@@ -93,7 +93,10 @@ vi.mock("../agent-awareness/remoteRegistration", () => ({
   armAgentAwarenessLiveActivityForLocalWork: vi.fn(),
 }));
 vi.mock("../../lib/uuid", () => ({ uuidv4: () => "fixture-uuid" }));
-vi.mock("../../lib/composerImages", () => ({ removePersistedComposerAttachmentFile: vi.fn() }));
+vi.mock("../../lib/composerImages", () => ({
+  composerStripAttachments: (attachments: ReadonlyArray<unknown>) => attachments,
+  removePersistedComposerAttachmentFile: vi.fn(),
+}));
 vi.mock("../../lib/attachmentUpload", () => ({ releasePendingAttachmentUploads: vi.fn() }));
 vi.mock("../sharing/incoming-share-storage", () => ({ loadIncomingShareDrafts: async () => [] }));
 vi.mock("expo-file-system", () => ({
@@ -145,8 +148,16 @@ vi.mock("../../state/queries", () => ({
   useDebouncedValue: (value: string) => value,
   usePaginatedBranches: () => native.branches,
 }));
-vi.mock("../../state/projects", () => ({ projectEnvironment: { readFile: vi.fn() } }));
+vi.mock("../../state/projects", () => ({
+  projectEnvironment: { readFile: vi.fn(), delete: { label: "project.delete" } },
+}));
 vi.mock("../../state/vcs", () => ({ vcsEnvironment: { status: vi.fn() } }));
+vi.mock("../../state/sourceControl", () => ({
+  sourceControlEnvironment: {
+    cancelProjectClone: { label: "clone.cancel" },
+    retryProjectClone: { label: "clone.retry" },
+  },
+}));
 vi.mock("../../state/server", async () => {
   const { Atom } = await import("effect/unstable/reactivity");
   const config = Atom.make(null);

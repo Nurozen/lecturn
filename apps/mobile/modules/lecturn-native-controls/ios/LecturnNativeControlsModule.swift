@@ -50,6 +50,13 @@ public final class LecturnNativeControlsModule: Module {
       }
     }
 
+    View(LecturnContextSheetSizeView.self) {
+      ViewName("ContextSheetSize")
+      Prop("contentHeight") { (view: LecturnContextSheetSizeView, height: Double) in
+        view.contentHeight = CGFloat(height)
+      }
+    }
+
     AsyncFunction("shareFileFromSource") { (url: URL, title: String, identifier: String, promise: Promise) in
       try self.shareFile(url: url, title: title, sourceIdentifier: identifier, promise: promise)
     }.runOnQueue(.main)

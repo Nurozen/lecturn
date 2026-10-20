@@ -69,10 +69,20 @@ export function AgentActivity(
 
   // Keep these literals inside the serialized widget function. Match Lecturn's
   // dark app chrome even when macOS mirrors the activity in a light appearance.
-  const glass = (props.iosMajorVersion ?? 18) >= 26;
+  // Prefer the host's own answer; older hosts only report the OS version.
+  const glass = environment.isLiquidGlassAvailable ?? (props.iosMajorVersion ?? 18) >= 26;
   const navy = "#061522";
-  const primaryForeground = glass ? "primary" : "#dfc7a4";
-  const secondaryForeground = glass ? "secondary" : "#a5957f";
+  // On glass, hierarchical styles inherit the system's foreground treatment,
+  // including tinted and vibrant presentations, rather than resolving to a label color.
+  type Foreground = Parameters<typeof foregroundStyle>[0];
+  const primaryForeground: Foreground = glass
+    ? { type: "hierarchical", style: "primary" }
+    : "#dfc7a4";
+  const secondaryForeground: Foreground = glass
+    ? { type: "hierarchical", style: "secondary" }
+    : "#a5957f";
+  const monochrome =
+    environment.widgetRenderingMode === "accented" || environment.widgetRenderingMode === "vibrant";
   const gold = "#e6bc63";
   const accountColor = /^#[0-9a-f]{6}$/i.test(props.accountColor ?? "")
     ? props.accountColor
@@ -95,8 +105,9 @@ export function AgentActivity(
   // The compact/minimal host chrome remains system-owned (including on Mac).
   const systemGold = environment.colorScheme === "light" ? "#996918" : gold;
 
-  const phaseTint = (phase: AgentActivityPhase | undefined, systemSurface = false): string => {
+  const phaseTint = (phase: AgentActivityPhase | undefined, systemSurface = false): Foreground => {
     if (subdued) return systemSurface ? "secondary" : secondaryForeground;
+    if (monochrome) return primaryForeground;
     const isLightScheme = systemSurface && environment.colorScheme === "light";
     switch (phase) {
       case "waiting_for_approval":
@@ -213,7 +224,7 @@ export function AgentActivity(
 
   // SF Symbols, like the logo, ignore frame/foregroundStyle applied directly to
   // the image; size + tint them through a container the resizable symbol fills.
-  const renderGlyph = (systemName: SFName, size: number, color: string) => (
+  const renderGlyph = (systemName: SFName, size: number, color: Foreground) => (
     <HStack modifiers={[frame({ width: size, height: size }), foregroundStyle(color)]}>
       <Image systemName={systemName} modifiers={[resizable()]} />
     </HStack>
@@ -317,7 +328,7 @@ export function AgentActivity(
   // frame the resizable image fills and tint it through the container's
   // foreground style, which the template image inherits. The square frame matches
   // the glyph's aspect ratio so it never distorts.
-  const renderLogo = (height: number, color: string) => (
+  const renderLogo = (height: number, color: Foreground) => (
     <HStack modifiers={[frame({ width: height, height }), foregroundStyle(color)]}>
       <Image assetName="LecturnMark" modifiers={[resizable()]} />
     </HStack>

@@ -16,9 +16,9 @@
       // Vite+ pack entries and the launcher used by installed background services.
       "entry": [
         "src/bin.ts!",
-        "src/service-launcher.ts!",
-        "src/claudeHistoryWorker.ts!",
+        "src/claude-history-worker.ts!",
         "scripts/cli.ts",
+        "scripts/evaluate-thread-titles.ts",
         "src/provider/testFixtures/*.mjs",
       ],
       // Keep the transitive Effect runtime pinned for standalone npm installs.
@@ -83,12 +83,14 @@
       // Maintainer scripts run by hand (NOTICE.md, assets/provider-emblems/README.md). The upstream
       // icon exporters stay beside export-lecturn-icons.ts, which icons:export runs instead.
       // Knip loads its preprocessor (knip-schemas.ts) through a CLI option, not a source import.
+      // mobile-native-client.ts runs directly for native client verification (AGENTS.md).
       "entry": [
         "export-android-icons.ts",
         "export-brand-icons.ts",
         "export-provider-emblems.ts",
         "generate-legal-notices.ts",
         "knip-schemas.ts",
+        "mobile-native-client.ts",
       ],
     },
     "packages/*": {

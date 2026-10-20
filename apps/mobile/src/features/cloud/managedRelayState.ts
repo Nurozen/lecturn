@@ -1,10 +1,16 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   createManagedRelayQueryManager,
+  deregisterManagedRelayEnvironment,
   managedRelaySessionAtom,
   managedRelaySessionsAtom,
   readManagedRelaySnapshotState,
 } from "@lecturn/client-runtime/relay";
+import {
+  createAtomCommandScheduler,
+  createRuntimeCommand,
+} from "@lecturn/client-runtime/state/runtime";
+import type { EnvironmentId } from "@lecturn/contracts";
 import type { RelayClientEnvironmentRecord } from "@lecturn/contracts/relay";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { useCallback, useEffect } from "react";
@@ -19,6 +25,22 @@ export const managedRelayQueryManager = createManagedRelayQueryManager(managedRe
   onQueryEvent: (event) =>
     cloudDebugLog(`query:${event.operation}:${event.stage}:${event.phase}`, { ...event }),
 });
+
+const managedRelayMutationScheduler = createAtomCommandScheduler();
+
+export const deregisterManagedRelayEnvironmentCommand = createRuntimeCommand(
+  managedRelayAtomRuntime,
+  {
+    label: "mobile:managed-relay:deregister-environment",
+    scheduler: managedRelayMutationScheduler,
+    concurrency: {
+      mode: "serial",
+      key: (input: { readonly accountId: string; readonly environmentId: EnvironmentId }) =>
+        input.accountId,
+    },
+    execute: (input, registry) => deregisterManagedRelayEnvironment(registry, input),
+  },
+);
 
 const EMPTY_ENVIRONMENTS_ATOM = Atom.make(
   AsyncResult.success<ReadonlyArray<RelayClientEnvironmentRecord>>([]),

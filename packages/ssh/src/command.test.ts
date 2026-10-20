@@ -14,7 +14,6 @@ import {
   baseSshArgs,
   getLastNonEmptyOutputLine,
   parseSshResolveOutput,
-  resolveRemoteLecturnCliPackageSpec,
   runSshCommand,
 } from "./command.ts";
 import { SshCommandError } from "./errors.ts";
@@ -95,41 +94,6 @@ describe("ssh command", () => {
           { batchMode: "no" },
         ),
         ["-o", "BatchMode=no", "-o", "ConnectTimeout=10", "-p", "2222"],
-      );
-    }),
-  );
-
-  it.effect("resolves the remote lecturn package spec from the desktop release channel", () =>
-    Effect.sync(() => {
-      assert.equal(
-        resolveRemoteLecturnCliPackageSpec({
-          appVersion: "0.0.17",
-          updateChannel: "latest",
-        }),
-        "lecturn@0.0.17",
-      );
-      assert.equal(
-        resolveRemoteLecturnCliPackageSpec({
-          appVersion: "0.0.17-nightly.20260415.44",
-          updateChannel: "nightly",
-        }),
-        "lecturn@0.0.17-nightly.20260415.44",
-      );
-      assert.equal(
-        resolveRemoteLecturnCliPackageSpec({
-          appVersion: "0.0.0-dev",
-          updateChannel: "nightly",
-          isDevelopment: true,
-        }),
-        "lecturn@nightly",
-      );
-      assert.equal(
-        resolveRemoteLecturnCliPackageSpec({
-          appVersion: "0.0.0-dev",
-          updateChannel: "latest",
-          isDevelopment: true,
-        }),
-        "lecturn@nightly",
       );
     }),
   );

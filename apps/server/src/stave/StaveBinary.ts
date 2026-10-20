@@ -20,7 +20,8 @@ import {
  *   while status and all execution gates use the authoritative `resolve`.
  *
  * After settings, the order is `LECTURN_STAVE_PATH` → the desktop bootstrap
- * `stavePath` → binaries bundled next to the server build → `stave` on PATH.
+ * `stavePath` → binaries bundled next to the server build (or, in the
+ * single-executable, next to the executable) → `stave` on PATH.
  * Each hit is probed with `stave version`; a failed probe leaves `version`
  * null and does not fail resolution. Successful resolutions are memoised per
  * settings key. Cached file identity is checked cheaply on every resolution;
@@ -32,6 +33,8 @@ import {
 import {
   HostProcessArchitecture,
   HostProcessEnvironment,
+  HostProcessExecutablePath,
+  HostProcessIsExecutable,
   HostProcessPlatform,
   HostProcessWorkingDirectory,
 } from "@lecturn/shared/hostProcess";
@@ -190,6 +193,31 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
   const architecture = yield* HostProcessArchitecture;
   const environment = yield* HostProcessEnvironment;
   const workingDirectory = yield* HostProcessWorkingDirectory;
+  // The CLI release archive (scripts/build-cli-archive.ts --stave-binary)
+  // stages Stave at stave/<platformKey>/ beside the single-executable.
+  const executablePlatformKey = stavePlatformKey(platform, architecture);
+  const executableCandidates =
+    (yield* HostProcessIsExecutable) && executablePlatformKey !== undefined
+      ? [
+          path.resolve(
+            path.dirname(yield* HostProcessExecutablePath),
+            "stave",
+            executablePlatformKey,
+            staveExecutableName(platform),
+          ),
+        ]
+      : [];
+  const bundledCandidatePaths = Array.from(
+    new Set([
+      ...bundledStaveCandidates({
+        baseDir: options.bundledBaseDir ?? import.meta.dirname,
+        platform,
+        architecture,
+        resolvePath: path.resolve,
+      }),
+      ...executableCandidates,
+    ]),
+  );
 
   const envOverride = environment[STAVE_BINARY_ENV_VAR]?.trim();
   const runnableCandidates: ReadonlyArray<StaveBinaryCandidate> = [
@@ -199,12 +227,10 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
     ...(config.stavePath
       ? [{ path: path.resolve(workingDirectory, config.stavePath), source: "bootstrap" as const }]
       : []),
-    ...bundledStaveCandidates({
-      baseDir: options.bundledBaseDir ?? import.meta.dirname,
-      platform,
-      architecture,
-      resolvePath: path.resolve,
-    }).map((candidatePath) => ({ path: candidatePath, source: "bundled" as const })),
+    ...bundledCandidatePaths.map((candidatePath) => ({
+      path: candidatePath,
+      source: "bundled" as const,
+    })),
   ];
 
   /**

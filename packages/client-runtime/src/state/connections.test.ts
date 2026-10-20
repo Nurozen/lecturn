@@ -37,8 +37,10 @@ function makeCatalog(initialTargets: ReadonlyArray<ConnectionTarget>) {
       Layer.mergeAll(
         Layer.succeed(Persistence.ConnectionTargetStore, {
           list: Effect.sync(() => [...storedTargets.values()]),
+          listDisabled: Effect.succeed([]),
         }),
         Layer.succeed(Persistence.ConnectionRegistrationStore, {
+          setEnabled: () => Effect.void,
           register: (registration) =>
             Effect.sync(() => {
               storedTargets.set(registration.target.environmentId, registration.target);

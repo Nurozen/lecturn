@@ -55,7 +55,8 @@ function ConfiguredConnectOnboardingRouteScreen(props: { readonly accountId?: st
   const accounts = useConnectAccounts();
   const userId = props.accountId ?? auth.userId;
   const isSignedIn = accounts.some((account) => account.accountId === userId && account.signedIn);
-  const { connectedEnvironments, onReconnectEnvironment } = useRemoteConnections();
+  const { connectedEnvironments, onSetEnvironmentEnabled, onRemoveEnvironmentPress } =
+    useRemoteConnections();
   const { refreshRelayEnvironments } = useConnectionController();
   const { connectedCloudEnvironments } = splitEnvironmentSections({
     connectedEnvironments,
@@ -126,7 +127,8 @@ function ConfiguredConnectOnboardingRouteScreen(props: { readonly accountId?: st
           <CloudEnvironmentRows
             accountId={userId ?? undefined}
             connectedCloudEnvironments={connectedCloudEnvironments}
-            onReconnectEnvironment={onReconnectEnvironment}
+            onSetEnvironmentEnabled={onSetEnvironmentEnabled}
+            onRemoveEnvironment={onRemoveEnvironmentPress}
             showHeader={false}
           />
         ) : (

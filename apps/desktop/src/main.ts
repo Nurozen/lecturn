@@ -17,7 +17,6 @@ import * as Electron from "electron";
 
 import * as NetService from "@lecturn/shared/Net";
 import { HostProcessArchitecture, HostProcessPlatform } from "@lecturn/shared/hostProcess";
-import { resolveRemoteLecturnCliPackageSpec } from "@lecturn/ssh/command";
 import type { RemoteLecturnRunnerOptions } from "@lecturn/ssh/tunnel";
 import serverPackageJson from "../../server/package.json" with { type: "json" };
 
@@ -86,9 +85,11 @@ const desktopEnvironmentLayer = Layer.unwrap(
   }),
 );
 
+// The remote runs the exact release this app is on, from its self-contained
+// archive, so it needs neither Node nor npm. Development points the remote at
+// a source checkout instead so the two sides can be iterated together.
 const resolveDesktopSshCliRunner = (
   environment: DesktopEnvironment.DesktopEnvironment["Service"],
-  settings: DesktopAppSettings.DesktopSettings,
 ): RemoteLecturnRunnerOptions => {
   const devRemoteEntryPath = Option.getOrUndefined(environment.devRemoteLecturnServerEntryPath);
   if (environment.isDevelopment && devRemoteEntryPath !== undefined) {
@@ -97,24 +98,14 @@ const resolveDesktopSshCliRunner = (
       nodeEngineRange: serverPackageJson.engines.node,
     };
   }
-  return {
-    packageSpec: resolveRemoteLecturnCliPackageSpec({
-      appVersion: environment.appVersion,
-      updateChannel: settings.updateChannel,
-      isDevelopment: environment.isDevelopment,
-    }),
-    nodeEngineRange: serverPackageJson.engines.node,
-  };
+  return { archiveVersion: environment.appVersion };
 };
 
 const desktopSshEnvironmentLayer = Layer.unwrap(
   Effect.gen(function* () {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
-    const settings = yield* DesktopAppSettings.DesktopAppSettings;
     return DesktopSshEnvironment.layer({
-      resolveCliRunner: settings.get.pipe(
-        Effect.map((currentSettings) => resolveDesktopSshCliRunner(environment, currentSettings)),
-      ),
+      resolveCliRunner: Effect.succeed(resolveDesktopSshCliRunner(environment)),
     });
   }),
 );

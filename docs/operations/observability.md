@@ -528,6 +528,9 @@ OTLP export:
 - `LECTURN_OTLP_METRICS_URL`: OTLP metric endpoint
 - `LECTURN_OTLP_EXPORT_INTERVAL_MS`: export interval, default `10000`
 - `LECTURN_OTLP_SERVICE_NAME`: service name, default `lecturn-server`
+- `LECTURN_OTLP_HEADERS`: extra headers for both exporters, same format as
+  `OTEL_EXPORTER_OTLP_HEADERS`: comma-separated `key=value` pairs with percent-encoded values.
+- `LECTURN_OTLP_PROTOCOL`: `http/json` (default) or `http/protobuf`
 
 If the OTLP URLs are unset, local tracing still works and metrics stay in-process only.
 

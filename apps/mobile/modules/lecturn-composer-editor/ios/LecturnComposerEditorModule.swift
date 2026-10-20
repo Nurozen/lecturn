@@ -1,8 +1,48 @@
 import ExpoModulesCore
+import UIKit
+
+enum LecturnComposerClipboard {
+  static let fragmentType = "app.t3.context-fragment"
+
+  static func write(text: String, fragment: String) {
+    var items: [String: Any] = ["public.utf8-plain-text": text]
+    if let data = fragment.data(using: .utf8),
+       var payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       let records = payload["records"] as? [[String: Any]] {
+      var selected = records.filter { record in
+        guard let id = record["contextId"] as? String else { return false }
+        return text.contains("/\(id))")
+      }
+      let screenshots = Set(selected.compactMap { $0["screenshotContextId"] as? String })
+      selected.append(contentsOf: records.filter { screenshots.contains($0["contextId"] as? String ?? "") && !text.contains("/\($0["contextId"] as? String ?? ""))") })
+      payload["records"] = selected
+      if !selected.isEmpty, let encoded = try? JSONSerialization.data(withJSONObject: payload), let raw = String(data: encoded, encoding: .utf8) {
+        let attribute = raw.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+        let escaped = text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
+        items[fragmentType] = encoded
+        items["public.html"] = Data("<pre data-t3-context-fragment=\"\(attribute)\">\(escaped)</pre>".utf8)
+      }
+    }
+    UIPasteboard.general.items = [items]
+  }
+
+  static func read() -> [String: String] {
+    let board = UIPasteboard.general
+    return [
+      "text": board.string ?? "",
+      "fragment": board.data(forPasteboardType: fragmentType).flatMap { String(data: $0, encoding: .utf8) } ?? "",
+      "html": board.data(forPasteboardType: "public.html").flatMap { String(data: $0, encoding: .utf8) } ?? "",
+    ]
+  }
+}
 
 public class LecturnComposerEditorModule: Module {
   public func definition() -> ModuleDefinition {
     Name("LecturnComposerEditor")
+
+    AsyncFunction("writeContextClipboard") { (text: String, fragment: String) in
+      LecturnComposerClipboard.write(text: text, fragment: fragment)
+    }.runOnQueue(.main)
 
     View(LecturnComposerEditorView.self) {
       Prop("controlledDocumentJson") { (view: LecturnComposerEditorView, documentJson: String) in
@@ -10,6 +50,9 @@ public class LecturnComposerEditorModule: Module {
       }
       Prop("themeJson") { (view: LecturnComposerEditorView, themeJson: String) in
         view.setThemeJson(themeJson)
+      }
+      Prop("clipboardFragment") { (view: LecturnComposerEditorView, fragment: String) in
+        view.setClipboardFragment(fragment)
       }
       Prop("placeholder") { (view: LecturnComposerEditorView, placeholder: String) in
         view.setPlaceholder(placeholder)
@@ -44,6 +87,15 @@ public class LecturnComposerEditorModule: Module {
       Prop("spellCheck") { (view: LecturnComposerEditorView, spellCheck: Bool) in
         view.setSpellCheck(spellCheck)
       }
+      Prop("enterBehavior") { (view: LecturnComposerEditorView, behavior: String) in
+        view.setEnterBehavior(behavior)
+      }
+      Prop("textPasteThresholdBytes") { (view: LecturnComposerEditorView, threshold: Int) in
+        view.setTextPasteThresholdBytes(threshold)
+      }
+      Prop("maxInputChars") { (view: LecturnComposerEditorView, maxInputChars: Int) in
+        view.setMaxInputChars(maxInputChars)
+      }
 
       Events(
         "onComposerChange",
@@ -52,6 +104,9 @@ public class LecturnComposerEditorModule: Module {
         "onComposerBlur",
         "onComposerSubmit",
         "onComposerPasteImages",
+        "onComposerContextPress",
+        "onComposerPasteContext",
+        "onComposerPasteText",
         "onComposerContentSizeChange"
       )
 

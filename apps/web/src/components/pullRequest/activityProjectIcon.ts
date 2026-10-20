@@ -1,34 +1,7 @@
 import type { ProjectIconOverride } from "@lecturn/contracts";
 import dynamicIconImports from "lucide-react/dynamicIconImports";
-import { selectProjectIcon, type ProjectIconName } from "../../projectIconModel";
+import { deriveProjectIdentity } from "../../projectIdentity";
 
-const automatic: Record<
-  ProjectIconName,
-  [string, Extract<ProjectIconOverride, { kind: "lucide" }>["color"]]
-> = {
-  ai: ["bot", "violet"],
-  book: ["book-open", "amber"],
-  braces: ["braces", "purple"],
-  circuit: ["circuit-board", "teal"],
-  cloud: ["cloud-cog", "sky"],
-  code: ["code-xml", "blue"],
-  database: ["database", "cyan"],
-  desktop: ["monitor", "indigo"],
-  "folder-code": ["folder-code", "orange"],
-  game: ["gamepad-2", "emerald"],
-  image: ["image", "pink"],
-  layers: ["layers", "fuchsia"],
-  mobile: ["smartphone", "lime"],
-  music: ["music", "fuchsia"],
-  package: ["package", "orange"],
-  security: ["shield-check", "teal"],
-  server: ["server", "blue"],
-  shopping: ["shopping-bag", "rose"],
-  terminal: ["terminal", "green"],
-  test: ["flask-conical", "yellow"],
-  video: ["video", "red"],
-  web: ["globe", "sky"],
-};
 const colors = {
   gray: "#9ca3af",
   red: "#f87171",
@@ -50,16 +23,14 @@ const colors = {
   rose: "#fb7185",
 };
 
+/** Configured icon, else the same generated monogram the sidebar shows for the project. */
 export function activityProjectIcon(
   title: string,
-  root: string,
   override?: ProjectIconOverride | null,
 ): ProjectIconOverride {
   if (override) return override;
-  const selection = selectProjectIcon(title, root);
-  if (selection.kind === "emoji") return { kind: "emoji", emoji: selection.emoji };
-  const [name, color] = automatic[selection.icon];
-  return { kind: "lucide", name, color };
+  const identity = deriveProjectIdentity(title);
+  return { kind: "monogram", text: identity.monogram, color: identity.color };
 }
 
 const cache = new Map<string, Promise<string | undefined>>();
@@ -70,6 +41,12 @@ const xml = (value: string | number) =>
   );
 /** Render local catalog geometry as an inert image; no HTML or external resource URLs cross IPC. */
 export function loadActivityProjectIcon(icon: ProjectIconOverride): Promise<string | undefined> {
+  if (icon.kind === "monogram") {
+    const text = Array.from(icon.text).slice(0, 2).join("");
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="1" y="1" width="22" height="22" rx="6" fill="none" stroke="${colors[icon.color]}" stroke-width="2"/><text x="12" y="16" text-anchor="middle" font-family="system-ui, sans-serif" font-size="${text.length > 1 ? 10 : 12}" font-weight="600" fill="${colors[icon.color]}">${xml(text)}</text></svg>`;
+    const url = `data:image/svg+xml;base64,${btoa(String.fromCodePoint(...new TextEncoder().encode(svg)))}`;
+    return Promise.resolve(url.length <= 16384 ? url : undefined);
+  }
   if (icon.kind !== "lucide") return Promise.resolve(undefined);
   const key = `${icon.name}:${icon.color}`;
   const prior = cache.get(key);

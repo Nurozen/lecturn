@@ -1,7 +1,7 @@
 import { GlassCard } from "../../components/GlassCard";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { EnvironmentId, USAGE_CONTRACT_VERSION } from "@lecturn/contracts";
-import { useNavigation } from "@react-navigation/native";
+import { type RouteProp, useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import {
   isCompatibleUsageContractVersion,
   isModelCostUnknown,
@@ -21,9 +21,10 @@ import {
 } from "@lecturn/shared/usageFormat";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, RefreshControl, ScrollView, View } from "react-native";
-import Animated, { Easing, FadeIn, LinearTransition, ReduceMotion } from "react-native-reanimated";
+import Animated, { FadeIn, ReduceMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { SegmentedControl } from "../../components/SegmentedControl";
 import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { AppText as Text } from "../../components/AppText";
 import { cn } from "../../lib/cn";
@@ -67,11 +68,22 @@ const CHART_HEIGHT = 180;
  * pull to refresh, each refreshing its own data.
  */
 export function UsageRouteScreen() {
+  const route = useRoute<RouteProp<{ Usage: { tab?: string } | undefined }, "Usage">>();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  // Limits first: remaining quota and reset time are what most people open
-  // the screen for.
-  const [tab, setTab] = useState<UsageTab>("limits");
+  // Preserve the Limits default while honoring explicit widget/navigation links.
+  const [selection, setSelection] = useState(() => ({
+    params: route.params,
+    tab: (route.params?.tab === "usage" ? "usage" : "limits") as UsageTab,
+  }));
+  if (selection.params !== route.params) {
+    setSelection({
+      params: route.params,
+      tab: route.params?.tab === "usage" ? "usage" : "limits",
+    });
+  }
+  const { tab } = selection;
+  const setTab = (tab: UsageTab) => setSelection({ params: route.params, tab });
   const [windowSelection, setWindowSelection] = useState(() => ({
     days: 30,
     window: makeWindow(30),
@@ -85,7 +97,8 @@ export function UsageRouteScreen() {
     window,
     selectedEnvironmentIds,
   );
-  const limits = useRefreshLimits(selectedEnvironmentIds);
+  const isFocused = useIsFocused();
+  const limits = useRefreshLimits(selectedEnvironmentIds, isFocused && tab === "limits");
 
   const days = useMemo(
     () => enumerateDays(window.sinceDay, window.untilDay),
@@ -335,74 +348,6 @@ export function UsageRouteScreen() {
         </Animated.View>
       </ScrollView>
     </View>
-  );
-}
-
-function SegmentedControl<Value extends number | string>(props: {
-  readonly options: readonly {
-    readonly value: Value;
-    readonly label: string;
-    readonly accessibilityLabel?: string;
-  }[];
-  readonly selected: Value;
-  readonly onSelect: (value: Value) => void;
-  /** The tab bar is full height; filters under it are shorter so it stays primary. */
-  readonly size?: "default" | "compact";
-  /** "tab" for the view switcher; filters stay plain buttons. */
-  readonly role?: "tab" | "button";
-  readonly className?: string;
-}) {
-  const compact = props.size === "compact";
-  return (
-    <GlassCard
-      radius={28}
-      accessible={false}
-      className={cn("flex-row overflow-hidden", props.className)}
-    >
-      <Animated.View
-        pointerEvents="none"
-        layout={LinearTransition.duration(200)
-          .easing(Easing.out(Easing.cubic))
-          .reduceMotion(ReduceMotion.System)}
-        className="absolute bottom-0 top-0 rounded-full bg-subtle-strong"
-        style={{
-          width: `${100 / props.options.length}%`,
-          start: `${
-            (Math.max(
-              0,
-              props.options.findIndex((option) => option.value === props.selected),
-            ) *
-              100) /
-            props.options.length
-          }%`,
-        }}
-      />
-      {props.options.map((option) => {
-        const active = option.value === props.selected;
-        return (
-          <Pressable
-            key={String(option.value)}
-            accessibilityRole={Platform.OS === "ios" ? "button" : (props.role ?? "button")}
-            accessibilityLabel={option.accessibilityLabel ?? option.label}
-            accessibilityState={{ selected: active }}
-            onPress={() => props.onSelect(option.value)}
-            className={cn(
-              "flex-1 items-center justify-center rounded-full",
-              compact ? "h-9" : "h-11",
-            )}
-          >
-            <Text
-              className={cn(
-                compact ? "text-xs" : "text-sm",
-                active ? "font-lecturn-medium text-foreground" : "text-foreground-muted",
-              )}
-            >
-              {option.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </GlassCard>
   );
 }
 

@@ -42,6 +42,10 @@ export function useConnectionController() {
   const registerEnvironment = useAtomCommand(environmentCatalog.register, "environment register");
   const removeEnvironmentMutation = useAtomCommand(environmentCatalog.remove, "environment remove");
   const retryEnvironmentMutation = useAtomCommand(environmentCatalog.retryNow, "environment retry");
+  const setEnvironmentEnabledMutation = useAtomCommand(
+    environmentCatalog.setEnabled,
+    "environment toggle",
+  );
   const refreshRelayEnvironments = useAtomCommand(
     relayEnvironmentDiscovery.refresh,
     "relay environment refresh",
@@ -101,6 +105,11 @@ export function useConnectionController() {
     (environmentId: EnvironmentId) => retryEnvironmentMutation(environmentId),
     [retryEnvironmentMutation],
   );
+  const setEnvironmentEnabled = useCallback(
+    (environmentId: EnvironmentId, enabled: boolean) =>
+      setEnvironmentEnabledMutation({ environmentId, enabled }),
+    [setEnvironmentEnabledMutation],
+  );
   const updateEnvironment = useCallback(
     (
       environmentId: EnvironmentId,
@@ -128,6 +137,7 @@ export function useConnectionController() {
     connectRelayEnvironment,
     removeEnvironment,
     retryEnvironment,
+    setEnvironmentEnabled,
     updateEnvironment,
     refreshRelayEnvironments,
   };

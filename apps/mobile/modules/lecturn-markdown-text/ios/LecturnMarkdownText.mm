@@ -2,6 +2,7 @@
 #import "LecturnMarkdownTextShadowNode.h"
 #import "LecturnMarkdownTextComponentDescriptor.h"
 #import "LecturnMarkdownTextRun.h"
+#import "LecturnContextChip.h"
 #import <React/RCTConversions.h>
 #import <objc/runtime.h>
 
@@ -12,6 +13,83 @@
 #import "RCTFabricComponentsPlugins.h"
 
 using namespace facebook::react;
+
+@interface LecturnContextChipAccessibilityElement : UIAccessibilityElement
+@property(nonatomic, weak) LecturnMarkdownTextRun *run;
+@end
+
+@implementation LecturnContextChipAccessibilityElement
+- (BOOL)accessibilityActivate
+{
+  if (self.run == nil) return NO;
+  [self.run onPress];
+  return YES;
+}
+@end
+
+/** Preserve canonical references and their payload when copying a native text selection. */
+@interface LecturnContextCopyTextView : UITextView
+@property(nonatomic, copy) NSDictionary *contextClipboardConfig;
+@end
+
+@implementation LecturnContextCopyTextView
+// Read-only text still supports selecting the entire document after selecting a word.
+- (BOOL)canPerformAction:(SEL)action withSender:(id)sender
+{
+  if (action == @selector(selectAll:)) {
+    return self.selectable && self.text.length > 0 && self.selectedRange.length < self.text.length;
+  }
+  return [super canPerformAction:action withSender:sender];
+}
+
+- (void)copy:(id)sender
+{
+  NSRange selected = self.selectedRange;
+  NSArray *ranges = self.contextClipboardConfig[@"ranges"];
+  if (selected.location == NSNotFound || selected.length == 0 || NSMaxRange(selected) > self.text.length || ranges.count == 0) {
+    [super copy:sender];
+    return;
+  }
+  NSMutableString *text = [[self.text substringWithRange:selected] mutableCopy];
+  BOOL hasContext = NO;
+  for (NSDictionary *range in [ranges reverseObjectEnumerator]) {
+    NSUInteger start = [range[@"start"] unsignedIntegerValue];
+    NSUInteger end = [range[@"end"] unsignedIntegerValue];
+    if (end <= start || end > self.text.length) continue;
+    NSRange overlap = NSIntersectionRange(selected, NSMakeRange(start, end - start));
+    if (overlap.length == 0 || ![range[@"text"] isKindOfClass:NSString.class]) continue;
+    [text replaceCharactersInRange:NSMakeRange(overlap.location - selected.location, overlap.length) withString:range[@"text"]];
+    hasContext = YES;
+  }
+  if (!hasContext) { [super copy:sender]; return; }
+  [text replaceOccurrencesOfString:@"\uFFFC\u00A0" withString:@"" options:0 range:NSMakeRange(0, text.length)];
+  NSString *fragment = self.contextClipboardConfig[@"fragment"];
+  NSMutableDictionary *payload = [[NSJSONSerialization JSONObjectWithData:[fragment dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingMutableContainers error:nil] mutableCopy];
+  NSArray *records = payload[@"records"];
+  NSMutableArray *copied = [NSMutableArray array];
+  NSMutableSet *screenshots = [NSMutableSet set];
+  for (NSDictionary *record in records) {
+    if ([text containsString:[NSString stringWithFormat:@"/%@)", record[@"contextId"]]]) {
+      [copied addObject:record];
+      if ([record[@"screenshotContextId"] isKindOfClass:NSString.class]) [screenshots addObject:record[@"screenshotContextId"]];
+    }
+  }
+  for (NSDictionary *record in records) {
+    if ([screenshots containsObject:record[@"contextId"]] && ![copied containsObject:record]) [copied addObject:record];
+  }
+  payload[@"records"] = copied;
+  NSData *encoded = payload ? [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil] : nil;
+  NSMutableDictionary *item = [@{@"public.utf8-plain-text": text} mutableCopy];
+  if (encoded && copied.count > 0) {
+    NSString *raw = [[NSString alloc] initWithData:encoded encoding:NSUTF8StringEncoding];
+    NSString *attribute = [raw stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.alphanumericCharacterSet];
+    NSString *escaped = [[[text stringByReplacingOccurrencesOfString:@"&" withString:@"&amp;"] stringByReplacingOccurrencesOfString:@"<" withString:@"&lt;"] stringByReplacingOccurrencesOfString:@">" withString:@"&gt;"];
+    item[@"app.t3.context-fragment"] = encoded;
+    item[@"public.html"] = [[NSString stringWithFormat:@"<pre data-t3-context-fragment=\"%@\">%@</pre>", attribute, escaped] dataUsingEncoding:NSUTF8StringEncoding];
+  }
+  UIPasteboard.generalPasteboard.items = @[item];
+}
+@end
 
 static void LecturnMarkdownTextApplyParagraphStyles(
     NSMutableAttributedString *attributedString,
@@ -64,12 +142,10 @@ static void LecturnMarkdownTextApplyAttachments(
     if (isSymbol) {
       image = [UIImage systemImageNamed:[imageUri substringFromIndex:3]];
     }
-    UIColor *foregroundColor = [attributedString attribute:NSForegroundColorAttributeName
-                                                   atIndex:attachmentRange.location
-                                            effectiveRange:nil];
-    id link = [attributedString attribute:NSLinkAttributeName
-                                 atIndex:attachmentRange.location
-                          effectiveRange:nil];
+    NSDictionary *runAttributes =
+        [attributedString attributesAtIndex:attachmentRange.location effectiveRange:nil];
+    UIColor *foregroundColor = runAttributes[NSForegroundColorAttributeName];
+    id link = runAttributes[NSLinkAttributeName];
     if (image != nil && (isSymbol || attachmentRange.tintWithForeground)) {
       image = [image imageWithTintColor:foregroundColor ?: UIColor.labelColor
                           renderingMode:UIImageRenderingModeAlwaysOriginal];
@@ -81,18 +157,19 @@ static void LecturnMarkdownTextApplyAttachments(
         LecturnMarkdownTextAttachmentBaselineOffset(attachmentRange),
         attachmentSize,
         attachmentSize);
+    NSDictionary *chip = LecturnContextChipPayload(imageUri);
+    if (chip != nil) {
+      CGSize size = CGSizeMake(attachmentRange.chipWidth, attachmentRange.chipHeight);
+      attachment.bounds = LecturnContextChipBounds(runAttributes[NSFontAttributeName], size);
+      NSString *iconUri = [chip[@"iconUri"] isKindOfClass:NSString.class] ? chip[@"iconUri"] : nil;
+      attachment.image = LecturnContextChipImage(chip, size, iconUri ? images[iconUri] : nil);
+    }
     const NSRange range = NSMakeRange(
         attachmentRange.location,
         MIN(attachmentRange.length, attributedString.length - attachmentRange.location));
     NSMutableAttributedString *attachmentString =
-        [[NSAttributedString attributedStringWithAttachment:attachment] mutableCopy];
-    // Keep the run color on the attachment so a later re-apply (after the image
-    // loads asynchronously) still tints with the link color, not labelColor.
-    if (foregroundColor != nil) {
-      [attachmentString addAttribute:NSForegroundColorAttributeName
-                               value:foregroundColor
-                               range:NSMakeRange(0, attachmentString.length)];
-    }
+        [LecturnMarkdownTextAttachmentString(attachment, runAttributes) mutableCopy];
+    // Keep the run link on the attachment so tapping an inline icon still opens it.
     if (link != nil) {
       [attachmentString addAttribute:NSLinkAttributeName
                                value:link
@@ -209,7 +286,7 @@ LecturnMarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
 
 @implementation LecturnMarkdownText {
   UIView * _view;
-  UITextView * _textView;
+  LecturnContextCopyTextView * _textView;
   LecturnMarkdownTextShadowNode::ConcreteState::Shared _state;
   __weak UIWindow * _outsideTapWindow;
   BOOL _suppressSelectionChange;
@@ -217,6 +294,7 @@ LecturnMarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
   NSMutableSet<NSString *> * _pendingAttachmentUris;
   UILongPressGestureRecognizer *_longPressGestureRecognizer;
   UITapGestureRecognizer *_pressGestureRecognizer;
+  NSArray *_contextAccessibilityElements;
 }
 
 + (ComponentDescriptorProvider)componentDescriptorProvider
@@ -234,7 +312,7 @@ LecturnMarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
     self.contentView = _view;
     self.clipsToBounds = true;
 
-    _textView = [[UITextView alloc] init];
+    _textView = [[LecturnContextCopyTextView alloc] init];
     _attachmentImages = [[NSMutableDictionary alloc] init];
     _pendingAttachmentUris = [[NSMutableSet alloc] init];
     _textView.scrollEnabled = false;
@@ -289,6 +367,11 @@ LecturnMarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
   [coordinator removeTarget:self];
 }
 
+- (NSArray *)accessibilityElements
+{
+  return _contextAccessibilityElements ?: [super accessibilityElements];
+}
+
 // See RCTParagraphComponentView
 - (void)prepareForRecycle
 {
@@ -302,6 +385,7 @@ LecturnMarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
   // Reset the frame to zero so that when it properly lays out on the next use
   _textView.frame = CGRectZero;
   _textView.attributedText = nil;
+  _contextAccessibilityElements = nil;
 }
 
 - (void)layoutSubviews
@@ -334,6 +418,8 @@ LecturnMarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
       convertedAttrString,
       _state->getData().attachmentRanges,
       _attachmentImages);
+  // Matches the shadow node so drawn lines sit where measurement put them.
+  RCTApplyBaselineOffset(convertedAttrString);
   NSUInteger runLocation = 0;
   for (UIView *child in self.subviews) {
     if (![child isKindOfClass:[LecturnMarkdownTextRun class]]) {
@@ -351,7 +437,17 @@ LecturnMarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
     NSURL *link = [NSURL URLWithString:
         [NSString stringWithFormat:@"lecturn-markdown-run://%ld", (long)textChild.tag]];
     if (link != nil) {
-      [convertedAttrString addAttribute:NSLinkAttributeName value:link range:runRange];
+      // A glyph must not be both a link and an attachment. UIKit caches them as
+      // different text-item classes and can send `attachment` to a cached link
+      // on a later tap. Attachment actions already use primaryActionForTextItem.
+      [convertedAttrString enumerateAttribute:NSAttachmentAttributeName
+                                     inRange:runRange
+                                     options:0
+                                  usingBlock:^(id attachment, NSRange range, BOOL *stop) {
+        if (attachment == nil) {
+          [convertedAttrString addAttribute:NSLinkAttributeName value:link range:range];
+        }
+      }];
     }
   }
   [self loadAttachmentImages:_state->getData().attachmentRanges];
@@ -373,6 +469,15 @@ LecturnMarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
     const NSRange savedRange = _textView.selectedRange;
     _suppressSelectionChange = YES;
     _textView.attributedText = convertedAttrString;
+    NSMutableString *accessibleText = [convertedAttrString.string mutableCopy];
+    for (auto it = _state->getData().attachmentRanges.rbegin();
+         it != _state->getData().attachmentRanges.rend(); ++it) {
+      NSDictionary *chip = LecturnContextChipPayload([NSString stringWithUTF8String:it->imageUri.c_str()]);
+      if (chip != nil && it->location < accessibleText.length) {
+        [accessibleText replaceCharactersInRange:NSMakeRange(it->location, 1) withString:chip[@"label"]];
+      }
+    }
+    _textView.accessibilityLabel = accessibleText;
     if (savedRange.length > 0 && NSMaxRange(savedRange) <= _textView.attributedText.length) {
       _textView.selectedRange = savedRange;
     }
@@ -381,6 +486,36 @@ LecturnMarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
   if (frameChanged) {
     _textView.frame = _view.frame;
   }
+
+  // Text attachments have no native link element. Expose their existing runs
+  // at the measured glyph bounds, without inserting views into text layout.
+  NSMutableArray *accessibleElements = [NSMutableArray arrayWithObject:_textView];
+  for (UIView *child in self.subviews) {
+    if (![child isKindOfClass:LecturnMarkdownTextRun.class]) continue;
+    LecturnMarkdownTextRun *run = (LecturnMarkdownTextRun *)child;
+    run.contextChipInteractive = NO;
+  }
+  for (const auto &attachmentRange : _state->getData().attachmentRanges) {
+    NSDictionary *chip = LecturnContextChipPayload(
+        [NSString stringWithUTF8String:attachmentRange.imageUri.c_str()]);
+    if (![chip[@"interactive"] boolValue]) continue;
+    NSRange range = NSMakeRange(attachmentRange.location, 1);
+    LecturnMarkdownTextRun *run = [self childForCharacterRange:range];
+    if (!run || NSMaxRange(range) > convertedAttrString.length) continue;
+    NSRange glyphRange = [_textView.layoutManager glyphRangeForCharacterRange:range actualCharacterRange:nil];
+    CGRect bounds = [_textView.layoutManager boundingRectForGlyphRange:glyphRange
+                                                     inTextContainer:_textView.textContainer];
+    bounds = CGRectOffset(bounds, _textView.textContainerInset.left, _textView.textContainerInset.top);
+    run.contextChipInteractive = YES;
+    LecturnContextChipAccessibilityElement *element =
+        [[LecturnContextChipAccessibilityElement alloc] initWithAccessibilityContainer:self];
+    element.run = run;
+    element.accessibilityLabel = chip[@"label"];
+    element.accessibilityTraits = UIAccessibilityTraitButton;
+    element.accessibilityFrameInContainerSpace = [_textView convertRect:bounds toView:self];
+    [accessibleElements addObject:element];
+  }
+  _contextAccessibilityElements = accessibleElements;
 
   __block std::vector<std::string> lines;
   const int maxLines = props.numberOfLines;
@@ -411,6 +546,11 @@ LecturnMarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
     NSString *imageUri = [NSString stringWithUTF8String:attachmentRange.imageUri.c_str()];
     if ([imageUri hasPrefix:@"sf:"]) {
       continue;
+    }
+    NSDictionary *chip = LecturnContextChipPayload(imageUri);
+    if (chip != nil) {
+      imageUri = [chip[@"iconUri"] isKindOfClass:NSString.class] ? chip[@"iconUri"] : nil;
+      if (imageUri.length == 0) continue;
     }
     if (_attachmentImages[imageUri] != nil || [_pendingAttachmentUris containsObject:imageUri]) {
       continue;
@@ -473,6 +613,10 @@ LecturnMarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
 {
   const auto &oldViewProps = *std::static_pointer_cast<LecturnMarkdownTextProps const>(_props);
   const auto &newViewProps = *std::static_pointer_cast<LecturnMarkdownTextProps const>(props);
+  if (oldViewProps.contextClipboardConfig != newViewProps.contextClipboardConfig) {
+    NSString *config = RCTNSStringFromString(newViewProps.contextClipboardConfig);
+    _textView.contextClipboardConfig = config.length ? [NSJSONSerialization JSONObjectWithData:[config dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] : nil;
+  }
 
   if (oldViewProps.numberOfLines != newViewProps.numberOfLines) {
     _textView.textContainer.maximumNumberOfLines = newViewProps.numberOfLines;
@@ -641,7 +785,7 @@ LecturnMarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
                defaultAction:(UIAction *)defaultAction API_AVAILABLE(ios(17.0))
 {
   LecturnMarkdownTextRun *child = [self childForCharacterRange:textItem.range];
-  if (![child hasContextMenu]) {
+  if (![child hasContextMenu] && !child.contextChipInteractive) {
     return defaultAction;
   }
 
@@ -657,6 +801,7 @@ LecturnMarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
 {
   LecturnMarkdownTextRun *child = [self childForCharacterRange:textItem.range];
   UIMenu *menu = [child contextMenu];
+  if (child.contextChipInteractive && menu == nil) return nil;
   return [UITextItemMenuConfiguration configurationWithMenu:menu ?: defaultMenu];
 }
 

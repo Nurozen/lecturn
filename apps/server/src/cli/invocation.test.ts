@@ -34,8 +34,13 @@ it("treats stable installs as direct invocations", () => {
   }
 });
 
-it("never re-suggests the nightly channel, even for nightly builds", () => {
-  for (const version of ["0.0.31-nightly.20260729", "0.0.31"]) {
+it("never re-suggests a prerelease channel, even for prerelease builds", () => {
+  for (const version of [
+    "0.0.31-nightly.20260729",
+    "0.0.31-preview.20260729.1",
+    "0.0.31-foo-preview.20260729.1",
+    "0.0.31",
+  ]) {
     assert.equal(
       formatCliCommand({
         subcommand: "serve",

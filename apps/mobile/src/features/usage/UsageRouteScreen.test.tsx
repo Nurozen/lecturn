@@ -61,7 +61,9 @@ vi.mock("react-native-reanimated", () => {
   };
 });
 vi.mock("@react-navigation/native", () => ({
+  useIsFocused: () => true,
   useNavigation: () => ({ setOptions() {}, goBack() {} }),
+  useRoute: () => ({ params: undefined }),
 }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
 vi.mock("../../components/ArcaneBackdrop", () => ({

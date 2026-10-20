@@ -2,10 +2,72 @@ package expo.modules.lecturncomposereditor
 
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import org.json.JSONObject
+import org.json.JSONArray
+
+internal object LecturnComposerClipboard {
+  fun write(context: Context, text: String, fragment: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val payload = try {
+      JSONObject(fragment)
+    } catch (_: Exception) {
+      null
+    }
+    val records = payload?.optJSONArray("records")
+    if (payload == null || records == null) {
+      clipboard.setPrimaryClip(ClipData.newPlainText("Lecturn", text))
+      return
+    }
+    val all = (0 until records.length()).map { records.getJSONObject(it) }
+    val selected = all.filter { text.contains("/${it.optString("contextId")})") }.toMutableList()
+    val screenshots = selected.map { it.optString("screenshotContextId") }.toSet()
+    selected.addAll(
+      all.filter {
+        screenshots.contains(it.optString("contextId")) &&
+          !selected.contains(it)
+      }
+    )
+    payload.put("records", JSONArray(selected))
+    val encoded = java.net.URLEncoder.encode(payload.toString(), "UTF-8").replace("+", "%20")
+    val escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    clipboard.setPrimaryClip(
+      if (selected.isEmpty()) {
+        ClipData.newPlainText(
+          "Lecturn",
+          text
+        )
+      } else {
+        ClipData.newHtmlText(
+          "Lecturn",
+          text,
+          "<pre data-t3-context-fragment=\"$encoded\">$escaped</pre>"
+        )
+      }
+    )
+  }
+
+  fun read(context: Context): Map<String, String> {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val clip = clipboard.primaryClip
+    val item = if (clip != null && clip.itemCount > 0) clip.getItemAt(0) else null
+    return mapOf(
+      "text" to (item?.text?.toString() ?: ""),
+      "html" to (item?.htmlText ?: ""),
+      "fragment" to ""
+    )
+  }
+}
 
 class LecturnComposerEditorModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("LecturnComposerEditor")
+
+    AsyncFunction("writeContextClipboard") { text: String, fragment: String ->
+      LecturnComposerClipboard.write(requireNotNull(appContext.reactContext), text, fragment)
+    }
 
     View(LecturnComposerEditorView::class) {
       Prop("controlledDocumentJson") { view: LecturnComposerEditorView, documentJson: String ->
@@ -13,6 +75,9 @@ class LecturnComposerEditorModule : Module() {
       }
       Prop("themeJson") { view: LecturnComposerEditorView, themeJson: String ->
         view.setThemeJson(themeJson)
+      }
+      Prop("clipboardFragment") { view: LecturnComposerEditorView, fragment: String ->
+        view.setClipboardFragment(fragment)
       }
       Prop("placeholder") { view: LecturnComposerEditorView, placeholder: String ->
         view.setPlaceholder(placeholder)
@@ -26,10 +91,7 @@ class LecturnComposerEditorModule : Module() {
       Prop("lineHeight") { view: LecturnComposerEditorView, lineHeight: Double ->
         view.setLineHeight(lineHeight.toFloat())
       }
-      Prop("contentInsetVertical") {
-          view: LecturnComposerEditorView,
-          contentInsetVertical: Double
-        ->
+      Prop("contentInsetVertical") { view: LecturnComposerEditorView, contentInsetVertical: Double ->
         view.setContentInsetVertical(contentInsetVertical.toInt())
       }
 
@@ -38,6 +100,9 @@ class LecturnComposerEditorModule : Module() {
       }
       Prop("editable") { view: LecturnComposerEditorView, editable: Boolean ->
         view.setEditable(editable)
+      }
+      Prop("readOnly") { view: LecturnComposerEditorView, readOnly: Boolean ->
+        view.setReadOnly(readOnly)
       }
       Prop("scrollEnabled") { view: LecturnComposerEditorView, scrollEnabled: Boolean ->
         view.setScrollEnabled(scrollEnabled)
@@ -51,6 +116,12 @@ class LecturnComposerEditorModule : Module() {
       Prop("spellCheck") { view: LecturnComposerEditorView, spellCheck: Boolean ->
         view.setSpellCheck(spellCheck)
       }
+      Prop("textPasteThresholdBytes") { view: LecturnComposerEditorView, threshold: Int ->
+        view.setTextPasteThresholdBytes(threshold)
+      }
+      Prop("maxInputChars") { view: LecturnComposerEditorView, maxInputChars: Int ->
+        view.setMaxInputChars(maxInputChars)
+      }
 
       Events(
         "onComposerChange",
@@ -58,6 +129,9 @@ class LecturnComposerEditorModule : Module() {
         "onComposerFocus",
         "onComposerBlur",
         "onComposerPasteImages",
+        "onComposerContextPress",
+        "onComposerPasteContext",
+        "onComposerPasteText",
         "onComposerContentSizeChange",
       )
 

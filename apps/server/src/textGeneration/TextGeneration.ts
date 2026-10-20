@@ -13,6 +13,8 @@ import { TextGenerationError } from "@lecturn/contracts";
 
 import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
+import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
+import * as ThreadTitleLinks from "./ThreadTitleLinks.ts";
 import type { TextGenerationPolicy } from "./TextGenerationPolicy.ts";
 
 export type TextGenerationProvider =
@@ -73,6 +75,7 @@ export interface BranchNameGenerationResult {
 }
 
 export interface ThreadTitleGenerationInput {
+  linkedContext?: string | undefined;
   cwd: string;
   message: string;
   /** Present when replacing an existing title from the current thread history. */
@@ -111,6 +114,7 @@ export interface DecisionWriterCapability {
 
 export interface ThreadTitleGenerationResult {
   title: string;
+  needsRefinement?: boolean | undefined;
 }
 
 /**
@@ -203,6 +207,7 @@ export type RoutedTextGeneration = TextGeneration["Service"] &
 
 export const makeTextGenerationFromRegistry = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
+  sourceControl: SourceControlProviderRegistry.SourceControlProviderRegistry["Service"],
 ): RoutedTextGeneration => ({
   checkDecisionWriter: (input) =>
     resolveInstance(registry, "checkDecisionWriter", input.modelSelection.instanceId).pipe(
@@ -259,14 +264,27 @@ export const makeTextGenerationFromRegistry = (
     ),
   generateThreadTitle: (input) =>
     resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
-      Effect.flatMap((textGeneration) => textGeneration.generateThreadTitle(input)),
+      Effect.flatMap((textGeneration) =>
+        Effect.gen(function* () {
+          const linkedContext =
+            input.linkedContext ??
+            (yield* ThreadTitleLinks.resolveThreadTitleLinks(input).pipe(
+              Effect.provideService(
+                SourceControlProviderRegistry.SourceControlProviderRegistry,
+                sourceControl,
+              ),
+            ));
+          return yield* textGeneration.generateThreadTitle({ ...input, linkedContext });
+        }),
+      ),
     ),
 });
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const registry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
-  return makeTextGenerationFromRegistry(registry);
+  const sourceControl = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
+  return makeTextGenerationFromRegistry(registry, sourceControl);
 });
 
 export const layer = Layer.effect(TextGeneration, make);

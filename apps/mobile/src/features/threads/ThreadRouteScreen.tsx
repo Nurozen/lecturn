@@ -30,6 +30,7 @@ import {
 import { Alert, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useWorkspaceState } from "../../state/workspace";
+import { useEnvironmentShellState } from "../../state/shell";
 import { restoredNewTaskDraftKey } from "../../state/new-task-draft-key";
 import { clearPendingThreadCreationOutcome } from "../../state/pending-thread-creation";
 import { recoverFailedThreadDraft } from "../../state/recover-failed-thread-draft";
@@ -97,6 +98,7 @@ import {
   ThreadInspectorContentStack,
   type ThreadInspectorMode,
 } from "./thread-inspector-content-stack";
+import { threadRouteIsHydrating } from "./thread-route-hydration";
 
 interface ThreadInspectorSelection {
   readonly routeThreadIdentity: string | null;
@@ -133,7 +135,11 @@ interface ThreadRouteScreenProps extends ThreadRouteScreenRouteProps {
   readonly renderInspector?: (headerInset: number) => ReactNode;
 }
 
-function ThreadUnavailableScreen() {
+/** Shows recovery only after the target route has reached a terminal unavailable state. */
+function ThreadUnavailableScreen(props: {
+  readonly actionLabel: string;
+  readonly onAction: () => void;
+}) {
   return (
     <ScrollView
       contentInsetAdjustmentBehavior="automatic"
@@ -148,6 +154,8 @@ function ThreadUnavailableScreen() {
       <EmptyState
         title="Thread unavailable"
         detail="This thread is not available in the current mobile snapshot."
+        actionLabel={props.actionLabel}
+        onAction={props.onAction}
       />
     </ScrollView>
   );
@@ -176,7 +184,18 @@ function AccountScopedThreadRouteScreen(props: ThreadRouteScreenProps) {
     if (owner) expandMobileAccountSection(owner);
   }, [owner]);
   if (decision.kind === "loading") return <OpeningThreadLoadingScreen />;
-  if (decision.kind === "unavailable") return <ThreadUnavailableScreen />;
+  if (decision.kind === "unavailable")
+    return (
+      <ThreadUnavailableScreen
+        actionLabel="Manage environments"
+        onAction={() =>
+          navigation.navigate("SettingsSheet", {
+            screen: "SettingsContent",
+            params: { screen: "SettingsEnvironments" },
+          })
+        }
+      />
+    );
   if (decision.kind === "sign-in")
     return (
       <View className="flex-1 justify-center bg-screen p-5">
@@ -204,6 +223,9 @@ function ConnectedThreadRouteScreen(props: ThreadRouteScreenProps) {
   const threadIdRaw = firstRouteParam(params.threadId);
   const environmentId = environmentIdRaw ? EnvironmentId.make(environmentIdRaw) : null;
   const routeEnvironmentRuntime = useRemoteEnvironmentRuntime(environmentId);
+  const routeEnvironmentShellState = useEnvironmentShellState(environmentId);
+  const { onReconnectEnvironment } = useRemoteConnections();
+  const navigation = useNavigation();
   const routeConnectionState =
     routeEnvironmentRuntime?.connectionState ?? (environmentId ? "available" : connectionState);
   const routeThreadKey =
@@ -229,16 +251,36 @@ function ConnectedThreadRouteScreen(props: ThreadRouteScreenProps) {
     return <ThreadRouteContent {...props} selectedThreadDetailState={selectedThreadDetailState} />;
   }
 
-  const stillHydrating =
-    workspaceState.isLoadingConnections ||
-    routeConnectionState === "connecting" ||
-    routeConnectionState === "reconnecting";
+  const stillHydrating = threadRouteIsHydrating({
+    isLoadingConnections: workspaceState.isLoadingConnections,
+    connectionState: routeConnectionState,
+    shellStatus: routeEnvironmentShellState.status,
+    shellHasError: Option.isSome(routeEnvironmentShellState.error),
+    detailStatus: selectedThreadDetailState.status,
+    detailHasError: Option.isSome(selectedThreadDetailState.error),
+  });
 
   if (stillHydrating) {
     return <OpeningThreadLoadingScreen />;
   }
 
-  return <ThreadUnavailableScreen />;
+  return (
+    <ThreadUnavailableScreen
+      actionLabel={
+        routeEnvironmentRuntime === null ? "Manage environments" : "Reconnect environment"
+      }
+      onAction={() => {
+        if (routeEnvironmentRuntime !== null) {
+          onReconnectEnvironment(environmentId);
+          return;
+        }
+        navigation.navigate("SettingsSheet", {
+          screen: "SettingsContent",
+          params: { screen: "SettingsEnvironments" },
+        });
+      }}
+    />
+  );
 }
 
 function ThreadRouteContent(
@@ -985,9 +1027,26 @@ function ThreadRouteContent(
       }),
     );
   }, [navigation, routeThreadIdentity, selectedThreadCreation, selectedThreadProject]);
+  // A worktree bootstrap records a running setup on the thread before its
+  // turn, so a thread opened from another device (or after a restart) shows
+  // the same preparing state the sending client does. A starting session is
+  // not enough on its own: an ordinary first turn projects one too.
+  const awaitingBootstrapTurn = useMemo(
+    () =>
+      selectedThreadDetail !== null &&
+      selectedThreadDetail.latestTurn === null &&
+      selectedThreadDetail.activities.some(
+        (activity) =>
+          activity.kind === "worktree-setup" &&
+          typeof activity.payload === "object" &&
+          activity.payload !== null &&
+          (activity.payload as { phase?: unknown }).phase === "running",
+      ),
+    [selectedThreadDetail],
+  );
   const creationState = ((): ThreadDetailScreenProps["creationState"] => {
     if (selectedThreadCreation === null) {
-      return null;
+      return awaitingBootstrapTurn ? { kind: "preparing", preparingWorktree: true } : null;
     }
     if (selectedThreadCreation.outcome?.kind === "failed") {
       return {
@@ -1093,6 +1152,7 @@ function ThreadRouteContent(
           onPickDraftMedia={composer.onPickDraftMedia}
           onPickDraftFiles={composer.onPickDraftFiles}
           onNativePasteImages={composer.onNativePasteImages}
+          onNativePasteText={composer.onNativePasteText}
           onRemoveDraftImage={composer.onRemoveDraftImage}
           serverConfig={serverConfig}
           onStopThread={handleStopThread}
@@ -1160,7 +1220,16 @@ function ThreadRouteContent(
         <AndroidScreenHeader
           title={selectedThread.title}
           subtitle={headerSubtitle}
-          onBack={layout.usesSplitView ? undefined : () => navigation.goBack()}
+          onBack={
+            layout.usesSplitView
+              ? undefined
+              : () => {
+                  // A deep link or cold start has no previous route; Home is the way out.
+                  // Read the history at press time: it changes without re-rendering this screen.
+                  if (navigation.canGoBack()) navigation.goBack();
+                  else navigation.dispatch(StackActions.replace("Home"));
+                }
+          }
           actions={androidHeaderActions}
           hideBottomBorder={materialYouStyleLayoutActive}
         />

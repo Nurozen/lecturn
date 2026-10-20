@@ -16,6 +16,7 @@ import {
   resolveWebAssetBrandForPackageVersion,
   resolveWebIconOverrides,
 } from "../../../scripts/lib/brand-assets.ts";
+import { findEsmImportsOfExternalPackages } from "../../../scripts/lib/cli-external-packages.ts";
 import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog.ts";
 import { fromJsonStringPretty } from "@lecturn/shared/schemaJson";
 import { fromYaml } from "@lecturn/shared/schemaYaml";
@@ -27,6 +28,7 @@ import {
   ServerCliCommandExitError,
   ServerCliDevelopmentIconSourceMissingError,
   ServerCliDevelopmentIconTargetMissingError,
+  ServerCliExecutableImportError,
   ServerCliPublishIconSourceMissingError,
   ServerCliPublishIconTargetMissingError,
 } from "./cliErrors.ts";
@@ -206,6 +208,65 @@ const assertStaveBinaries = Effect.fn("assertStaveBinaries")(function* (serverDi
 });
 
 // ---------------------------------------------------------------------------
+// build-exe subcommand
+// ---------------------------------------------------------------------------
+
+const buildExeCmd = Command.make(
+  "build-exe",
+  {
+    verbose: Flag.boolean("verbose").pipe(Flag.withDefault(false)),
+    target: Flag.string("target").pipe(
+      Flag.withDescription(
+        "Cross-build for <platform>-<arch> in nodejs.org naming (for example darwin-x64); defaults to the host.",
+      ),
+      Flag.optional,
+    ),
+  },
+  (config) =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const fs = yield* FileSystem.FileSystem;
+      const repoRoot = yield* RepoRoot;
+      const serverDir = path.join(repoRoot, "apps/server");
+
+      yield* Effect.log("[cli] Building single-executable...");
+      const spawnCommand = yield* resolveSpawnCommand("vp", ["pack"]);
+      yield* runCommand(
+        ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+          cwd: serverDir,
+          env: {
+            ...process.env,
+            LECTURN_PACK_EXE: "1",
+            ...Option.match(config.target, {
+              onNone: () => ({}),
+              onSome: (target) => ({ LECTURN_PACK_EXE_TARGET: target }),
+            }),
+          },
+          stdout: config.verbose ? "inherit" : "ignore",
+          stderr: "inherit",
+          shell: spawnCommand.shell,
+        }),
+      );
+
+      // The executable can only `import` built-ins. A file-backed import
+      // passes the bundler and `node dist/bin.mjs`, then throws inside the
+      // binary, so read the emitted module graph rather than trusting config.
+      const bundlePath = path.join(serverDir, "dist-exe/bin.mjs");
+      const specifiers = findEsmImportsOfExternalPackages(yield* fs.readFileString(bundlePath));
+      if (specifiers.length > 0) {
+        return yield* new ServerCliExecutableImportError({ bundlePath, specifiers });
+      }
+      yield* Effect.log(
+        "[cli] Built dist-exe/lecturn (expects client/, resource-monitor/, and the runtime-external node_modules beside it; scripts/build-cli-archive.ts assembles that tree)",
+      );
+    }),
+).pipe(
+  Command.withDescription(
+    "Build the server as a Node single-executable (needs a Node 25.7+ host for --build-sea). The binary still resolves native packages from a node_modules tree beside it.",
+  ),
+);
+
+// ---------------------------------------------------------------------------
 // publish subcommand
 // ---------------------------------------------------------------------------
 
@@ -271,9 +332,155 @@ export const buildPublishManifest = (input: PublishManifestInput): PackageJson =
   };
 };
 
+/** npm scope and launcher name scripts/build-npm-platform-packages.ts emits. */
+const NPM_PLATFORM_PACKAGE_SCOPE = "@lecturn";
+const NPM_LAUNCHER_PACKAGE_NAME = "lecturn";
+
+interface PublishFlags extends PublishCommandConfig {
+  readonly appVersion: Option.Option<string>;
+  readonly binName: Option.Option<string>;
+  readonly requireStave: boolean;
+  readonly verbose: boolean;
+}
+
+/**
+ * Publishes the tarballs scripts/build-npm-platform-packages.ts produced:
+ * every `@lecturn/lecturn-<platform>.tgz` first, `lecturn.tgz` (the launcher)
+ * last, so the launcher is never installable before the executables it
+ * depends on. Tarballs rather than directories because `npm publish <dir>`
+ * strips the `node_modules/` the executable loads its native addons from.
+ */
+const publishPlatformTarballs = Effect.fn("publishPlatformTarballs")(function* (
+  packagesDirInput: string,
+  config: PublishFlags,
+) {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  // npm runs with cwd set to the packages dir below, so tarball paths are
+  // resolved once here rather than joined twice.
+  const packagesDir = path.resolve(packagesDirInput);
+  const scopeDir = path.join(packagesDir, NPM_PLATFORM_PACKAGE_SCOPE);
+  const launcherTarball = path.join(packagesDir, `${NPM_LAUNCHER_PACKAGE_NAME}.tgz`);
+  const platformPrefix = `${NPM_LAUNCHER_PACKAGE_NAME}-`;
+  const platformTarballs = (yield* fs
+    .readDirectory(scopeDir)
+    .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => [])))
+    .filter((entry) => entry.startsWith(platformPrefix) && entry.endsWith(".tgz"))
+    .sort()
+    .map((entry) => path.join(scopeDir, entry));
+  if (platformTarballs.length === 0) {
+    return yield* new ServerCliBuildAssetMissingError({
+      assetPath: path.join(scopeDir, `${platformPrefix}<platform>.tgz`),
+    });
+  }
+  if (!(yield* fs.exists(launcherTarball))) {
+    return yield* new ServerCliBuildAssetMissingError({ assetPath: launcherTarball });
+  }
+
+  const args = ["publish", "--access", config.access, "--tag", config.tag];
+  if (config.provenance) args.push("--provenance");
+  if (config.dryRun) args.push("--dry-run");
+
+  for (const tarball of [...platformTarballs, launcherTarball]) {
+    const spawnCommand = yield* resolveSpawnCommand("npm", [...args, tarball]);
+    yield* Effect.log(`[cli] npm ${args.join(" ")} ${path.basename(tarball)}`);
+    yield* runCommand(
+      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+        cwd: packagesDir,
+        stdout: config.verbose ? "inherit" : "ignore",
+        stderr: "inherit",
+        shell: spawnCommand.shell,
+      }),
+    );
+  }
+});
+
+/**
+ * Publishes apps/server itself as the Node-script `lecturn` package: rewrites
+ * the manifest (resolved catalog versions, package/bin name, repository) and
+ * release icons for the duration of `vp pm publish`, then restores them.
+ */
+const publishNodePackage = Effect.fn("publishNodePackage")(function* (config: PublishFlags) {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  const repoRoot = yield* RepoRoot;
+  const serverDir = path.join(repoRoot, "apps/server");
+  const packageJsonPath = path.join(serverDir, "package.json");
+
+  for (const relPath of ["dist/bin.mjs", "dist/client/index.html"]) {
+    const abs = path.join(serverDir, relPath);
+    if (!(yield* fs.exists(abs))) {
+      return yield* new ServerCliBuildAssetMissingError({ assetPath: abs });
+    }
+  }
+
+  if (config.requireStave) {
+    yield* assertStaveBinaries(serverDir);
+  }
+
+  yield* Effect.acquireUseRelease(
+    // Acquire: resolve publish metadata and read every original before mutation.
+    Effect.gen(function* () {
+      const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version);
+      const workspaceConfig = yield* readWorkspaceConfig();
+      const pkg = buildPublishManifest({
+        version,
+        workspaceConfig,
+        packageName: Option.getOrUndefined(config.packageName),
+        binName: Option.getOrUndefined(config.binName),
+        githubRepository: process.env.GITHUB_REPOSITORY,
+      });
+
+      return {
+        packageJsonString: yield* encodePackageJson(pkg),
+        originalPackageJson: yield* fs.readFile(packageJsonPath),
+        icons: yield* preparePublishIcons(repoRoot, serverDir, version),
+      };
+    }),
+    // Use: pnpm publish from the workspace root so pnpm-only workspace
+    // config, including override selectors, is interpreted correctly.
+    (resource) =>
+      Effect.gen(function* () {
+        yield* fs.writeFileString(packageJsonPath, `${resource.packageJsonString}\n`);
+        for (const icon of resource.icons) {
+          yield* fs.writeFile(icon.targetPath, icon.publish);
+        }
+        yield* Effect.log("[cli] Applied package metadata and publish icon overrides");
+
+        const args = createVpPmPublishArgs(config);
+        const spawnCommand = yield* resolveSpawnCommand("vp", ["pm", ...args]);
+
+        yield* Effect.log(`[cli] Running: vp pm ${args.join(" ")}`);
+        yield* runCommand(
+          ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+            cwd: repoRoot,
+            stdout: config.verbose ? "inherit" : "ignore",
+            stderr: "inherit",
+            shell: spawnCommand.shell,
+          }),
+        );
+      }),
+    // Release: restore every file even if applying overrides or publishing fails.
+    (resource) =>
+      Effect.gen(function* () {
+        yield* fs.writeFile(packageJsonPath, resource.originalPackageJson);
+        for (const icon of resource.icons) {
+          yield* fs.writeFile(icon.targetPath, icon.original);
+        }
+        if (config.verbose) yield* Effect.log("[cli] Restored original publish assets");
+      }),
+  );
+});
+
 const publishCmd = Command.make(
   "publish",
   {
+    packagesDir: Flag.string("packages-dir").pipe(
+      Flag.withDescription(
+        "Output dir of scripts/build-npm-platform-packages.ts. When set, publishes the per-platform executable tarballs and then the launcher; otherwise publishes apps/server as the Node package.",
+      ),
+      Flag.optional,
+    ),
     tag: Flag.string("tag").pipe(Flag.withDefault("latest")),
     access: Flag.string("access").pipe(Flag.withDefault("public")),
     appVersion: Flag.string("app-version").pipe(Flag.optional),
@@ -285,83 +492,15 @@ const publishCmd = Command.make(
     verbose: Flag.boolean("verbose").pipe(Flag.withDefault(false)),
   },
   (config) =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path;
-      const fs = yield* FileSystem.FileSystem;
-      const repoRoot = yield* RepoRoot;
-      const serverDir = path.join(repoRoot, "apps/server");
-      const packageJsonPath = path.join(serverDir, "package.json");
-
-      // Assert build assets exist
-      for (const relPath of [
-        "dist/bin.mjs",
-        "dist/service-launcher.mjs",
-        "dist/client/index.html",
-      ]) {
-        const abs = path.join(serverDir, relPath);
-        if (!(yield* fs.exists(abs))) {
-          return yield* new ServerCliBuildAssetMissingError({ assetPath: abs });
-        }
-      }
-
-      if (config.requireStave) {
-        yield* assertStaveBinaries(serverDir);
-      }
-
-      yield* Effect.acquireUseRelease(
-        // Acquire: resolve publish metadata and read every original before mutation.
-        Effect.gen(function* () {
-          const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version);
-          const workspaceConfig = yield* readWorkspaceConfig();
-          const pkg = buildPublishManifest({
-            version,
-            workspaceConfig,
-            packageName: Option.getOrUndefined(config.packageName),
-            binName: Option.getOrUndefined(config.binName),
-            githubRepository: process.env.GITHUB_REPOSITORY,
-          });
-
-          return {
-            packageJsonString: yield* encodePackageJson(pkg),
-            originalPackageJson: yield* fs.readFile(packageJsonPath),
-            icons: yield* preparePublishIcons(repoRoot, serverDir, version),
-          };
-        }),
-        // Use: pnpm publish from the workspace root so pnpm-only workspace
-        // config, including override selectors, is interpreted correctly.
-        (resource) =>
-          Effect.gen(function* () {
-            yield* fs.writeFileString(packageJsonPath, `${resource.packageJsonString}\n`);
-            for (const icon of resource.icons) {
-              yield* fs.writeFile(icon.targetPath, icon.publish);
-            }
-            yield* Effect.log("[cli] Applied package metadata and publish icon overrides");
-
-            const args = createVpPmPublishArgs(config);
-            const spawnCommand = yield* resolveSpawnCommand("vp", ["pm", ...args]);
-
-            yield* Effect.log(`[cli] Running: vp pm ${args.join(" ")}`);
-            yield* runCommand(
-              ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-                cwd: repoRoot,
-                stdout: config.verbose ? "inherit" : "ignore",
-                stderr: "inherit",
-                shell: spawnCommand.shell,
-              }),
-            );
-          }),
-        // Release: restore every file even if applying overrides or publishing fails.
-        (resource) =>
-          Effect.gen(function* () {
-            yield* fs.writeFile(packageJsonPath, resource.originalPackageJson);
-            for (const icon of resource.icons) {
-              yield* fs.writeFile(icon.targetPath, icon.original);
-            }
-            if (config.verbose) yield* Effect.log("[cli] Restored original publish assets");
-          }),
-      );
+    Option.match(config.packagesDir, {
+      onNone: () => publishNodePackage(config),
+      onSome: (packagesDir) => publishPlatformTarballs(packagesDir, config),
     }),
-).pipe(Command.withDescription("Publish the server package to npm."));
+).pipe(
+  Command.withDescription(
+    "Publish to npm: the @lecturn/lecturn-<platform> tarballs and then the lecturn launcher with --packages-dir, otherwise the apps/server Node package.",
+  ),
+);
 
 // ---------------------------------------------------------------------------
 // root command
@@ -369,7 +508,7 @@ const publishCmd = Command.make(
 
 const cli = Command.make("cli").pipe(
   Command.withDescription("Lecturn server build & publish CLI."),
-  Command.withSubcommands([buildCmd, publishCmd]),
+  Command.withSubcommands([buildCmd, buildExeCmd, publishCmd]),
 );
 
 if (import.meta.main) {

@@ -17,7 +17,7 @@ This document covers the unified release workflow for stable and nightly desktop
   landing while you verify and never leak into the stable build.
   - The version defaults to the one the nightly previewed (`0.0.39-nightly.*` ships as `0.0.39`).
     Pass the `version` input to override it, for example for a minor bump.
-  - Every quality check, desktop build, WSL prebuild, CLI package, and GitHub Release uses the
+  - Every quality check, desktop build, CLI archive, CLI package, and GitHub Release uses the
     resolved commit. Finalization alone checks out current `main` for the version bookkeeping PR.
   - The stable tag is created on the nightly's commit when the GitHub Release is published.
   - Without a published nightly, manual stable releases fail even when `version` is supplied.
@@ -26,7 +26,8 @@ This document covers the unified release workflow for stable and nightly desktop
     the commit to ship is not the latest nightly, such as a cherry-picked fix on a release branch.
 - Runs lint, typecheck, and tests alongside artifact builds. Publishing waits for every check.
 - Reads the shared production Lecturn Connect relay URL and Clerk client configuration before packaging clients.
-- Builds four artifacts in parallel for both channels:
+- Builds the Linux x64 CLI archive first in its own job (`build_linux_cli`); the Windows desktop build embeds it as the WSL runtime.
+- Builds four desktop artifacts in parallel for both channels:
   - macOS `arm64` DMG
   - macOS `x64` DMG
   - Linux `x64` AppImage
@@ -37,9 +38,15 @@ This document covers the unified release workflow for stable and nightly desktop
   - Nightly runs are always GitHub prereleases and never marked latest.
   - Automatically generated release notes are pinned to the previous tag in the same channel, so stable compares to the previous stable tag and nightly compares to the previous nightly tag.
 - Includes Electron auto-update metadata (for example `latest*.yml`, `nightly*.yml`, and `*.blockmap`) in release assets.
+- Builds a self-contained CLI archive (`lecturn-<version>-<platform>-<arch>.tar.gz`, `.zip` on Windows) for three targets, macOS arm64, Linux x64, and Windows x64, and attaches them to the GitHub Release with a `SHA256SUMS` file. Linux comes from `build_linux_cli`; macOS arm64 and Windows x64 are built in the same job as that target's desktop artifact. There is no macOS x64 archive: Node single-executables are unsupported on x64 macOS. The x64 desktop app is Electron and unaffected.
+  - The archive holds the server as a Node single-executable (`scripts/build-cli-archive.ts`) plus the web client, resource monitor, native externals, and the platform's Stave binary at `stave/<platform>-<arch>/`, so unpacking it needs neither Node, npm, nor a compiler. The desktop's SSH environments, the boot service, `lecturn update`, the desktop WSL backend, and the install scripts (`scripts/install.sh`, `scripts/install.ps1`) all download this archive and verify it against `SHA256SUMS`.
+  - The executable is built with a Node that supports `--build-sea` (`VP_NODE_VERSION=26.8.2`, kept in step with `SEA_NODE_VERSION` in `apps/server/vite.config.ts`), while the repo stays on `engines.node`.
+  - macOS archives are signed with the Developer ID certificate (`CSC_LINK`) and notarized when the Apple API secrets are present, and signed ad hoc otherwise. Windows executables use the installer's Azure Trusted Signing setup when its secrets are present and stay unsigned otherwise.
+  - Each archive is extracted and executed on its build runner (`scripts/smoke-cli-archive.ts`) before it is uploaded.
 - Publishes the CLI package (`apps/server`, npm package `lecturn`) with OIDC trusted publishing from the same workflow file:
   - stable releases publish npm dist-tag `latest`
   - nightly releases publish npm dist-tag `nightly`
+  - Upstream's npm layout, a launcher over per-platform executable packages (`scripts/build-npm-platform-packages.ts`, which would publish `@lecturn/lecturn-<platform>-<arch>`), is not wired into the workflow: those packages and their trusted publishers do not exist yet.
 - Signing is optional and auto-detected per platform from secrets.
 
 ## Required release credentials
@@ -189,12 +196,13 @@ Windows packages the bundled server and only its runtime-external/native
 dependency closure in `resources/server.asar`. Native modules and helper
 executables declared as unpacked by that archive must be present at the matching
 paths below `resources/server.asar.unpacked`. The Windows-native backend reads
-the archive in place through Electron. Packaged Windows builds also ship a
-Linux-only `resources/wsl-runtime.tar.gz` plus its SHA-256 sidecar. WSL verifies
-and extracts that archive into `~/.lecturn/wsl-runtime/sha256-<archive-digest>` inside
-the selected distro, then reuses it for later launches of the same update. The
-Windows-side `wsl-server-tree/<version>` extraction remains a fallback and is
-removed after the distro-local runtime passes preflight.
+the archive in place through Electron. Packaged Windows builds also ship
+`resources/wsl-runtime.tar.gz` plus its SHA-256 sidecar: the Linux CLI archive
+(`lecturn-<version>-linux-x64.tar.gz`) built by `build_linux_cli` and handed to
+the Windows desktop build as `--wsl-runtime`, copied in verbatim so WSL runs the
+exact bytes a Linux user downloads. WSL verifies and extracts that archive into
+`~/.lecturn/wsl-runtime/sha256-<archive-digest>` inside the selected distro,
+then reuses it for later launches of the same update.
 
 Windows keeps JavaScript and package metadata inside `app.asar` and unpacks only
 native libraries and helper executables. Avoid enabling whole-package smart
@@ -210,11 +218,13 @@ break:
 - On same-architecture Windows builds, the packaged primary cannot load the fff
   native library from inside `server.asar` through its `.unpacked` sibling.
 - The isolated, extracted sidecar cannot load the server entry with plain Node.
-- A Windows build with a WSL node-pty prebuild omits the WSL archive or SHA-256
-  sidecar, the sidecar digest does not match the emitted archive, or required
-  Linux runtime members are absent.
-- The emitted WSL archive contains Windows/Darwin node-pty payloads, ConPTY,
-  pnpm install metadata, or Windows-only FFF, ffi-rs, or msgpackr bindings.
+- A Windows build given `--wsl-runtime` omits the WSL archive or SHA-256
+  sidecar, or the sidecar digest does not match the emitted archive.
+- The emitted WSL archive is not a Linux CLI release archive: it must unpack to
+  a single `lecturn-<version>-linux-<arch>` directory holding `lecturn`,
+  `client/`, `node_modules/` with the Linux node-pty binary, and (for a
+  Stave-equipped build) an executable `stave/linux-<arch>/stave`, and must not
+  carry a loose server bundle (`bin.mjs`).
 - The external Windows resource monitor is absent.
 - The unpacked Windows application contains more than 80 files.
 
@@ -350,7 +360,7 @@ Checklist:
 4. Verify workflow steps:
    - preflight passes
    - release quality checks pass
-   - all matrix builds pass
+   - `build_linux_cli` and all matrix builds pass
    - `publish_cli` publishes the exact release version before the release job
    - release job uploads expected files
 5. Smoke test downloaded artifacts.

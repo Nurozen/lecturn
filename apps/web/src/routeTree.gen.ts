@@ -31,7 +31,6 @@ import { Route as SettingsArchivedRouteImport } from './routes/settings.archived
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
 import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$projectKey'
 import { Route as ContextualEnvironmentIdRouteImport } from './routes/contextual.$environmentId'
-import { Route as ConnectCallbackRouteImport } from './routes/connect_.callback'
 import { Route as AccountBillingRouteImport } from './routes/account.billing'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as ExtensionsFundingApproveRouteImport } from './routes/extensions.funding.approve'
@@ -151,11 +150,6 @@ const ContextualEnvironmentIdRoute = ContextualEnvironmentIdRouteImport.update({
   path: '/contextual/$environmentId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ConnectCallbackRoute = ConnectCallbackRouteImport.update({
-  id: '/connect_/callback',
-  path: '/connect/callback',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AccountBillingRoute = AccountBillingRouteImport.update({
   id: '/account/billing',
   path: '/account/billing',
@@ -210,7 +204,6 @@ export interface FileRoutesByFullPath {
   '/welcome': typeof WelcomeRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/account/billing': typeof AccountBillingRoute
-  '/connect/callback': typeof ConnectCallbackRoute
   '/contextual/$environmentId': typeof ContextualEnvironmentIdRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -241,7 +234,6 @@ export interface FileRoutesByTo {
   '/welcome': typeof WelcomeRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/account/billing': typeof AccountBillingRoute
-  '/connect/callback': typeof ConnectCallbackRoute
   '/contextual/$environmentId': typeof ContextualEnvironmentIdRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -275,7 +267,6 @@ export interface FileRoutesById {
   '/welcome': typeof WelcomeRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
   '/account/billing': typeof AccountBillingRoute
-  '/connect_/callback': typeof ConnectCallbackRoute
   '/contextual/$environmentId': typeof ContextualEnvironmentIdRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -310,7 +301,6 @@ export interface FileRouteTypes {
     | '/welcome'
     | '/pull-requests'
     | '/account/billing'
-    | '/connect/callback'
     | '/contextual/$environmentId'
     | '/projects/$projectKey'
     | '/settings/appearance'
@@ -341,7 +331,6 @@ export interface FileRouteTypes {
     | '/welcome'
     | '/pull-requests'
     | '/account/billing'
-    | '/connect/callback'
     | '/contextual/$environmentId'
     | '/projects/$projectKey'
     | '/settings/appearance'
@@ -374,7 +363,6 @@ export interface FileRouteTypes {
     | '/welcome'
     | '/_chat/pull-requests'
     | '/account/billing'
-    | '/connect_/callback'
     | '/contextual/$environmentId'
     | '/projects/$projectKey'
     | '/settings/appearance'
@@ -407,7 +395,6 @@ export interface RootRouteChildren {
   UsageRoute: typeof UsageRoute
   WelcomeRoute: typeof WelcomeRoute
   AccountBillingRoute: typeof AccountBillingRoute
-  ConnectCallbackRoute: typeof ConnectCallbackRoute
   ContextualEnvironmentIdRoute: typeof ContextualEnvironmentIdRoute
   ProjectsProjectKeyRoute: typeof ProjectsProjectKeyRoute
   DecisionsEnvironmentIdProjectIdRoute: typeof DecisionsEnvironmentIdProjectIdRoute
@@ -571,13 +558,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ContextualEnvironmentIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/connect_/callback': {
-      id: '/connect_/callback'
-      path: '/connect/callback'
-      fullPath: '/connect/callback'
-      preLoaderRoute: typeof ConnectCallbackRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/account/billing': {
       id: '/account/billing'
       path: '/account/billing'
@@ -699,7 +679,6 @@ const rootRouteChildren: RootRouteChildren = {
   UsageRoute: UsageRoute,
   WelcomeRoute: WelcomeRoute,
   AccountBillingRoute: AccountBillingRoute,
-  ConnectCallbackRoute: ConnectCallbackRoute,
   ContextualEnvironmentIdRoute: ContextualEnvironmentIdRoute,
   ProjectsProjectKeyRoute: ProjectsProjectKeyRoute,
   DecisionsEnvironmentIdProjectIdRoute: DecisionsEnvironmentIdProjectIdRoute,

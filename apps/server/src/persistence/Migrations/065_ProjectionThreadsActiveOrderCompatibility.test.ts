@@ -39,7 +39,7 @@ describe("065 collision compatibility", () => {
         if (upstreamId === 49) yield* sql`UPDATE projection_threads SET active_order_key = 'gm'`;
         const ledger = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
         const executed = yield* runMigrations();
-        assert.deepEqual(executed.at(-1), [66, "ProjectionThreadPullRequestsCompatibility"]);
+        assert.deepEqual(executed.at(-1), [67, "MessageContextTitleStateCompatibility"]);
         assert.deepEqual(
           yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= ${upstreamId} ORDER BY migration_id`,
           ledger,

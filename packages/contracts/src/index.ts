@@ -1,5 +1,7 @@
 export * from "./baseSchemas.ts";
 export * from "./assistantCitations.ts";
+export * from "./composerContext.ts";
+export * from "./composerContextClipboard.ts";
 export * from "./background.ts";
 export * from "./auth.ts";
 export * from "./environment.ts";
@@ -23,6 +25,7 @@ export * from "./settings.ts";
 export * from "./git.ts";
 export * from "./vcs.ts";
 export * from "./sourceControl.ts";
+export * from "./projectClone.ts";
 export * from "./pullRequest.ts";
 export * from "./orchestration.ts";
 export * from "./stave.ts";
@@ -65,3 +68,5 @@ export * from "./extensions.ts";
 export * from "./extensionsEvaluator.ts";
 
 export * from "./connectAccount.ts";
+
+export * from "./worktreeSetup.ts";

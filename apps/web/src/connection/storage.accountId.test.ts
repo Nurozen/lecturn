@@ -51,7 +51,8 @@ describe("makeCatalogStore accountId", () => {
 
       yield* store.update((current) => ({ ...current }));
       expect(writes).toHaveLength(1);
-      expect(decodeJson(writes[0]!)).toEqual(taggedCatalog);
+      // The write adds only the (empty) disabled-environment list.
+      expect(decodeJson(writes[0]!)).toEqual({ ...taggedCatalog, disabledEnvironmentIds: [] });
     }),
   );
 });

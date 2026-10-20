@@ -4,6 +4,12 @@
 # deploy, Discord announcements, and the GitHub App release token (finalize
 # uses github.token). Everything else is kept as close to upstream as possible
 # to minimize nightly merge conflicts.
+# Self-contained CLI archives (lecturn-<version>-<platform>.tar.gz/.zip plus
+# SHA256SUMS) are built here and attached to the GitHub Release, which is what
+# install.sh, `lecturn update`, SSH remotes, and the desktop WSL backend
+# download. npm keeps receiving the single `lecturn` JS package: the upstream
+# launcher-over-platform-packages layout (@lecturn/lecturn-<platform>) needs npm
+# packages and trusted publishers the fork has not provisioned.
 # Never push upstream `v*` tags to this repo: a tag push here cuts a release.
 name: Release
 
@@ -272,26 +278,26 @@ jobs:
       - name: Test
         run: vp run test
 
-  # node-pty publishes no Linux prebuilt and the WSL backend runs under the
-  # distro's own (Linux) Node, which can't load the Windows/Electron binary. We
-  # build the Linux pty.node here, on Linux, and hand it to the Windows packaging
-  # job — the Windows artifact then ships a ready WSL backend binary with no
-  # cross-compiling and no first-launch compiler/node-gyp/network on the user's
-  # machine. node-pty is N-API, so one binary works across all WSL Node versions.
-  build_wsl_node_pty:
-    name: Build WSL node-pty (linux-x64)
-    # Only the release commit is needed, so this runs alongside preflight.
-    needs: [resolve_commit]
-    if: |
-      needs.resolve_commit.result == 'success' &&
-      (github.event_name != 'schedule' || needs.resolve_commit.outputs.has_changes == 'true')
+  # The Linux x64 CLI archive is built first and on its own: it is both a
+  # release asset and the WSL runtime the Windows desktop build embeds
+  # verbatim, so the Windows matrix leg downloads it from here.
+  build_linux_cli:
+    name: Build CLI archive (linux-x64)
+    needs: [preflight]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
+    environment: production
+    env:
+      LECTURN_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
+      LECTURN_CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE }}
+      LECTURN_CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.CLERK_CLI_OAUTH_CLIENT_ID }}
+      LECTURN_RELAY_URL: https://${{ vars.RELAY_DOMAIN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.resolve_commit.outputs.ref }}
+          ref: ${{ needs.preflight.outputs.ref }}
           sparse-checkout: |
             /*
             !/.repos/
@@ -302,41 +308,90 @@ jobs:
         with:
           node-version-file: package.json
           cache: true
-          run-install: |
-            args:
-              - --filter=lecturn...
+          run-install: false
 
-      - name: Build node-pty linux-x64 prebuild
+      - name: Download dependency verification
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: release-dependency-verification
+          path: ${{ runner.temp }}/pnpm-metadata
+
+      - name: Install CLI dependencies
+        env:
+          pnpm_config_cache_dir: ${{ runner.temp }}/pnpm-metadata
+        run: vp install --filter=lecturn... --filter=@lecturn/web... --filter=@lecturn/scripts...
+
+      - name: Align package versions to release version
+        run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
+
+      # The lecturn build task depends on @lecturn/web#build, so apps/server/dist
+      # holds the server bundle plus the web client the archive serves.
+      - name: Build server bundle and web client
+        run: vp run --filter lecturn build
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Build resource monitor
         shell: bash
         run: |
           set -euo pipefail
-          # Resolve node-pty from apps/server (where it's a dependency) and build
-          # its native binary from source for Linux. node-addon-api resolves from
-          # node-pty's own dependency tree, so node-gyp has everything it needs.
-          pty_pkg="$(node -e "console.log(require.resolve('node-pty/package.json', { paths: ['$GITHUB_WORKSPACE/apps/server'] }))")"
-          pty_dir="$(dirname "$pty_pkg")"
-          ( cd "$pty_dir" && npx --yes node-gyp rebuild )
-          mkdir -p wsl-prebuild
-          cp "$pty_dir/build/Release/pty.node" wsl-prebuild/pty.node
-          file wsl-prebuild/pty.node
+          cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml --target x86_64-unknown-linux-gnu
+          mkdir -p "$RUNNER_TEMP/cli-resource-monitor/linux-x64"
+          cp native/resource-monitor/target/x86_64-unknown-linux-gnu/release/lecturn-resource-monitor "$RUNNER_TEMP/cli-resource-monitor/linux-x64/"
 
-      - name: Upload node-pty linux-x64 prebuild
+      - name: Fetch Stave binary
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/fetch-stave.ts \
+            --platform-key linux-x64 \
+            --version "${{ needs.preflight.outputs.stave_tag }}" \
+            --out "$GITHUB_WORKSPACE/stave-bin"
+
+      # Keep VP_NODE_VERSION in step with SEA_NODE_VERSION in
+      # apps/server/vite.config.ts; only exact versions have a nodejs.org dist.
+      - name: Build CLI single-executable
+        env:
+          VP_NODE_VERSION: "26.8.2"
+        run: node apps/server/scripts/cli.ts build-exe --verbose
+
+      - name: Build CLI archive
+        run: |
+          node scripts/build-cli-archive.ts \
+            --platform linux \
+            --arch x64 \
+            --version "${{ needs.preflight.outputs.version }}" \
+            --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor" \
+            --stave-binary "$GITHUB_WORKSPACE/stave-bin/linux-x64/stave" \
+            --output-dir release-cli
+
+      - name: Smoke-test CLI archive
+        run: node scripts/smoke-cli-archive.ts --archive release-cli/* --expect-version "${{ needs.preflight.outputs.version }}"
+
+      - name: Upload CLI archive
         uses: actions/upload-artifact@v7
         with:
-          name: wsl-node-pty-x64
-          path: wsl-prebuild/pty.node
+          name: cli-linux-x64
+          path: release-cli/*
           if-no-files-found: error
 
   build:
     name: Build ${{ matrix.label }}
-    # build_wsl_node_pty stays in `needs` so it runs first and its artifact is
-    # available to download, but only the Windows matrix entry consumes it. We
-    # therefore gate the job on preflight (must succeed) WITHOUT requiring
-    # build_wsl_node_pty, so a failed Linux prebuild doesn't skip the macOS/Linux
-    # builds. `!cancelled()` (not `!failure()`) lets the job run even when
-    # build_wsl_node_pty failed; the Windows-only download step below then fails
-    # that single platform if the prebuild is missing.
-    needs: [preflight, build_wsl_node_pty]
+    # build_linux_cli stays in `needs` so it runs first and its archive is
+    # available to download, but only the Windows matrix entry consumes it (as
+    # the WSL runtime). We therefore gate the job on preflight (must succeed)
+    # WITHOUT requiring build_linux_cli, so a failed Linux CLI build doesn't
+    # skip the macOS/Linux builds. `!cancelled()` (not `!failure()`) lets the
+    # job run even when build_linux_cli failed; the Windows-only download step
+    # below then fails that single platform if the archive is missing.
+    # Matrix legs with cli_archive also build their platform's CLI archive.
+    # macOS x64 has none: Node single-executables are unsupported there.
+    needs: [preflight, build_linux_cli]
     if: ${{ !cancelled() && needs.preflight.result == 'success' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
@@ -357,6 +412,7 @@ jobs:
             arch: arm64
             rust_target: aarch64-apple-darwin
             resource_key: darwin-arm64
+            cli_archive: true
           - label: macOS x64
             runner: macos-26-intel
             platform: mac
@@ -364,6 +420,7 @@ jobs:
             arch: x64
             rust_target: x86_64-apple-darwin
             resource_key: darwin-x64
+            cli_archive: false
           - label: Linux x64
             runner: ubuntu-24.04
             platform: linux
@@ -371,6 +428,8 @@ jobs:
             arch: x64
             rust_target: x86_64-unknown-linux-gnu
             resource_key: linux-x64
+            # Built by build_linux_cli.
+            cli_archive: false
           - label: Windows x64
             runner: windows-2025
             platform: win
@@ -378,6 +437,7 @@ jobs:
             arch: x64
             rust_target: x86_64-pc-windows-msvc
             resource_key: win32-x64
+            cli_archive: true
           # - label: Windows arm64
           #   runner: windows-11-arm
           #   platform: win
@@ -471,12 +531,12 @@ jobs:
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
 
-      - name: Download WSL node-pty prebuild
+      - name: Download Linux CLI archive for WSL
         if: matrix.platform == 'win'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
-          name: wsl-node-pty-x64
-          path: wsl-prebuild
+          name: cli-linux-x64
+          path: wsl-runtime
 
       - name: Fetch Stave binary
         shell: bash
@@ -485,20 +545,6 @@ jobs:
         run: |
           node scripts/fetch-stave.ts \
             --platform-key "${{ matrix.resource_key }}" \
-            --version "${{ needs.preflight.outputs.stave_tag }}" \
-            --out "$GITHUB_WORKSPACE/stave-bin"
-
-      # The WSL backend runs the Linux Stave binary for the host's architecture.
-      # The matrix only builds Windows x64 today; a Windows arm64 leg would
-      # fetch linux-arm64 here instead.
-      - name: Fetch Stave WSL binary
-        if: matrix.platform == 'win'
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          node scripts/fetch-stave.ts \
-            --platform-key linux-x64 \
             --version "${{ needs.preflight.outputs.stave_tag }}" \
             --out "$GITHUB_WORKSPACE/stave-bin"
 
@@ -715,14 +761,11 @@ jobs:
               echo "macOS signing disabled (missing one or more Apple signing secrets)."
             fi
           elif [[ "${{ matrix.platform }}" == "win" ]]; then
-            # Bundle the Linux node-pty binary built by the build_wsl_node_pty job
-            # so the packaged WSL backend ships a ready binary (no first-launch
-            # compile). Required for a working WSL backend on Windows.
-            args+=(--wsl-prebuild "$GITHUB_WORKSPACE/wsl-prebuild/pty.node")
-            # The Windows app runs stave.exe natively and stages the Linux
-            # binary into the WSL server payload for the WSL backend.
+            # Embed the Linux CLI archive from build_linux_cli as the WSL
+            # runtime; it carries the Linux Stave binary for the WSL backend.
+            args+=(--wsl-runtime "$GITHUB_WORKSPACE"/wsl-runtime/lecturn-*-linux-x64.tar.gz)
+            # The Windows app runs stave.exe natively.
             args+=(--stave-binary "$GITHUB_WORKSPACE/stave-bin/${{ matrix.resource_key }}/stave.exe")
-            args+=(--stave-wsl-binary "$GITHUB_WORKSPACE/stave-bin/linux-x64/stave")
             if has_all \
               "$AZURE_TENANT_ID" \
               "$AZURE_CLIENT_ID" \
@@ -750,6 +793,100 @@ jobs:
             args+=(--extensions-resources "$RUNNER_TEMP/extensions-helper")
           fi
           vp run dist:desktop:artifact "${args[@]}"
+
+      # The single-executable is built with a Node that supports --build-sea
+      # (25.7+); the repo itself stays on the engines.node version. Keep
+      # VP_NODE_VERSION in step with SEA_NODE_VERSION in apps/server/vite.config.ts.
+      - name: Build CLI single-executable
+        if: matrix.cli_archive
+        shell: bash
+        env:
+          VP_NODE_VERSION: "26.8.2"
+        run: node apps/server/scripts/cli.ts build-exe --verbose
+
+      # Without signing secrets the archive's executable is signed ad hoc,
+      # which Apple Silicon accepts but Gatekeeper warns about on download.
+      - name: Import macOS signing certificate for the CLI archive
+        if: matrix.cli_archive && matrix.platform == 'mac'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CSC_LINK" || -z "$CSC_KEY_PASSWORD" ]]; then
+            echo "macOS CLI signing disabled (missing CSC_LINK); the archive is signed ad hoc."
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/lecturn-cli-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 16)"
+          echo "::add-mask::$keychain_password"
+          cert_path="$RUNNER_TEMP/lecturn-cli-signing.p12"
+          printf '%s' "$CSC_LINK" | base64 --decode > "$cert_path"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$cert_path" -k "$keychain" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
+          rm -f "$cert_path"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity="$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n 1)"
+          if [[ -z "$identity" ]]; then
+            echo "No Developer ID Application identity found in CSC_LINK." >&2
+            exit 1
+          fi
+          echo "LECTURN_CLI_MAC_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "macOS CLI signing enabled."
+
+      - name: Build CLI archive
+        if: matrix.cli_archive
+        shell: bash
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
+        run: |
+          set -euo pipefail
+          binary_name="lecturn-resource-monitor"
+          stave_name="stave"
+          if [[ "${{ matrix.platform }}" == "win" ]]; then
+            binary_name="${binary_name}.exe"
+            stave_name="stave.exe"
+          fi
+          monitor_dir="$RUNNER_TEMP/cli-resource-monitor/${{ matrix.resource_key }}"
+          mkdir -p "$monitor_dir"
+          cp "native/resource-monitor/target/${{ matrix.rust_target }}/release/${binary_name}" "$monitor_dir/$binary_name"
+          if [[ "${{ matrix.platform }}" == "mac" && -n "${APPLE_API_KEY:-}" ]]; then
+            key_path="$RUNNER_TEMP/AuthKey_cli_${APPLE_API_KEY_ID}.p8"
+            printf '%s' "$APPLE_API_KEY" > "$key_path"
+            export APPLE_API_KEY="$key_path"
+          fi
+          node scripts/build-cli-archive.ts \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --version "${{ needs.preflight.outputs.version }}" \
+            --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor" \
+            --stave-binary "$GITHUB_WORKSPACE/stave-bin/${{ matrix.resource_key }}/$stave_name" \
+            --output-dir release-cli
+
+      - name: Smoke-test CLI archive
+        if: matrix.cli_archive
+        shell: bash
+        run: node scripts/smoke-cli-archive.ts --archive release-cli/* --expect-version "${{ needs.preflight.outputs.version }}"
+
+      - name: Upload CLI archive
+        if: matrix.cli_archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release-cli/*
+          if-no-files-found: error
 
       - name: Collect release assets
         shell: bash
@@ -908,8 +1045,8 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    needs: [preflight, build, publish_cli]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' && needs.publish_cli.result == 'success' }}
+    needs: [preflight, build_linux_cli, build, publish_cli]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.build_linux_cli.result == 'success' && needs.build.result == 'success' && needs.publish_cli.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -939,6 +1076,29 @@ jobs:
           pattern: desktop-*
           merge-multiple: true
           path: release-assets
+
+      - name: Download all CLI archives
+        uses: actions/download-artifact@v8
+        with:
+          pattern: cli-*
+          merge-multiple: true
+          path: release-assets
+
+      # Installers verify archives against this file, so it is written from the
+      # signed bytes that get uploaded, never from an earlier stage.
+      - name: Write CLI archive checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          shopt -s nullglob
+          archives=(lecturn-*.tar.gz lecturn-*.zip)
+          if [[ ${#archives[@]} -eq 0 ]]; then
+            echo "No CLI archives were produced." >&2
+            exit 1
+          fi
+          sha256sum "${archives[@]}" > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Merge macOS updater manifests
         run: |
@@ -970,6 +1130,8 @@ jobs:
             release-assets/*.exe
             release-assets/*.blockmap
             release-assets/*.yml
+            release-assets/*.tar.gz
+            release-assets/SHA256SUMS
           fail_on_unmatched_files: true
           token: ${{ github.token }}
 
@@ -991,6 +1153,8 @@ jobs:
             release-assets/*.exe
             release-assets/*.blockmap
             release-assets/*.yml
+            release-assets/*.tar.gz
+            release-assets/SHA256SUMS
           fail_on_unmatched_files: true
           token: ${{ github.token }}
 

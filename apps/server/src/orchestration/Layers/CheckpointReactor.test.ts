@@ -348,7 +348,7 @@ describe("CheckpointReactor", () => {
       prefix: "lecturn-checkpoint-reactor-test-",
     });
     const pullRequestRefreshes: number[] = [];
-    const refreshAfterTurn = Effect.sync(() => void pullRequestRefreshes.push(1));
+    const refreshAfterTurn = () => Effect.sync(() => void pullRequestRefreshes.push(1));
     const vcsStatusBroadcasterLayer = Layer.succeed(VcsStatusBroadcaster, {
       getStatus: () => Effect.die("getStatus should not be called in this test"),
       refreshLocalStatus: (cwd: string) =>

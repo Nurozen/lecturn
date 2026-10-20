@@ -51,7 +51,7 @@ const assertCompatible = Effect.gen(function* () {
 it.effect("creates a fresh schema with fork lineage and branch PR discovery", () =>
   Effect.gen(function* () {
     const executed = yield* runMigrations();
-    assert.deepStrictEqual(executed.at(-1), [66, "ProjectionThreadPullRequestsCompatibility"]);
+    assert.deepStrictEqual(executed.at(-1), [67, "MessageContextTitleStateCompatibility"]);
     yield* seedThread;
     const repository = yield* ProjectionThreadRepository;
     const upgraded = yield* repository.getById({ threadId: ThreadId.make("fixture-thread") });

@@ -5,8 +5,9 @@ desktop, web, or mobile app. Set up the machine where the agents will work first
 
 ## Requirements
 
-Command-line use, SSH hosts, and WSL backends need Node.js 22.16+ (22.x), 23.11+
-(23.x), or 24.10 and later. The native desktop app includes its server runtime.
+`npx lecturn` needs Node.js 22.16+ (22.x), 23.11+ (23.x), or 24.10 and later.
+The self-contained CLI from the install script, SSH hosts, WSL backends, and the
+native desktop app need no Node.js; they run their own server runtime.
 
 You need an installed, authenticated provider before starting a thread. You can
 launch Lecturn and configure providers afterwards.
@@ -15,6 +16,32 @@ launch Lecturn and configure providers afterwards.
 
 Start with the [Lecturn installation guide](./lecturn-installation.md) for desktop downloads,
 mobile access, and runtime distribution. The standalone CLI command is `lecturn`.
+
+To install the self-contained CLI without Node.js, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Nurozen/lecturn/main/scripts/install.sh | sh
+```
+
+On Windows, run
+`irm https://raw.githubusercontent.com/Nurozen/lecturn/main/scripts/install.ps1 | iex`
+in PowerShell.
+
+The executable is built for Apple Silicon Macs, Linux x64, and Windows x64. There is
+no Intel Mac build of it, because Node cannot produce a single executable for
+that platform; the Intel desktop app is unaffected. To run a standalone server
+on an Intel Mac, use `npx lecturn` or build it from source. You need Node.js 24 and `vp` (see
+[Vite+](https://viteplus.dev/guide/)):
+
+```bash
+git clone https://github.com/Nurozen/lecturn
+cd lecturn && vp i && vp run build:desktop
+node apps/server/dist/bin.mjs
+```
+
+A server run this way is a plain Node program: `lecturn update` and the background
+service do not apply, so update it with `git pull` and a rebuild, and start it
+however you run other Node processes.
 
 ## Desktop app
 
@@ -45,6 +72,12 @@ command cannot reach the app, start or update the desktop app and try again.
 The phone connects to a server on another machine. See the
 [Lecturn installation guide](./lecturn-installation.md#iphone-and-ipad) for how to get the mobile app, then follow
 [remote access](./remote-access.md) to link it through Lecturn Connect or a pairing URL.
+
+If the app crashes during launch, open Settings → Diagnostics on the next launch
+that succeeds. It lists startup crashes from the last 7 days with the error and
+component stack that store crash reports leave out. Copy the report and paste it
+into a GitHub issue. Error messages can quote values from the app, so read it over
+before sharing.
 
 ## Providers
 

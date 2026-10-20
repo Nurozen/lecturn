@@ -116,6 +116,8 @@ export function makeDevelopmentEnvironmentScript(environment) {
     ["LECTURN_COMMIT_HASH", environment.LECTURN_COMMIT_HASH],
     ["LECTURN_OTLP_TRACES_URL", environment.LECTURN_OTLP_TRACES_URL],
     ["LECTURN_OTLP_EXPORT_INTERVAL_MS", environment.LECTURN_OTLP_EXPORT_INTERVAL_MS],
+    ["LECTURN_OTLP_HEADERS", environment.LECTURN_OTLP_HEADERS],
+    ["LECTURN_OTLP_PROTOCOL", environment.LECTURN_OTLP_PROTOCOL],
     ["LECTURN_DESKTOP_APP_USER_MODEL_ID", APP_BUNDLE_ID],
   ].filter((entry) => typeof entry[1] === "string" && entry[1].trim().length > 0);
   return [
