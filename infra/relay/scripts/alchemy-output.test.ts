@@ -4,7 +4,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import { describe, expect, it } from "@effect/vitest";
 
-// Regression for alchemy-run/alchemy#1094, backported to our pinned beta.65.
+// Regression for alchemy-run/alchemy#1082/#1094, fixed upstream as of beta.76.
 describe("Alchemy dependency traversal", () => {
   it("terminates cyclic props while retaining nested resource dependencies", () => {
     const first = { Type: "Test", FQN: "first" };

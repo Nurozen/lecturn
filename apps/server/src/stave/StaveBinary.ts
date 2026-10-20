@@ -69,7 +69,7 @@ export interface StaveBinaryResolution {
   readonly commit: string | null;
 }
 
-export class StaveBinaryNotFound extends Schema.TaggedErrorClass<StaveBinaryNotFound>()(
+export class StaveBinaryNotFound extends Schema.TaggedError<StaveBinaryNotFound>()(
   "StaveBinaryNotFound",
   {
     /** Every location tried, in order; the bare command name stands for the PATH search. */
@@ -81,7 +81,7 @@ export class StaveBinaryNotFound extends Schema.TaggedErrorClass<StaveBinaryNotF
   }
 }
 
-export class StaveBinaryNotExecutable extends Schema.TaggedErrorClass<StaveBinaryNotExecutable>()(
+export class StaveBinaryNotExecutable extends Schema.TaggedError<StaveBinaryNotExecutable>()(
   "StaveBinaryNotExecutable",
   {
     path: Schema.String,
@@ -92,7 +92,7 @@ export class StaveBinaryNotExecutable extends Schema.TaggedErrorClass<StaveBinar
   }
 }
 
-export class StaveBinaryUnsupportedWrapper extends Schema.TaggedErrorClass<StaveBinaryUnsupportedWrapper>()(
+export class StaveBinaryUnsupportedWrapper extends Schema.TaggedError<StaveBinaryUnsupportedWrapper>()(
   "StaveBinaryUnsupportedWrapper",
   { path: Schema.String },
 ) {

@@ -112,7 +112,7 @@ export const SagaWorkbenchActivity = Schema.Struct({
   detail: Schema.String,
 });
 export type SagaWorkbenchActivity = typeof SagaWorkbenchActivity.Type;
-export class SagaWorkbenchError extends Schema.TaggedErrorClass<SagaWorkbenchError>()(
+export class SagaWorkbenchError extends Schema.TaggedError<SagaWorkbenchError>()(
   "SagaWorkbenchError",
   {
     code: Schema.Literals([

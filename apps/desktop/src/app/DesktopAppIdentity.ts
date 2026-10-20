@@ -18,7 +18,7 @@ const AppPackageMetadata = Schema.Struct({
 });
 const decodeAppPackageMetadata = Schema.decodeEffect(Schema.fromJsonString(AppPackageMetadata));
 
-export class DesktopUserDataPathResolutionError extends Schema.TaggedErrorClass<DesktopUserDataPathResolutionError>()(
+export class DesktopUserDataPathResolutionError extends Schema.TaggedError<DesktopUserDataPathResolutionError>()(
   "DesktopUserDataPathResolutionError",
   {
     legacyPath: Schema.String,
@@ -41,7 +41,7 @@ export class DesktopAppIdentity extends Context.Service<
   }
 >()("@lecturn/desktop/app/DesktopAppIdentity") {}
 
-export class DesktopUserDataPathCreationError extends Schema.TaggedErrorClass<DesktopUserDataPathCreationError>()(
+export class DesktopUserDataPathCreationError extends Schema.TaggedError<DesktopUserDataPathCreationError>()(
   "DesktopUserDataPathCreationError",
   {
     path: Schema.String,
@@ -188,10 +188,6 @@ export const make = Effect.gen(function* () {
 
     if (environment.platform === "win32") {
       yield* electronApp.setAppUserModelId(environment.appUserModelId);
-    }
-
-    if (environment.platform === "linux") {
-      yield* electronApp.setDesktopName(environment.linuxDesktopEntryName);
     }
 
     // Unpackaged runs only. A packaged bundle already carries its icon in

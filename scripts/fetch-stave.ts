@@ -45,7 +45,7 @@ export type StaveTagInput =
   | { readonly kind: "latest" }
   | { readonly kind: "tag"; readonly tag: string };
 
-export class StaveTagInputError extends Schema.TaggedErrorClass<StaveTagInputError>()(
+export class StaveTagInputError extends Schema.TaggedError<StaveTagInputError>()(
   "StaveTagInputError",
   {
     input: Schema.String,
@@ -56,7 +56,7 @@ export class StaveTagInputError extends Schema.TaggedErrorClass<StaveTagInputErr
   }
 }
 
-export class StaveLatestReleaseError extends Schema.TaggedErrorClass<StaveLatestReleaseError>()(
+export class StaveLatestReleaseError extends Schema.TaggedError<StaveLatestReleaseError>()(
   "StaveLatestReleaseError",
   {
     operation: Schema.Literals(["config", "request", "status", "read", "decode"]),
@@ -68,7 +68,7 @@ export class StaveLatestReleaseError extends Schema.TaggedErrorClass<StaveLatest
   }
 }
 
-export class StaveDownloadError extends Schema.TaggedErrorClass<StaveDownloadError>()(
+export class StaveDownloadError extends Schema.TaggedError<StaveDownloadError>()(
   "StaveDownloadError",
   {
     operation: Schema.Literals(["request", "status", "read"]),
@@ -81,7 +81,7 @@ export class StaveDownloadError extends Schema.TaggedErrorClass<StaveDownloadErr
   }
 }
 
-export class StaveChecksumMissingError extends Schema.TaggedErrorClass<StaveChecksumMissingError>()(
+export class StaveChecksumMissingError extends Schema.TaggedError<StaveChecksumMissingError>()(
   "StaveChecksumMissingError",
   {
     tag: Schema.String,
@@ -93,7 +93,7 @@ export class StaveChecksumMissingError extends Schema.TaggedErrorClass<StaveChec
   }
 }
 
-export class StaveChecksumMismatchError extends Schema.TaggedErrorClass<StaveChecksumMismatchError>()(
+export class StaveChecksumMismatchError extends Schema.TaggedError<StaveChecksumMismatchError>()(
   "StaveChecksumMismatchError",
   {
     assetName: Schema.String,
@@ -106,7 +106,7 @@ export class StaveChecksumMismatchError extends Schema.TaggedErrorClass<StaveChe
   }
 }
 
-export class StaveArchiveError extends Schema.TaggedErrorClass<StaveArchiveError>()(
+export class StaveArchiveError extends Schema.TaggedError<StaveArchiveError>()(
   "StaveArchiveError",
   {
     format: Schema.Literals(["zip", "tar.gz"]),
@@ -119,7 +119,7 @@ export class StaveArchiveError extends Schema.TaggedErrorClass<StaveArchiveError
   }
 }
 
-export class StaveBinaryMissingError extends Schema.TaggedErrorClass<StaveBinaryMissingError>()(
+export class StaveBinaryMissingError extends Schema.TaggedError<StaveBinaryMissingError>()(
   "StaveBinaryMissingError",
   {
     platformKey: Schema.String,
@@ -132,7 +132,7 @@ export class StaveBinaryMissingError extends Schema.TaggedErrorClass<StaveBinary
   }
 }
 
-export class StaveExtractWriteError extends Schema.TaggedErrorClass<StaveExtractWriteError>()(
+export class StaveExtractWriteError extends Schema.TaggedError<StaveExtractWriteError>()(
   "StaveExtractWriteError",
   {
     path: Schema.String,
@@ -144,7 +144,7 @@ export class StaveExtractWriteError extends Schema.TaggedErrorClass<StaveExtract
   }
 }
 
-export class StaveCliUsageError extends Schema.TaggedErrorClass<StaveCliUsageError>()(
+export class StaveCliUsageError extends Schema.TaggedError<StaveCliUsageError>()(
   "StaveCliUsageError",
   {
     reason: Schema.String,
@@ -155,7 +155,7 @@ export class StaveCliUsageError extends Schema.TaggedErrorClass<StaveCliUsageErr
   }
 }
 
-export class StaveGitHubOutputConfigError extends Schema.TaggedErrorClass<StaveGitHubOutputConfigError>()(
+export class StaveGitHubOutputConfigError extends Schema.TaggedError<StaveGitHubOutputConfigError>()(
   "StaveGitHubOutputConfigError",
   {
     cause: Schema.Defect(),
@@ -166,7 +166,7 @@ export class StaveGitHubOutputConfigError extends Schema.TaggedErrorClass<StaveG
   }
 }
 
-export class StaveGitHubOutputAppendError extends Schema.TaggedErrorClass<StaveGitHubOutputAppendError>()(
+export class StaveGitHubOutputAppendError extends Schema.TaggedError<StaveGitHubOutputAppendError>()(
   "StaveGitHubOutputAppendError",
   {
     outputPath: Schema.String,
@@ -239,7 +239,7 @@ const fetchLatestStaveTag = Effect.fn("fetchLatestStaveTag")(function* () {
 });
 
 /** Bundled releases must implement the v0.4 JSON mutation protocol. */
-export class StaveBundleVersionError extends Schema.TaggedErrorClass<StaveBundleVersionError>()(
+export class StaveBundleVersionError extends Schema.TaggedError<StaveBundleVersionError>()(
   "StaveBundleVersionError",
   { tag: Schema.String },
 ) {

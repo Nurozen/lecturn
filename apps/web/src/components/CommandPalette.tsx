@@ -113,7 +113,11 @@ import {
 import { onOpenCommandPalette } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
+import {
+  PULL_REQUESTS_PANEL_REF,
+  selectActiveRightPanel,
+  useRightPanelStore,
+} from "../rightPanelStore";
 import { getLatestThreadForProject, sortThreads } from "../lib/threadSort";
 import { cn, getLocalFileManagerName, isMacPlatform, isWindowsPlatform } from "../lib/utils";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
@@ -677,24 +681,34 @@ function OpenCommandPaletteDialog(props: {
   const contextualToggle = useAtomCommand(contextualEnvironment.updateThreadSettings);
   const contextualRefresh = useAtomCommand(contextualEnvironment.refresh);
 
-  const openPanelPullRequestUrl = useOpenPanelPullRequestUrl(
-    activeThread ? scopeThreadRef(activeThread.environmentId, activeThread.id) : null,
-  );
+  const referenceThreadRef =
+    pathname === "/pull-requests"
+      ? environments.some(
+          (environment) => environment.serverConfig?.environment.capabilities.pullRequests === true,
+        )
+        ? PULL_REQUESTS_PANEL_REF
+        : null
+      : activeThread
+        ? scopeThreadRef(activeThread.environmentId, activeThread.id)
+        : null;
+  const openPanelPullRequestUrl = useOpenPanelPullRequestUrl(referenceThreadRef);
   const activeThreadReferenceCopyTarget =
-    activeThread == null
+    referenceThreadRef === null || (pathname === "/pull-requests" && !openPanelPullRequestUrl)
       ? null
       : resolveThreadReferenceCopyTarget({
-          threadId: activeThread.id,
+          threadId: referenceThreadRef.threadId,
           openPanelPullRequestUrl,
           linkedPullRequestUrl:
-            resolveThreadPullRequestRef(
-              activeThread,
-              projects.find(
-                (project) =>
-                  project.environmentId === activeThread.environmentId &&
-                  project.id === activeThread.projectId,
-              ) ?? null,
-            )?.url ?? null,
+            (activeThread
+              ? resolveThreadPullRequestRef(
+                  activeThread,
+                  projects.find(
+                    (project) =>
+                      project.environmentId === activeThread.environmentId &&
+                      project.id === activeThread.projectId,
+                  ) ?? null,
+                )?.url
+              : null) ?? null,
         });
   const copyActiveThreadReference = useCallback(async () => {
     const target = activeThreadReferenceCopyTarget;

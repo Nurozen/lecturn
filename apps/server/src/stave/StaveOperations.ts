@@ -119,7 +119,7 @@ export interface StaveOperationsLimits {
 // ── Pre-flight refusals ───────────────────────────────────────
 
 /** A refusal raised by Lecturn before (or between) Stave invocations; carries no verb. */
-export class StaveRefusalError extends Schema.TaggedErrorClass<StaveRefusalError>()(
+export class StaveRefusalError extends Schema.TaggedError<StaveRefusalError>()(
   "StaveRefusalError",
   {
     code: StaveErrorCode,

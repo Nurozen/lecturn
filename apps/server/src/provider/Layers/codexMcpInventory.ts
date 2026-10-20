@@ -27,7 +27,7 @@ export const codexSpawnEnvironment = (
 const Inventory = Schema.Array(Schema.Struct({ name: Schema.String.check(Schema.isMinLength(1)) }));
 const decodeInventory = Schema.decodeUnknownEffect(Schema.fromJsonString(Inventory));
 
-export class CodexMcpInventoryError extends Schema.TaggedErrorClass<CodexMcpInventoryError>()(
+export class CodexMcpInventoryError extends Schema.TaggedError<CodexMcpInventoryError>()(
   "CodexMcpInventoryError",
   { reason: Schema.Literals(["process", "timeout", "output", "invalid_response"]) },
 ) {

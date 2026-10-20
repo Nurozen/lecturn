@@ -181,7 +181,7 @@ export const ExtensionEvaluationStatusResult = Schema.Struct({
   inputTokens: Schema.NullOr(counter),
   allowance: Schema.NullOr(ExtensionAllowance),
 });
-export class ExtensionEvaluationError extends Schema.TaggedErrorClass<ExtensionEvaluationError>()(
+export class ExtensionEvaluationError extends Schema.TaggedError<ExtensionEvaluationError>()(
   "ExtensionEvaluationError",
   {
     code: Schema.Literals([

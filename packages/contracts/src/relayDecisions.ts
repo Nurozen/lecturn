@@ -141,7 +141,7 @@ export const DecisionFundingRevokeRequest = Schema.Struct({
   expectedGeneration: counter,
 });
 export const DecisionFundingRevokeResult = DecisionFundingStatusResult;
-export class DecisionEvaluationError extends Schema.TaggedErrorClass<DecisionEvaluationError>()(
+export class DecisionEvaluationError extends Schema.TaggedError<DecisionEvaluationError>()(
   "DecisionEvaluationError",
   {
     code: Schema.Literals([

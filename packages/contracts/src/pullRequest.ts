@@ -1154,7 +1154,7 @@ export function pullRequestProviderRequirement(
  * as-is; the underlying failure travels in `cause` (absent for `provider-unsupported`, which
  * has none).
  */
-export class PullRequestUnavailableError extends Schema.TaggedErrorClass<PullRequestUnavailableError>()(
+export class PullRequestUnavailableError extends Schema.TaggedError<PullRequestUnavailableError>()(
   "PullRequestUnavailableError",
   {
     reason: PullRequestUnavailableReason,
@@ -1183,7 +1183,7 @@ export class PullRequestUnavailableError extends Schema.TaggedErrorClass<PullReq
   }
 }
 
-export class PullRequestOperationError extends Schema.TaggedErrorClass<PullRequestOperationError>()(
+export class PullRequestOperationError extends Schema.TaggedError<PullRequestOperationError>()(
   "PullRequestOperationError",
   {
     operation: Schema.String,

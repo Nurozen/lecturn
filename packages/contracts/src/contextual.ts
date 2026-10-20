@@ -750,7 +750,7 @@ export const ContextualDisclosure = Schema.Struct({
       (v.packet === null || v.packet.id === v.receipt.packetId),
   ),
 );
-export class ContextualError extends Schema.TaggedErrorClass<ContextualError>()("ContextualError", {
+export class ContextualError extends Schema.TaggedError<ContextualError>()("ContextualError", {
   code: Schema.Literals([
     "invalid",
     "forbidden",

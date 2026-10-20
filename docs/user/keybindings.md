@@ -62,6 +62,10 @@ final agent responses across connected environments. A setting result opens its 
 section. Message matches show one labeled excerpt while keeping the thread's project, branch, and
 machine context visible. Message search begins after two characters and uses SQLite's ASCII
 case-insensitive matching.
+
+`thread.stop` interrupts the running turn in the focused thread. It has no default shortcut —
+assign one in **Settings** → **Keybindings**.
+
 `chat.new` may ask you to choose a project when there is more than one.
 `chat.newLocal` skips that chooser. Both use your
 [new-thread defaults](./thread-sidebar.md#start-a-thread).

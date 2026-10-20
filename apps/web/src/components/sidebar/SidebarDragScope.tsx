@@ -698,7 +698,7 @@ export function SidebarDragBoundary(props: {
       }}
       className={cn(
         "relative list-none",
-        boundary || placeholder ? "h-0" : props.children ? "" : "h-8",
+        boundary || placeholder ? "-mb-px h-0" : props.children ? "" : "h-8",
         visible &&
           props.marker === "settled-header" &&
           "[&_button]:text-sidebar-foreground/80 [&_span]:text-sidebar-foreground/80",

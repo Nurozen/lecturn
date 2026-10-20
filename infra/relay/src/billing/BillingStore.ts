@@ -1,7 +1,7 @@
 import { Effect, Schema, Random } from "effect";
 import { RelayDb } from "../db.ts";
 
-export class BillingError extends Schema.TaggedErrorClass<BillingError>()("BillingError", {
+export class BillingError extends Schema.TaggedError<BillingError>()("BillingError", {
   code: Schema.String,
   message: Schema.String,
 }) {}

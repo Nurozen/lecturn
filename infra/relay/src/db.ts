@@ -53,8 +53,7 @@ export const PlanetscaleDatabase = Effect.gen(function* () {
           name: RELAY_PRODUCTION_DATABASE_NAME,
           region: { slug: "us-west" },
           clusterSize: "PS_5",
-          migrationsDir: schema.out,
-          migrationsTable: "relay_migrations",
+          migrations: { dir: schema.out, table: "relay_migrations" },
           replicas: 0,
         }).pipe(AdoptPolicy.adopt(), RemovalPolicy.retain())
       : yield* Planetscale.PostgresDatabase.ref("RelayPostgresDatabase", {
@@ -65,8 +64,7 @@ export const PlanetscaleDatabase = Effect.gen(function* () {
       ? yield* Planetscale.PostgresBranch("RelayPostgresBranch", {
           database,
           clusterSize: "PS_DEV",
-          migrationsDir: schema.out,
-          migrationsTable: "relay_migrations",
+          migrations: { dir: schema.out, table: "relay_migrations" },
         })
       : undefined;
 

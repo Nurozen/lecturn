@@ -77,7 +77,7 @@ const DesktopConnectionCatalogStoreProtectionOperation = Schema.Literals([
   "decrypt-catalog",
 ]);
 
-export class DesktopConnectionCatalogStoreWriteError extends Schema.TaggedErrorClass<DesktopConnectionCatalogStoreWriteError>()(
+export class DesktopConnectionCatalogStoreWriteError extends Schema.TaggedError<DesktopConnectionCatalogStoreWriteError>()(
   "DesktopConnectionCatalogStoreWriteError",
   {
     operation: DesktopConnectionCatalogStoreWriteOperation,
@@ -90,7 +90,7 @@ export class DesktopConnectionCatalogStoreWriteError extends Schema.TaggedErrorC
   }
 }
 
-export class DesktopConnectionCatalogStoreDecodeError extends Schema.TaggedErrorClass<DesktopConnectionCatalogStoreDecodeError>()(
+export class DesktopConnectionCatalogStoreDecodeError extends Schema.TaggedError<DesktopConnectionCatalogStoreDecodeError>()(
   "DesktopConnectionCatalogStoreDecodeError",
   {
     resource: Schema.Literal("encryptedCatalog"),
@@ -103,7 +103,7 @@ export class DesktopConnectionCatalogStoreDecodeError extends Schema.TaggedError
   }
 }
 
-export class DesktopConnectionCatalogStoreReadError extends Schema.TaggedErrorClass<DesktopConnectionCatalogStoreReadError>()(
+export class DesktopConnectionCatalogStoreReadError extends Schema.TaggedError<DesktopConnectionCatalogStoreReadError>()(
   "DesktopConnectionCatalogStoreReadError",
   {
     catalogPath: Schema.String,
@@ -115,7 +115,7 @@ export class DesktopConnectionCatalogStoreReadError extends Schema.TaggedErrorCl
   }
 }
 
-export class DesktopConnectionCatalogStoreDocumentDecodeError extends Schema.TaggedErrorClass<DesktopConnectionCatalogStoreDocumentDecodeError>()(
+export class DesktopConnectionCatalogStoreDocumentDecodeError extends Schema.TaggedError<DesktopConnectionCatalogStoreDocumentDecodeError>()(
   "DesktopConnectionCatalogStoreDocumentDecodeError",
   {
     catalogPath: Schema.String,
@@ -127,7 +127,7 @@ export class DesktopConnectionCatalogStoreDocumentDecodeError extends Schema.Tag
   }
 }
 
-export class DesktopConnectionCatalogStoreMigrationError extends Schema.TaggedErrorClass<DesktopConnectionCatalogStoreMigrationError>()(
+export class DesktopConnectionCatalogStoreMigrationError extends Schema.TaggedError<DesktopConnectionCatalogStoreMigrationError>()(
   "DesktopConnectionCatalogStoreMigrationError",
   {
     operation: DesktopConnectionCatalogStoreMigrationOperation,
@@ -143,7 +143,7 @@ export class DesktopConnectionCatalogStoreMigrationError extends Schema.TaggedEr
   }
 }
 
-export class DesktopConnectionCatalogStoreProtectionError extends Schema.TaggedErrorClass<DesktopConnectionCatalogStoreProtectionError>()(
+export class DesktopConnectionCatalogStoreProtectionError extends Schema.TaggedError<DesktopConnectionCatalogStoreProtectionError>()(
   "DesktopConnectionCatalogStoreProtectionError",
   {
     operation: DesktopConnectionCatalogStoreProtectionOperation,

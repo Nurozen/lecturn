@@ -110,7 +110,7 @@ export const PullRequestWatchConfigureInput = Schema.Struct({
   defaultMergeMode: PullRequestWatchMergeMode,
 });
 export type PullRequestWatchConfigureInput = typeof PullRequestWatchConfigureInput.Type;
-export class PullRequestWatchError extends Schema.TaggedErrorClass<PullRequestWatchError>()(
+export class PullRequestWatchError extends Schema.TaggedError<PullRequestWatchError>()(
   "PullRequestWatchError",
   {
     code: Schema.Literals(["not-found", "invalid", "conflict", "unavailable", "forbidden"]),

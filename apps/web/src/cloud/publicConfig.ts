@@ -4,7 +4,7 @@ import { relayClerkTokenOptions } from "@lecturn/shared/relayAuth";
 import { normalizeSecureRelayUrl } from "@lecturn/shared/relayUrl";
 import * as Schema from "effect/Schema";
 
-export class CloudPublicConfigMissingError extends Schema.TaggedErrorClass<CloudPublicConfigMissingError>()(
+export class CloudPublicConfigMissingError extends Schema.TaggedError<CloudPublicConfigMissingError>()(
   "CloudPublicConfigMissingError",
   {
     key: Schema.Literal("LECTURN_CLERK_JWT_TEMPLATE"),

@@ -28,7 +28,7 @@ import { detectServerEnvironmentMachineKind } from "./ServerEnvironmentMachine.t
 // the server speaks changes.
 export const STAVE_PROTOCOL_VERSION = 1;
 
-export class ServerEnvironmentIdPersistenceError extends Schema.TaggedErrorClass<ServerEnvironmentIdPersistenceError>()(
+export class ServerEnvironmentIdPersistenceError extends Schema.TaggedError<ServerEnvironmentIdPersistenceError>()(
   "ServerEnvironmentIdPersistenceError",
   {
     operation: Schema.Literals(["check", "read", "write", "initialize"]),

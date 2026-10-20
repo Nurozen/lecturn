@@ -6,7 +6,7 @@ import * as NodeCrypto from "node:crypto";
 import * as PgClient from "@effect/sql-pg/PgClient";
 import { Effect, Redacted, Schema } from "effect";
 
-class ProbeFailed extends Schema.TaggedErrorClass<ProbeFailed>()("ProbeFailed", {
+class ProbeFailed extends Schema.TaggedError<ProbeFailed>()("ProbeFailed", {
   message: Schema.String,
 }) {}
 

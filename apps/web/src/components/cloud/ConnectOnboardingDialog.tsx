@@ -1,7 +1,6 @@
 import { useAuth } from "@clerk/react";
 import { useAtomValue } from "@effect/atom-react";
 import { AuthAdministrativeScopes, AuthRelayWriteScope } from "@lecturn/contracts";
-import { CheckIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -17,7 +16,6 @@ import { useCloudLinkController } from "~/cloud/useCloudLinkController";
 import { usePrimarySessionState } from "~/environments/primary";
 import { knownConnectAccountsAtom, newlyKnownAccounts } from "~/cloud/knownAccounts";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
-import { cn } from "~/lib/utils";
 import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
 import { useConnectAccountPicker } from "../clerk/ConnectAccountPicker";
 import { ConnectSubscriptionGate } from "./ConnectSubscriptionGate";
@@ -36,6 +34,7 @@ import {
 import { TeamSelector } from "./TeamSelector";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
+import { WizardSteps } from "../ui/wizard-steps";
 
 /**
  * Post-sign-in onboarding wizard for Lecturn Connect. Opens when an account
@@ -267,8 +266,8 @@ function ConfiguredConnectOnboardingDialog() {
           {step === "publish" ? account.picker : null}
           <TeamSelector accountId={account.accountId} />
           {steps.length > 1 ? (
-            <OnboardingStepper
-              steps={steps}
+            <WizardSteps
+              steps={steps.map((id) => ({ id, label: STEP_LABELS[id] }))}
               currentStep={step}
               disabled={isApplying}
               onStepSelect={setStep}
@@ -340,60 +339,6 @@ const STEP_LABELS: Record<OnboardingStep, string> = {
   publish: "Publish",
   devices: "Connect devices",
 };
-
-function OnboardingStepper({
-  steps,
-  currentStep,
-  disabled,
-  onStepSelect,
-}: {
-  readonly steps: ReadonlyArray<OnboardingStep>;
-  readonly currentStep: OnboardingStep;
-  readonly disabled: boolean;
-  readonly onStepSelect: (step: OnboardingStep) => void;
-}) {
-  const currentIndex = steps.indexOf(currentStep);
-  return (
-    <div className="grid grid-cols-2 gap-2">
-      {steps.map((step, index) => (
-        <button
-          key={step}
-          type="button"
-          disabled={disabled}
-          className={cn(
-            "grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] gap-x-2 rounded-lg border px-3 py-2 text-left",
-            index === currentIndex
-              ? "border-primary bg-primary/10 ring-1 ring-primary/25"
-              : index < currentIndex
-                ? "border-border bg-background"
-                : "border-border bg-muted/40",
-          )}
-          onClick={() => onStepSelect(step)}
-        >
-          <span
-            className={cn(
-              "row-span-2 mt-0.5 grid size-4 place-items-center rounded-full border",
-              index < currentIndex
-                ? "border-primary bg-primary text-primary-foreground"
-                : index === currentIndex
-                  ? "border-primary bg-background"
-                  : "border-muted-foreground/35 bg-background",
-            )}
-            aria-hidden
-          >
-            {index < currentIndex ? <CheckIcon className="size-3" /> : null}
-          </span>
-          <span className="text-[10px] font-medium uppercase text-muted-foreground">
-            Step {index + 1}
-          </span>
-          <span className="truncate text-xs font-semibold text-foreground">
-            {STEP_LABELS[step]}
-          </span>
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function PublishStep({
   exposeEnvironment,

@@ -11,7 +11,7 @@ import { TeamRuntime } from "../teams/TeamRuntime.ts";
 import { ManagedEndpointProvider } from "./ManagedEndpointProvider.ts";
 import { EnvironmentCredentials } from "./EnvironmentCredentials.ts";
 
-export class EnvironmentRelinkError extends Schema.TaggedErrorClass<EnvironmentRelinkError>()(
+export class EnvironmentRelinkError extends Schema.TaggedError<EnvironmentRelinkError>()(
   "EnvironmentRelinkError",
   {
     environmentId: Schema.String,
