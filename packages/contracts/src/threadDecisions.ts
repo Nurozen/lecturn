@@ -613,7 +613,7 @@ export const DecisionWriterInput = Schema.Struct({
       64000,
   ),
 );
-export class ThreadDecisionError extends Schema.TaggedErrorClass<ThreadDecisionError>()(
+export class ThreadDecisionError extends Schema.TaggedError<ThreadDecisionError>()(
   "ThreadDecisionError",
   {
     code: Schema.Literals([

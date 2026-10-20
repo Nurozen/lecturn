@@ -278,7 +278,7 @@ export const StaveUnavailableReason = Schema.Literals([
 ]);
 export type StaveUnavailableReason = typeof StaveUnavailableReason.Type;
 
-export class StaveUnavailableError extends Schema.TaggedErrorClass<StaveUnavailableError>()(
+export class StaveUnavailableError extends Schema.TaggedError<StaveUnavailableError>()(
   "StaveUnavailableError",
   {
     reason: StaveUnavailableReason,
@@ -287,7 +287,7 @@ export class StaveUnavailableError extends Schema.TaggedErrorClass<StaveUnavaila
 ) {}
 
 /** The workspace root has no `.stave.yaml`, so space-scoped verbs do not apply. */
-export class StaveNotSpaceError extends Schema.TaggedErrorClass<StaveNotSpaceError>()(
+export class StaveNotSpaceError extends Schema.TaggedError<StaveNotSpaceError>()(
   "StaveNotSpaceError",
   {
     workspaceRoot: Schema.String,
@@ -297,7 +297,7 @@ export class StaveNotSpaceError extends Schema.TaggedErrorClass<StaveNotSpaceErr
 
 /** A Stave verb exited non-zero; `code` and `message` come from its `--json`
     error envelope. */
-export class StaveCommandError extends Schema.TaggedErrorClass<StaveCommandError>()(
+export class StaveCommandError extends Schema.TaggedError<StaveCommandError>()(
   "StaveCommandError",
   {
     verb: Schema.String,
@@ -1090,7 +1090,7 @@ export type StaveOperationError = typeof StaveOperationError.Type;
 /** `runOperation`/`observeOperation` refused before any event: the id is
     unknown or reaped (`operation_expired`), or it is already running with a
     different payload (`invalid_arguments`). */
-export class StaveOperationRejectedError extends Schema.TaggedErrorClass<StaveOperationRejectedError>()(
+export class StaveOperationRejectedError extends Schema.TaggedError<StaveOperationRejectedError>()(
   "StaveOperationRejectedError",
   {
     operationId: Schema.String,

@@ -443,7 +443,7 @@ export function findProjectVisibleAtSequence(
   return snapshot.projects.find((project) => project.id === input.projectId) ?? null;
 }
 
-export class ProjectNotVisibleError extends Schema.TaggedErrorClass<ProjectNotVisibleError>()(
+export class ProjectNotVisibleError extends Schema.TaggedError<ProjectNotVisibleError>()(
   "ProjectNotVisibleError",
   { projectId: ProjectId, sequence: Schema.Number },
 ) {

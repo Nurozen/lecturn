@@ -180,22 +180,22 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     const fastMode =
       fastModeDescriptor?.type === "boolean" ? fastModeDescriptor.currentValue : undefined;
     const settings = {
+      disableAllHooks: true,
       ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
       ...(fastMode ? { fastMode: true } : {}),
       ...(ultracode ? { ultracode: true } : {}),
     };
-    const settingsJson =
-      Object.keys(settings).length > 0
-        ? yield* encodeJsonForOperation(
-            operation,
-            settings,
-            "Failed to encode Claude CLI settings.",
-          )
-        : undefined;
+    const settingsJson = yield* encodeJsonForOperation(
+      operation,
+      settings,
+      "Failed to encode Claude CLI settings.",
+    );
 
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* () {
       const inference =
         operation === "generateWorkflowSummary" || operation === "generateContextualSummary";
+      // Workflow inference and titles need only the supplied prompt, not
+      // configuration from the checkout.
       const commandCwd = inference
         ? yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-workflow-inference-" }).pipe(
             Effect.mapError(
@@ -207,7 +207,15 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
                 }),
             ),
           )
-        : cwd;
+        : operation === "generateThreadTitle"
+          ? yield* fileSystem
+              .makeTempDirectoryScoped({ prefix: "lecturn-claude-title-" })
+              .pipe(
+                Effect.mapError((cause) =>
+                  normalizeCliError("claude", operation, cause, "Failed to create title directory"),
+                ),
+              )
+          : cwd;
       const spawnCommand = yield* resolveSpawnCommand(
         claudeSettings.binaryPath || "claude",
         [
@@ -219,19 +227,21 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
           "--model",
           resolveClaudeCatalogApiModelId(catalog, resolvedModelSelection),
           ...(cliEffort ? ["--effort", cliEffort] : []),
-          ...(settingsJson ? ["--settings", settingsJson] : []),
+          "--settings",
+          settingsJson,
+          // Metadata prompts need no executable capabilities, even when they contain a skill name.
+          "--tools",
+          "",
+          "--disable-slash-commands",
+          "--strict-mcp-config",
           ...(inference
             ? [
                 "--safe-mode",
-                "--tools",
-                "",
-                "--strict-mcp-config",
-                "--disable-slash-commands",
                 "--no-session-persistence",
                 "--system-prompt",
                 "Classify the supplied conversation and return the requested JSON. You have no tools or external context.",
               ]
-            : ["--dangerously-skip-permissions"]),
+            : []),
         ],
         { env: claudeEnvironment },
       );

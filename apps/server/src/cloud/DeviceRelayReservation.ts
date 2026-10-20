@@ -29,7 +29,7 @@ export function setDeviceRelayConflict(
   else conflicts.delete(store);
 }
 
-export class DeviceRelayReservationError extends Schema.TaggedErrorClass<DeviceRelayReservationError>()(
+export class DeviceRelayReservationError extends Schema.TaggedError<DeviceRelayReservationError>()(
   "DeviceRelayReservationError",
   { message: Schema.String },
 ) {}

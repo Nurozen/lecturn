@@ -55,7 +55,7 @@ export function normalizeStaveErrorCode(raw: string): StaveErrorCode {
 export const StaveErrorDetails = Schema.Record(Schema.String, Schema.Unknown);
 export type StaveErrorDetails = typeof StaveErrorDetails.Type;
 
-export class StaveError extends Schema.TaggedErrorClass<StaveError>()("StaveError", {
+export class StaveError extends Schema.TaggedError<StaveError>()("StaveError", {
   code: StaveErrorCode,
   message: Schema.String,
   /** Stave's structured `details` (repo lists, candidates, saga teardown progress) or null. */

@@ -4,7 +4,7 @@ import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSna
 import { StaveAdmission } from "./StaveAdmission.ts";
 import { isPathUnder } from "./StaveSpaceLock.ts";
 
-export class StaveRuntimeFenced extends Schema.TaggedErrorClass<StaveRuntimeFenced>()(
+export class StaveRuntimeFenced extends Schema.TaggedError<StaveRuntimeFenced>()(
   "StaveRuntimeFenced",
   { message: Schema.String },
 ) {}

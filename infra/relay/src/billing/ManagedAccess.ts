@@ -4,11 +4,11 @@ import { Clock, Context, Effect, Layer, Schema } from "effect";
 import { makeBillingStore, type BillingError, type BillingAccount } from "./BillingStore.ts";
 
 export type ManagedFeature = "managedConnect" | "pushNotifications" | "liveActivities";
-export class ManagedAccessRequired extends Schema.TaggedErrorClass<ManagedAccessRequired>()(
+export class ManagedAccessRequired extends Schema.TaggedError<ManagedAccessRequired>()(
   "ManagedAccessRequired",
   { message: Schema.String },
 ) {}
-export class ManagedAccessUnavailable extends Schema.TaggedErrorClass<ManagedAccessUnavailable>()(
+export class ManagedAccessUnavailable extends Schema.TaggedError<ManagedAccessUnavailable>()(
   "ManagedAccessUnavailable",
   { message: Schema.String },
 ) {}

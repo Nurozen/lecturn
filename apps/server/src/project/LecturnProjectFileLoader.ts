@@ -21,7 +21,7 @@ import { LecturnProjectFileFromJson } from "@lecturn/shared/lecturnProjectFile";
 
 const decodeLecturnProjectFileJson = Schema.decodeEffect(LecturnProjectFileFromJson);
 
-export class LecturnProjectFileLoadError extends Schema.TaggedErrorClass<LecturnProjectFileLoadError>()(
+export class LecturnProjectFileLoadError extends Schema.TaggedError<LecturnProjectFileLoadError>()(
   "LecturnProjectFileLoadError",
   {
     operation: Schema.Literals(["read", "decode"]),

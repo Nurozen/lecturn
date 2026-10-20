@@ -42,6 +42,7 @@ const DEVELOPMENT_ASSETS = {
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
   androidAdaptiveForeground,
   androidAdaptiveBackgroundColor: "#061522",
+  androidSplashIcon: "./assets/android-splash-icon-dev.png",
   androidMonochromeIcon: "./assets/android-icon-mark.png",
   androidNotificationIcon: "./assets/android-notification-icon.png",
   androidNotificationColor: "#C89954",
@@ -53,6 +54,7 @@ const PREVIEW_ASSETS = {
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
   androidAdaptiveForeground,
   androidAdaptiveBackgroundColor: "#061522",
+  androidSplashIcon: "./assets/android-splash-icon-nightly.png",
   androidMonochromeIcon: "./assets/android-icon-mark.png",
   androidNotificationIcon: "./assets/android-notification-icon.png",
   androidNotificationColor: "#C89954",
@@ -64,6 +66,7 @@ const RELEASE_ASSETS = {
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
   androidAdaptiveForeground,
   androidAdaptiveBackgroundColor: "#061522",
+  androidSplashIcon: "./assets/android-splash-icon-prod.png",
   androidMonochromeIcon: "./assets/android-icon-mark.png",
   androidNotificationIcon: "./assets/android-notification-icon.png",
   androidNotificationColor: "#C89954",
@@ -204,6 +207,11 @@ const config: ExpoConfig = {
       `applinks:${variant.relyingParty}`,
       `webcredentials:${variant.relyingParty}`,
     ],
+    entitlements: {
+      // Pin the default access group to the signed bundle ID (including a personal-team
+      // override) so SecureStore keeps reading items written before the entitlement existed.
+      "keychain-access-groups": [`$(AppIdentifierPrefix)${iosBundleIdentifier}`],
+    },
     infoPlist: {
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: true,
@@ -339,6 +347,14 @@ const config: ExpoConfig = {
         dark: {
           image: variant.assets.splashIcon,
           backgroundColor: "#061522",
+        },
+        android: {
+          // Android 12+ masks the splash icon to a circle over the central two thirds of
+          // its 288dp canvas, which cuts the iOS export's ring. These full-canvas images
+          // are the variant's iOS icon scaled so the Lecturn mark sits inside that circle.
+          image: variant.assets.androidSplashIcon,
+          imageWidth: 288,
+          dark: { image: variant.assets.androidSplashIcon },
         },
       },
     ],

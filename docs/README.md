@@ -15,6 +15,7 @@
 - [Decisions](./user/decisions.md)
 - [Forking threads](./user/forking-threads.md)
 - [Importing sessions](./user/importing-sessions.md)
+- [SnapShots](./user/snap-shot.md)
 - [Import browser sessions](./user/browser-import.md)
 - [Usage and limits](./user/usage.md)
 - [Product usage data](./user/telemetry.md)

@@ -3,7 +3,7 @@ import type { RelayTeamPolicy } from "@lecturn/contracts";
 import { operationId } from "../billing/BillingStore.ts";
 import { RelayDb } from "../db.ts";
 
-export class TeamError extends Schema.TaggedErrorClass<TeamError>()("TeamError", {
+export class TeamError extends Schema.TaggedError<TeamError>()("TeamError", {
   code: Schema.Literals([
     "not_found",
     "forbidden",

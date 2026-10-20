@@ -81,7 +81,9 @@ describe("DesktopEarlyElectronStartup", () => {
     });
 
     assert.deepEqual(options, {
+      isDevelopment: true,
       linuxWmClass: "lecturn-dev",
+      linuxDesktopEntryName: "com.cloudgatherer.lecturn.dev.desktop",
       passwordStore: "gnome-libsecret",
     });
   });

@@ -26,7 +26,7 @@ export const ManualCloudRelayConfigInput = Schema.Struct({
   environmentId: EnvironmentId,
   endpointRuntime: Schema.Null,
 });
-export class ManualCloudLinkError extends Schema.TaggedErrorClass<ManualCloudLinkError>()(
+export class ManualCloudLinkError extends Schema.TaggedError<ManualCloudLinkError>()(
   "ManualCloudLinkError",
   { message: Schema.String },
 ) {}

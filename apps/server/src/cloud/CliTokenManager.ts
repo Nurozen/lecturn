@@ -165,7 +165,7 @@ function idTokenIdentity(idToken: string | undefined): string | null {
   return null;
 }
 
-export class CloudCliCredentialRemovalError extends Schema.TaggedErrorClass<CloudCliCredentialRemovalError>()(
+export class CloudCliCredentialRemovalError extends Schema.TaggedError<CloudCliCredentialRemovalError>()(
   "CloudCliCredentialRemovalError",
   { cause: Schema.Defect() },
 ) {
@@ -174,7 +174,7 @@ export class CloudCliCredentialRemovalError extends Schema.TaggedErrorClass<Clou
   }
 }
 
-export class CloudCliCredentialRefreshError extends Schema.TaggedErrorClass<CloudCliCredentialRefreshError>()(
+export class CloudCliCredentialRefreshError extends Schema.TaggedError<CloudCliCredentialRefreshError>()(
   "CloudCliCredentialRefreshError",
   { cause: Schema.Defect() },
 ) {
@@ -183,7 +183,7 @@ export class CloudCliCredentialRefreshError extends Schema.TaggedErrorClass<Clou
   }
 }
 
-export class CloudCliCredentialReadError extends Schema.TaggedErrorClass<CloudCliCredentialReadError>()(
+export class CloudCliCredentialReadError extends Schema.TaggedError<CloudCliCredentialReadError>()(
   "CloudCliCredentialReadError",
   { cause: Schema.Defect() },
 ) {
@@ -192,7 +192,7 @@ export class CloudCliCredentialReadError extends Schema.TaggedErrorClass<CloudCl
   }
 }
 
-export class CloudCliAuthorizationError extends Schema.TaggedErrorClass<CloudCliAuthorizationError>()(
+export class CloudCliAuthorizationError extends Schema.TaggedError<CloudCliAuthorizationError>()(
   "CloudCliAuthorizationError",
   { cause: Schema.Defect() },
 ) {
@@ -201,7 +201,7 @@ export class CloudCliAuthorizationError extends Schema.TaggedErrorClass<CloudCli
   }
 }
 
-export class CloudCliAuthorizationTimeoutError extends Schema.TaggedErrorClass<CloudCliAuthorizationTimeoutError>()(
+export class CloudCliAuthorizationTimeoutError extends Schema.TaggedError<CloudCliAuthorizationTimeoutError>()(
   "CloudCliAuthorizationTimeoutError",
   { cause: Schema.Defect() },
 ) {

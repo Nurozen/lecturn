@@ -18,7 +18,7 @@ export const EnvironmentTeamPolicy = Schema.Struct({
   allowedProviders: Schema.NullOr(Schema.Array(Schema.String)),
   publishAgentActivity: Schema.Boolean,
 });
-export class TeamPolicyError extends Schema.TaggedErrorClass<TeamPolicyError>()("TeamPolicyError", {
+export class TeamPolicyError extends Schema.TaggedError<TeamPolicyError>()("TeamPolicyError", {
   message: Schema.String,
 }) {}
 export class TeamPolicy extends Context.Service<

@@ -65,7 +65,7 @@ export const ExternalSessionsListFailure = Schema.Literals([
 ]);
 export type ExternalSessionsListFailure = typeof ExternalSessionsListFailure.Type;
 
-export class ExternalSessionsListError extends Schema.TaggedErrorClass<ExternalSessionsListError>()(
+export class ExternalSessionsListError extends Schema.TaggedError<ExternalSessionsListError>()(
   "ExternalSessionsListError",
   {
     providerInstanceId: ProviderInstanceId,
@@ -96,7 +96,7 @@ export const ExternalSessionImportFailure = Schema.Literals([
 ]);
 export type ExternalSessionImportFailure = typeof ExternalSessionImportFailure.Type;
 
-export class ExternalSessionImportError extends Schema.TaggedErrorClass<ExternalSessionImportError>()(
+export class ExternalSessionImportError extends Schema.TaggedError<ExternalSessionImportError>()(
   "ExternalSessionImportError",
   {
     providerInstanceId: ProviderInstanceId,

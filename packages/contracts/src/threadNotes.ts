@@ -73,7 +73,7 @@ export const ThreadNoteUpdateInput = Schema.Struct({
 export type ThreadNoteUpdateInput = typeof ThreadNoteUpdateInput.Type;
 export const ThreadNoteDeleteInput = Schema.Struct({ id: ThreadNoteId });
 export type ThreadNoteDeleteInput = typeof ThreadNoteDeleteInput.Type;
-export class ThreadNoteError extends Schema.TaggedErrorClass<ThreadNoteError>()("ThreadNoteError", {
+export class ThreadNoteError extends Schema.TaggedError<ThreadNoteError>()("ThreadNoteError", {
   code: Schema.Literals(["not-found", "invalid", "conflict", "unavailable", "forbidden"]),
   message: Schema.String,
 }) {}

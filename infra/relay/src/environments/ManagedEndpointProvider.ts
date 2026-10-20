@@ -32,7 +32,7 @@ import {
   type GatewayEnrollmentMapping,
 } from "./ManagedGatewayEnrollment.ts";
 
-export class ManagedEndpointProvisioningNotConfigured extends Schema.TaggedErrorClass<ManagedEndpointProvisioningNotConfigured>()(
+export class ManagedEndpointProvisioningNotConfigured extends Schema.TaggedError<ManagedEndpointProvisioningNotConfigured>()(
   "ManagedEndpointProvisioningNotConfigured",
   {
     userId: Schema.String,
@@ -62,7 +62,7 @@ const ManagedEndpointProvisioningStage = Schema.Literals([
   "gateway-enrollment",
 ]);
 
-export class ManagedEndpointProvisioningFailed extends Schema.TaggedErrorClass<ManagedEndpointProvisioningFailed>()(
+export class ManagedEndpointProvisioningFailed extends Schema.TaggedError<ManagedEndpointProvisioningFailed>()(
   "ManagedEndpointProvisioningFailed",
   {
     stage: ManagedEndpointProvisioningStage,
@@ -92,7 +92,7 @@ const ManagedEndpointDeprovisioningStage = Schema.Literals([
   "gateway-cutoff",
 ]);
 
-export class ManagedEndpointDeprovisioningFailed extends Schema.TaggedErrorClass<ManagedEndpointDeprovisioningFailed>()(
+export class ManagedEndpointDeprovisioningFailed extends Schema.TaggedError<ManagedEndpointDeprovisioningFailed>()(
   "ManagedEndpointDeprovisioningFailed",
   {
     stage: ManagedEndpointDeprovisioningStage,
@@ -108,7 +108,7 @@ export class ManagedEndpointDeprovisioningFailed extends Schema.TaggedErrorClass
   }
 }
 
-export class ManagedEndpointOriginNotAllowed extends Schema.TaggedErrorClass<ManagedEndpointOriginNotAllowed>()(
+export class ManagedEndpointOriginNotAllowed extends Schema.TaggedError<ManagedEndpointOriginNotAllowed>()(
   "ManagedEndpointOriginNotAllowed",
   {
     userId: Schema.String,
@@ -216,7 +216,7 @@ const ManagedEndpointTunnelClientOperation = Schema.Literals([
   "delete",
 ]);
 
-export class ManagedEndpointTunnelClientError extends Schema.TaggedErrorClass<ManagedEndpointTunnelClientError>()(
+export class ManagedEndpointTunnelClientError extends Schema.TaggedError<ManagedEndpointTunnelClientError>()(
   "ManagedEndpointTunnelClientError",
   {
     operation: ManagedEndpointTunnelClientOperation,
@@ -280,7 +280,7 @@ const ManagedEndpointDnsClientOperation = Schema.Literals([
   "delete-record",
 ]);
 
-export class ManagedEndpointDnsClientError extends Schema.TaggedErrorClass<ManagedEndpointDnsClientError>()(
+export class ManagedEndpointDnsClientError extends Schema.TaggedError<ManagedEndpointDnsClientError>()(
   "ManagedEndpointDnsClientError",
   {
     operation: ManagedEndpointDnsClientOperation,

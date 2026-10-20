@@ -107,7 +107,7 @@ const MAX_TERMINAL_LABEL_LENGTH = 128;
 const decodeClaudeSettings = Schema.decodeUnknownOption(ClaudeSettings);
 const decodeCodexSettings = Schema.decodeUnknownOption(CodexSettings);
 
-export class TerminalSubprocessCheckError extends Schema.TaggedErrorClass<TerminalSubprocessCheckError>()(
+export class TerminalSubprocessCheckError extends Schema.TaggedError<TerminalSubprocessCheckError>()(
   "TerminalSubprocessCheckError",
   {
     cause: Schema.optional(Schema.Defect()),
@@ -129,7 +129,7 @@ export class TerminalSubprocessCheckError extends Schema.TaggedErrorClass<Termin
   }
 }
 
-class TerminalProcessSignalError extends Schema.TaggedErrorClass<TerminalProcessSignalError>()(
+class TerminalProcessSignalError extends Schema.TaggedError<TerminalProcessSignalError>()(
   "TerminalProcessSignalError",
   {
     cause: Schema.optional(Schema.Defect()),

@@ -52,7 +52,7 @@ export type StaveAdmissionIntent = typeof StaveAdmissionIntent.Type;
 export const STAVE_WORKTREE_FORBIDDEN_MESSAGE =
   "Stave spaces run threads in the space root; worktrees are not used";
 
-export class StaveWorktreeForbiddenError extends Schema.TaggedErrorClass<StaveWorktreeForbiddenError>()(
+export class StaveWorktreeForbiddenError extends Schema.TaggedError<StaveWorktreeForbiddenError>()(
   "StaveWorktreeForbiddenError",
   {
     projectRoot: Schema.String,
@@ -61,15 +61,15 @@ export class StaveWorktreeForbiddenError extends Schema.TaggedErrorClass<StaveWo
   },
 ) {}
 
-export class StaveArchivedProjectError extends Schema.TaggedErrorClass<StaveArchivedProjectError>()(
+export class StaveArchivedProjectError extends Schema.TaggedError<StaveArchivedProjectError>()(
   "StaveArchivedProjectError",
   { projectRoot: Schema.String, intent: StaveAdmissionIntent, message: Schema.String },
 ) {}
-export class StaveSpaceTransitioningError extends Schema.TaggedErrorClass<StaveSpaceTransitioningError>()(
+export class StaveSpaceTransitioningError extends Schema.TaggedError<StaveSpaceTransitioningError>()(
   "StaveSpaceTransitioningError",
   { projectRoot: Schema.String, intent: StaveAdmissionIntent, message: Schema.String },
 ) {}
-export class StaveProjectIncarnationMismatchError extends Schema.TaggedErrorClass<StaveProjectIncarnationMismatchError>()(
+export class StaveProjectIncarnationMismatchError extends Schema.TaggedError<StaveProjectIncarnationMismatchError>()(
   "StaveProjectIncarnationMismatchError",
   { projectRoot: Schema.String, intent: StaveAdmissionIntent, message: Schema.String },
 ) {}

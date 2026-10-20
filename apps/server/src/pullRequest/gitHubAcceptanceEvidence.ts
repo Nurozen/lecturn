@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema";
 import type { GitHubCli } from "../sourceControl/GitHubCli.ts";
 import type { ProviderAcceptanceEvidence, ProviderRepositoryRef } from "./PullRequestProvider.ts";
 
-class GitHubAcceptanceReadError extends Schema.TaggedErrorClass<GitHubAcceptanceReadError>()(
+class GitHubAcceptanceReadError extends Schema.TaggedError<GitHubAcceptanceReadError>()(
   "GitHubAcceptanceReadError",
   { message: Schema.String },
 ) {}

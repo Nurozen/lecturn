@@ -36,7 +36,7 @@ export const resolveExtensionsBootstrap = Effect.gen(function* () {
     },
   };
 });
-class InvalidReviewManifest extends Schema.TaggedErrorClass<InvalidReviewManifest>()(
+class InvalidReviewManifest extends Schema.TaggedError<InvalidReviewManifest>()(
   "InvalidReviewManifest",
   {},
 ) {}
