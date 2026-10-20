@@ -11,11 +11,8 @@ export const CLI_RELEASE_CHECKSUMS_FILE = "SHA256SUMS";
 export const CLI_RELEASE_BASE_URL_ENV = "LECTURN_RELEASE_BASE_URL";
 
 /**
- * The archives a release attaches. Kept in step with the build_linux_cli
- * matrix, build_windows_arm64_cli, and the `cli_archive` rows in
- * .github/workflows/release.yml: a key here without a build there produces
- * download URLs that 404, and a build there without a key here is
- * unreachable from every installer.
+ * Every platform the archive builder (scripts/build-cli-archive.ts) can name.
+ * The release workflow builds only CLI_PUBLISHED_ARCHIVE_PLATFORM_KEYS.
  */
 // No darwin-x64: Node single-executables are unsupported on x64 macOS (the
 // SEA docs list macOS as arm64 only) and the binary segfaults on start.
@@ -28,12 +25,36 @@ export const CLI_ARCHIVE_PLATFORM_KEYS = [
 ] as const;
 export type CliArchivePlatformKey = (typeof CLI_ARCHIVE_PLATFORM_KEYS)[number];
 
+/**
+ * The archives a Lecturn release attaches: build_linux_cli plus the
+ * `cli_archive: true` rows of the build matrix in
+ * .github/workflows/release.yml. Installers must not build download URLs for
+ * any other key, because those URLs 404; hosts without an archive run the npm
+ * package (`npx lecturn`) instead. scripts/install.sh and scripts/install.ps1
+ * hard-code the same set (checked by scripts/install-scripts.test.ts).
+ */
+export const CLI_PUBLISHED_ARCHIVE_PLATFORM_KEYS = [
+  "darwin-arm64",
+  "linux-x64",
+  "win32-x64",
+] as const satisfies ReadonlyArray<CliArchivePlatformKey>;
+export type CliPublishedArchivePlatformKey = (typeof CLI_PUBLISHED_ARCHIVE_PLATFORM_KEYS)[number];
+
 export function cliArchivePlatformKey(
   platform: NodeJS.Platform,
   arch: string,
 ): CliArchivePlatformKey | undefined {
   const key = `${platform}-${arch}`;
   return CLI_ARCHIVE_PLATFORM_KEYS.find((candidate) => candidate === key);
+}
+
+/** The archive a release publishes for this host, if any. */
+export function publishedCliArchivePlatformKey(
+  platform: NodeJS.Platform,
+  arch: string,
+): CliPublishedArchivePlatformKey | undefined {
+  const key = `${platform}-${arch}`;
+  return CLI_PUBLISHED_ARCHIVE_PLATFORM_KEYS.find((candidate) => candidate === key);
 }
 
 /**

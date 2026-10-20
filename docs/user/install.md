@@ -6,8 +6,9 @@ desktop, web, or mobile app. Set up the machine where the agents will work first
 ## Requirements
 
 `npx lecturn` needs Node.js 22.16+ (22.x), 23.11+ (23.x), or 24.10 and later.
-The self-contained CLI from the install script, SSH hosts, WSL backends, and the
-native desktop app need no Node.js; they run their own server runtime.
+The native desktop app and its WSL backends include their own server runtime. SSH
+hosts on Apple Silicon macOS or Linux x64 need no Node.js; other SSH hosts need a
+compatible Node.js and npm.
 
 You need an installed, authenticated provider before starting a thread. You can
 launch Lecturn and configure providers afterwards.
@@ -27,10 +28,12 @@ On Windows, run
 `irm https://raw.githubusercontent.com/Nurozen/lecturn/main/scripts/install.ps1 | iex`
 in PowerShell.
 
-The executable is built for Apple Silicon Macs, Linux x64, and Windows x64. There is
-no Intel Mac build of it, because Node cannot produce a single executable for
-that platform; the Intel desktop app is unaffected. To run a standalone server
-on an Intel Mac, use `npx lecturn` or build it from source. You need Node.js 24 and `vp` (see
+The script downloads the executable from a Lecturn release and is unavailable
+until Lecturn publishes standalone CLI release archives. The executable is built
+for Apple Silicon Macs, Linux x64, and Windows x64; on other platforms the script
+tells you to use `npx lecturn` instead. Intel Macs have no build because Node
+cannot produce a single executable there; the Intel desktop app is unaffected.
+You can also build a standalone server from source with Node.js 24 and `vp` (see
 [Vite+](https://viteplus.dev/guide/)):
 
 ```bash
@@ -50,9 +53,9 @@ Download a Lecturn installer from [GitHub Releases](https://github.com/Nurozen/l
 ### Windows Subsystem for Linux
 
 Choose a WSL distro in **Settings → Connections** to run agents and projects
-there. Install Node.js and provider CLIs inside that distro. Lecturn installs its
-matching server runtime there automatically; the first launch after an app
-update can take longer.
+there. Install provider CLIs inside that distro. Lecturn installs its matching
+server runtime there automatically; the first launch after an app update can
+take longer.
 
 ### Open a project from a terminal
 

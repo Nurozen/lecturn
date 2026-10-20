@@ -35,6 +35,11 @@ $arch = switch ($rawArch) {
   "ARM64" { "arm64" }
   default { Fail "unsupported architecture $rawArch" }
 }
+# The platforms a release attaches an archive for (CLI_PUBLISHED_ARCHIVE_PLATFORM_KEYS
+# in packages/shared/src/cliRelease.ts). Anything else would download a 404.
+if (@("win32-x64") -notcontains "win32-$arch") {
+  Fail "Lecturn releases have no self-contained CLI for win32-$arch; run 'npx lecturn' (needs Node.js) instead"
+}
 
 $channel = if ($env:LECTURN_CHANNEL) { $env:LECTURN_CHANNEL } else { "stable" }
 $version = $env:LECTURN_VERSION

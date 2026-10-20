@@ -111,7 +111,7 @@ const NODE_SCRIPT = {
 } as const;
 
 describe("ssh tunnel scripts", () => {
-  it("installs and runs the release archive without Node, npm, or npx", () => {
+  it("installs the release archive where one is published, else falls back to npx", () => {
     const script = buildRemoteLecturnRunnerScript(ARCHIVE);
 
     assert.include(script, "LECTURN_ARCHIVE_VERSION='1.2.3-preview.20260911.4'");
@@ -126,14 +126,19 @@ describe("ssh tunnel scripts", () => {
     );
     assert.include(
       script,
-      'LECTURN_ARCHIVE="lecturn-$LECTURN_ARCHIVE_VERSION-$LECTURN_PLATFORM-$LECTURN_ARCH.tar.gz"',
+      'LECTURN_ARCHIVE="lecturn-$LECTURN_ARCHIVE_VERSION-$LECTURN_PLATFORM_KEY.tar.gz"',
     );
     assert.include(script, "SHA256SUMS");
     assert.include(script, 'exec "$LECTURN_RUNTIME_DIR/lecturn" "$@"');
-    assert.notInclude(script, "npx");
-    assert.notInclude(script, "npm exec");
+    // Only platforms a release publishes download an archive; the rest run
+    // the same version from npm, as remotes did before archives existed.
+    assert.include(script, "for LECTURN_PUBLISHED_KEY in darwin-arm64 linux-x64 win32-x64; do");
+    assert.include(script, "npx --yes --package 'lecturn@1.2.3-preview.20260911.4'");
     assert.notInclude(script, "lecturn@latest");
-    assert.notInclude(script, 'exec lecturn "$@"');
+    assert.isBelow(
+      script.indexOf('if [ "$LECTURN_USE_ARCHIVE" != "1" ]; then'),
+      script.indexOf("LECTURN_RUNTIME_DIR="),
+    );
     // Concurrent launches serialize on a per-version mkdir lock and recheck
     // the completion marker after acquiring it.
     assert.include(
@@ -156,9 +161,9 @@ describe("ssh tunnel scripts", () => {
       script.indexOf('"$LECTURN_STAGING/lecturn" --version'),
       script.indexOf('> "$LECTURN_STAGING/.install-complete"'),
     );
-    // Node discovery is defined for the dev path but only ever invoked inside
-    // the node-script branch, which the archive path skips entirely.
-    assert.equal(script.split("ensure_remote_node_path || true").length - 1, 1);
+    // Node discovery runs only in the node-script and npx branches, which the
+    // archive path skips entirely.
+    assert.equal(script.split("ensure_remote_node_path || true").length - 1, 2);
     assert.isBelow(
       script.indexOf("ensure_remote_node_path || true"),
       script.indexOf('exec node "$LECTURN_NODE_SCRIPT_PATH" "$@"'),
@@ -172,12 +177,13 @@ describe("ssh tunnel scripts", () => {
       ...ARCHIVE,
       releaseBaseUrl: "https://mirror.example/lecturn/",
     });
-    assert.include(launch, "LECTURN_ARCHIVE_MODE=1");
+    assert.include(launch, 'LECTURN_ARCHIVE_MODE="$LECTURN_USE_ARCHIVE"');
+    assert.include(launch, "LECTURN_ARCHIVE_VERSION='1.2.3-preview.20260911.4'");
     assert.include(launch, "LECTURN_RELEASE_BASE_URL='https://mirror.example/lecturn'");
     assert.include(launch, '"$RUNNER_FILE" __ssh-helper pick-port "$PORT_FILE"');
     assert.include(launch, '"$RUNNER_FILE" __ssh-helper wait-ready "$REMOTE_PORT"');
     assert.include(launch, '"$RUNNER_FILE" __ssh-helper runtime-port "$DEFAULT_RUNTIME_FILE"');
-    assert.include(buildRemoteLaunchScript(NODE_SCRIPT), "LECTURN_ARCHIVE_MODE=0");
+    assert.include(buildRemoteLaunchScript(NODE_SCRIPT), "LECTURN_ARCHIVE_VERSION=''");
   });
 
   it("rejects archive versions that are not a single exact version segment", () => {
@@ -202,8 +208,14 @@ describe("ssh tunnel scripts", () => {
     );
   });
 
-  it("refuses to build a runner with neither an archive version nor a node script", () => {
-    for (const input of [undefined, {}, { archiveVersion: "  " }, { nodeScriptPath: null }]) {
+  it("refuses to build a runner with no archive version, package spec, or node script", () => {
+    for (const input of [
+      undefined,
+      {},
+      { archiveVersion: "  " },
+      { packageSpec: " " },
+      { nodeScriptPath: null },
+    ]) {
       assert.throws(() => buildRemoteLecturnRunnerScript(input), SshMissingRunnerError);
     }
     assert.throws(() => buildRemoteLaunchScript(), SshMissingRunnerError);
@@ -244,7 +256,10 @@ describe("ssh tunnel scripts", () => {
     assert.include(script, "nvm use --silent default");
     assert.include(script, 'for LECTURN_NODE_BIN in "$NVM_DIR"/versions/node/*/bin');
     assert.notInclude(script, "ensure $NVM_DIR/nvm.sh is available");
-    assert.notInclude(script, "npx");
+    assert.isBelow(
+      script.indexOf('exec node "$LECTURN_NODE_SCRIPT_PATH" "$@"'),
+      script.indexOf("npx"),
+    );
   });
 
   it("uses the remote lecturn runner for launch and pairing scripts", () => {
@@ -809,6 +824,73 @@ describe("archive runner script", () => {
         const afterUnowned = yield* runRunner(home, runner);
         assert.equal(afterUnowned.exitCode, 0, afterUnowned.stderr);
         assert.isFalse(yield* fs.exists(lock));
+      }).pipe(Effect.provide(NodeServices.layer)),
+    60_000,
+  );
+
+  it.effect.skipIf(windowsHost)(
+    "runs the npm package on a remote platform no release archive is published for",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-npx-runner-" });
+        const bin = `${root}/bin`;
+        const pkg = `${root}/pkg`;
+        const home = `${root}/home`;
+        yield* fs.makeDirectory(bin, { recursive: true });
+        yield* fs.makeDirectory(pkg, { recursive: true });
+        yield* fs.makeDirectory(home, { recursive: true });
+        const stubs: ReadonlyArray<readonly [string, string]> = [
+          // A linux-arm64 remote, which no Lecturn release builds an archive for.
+          [`${bin}/uname`, 'case "$1" in -s) echo Linux ;; -m) echo aarch64 ;; esac'],
+          // Present so Node discovery does not reach for the real machine's PATH.
+          [`${bin}/node`, "exit 0"],
+          [
+            `${bin}/npx`,
+            `printf '%s\\n' "$*" > '${root}/npx-args'\nwhile [ "$1" != "--" ]; do shift; done\nshift\nPATH='${pkg}':"$PATH" exec "$@"`,
+          ],
+          [`${pkg}/lecturn`, 'echo "lecturn from npm $*"'],
+        ];
+        for (const [file, body] of stubs) {
+          yield* fs.writeFileString(file, `#!/bin/sh\n${body}\n`);
+          yield* fs.chmod(file, 0o755);
+        }
+        const runner = `${root}/run-lecturn.sh`;
+        yield* fs.writeFileString(
+          runner,
+          buildRemoteLecturnRunnerScript({
+            archiveVersion,
+            // Never served: an archive download here would fail the run.
+            releaseBaseUrl: `file://${root}/missing-mirror`,
+          }),
+        );
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const child = yield* spawner.spawn(
+          ChildProcess.make("sh", [runner, "--version"], {
+            env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home },
+            extendEnv: false,
+          }),
+        );
+        const [stdout, exitCode] = yield* Effect.all(
+          [
+            child.stdout.pipe(
+              Stream.decodeText(),
+              Stream.runFold(
+                () => "",
+                (acc, chunk) => acc + chunk,
+              ),
+            ),
+            child.exitCode.pipe(Effect.map(Number)),
+          ],
+          { concurrency: "unbounded" },
+        );
+        assert.equal(exitCode, 0);
+        assert.equal(stdout.trim(), "lecturn from npm --version");
+        assert.equal(
+          (yield* fs.readFileString(`${root}/npx-args`)).trim(),
+          `--yes --package lecturn@${archiveVersion} -- sh -c command -v lecturn`,
+        );
+        assert.isFalse(yield* fs.exists(`${home}/.lecturn/runtime`));
       }).pipe(Effect.provide(NodeServices.layer)),
     60_000,
   );

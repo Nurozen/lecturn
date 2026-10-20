@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   cliArchiveFileName,
+  CLI_PUBLISHED_ARCHIVE_PLATFORM_KEYS,
   cliArchivePlatformKey,
   cliArchiveTarCommand,
   cliReleaseDownloadBaseUrl,
@@ -9,6 +10,7 @@ import {
   cliReleaseIndexPageUrl,
   newestCliReleaseVersion,
   parseChecksums,
+  publishedCliArchivePlatformKey,
 } from "./cliRelease.ts";
 
 describe("cliRelease", () => {
@@ -29,6 +31,16 @@ describe("cliRelease", () => {
     expect(cliArchivePlatformKey("win32", "arm64")).toBe("win32-arm64");
     expect(cliArchivePlatformKey("freebsd", "x64")).toBeUndefined();
     expect(cliArchivePlatformKey("linux", "ia32")).toBeUndefined();
+  });
+
+  it("publishes archives only for the platforms the release workflow builds", () => {
+    expect(CLI_PUBLISHED_ARCHIVE_PLATFORM_KEYS).toEqual(["darwin-arm64", "linux-x64", "win32-x64"]);
+    expect(publishedCliArchivePlatformKey("darwin", "arm64")).toBe("darwin-arm64");
+    expect(publishedCliArchivePlatformKey("linux", "x64")).toBe("linux-x64");
+    expect(publishedCliArchivePlatformKey("win32", "x64")).toBe("win32-x64");
+    expect(publishedCliArchivePlatformKey("linux", "arm64")).toBeUndefined();
+    expect(publishedCliArchivePlatformKey("win32", "arm64")).toBeUndefined();
+    expect(publishedCliArchivePlatformKey("darwin", "x64")).toBeUndefined();
   });
 
   it("resolves download URLs under the tagged release, honoring a mirror", () => {

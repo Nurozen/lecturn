@@ -25,45 +25,33 @@ Updating restarts the server. Finish active work first, and wait for any remote
 update already in progress. To match a remote client's version, follow
 [Updating Lecturn](./updating.md).
 
-Self-contained builds install as a download from the Lecturn GitHub release
-instead of through npm, so the machine running the service does not need
-Node.js or npm once the CLI is on it. To get the CLI onto a machine without
-Node, run the install script:
+Service installation and updates run the service from a self-contained Lecturn
+runtime downloaded from a Lecturn release, so the service does not depend on
+Node.js or npm. They are unavailable until a Lecturn runtime is published: until
+then `service install` and `service update` stop with an explanation. Use the
+Lecturn desktop app to host Lecturn Connect in the meantime.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/Nurozen/lecturn/main/scripts/install.sh | sh
-```
+## Self-contained CLI
 
-On Windows, run `irm https://raw.githubusercontent.com/Nurozen/lecturn/main/scripts/install.ps1 | iex` in PowerShell instead.
-
-It places `lecturn` in `~/.local/bin` and reuses the same download when you later
-run `lecturn service install`. It follows the stable train by default; set
+The [install script](./install.md#choose-an-installation) places a self-contained
+`lecturn` in `~/.local/bin`. It follows the stable train by default; set
 `LECTURN_CHANNEL=nightly` for nightlies, `LECTURN_VERSION` to pin an exact
 version, or `LECTURN_RELEASE_BASE_URL` to download from a mirror.
 
-`preview` is a third train that maintainers cut from unreleased branches to
-exercise the release pipeline. Those builds can be broken, receive no fixes,
-and are never offered as updates; the installer and `lecturn update` only take you
-there when you ask for the channel explicitly, and warn you when they do.
-
-Once a self-contained `lecturn` is installed, `lecturn update` moves the machine to a
-newer one without npm: it downloads the newest release on the channel the
-running `lecturn` came from, verifies it, and points the `lecturn` launcher at it. When
-a background service is installed for the same Lecturn home it asks before
-restarting it, since a restart interrupts running agent turns, terminals, and
-remote clients; answer no and the service keeps the old version until you run
-`lecturn service update`. From a script there is no prompt, so pass `--yes` to
-restart the service. A server you started by hand is never touched; the
-command tells you it is still on the old version so you can restart it
-yourself. Pass an exact version (`lecturn update 0.0.41-preview.20260912.1595`) to
-pin one, `--channel` to follow a different release train (moving onto preview from stable or nightly asks for confirmation), or
-`--allow-downgrade` to move backwards.
+`lecturn update` moves a self-contained install to the newest release on its
+channel. It is unavailable until Lecturn publishes standalone CLI release
+archives; update through the Lecturn desktop app or your package manager instead.
+Once available, it asks before restarting a background service for the same
+Lecturn home, because a restart interrupts running agent turns, terminals, and
+remote clients. Pass `--yes` from a script. A server you started by hand keeps
+running the old version until you restart it. Pass an exact version to pin one,
+`--channel` to switch between stable and nightly, or `--allow-downgrade` to move
+backwards.
 
 `lecturn uninstall` reverses the install script: it shows what it found (the
-background service, the `lecturn` launcher, every downloaded version under
+background service, the `lecturn` launcher, and downloaded versions under
 `~/.lecturn/runtime`), asks once, and removes them. Your projects, threads, and
-settings under `~/.lecturn/userdata` are kept; delete that directory yourself if
-you want them gone too. Pass `--yes` from a script.
+settings under `~/.lecturn/userdata` are kept. Pass `--yes` from a script.
 
 ## Platform support
 

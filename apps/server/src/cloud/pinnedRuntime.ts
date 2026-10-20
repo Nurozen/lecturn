@@ -12,7 +12,7 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 import {
   CLI_RELEASE_CHECKSUMS_FILE,
   cliArchiveFileName,
-  cliArchivePlatformKey,
+  publishedCliArchivePlatformKey,
   cliArchiveTarCommand,
   cliReleaseDownloadBaseUrl,
   parseChecksums,
@@ -164,7 +164,7 @@ const installFromArchive = Effect.fn("cloud.pinned_runtime.install_archive")(fun
   stagingDir: string,
 ) {
   const { fs, path } = input;
-  const platformKey = cliArchivePlatformKey(input.platform, input.arch);
+  const platformKey = publishedCliArchivePlatformKey(input.platform, input.arch);
   if (platformKey === undefined) {
     return yield* new PinnedRuntimeInstallError({
       step: `selecting a lecturn release archive for ${input.platform}-${input.arch}`,

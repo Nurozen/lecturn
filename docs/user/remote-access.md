@@ -129,9 +129,12 @@ In the desktop app, open **Settings → Connections → Add environment**, choos
 or reuses a server there and opens the port forward for you. Projects, provider
 credentials, and agent work stay on the remote machine.
 
-The remote host needs a compatible [Node.js installation](./install.md#requirements)
-and [provider setup](./install.md#providers). If launch cannot find Node or reports
-an incompatible version, check it through a non-interactive SSH session:
+The remote host needs [provider setup](./install.md#providers). On Apple Silicon
+macOS and Linux x64 hosts, Lecturn downloads its matching server runtime, so they
+need no Node.js. Other hosts run Lecturn through `npx` and need a compatible
+[Node.js installation](./install.md#requirements) and npm. If launch cannot find
+Node or reports an incompatible version, check it through a non-interactive SSH
+session:
 
 ```bash
 ssh user@example.com 'sh -lc "command -v node && node --version"'

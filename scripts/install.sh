@@ -55,6 +55,12 @@ case "$(uname -m)" in
   x86_64 | amd64) arch="x64" ;;
   *) fail "unsupported architecture $(uname -m)" ;;
 esac
+# The platforms a release attaches an archive for (CLI_PUBLISHED_ARCHIVE_PLATFORM_KEYS
+# in packages/shared/src/cliRelease.ts). Anything else would download a 404.
+case "${platform}-${arch}" in
+  darwin-arm64 | linux-x64) ;;
+  *) fail "Lecturn releases have no self-contained CLI for ${platform}-${arch}; run \`npx lecturn\` (needs Node.js) instead" ;;
+esac
 command -v tar >/dev/null 2>&1 || fail "tar is required"
 if command -v sha256sum >/dev/null 2>&1; then
   checksum() { sha256sum "$1" | cut -d' ' -f1; }

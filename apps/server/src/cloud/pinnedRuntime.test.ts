@@ -131,6 +131,29 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     }),
   );
 
+  it.effect("never requests an archive the release does not publish for the host", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-pinned-archive-arm-" });
+      const requests: string[] = [];
+      const error = yield* ensurePinnedRuntimeInstalled({
+        baseDir,
+        version,
+        fs,
+        path,
+        platform: "linux",
+        arch: "arm64",
+        httpClient: releaseHttpClient(yield* validChecksums, requests),
+        runner: extractingRunner(fs, path),
+        validate: () => Effect.die("must not validate a missing archive"),
+      }).pipe(Effect.flip);
+      assert.instanceOf(error, PinnedRuntimeInstallError);
+      assert.equal(error.step, "selecting a lecturn release archive for linux-arm64");
+      assert.deepEqual(requests, []);
+    }),
+  );
+
   it.effect("validates a staging tree before atomically publishing it", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
