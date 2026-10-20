@@ -12,13 +12,15 @@ browser.
 
 You can add more computers before continuing:
 
-- **Lecturn Connect** connects computers that are signed in to your account. Run
-  `npx lecturn connect` on each computer you want to add, then start Lecturn or run
-  `npx lecturn serve` so the computer stays available.
+- **Lecturn Connect** connects computers that are signed in to your account.
+  [Install the CLI](./install.md#command-line) and run `lecturn connect` on each
+  computer you want to add, then start Lecturn or run `lecturn serve` so the
+  computer stays available. Without installing, use `npx lecturn connect` and
+  `npx lecturn serve`.
 - **Add a computer** connects directly to a server on your network or tailnet.
-  Start the server with `npx lecturn serve`, then run `npx lecturn pair --tailscale` and
-  paste the pairing link. You can also run `npx lecturn serve --host <address>` and
-  use `npx lecturn pair` when the server is already reachable on your network.
+  Start the server with `lecturn serve`, then run `lecturn pair --tailscale` and
+  paste the pairing link. You can also run `lecturn serve --host <address>` and
+  use `lecturn pair` when the server is already reachable on your network.
 
 Saved computers and computers discovered through Lecturn Connect are selected by
 default. Uncheck any you do not want to set up; this does not disconnect them.
@@ -36,9 +38,9 @@ unreadable settings with defaults.
 
 Lecturn checks each selected computer for Claude Code and Codex. If an agent is
 not installed or signed in, select its action to open a terminal with the
-correct command ready to run. Install uses the vendor's standalone installer,
-which does not need Node or npm and keeps **Update now** working in Settings.
-Other providers can be enabled in Settings.
+correct command ready to run. Install uses the vendor's own installer, which
+keeps **Update now** working in Settings. Other providers can be enabled in
+Settings.
 
 The setup terminal uses the home directory and environment configured for the
 selected provider instance. Sensitive values remain redacted in Settings and

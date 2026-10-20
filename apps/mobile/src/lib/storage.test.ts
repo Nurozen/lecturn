@@ -213,21 +213,15 @@ describe("mobile connection storage", () => {
     await expect(loadPreferences()).resolves.toEqual({ ...themes, lightThemeId: "iris" });
   });
 
-  it("persists the Material You layout independently of the selected theme", async () => {
-    await savePreferencesPatch({
-      lightThemeId: "material-you",
-      materialYouStyleLayoutEnabled: true,
-    });
-    await savePreferencesPatch({ lightThemeId: "iris" });
-    await expect(loadPreferences()).resolves.toEqual({
-      lightThemeId: "iris",
-      materialYouStyleLayoutEnabled: true,
-    });
-    await savePreferencesPatch({ materialYouStyleLayoutEnabled: false });
-    await expect(loadPreferences()).resolves.toEqual({
-      lightThemeId: "iris",
-      materialYouStyleLayoutEnabled: false,
-    });
+  it.each([true, false])("drops the removed Android layout preference (%s)", async (enabled) => {
+    mocks.setPreferencesJson(
+      JSON.stringify({
+        materialYouStyleLayoutEnabled: enabled,
+        lightThemeId: "iris",
+      }),
+      10,
+    );
+    await expect(loadPreferences()).resolves.toEqual({ lightThemeId: "iris" });
   });
 
   it("drops the removed theme transition preference", async () => {

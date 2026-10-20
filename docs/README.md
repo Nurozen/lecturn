@@ -44,6 +44,7 @@ source alone does not explain. Most code changes do not need an internal documen
 - [Providers](./internals/providers.md)
 - [Thread notes](./internals/thread-notes.md)
 - [Thread forking](./internals/thread-forking.md)
+- [Pull request file revisions](./internals/pull-request-file-revisions.md)
 - [Model classification](./internals/model-manifest.md)
 - [Remote environments](./internals/remote.md)
 - [Server updates](./internals/server-updates.md)

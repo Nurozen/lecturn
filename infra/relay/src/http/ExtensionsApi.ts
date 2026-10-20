@@ -5,7 +5,7 @@ import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpIncomingMessage from "effect/unstable/http/HttpIncomingMessage";
-import * as FileSystem from "effect/FileSystem";
+import * as ByteSize from "effect/ByteSize";
 import * as Contracts from "@lecturn/contracts";
 import { RelayConfiguration } from "../Config.ts";
 import { EnvironmentCredentials } from "../environments/EnvironmentCredentials.ts";
@@ -216,7 +216,7 @@ export const extensionsApi = (routeConfig: DecisionsRouteConfig) =>
           return json(yield* service.evaluate(host, payload, "decisions"));
         return json({ message: "Not found" }, 404);
       }).pipe(
-        Effect.provideService(HttpIncomingMessage.MaxBodySize, FileSystem.Size(256 * 1024)),
+        Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(256 * 1024)),
         Effect.withTracerEnabled(false),
         Effect.catchTag("DecisionEvaluationError", (error) =>
           Effect.succeed(

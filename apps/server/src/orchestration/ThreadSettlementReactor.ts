@@ -1,4 +1,9 @@
-import { CommandId, type ServerSettings as ServerSettingsValue } from "@lecturn/contracts";
+import {
+  CommandId,
+  type OrchestrationEvent,
+  type ServerSettings as ServerSettingsValue,
+  type ThreadId,
+} from "@lecturn/contracts";
 import { resolveProjectSettings } from "@lecturn/shared/projectSettings";
 import { makeDrainableWorker } from "@lecturn/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
@@ -98,6 +103,7 @@ export const make = Effect.gen(function* () {
 
   const sweep = Effect.fn("ThreadSettlementReactor.sweep")(function* (
     mergedPullRequest: PullRequestService.PullRequestMergeEvent | null,
+    threadId?: ThreadId,
   ) {
     const settings = yield* settingsService.getSettings;
     const ordinarySettlementEnabled = autoSettlementConfigured(settings);
@@ -120,6 +126,7 @@ export const make = Effect.gen(function* () {
     // not linked yet. Those lookups can still have cached the PR as open.
     const candidates = snapshot.threads.filter(
       (thread) =>
+        (threadId === undefined || thread.id === threadId) &&
         (ordinarySettlementEnabled || staveMerged.has(thread.projectId)) &&
         isAutoSettlementCandidate(thread, now),
     );
@@ -391,8 +398,11 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  const runSweep = (mergedPullRequest: PullRequestService.PullRequestMergeEvent | null) =>
-    sweep(mergedPullRequest).pipe(
+  const runSweep = (
+    mergedPullRequest: PullRequestService.PullRequestMergeEvent | null,
+    threadId?: ThreadId,
+  ) =>
+    sweep(mergedPullRequest, threadId).pipe(
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.failCause(cause)
@@ -401,13 +411,36 @@ export const make = Effect.gen(function* () {
             }),
       ),
     );
-  const worker = yield* makeDrainableWorker(() => runSweep(null));
+  const worker = yield* makeDrainableWorker((threadId: ThreadId | undefined) =>
+    runSweep(null, threadId),
+  );
+
+  const processEvent = (event: OrchestrationEvent) => {
+    switch (event.type) {
+      case "thread.pull-request-linked":
+      case "thread.pull-request-synced":
+      case "thread.pull-request-unlinked":
+        // Merge notifications can arrive before the linked snapshot is projected.
+        // Recheck the persisted state so terminal links settle without the timer.
+        return worker.enqueue(event.payload.threadId);
+      case "thread.session-set":
+        if (
+          event.payload.session.status !== "running" &&
+          event.payload.session.status !== "starting"
+        ) {
+          return worker.enqueue(event.payload.threadId);
+        }
+        break;
+    }
+    return Effect.void;
+  };
 
   const start: ThreadSettlementReactor["Service"]["start"] = Effect.fn(
     "ThreadSettlementReactor.start",
   )(function* () {
     const settingsChanges = yield* settingsService.subscribeChanges;
     const mergedPullRequests = yield* pullRequests.subscribeMerges;
+    const events = yield* engine.subscribeDomainEvents;
     const initialSettings = yield* settingsService.getSettings.pipe(Effect.orDie);
     let lastSettlementSettings = settlementSweepKey(initialSettings);
     yield* forkParked(
@@ -426,7 +459,8 @@ export const make = Effect.gen(function* () {
         return worker.enqueue(undefined);
       }),
     );
-    yield* forkParked(Stream.runForEach(mergedPullRequests, runSweep));
+    yield* forkParked(Stream.runForEach(mergedPullRequests, (event) => runSweep(event)));
+    yield* forkParked(Stream.runForEach(events, processEvent));
   });
 
   return { start, drain: worker.drain } satisfies ThreadSettlementReactor["Service"];

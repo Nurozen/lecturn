@@ -16,7 +16,16 @@ launch Lecturn and configure providers afterwards.
 ## Choose an installation
 
 Start with the [Lecturn installation guide](./lecturn-installation.md) for desktop downloads,
-mobile access, and runtime distribution. The standalone CLI command is `lecturn`.
+mobile access, and runtime distribution.
+
+## Command line
+
+The standalone CLI command is `lecturn`. To run it without installing (needs
+Node.js, see [Requirements](#requirements)):
+
+```bash
+npx lecturn@latest
+```
 
 To install the self-contained CLI without Node.js, run:
 
@@ -24,16 +33,39 @@ To install the self-contained CLI without Node.js, run:
 curl -fsSL https://raw.githubusercontent.com/Nurozen/lecturn/main/scripts/install.sh | sh
 ```
 
-On Windows, run
-`irm https://raw.githubusercontent.com/Nurozen/lecturn/main/scripts/install.ps1 | iex`
-in PowerShell.
+On Windows, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Nurozen/lecturn/main/scripts/install.ps1 | iex
+```
 
 The script downloads the executable from a Lecturn release and is unavailable
-until Lecturn publishes standalone CLI release archives. The executable is built
-for Apple Silicon Macs, Linux x64, and Windows x64; on other platforms the script
-tells you to use `npx lecturn` instead. Intel Macs have no build because Node
-cannot produce a single executable there; the Intel desktop app is unaffected.
-You can also build a standalone server from source with Node.js 24 and `vp` (see
+until Lecturn publishes standalone CLI release archives. It puts `lecturn` in
+`~/.local/bin`. If your shell reports `command not found` afterwards, that
+directory is not on your `PATH` yet; the installer prints the line to add. Set
+`LECTURN_CHANNEL=nightly` to install the nightly train, or `LECTURN_VERSION` to
+pin an exact version. The executable is built for Apple Silicon Macs, Linux x64,
+and Windows x64; on other platforms the script tells you to use `npx lecturn`
+instead.
+
+| Task                                             | Command                                                        |
+| ------------------------------------------------ | -------------------------------------------------------------- |
+| Start the server and open the web app            | `lecturn`                                                      |
+| Start the server without a browser               | `lecturn serve`                                                |
+| Keep it running in the background (macOS, Linux) | `lecturn service install` ([details](./background-service.md)) |
+| Move to the newest release                       | `lecturn update`                                               |
+| Remove it again                                  | `lecturn uninstall`                                            |
+
+With `npx`, run the same commands as `npx lecturn@latest <command>`. Service
+installation and `lecturn update` stay unavailable until a Lecturn runtime is
+published; see [Running in the background](./background-service.md). Run
+`lecturn --help` for the full reference.
+
+### Intel Macs
+
+There is no `lecturn` executable for Intel Macs (the desktop app is available)
+because Node cannot produce a single executable there. Use `npx lecturn`, or
+build a server from source with Node.js 24 and `vp` (see
 [Vite+](https://viteplus.dev/guide/)):
 
 ```bash
@@ -42,9 +74,8 @@ cd lecturn && vp i && vp run build:desktop
 node apps/server/dist/bin.mjs
 ```
 
-A server run this way is a plain Node program: `lecturn update` and the background
-service do not apply, so update it with `git pull` and a rebuild, and start it
-however you run other Node processes.
+`lecturn update` and the background service do not apply to a server run this
+way; update it with `git pull` and a rebuild.
 
 ## Desktop app
 
@@ -53,7 +84,7 @@ Download a Lecturn installer from [GitHub Releases](https://github.com/Nurozen/l
 ### Windows Subsystem for Linux
 
 Choose a WSL distro in **Settings → Connections** to run agents and projects
-there. Install provider CLIs inside that distro. Lecturn installs its matching
+there. Install the provider CLIs inside that distro. Lecturn installs its own
 server runtime there automatically; the first launch after an app update can
 take longer.
 

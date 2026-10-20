@@ -31,7 +31,7 @@ describe("066 collision compatibility", () => {
   it.effect("creates the thread pull request table on a fresh database", () =>
     Effect.gen(function* () {
       const executed = yield* runMigrations();
-      assert.deepEqual(executed.at(-1), [67, "MessageContextTitleStateCompatibility"]);
+      assert.deepEqual(executed.at(-1), [68, "PullRequestFilesViewedCompatibility"]);
       assert.deepEqual(yield* linkRows, []);
       assert.deepEqual(yield* runMigrations(), []);
     }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
@@ -46,6 +46,7 @@ describe("066 collision compatibility", () => {
       assert.deepEqual(yield* runMigrations(), [
         [66, "ProjectionThreadPullRequestsCompatibility"],
         [67, "MessageContextTitleStateCompatibility"],
+        [68, "PullRequestFilesViewedCompatibility"],
       ]);
       assert.deepEqual(
         yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= 65 ORDER BY migration_id`,
@@ -81,7 +82,7 @@ describe("066 collision compatibility", () => {
 
       const executed = yield* runMigrations();
       assert.deepEqual(executed[0], [51, "SagaWorkbench"]);
-      assert.deepEqual(executed.at(-1), [67, "MessageContextTitleStateCompatibility"]);
+      assert.deepEqual(executed.at(-1), [68, "PullRequestFilesViewedCompatibility"]);
       assert.deepEqual(
         yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= 50 ORDER BY migration_id`,
         ledger,

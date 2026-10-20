@@ -26,6 +26,7 @@ import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { ProviderInstanceIcon } from "../../components/ProviderIcon";
 import type { ThreadRowProviderInstance } from "./thread-provider-instance";
 import { cn } from "../../lib/cn";
+import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { relativeTime } from "../../lib/time";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
@@ -35,6 +36,7 @@ import { ActiveThreadBorder } from "./ActiveThreadBorder";
 import { buildThreadForkMenuItems } from "./thread-fork-menu";
 import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regeneration-menu";
 import {
+  THREAD_LIST_V2_SETTLED_PAGE_COUNT,
   resolveThreadListV2SnoozeMenuSelection,
   resolveThreadListV2SnoozeGateExpiryMs,
   resolveThreadListV2Status,
@@ -100,88 +102,149 @@ const LEGACY_MENU_ACTIONS: MenuAction[] = [
 /** Rounded-row radius shared with the v1 sidebar rows. */
 const SIDEBAR_V2_ROW_RADIUS = 22;
 
-/** Section label + rule: the only structure in an otherwise flat list. */
-export const ThreadListV2SectionDivider = memo(function ThreadListV2SectionDivider(props: {
+/**
+ * Shared section chrome (upstream #12363 shape). Plain dividers stay a flat
+ * label + rule; disclosure shelves (snoozed / settled) keep Lecturn's glass
+ * capsule so they read as tappable controls.
+ */
+function ThreadListV2Section(props: {
   readonly label: string;
   readonly pane?: "screen" | "sidebar";
+  readonly tone?: "default" | "snoozed" | "settled";
+  readonly disclosure?: {
+    readonly expanded: boolean;
+    readonly disabled?: boolean;
+    readonly onToggle: () => void;
+    readonly accessibilityLabel: string;
+    readonly accessibilityHint: string;
+  };
 }) {
-  return (
+  const tone = props.tone ?? "default";
+  const snoozed = tone === "snoozed";
+  const content = (
+    <>
+      <Text
+        className={cn(
+          "text-xs font-lecturn-medium",
+          snoozed
+            ? "text-foreground-secondary"
+            : tone === "settled"
+              ? "text-foreground-muted"
+              : "text-foreground-tertiary",
+        )}
+      >
+        {props.label}
+      </Text>
+      <View className={cn("h-px flex-1", snoozed ? "bg-primary/20" : "bg-border")} />
+      {props.disclosure ? (
+        tone === "settled" ? (
+          <ThreadHierarchyChevron direction="down" expanded={props.disclosure.expanded} size={10} />
+        ) : (
+          <SymbolView
+            name="chevron.down"
+            size={10}
+            tintColorClassName={snoozed ? "accent-icon-muted" : "accent-foreground-muted"}
+            type="monochrome"
+            style={{ transform: [{ rotate: props.disclosure.expanded ? "180deg" : "0deg" }] }}
+          />
+        )
+      ) : null}
+    </>
+  );
+
+  return props.disclosure ? (
+    <Pressable
+      accessibilityHint={props.disclosure.accessibilityHint}
+      accessibilityLabel={props.disclosure.accessibilityLabel}
+      accessibilityRole="button"
+      accessibilityState={{
+        disabled: props.disclosure.disabled,
+        expanded: props.disclosure.expanded,
+      }}
+      className={cn("mb-2 mt-3", props.pane === "sidebar" ? "mx-0" : "mx-[14px]")}
+      disabled={props.disclosure.disabled}
+      onPress={props.disclosure.onToggle}
+      style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+    >
+      <GlassCard radius={22} className="min-h-[44px] flex-row items-center gap-2.5 px-4 py-2">
+        {content}
+      </GlassCard>
+    </Pressable>
+  ) : (
     <View
       className={cn(
         "mb-1.5 mt-4 flex-row items-center gap-2.5",
         props.pane === "sidebar" ? "px-3" : "px-5",
       )}
     >
-      <Text className="text-xs font-lecturn-medium text-foreground-tertiary">{props.label}</Text>
-      <View className="h-px flex-1 bg-border" />
+      {content}
     </View>
   );
+}
+
+/** Section label + rule: the only structure in an otherwise flat list. */
+export const ThreadListV2SectionDivider = memo(function ThreadListV2SectionDivider(props: {
+  readonly label: string;
+  readonly pane?: "screen" | "sidebar";
+}) {
+  return <ThreadListV2Section {...props} />;
 });
 
-export const ThreadListV2SnoozedShelfHeader = memo(function ThreadListV2SnoozedShelfHeader(props: {
+type ThreadListV2ShelfHeaderProps = {
   readonly count: number;
   readonly disabled?: boolean;
   readonly expanded: boolean;
   readonly onToggle: () => void;
   readonly pane?: "screen" | "sidebar";
-}) {
+};
+
+function ThreadListV2ShelfHeader(
+  props: ThreadListV2ShelfHeaderProps & { readonly kind: "snoozed" | "settled" },
+) {
+  const label = props.kind === "snoozed" ? "Snoozed" : "Settled";
   return (
-    <Pressable
-      accessibilityHint={
-        props.expanded ? "Collapses the snoozed threads." : "Expands the snoozed threads."
-      }
-      accessibilityLabel={props.count === 1 ? "1 snoozed thread" : `${props.count} snoozed threads`}
-      accessibilityRole="button"
-      accessibilityState={{ disabled: props.disabled, expanded: props.expanded }}
-      className={cn("mb-2 mt-3", props.pane === "sidebar" ? "mx-0" : "mx-[14px]")}
-      disabled={props.disabled}
-      onPress={props.onToggle}
-      style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-    >
-      <GlassCard radius={22} className="min-h-[44px] flex-row items-center gap-2.5 px-4 py-2">
-        <Text className="text-xs font-lecturn-medium text-foreground-secondary">
-          {props.expanded ? "Snoozed" : `Snoozed (${props.count})`}
-        </Text>
-        <View className="h-px flex-1 bg-primary/20" />
-        <SymbolView
-          name="chevron.down"
-          size={10}
-          tintColorClassName="accent-icon-muted"
-          type="monochrome"
-          style={{ transform: [{ rotate: props.expanded ? "180deg" : "0deg" }] }}
-        />
-      </GlassCard>
-    </Pressable>
+    <ThreadListV2Section
+      label={props.expanded ? label : `${label} (${props.count})`}
+      pane={props.pane}
+      tone={props.kind}
+      disclosure={{
+        expanded: props.expanded,
+        disabled: props.disabled,
+        onToggle: props.onToggle,
+        accessibilityLabel: `${props.count} ${props.kind} ${props.count === 1 ? "thread" : "threads"}`,
+        accessibilityHint: `${props.expanded ? "Collapses" : "Expands"} the ${props.kind} threads.`,
+      }}
+    />
   );
+}
+
+export const ThreadListV2SnoozedShelfHeader = memo(function ThreadListV2SnoozedShelfHeader(
+  props: ThreadListV2ShelfHeaderProps,
+) {
+  return <ThreadListV2ShelfHeader {...props} kind="snoozed" />;
 });
 
-export const ThreadListV2SettledShelfHeader = memo(function ThreadListV2SettledShelfHeader(props: {
-  readonly count: number;
-  readonly disabled?: boolean;
-  readonly expanded: boolean;
-  readonly onToggle: () => void;
-  readonly pane?: "screen" | "sidebar";
+export const ThreadListV2SettledShelfHeader = memo(function ThreadListV2SettledShelfHeader(
+  props: ThreadListV2ShelfHeaderProps,
+) {
+  return <ThreadListV2ShelfHeader {...props} kind="settled" />;
+});
+
+export const ThreadListV2ShowMoreRow = memo(function ThreadListV2ShowMoreRow(props: {
+  readonly hiddenCount: number;
+  readonly onPress: () => void;
 }) {
   return (
     <Pressable
-      accessibilityHint={
-        props.expanded ? "Collapses the settled threads." : "Expands the settled threads."
-      }
-      accessibilityLabel={props.count === 1 ? "1 settled thread" : `${props.count} settled threads`}
       accessibilityRole="button"
-      accessibilityState={{ disabled: props.disabled, expanded: props.expanded }}
-      className={cn("mb-2 mt-3", props.pane === "sidebar" ? "mx-0" : "mx-[14px]")}
-      disabled={props.disabled}
-      onPress={props.onToggle}
+      accessibilityLabel={`Show ${Math.min(props.hiddenCount, THREAD_LIST_V2_SETTLED_PAGE_COUNT)} more settled threads`}
+      onPress={props.onPress}
+      className="mx-4 mt-2 items-center rounded-full border border-border bg-card py-3"
       style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
     >
-      <GlassCard radius={22} className="min-h-[44px] flex-row items-center gap-2.5 px-4 py-2">
-        <Text className="text-xs font-lecturn-medium text-foreground-muted">
-          {props.expanded ? "Settled" : `Settled (${props.count})`}
-        </Text>
-        <View className="h-px flex-1 bg-border" />
-        <ThreadHierarchyChevron direction="down" expanded={props.expanded} size={10} />
-      </GlassCard>
+      <Text className="text-xs font-lecturn-medium text-foreground-muted">
+        Show more ({props.hiddenCount} settled hidden)
+      </Text>
     </Pressable>
   );
 });
@@ -636,6 +699,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === "fork-thread") handleFork();
       if (nativeEvent.event === "rename") handleRename();
       if (nativeEvent.event === "regenerate-title") handleRegenerateTitle();
+      if (nativeEvent.event === "copy-thread-id") {
+        copyTextWithHaptic(thread.id, { target: "thread-id" });
+      }
       if (nativeEvent.event === "delete") handleDelete();
       if (nativeEvent.event === "snooze:custom") {
         setCustomSnoozeOpen(true);
@@ -758,7 +824,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           <SymbolView
             name="pin"
             size={11}
-            tintColorClassName={"accent-foreground-muted"}
+            tintColorClassName="accent-foreground-muted"
             type="monochrome"
           />
         ) : null}
@@ -975,7 +1041,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     );
 
   return (
-    <>
+    <View collapsable={false}>
       {customSnoozeOpen && (
         <CustomSnoozeSheet onClose={() => setCustomSnoozeOpen(false)} onSnooze={handleSnooze} />
       )}
@@ -1018,6 +1084,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                     },
                   ]
                 : []),
+              { id: "copy-thread-id", title: "Copy thread ID", image: "doc.on.doc" },
               ...(snoozedRow
                 ? snoozedMenuActions
                 : !props.settlementSupported
@@ -1035,6 +1102,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           </ControlPillMenu>
         )}
       </ThreadSwipeable>
-    </>
+    </View>
   );
 });

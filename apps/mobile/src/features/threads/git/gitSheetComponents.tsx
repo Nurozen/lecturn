@@ -1,8 +1,9 @@
 import { GlassCard } from "../../../components/GlassCard";
 import { SymbolView } from "../../../components/AppSymbol";
-import type { ComponentProps } from "react";
-import { Pressable, View } from "react-native";
+import type { ComponentProps, ReactNode } from "react";
+import { Platform, Pressable, View } from "react-native";
 import { AppText as Text } from "../../../components/AppText";
+import { MaterialButton } from "../../../components/MaterialButton";
 import { cn } from "../../../lib/cn";
 
 /* ─── Shared sheet components ──────────────────────────────────────── */
@@ -14,6 +15,18 @@ export function SheetActionButton(props: {
   readonly tone?: "primary" | "secondary" | "danger";
   readonly onPress: () => void;
 }) {
+  if (Platform.OS === "android")
+    return (
+      <View className="flex-1">
+        <MaterialButton
+          label={props.label}
+          tone={props.tone}
+          disabled={props.disabled}
+          onPress={props.onPress}
+          fullWidth
+        />
+      </View>
+    );
   const tone = props.tone ?? "secondary";
   const textColorClassName =
     tone === "primary"
@@ -60,15 +73,22 @@ export function SheetActionButton(props: {
 
 export function MetaCard(props: { readonly label: string; readonly value: string }) {
   return (
-    <GlassCard className="gap-1 px-4 py-3">
+    <MetaCardContainer>
       <Text className="text-foreground-muted text-2xs font-lecturn-bold tracking-[0.9px] uppercase">
         {props.label}
       </Text>
       <Text selectable className="text-foreground text-sm font-medium" numberOfLines={1}>
         {props.value}
       </Text>
-    </GlassCard>
+    </MetaCardContainer>
   );
+}
+
+function MetaCardContainer(props: { readonly children: ReactNode }) {
+  if (Platform.OS === "android") {
+    return <View className="gap-1 rounded-[20px] bg-card px-4 py-3">{props.children}</View>;
+  }
+  return <GlassCard className="gap-1 px-4 py-3">{props.children}</GlassCard>;
 }
 
 export function SheetListRow(props: {
@@ -81,30 +101,50 @@ export function SheetListRow(props: {
   return (
     <Pressable
       accessibilityRole="button"
-      className="min-h-14 flex-row items-center gap-3 rounded-2xl px-1 py-3 active:opacity-70 disabled:opacity-[0.45]"
+      className={
+        Platform.OS === "android"
+          ? "min-h-16 flex-row items-center gap-4 px-4 py-3 active:bg-subtle disabled:opacity-[0.45]"
+          : "min-h-14 flex-row items-center gap-3 rounded-2xl px-1 py-3 active:opacity-70 disabled:opacity-[0.45]"
+      }
       disabled={props.disabled}
       onPress={props.onPress}
     >
-      <View className="h-10 w-10 items-center justify-center rounded-full border border-border-subtle bg-glass-surface">
+      <View
+        className={
+          Platform.OS === "android"
+            ? "size-6 items-center justify-center"
+            : "h-10 w-10 items-center justify-center rounded-full border border-border-subtle bg-glass-surface"
+        }
+      >
         <SymbolView
           name={props.icon}
-          size={16}
-          tintColorClassName={"accent-icon"}
+          size={Platform.OS === "android" ? 24 : 16}
+          tintColorClassName="accent-icon"
           type="monochrome"
         />
       </View>
       <View className="flex-1 gap-0.5">
-        <Text className="text-foreground text-base font-lecturn-bold">{props.title}</Text>
+        <Text
+          className={
+            Platform.OS === "android"
+              ? "text-foreground text-base font-lecturn-medium"
+              : "text-foreground text-base font-lecturn-bold"
+          }
+        >
+          {props.title}
+        </Text>
         {props.subtitle ? (
           <Text className="text-foreground-muted text-xs leading-snug">{props.subtitle}</Text>
         ) : null}
       </View>
-      <SymbolView
-        name="chevron.right"
-        size={13}
-        tintColorClassName={"accent-icon-subtle"}
-        type="monochrome"
-      />
+      {Platform.OS !== "android" ? (
+        <SymbolView
+          name="chevron.right"
+          size={13}
+          tintColorClassName="accent-icon-subtle"
+          type="monochrome"
+        />
+      ) : null}
     </Pressable>
   );
 }

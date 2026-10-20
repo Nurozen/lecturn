@@ -86,6 +86,7 @@ function registryLayer(reconciles: Ref.Ref<ReadonlyArray<Reconcile>>) {
           new Set(),
         ),
         retryNow: () => Effect.die("unused"),
+        setCompatibility: () => Effect.die("unused"),
         state: () => Effect.die("unused"),
         stateChanges: () => Stream.die("unused"),
         run: () => Effect.die("unused"),

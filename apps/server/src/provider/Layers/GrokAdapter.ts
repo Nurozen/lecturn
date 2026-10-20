@@ -452,13 +452,15 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             | "AssistantItemCompleted"
             | "PlanUpdated"
             | "ToolCallUpdated"
-            | "ContentDelta";
+            | "ContentDelta"
+            | "ThoughtDelta";
         }
       >,
     ) {
       if (
         ctx.livenessTurnId !== turnId ||
-        (event._tag === "ContentDelta" && event.text.length === 0)
+        ((event._tag === "ContentDelta" || event._tag === "ThoughtDelta") &&
+          event.text.length === 0)
       ) {
         return;
       }
@@ -1364,7 +1366,8 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   event._tag === "AssistantItemCompleted" ||
                   event._tag === "PlanUpdated" ||
                   event._tag === "ToolCallUpdated" ||
-                  event._tag === "ContentDelta"
+                  event._tag === "ContentDelta" ||
+                  event._tag === "ThoughtDelta"
                 ) {
                   yield* recordTurnActivity(ctx, notificationTurnId, event);
                 }
@@ -1440,6 +1443,19 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     }
                     return;
                   }
+                  case "ThoughtDelta":
+                    yield* offerRuntimeEvent(
+                      makeAcpContentDeltaEvent({
+                        stamp,
+                        provider: PROVIDER,
+                        threadId: ctx.threadId,
+                        turnId: notificationTurnId,
+                        streamKind: "reasoning_text",
+                        text: event.text,
+                        rawPayload: event.rawPayload,
+                      }),
+                    );
+                    return;
                   case "ContentDelta":
                     yield* offerRuntimeEvent(
                       makeAcpContentDeltaEvent({
@@ -1502,6 +1518,14 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
 
     const sendTurn: GrokAdapterShape["sendTurn"] = (input) =>
       Effect.gen(function* () {
+        if (/^\/always-approve(?:\s|$)/i.test(input.input?.trim() ?? "")) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "session/prompt",
+            detail:
+              "Change permissions with Lecturn's permission selector instead of /always-approve.",
+          });
+        }
         const prepared = yield* withThreadLock(
           input.threadId,
           Effect.gen(function* () {
@@ -1613,11 +1637,15 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               const displayModel = currentModelId
                 ? resolveGrokAcpBaseModelId(currentModelId)
                 : undefined;
-              const runtimeInstructions = buildRuntimeInstructions({
-                harness: "Grok",
-                model: displayModel,
-                reasoningEffort: normalizeGrokReasoningEffort(requestedTurnReasoningEffort),
-              });
+              // ACP slash commands must receive only their own arguments.
+              const runtimeInstructions =
+                text && /^\/[^\s/]+(?:\s|$)/.test(text)
+                  ? undefined
+                  : buildRuntimeInstructions({
+                      harness: "Grok",
+                      model: displayModel,
+                      reasoningEffort: normalizeGrokReasoningEffort(requestedTurnReasoningEffort),
+                    });
               for (let yieldAttempt = 0; yieldAttempt < 8; yieldAttempt += 1) {
                 yield* Effect.yieldNow;
               }
@@ -1735,9 +1763,15 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               if (liveCtx.interruptedTurnIds.has(prepared.turnId)) {
                 return { _tag: "Skipped" as const, interrupted: true };
               }
+              // Native slash commands carry no runtime instructions and must
+              // receive only their own arguments, so they skip retrieved context.
               contextual = prepareContextualDispatch(
                 input,
-                prepared.steeringTurnId === undefined ? "fresh" : "steered",
+                prepared.runtimeInstructions === undefined
+                  ? "skipped"
+                  : prepared.steeringTurnId === undefined
+                    ? "fresh"
+                    : "steered",
                 boundInstanceId,
                 prepared.acpSessionId,
               );
@@ -1751,7 +1785,9 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                       ...(contextual.text
                         ? [{ type: "text" as const, text: contextual.text }]
                         : []),
-                      { type: "text", text: prepared.runtimeInstructions },
+                      ...(prepared.runtimeInstructions
+                        ? [{ type: "text" as const, text: prepared.runtimeInstructions }]
+                        : []),
                     ],
                   },
                   { dispatched },

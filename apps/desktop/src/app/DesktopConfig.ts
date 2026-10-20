@@ -9,10 +9,10 @@ const trimNonEmptyOption = (value: string): Option.Option<string> => {
 };
 
 const trimmedString = (name: string) =>
-  Config.string(name).pipe(Config.option, Config.map(Option.flatMap(trimNonEmptyOption)));
+  Config.String(name).pipe(Config.option, Config.map(Option.flatMap(trimNonEmptyOption)));
 
 const optionalBoolean = (name: string) =>
-  Config.boolean(name).pipe(Config.option, Config.map(Option.getOrElse(() => false)));
+  Config.Boolean(name).pipe(Config.option, Config.map(Option.getOrElse(() => false)));
 
 const commaSeparatedStrings = (name: string) =>
   trimmedString(name).pipe(
@@ -38,15 +38,15 @@ export const DesktopConfig = Config.all({
   xdgConfigHome: trimmedString("XDG_CONFIG_HOME"),
   xdgDataHome: trimmedString("XDG_DATA_HOME"),
   lecturnHome: trimmedString("LECTURN_HOME"),
-  devServerUrl: Config.url("VITE_DEV_SERVER_URL").pipe(Config.option),
+  devServerUrl: Config.URL("VITE_DEV_SERVER_URL").pipe(Config.option),
   appUserModelIdOverride: trimmedString("LECTURN_DESKTOP_APP_USER_MODEL_ID"),
   devRemoteLecturnServerEntryPath: trimmedString("LECTURN_DEV_REMOTE_LECTURN_SERVER_ENTRY_PATH"),
-  configuredBackendPort: Config.port("LECTURN_PORT").pipe(Config.option),
+  configuredBackendPort: Config.Port("LECTURN_PORT").pipe(Config.option),
   commitHashOverride: trimmedString("LECTURN_COMMIT_HASH"),
   desktopLanHostOverride: trimmedString("LECTURN_DESKTOP_LAN_HOST"),
   desktopHttpsEndpointUrls: commaSeparatedStrings("LECTURN_DESKTOP_HTTPS_ENDPOINTS"),
   otlpTracesUrl: trimmedString("LECTURN_OTLP_TRACES_URL"),
-  otlpExportIntervalMs: Config.int("LECTURN_OTLP_EXPORT_INTERVAL_MS").pipe(
+  otlpExportIntervalMs: Config.Int("LECTURN_OTLP_EXPORT_INTERVAL_MS").pipe(
     Config.withDefault(10_000),
   ),
   otlpHeaders: Config.schema(OtlpHeadersFromString, "LECTURN_OTLP_HEADERS").pipe(Config.option),
@@ -56,7 +56,7 @@ export const DesktopConfig = Config.all({
   appImagePath: trimmedString("APPIMAGE"),
   disableAutoUpdate: optionalBoolean("LECTURN_DISABLE_AUTO_UPDATE"),
   mockUpdates: optionalBoolean("LECTURN_DESKTOP_MOCK_UPDATES"),
-  mockUpdateServerPort: Config.port("LECTURN_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(
+  mockUpdateServerPort: Config.Port("LECTURN_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(
     Config.withDefault(3000),
   ),
 });

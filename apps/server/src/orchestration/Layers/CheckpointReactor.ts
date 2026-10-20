@@ -15,6 +15,8 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type * as PlatformError from "effect/PlatformError";
@@ -92,8 +94,29 @@ const make = Effect.gen(function* () {
   const checkpointStore = yield* CheckpointStore.CheckpointStore;
   const receiptBus = yield* RuntimeReceiptBus;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const pullRequests = yield* PullRequestService.PullRequestService;
+  const queuedEntryRefreshes = new Set<string>();
+  const entryRefreshWorker = yield* makeDrainableWorker((cwd: string) =>
+    Effect.sync(() => queuedEntryRefreshes.delete(cwd)).pipe(
+      Effect.andThen(workspaceEntries.refresh(cwd)),
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.failCause(cause)
+          : Effect.logWarning("failed to refresh checkpoint workspace entries", {
+              cwd,
+            }),
+      ),
+    ),
+  );
+  const refreshWorkspaceEntries = Effect.fn("refreshWorkspaceEntries")(function* (cwd: string) {
+    if (queuedEntryRefreshes.has(cwd)) return;
+    queuedEntryRefreshes.add(cwd);
+    yield* entryRefreshWorker.enqueue(cwd);
+  });
+
   const startedTurns = new Map<ThreadId, TurnId>();
   const pending = new Set<ThreadId>();
 
@@ -252,10 +275,20 @@ const make = Effect.gen(function* () {
     const fromCheckpointRef = checkpointRefForThreadTurn(input.threadId, fromTurnCount);
     const targetCheckpointRef = checkpointRefForThreadTurn(input.threadId, input.turnCount);
 
-    const fromCheckpointExists = yield* checkpointStore.hasCheckpointRef({
-      cwd: input.cwd,
-      checkpointRef: fromCheckpointRef,
-    });
+    const fromCheckpointExists = yield* checkpointStore
+      .hasCheckpointRef({
+        cwd: input.cwd,
+        checkpointRef: fromCheckpointRef,
+      })
+      .pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("checkpoint capture previous ref lookup failed", {
+            threadId: input.threadId,
+            checkpointRef: fromCheckpointRef,
+            category: error._tag,
+          }).pipe(Effect.as(false)),
+        ),
+      );
     if (!fromCheckpointExists) {
       yield* Effect.logWarning("checkpoint capture missing pre-turn baseline", {
         threadId: input.threadId,
@@ -271,7 +304,7 @@ const make = Effect.gen(function* () {
 
     // Refresh the workspace entry index so the @-mention file picker
     // reflects files created or deleted during this turn.
-    yield* workspaceEntries.refresh(input.cwd);
+    yield* refreshWorkspaceEntries(input.cwd);
 
     // Git may have been initialized during this turn, leaving no pre-turn
     // snapshot. Keep the completion checkpoint for future turns, but do not
@@ -633,7 +666,6 @@ const make = Effect.gen(function* () {
             ? Effect.failCause(cause)
             : Effect.logWarning("failed to refresh git status after turn completion", {
                 threadId: event.threadId,
-                cause: Cause.pretty(cause),
               }),
         ),
       ),
@@ -703,6 +735,55 @@ const make = Effect.gen(function* () {
       checkpointRef: baselineCheckpointRef,
       createdAt: event.occurredAt,
     });
+  });
+
+  // Checkpoints contain the whole checkout, so restoring a shared cwd can erase a sibling's work.
+  const isRestoreWorkspaceIsolated = Effect.fn("isRestoreWorkspaceIsolated")(function* (
+    thread: { readonly id: ThreadId; readonly worktreePath: string | null },
+    cwd: string,
+  ) {
+    if (thread.worktreePath === null) return false;
+    const canonicalCwd = yield* fileSystem.realPath(cwd);
+    if ((yield* fileSystem.realPath(thread.worktreePath)) !== canonicalCwd) return false;
+    const active = yield* projectionSnapshotQuery.getShellSnapshot();
+    const archived = yield* projectionSnapshotQuery.getArchivedShellSnapshot();
+    const projects = [...active.projects, ...archived.projects];
+    const paths = new Set<string>();
+    for (const other of [...active.threads, ...archived.threads]) {
+      if (other.id === thread.id) continue;
+      const candidate =
+        other.worktreePath ??
+        projects.find((project) => project.id === other.projectId)?.workspaceRoot;
+      if (candidate !== undefined) paths.add(candidate);
+    }
+    for (const session of yield* providerService.listSessions()) {
+      if (
+        session.threadId !== thread.id &&
+        session.status !== "closed" &&
+        session.cwd !== undefined
+      )
+        paths.add(session.cwd);
+    }
+    for (const candidate of paths) {
+      const otherCwd = yield* fileSystem
+        .realPath(candidate)
+        .pipe(
+          Effect.catch((error) =>
+            error.reason._tag === "NotFound" ? Effect.succeed(null) : Effect.fail(error),
+          ),
+        );
+      if (otherCwd === null) continue;
+      const isWithin = (parent: string, child: string) => {
+        const relative = path.relative(parent, child);
+        return (
+          relative === "" ||
+          (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`))
+        );
+      };
+      // Parent and nested owners can both have files inside the restore target.
+      if (isWithin(canonicalCwd, otherCwd) || isWithin(otherCwd, canonicalCwd)) return false;
+    }
+    return true;
   });
 
   const handleRevertRequested = Effect.fn("handleRevertRequested")(function* (
@@ -815,6 +896,17 @@ const make = Effect.gen(function* () {
     // Check availability before changing provider history; perform the destructive
     // restore only after the provider accepts the rollback.
     if (checkpointCwd && targetCheckpointRef) {
+      if (!(yield* isRestoreWorkspaceIsolated(thread, checkpointCwd))) {
+        yield* appendRevertFailureActivity({
+          threadId: thread.id,
+          turnCount: event.payload.turnCount,
+          detail:
+            "File restore requires an isolated worktree. This workspace may contain changes from another thread. Rewind the conversation without restoring files instead.",
+          createdAt: now,
+        }).pipe(Effect.catch(() => Effect.void));
+        return;
+      }
+
       const checkpointAvailable =
         (yield* checkpointStore.hasCheckpointRef({
           cwd: checkpointCwd,
@@ -862,7 +954,7 @@ const make = Effect.gen(function* () {
 
       // Refresh the workspace entry index so the @-mention file picker
       // reflects the reverted filesystem state.
-      yield* workspaceEntries.refresh(checkpointCwd);
+      yield* refreshWorkspaceEntries(checkpointCwd);
     }
 
     const staleCheckpointRefs: Array<CheckpointRef> = [];
@@ -1045,7 +1137,10 @@ const make = Effect.gen(function* () {
 
   return {
     start,
-    drain: worker.drain.pipe(Effect.andThen(statusRefreshWorker.drain)),
+    drain: worker.drain.pipe(
+      Effect.andThen(statusRefreshWorker.drain),
+      Effect.andThen(entryRefreshWorker.drain),
+    ),
   } satisfies CheckpointReactorShape;
 });
 

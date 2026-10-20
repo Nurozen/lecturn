@@ -98,6 +98,28 @@ vi.mock("../../components/ControlPill", () => ({
     return children;
   },
 }));
+// Android routes SegmentedControl to the native Material control; keep plain
+// pressable segments so tests can switch tabs by label.
+vi.mock("../../components/SegmentedControl", () => ({
+  SegmentedControl: ({
+    options,
+    onSelect,
+  }: {
+    options: readonly { value: string | number; label: string }[];
+    onSelect: (value: string | number) => void;
+  }) => {
+    for (const option of options) ui.press.set(option.label, () => onSelect(option.value));
+    return null;
+  },
+}));
+vi.mock("../settings/components/SettingsScreen", () => ({
+  SettingsScreen: ({ children, trailing }: { children: ReactNode; trailing?: ReactNode }) => (
+    <>
+      {children}
+      {trailing}
+    </>
+  ),
+}));
 vi.mock("../settings/components/SettingsSection", () => ({
   SettingsSection: ({ children }: { children: ReactNode }) => children,
 }));

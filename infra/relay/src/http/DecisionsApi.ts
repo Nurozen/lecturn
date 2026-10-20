@@ -6,7 +6,7 @@ import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpIncomingMessage from "effect/unstable/http/HttpIncomingMessage";
-import * as FileSystem from "effect/FileSystem";
+import * as ByteSize from "effect/ByteSize";
 import {
   DecisionEvaluationRequest,
   DecisionFundingApprovalRequest,
@@ -217,7 +217,7 @@ const makeDecisionsHandler = (routeConfig: DecisionsRouteConfig) =>
       }
       return json({ message: "Not found" }, 404);
     }).pipe(
-      Effect.provideService(HttpIncomingMessage.MaxBodySize, FileSystem.Size(256 * 1024)),
+      Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(256 * 1024)),
       Effect.withTracerEnabled(false),
       Effect.catchTag("DecisionEvaluationError", (error) =>
         Effect.succeed(

@@ -4,11 +4,13 @@ import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useCallback, useMemo } from "react";
-import { Platform, View } from "react-native";
+import { Platform, ScrollView, useWindowDimensions, View } from "react-native";
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AndroidSheetHeader } from "../../../components/AndroidScreenHeader";
+import { MaterialScreenContent } from "../../../components/MaterialScreenContent";
+import { NativeStackScreenOptions } from "../../../native/StackHeader";
 import { AppText as Text } from "../../../components/AppText";
 import { useSelectedThreadWorktree } from "../../../state/use-selected-thread-worktree";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
@@ -29,6 +31,7 @@ type GitConfirmSheetProps = StaticScreenProps<{
 export function GitConfirmSheet(props: GitConfirmSheetProps) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const gitState = useSelectedThreadGitState(props.route.params.repoKey);
   const gitActions = useSelectedThreadGitActions(props.route.params.repoKey);
 
@@ -105,43 +108,104 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
   ]);
 
   return (
-    <View collapsable={false} className="flex-1 bg-sheet">
-      {params.repoKey ? (
+    <View
+      collapsable={false}
+      className={Platform.OS === "android" ? "bg-sheet" : "flex-1 bg-sheet"}
+      style={Platform.OS === "android" ? { maxHeight: windowHeight * 0.92 } : undefined}
+    >
+      {params.repoKey && Platform.OS !== "android" ? (
         <Text className="px-5 pt-3 text-sm font-lecturn-bold">
           {selectedThreadGitRepository?.repoName ?? "Repository unavailable"}
         </Text>
       ) : null}
       {Platform.OS === "android" ? (
-        <AndroidSheetHeader title="Confirm action" onBack={() => navigation.goBack()} />
+        <NativeStackScreenOptions
+          options={{
+            sheetCornerRadius: 28,
+            sheetAllowedDetents: "fitToContents",
+          }}
+        />
+      ) : null}
+      {Platform.OS === "android" ? (
+        <AndroidSheetHeader
+          title="Confirm action"
+          onBack={() => navigation.goBack()}
+          hideBottomBorder
+        />
       ) : (
         <View className="min-h-4 pt-2" />
       )}
 
-      <View className="items-center gap-1 px-5 pb-3 pt-4">
-        <Text className="text-xs font-lecturn-bold tracking-[1px] uppercase text-foreground-muted">
-          Confirm
-        </Text>
-        <Text className="text-center text-3xl font-lecturn-bold">
-          {copy?.title ?? "Run action on default branch?"}
-        </Text>
-        <Text className="text-center text-foreground-secondary text-sm font-medium leading-normal">
-          {copy?.description ?? "Choose how to continue."}
-        </Text>
-      </View>
+      <MaterialScreenContent fitToContents>
+        <ScrollView
+          className={Platform.OS === "android" ? "shrink grow-0" : "flex-1"}
+          showsVerticalScrollIndicator={false}
+          contentContainerClassName={Platform.OS === "android" ? "gap-2 p-2" : undefined}
+          contentContainerStyle={
+            Platform.OS === "android"
+              ? { paddingBottom: Math.max(insets.bottom, 18) + 8 }
+              : undefined
+          }
+        >
+          <View
+            className={
+              Platform.OS === "android"
+                ? "gap-2 rounded-[20px] bg-card p-3"
+                : "items-center gap-1 px-5 pb-3 pt-4"
+            }
+          >
+            {Platform.OS !== "android" ? (
+              <Text className="text-xs font-lecturn-bold tracking-[1px] uppercase text-foreground-muted">
+                Confirm
+              </Text>
+            ) : null}
+            {params.repoKey && Platform.OS === "android" ? (
+              <Text className="text-foreground-secondary text-sm font-lecturn-medium">
+                {selectedThreadGitRepository?.repoName ?? "Repository unavailable"}
+              </Text>
+            ) : null}
+            <Text
+              className={
+                Platform.OS === "android"
+                  ? "text-xl font-lecturn-medium"
+                  : "text-center text-3xl font-lecturn-bold"
+              }
+            >
+              {copy?.title ?? "Run action on default branch?"}
+            </Text>
+            <Text
+              className={
+                Platform.OS === "android"
+                  ? "text-foreground-secondary text-base leading-normal"
+                  : "text-center text-foreground-secondary text-sm font-medium leading-normal"
+              }
+            >
+              {copy?.description ?? "Choose how to continue."}
+            </Text>
+          </View>
 
-      <View className="gap-3 px-5 pt-2" style={{ paddingBottom: Math.max(insets.bottom, 18) + 8 }}>
-        <SheetActionButton
-          icon="arrow.right.circle"
-          label={copy?.continueLabel ?? "Continue"}
-          onPress={() => void continuePendingAction()}
-        />
-        <SheetActionButton
-          icon="arrow.branch"
-          label="Feature branch & continue"
-          tone="primary"
-          onPress={() => void movePendingActionToFeatureBranch()}
-        />
-      </View>
+          <View
+            className={Platform.OS === "android" ? "gap-2" : "gap-3 px-5 pt-2"}
+            style={
+              Platform.OS === "android"
+                ? undefined
+                : { paddingBottom: Math.max(insets.bottom, 18) + 8 }
+            }
+          >
+            <SheetActionButton
+              icon="arrow.right.circle"
+              label={copy?.continueLabel ?? "Continue"}
+              onPress={() => void continuePendingAction()}
+            />
+            <SheetActionButton
+              icon="arrow.branch"
+              label="Feature branch & continue"
+              tone="primary"
+              onPress={() => void movePendingActionToFeatureBranch()}
+            />
+          </View>
+        </ScrollView>
+      </MaterialScreenContent>
     </View>
   );
 }

@@ -1,3 +1,5 @@
+import { RequestActionButton } from "./RequestActionButton";
+import { QuestionAttachments } from "./QuestionAttachments";
 import type { ApprovalRequestId, UserInputQuestion } from "@lecturn/contracts";
 import { useCallback, useRef } from "react";
 import { Platform, Pressable, ScrollView, View, type LayoutChangeEvent } from "react-native";
@@ -13,7 +15,6 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { USER_INPUT_TOGGLE_DURATION_MS } from "./pendingUserInputLayout";
-import { QuestionAttachments } from "./QuestionAttachments";
 
 import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
@@ -338,31 +339,15 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
           );
         })}
       </ScrollView>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{
-          disabled:
-            props.answers === null ||
-            props.respondingUserInputId === props.pendingUserInput.requestId,
-        }}
-        className={cn(
-          "items-center justify-center rounded-2xl px-4 py-3.5",
-          props.answers ? "bg-primary" : "bg-subtle-strong",
-        )}
+      <RequestActionButton
+        label="Submit answers"
+        size="large"
+        tone={props.answers ? "primary" : "secondary"}
         disabled={
           props.answers === null || props.respondingUserInputId === props.pendingUserInput.requestId
         }
         onPress={() => void props.onSubmit()}
-      >
-        <Text
-          className={cn(
-            "font-lecturn-extrabold text-sm",
-            props.answers ? "text-primary-foreground" : "text-foreground-muted",
-          )}
-        >
-          Submit answers
-        </Text>
-      </Pressable>
+      />
       {props.pendingUserInput.dismissible ? (
         <Pressable
           accessibilityRole="button"

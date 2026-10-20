@@ -3,6 +3,14 @@ import { environmentCatalog } from "../../connection/catalog";
 import { connectAccountsReadyAtom, useConnectAccounts } from "../cloud/knownAccounts";
 import { expandMobileAccountSection } from "../home/accountSectionExpansion";
 import { resolveThreadAccountRoute } from "./threadAccountRoute";
+import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
+import { enqueueThreadOutboxMessage } from "../../state/thread-outbox";
+import {
+  getComposerDraftSnapshot,
+  clearComposerDraftContent,
+} from "../../state/use-composer-drafts";
+import { useWorktreeSetup } from "./use-worktree-setup";
+import { worktreeSetupAgentStarted } from "@lecturn/client-runtime/worktree-setup";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import {
   StackActions,
@@ -13,6 +21,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as Option from "effect/Option";
 import {
+  CommandId,
+  MessageId,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   ThreadId,
@@ -37,18 +47,18 @@ import { recoverFailedThreadDraft } from "../../state/recover-failed-thread-draf
 import { useEnvironmentQuery } from "../../state/query";
 import { dismissGitActionResult, useGitActionProgress } from "../../state/use-vcs-action-state";
 import { vcsEnvironment } from "../../state/vcs";
-
 import { EmptyState } from "../../components/EmptyState";
 import {
+  AndroidHeaderIconButton,
   AndroidScreenHeader,
   type AndroidHeaderAction,
 } from "../../components/AndroidScreenHeader";
+import { AndroidWorkspaceSidebarButton } from "../layout/workspace-sidebar-toolbar";
 import { LoadingScreen } from "../../components/LoadingScreen";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { buildThreadImportLabel } from "../../lib/threadActivity";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { connectionTone } from "../connection/connectionTone";
-
 import {
   useRemoteConnections,
   useRemoteConnectionStatus,
@@ -288,7 +298,7 @@ function ThreadRouteContent(
     readonly selectedThreadDetailState: ReturnType<typeof useSelectedThreadDetailState>;
   },
 ) {
-  const { materialYouStyleLayoutActive, themeVariables } = useAppearancePreferences();
+  const { themeVariables } = useAppearancePreferences();
   const headerColor = themeVariables["--color-header"];
   const {
     fileInspector,
@@ -949,10 +959,12 @@ function ThreadRouteContent(
       });
     }
     if (selectedThreadCwd !== null) {
+      const filesVisible = inspectorMode === "files" && panes.auxiliaryPaneVisible;
       actions.push({
-        accessibilityLabel: "Open files",
+        accessibilityLabel: filesVisible ? "Close files" : "Open files",
+        selected: filesVisible,
         icon: "folder",
-        onPress: handleOpenFilesInspector,
+        onPress: filesVisible ? toggleAuxiliaryPane : handleOpenFilesInspector,
       });
     }
     if (selectedThreadProject?.workspaceRoot) {
@@ -975,23 +987,17 @@ function ThreadRouteContent(
         onPress: () => void handleForkCurrentThread(),
       });
     }
-    if (fileInspector.supported && selectedThreadCwd !== null) {
-      actions.push({
-        accessibilityLabel: "Toggle inspector",
-        icon: "sidebar.right",
-        onPress: handleToggleInspector,
-      });
-    }
     return actions;
   }, [
-    fileInspector.supported,
     forkAvailable,
     forkSupported,
     handleForkCurrentThread,
+    inspectorMode,
+    panes.auxiliaryPaneVisible,
     handleOpenFilesInspector,
     handleOpenTerminal,
     handleOpenGitInspector,
-    handleToggleInspector,
+    toggleAuxiliaryPane,
     props.onReturnToThread,
     selectedThreadCwd,
     selectedThreadProject?.workspaceRoot,
@@ -1027,23 +1033,100 @@ function ThreadRouteContent(
       }),
     );
   }, [navigation, routeThreadIdentity, selectedThreadCreation, selectedThreadProject]);
-  // A worktree bootstrap records a running setup on the thread before its
-  // turn, so a thread opened from another device (or after a restart) shows
-  // the same preparing state the sending client does. A starting session is
-  // not enough on its own: an ordinary first turn projects one too.
-  const awaitingBootstrapTurn = useMemo(
-    () =>
-      selectedThreadDetail !== null &&
-      selectedThreadDetail.latestTurn === null &&
-      selectedThreadDetail.activities.some(
-        (activity) =>
-          activity.kind === "worktree-setup" &&
-          typeof activity.payload === "object" &&
-          activity.payload !== null &&
-          (activity.payload as { phase?: unknown }).phase === "running",
-      ),
-    [selectedThreadDetail],
-  );
+  const worktreeSetup = useWorktreeSetup({
+    environmentId: selectedThread?.environmentId ?? null,
+    threadId: selectedThread?.id ?? null,
+    activities: selectedThreadDetail?.activities ?? [],
+    preparing:
+      selectedThreadCreation?.message.creation?.workspaceMode === "worktree" &&
+      selectedThreadCreation.outcome == null,
+    turnStarted: selectedThreadDetail?.latestTurn?.startedAt != null,
+    followUpSent:
+      composer.selectedThreadFeed.filter(
+        (entry) => entry.type === "message" && entry.message.role === "user",
+      ).length +
+        composer.selectedThreadQueuedMessages.length >
+      1,
+  });
+  const awaitingBootstrapTurn =
+    worktreeSetup?.phase === "running" && !worktreeSetupAgentStarted(worktreeSetup);
+  const cancelWorktreeSetup = useAtomCommand(vcsEnvironment.cancelWorktreeSetup);
+  const handleCancelWorktreeSetup = useCallback(() => {
+    if (!selectedThread) return;
+    void cancelWorktreeSetup({
+      environmentId: selectedThread.environmentId,
+      input: { threadId: selectedThread.id },
+    });
+  }, [cancelWorktreeSetup, selectedThread]);
+  const [localResendMessageId, setLocalResendMessageId] = useState<string | null>(null);
+  const handleWorkLocally = useCallback(async () => {
+    if (!selectedThread || !selectedThreadCreation) return;
+    const result = await cancelWorktreeSetup({
+      environmentId: selectedThread.environmentId,
+      input: { threadId: selectedThread.id },
+    });
+    if (result._tag === "Success" && result.value.cancelled) {
+      setLocalResendMessageId(selectedThreadCreation.message.messageId);
+    }
+  }, [cancelWorktreeSetup, selectedThread, selectedThreadCreation]);
+  // Wait for the outbox to restore the cancelled send before queuing its replacement.
+  useEffect(() => {
+    const pending = selectedThreadCreation;
+    if (
+      !localResendMessageId ||
+      pending?.message.messageId !== localResendMessageId ||
+      pending.outcome?.kind !== "failed"
+    )
+      return;
+    setLocalResendMessageId(null);
+    const original = pending.message;
+    if (!original.creation) return;
+    const metadata = makeTurnCommandMetadata();
+    const replacement = {
+      ...original,
+      commandId: CommandId.make(metadata.commandId),
+      messageId: MessageId.make(metadata.messageId),
+      threadId: ThreadId.make(metadata.threadId),
+      createdAt: metadata.createdAt,
+      creation: {
+        ...original.creation,
+        workspaceMode: "local" as const,
+        branch: null,
+        worktreePath: null,
+      },
+    };
+    void enqueueThreadOutboxMessage(replacement)
+      .then(() => {
+        const draftKey = restoredNewTaskDraftKey(original.messageId);
+        const restored = getComposerDraftSnapshot(draftKey);
+        // Leave any edits made during cancellation in their recovery draft.
+        if (
+          restored.text === original.text &&
+          JSON.stringify(restored.context) === JSON.stringify(original.context) &&
+          restored.attachments.length === original.attachments.length &&
+          restored.attachments.every(
+            (attachment, index) => attachment.id === original.attachments[index]?.id,
+          )
+        ) {
+          clearComposerDraftContent(draftKey, { deferAttachmentCleanup: true });
+        }
+        clearPendingThreadCreationOutcome(
+          scopedThreadKey(original.environmentId, original.threadId),
+        );
+        navigation.dispatch(
+          StackActions.replace("Thread", {
+            environmentId: String(replacement.environmentId),
+            threadId: String(replacement.threadId),
+          }),
+        );
+      })
+      .catch((error) =>
+        Alert.alert(
+          "Could not work locally",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+  }, [localResendMessageId, navigation, selectedThreadCreation]);
   const creationState = ((): ThreadDetailScreenProps["creationState"] => {
     if (selectedThreadCreation === null) {
       return awaitingBootstrapTurn ? { kind: "preparing", preparingWorktree: true } : null;
@@ -1104,13 +1187,12 @@ function ThreadRouteContent(
       <GitActionProgressOverlay progress={gitActionProgress} onDismiss={dismissGitActionResult} />
 
       <View
-        className={materialYouStyleLayoutActive ? "flex-1 bg-thread-canvas" : "flex-1 bg-screen"}
+        className={Platform.OS === "android" ? "flex-1 bg-thread-canvas" : "flex-1 bg-screen"}
         style={
-          materialYouStyleLayoutActive
+          Platform.OS === "android"
             ? {
                 borderTopLeftRadius: 28,
                 borderTopRightRadius: 28,
-                marginRight: layout.usesSplitView ? 8 : 0,
                 overflow: "hidden",
               }
             : undefined
@@ -1128,6 +1210,32 @@ function ThreadRouteContent(
           activeWorkStartedAt={composer.activeWorkStartedAt}
           isCompacting={composer.isCompacting}
           creationState={creationState}
+          setupWorkingStartedAt={
+            composer.activeWorkStartedAt !== null &&
+            selectedThreadDetail?.activities.some(
+              (activity) => activity.kind === "worktree-setup",
+            ) &&
+            composer.selectedThreadFeed.filter(
+              (entry) => entry.type === "message" && entry.message.role === "user",
+            ).length <= 1
+              ? composer.activeWorkStartedAt
+              : null
+          }
+          worktreeSetup={
+            worktreeSetup
+              ? {
+                  snapshot: worktreeSetup,
+                  turnStartedAt: selectedThreadDetail?.latestTurn?.startedAt ?? null,
+                  working: composer.activeWorkStartedAt !== null,
+                  turnStarted: selectedThreadDetail?.latestTurn?.startedAt != null,
+                  onCancel: handleCancelWorktreeSetup,
+                  onWorkLocally:
+                    selectedThreadCreation?.outcome == null && selectedThreadCreation
+                      ? handleWorkLocally
+                      : null,
+                }
+              : null
+          }
           activePendingApproval={requests.activePendingApproval}
           respondingApprovalId={requests.respondingApprovalId}
           activePendingUserInput={requests.activePendingUserInput}
@@ -1155,7 +1263,7 @@ function ThreadRouteContent(
           onNativePasteText={composer.onNativePasteText}
           onRemoveDraftImage={composer.onRemoveDraftImage}
           serverConfig={serverConfig}
-          onStopThread={handleStopThread}
+          onStopThread={awaitingBootstrapTurn ? handleCancelWorktreeSetup : handleStopThread}
           onSendMessage={composer.onSendMessage}
           onReconnectEnvironment={handleReconnectEnvironment}
           onUpdateThreadModelSelection={composer.onUpdateModelSelection}
@@ -1210,9 +1318,7 @@ function ThreadRouteContent(
               : undefined,
           unstable_headerSubtitle: usesNativeHeaderGlass ? headerSubtitle : undefined,
           contentStyle:
-            Platform.OS === "android" && materialYouStyleLayoutActive
-              ? { backgroundColor: headerColor }
-              : undefined,
+            Platform.OS === "android" && true ? { backgroundColor: headerColor } : undefined,
         }}
       />
 
@@ -1220,6 +1326,21 @@ function ThreadRouteContent(
         <AndroidScreenHeader
           title={selectedThread.title}
           subtitle={headerSubtitle}
+          leading={<AndroidWorkspaceSidebarButton />}
+          trailing={
+            fileInspector.supported && selectedThreadCwd !== null ? (
+              <AndroidHeaderIconButton
+                accessibilityLabel={
+                  inspectorMode !== null && panes.auxiliaryPaneVisible
+                    ? "Hide inspector"
+                    : "Show inspector"
+                }
+                icon="sidebar.right"
+                selected={inspectorMode !== null && panes.auxiliaryPaneVisible}
+                onPress={handleToggleInspector}
+              />
+            ) : null
+          }
           onBack={
             layout.usesSplitView
               ? undefined
@@ -1231,7 +1352,7 @@ function ThreadRouteContent(
                 }
           }
           actions={androidHeaderActions}
-          hideBottomBorder={materialYouStyleLayoutActive}
+          hideBottomBorder
         />
       ) : null}
 

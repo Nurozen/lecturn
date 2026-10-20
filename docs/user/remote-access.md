@@ -9,15 +9,16 @@ Lecturn Connect makes an environment available to your other devices without set
 up router forwarding. In the desktop app on the host, open **Settings →
 Connections**, sign in, and enable **Lecturn Connect** for that environment.
 
-For a command-line host, run:
+For a command-line host with the [`lecturn` CLI](./install.md#command-line),
+run the following (or `npx lecturn@latest connect` without installing):
 
 ```bash
-npx lecturn@latest connect
+lecturn connect
 ```
 
 Follow the sign-in instructions. Setup offers a
 [background service](./background-service.md); if you decline it, start the
-server with `npx lecturn serve`. Saving your sign-in alone does not make the machine
+server with `lecturn serve`. Saving your sign-in alone does not make the machine
 reachable.
 
 On your other device, sign in to the same Lecturn Connect account and choose the
@@ -42,13 +43,13 @@ For a command-line host, replace `<private-ip>` with the host's LAN or tailnet
 address:
 
 ```bash
-npx lecturn serve --host <private-ip>
+lecturn serve --host <private-ip>
 ```
 
 If a server is already running, generate a fresh link without restarting it:
 
 ```bash
-npx lecturn pair
+lecturn pair
 ```
 
 Scan the QR code on your phone or paste the pairing URL into **Add environment**
@@ -92,13 +93,13 @@ HTTPS** in **Settings → Connections**. Turn it off there to remove that route.
 To start a command-line server with Tailscale HTTPS:
 
 ```bash
-npx lecturn serve --tailscale-serve
+lecturn serve --tailscale-serve
 ```
 
 For an already-running server:
 
 ```bash
-npx lecturn pair --tailscale
+lecturn pair --tailscale
 ```
 
 The pairing link uses an address such as `https://machine.tailnet.ts.net/`.
@@ -110,7 +111,7 @@ tailscale serve --https=443 off
 ```
 
 If that port is already in use, choose another with
-`--tailscale-serve-port`. See `npx lecturn pair --help` for other pairing options.
+`--tailscale-serve-port`. See `lecturn pair --help` for other pairing options.
 
 ### Hosted web app
 
@@ -130,14 +131,17 @@ or reuses a server there and opens the port forward for you. Projects, provider
 credentials, and agent work stay on the remote machine.
 
 The remote host needs [provider setup](./install.md#providers). On Apple Silicon
-macOS and Linux x64 hosts, Lecturn downloads its matching server runtime, so they
-need no Node.js. Other hosts run Lecturn through `npx` and need a compatible
-[Node.js installation](./install.md#requirements) and npm. If launch cannot find
-Node or reports an incompatible version, check it through a non-interactive SSH
-session:
+macOS and Linux x64 hosts, the first launch downloads Lecturn's matching server
+runtime to `~/.lecturn/runtime`, so it takes longer than later ones. Those hosts
+need no Node.js, only `curl` or `wget`, `tar`, and `sha256sum` or `shasum`.
+Other hosts run Lecturn through `npx` and need a compatible
+[Node.js installation](./install.md#requirements) and npm.
+
+Provider CLIs, and Node on hosts that use `npx`, must be on the `PATH` of a
+non-interactive login shell there; check with:
 
 ```bash
-ssh user@example.com 'sh -lc "command -v node && node --version"'
+ssh user@example.com 'sh -lc "command -v claude codex node"'
 ```
 
 Configure your version manager for non-interactive shells if this differs from
@@ -156,7 +160,7 @@ For Antigravity's Google callback on a remote host, see
 On the host, **Settings → Connections** lets authorized administrators create
 pairing links and revoke client sessions. Revoking an unused link prevents new
 pairings; revoke a device's session to remove its existing access. Command-line
-management is available through `npx lecturn auth --help`.
+management is available through `lecturn auth --help`.
 
 A session with an open connection stays listed after its access credential
 expires.

@@ -2,8 +2,11 @@ import {
   SelectableMarkdownText as LecturnSelectableMarkdownText,
   type SelectableMarkdownTextProps,
 } from "@lecturn/mobile-markdown-text/renderer";
+import { useMemo } from "react";
 
 import { highlightCodeSnippet } from "../features/review/shikiReviewHighlighter";
+import { themeColorWithAlpha } from "../lib/mobileTheme";
+import { useUniwindTheme } from "../lib/useUniwindTheme";
 
 type MobileSelectableMarkdownTextProps = Omit<SelectableMarkdownTextProps, "highlightCode">;
 
@@ -20,5 +23,18 @@ export function hasNativeSelectableMarkdownText(): boolean {
 }
 
 export function SelectableMarkdownText(props: MobileSelectableMarkdownTextProps) {
-  return <LecturnSelectableMarkdownText {...props} highlightCode={highlightCodeSnippet} />;
+  const theme = useUniwindTheme();
+  const selectionColor = themeColorWithAlpha(theme["--color-primary"], 0.32);
+  const selectionHandleColor = theme["--color-primary"];
+  const textStyle = useMemo(
+    () => ({ selectionColor, selectionHandleColor, ...props.textStyle }),
+    [props.textStyle, selectionColor, selectionHandleColor],
+  );
+  return (
+    <LecturnSelectableMarkdownText
+      {...props}
+      textStyle={textStyle}
+      highlightCode={highlightCodeSnippet}
+    />
+  );
 }

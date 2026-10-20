@@ -1,3 +1,4 @@
+import Migration0068 from "./Migrations/068_PullRequestFilesViewedCompatibility.ts";
 import Migration0067 from "./Migrations/067_MessageContextTitleStateCompatibility.ts";
 import Migration0066 from "./Migrations/066_ProjectionThreadPullRequestsCompatibility.ts";
 import Migration0065 from "./Migrations/065_ProjectionThreadsActiveOrderCompatibility.ts";
@@ -170,6 +171,7 @@ const migrationEntries = [
   [65, "ProjectionThreadsActiveOrderCompatibility", Migration0065],
   [66, "ProjectionThreadPullRequestsCompatibility", Migration0066],
   [67, "MessageContextTitleStateCompatibility", Migration0067],
+  [68, "PullRequestFilesViewedCompatibility", Migration0068],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

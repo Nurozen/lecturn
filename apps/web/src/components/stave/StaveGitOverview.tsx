@@ -9,10 +9,11 @@ import {
   type OrchestrationProjectShell,
   type ScopedThreadRef,
 } from "@lecturn/contracts";
-import { GitBranchIcon, GitPullRequestIcon, RefreshCwIcon } from "lucide-react";
+import { GitBranchIcon, RefreshCwIcon } from "lucide-react";
 import type { DraftId } from "~/composerDraftStore";
 import { useEnvironmentQuery } from "~/state/query";
 import { vcsEnvironment } from "~/state/vcs";
+import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -142,7 +143,7 @@ function RepoRow({
                 variant="outline"
                 onClick={() => onOpenPullRequest(data.pr!.number, repositoryTarget)}
               >
-                <GitPullRequestIcon className="size-3.5" />
+                <PullRequestGlyph.pullRequest className="size-3.5" />
                 PR #{data.pr.number}
               </Button>
             ) : null}

@@ -5,7 +5,7 @@ import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpIncomingMessage from "effect/unstable/http/HttpIncomingMessage";
-import * as FileSystem from "effect/FileSystem";
+import * as ByteSize from "effect/ByteSize";
 import { createClerkClient } from "@clerk/backend";
 import { verifyWebhook } from "@clerk/backend/webhooks";
 import { RelayTeamPolicy } from "@lecturn/contracts";
@@ -297,7 +297,7 @@ export function teamsRoutes(routeConfig: TeamsRouteConfig) {
         }
         return json({ ok: true });
       }).pipe(
-        Effect.provideService(HttpIncomingMessage.MaxBodySize, FileSystem.Size(512 * 1024)),
+        Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(512 * 1024)),
         Effect.catchTag("TeamError", (error) =>
           Effect.succeed(
             json(

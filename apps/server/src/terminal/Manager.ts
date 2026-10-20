@@ -7,6 +7,7 @@ import { StaveRuntimeFence, noop as noopRuntimeFence } from "../stave/StaveRunti
  *
  * @module TerminalManager
  */
+import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import {
   DEFAULT_TERMINAL_ID,
   PHONE_AUTH_TERMINAL_THREAD_ID,
@@ -2540,142 +2541,147 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     }).pipe(Effect.ignoreCause({ log: true })),
   );
 
+  // The Stave fence check runs before the workspace lease, so a start under a
+  // fenced space fails fast instead of queueing behind a held lease.
   const openLocked = Effect.fn("terminal.openLocked")(function* (input: TerminalOpenInput) {
     return yield* runtimeFence
       .withStart(
         input.cwd,
-        Effect.gen(function* () {
-          const terminalId = input.terminalId;
-          yield* assertValidCwd(input.cwd);
+        withWorkspaceLease(
+          path.resolve(input.worktreePath ?? input.cwd),
+          Effect.gen(function* () {
+            const terminalId = input.terminalId;
+            yield* assertValidCwd(input.cwd);
 
-          const sessionKey = toSessionKey(input.threadId, terminalId);
-          const existing = yield* getSession(input.threadId, terminalId);
-          if (Option.isNone(existing)) {
-            yield* flushPersist(input.threadId, terminalId);
-            const history = yield* readHistory(input.threadId, terminalId);
-            const cols = input.cols ?? DEFAULT_OPEN_COLS;
-            const rows = input.rows ?? DEFAULT_OPEN_ROWS;
-            const session: TerminalSessionState = {
-              threadId: input.threadId,
-              terminalId,
-              cwd: input.cwd,
-              worktreePath: input.worktreePath ?? null,
-              status: "starting",
-              pid: null,
-              history,
-              pendingHistoryControlSequence: "",
-              pendingProcessEvents: [],
-              pendingProcessEventIndex: 0,
-              processEventDrainRunning: false,
-              exitCode: null,
-              exitSignal: null,
-              updatedAt: yield* nowIso,
-              eventSequence: 0,
-              cols,
-              rows,
-              process: null,
-              unsubscribeData: null,
-              unsubscribeExit: null,
-              hasRunningSubprocess: false,
-              childCommandLabel: null,
-              runtimeEnv: normalizedRuntimeEnv(input.env),
-            };
-
-            const createdSession = session;
-            yield* modifyManagerState((state) => {
-              const sessions = new Map(state.sessions);
-              sessions.set(sessionKey, createdSession);
-              return [undefined, { ...state, sessions }] as const;
-            });
-
-            yield* evictInactiveSessionsIfNeeded();
-            yield* startSession(
-              session,
-              {
+            const sessionKey = toSessionKey(input.threadId, terminalId);
+            const existing = yield* getSession(input.threadId, terminalId);
+            if (Option.isNone(existing)) {
+              yield* flushPersist(input.threadId, terminalId);
+              const history = yield* readHistory(input.threadId, terminalId);
+              const cols = input.cols ?? DEFAULT_OPEN_COLS;
+              const rows = input.rows ?? DEFAULT_OPEN_ROWS;
+              const session: TerminalSessionState = {
                 threadId: input.threadId,
                 terminalId,
                 cwd: input.cwd,
-                ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
+                worktreePath: input.worktreePath ?? null,
+                status: "starting",
+                pid: null,
+                history,
+                pendingHistoryControlSequence: "",
+                pendingProcessEvents: [],
+                pendingProcessEventIndex: 0,
+                processEventDrainRunning: false,
+                exitCode: null,
+                exitSignal: null,
+                updatedAt: yield* nowIso,
+                eventSequence: 0,
                 cols,
                 rows,
-                ...(input.env ? { env: input.env } : {}),
-              },
-              "started",
-            );
-            return snapshot(session);
-          }
+                process: null,
+                unsubscribeData: null,
+                unsubscribeExit: null,
+                hasRunningSubprocess: false,
+                childCommandLabel: null,
+                runtimeEnv: normalizedRuntimeEnv(input.env),
+              };
 
-          const liveSession = existing.value;
-          const nextRuntimeEnv = normalizedRuntimeEnv(input.env);
-          const currentRuntimeEnv = liveSession.runtimeEnv;
-          const targetCols = input.cols ?? liveSession.cols;
-          const targetRows = input.rows ?? liveSession.rows;
-          const runtimeEnvChanged = !Equal.equals(currentRuntimeEnv, nextRuntimeEnv);
-          const nextWorktreePath =
-            input.worktreePath !== undefined
-              ? (input.worktreePath ?? null)
-              : liveSession.worktreePath;
-          const launchContextChanged =
-            liveSession.cwd !== input.cwd ||
-            runtimeEnvChanged ||
-            liveSession.worktreePath !== nextWorktreePath;
+              const createdSession = session;
+              yield* modifyManagerState((state) => {
+                const sessions = new Map(state.sessions);
+                sessions.set(sessionKey, createdSession);
+                return [undefined, { ...state, sessions }] as const;
+              });
 
-          if (launchContextChanged) {
-            yield* stopProcess(liveSession);
-            liveSession.cwd = input.cwd;
-            liveSession.worktreePath = nextWorktreePath;
-            liveSession.runtimeEnv = nextRuntimeEnv;
-            liveSession.history.clear();
-            liveSession.pendingHistoryControlSequence = "";
-            liveSession.pendingProcessEvents = [];
-            liveSession.pendingProcessEventIndex = 0;
-            liveSession.processEventDrainRunning = false;
-            yield* persistHistory(
-              liveSession.threadId,
-              liveSession.terminalId,
-              liveSession.history,
-            );
-          } else if (liveSession.status === "exited" || liveSession.status === "error") {
-            liveSession.runtimeEnv = nextRuntimeEnv;
-            liveSession.worktreePath = nextWorktreePath;
-            liveSession.history.clear();
-            liveSession.pendingHistoryControlSequence = "";
-            liveSession.pendingProcessEvents = [];
-            liveSession.pendingProcessEventIndex = 0;
-            liveSession.processEventDrainRunning = false;
-            yield* persistHistory(
-              liveSession.threadId,
-              liveSession.terminalId,
-              liveSession.history,
-            );
-          }
+              yield* evictInactiveSessionsIfNeeded();
+              yield* startSession(
+                session,
+                {
+                  threadId: input.threadId,
+                  terminalId,
+                  cwd: input.cwd,
+                  ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
+                  cols,
+                  rows,
+                  ...(input.env ? { env: input.env } : {}),
+                },
+                "started",
+              );
+              return snapshot(session);
+            }
 
-          if (!liveSession.process) {
-            yield* startSession(
-              liveSession,
-              {
-                threadId: input.threadId,
-                terminalId,
-                cwd: input.cwd,
-                worktreePath: liveSession.worktreePath,
-                cols: targetCols,
-                rows: targetRows,
-                ...(input.env ? { env: input.env } : {}),
-              },
-              "started",
-            );
+            const liveSession = existing.value;
+            const nextRuntimeEnv = normalizedRuntimeEnv(input.env);
+            const currentRuntimeEnv = liveSession.runtimeEnv;
+            const targetCols = input.cols ?? liveSession.cols;
+            const targetRows = input.rows ?? liveSession.rows;
+            const runtimeEnvChanged = !Equal.equals(currentRuntimeEnv, nextRuntimeEnv);
+            const nextWorktreePath =
+              input.worktreePath !== undefined
+                ? (input.worktreePath ?? null)
+                : liveSession.worktreePath;
+            const launchContextChanged =
+              liveSession.cwd !== input.cwd ||
+              runtimeEnvChanged ||
+              liveSession.worktreePath !== nextWorktreePath;
+
+            if (launchContextChanged) {
+              yield* stopProcess(liveSession);
+              liveSession.cwd = input.cwd;
+              liveSession.worktreePath = nextWorktreePath;
+              liveSession.runtimeEnv = nextRuntimeEnv;
+              liveSession.history.clear();
+              liveSession.pendingHistoryControlSequence = "";
+              liveSession.pendingProcessEvents = [];
+              liveSession.pendingProcessEventIndex = 0;
+              liveSession.processEventDrainRunning = false;
+              yield* persistHistory(
+                liveSession.threadId,
+                liveSession.terminalId,
+                liveSession.history,
+              );
+            } else if (liveSession.status === "exited" || liveSession.status === "error") {
+              liveSession.runtimeEnv = nextRuntimeEnv;
+              liveSession.worktreePath = nextWorktreePath;
+              liveSession.history.clear();
+              liveSession.pendingHistoryControlSequence = "";
+              liveSession.pendingProcessEvents = [];
+              liveSession.pendingProcessEventIndex = 0;
+              liveSession.processEventDrainRunning = false;
+              yield* persistHistory(
+                liveSession.threadId,
+                liveSession.terminalId,
+                liveSession.history,
+              );
+            }
+
+            if (!liveSession.process) {
+              yield* startSession(
+                liveSession,
+                {
+                  threadId: input.threadId,
+                  terminalId,
+                  cwd: input.cwd,
+                  worktreePath: liveSession.worktreePath,
+                  cols: targetCols,
+                  rows: targetRows,
+                  ...(input.env ? { env: input.env } : {}),
+                },
+                "started",
+              );
+              return snapshot(liveSession);
+            }
+
+            if (liveSession.cols !== targetCols || liveSession.rows !== targetRows) {
+              yield* resizePtyProcess(liveSession, liveSession.process, targetCols, targetRows);
+              liveSession.cols = targetCols;
+              liveSession.rows = targetRows;
+              liveSession.updatedAt = yield* nowIso;
+            }
+
             return snapshot(liveSession);
-          }
-
-          if (liveSession.cols !== targetCols || liveSession.rows !== targetRows) {
-            yield* resizePtyProcess(liveSession, liveSession.process, targetCols, targetRows);
-            liveSession.cols = targetCols;
-            liveSession.rows = targetRows;
-            liveSession.updatedAt = yield* nowIso;
-          }
-
-          return snapshot(liveSession);
-        }),
+          }),
+        ),
       )
       .pipe(
         Effect.catchTag(
@@ -3059,7 +3065,14 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         input.cwd,
         withThreadLock(
           input.threadId,
-          resolveLaunchInputEnvironment(input).pipe(Effect.flatMap(restartResolved)),
+          resolveLaunchInputEnvironment(input).pipe(
+            Effect.flatMap((resolved) =>
+              withWorkspaceLease(
+                path.resolve(resolved.worktreePath ?? resolved.cwd),
+                restartResolved(resolved),
+              ),
+            ),
+          ),
         ),
       )
       .pipe(

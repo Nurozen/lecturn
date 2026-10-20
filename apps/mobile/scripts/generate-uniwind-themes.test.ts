@@ -52,4 +52,37 @@ describe("generate mobile Uniwind themes", () => {
     expect(variables.dark["--color-screen"]).toBe("#061522");
     expect(Object.keys(variables.light)).toEqual(Object.keys(variables.dark));
   });
+
+  it("gives every theme the same variables and a fixed Clerk palette for its appearance", () => {
+    const css =
+      NodeFS.readFileSync(NodePath.resolve(import.meta.dirname, "../global.css"), "utf8") +
+      renderUniwindThemesCSS();
+    const themes = new Map<string, Map<string, string>>(
+      ["light", "dark", ...customThemeNames].map((name) => [name, new Map()]),
+    );
+    for (const [, name, body] of css.matchAll(/@variant ([\w-]+) \{([^}]+)\}/gu)) {
+      const variables = themes.get(name!);
+      for (const [, variable, value] of body!.matchAll(/(--[\w-]+):\s*([^;]+);/gu)) {
+        variables?.set(variable!, value!.trim().toLowerCase());
+      }
+    }
+
+    const lightVariables = themes.get("light")!;
+    for (const [name, variables] of themes) {
+      expect([...variables.keys()].sort(), name).toEqual([...lightVariables.keys()].sort());
+      const isDark = name === "dark" || name.endsWith("-dark");
+      expect(
+        Object.fromEntries(
+          [...variables].filter(([variable]) => variable.startsWith("--color-clerk-")),
+        ),
+        name,
+      ).toEqual({
+        "--color-clerk-page": isDark ? "#0a1927" : "#f4eddf",
+        "--color-clerk-foreground": isDark ? "#e8edf0" : "#302a22",
+        "--color-clerk-foreground-muted": isDark ? "#9eacb7" : "#756650",
+        "--color-clerk-border": isDark ? "rgba(38, 55, 70, 0.06)" : "rgba(214, 200, 178, 0.06)",
+        "--color-clerk-danger": isDark ? "#fca5a5" : "#dc2626",
+      });
+    }
+  });
 });
