@@ -1,4 +1,4 @@
-import { makeAggregateState } from "./AgentActivityAggregate.ts";
+import { makeAggregateState } from "./agentActivityAggregate.ts";
 import { filterPermittedActivity } from "../teams/TeamNotifications.ts";
 import type {
   RelayAgentActivityAggregateState,
@@ -813,7 +813,7 @@ const recoverApnsDeliveryTransportError = (
 interface LiveActivityDeliveryTarget {
   readonly account_label?: string | null;
   readonly account_color?: string | null;
-  readonly ios_major_version?: number;
+  readonly ios_major_version?: number | null;
   readonly user_id: string;
   readonly device_id: string;
   readonly bundle_id?: string | null;
@@ -826,9 +826,9 @@ interface LiveActivityDeliveryTarget {
 // DeviceTokenNotForTopic/BadDeviceToken, so per-device values override the
 // relay-wide defaults when present.
 function credentialsForTarget(
-  credentials: RelayConfiguration.RelayConfiguration["Service"]["apns"],
+  credentials: RelayConfiguration.ApnsCredentials,
   target: LiveActivityDeliveryTarget,
-): RelayConfiguration.RelayConfiguration["Service"]["apns"] {
+): RelayConfiguration.ApnsCredentials {
   return {
     ...credentials,
     ...(target.bundle_id ? { bundleId: target.bundle_id } : {}),
@@ -887,7 +887,7 @@ function makeLiveActivityDeliveryRequest(
     accountId: input.target.user_id,
     accountLabel: input.target.account_label ?? undefined,
     accountColor: input.target.account_color ?? undefined,
-    iosMajorVersion: input.target.ios_major_version,
+    iosMajorVersion: input.target.ios_major_version ?? undefined,
   };
   switch (input.kind) {
     case "live_activity_start":
@@ -1142,7 +1142,7 @@ export const make = Effect.gen(function* () {
     });
   });
 
-  const isCurrentSignedJobToken = Effect.fnUntraced(function* (input: {
+  const currentSignedJobTarget = Effect.fnUntraced(function* (input: {
     readonly target: LiveActivityDeliveryTarget;
     readonly kind: RelayDeliveryKind;
     readonly token: string;
@@ -1150,10 +1150,10 @@ export const make = Effect.gen(function* () {
     return yield* liveActivities.listTargets({ userId: input.target.user_id }).pipe(
       Effect.map((targets) => {
         const currentTarget = targets.find((row) => row.device_id === input.target.device_id);
-        return (
-          currentTarget !== undefined &&
+        return currentTarget &&
           expectedCurrentToken({ target: currentTarget, kind: input.kind }) === input.token
-        );
+          ? currentTarget
+          : null;
       }),
     );
   });
@@ -1177,6 +1177,16 @@ export const make = Effect.gen(function* () {
   const sendLiveActivity: ApnsDeliveries["Service"]["sendLiveActivity"] = Effect.fn(
     "relay.apns_deliveries.send_live_activity",
   )(function* (input) {
+    if (!config.apns) {
+      return {
+        deviceId: input.target.device_id,
+        kind: input.kind,
+        ok: false,
+        apnsStatus: null,
+        apnsReason: "APNs is disabled for this relay.",
+        apnsId: null,
+      };
+    }
     yield* Effect.annotateCurrentSpan({
       "relay.mobile.device_id": input.target.device_id,
       "user.id": input.target.user_id,
@@ -1233,6 +1243,7 @@ export const make = Effect.gen(function* () {
     const now = yield* DateTime.now;
     let aggregate =
       input.aggregate === null ? null : sanitizeAgentActivityAggregateState(input.aggregate);
+    let deliveryTarget: LiveActivityDeliveryTarget = input.target;
     const registeredTarget = (yield* liveActivities.listTargets({
       userId: input.target.user_id,
     })).find((row) => row.device_id === input.target.device_id);
@@ -1261,18 +1272,21 @@ export const make = Effect.gen(function* () {
       if (claim === "in_flight") {
         return yield* new ApnsDeliveryJobClaimInFlight({ sourceJobId: input.sourceJobId });
       }
-      const tokenIsCurrent = yield* isCurrentSignedJobToken({
+      const currentTarget = yield* currentSignedJobTarget({
         target: input.target,
         kind: input.kind,
         token: input.token,
       });
-      if (!tokenIsCurrent) {
+      if (!currentTarget) {
         yield* attempts.completeSourceJob({
           sourceJobId: input.sourceJobId,
           apnsReason: "Stale APNs delivery job skipped.",
         });
         return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
       }
+      // Route through the current registration: the device may have moved to
+      // another bundle or APNs environment since the job was signed.
+      deliveryTarget = currentTarget;
       if (input.kind === "live_activity_update" && input.alertEvents !== undefined) {
         // The card may contain progress from other environments by delivery time.
         // Rebuild its content, while keeping alert eligibility tied to the signed
@@ -1409,7 +1423,7 @@ export const make = Effect.gen(function* () {
         : request;
     const result = yield* apns
       .sendLiveActivityRequest({
-        credentials: credentialsForTarget(config.apns, input.target),
+        credentials: credentialsForTarget(config.apns, deliveryTarget),
         request: finalRequest,
         issuedAtUnixSeconds: epochSeconds,
       })
@@ -1470,12 +1484,23 @@ export const make = Effect.gen(function* () {
   const sendPushNotification: ApnsDeliveries["Service"]["sendPushNotification"] = Effect.fn(
     "relay.apns_deliveries.send_push_notification",
   )(function* (input) {
+    if (!config.apns) {
+      return {
+        deviceId: input.target.device_id,
+        kind: "push_notification",
+        ok: false,
+        apnsStatus: null,
+        apnsReason: "APNs is disabled for this relay.",
+        apnsId: null,
+      };
+    }
     yield* Effect.annotateCurrentSpan({
       "relay.mobile.device_id": input.target.device_id,
       "user.id": input.target.user_id,
       "relay.delivery.kind": "push_notification",
       ...(input.sourceJobId ? { "relay.delivery.job_id": input.sourceJobId } : {}),
     });
+    let deliveryTarget = input.target;
     if (
       !(yield* permitted(
         input.target.user_id,
@@ -1526,12 +1551,12 @@ export const make = Effect.gen(function* () {
       if (claim === "in_flight") {
         return yield* new ApnsDeliveryJobClaimInFlight({ sourceJobId: input.sourceJobId });
       }
-      const tokenIsCurrent = yield* isCurrentSignedJobToken({
+      const currentTarget = yield* currentSignedJobTarget({
         target: input.target,
         kind: "push_notification",
         token: input.token,
       });
-      if (!tokenIsCurrent) {
+      if (!currentTarget) {
         yield* attempts.completeSourceJob({
           sourceJobId: input.sourceJobId,
           apnsReason: "Stale APNs delivery job skipped.",
@@ -1556,6 +1581,7 @@ export const make = Effect.gen(function* () {
           kind: "push_notification",
         });
       }
+      deliveryTarget = currentTarget;
     }
     if (
       !(yield* permitted(
@@ -1574,7 +1600,7 @@ export const make = Effect.gen(function* () {
     }
     const result = yield* apns
       .sendPushNotificationRequest({
-        credentials: credentialsForTarget(config.apns, input.target),
+        credentials: credentialsForTarget(config.apns, deliveryTarget),
         request,
         issuedAtUnixSeconds: epochSeconds,
       })
@@ -1723,6 +1749,8 @@ export const make = Effect.gen(function* () {
   const sendPushNotificationForTarget = Effect.fnUntraced(function* (
     input: Parameters<ApnsDeliveries["Service"]["sendPushNotificationForTarget"]>[0],
   ) {
+    // APNs can be disabled for relays that only serve Android devices.
+    if (!config.apns) return null;
     const now = yield* DateTime.now;
     const decision = decidePushNotification({
       target: input.target,
@@ -1760,6 +1788,8 @@ export const make = Effect.gen(function* () {
   const sendForTarget = Effect.fnUntraced(function* (
     input: Parameters<ApnsDeliveries["Service"]["sendForTarget"]>[0],
   ) {
+    // APNs can be disabled for relays that only serve Android devices.
+    if (!config.apns) return null;
     const aggregate = yield* filterPermittedActivity(
       managedAccess,
       input.target.user_id,

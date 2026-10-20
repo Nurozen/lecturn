@@ -3,7 +3,7 @@ import { KeyboardController } from "react-native-keyboard-controller";
 
 import type { ComposerEditorHandle } from "../../components/ComposerEditor";
 
-type PresentationPhase = "closed" | "opening" | "visible";
+type PresentationPhase = "closed" | "opening" | "visible" | "restoring";
 
 /**
  * The navigator-level UIKit completion event added by the repo's
@@ -93,9 +93,11 @@ export function useThreadSettingsSheetPresentation(input: {
     clearDismissRestoreTimer();
     restorePendingRef.current = false;
     // The compact metadata strip can open settings without owning the
-    // keyboard. Preserve that layout and never steal focus on dismissal.
-    restoreFocusAfterDismissRef.current = input.isEditorFocused;
-    setKeepsComposerExpanded(input.isEditorFocused);
+    // keyboard. Preserve that layout and never steal focus on dismissal. A
+    // reopen during the post-dismissal "restoring" handoff keeps the restore.
+    const restoresEditorFocus = phase === "restoring" || input.isEditorFocused;
+    restoreFocusAfterDismissRef.current = restoresEditorFocus;
+    setKeepsComposerExpanded(restoresEditorFocus);
     setPhase("opening");
 
     const openingId = openingIdRef.current + 1;
@@ -113,7 +115,7 @@ export function useThreadSettingsSheetPresentation(input: {
       }
       setPhase("visible");
     });
-  }, [clearDismissRestoreTimer, input.editorRef, input.isEditorFocused]);
+  }, [clearDismissRestoreTimer, input.editorRef, input.isEditorFocused, phase]);
 
   const restoreEditorFocus = useCallback(() => {
     const focusRestoreId = focusRestoreIdRef.current + 1;
@@ -124,12 +126,11 @@ export function useThreadSettingsSheetPresentation(input: {
     // normally succeeds; the retries are insurance against UIKit briefly
     // refusing first-responder status right at the transition boundary.
     const restoreFocus = () => {
-      if (
-        !isMountedRef.current ||
-        focusRestoreIdRef.current !== focusRestoreId ||
-        isEditorFocusedRef.current ||
-        attemptsRemaining <= 0
-      ) {
+      if (!isMountedRef.current || focusRestoreIdRef.current !== focusRestoreId) {
+        return;
+      }
+      if (isEditorFocusedRef.current || attemptsRemaining <= 0) {
+        setPhase("closed");
         return;
       }
 
@@ -161,11 +162,15 @@ export function useThreadSettingsSheetPresentation(input: {
    */
   const onDismissed = useCallback(() => {
     isActiveRef.current = false;
-    setPhase("closed");
 
     if (!restoreFocusAfterDismissRef.current) {
+      setPhase("closed");
       return;
     }
+    // Keep the card expanded across the handoff back to its editor. With a
+    // hardware keyboard there is no software-keyboard travel to hide a collapse
+    // while the sheet dismissal and focus restoration finish.
+    setPhase("restoring");
     restoreFocusAfterDismissRef.current = false;
     restorePendingRef.current = true;
     clearDismissRestoreTimer();
@@ -189,7 +194,7 @@ export function useThreadSettingsSheetPresentation(input: {
   }, [runPendingDismissalRestore]);
 
   return {
-    isActive: phase !== "closed",
+    isActive: phase === "opening" || phase === "visible",
     isVisible: phase === "visible",
     keepsComposerExpanded: phase !== "closed" && keepsComposerExpanded,
     open,

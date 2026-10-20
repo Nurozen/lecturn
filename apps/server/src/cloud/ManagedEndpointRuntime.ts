@@ -118,6 +118,7 @@ const stopConnector = (connector: ActiveConnector | null) =>
       )
     : Effect.void;
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const reservation = yield* DeviceReservation.DeviceRelayReservation;
   const secrets = yield* ServerSecretStore.ServerSecretStore;

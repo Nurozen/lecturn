@@ -88,8 +88,8 @@ import { Input } from "../ui/input";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { ScrollArea } from "../ui/scroll-area";
 import { Spinner } from "../ui/spinner";
-import { WizardPanel, WizardSteps } from "../ui/wizard";
-import { Dialog, DialogHeader, DialogPopup, DialogTitle } from "../ui/dialog";
+import { WizardPanel, WizardSteps, WizardHeader } from "../ui/wizard";
+import { Dialog, DialogPopup } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
@@ -195,15 +195,18 @@ export function WelcomeWizard({
         showCloseButton={false}
         initialFocus={() => document.getElementById("onboarding-pairing-url") ?? true}
       >
-        <DialogTitle className="sr-only">Set up Lecturn</DialogTitle>
         <div className="flex min-h-0 flex-col">
-          <DialogHeader className="gap-4">
-            <div className="flex items-baseline gap-1.5" role="img" aria-label="Lecturn">
-              <LecturnWordmark className="size-8 shrink-0" aria-hidden />
-              <span className="text-[1.4rem] font-medium tracking-tight text-muted-foreground">
-                Lecturn
-              </span>
-            </div>
+          <WizardHeader
+            title="Set up Lecturn"
+            identity={
+              <div className="flex items-baseline gap-1.5" role="img" aria-label="Lecturn">
+                <LecturnWordmark className="size-8 shrink-0" aria-hidden />
+                <span className="text-[1.4rem] font-medium tracking-tight text-muted-foreground">
+                  Lecturn
+                </span>
+              </div>
+            }
+          >
             <WizardSteps
               steps={ONBOARDING_STAGES}
               currentStep={stageIndex}
@@ -213,9 +216,9 @@ export function WelcomeWizard({
                 setStep(index === 0 ? "connection" : "agents");
               }}
             />
-          </DialogHeader>
+          </WizardHeader>
 
-          <WizardPanel className="min-w-0" holdHeight={isLoadingProjects}>
+          <WizardPanel holdHeight={isLoadingProjects}>
             {step === "connection" ? (
               <ConnectionStep
                 expandPairingInitially={!localAvailable && !hasCloudPublicConfig()}

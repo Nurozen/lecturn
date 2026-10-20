@@ -61,6 +61,7 @@ const makeThreadShell = (id: ThreadId, projectId: ProjectId): OrchestrationThrea
   latestTurn: null,
   createdAt: now,
   updatedAt: now,
+  pullRequests: [],
   archivedAt: null,
   settledOverride: null,
   settledAt: null,

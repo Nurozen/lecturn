@@ -27,6 +27,7 @@ import type {
   VcsStatusStreamEvent,
 } from "@lecturn/contracts";
 import { mergeGitStatusParts } from "@lecturn/shared/git";
+import { resolveProjectSettings } from "@lecturn/shared/projectSettings";
 import { resolveProjectAutoPull } from "@lecturn/shared/serverSettings";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
@@ -179,8 +180,12 @@ export const autoPullPolicyLayer = Layer.effect(
           const project = yield* snapshots.getActiveProjectByWorkspaceRoot(cwd);
           if (Option.isNone(project) || project.value.stave != null) return false;
           const settings = yield* serverSettings.getSettings;
-          if (!resolveProjectAutoPull(settings, project.value.id, project.value.autoPull))
-            return false;
+          // After the one-time fold, project overrides alone decide so a reset in
+          // settings is not undone by the legacy aggregate flag.
+          const autoPull = settings.projectSettingsFolded
+            ? resolveProjectSettings(settings, project.value.id).settings.defaultAutoPull
+            : resolveProjectAutoPull(settings, project.value.id, project.value.autoPull);
+          if (!autoPull) return false;
           const hasOwner = yield* ownershipLock.withPermits(1)(
             Effect.gen(function* () {
               const snapshot = yield* snapshots.getShellSnapshot();
@@ -265,6 +270,7 @@ const normalizeCwd = (cwd: string) =>
     Effect.orElseSucceed(() => cwd),
   );
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const autoPullPolicy = yield* VcsAutoPullPolicy;
   const workflow = yield* GitWorkflowService.GitWorkflowService;

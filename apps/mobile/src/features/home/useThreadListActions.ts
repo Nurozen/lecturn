@@ -1,9 +1,10 @@
+import type { ThreadMoveDestination } from "../threads/threadOrder";
 import { environmentProjects } from "../../state/projects";
 import { listedThreadShells } from "../../state/listed-entities";
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import { scopeThreadRef } from "@lecturn/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
-import { canSnooze } from "@lecturn/client-runtime/state/thread-settled";
+import { canSnooze, effectiveSnoozed } from "@lecturn/client-runtime/state/thread-settled";
 import { ThreadId, type ScopedThreadRef } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import * as Haptics from "expo-haptics";
@@ -26,8 +27,16 @@ import {
   resolveThreadForkAvailability,
   type ThreadForkUnavailableReason,
 } from "../threads/thread-fork-menu";
-import { beginPendingThreadOrder, getPendingThreadOrder } from "../../state/thread-order";
-import { createPendingThreadOrder, createThreadMovePlanner } from "../threads/threadOrder";
+import {
+  beginPendingThreadOrder,
+  getPendingThreadOrder,
+  threadDropBusyAtom,
+} from "../../state/thread-order";
+import {
+  createPendingThreadOrder,
+  createThreadMovePlanner,
+  threadDropLifecycle,
+} from "../threads/threadOrder";
 import { getThreadListV2OrderedSection } from "../threads/threadListV2";
 
 /** Version skew: never send settle/unsettle to a server that predates them
@@ -340,8 +349,9 @@ export function useThreadListActions(): {
   readonly unpinThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
   readonly moveThread: (
     thread: EnvironmentThreadShell,
-    direction: "up" | "down",
-    scopeProjectKeys: readonly string[],
+    direction: ThreadMoveDestination,
+    /** Project-group scope for grouped lists; omit to plan the whole section. */
+    scopeProjectKeys?: readonly string[],
   ) => Promise<boolean>;
   readonly regenerateThreadTitle: (thread: EnvironmentThreadShell) => Promise<boolean>;
   readonly forkThread: (thread: EnvironmentThreadShell) => Promise<ScopedThreadRef | null>;
@@ -590,11 +600,31 @@ export function useThreadListActions(): {
   const moveThread = useCallback(
     async (
       thread: EnvironmentThreadShell,
-      direction: "up" | "down",
-      scopeProjectKeys: readonly string[],
+      direction: ThreadMoveDestination,
+      scopeProjectKeys?: readonly string[],
     ) => {
-      if (getPendingThreadOrder() !== null) return false;
-      const section = thread.pinnedAt != null ? "pinned" : "active";
+      if (getPendingThreadOrder() !== null || appAtomRegistry.get(threadDropBusyAtom)) return false;
+      const shells = appAtomRegistry.get(environmentThreadShells.threadShellsAtom);
+      const current = shells.find(
+        (row) => row.id === thread.id && row.environmentId === thread.environmentId,
+      );
+      if (!current || current.archivedAt !== null) return false;
+      thread = current;
+      const section =
+        typeof direction === "object" && direction.section !== undefined
+          ? direction.section
+          : thread.pinnedAt != null
+            ? "pinned"
+            : "active";
+      if (section === "settled") {
+        if (!environmentSupportsSettlement(thread.environmentId)) return false;
+        appAtomRegistry.set(threadDropBusyAtom, true);
+        try {
+          return await settleThread(thread);
+        } finally {
+          appAtomRegistry.set(threadDropBusyAtom, false);
+        }
+      }
       const configs = appAtomRegistry.get(environmentServerConfigsAtom);
       const supportsReorder = (environmentId: EnvironmentThreadShell["environmentId"]) => {
         const capabilities = configs.get(environmentId)?.environment.capabilities;
@@ -609,13 +639,15 @@ export function useThreadListActions(): {
         );
         return false;
       }
-      const shells = appAtomRegistry.get(environmentThreadShells.threadShellsAtom);
-      const scope = new Set(scopeProjectKeys);
-      if (!scope.has(scopedProjectKey(thread.environmentId, thread.projectId))) return false;
+      const scope = scopeProjectKeys === undefined ? null : new Set(scopeProjectKeys);
+      if (scope !== null && !scope.has(scopedProjectKey(thread.environmentId, thread.projectId)))
+        return false;
       const eligible = listedThreadShells(
         appAtomRegistry.get(environmentProjects.projectsAtom),
         shells,
-      ).filter((row) => scope.has(scopedProjectKey(row.environmentId, row.projectId)));
+      ).filter(
+        (row) => scope === null || scope.has(scopedProjectKey(row.environmentId, row.projectId)),
+      );
       const ordered = getThreadListV2OrderedSection({
         threads: eligible,
         section,
@@ -639,25 +671,68 @@ export function useThreadListActions(): {
         reorderableEnvironmentIds: new Set([...configs.keys()].filter(supportsReorder)),
       })(scopedThreadKey(thread.environmentId, thread.id), direction);
       if (assignments === null) return false;
+      const lifecycle = threadDropLifecycle(thread, section, new Date().toISOString());
+      const crossSection = !ordered.some(
+        (row) => row.id === thread.id && row.environmentId === thread.environmentId,
+      );
+      if (
+        crossSection &&
+        (((section === "pinned" || thread.pinnedAt != null) &&
+          !environmentSupportsPinning(thread.environmentId)) ||
+          (thread.settledOverride === "settled" &&
+            !environmentSupportsSettlement(thread.environmentId)) ||
+          (effectiveSnoozed(thread, { now: new Date().toISOString() }) &&
+            !environmentSupportsSnooze(thread.environmentId)))
+      )
+        return false;
       const shellByKey = new Map(
-        ordered.map((shell) => [scopedThreadKey(shell.environmentId, shell.id), shell]),
+        shells.map((shell) => [scopedThreadKey(shell.environmentId, shell.id), shell]),
       );
       selectionHaptic();
-      const pending = beginPendingThreadOrder(
-        createPendingThreadOrder({
-          section,
-          ordered,
-          scopeProjectKeys,
-          movedId: scopedThreadKey(thread.environmentId, thread.id),
-          direction,
-          assignments,
-        }),
-      );
+      appAtomRegistry.set(threadDropBusyAtom, true);
+      const pending = crossSection
+        ? null
+        : beginPendingThreadOrder(
+            createPendingThreadOrder({
+              section,
+              ordered,
+              scopeProjectKeys,
+              movedId: scopedThreadKey(thread.environmentId, thread.id),
+              direction,
+              assignments,
+            }),
+          );
       let succeeded = false;
       const reorder = section === "pinned" ? reorderPinnedMutation : reorderActiveMutation;
       try {
+        if (crossSection) {
+          if (section === "pinned") {
+            const orderKey = assignments.find(
+              ({ id }) => id === scopedThreadKey(thread.environmentId, thread.id),
+            )?.orderKey;
+            const result = await pinMutation({
+              environmentId: thread.environmentId,
+              input: { threadId: thread.id, ...(orderKey === undefined ? {} : { orderKey }) },
+            });
+            if (result._tag === "Failure") {
+              Alert.alert("Could not pin thread", String(Cause.squash(result.cause)));
+              return false;
+            }
+          } else {
+            if (lifecycle.unpin && !(await unpinThread(thread))) return false;
+            if (lifecycle.unsettle && !(await unsettleThread(thread))) return false;
+            if (lifecycle.unsnooze && !(await unsnoozeThread(thread))) return false;
+          }
+        }
         for (const assignment of assignments) {
-          if (!pending.isPending()) return false;
+          if (
+            crossSection &&
+            section === "pinned" &&
+            thread.pinnedAt == null &&
+            assignment.id === scopedThreadKey(thread.environmentId, thread.id)
+          )
+            continue;
+          if (pending !== null && !pending.isPending()) return false;
           const target = shellByKey.get(assignment.id);
           if (target === undefined) continue;
           const result = await reorder({
@@ -677,13 +752,22 @@ export function useThreadListActions(): {
           }
         }
         succeeded = true;
-        pending.complete();
+        pending?.complete();
         return true;
       } finally {
-        if (!succeeded) pending.cancel();
+        if (!succeeded) pending?.cancel();
+        appAtomRegistry.set(threadDropBusyAtom, false);
       }
     },
-    [reorderActiveMutation, reorderPinnedMutation],
+    [
+      settleThread,
+      reorderActiveMutation,
+      reorderPinnedMutation,
+      pinMutation,
+      unpinThread,
+      unsettleThread,
+      unsnoozeThread,
+    ],
   );
 
   const confirmDeleteThread = useConfirmDeleteThread(executeAction);

@@ -117,7 +117,7 @@ const decodeBinding = Schema.decodeUnknownOption(
 );
 
 /** A server-created binding identifies the checkout independently of grouping's upstream remote. */
-export function boundWatchCheckout(
+function boundWatchCheckout(
   binding: string | undefined,
   target: OrchestrationProjectShell,
   reference: Pick<PullRequestRef, "repository" | "host"> | undefined,

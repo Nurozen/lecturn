@@ -93,6 +93,7 @@ export const GROK_ADAPTER_CAPABILITIES = {
   sessionModelSwitch: "in-session",
   conversationFork: "unsupported",
   conversationForkRequiresAnchor: false,
+  supportsConversationRollback: false,
 } as const;
 const GROK_RESUME_VERSION = 1 as const;
 const NANOS_PER_MILLI = 1_000_000n;
@@ -1001,7 +1002,14 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           }
           const acp = yield* makeGrokAcpRuntime({
             grokSettings,
-            ...(options?.environment ? { environment: options.environment } : {}),
+            ...(options?.environment || mcpSession?.agentDeviceEnvironment
+              ? {
+                  environment: McpProviderSession.withAgentDeviceEnvironment(
+                    options?.environment ?? process.env,
+                    mcpSession,
+                  ),
+                }
+              : {}),
             childProcessSpawner,
             cwd,
             runtimeMode: input.runtimeMode,

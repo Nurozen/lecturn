@@ -179,7 +179,19 @@ it.effect("thread.forked sets lineage, latest turn and plans without hydrating b
     const child = forked.threads.find((thread) => thread.id === childThreadId);
     expect(child).toBeDefined();
     expect(child?.forkedFrom).toEqual(forkedPayload.forkedFrom);
-    expect(child?.linkedPullRequest).toEqual(linkedPullRequest);
+    // The inherited link lands in the link array as a manual link.
+    expect(child?.pullRequests).toEqual([
+      {
+        host: "github.com",
+        repository: "nurozen/lecturn",
+        number: 7,
+        url: linkedPullRequest.url,
+        source: "manual",
+        linkedAt: forkAt,
+        snapshot: null,
+        stack: null,
+      },
+    ]);
     // Latest turn mirrors the last inherited turn row.
     expect(child?.latestTurn).toEqual({
       turnId: turn2,

@@ -30,6 +30,35 @@ const encodeMcpElicitationResponse = Schema.encodeSync(
   EffectCodexSchema.McpServerElicitationRequestResponse,
 );
 
+describe("Codex thread history", () => {
+  for (const cursors of [
+    ["next", "next"],
+    ["first", "second", "first"],
+  ]) {
+    it.effect(`rejects a pagination cursor cycle: ${cursors.join(", ")}`, () =>
+      Effect.gen(function* () {
+        let pageCount = 0;
+        const client: Parameters<typeof readCodexThreadSnapshot>[0] = {
+          request: () => Effect.die("Unexpected legacy request"),
+          raw: {
+            request: (method) =>
+              Effect.sync(() => {
+                if (method === "thread/read") {
+                  return { thread: { id: "thread-1", historyMode: "paginated" } };
+                }
+                NodeAssert.ok(pageCount < cursors.length, "Repeated cursor was requested");
+                return { data: [], nextCursor: cursors[pageCount++] };
+              }),
+          },
+        };
+        const error = yield* Effect.flip(readCodexThreadSnapshot(client, "thread-1"));
+        NodeAssert.ok(isCodexAppServerRequestError(error));
+        NodeAssert.equal(pageCount, cursors.length);
+      }),
+    );
+  }
+});
+
 describe("CodexSessionRuntimeIdentifierGenerationError", () => {
   it("retains identifier purpose and the random source failure", () => {
     const cause = new Error("random source unavailable");

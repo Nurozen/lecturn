@@ -53,6 +53,7 @@ export function HardwareKeyboardCommandProvider({
         ? null
         : resolveThreadReferenceCopyTarget({
             threadId: activeThread?.id ?? activeThreadRef.threadId,
+            pullRequests: activeThread?.pullRequests,
             linkedPullRequestUrl:
               activeThread === null
                 ? null

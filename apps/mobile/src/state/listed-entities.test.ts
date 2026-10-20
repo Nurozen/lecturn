@@ -50,6 +50,7 @@ function makeThread(id: string, project: EnvironmentProject): EnvironmentThreadS
     hasActionableProposedPlan: false,
     settledOverride: null,
     settledAt: null,
+    pullRequests: [],
   };
 }
 

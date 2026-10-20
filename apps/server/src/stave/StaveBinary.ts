@@ -53,11 +53,11 @@ import { ProcessRunner } from "../processRunner.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 
 /** Environment override consulted right after the persisted settings path. */
-export const STAVE_BINARY_ENV_VAR = "LECTURN_STAVE_PATH";
+const STAVE_BINARY_ENV_VAR = "LECTURN_STAVE_PATH";
 /** Command name searched on PATH as the last resort. */
 export const STAVE_COMMAND_NAME = "stave";
 /** Upper bound for the `stave version` probe; a hung binary is reported as version-less, not fatal. */
-export const STAVE_VERSION_PROBE_TIMEOUT = "10 seconds";
+const STAVE_VERSION_PROBE_TIMEOUT = "10 seconds";
 
 export type StaveBinarySource = "settings" | "env" | "bootstrap" | "bundled" | "path";
 
@@ -144,11 +144,11 @@ interface StaveBinaryCandidate {
   readonly source: Exclude<StaveBinarySource, "path">;
 }
 
-export function staveExecutableName(platform: NodeJS.Platform): string {
+function staveExecutableName(platform: NodeJS.Platform): string {
   return platform === "win32" ? `${STAVE_COMMAND_NAME}.exe` : STAVE_COMMAND_NAME;
 }
 
-export function stavePlatformKey(
+function stavePlatformKey(
   platform: NodeJS.Platform,
   architecture: NodeJS.Architecture,
 ): string | undefined {
@@ -162,7 +162,7 @@ export function stavePlatformKey(
  * outputs, and the dev fallback from `src/stave/` to `apps/server/dist/stave/`
  * where `fetch-stave` extracts.
  */
-export function bundledStaveCandidates(input: {
+function bundledStaveCandidates(input: {
   readonly baseDir: string;
   readonly platform: NodeJS.Platform;
   readonly architecture: NodeJS.Architecture;

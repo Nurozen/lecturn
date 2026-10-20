@@ -3283,7 +3283,10 @@ export function ConnectionsSettings() {
       ) : null}
       {canManageLocalBackend ? (
         <>
-          <SettingsSection {...searchableSetting("connections-environment")}>
+          <SettingsSection
+            {...searchableSetting("connections-environment")}
+            title={primaryEnvironment?.label ?? "Primary environment"}
+          >
             {primaryVersionMismatch || primaryServerUpdateState.status !== "idle" ? (
               <SettingsRow
                 title={

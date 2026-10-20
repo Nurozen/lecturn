@@ -13,10 +13,12 @@ import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  DEFAULT_SERVER_SETTINGS,
   MessageId,
   LECTURN_PROJECT_FILE_NAME,
   ThreadId,
 } from "@lecturn/contracts";
+import { resolveProjectSettings } from "@lecturn/shared/projectSettings";
 import { parseLecturnProjectFile } from "@lecturn/shared/lecturnProjectFile";
 import {
   isDefaultThreadEnvModeSettled,
@@ -443,11 +445,26 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     if (lecturnProjectFileData === null || lecturnProjectFileData.truncated) return null;
     return parseLecturnProjectFile(lecturnProjectFileData.contents)?.defaultThreadEnvMode ?? null;
   }, [lecturnProjectFileData]);
+  // Environment settings with the project's overrides applied; the
+  // aggregate's own legacy fields still count until the server folds them.
+  const projectSettings = useMemo(
+    () =>
+      resolveProjectSettings(
+        selectedEnvironmentServerConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
+        selectedProject?.id ?? null,
+        selectedProject ?? undefined,
+      ),
+    [selectedEnvironmentServerConfig?.settings, selectedProject],
+  );
+  const projectThreadEnvMode =
+    projectSettings.sources.defaultThreadEnvMode === "project"
+      ? projectSettings.settings.defaultThreadEnvMode
+      : undefined;
   const defaultWorkspaceMode: WorkspaceMode = resolveDefaultThreadEnvMode({
     forcedMode: forcedWorkspaceMode,
-    projectSetting: selectedProject?.defaultThreadEnvMode,
+    projectSetting: projectThreadEnvMode,
     projectFile: lecturnProjectFileDefaultMode,
-    globalDefault: selectedEnvironmentServerConfig?.settings.defaultThreadEnvMode ?? "local",
+    globalDefault: projectSettings.settings.defaultThreadEnvMode,
   });
   // While unsettled the resolved default is provisional. Nothing may write
   // it into the draft during that window (the auto-branch effect does), or
@@ -455,7 +472,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   const defaultWorkspaceModeSettled = isDefaultThreadEnvModeSettled({
     explicitMode: selectedProjectDraft.workspaceSelection?.mode,
     forcedMode: forcedWorkspaceMode,
-    projectSetting: selectedProject?.defaultThreadEnvMode,
+    projectSetting: projectThreadEnvMode,
     projectFilePending: lecturnProjectFileQuery.isPending,
   });
   // The forced mode also beats a stale explicit pick left in the draft.
@@ -471,10 +488,11 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   // value keeps tracking the server setting when the config loads late.
   const draftStartFromOrigin = selectedProjectDraft.workspaceSelection?.startFromOrigin;
   const startFromOrigin =
-    draftStartFromOrigin ??
-    selectedEnvironmentServerConfig?.settings.newWorktreesStartFromOrigin ??
-    true;
-  const runtimeMode = selectedProjectDraft.runtimeMode ?? DEFAULT_RUNTIME_MODE;
+    draftStartFromOrigin ?? projectSettings.settings.newWorktreesStartFromOrigin;
+  const defaultRuntimeMode = editingPendingTask
+    ? (editingPendingTask.runtimeMode ?? DEFAULT_RUNTIME_MODE)
+    : projectSettings.settings.defaultRuntimeMode;
+  const runtimeMode = selectedProjectDraft.runtimeMode ?? defaultRuntimeMode;
 
   // Antigravity keeps unavailable selections so sign-out or a catalog change
   // cannot switch the user's model. Other providers retain their fallback
@@ -485,9 +503,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   );
   const projectDefaultModelSelection = resolveDefaultableModelSelection(
     selectedEnvironmentServerConfig,
-    selectedProject?.defaultModelSelection ??
-      selectedEnvironmentServerConfig?.settings.defaultModelSelection ??
-      null,
+    projectSettings.settings.defaultModelSelection,
   );
   const storedStickyModelSelection = useStickyComposerModelSelection();
   const stickyModelSelection = resolveDefaultableModelSelection(
@@ -1009,7 +1025,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         text,
         attachments: draft.attachments,
         modelSelection: draftModelSelection,
-        runtimeMode: draft.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+        runtimeMode: draft.runtimeMode ?? defaultRuntimeMode,
         interactionMode: resolvePendingTaskInteractionMode({
           preferenceLoaded: planModePreferenceLoaded,
           planModeEnabled: legacyPlanModeEnabled,
@@ -1049,6 +1065,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       };
     },
     [
+      defaultRuntimeMode,
       editingPendingProject,
       editingPendingTask,
       forcedWorkspaceMode,

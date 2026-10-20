@@ -11,6 +11,7 @@ import {
   type CodexSettings,
   DEFAULT_TEXT_GENERATION_REASONING_EFFORT,
   type ModelSelection,
+  type ServerProviderModel,
   TextGenerationError,
 } from "@lecturn/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@lecturn/shared/git";
@@ -38,7 +39,7 @@ import {
   sanitizeThreadTitle,
   toCodexJsonSchemaObject,
 } from "./TextGenerationUtils.ts";
-import { getModelSelectionStringOptionValue } from "@lecturn/shared/model";
+import { codexModelFamily, getModelSelectionStringOptionValue } from "@lecturn/shared/model";
 import { prepareCodexInferenceIsolation } from "./CodexInferenceIsolation.ts";
 import { getCodexServiceTierOptionValue } from "../codexModelOptions.ts";
 
@@ -83,6 +84,7 @@ const encodeJsonString = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknow
 export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(function* (
   codexConfig: CodexSettings,
   environment?: NodeJS.ProcessEnv,
+  getModels: Effect.Effect<ReadonlyArray<ServerProviderModel>> = Effect.succeed([]),
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -94,6 +96,20 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     prepareCodexInferenceIsolation(input).pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, commandSpawner),
+    );
+
+  // Selections may carry a model family id; run the installed concrete slug.
+  const resolveModelSlug = (requestedModel: string) =>
+    getModels.pipe(
+      Effect.map(
+        (models) =>
+          models.find((candidate) => candidate.slug === requestedModel)?.slug ??
+          models.find(
+            (candidate) =>
+              !candidate.isCustom && codexModelFamily(candidate.slug) === requestedModel,
+          )?.slug ??
+          requestedModel,
+      ),
     );
 
   type MaterializedImageAttachments = {
@@ -238,6 +254,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     const outputPath = yield* writeTempFile(operation, "codex-output", "");
 
     const runCodexCommand = Effect.fn("runCodexJson.runCodexCommand")(function* () {
+      const model = yield* resolveModelSlug(modelSelection.model);
       const inference =
         operation === "generateWorkflowSummary" ||
         operation === "generateContextualSummary" ||
@@ -288,7 +305,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
             env: commandEnvironment,
             cwd: commandCwd,
             operation,
-            model: modelSelection.model,
+            model,
           })
         : undefined;
       yield* isolation?.verify ?? Effect.void;
@@ -303,7 +320,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           "-s",
           "read-only",
           "--model",
-          modelSelection.model,
+          model,
           ...(reasoningEffort ? ["--config", `model_reasoning_effort="${reasoningEffort}"`] : []),
           ...(serviceTier ? ["--config", `service_tier="${serviceTier}"`] : []),
           "--output-schema",
@@ -615,7 +632,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         },
         cwd,
         operation: "checkDecisionWriter",
-        model: input.modelSelection.model,
+        model: yield* resolveModelSlug(input.modelSelection.model),
       });
       yield* isolation.verify;
       return { supported: true, reason: null };

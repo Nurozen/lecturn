@@ -1,4 +1,8 @@
 import { type LiveActivity } from "expo-widgets";
+import {
+  configureAndroidAgentNotifications,
+  clearAndroidAgentNotifications,
+} from "./androidNotifications";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import * as Effect from "effect/Effect";
@@ -77,6 +81,10 @@ const registrationMutationLock = Semaphore.makeUnsafe(1);
 const activityOwners = new Map<string, string>();
 const accountAppearances = new Map<string, { accountLabel: string; accountColor: string }>();
 let multiAccountPush = false;
+// The Android notification module persists a single delivery identity, and
+// configuring a different user clears the previous user's cards. Only the
+// primary account (or the legacy single-account registration) claims it.
+let androidPrimaryAccountId: string | null = null;
 const accounts = new Map<string, ReturnType<typeof makeAccountRegistration>>();
 const deviceAccountIds = () => (multiAccountPush ? [...accounts.keys()] : []);
 function activityAccountId(activity: LiveActivity<AgentActivityProps>): string | null {
@@ -123,6 +131,7 @@ function makeAccountRegistration(scopeAccountId: string | null) {
   // sign-out/identity change alongside the device registration state.
   const ACTIVITY_TOKEN_REREGISTER_INTERVAL_MS = 60_000;
   const registeredActivityPushTokens = new Map<string, number>();
+  let androidDeviceReplayedAt: number | null = null;
   let pushTokenSubscription: { remove: () => void } | null = null;
   let appStateSubscription: { remove: () => void } | null = null;
 
@@ -200,6 +209,14 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     return Platform.OS === "ios";
   }
 
+  function canRegisterPushNotifications(): boolean {
+    return Platform.OS === "ios" || Platform.OS === "android";
+  }
+
+  function ownsAndroidAgentNotifications(): boolean {
+    return scopeAccountId === null || scopeAccountId === androidPrimaryAccountId;
+  }
+
   function shouldRegisterAgentAwarenessDeviceForProvider(
     previousIdentity: string | null,
     identity: string | undefined,
@@ -215,6 +232,16 @@ function makeAccountRegistration(scopeAccountId: string | null) {
       provider !== null &&
       !shouldRegisterAgentAwarenessDeviceForProvider(relayTokenProviderIdentity, identity);
     if (!isExistingIdentity) {
+      // Native configure compares the persisted account on cold start. An
+      // unset JS identity is a remount, not evidence of a different account.
+      if (
+        ownsAndroidAgentNotifications() &&
+        relayTokenProviderIdentity &&
+        identity !== relayTokenProviderIdentity
+      ) {
+        clearAndroidAgentNotifications();
+      }
+      androidDeviceReplayedAt = null;
       activityRetryCount = 0;
       deviceRegistrationGeneration++;
       latestObservedPushToken = null;
@@ -226,6 +253,7 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     relayTokenProvider = provider;
     relayTokenProviderIdentity = provider ? (identity ?? null) : null;
     if (!provider) {
+      if (ownsAndroidAgentNotifications()) clearAndroidAgentNotifications();
       releaseAgentAwarenessRelayTokenProvider();
       pushTokenSubscription?.remove();
       pushTokenSubscription = null;
@@ -287,6 +315,7 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     deviceRegistrationGeneration++;
     activeDeviceRegistration = null;
     pendingDeviceRegistration = null;
+    androidDeviceReplayedAt = null;
     relayTokenProvider = null;
     relayTokenProviderIdentity = null;
     pushTokenSubscription?.remove();
@@ -313,11 +342,8 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     expectedGeneration: number,
   ) {
     return Effect.gen(function* () {
-      if (!canRegisterRemoteLiveActivities() || !supportsAgentAwarenessPush()) {
+      if (!canRegisterPushNotifications() || !supportsAgentAwarenessPush()) {
         return { notificationsEnabled: false, pushToken: null };
-      }
-      if (observedPushToken) {
-        return { notificationsEnabled: true, pushToken: observedPushToken };
       }
       const permissions = yield* Effect.tryPromise({
         try: () => Notifications.getPermissionsAsync(),
@@ -330,6 +356,11 @@ function makeAccountRegistration(scopeAccountId: string | null) {
       if (!permissions.granted) {
         return { notificationsEnabled: false, pushToken: null };
       }
+      // A rotated token only proves the OS issued one; permission can still have
+      // been revoked, so it is checked first.
+      if (observedPushToken) {
+        return { notificationsEnabled: true, pushToken: observedPushToken };
+      }
       const observedAtStart = latestObservedPushToken;
       const tokenResult = yield* Effect.tryPromise({
         try: () => Notifications.getDevicePushTokenAsync(),
@@ -339,13 +370,13 @@ function makeAccountRegistration(scopeAccountId: string | null) {
             cause,
           }),
       }).pipe(
-        // APNs registration can remain unresolved while iOS waits for connectivity.
+        // Native push registration can remain unresolved while iOS waits for connectivity.
         // Let the native listener complete registration later instead of blocking
         // Settings (and the registration queue) indefinitely after permission.
         Effect.timeout(NATIVE_PUSH_TOKEN_TIMEOUT_MS),
         Effect.tapError((error) =>
           Effect.sync(() => {
-            logRegistrationError("native APNs token lookup failed", error);
+            logRegistrationError("native push token lookup failed", error);
           }),
         ),
         Effect.match({
@@ -355,7 +386,9 @@ function makeAccountRegistration(scopeAccountId: string | null) {
       );
       const token = tokenResult.type === "success" ? tokenResult.token : null;
       const resolvedToken =
-        token?.type === "ios" && typeof token.data === "string" && token.data.trim().length > 0
+        token?.type === Platform.OS &&
+        typeof token.data === "string" &&
+        token.data.trim().length > 0
           ? token.data.trim()
           : null;
       // A token listener may finish registration while this native request waits.
@@ -375,7 +408,7 @@ function makeAccountRegistration(scopeAccountId: string | null) {
             cause:
               tokenResult.type === "failure"
                 ? tokenResult.error
-                : new Error("iOS did not return a push notification token."),
+                : new Error("The device did not return a push notification token."),
           }),
         );
       }
@@ -414,7 +447,9 @@ function makeAccountRegistration(scopeAccountId: string | null) {
       body.apsEnvironment ?? "",
       body.appVersion ?? "",
       body.label,
+      body.platform,
       body.iosMajorVersion,
+      body.androidApiLevel,
       body.preferences.notificationsEnabled,
       body.preferences.liveActivitiesEnabled,
       body.preferences.notifyOnApproval,
@@ -487,7 +522,19 @@ function makeAccountRegistration(scopeAccountId: string | null) {
           // The relay URL participates so pointing the app at a different relay
           // invalidates the record and re-registers there.
           const signature = `${relayConfig.url}|${registrationSignature(payload)}`;
-          if (persisted && persisted.identity === identity && persisted.signature === signature) {
+          // Android registration also silently replays the current card. Collapse
+          // foreground bursts, but repair missed pushes on cold start or a return
+          // after time away, just like re-registering an iOS activity token.
+          const needsAndroidReplay =
+            payload.platform === "android" &&
+            (androidDeviceReplayedAt === null ||
+              Date.now() - androidDeviceReplayedAt >= ACTIVITY_TOKEN_REREGISTER_INTERVAL_MS);
+          if (
+            persisted &&
+            persisted.identity === identity &&
+            persisted.signature === signature &&
+            !needsAndroidReplay
+          ) {
             setRegistrationStatus(
               "registered",
               Boolean(payload.pushToken) && payload.preferences.notificationsEnabled,
@@ -516,6 +563,7 @@ function makeAccountRegistration(scopeAccountId: string | null) {
             });
             return;
           }
+          if (payload.platform === "android") androidDeviceReplayedAt = Date.now();
           setRegistrationStatus(
             "registered",
             Boolean(payload.pushToken) && payload.preferences.notificationsEnabled,
@@ -837,7 +885,7 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     expectedGeneration = deviceRegistrationGeneration,
   ): Effect.Effect<void, unknown, ManagedRelay.ManagedRelayClient> {
     return Effect.gen(function* () {
-      if (!canRegisterRemoteLiveActivities()) {
+      if (!canRegisterPushNotifications()) {
         logRegistrationDebug("device registration skipped; platform does not support it");
         return;
       }
@@ -865,6 +913,14 @@ function makeAccountRegistration(scopeAccountId: string | null) {
         storedPreferences,
         input.preferencesOverride,
       );
+      if (expectedGeneration !== deviceRegistrationGeneration) return;
+      if (relayTokenProvider && relayTokenProviderIdentity && ownsAndroidAgentNotifications()) {
+        configureAndroidAgentNotifications(
+          deviceId,
+          relayTokenProviderIdentity,
+          preferences.liveActivitiesEnabled !== false,
+        );
+      }
       const pushTokenRegistration = yield* nativePushTokenRegistration(
         input?.observedPushToken,
         expectedGeneration,
@@ -873,15 +929,24 @@ function makeAccountRegistration(scopeAccountId: string | null) {
         expectedGeneration,
         notificationsEnabled: pushTokenRegistration.notificationsEnabled,
       });
-      const bundleId = Constants.expoConfig?.ios?.bundleIdentifier?.trim();
+      const bundleId =
+        Platform.OS === "android"
+          ? Constants.expoConfig?.android?.package?.trim()
+          : Constants.expoConfig?.ios?.bundleIdentifier?.trim();
       yield* registerDeviceWithRelay(
         makeRelayDeviceRegistrationRequest({
           deviceId,
-          label: Constants.deviceName?.trim() || "iOS device",
-          iosMajorVersion: iosMajorVersion(),
+          label:
+            Constants.deviceName?.trim() ||
+            (Platform.OS === "android" ? "Android device" : "iOS device"),
+          ...(Platform.OS === "android"
+            ? { platform: "android" as const, androidApiLevel: Number(Platform.Version) }
+            : { platform: "ios" as const, iosMajorVersion: iosMajorVersion() }),
           appVersion: Constants.expoConfig?.version,
           ...(bundleId ? { bundleId } : {}),
-          apsEnvironment: resolveApsEnvironment(Constants.expoConfig?.extra?.appVariant),
+          ...(Platform.OS === "ios"
+            ? { apsEnvironment: resolveApsEnvironment(Constants.expoConfig?.extra?.appVariant) }
+            : {}),
           ...(pushTokenRegistration.pushToken
             ? { pushToken: pushTokenRegistration.pushToken }
             : {}),
@@ -902,16 +967,20 @@ function makeAccountRegistration(scopeAccountId: string | null) {
   }
 
   function ensurePushTokenListener(): void {
-    if (pushTokenSubscription || !canRegisterRemoteLiveActivities()) {
+    if (pushTokenSubscription || !canRegisterPushNotifications()) {
       return;
     }
 
     pushTokenSubscription = Notifications.addPushTokenListener((token) => {
-      if (token.type === "ios" && typeof token.data === "string" && token.data.trim().length > 0) {
+      if (
+        token.type === Platform.OS &&
+        typeof token.data === "string" &&
+        token.data.trim().length > 0
+      ) {
         latestObservedPushToken = token.data.trim();
         enqueueDeviceRegistration(
           { observedPushToken: token.data.trim() },
-          "native APNs token rotation registration failed",
+          "native push token rotation registration failed",
         );
       }
     });
@@ -924,7 +993,7 @@ function makeAccountRegistration(scopeAccountId: string | null) {
   // foreground/sign-in bursts collapse to one registration, but returning after
   // real time away still replays.)
   function ensureAppStateListener(): void {
-    if (appStateSubscription || !canRegisterRemoteLiveActivities()) {
+    if (appStateSubscription || !canRegisterPushNotifications()) {
       return;
     }
 
@@ -957,7 +1026,7 @@ function makeAccountRegistration(scopeAccountId: string | null) {
   }
 
   function registerAgentAwarenessConnection(connection: SavedRemoteConnection): void {
-    if (!canRegisterRemoteLiveActivities()) {
+    if (!canRegisterPushNotifications()) {
       return;
     }
 
@@ -1033,6 +1102,7 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     pendingDeviceRegistration = null;
     registrationStatus = "unknown";
     notificationRegistrationEnabled = false;
+    androidDeviceReplayedAt = null;
     registeredActivityPushTokens.clear();
   }
 
@@ -1371,6 +1441,12 @@ export function syncAgentAwarenessAccounts(
     }
   }
   multiAccountPush = supported;
+  const previousAndroidPrimaryAccountId = androidPrimaryAccountId;
+  androidPrimaryAccountId = primaryId;
+  // No account can own Android delivery anymore. A new primary instead
+  // reconfigures (and thereby resets) the native identity on registration.
+  if (previousAndroidPrimaryAccountId !== null && (primaryId === null || !providers.has(primaryId)))
+    clearAndroidAgentNotifications();
   const allowed = supported
     ? providers
     : new Map([...providers].filter(([id]) => id === primaryId));
@@ -1426,6 +1502,10 @@ export function unregisterAgentAwarenessAccount(
     // Invalidate in-flight work before sending the unregister request.
     const drain = state?.stopAndDrain();
     accounts.delete(accountId);
+    if (accountId === androidPrimaryAccountId) {
+      androidPrimaryAccountId = null;
+      clearAndroidAgentNotifications();
+    }
     if (drain) yield* Effect.promise(() => drain);
     const activities = yield* Effect.try(() => AgentActivity.getInstances()).pipe(
       Effect.orElseSucceed(() => []),
@@ -1490,4 +1570,5 @@ export function __resetAgentAwarenessRemoteRegistrationForTest(): void {
   accountAppearances.clear();
   registrationStatusListeners.clear();
   multiAccountPush = false;
+  androidPrimaryAccountId = null;
 }

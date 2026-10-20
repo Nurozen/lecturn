@@ -1,11 +1,24 @@
-import type { ScopedProjectRef } from "@lecturn/contracts";
+import type {
+  EnvironmentId,
+  PullRequestLinkedThreadsResult,
+  ScopedProjectRef,
+} from "@lecturn/contracts";
+
+export interface CommandPaletteLinkedThreads {
+  readonly environmentId: EnvironmentId;
+  readonly threads: PullRequestLinkedThreadsResult["threads"];
+}
 
 // Tiny event bus allowing components to programmatically open the command palette
 // without owning its React state.
 const COMMAND_PALETTE_OPEN_EVENT = "lecturn:open-command-palette";
 
 export type CommandPaletteOpenDetail =
-  | { readonly open?: "add-project" | "new-thread-in" }
+  | {
+      readonly open?: "add-project" | "new-thread-in";
+      readonly query?: string;
+      readonly linkedThreads?: CommandPaletteLinkedThreads;
+    }
   // Opens straight into the session picker for that project.
   | { readonly open: "import-session"; readonly projectRef: ScopedProjectRef };
 

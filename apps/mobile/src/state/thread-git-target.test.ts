@@ -40,9 +40,9 @@ describe("resolveThreadGitTarget", () => {
     expect(
       resolveThreadGitTarget({
         project: { workspaceRoot: "/repo" },
-        thread: { branch: "feature", worktreePath: "/repo/.t3/worktrees/feature" },
+        thread: { branch: "feature", worktreePath: "/repo/.lecturn/worktrees/feature" },
       }),
-    ).toEqual({ cwd: "/repo/.t3/worktrees/feature", branch: "feature" });
+    ).toEqual({ cwd: "/repo/.lecturn/worktrees/feature", branch: "feature" });
     expect(
       resolveThreadGitTarget({
         project: { workspaceRoot: "/repo" },
@@ -118,9 +118,9 @@ describe("resolveThreadGitTarget", () => {
     expect(
       resolveThreadGitTarget({
         project: null,
-        thread: { branch: "feature", worktreePath: "/repo/.t3/worktrees/feature" },
+        thread: { branch: "feature", worktreePath: "/repo/.lecturn/worktrees/feature" },
       }),
-    ).toEqual({ cwd: "/repo/.t3/worktrees/feature", branch: "feature" });
+    ).toEqual({ cwd: "/repo/.lecturn/worktrees/feature", branch: "feature" });
     expect(resolveThreadGitTarget({ project: null, thread: null })).toEqual({
       cwd: null,
       branch: null,

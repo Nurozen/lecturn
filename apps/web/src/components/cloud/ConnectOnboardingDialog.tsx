@@ -22,19 +22,11 @@ import { ConnectSubscriptionGate } from "./ConnectSubscriptionGate";
 import { CloudEnvironmentConnectRows } from "./CloudEnvironmentConnectList";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
-import {
-  Dialog,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogPanel,
-  DialogPopup,
-  DialogTitle,
-} from "../ui/dialog";
+import { Dialog } from "../ui/dialog";
 import { TeamSelector } from "./TeamSelector";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
-import { WizardSteps } from "../ui/wizard-steps";
+import { WizardSteps, WizardPopup, WizardHeader, WizardPanel, WizardFooter } from "../ui/wizard";
 
 /**
  * Post-sign-in onboarding wizard for Lecturn Connect. Opens when an account
@@ -253,28 +245,34 @@ function ConfiguredConnectOnboardingDialog() {
         if (!open && !isApplying) complete();
       }}
     >
-      <DialogPopup className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Set up Lecturn Connect</DialogTitle>
-          <DialogDescription>
-            {namedAccount
-              ? `Publish this environment under ${namedAccount} and connect that account's other devices.`
-              : "Publish this environment and connect your other devices."}{" "}
-            Managed Connect requires an active subscription, trial, or complimentary access. Local
-            and direct connections remain free.
-          </DialogDescription>
+      <WizardPopup>
+        <WizardHeader
+          title="Set up Lecturn Connect"
+          description={
+            <>
+              {namedAccount
+                ? `Publish this environment under ${namedAccount} and connect that account's other devices.`
+                : "Publish this environment and connect your other devices."}{" "}
+              Managed Connect requires an active subscription, trial, or complimentary access. Local
+              and direct connections remain free.
+            </>
+          }
+        >
           {step === "publish" ? account.picker : null}
           <TeamSelector accountId={account.accountId} />
           {steps.length > 1 ? (
             <WizardSteps
-              steps={steps.map((id) => ({ id, label: STEP_LABELS[id] }))}
-              currentStep={step}
-              disabled={isApplying}
-              onStepSelect={setStep}
+              steps={steps.map((id) => STEP_LABELS[id])}
+              currentStep={steps.indexOf(step)}
+              isStepDisabled={() => isApplying}
+              onStepChange={(index) => {
+                const next = steps[index];
+                if (next) setStep(next);
+              }}
             />
           ) : null}
-        </DialogHeader>
-        <DialogPanel className="space-y-3">
+        </WizardHeader>
+        <WizardPanel>
           {step === "publish" ? (
             <>
               <PublishStep
@@ -295,42 +293,41 @@ function ConfiguredConnectOnboardingDialog() {
           ) : (
             <DevicesStep />
           )}
-        </DialogPanel>
-        <DialogFooter variant="bare" className="sm:justify-between">
-          <label className="flex cursor-pointer items-center gap-2 self-start text-xs text-muted-foreground sm:self-center">
-            <Checkbox
-              checked={dontShowAgain}
-              onCheckedChange={(checked) => setDontShowAgain(checked === true)}
-            />
-            Don&apos;t show this again
-          </label>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row">
-            {step === "publish" ? (
-              <>
-                <Button variant="ghost" disabled={isApplying} onClick={() => setStep("devices")}>
-                  Not now
-                </Button>
-                <Button
-                  disabled={
-                    isApplying || (controller.linkState.isPending && linkStateData === null)
-                  }
-                  onClick={() => void applyPublishSelection()}
-                >
-                  {isApplying
-                    ? "Checking and enabling…"
-                    : controller.subscriptionRequired
-                      ? "Refresh and continue"
-                      : "Continue"}
-                </Button>
-              </>
-            ) : (
-              <Button disabled={isApplying} onClick={complete}>
-                Done
+        </WizardPanel>
+        <WizardFooter
+          leading={
+            <label className="flex cursor-pointer items-center gap-2 self-start text-xs text-muted-foreground sm:self-center">
+              <Checkbox
+                checked={dontShowAgain}
+                onCheckedChange={(checked) => setDontShowAgain(checked === true)}
+              />
+              Don&apos;t show this again
+            </label>
+          }
+        >
+          {step === "publish" ? (
+            <>
+              <Button variant="ghost" disabled={isApplying} onClick={() => setStep("devices")}>
+                Not now
               </Button>
-            )}
-          </div>
-        </DialogFooter>
-      </DialogPopup>
+              <Button
+                disabled={isApplying || (controller.linkState.isPending && linkStateData === null)}
+                onClick={() => void applyPublishSelection()}
+              >
+                {isApplying
+                  ? "Checking and enabling…"
+                  : controller.subscriptionRequired
+                    ? "Refresh and continue"
+                    : "Continue"}
+              </Button>
+            </>
+          ) : (
+            <Button disabled={isApplying} onClick={complete}>
+              Done
+            </Button>
+          )}
+        </WizardFooter>
+      </WizardPopup>
     </Dialog>
   );
 }

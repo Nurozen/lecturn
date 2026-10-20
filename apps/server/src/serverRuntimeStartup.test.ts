@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   DEFAULT_MODEL,
+  DEFAULT_SERVER_SETTINGS,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -26,6 +27,16 @@ import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSna
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
+
+const autoPullOverrides = (entries: Record<string, boolean>) => ({
+  ...DEFAULT_SERVER_SETTINGS,
+  projectSettingsOverrides: Object.fromEntries(
+    Object.entries(entries).map(([root, defaultAutoPull]) => [
+      ProjectId.make(root),
+      { defaultAutoPull },
+    ]),
+  ),
+});
 
 it.effect("automatic pull only updates enabled, behind, clean default-branch checkouts", () =>
   Effect.gen(function* () {
@@ -54,19 +65,30 @@ it.effect("automatic pull only updates enabled, behind, clean default-branch che
           };
         }),
     } as unknown as GitVcsDriver.GitVcsDriver["Service"];
-    const project = (workspaceRoot: string, autoPull = true, stave: unknown = undefined) =>
-      ({ id: ProjectId.make(workspaceRoot), workspaceRoot, autoPull, stave }) as never;
+    const project = (workspaceRoot: string, stave: unknown = undefined) =>
+      ({ id: ProjectId.make(workspaceRoot), workspaceRoot, stave }) as never;
 
-    yield* ServerRuntimeStartup.autoPullProjects([
-      project("/clean"),
-      project("/current"),
-      project("/dirty"),
-      project("/ahead"),
-      project("/feature"),
-      project("/disabled", false),
-      // A Stave space root is not a repo; it is refused before any git call.
-      project("/stave", true, { spaceId: "s", isSaga: false, repos: [], memories: [] }),
-    ]).pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, git));
+    yield* ServerRuntimeStartup.autoPullProjects(
+      [
+        project("/clean"),
+        project("/current"),
+        project("/dirty"),
+        project("/ahead"),
+        project("/feature"),
+        project("/disabled"),
+        // A Stave space root is not a repo; it is refused before any git call.
+        project("/stave", { spaceId: "s", isSaga: false, repos: [], memories: [] }),
+      ],
+      autoPullOverrides({
+        "/clean": true,
+        "/current": true,
+        "/dirty": true,
+        "/ahead": true,
+        "/feature": true,
+        "/disabled": false,
+        "/stave": true,
+      }),
+    ).pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, git));
 
     assert.deepStrictEqual(pulled, ["/clean"]);
     assert.isFalse(statusChecked.includes("/stave"));
@@ -75,20 +97,12 @@ it.effect("automatic pull only updates enabled, behind, clean default-branch che
     pulled.length = 0;
     yield* ServerRuntimeStartup.autoPullProjects(
       [
-        project("/inherited", false),
+        project("/inherited"),
         project("/opted-out"),
-        project("/dirty", false),
-        project("/stave-inherited", false, {
-          spaceId: "s",
-          isSaga: false,
-          repos: [],
-          memories: [],
-        }),
+        project("/dirty"),
+        project("/stave-inherited", { spaceId: "s", isSaga: false, repos: [], memories: [] }),
       ],
-      {
-        defaultAutoPull: true,
-        projectAutoPullOverrides: { [ProjectId.make("/opted-out")]: false },
-      },
+      { ...autoPullOverrides({ "/opted-out": false }), defaultAutoPull: true },
     ).pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, git));
     assert.deepStrictEqual(pulled, ["/inherited"]);
     assert.isFalse(statusChecked.includes("/stave-inherited"));
@@ -127,7 +141,14 @@ for (const [projectCount, enabledCount] of [
         let canonicalReads = 0;
         let ceilingReads = 0;
         const checked: string[] = [];
-        yield* ServerRuntimeStartup.autoPullProjects(projects).pipe(
+        yield* ServerRuntimeStartup.autoPullProjects(
+          projects,
+          autoPullOverrides(
+            Object.fromEntries(
+              projects.map((project) => [project.workspaceRoot, project.autoPull]),
+            ),
+          ),
+        ).pipe(
           Effect.provideService(FileSystem.FileSystem, {
             ...fs,
             readFileString: (file, encoding) =>
@@ -179,19 +200,22 @@ it.effect("startup automatic pulls fail closed when the manifest ceiling cannot 
     const fs = yield* FileSystem.FileSystem;
     const root = yield* fs.makeTempDirectoryScoped();
     const checked: string[] = [];
-    yield* ServerRuntimeStartup.autoPullProjects([
-      {
-        id: ProjectId.make(root),
-        title: root,
-        workspaceRoot: root,
-        defaultModelSelection: null,
-        scripts: [],
-        autoPull: true,
-        stave: null,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      },
-    ]).pipe(
+    yield* ServerRuntimeStartup.autoPullProjects(
+      [
+        {
+          id: ProjectId.make(root),
+          title: root,
+          workspaceRoot: root,
+          defaultModelSelection: null,
+          scripts: [],
+          autoPull: true,
+          stave: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      autoPullOverrides({ [root]: true }),
+    ).pipe(
       Effect.provideService(FileSystem.FileSystem, {
         ...fs,
         exists: () =>
@@ -296,7 +320,7 @@ for (const ownerMetadata of [true, false, null]) {
             project(ordinary),
             project(unrelated),
           ],
-          { defaultAutoPull: true, projectAutoPullOverrides: {} },
+          { ...DEFAULT_SERVER_SETTINGS, defaultAutoPull: true },
         ).pipe(
           Effect.provide(
             Layer.mock(GitVcsDriver.GitVcsDriver)({
@@ -477,12 +501,37 @@ it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and threa
 });
 
 it.effect.each([
-  { existing: false, machineModel: null, projectModel: null },
-  { existing: false, machineModel: "claude-sonnet-4-6", projectModel: null },
-  { existing: true, machineModel: "claude-sonnet-4-6", projectModel: null },
-  { existing: true, machineModel: "claude-sonnet-4-6", projectModel: "gpt-5.4" },
-])("auto-bootstrap model precedence: %j", ({ existing, machineModel, projectModel }) =>
+  {
+    existing: false,
+    machineModel: null,
+    projectModel: null,
+    machineMode: "full-access",
+    projectMode: null,
+  },
+  {
+    existing: false,
+    machineModel: "claude-sonnet-4-6",
+    projectModel: null,
+    machineMode: "approval-required",
+    projectMode: null,
+  },
+  {
+    existing: true,
+    machineModel: "claude-sonnet-4-6",
+    projectModel: null,
+    machineMode: "auto",
+    projectMode: null,
+  },
+  {
+    existing: true,
+    machineModel: "claude-sonnet-4-6",
+    projectModel: "gpt-5.4",
+    machineMode: "full-access",
+    projectMode: "auto-accept-edits",
+  },
+] as const)("auto-bootstrap model and permissions precedence: %j", (options) =>
   Effect.gen(function* () {
+    const { existing, machineModel, projectModel, machineMode, projectMode } = options;
     const machineSelection = machineModel
       ? { instanceId: ProviderInstanceId.make("claude-code"), model: machineModel }
       : null;
@@ -494,10 +543,25 @@ it.effect.each([
         readonly type: string;
         readonly defaultModelSelection?: unknown;
         readonly modelSelection?: unknown;
+        readonly runtimeMode?: unknown;
       }>
     >([]);
     const targets = yield* ServerRuntimeStartup.resolveAutoBootstrapWelcomeTargets.pipe(
-      Effect.provide(ServerSettings.layerTest({ defaultModelSelection: machineSelection })),
+      Effect.provide(
+        ServerSettings.layerTest({
+          defaultModelSelection: machineSelection,
+          defaultRuntimeMode: machineMode,
+          projectSettingsOverrides:
+            existing && projectSelection
+              ? {
+                  [ProjectId.make("existing-project")]: {
+                    defaultModelSelection: projectSelection,
+                    ...(projectMode ? { defaultRuntimeMode: projectMode } : {}),
+                  },
+                }
+              : {},
+        }),
+      ),
       Effect.provideService(ServerConfig.ServerConfig, {
         cwd: "/tmp/startup-project",
         autoBootstrapProjectFromCwd: true,
@@ -520,7 +584,7 @@ it.effect.each([
                   id: ProjectId.make("existing-project"),
                   title: "Startup Project",
                   workspaceRoot: "/tmp/startup-project",
-                  defaultModelSelection: projectSelection,
+                  defaultModelSelection: null,
                   scripts: [],
                   createdAt: "2026-01-01T00:00:00.000Z",
                   updatedAt: "2026-01-01T00:00:00.000Z",
@@ -572,6 +636,7 @@ it.effect.each([
       existing ? ["thread.create"] : ["project.create", "thread.create"],
     );
     if (!existing) assert.equal("defaultModelSelection" in commands[0]!, false);
+    assert.equal(commands.at(-1)?.runtimeMode, projectMode ?? machineMode);
     assert.deepStrictEqual(
       commands.at(-1)?.modelSelection,
       projectSelection ??

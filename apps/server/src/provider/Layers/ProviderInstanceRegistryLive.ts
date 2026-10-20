@@ -34,7 +34,6 @@
  */
 import * as NodeCrypto from "node:crypto";
 import {
-  defaultInstanceIdForDriver,
   providerInstanceConfigEnabledFlag,
   ProviderInstanceId,
   type ProviderInstanceConfig,
@@ -447,5 +446,3 @@ export const ProviderInstanceRegistryMutableLayer = <R>(input: {
       ),
     ),
   ) as Layer.Layer<ProviderInstanceRegistry | ProviderInstanceRegistryMutator, never, R>;
-
-export { defaultInstanceIdForDriver };

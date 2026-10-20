@@ -299,6 +299,7 @@ for (const memory of memoryResolutions) {
             providerInstanceId: ProviderInstanceId.make("codex"),
             endpoint: "http://localhost:1234/mcp",
             authorizationHeader: "Bearer test-token",
+            capabilities: new Set(["preview"]),
           });
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),

@@ -1,10 +1,10 @@
 import { GlassView, isGlassEffectAPIAvailable } from "expo-glass-effect";
-import type { ReactNode, Ref } from "react";
+import type { ReactNode, Ref, RefObject } from "react";
 import {
   Platform,
+  StyleSheet,
   View,
   type ColorValue,
-  type StyleProp,
   type ViewProps,
   type ViewStyle,
 } from "react-native";
@@ -13,6 +13,7 @@ import { withUniwind } from "uniwind";
 import { useGlassPalette } from "../lib/useGlassPalette";
 import { cn } from "../lib/cn";
 import { themeColorWithAlpha } from "../lib/mobileTheme";
+import { GlassBackdrop } from "./GlassBackdrop";
 
 // Explicit mappings keep the native glassEffectStyle enum out of style-array conversion.
 const ThemedGlassView = withUniwind(GlassView, {
@@ -27,8 +28,9 @@ interface GlassSurfaceProps extends ViewProps {
   readonly tintColor?: ColorValue;
   readonly tintColorClassName?: string;
   readonly chrome?: "default" | "none";
-  /** Styling used only when native Liquid Glass is unavailable. */
-  readonly fallbackStyle?: StyleProp<ViewStyle>;
+  /** Base color for the frosted tint, or solid fill when blur is unavailable. */
+  readonly fallbackColor?: ColorValue;
+  readonly blurTarget?: RefObject<View | null>;
   /** Uniwind styling used only when native Liquid Glass is unavailable. */
   readonly fallbackClassName?: string;
 }
@@ -40,7 +42,8 @@ export function GlassSurface({
   chrome = "default",
   tintColor,
   tintColorClassName,
-  fallbackStyle,
+  fallbackColor,
+  blurTarget,
   fallbackClassName,
   className,
   style,
@@ -108,26 +111,28 @@ export function GlassSurface({
       {...props}
       ref={ref}
       className={cn(
-        chrome === "none"
-          ? "border-0 border-transparent bg-transparent"
-          : "border border-border bg-glass-surface",
+        chrome === "none" ? "border-0 border-transparent" : "border border-border",
         fallbackClassName,
         className,
         opaque ? "bg-card" : undefined,
       )}
-      style={[
-        surfaceStyle,
-        fallbackStyle,
-        style,
-        opaque || chrome === "none"
-          ? undefined
-          : {
+      style={[surfaceStyle, style]}
+    >
+      <GlassBackdrop blurTarget={blurTarget} fallbackColor={fallbackColor} />
+      {opaque || chrome === "none" ? null : (
+        // Account-tinted sheen over the frosted backdrop, matching the native glass tint.
+        <View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            {
               experimental_backgroundImage: isDarkMode
                 ? `linear-gradient(150deg, ${themeColorWithAlpha(accent, 0.16)} 0%, #ffffff08 12%, #ffffff00 45%, #00000018 100%)`
                 : `linear-gradient(150deg, #ffffff9c 0%, #ffffff00 42%, ${themeColorWithAlpha(accent, 0.08)} 100%)`,
             },
-      ]}
-    >
+          ]}
+        />
+      )}
       {children}
     </View>
   );

@@ -1,5 +1,4 @@
 import { AccountSurface } from "../components/AccountSurface";
-import { ArrowLeftIcon, RotateCcwIcon } from "lucide-react";
 import {
   Outlet,
   createFileRoute,
@@ -8,23 +7,40 @@ import {
   useCanGoBack,
   useNavigate,
 } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
-
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { ArrowLeftIcon, RotateCcwIcon } from "lucide-react";
+import { Button } from "../components/ui/button";
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
+
 import { SettingsBreadcrumb } from "../components/settings/SettingsBreadcrumb";
 import { PhoneSettingsCategorySelect } from "../components/settings/PhoneSettingsCategorySelect";
 import "../components/settings/project-settings-glass.css";
-import { Button } from "../components/ui/button";
 import { SidebarInset, useSidebar } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isElectron } from "../env";
 import { useBackToChat } from "../components/settings/SettingsNavigation";
 import { usePhoneAuthViewport } from "../onboarding/usePhoneAuthViewport";
 import "../components/settings/phone-settings.css";
+import {
+  SettingsScopeProvider,
+  useSettingsScope,
+} from "../components/settings/SettingsScopeContext";
+import { useSettingsProjectGroups } from "../components/settings/ProjectSettingsPanel";
+import { useProjectAccountScope } from "../components/sidebar/accountProjectGroups";
+import { useEnvironments } from "../state/environments";
+import { SettingsScopeNotice } from "../components/settings/SettingsScopeNotice";
+import {
+  retainSettingsScope,
+  validateSettingsRouteSearch,
+} from "../components/settings/settingsScopeNavigation";
+import {
+  getSettingsSearchTargetScope,
+  getThreadAutoSettlementSearchAvailability,
+  isSettingsSearchScopeAvailable,
+} from "../components/settings/settingsSearch";
 
-function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
+function RestoreDeviceDefaultsButton({ onRestored }: { onRestored: () => void }) {
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
-
   return (
     <Button
       size="xs"
@@ -33,9 +49,78 @@ function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
       onClick={() => void restoreDefaults()}
     >
       <RotateCcwIcon className="mx-1 size-3.5" />
-      Restore defaults
+      Restore device defaults
     </Button>
   );
+}
+
+/** Pages whose every row is saved on this client; the scope selects are hidden there. */
+const DEVICE_ONLY_PATHS = new Set([
+  "/settings/appearance",
+  "/settings/snap-shot",
+  "/settings/connections",
+  // Relay health and publishing follow this device's primary environment.
+  "/settings/relay",
+]);
+
+function SettingsScopeBoundary({ pathname, children }: { pathname: string; children: ReactNode }) {
+  const { scope, connectedEnvironments } = useSettingsScope();
+  const { environments } = useEnvironments();
+  const hash = useLocation({ select: (location) => location.hash });
+  const searchTarget = getSettingsSearchTargetScope(hash);
+  const autoSettlementAvailability = searchTarget?.requiresThreadAutoSettlement
+    ? getThreadAutoSettlementSearchAvailability(environments, scope)
+    : null;
+  if (
+    scope.kind !== "unavailable" &&
+    searchTarget &&
+    autoSettlementAvailability &&
+    !autoSettlementAvailability.isTargetAvailable
+  ) {
+    return (
+      <SettingsScopeNotice
+        target="environment"
+        targetId={hash}
+        eligibleEnvironmentIds={autoSettlementAvailability.eligibleEnvironmentIds}
+      >
+        {autoSettlementAvailability.eligibleEnvironmentIds.length > 0
+          ? `${searchTarget.title} requires a supporting environment. Choose one to continue.`
+          : `${searchTarget.title} requires a supporting environment. Connect or update an environment to continue.`}
+      </SettingsScopeNotice>
+    );
+  }
+  if (
+    scope.kind !== "unavailable" &&
+    searchTarget &&
+    !isSettingsSearchScopeAvailable(searchTarget.scope, scope.kind)
+  ) {
+    const target =
+      searchTarget.scope === "environment" ||
+      searchTarget.scope === "project" ||
+      searchTarget.scope === "checkout"
+        ? searchTarget.scope
+        : "all";
+    return (
+      <SettingsScopeNotice target={target} targetId={hash}>
+        {`${searchTarget.title} is not available for the selected target. Choose its owning scope to continue.`}
+      </SettingsScopeNotice>
+    );
+  }
+  // Device-local pages ignore the scope entirely; the project page follows
+  // remembered members while a grouping change replaces its URL key.
+  if (DEVICE_ONLY_PATHS.has(pathname) || pathname === "/settings/projects") {
+    return children;
+  }
+  if (scope.kind === "unavailable")
+    return <p className="p-8 text-sm text-muted-foreground">{scope.message}</p>;
+  if (scope.kind === "environment" && connectedEnvironments.length === 0) {
+    return (
+      <p className="p-8 text-sm text-muted-foreground">
+        Reconnect {scope.label} to change its settings.
+      </p>
+    );
+  }
+  return children;
 }
 
 function SettingsContentLayout() {
@@ -44,6 +129,22 @@ function SettingsContentLayout() {
   const { isMobile } = useSidebar();
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
+  const { search, selectScope } = useSettingsScope();
+  // The project select lists the groups the segmented sidebar shows, and an
+  // account-scoped key narrows it to that account's groups, named with its email.
+  const projectGroups = useSettingsProjectGroups(search.project ?? "", true);
+  const accountEmail = useProjectAccountScope(search.project ?? "")?.email;
+  const groups = useMemo(
+    () =>
+      accountEmail
+        ? projectGroups.map((group) => ({
+            ...group,
+            displayName: `${group.displayName} · ${accountEmail}`,
+          }))
+        : projectGroups,
+    [accountEmail, projectGroups],
+  );
+  const { environments } = useEnvironments();
   const navigateBackWithinApp = useCallback(() => {
     if (isMobile) backToChat();
     else if (canGoBack) window.history.back();
@@ -53,6 +154,10 @@ function SettingsContentLayout() {
   const [restoreSignal, setRestoreSignal] = useState(0);
   const showRestoreDefaults = location.pathname === "/settings/general";
   const handleRestored = () => setRestoreSignal((value) => value + 1);
+  const showScope = !DEVICE_ONLY_PATHS.has(location.pathname);
+  const scopeProps = showScope
+    ? { value: search, groups, environments, onChange: selectScope }
+    : undefined;
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -81,7 +186,6 @@ function SettingsContentLayout() {
     <SidebarInset
       ref={viewportRef}
       className="phone-settings-viewport h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate"
-      data-settings-page-layout
     >
       <AccountSurface className="lecturn-settings-surface lecturn-project-settings flex min-h-0 min-w-0 flex-1 flex-col text-foreground">
         <WorkspacePageHeader electron={isElectron}>
@@ -101,23 +205,35 @@ function SettingsContentLayout() {
               <PhoneSettingsCategorySelect />
             </div>
             <div className="hidden min-w-0 flex-1 md:block">
-              <SettingsBreadcrumb pathname={location.pathname} />
+              <SettingsBreadcrumb pathname={location.pathname} scope={scopeProps} />
             </div>
             {showRestoreDefaults ? (
-              <div className="ms-auto hidden items-center gap-2 sm:flex">
-                <RestoreDefaultsButton onRestored={handleRestored} />
+              <div className="ms-auto hidden shrink-0 items-center gap-2 sm:flex">
+                <RestoreDeviceDefaultsButton onRestored={handleRestored} />
               </div>
             ) : null}
           </div>
         </WorkspacePageHeader>
 
-        {showRestoreDefaults ? (
-          <div className="flex shrink-0 justify-end px-4 pb-2 sm:hidden">
-            <RestoreDefaultsButton onRestored={handleRestored} />
+        {scopeProps ? (
+          // Phones show the category select in the header, so the scope
+          // selects take their own row beneath it.
+          <div className="flex min-w-0 shrink-0 px-4 pb-2 md:hidden">
+            <SettingsBreadcrumb pathname={location.pathname} scope={scopeProps} />
           </div>
         ) : null}
-        <div key={restoreSignal} className="min-h-0 flex flex-1 flex-col">
-          <Outlet />
+        {showRestoreDefaults ? (
+          <div className="flex shrink-0 justify-end px-4 pb-2 sm:hidden">
+            <RestoreDeviceDefaultsButton onRestored={handleRestored} />
+          </div>
+        ) : null}
+        <div
+          key={`${JSON.stringify(search)}:${restoreSignal}`}
+          className="min-h-0 flex flex-1 flex-col"
+        >
+          <SettingsScopeBoundary pathname={location.pathname}>
+            <Outlet />
+          </SettingsScopeBoundary>
         </div>
       </AccountSurface>
     </SidebarInset>
@@ -125,10 +241,35 @@ function SettingsContentLayout() {
 }
 
 function SettingsRouteLayout() {
-  return <SettingsContentLayout />;
+  const rawSearch = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const pathname = useLocation({ select: (location) => location.pathname });
+  return (
+    <SettingsScopeProvider
+      search={rawSearch}
+      onChange={(next) => {
+        // Send every axis so the retain middleware sees an explicit target
+        // even when the choice is "all", which is the absence of a key.
+        void navigate({
+          to: pathname,
+          search: () => ({
+            project: next.project,
+            machine: next.machine,
+            checkout: next.checkout,
+          }),
+          hash: "",
+          resetScroll: false,
+        });
+      }}
+    >
+      <SettingsContentLayout />
+    </SettingsScopeProvider>
+  );
 }
 
 export const Route = createFileRoute("/settings")({
+  validateSearch: validateSettingsRouteSearch,
+  search: { middlewares: [retainSettingsScope] },
   beforeLoad: async ({ context, location }) => {
     if (
       context.authGateState.status !== "authenticated" &&

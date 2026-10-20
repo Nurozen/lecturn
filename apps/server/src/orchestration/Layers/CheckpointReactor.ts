@@ -717,8 +717,12 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    // Rewinding only the conversation keeps the files, so it needs neither a
+    // checkpoint workspace nor git and stays available for Stave spaces.
+    const restoreFiles = event.payload.restoreFiles !== false;
     const projects = yield* resolveThreadProjects(thread.projectId);
-    if (projects.some((project) => project.stave != null)) {
+    const staveSpace = projects.some((project) => project.stave != null);
+    if (staveSpace && restoreFiles) {
       yield* appendRevertFailureActivity({
         threadId: event.payload.threadId,
         turnCount: event.payload.turnCount,
@@ -728,18 +732,28 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const sessionRuntime = yield* resolveSessionRuntimeForThread(event.payload.threadId);
-    // Idle sessions may have been stopped or lost on restart. Provider rollback
-    // recovers them from the persisted binding; workspace lookup must not block it.
-    let cwd = Option.getOrUndefined(sessionRuntime)?.cwd;
-    if (!cwd) {
-      const binding = yield* providerSessionDirectory.getBinding(event.payload.threadId);
-      const workspace = decodePersistedWorkspace(Option.getOrUndefined(binding)?.runtimePayload);
-      cwd =
-        Option.getOrUndefined(workspace)?.cwd.trim() ||
-        resolveThreadWorkspaceCwd({ thread, projects });
-    }
-    if (!cwd) {
+    const resolveRevertCwd = Effect.gen(function* () {
+      if (staveSpace) return { cwd: undefined, isRepo: false };
+      const sessionRuntime = yield* resolveSessionRuntimeForThread(event.payload.threadId);
+      // Idle sessions may have been stopped or lost on restart. Provider rollback
+      // recovers them from the persisted binding; workspace lookup must not block it.
+      let cwd = Option.getOrUndefined(sessionRuntime)?.cwd;
+      if (!cwd) {
+        const binding = yield* providerSessionDirectory.getBinding(event.payload.threadId);
+        const workspace = decodePersistedWorkspace(Option.getOrUndefined(binding)?.runtimePayload);
+        cwd =
+          Option.getOrUndefined(workspace)?.cwd.trim() ||
+          resolveThreadWorkspaceCwd({ thread, projects });
+      }
+      if (!cwd) return { cwd: undefined, isRepo: false };
+      return { cwd, isRepo: yield* checkpointStore.isGitRepository(cwd) };
+    });
+    const revertCwd = yield* resolveRevertCwd.pipe(
+      Effect.catch((error) =>
+        restoreFiles ? Effect.fail(error) : Effect.succeed({ cwd: undefined, isRepo: false }),
+      ),
+    );
+    if (restoreFiles && !revertCwd.cwd) {
       yield* appendRevertFailureActivity({
         threadId: event.payload.threadId,
         turnCount: event.payload.turnCount,
@@ -748,7 +762,7 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.catch(() => Effect.void));
       return;
     }
-    if (!(yield* checkpointStore.isGitRepository(cwd))) {
+    if (restoreFiles && !revertCwd.isRepo) {
       yield* appendRevertFailureActivity({
         threadId: event.payload.threadId,
         turnCount: event.payload.turnCount,
@@ -757,6 +771,7 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.catch(() => Effect.void));
       return;
     }
+    const checkpointCwd = revertCwd.isRepo ? revertCwd.cwd : undefined;
 
     const currentTurnCount = thread.checkpoints.reduce(
       (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
@@ -773,13 +788,15 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const targetCheckpointRef = revertTargetCheckpointRef({
-      threadId: event.payload.threadId,
-      turnCount: event.payload.turnCount,
-      checkpoints: thread.checkpoints,
-    });
+    const targetCheckpointRef = restoreFiles
+      ? revertTargetCheckpointRef({
+          threadId: event.payload.threadId,
+          turnCount: event.payload.turnCount,
+          checkpoints: thread.checkpoints,
+        })
+      : undefined;
 
-    if (!targetCheckpointRef) {
+    if (restoreFiles && !targetCheckpointRef) {
       yield* appendRevertFailureActivity({
         threadId: event.payload.threadId,
         turnCount: event.payload.turnCount,
@@ -793,24 +810,26 @@ const make = Effect.gen(function* () {
 
     // Check availability before changing provider history; perform the destructive
     // restore only after the provider accepts the rollback.
-    const checkpointAvailable =
-      (yield* checkpointStore.hasCheckpointRef({
-        cwd: cwd,
-        checkpointRef: targetCheckpointRef,
-      })) ||
-      (event.payload.turnCount === 0 &&
+    if (checkpointCwd && targetCheckpointRef) {
+      const checkpointAvailable =
         (yield* checkpointStore.hasCheckpointRef({
-          cwd: cwd,
-          checkpointRef: CheckpointRef.make("HEAD"),
-        })));
-    if (!checkpointAvailable) {
-      yield* appendRevertFailureActivity({
-        threadId: event.payload.threadId,
-        turnCount: event.payload.turnCount,
-        detail: `Filesystem checkpoint is unavailable for turn ${event.payload.turnCount}.`,
-        createdAt: now,
-      }).pipe(Effect.catch(() => Effect.void));
-      return;
+          cwd: checkpointCwd,
+          checkpointRef: targetCheckpointRef,
+        })) ||
+        (event.payload.turnCount === 0 &&
+          (yield* checkpointStore.hasCheckpointRef({
+            cwd: checkpointCwd,
+            checkpointRef: CheckpointRef.make("HEAD"),
+          })));
+      if (!checkpointAvailable) {
+        yield* appendRevertFailureActivity({
+          threadId: event.payload.threadId,
+          turnCount: event.payload.turnCount,
+          detail: `Filesystem checkpoint is unavailable for turn ${event.payload.turnCount}.`,
+          createdAt: now,
+        }).pipe(Effect.catch(() => Effect.void));
+        return;
+      }
     }
 
     const rolledBackTurns = Math.max(0, currentTurnCount - event.payload.turnCount);
@@ -821,24 +840,26 @@ const make = Effect.gen(function* () {
       });
     }
 
-    const restored = yield* checkpointStore.restoreCheckpoint({
-      cwd: cwd,
-      checkpointRef: targetCheckpointRef,
-      fallbackToHead: event.payload.turnCount === 0,
-    });
-    if (!restored) {
-      yield* appendRevertFailureActivity({
-        threadId: event.payload.threadId,
-        turnCount: event.payload.turnCount,
-        detail: `Filesystem checkpoint is unavailable for turn ${event.payload.turnCount}.`,
-        createdAt: now,
-      }).pipe(Effect.catch(() => Effect.void));
-      return;
-    }
+    if (checkpointCwd && targetCheckpointRef) {
+      const restored = yield* checkpointStore.restoreCheckpoint({
+        cwd: checkpointCwd,
+        checkpointRef: targetCheckpointRef,
+        fallbackToHead: event.payload.turnCount === 0,
+      });
+      if (!restored) {
+        yield* appendRevertFailureActivity({
+          threadId: event.payload.threadId,
+          turnCount: event.payload.turnCount,
+          detail: `Filesystem checkpoint is unavailable for turn ${event.payload.turnCount}.`,
+          createdAt: now,
+        }).pipe(Effect.catch(() => Effect.void));
+        return;
+      }
 
-    // Refresh the workspace entry index so the @-mention file picker
-    // reflects the reverted filesystem state.
-    yield* workspaceEntries.refresh(cwd);
+      // Refresh the workspace entry index so the @-mention file picker
+      // reflects the reverted filesystem state.
+      yield* workspaceEntries.refresh(checkpointCwd);
+    }
 
     const staleCheckpointRefs: Array<CheckpointRef> = [];
     for (const checkpoint of thread.checkpoints) {
@@ -847,9 +868,9 @@ const make = Effect.gen(function* () {
       }
     }
 
-    if (staleCheckpointRefs.length > 0) {
+    if (checkpointCwd && staleCheckpointRefs.length > 0) {
       yield* checkpointStore.deleteCheckpointRefs({
-        cwd: cwd,
+        cwd: checkpointCwd,
         checkpointRefs: staleCheckpointRefs,
       });
     }

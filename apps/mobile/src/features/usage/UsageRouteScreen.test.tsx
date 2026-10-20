@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 const ui = vi.hoisted(() => ({
   text: [] as string[],
   refresh: undefined as (() => void) | undefined,
+  press: new Map<string, () => void>(),
   selectEnvironment: undefined as ((event: { nativeEvent: { event: string } }) => void) | undefined,
 }));
 
@@ -28,7 +29,18 @@ vi.mock("react-native", () => ({
       {children}
     </>
   ),
-  Pressable: ({ children }: { children: ReactNode }) => children,
+  Pressable: ({
+    children,
+    accessibilityLabel,
+    onPress,
+  }: {
+    children: ReactNode;
+    accessibilityLabel?: string;
+    onPress?: () => void;
+  }) => {
+    if (accessibilityLabel && onPress) ui.press.set(accessibilityLabel, onPress);
+    return children;
+  },
   RefreshControl: ({ onRefresh }: { onRefresh: () => void }) => {
     ui.refresh = onRefresh;
     return null;
@@ -207,7 +219,7 @@ function addEnvironment(
   );
 }
 
-async function render() {
+async function mount() {
   await act(() =>
     root.render(
       <RegistryContext.Provider value={registry}>
@@ -215,6 +227,11 @@ async function render() {
       </RegistryContext.Provider>,
     ),
   );
+}
+async function render() {
+  await mount();
+  // The screen opens on Limits; coverage lives on the Usage tab.
+  await act(() => ui.press.get("Usage")!());
 }
 const visibleText = () => ui.text.join("\n");
 
@@ -227,6 +244,7 @@ beforeEach(() => {
   backend.getQuery = queries;
   ui.text = [];
   ui.refresh = undefined;
+  ui.press.clear();
   ui.selectEnvironment = undefined;
   const document = { nodeType: 9, addEventListener() {}, removeEventListener() {} };
   const container = {
@@ -249,6 +267,14 @@ afterEach(async () => {
 });
 
 describe("mobile usage coverage with the actual useUsage hook", () => {
+  it("opens on Limits and shows usage coverage only after switching to the Usage tab", async () => {
+    addEnvironment(unavailable, "Unavailable host", Effect.fail(new Error("scan failed")));
+    await mount();
+    expect(visibleText()).not.toContain("could not report usage");
+    await act(() => ui.press.get("Usage")!());
+    expect(visibleText()).toContain("Unavailable host could not report usage");
+  });
+
   it("shows an unavailable report instead of normal zero charts when the only environment fails", async () => {
     addEnvironment(unavailable, "Unavailable host", Effect.fail(new Error("scan failed")));
     await render();

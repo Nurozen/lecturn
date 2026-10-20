@@ -83,6 +83,7 @@ export class ProjectSetupScriptRunner extends Context.Service<
   }
 >()("lecturn/project/ProjectSetupScriptRunner") {}
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const terminalManager = yield* TerminalManager.TerminalManager;

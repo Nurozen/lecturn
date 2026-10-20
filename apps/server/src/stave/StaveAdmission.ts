@@ -131,6 +131,7 @@ export const intentUsesWorktree = (input: StaveAdmissionInput): boolean =>
   input.prepareWorktree === true ||
   (input.worktreePath !== undefined && input.worktreePath !== null);
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.fn("StaveAdmission.make")(function* () {
   const reader = yield* StaveWorkspaceReader;
 

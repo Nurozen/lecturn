@@ -54,6 +54,7 @@ import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useNewTaskFlow } from "./new-task-flow-provider";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import {
   createProviderCatalogRefreshRunner,
   providerCatalogRefreshError,
@@ -106,6 +107,8 @@ function ModelRow(props: {
   readonly isFirst: boolean;
   readonly isLast: boolean;
 }) {
+  const { materialYouStyleLayoutActive } = useAppearancePreferences();
+  const selectedMaterialRow = materialYouStyleLayoutActive && props.selected;
   return (
     <Pressable
       accessibilityLabel={[props.option.label, props.option.subtitle].filter(Boolean).join(", ")}
@@ -118,6 +121,7 @@ function ModelRow(props: {
       onPress={props.onPress}
       className={cn(
         "mx-4 min-h-12 flex-row items-center gap-3 border-x border-border-subtle bg-glass-surface px-4 py-3 active:bg-subtle-strong",
+        selectedMaterialRow && "bg-thread-selected",
         props.isFirst && "rounded-t-[22px] border-t",
         props.isLast ? "rounded-b-[22px] border-b" : "border-b border-border-subtle",
       )}

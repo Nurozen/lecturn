@@ -175,6 +175,28 @@ const cursorAdapterTestLayer = it.layer(
 );
 
 cursorAdapterTestLayer("CursorAdapterLive", (it) => {
+  it.effect("rejects rollback without discarding the provider conversation", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const settings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-unsupported-rollback");
+      const wrapperPath = yield* Effect.promise(() => makeMockAgentWrapper());
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+      yield* adapter.startSession({
+        threadId,
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId, input: "Remember this turn", attachments: [] });
+      const originalTurns = [...(yield* adapter.readThread(threadId)).turns];
+      assert.isFalse(adapter.capabilities.supportsConversationRollback);
+      const error = yield* adapter.rollbackThread(threadId, 1).pipe(Effect.flip);
+      assert.equal(error._tag, "ProviderAdapterRequestError");
+      assert.deepStrictEqual((yield* adapter.readThread(threadId)).turns, originalTurns);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("dispatches manual compaction through Cursor's native compression command", () =>
     Effect.gen(function* () {
       const tempDir = yield* Effect.promise(() =>
@@ -287,7 +309,8 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
             providerSessionId: "stave-test-session",
             providerInstanceId: ProviderInstanceId.make("cursor"),
             endpoint: "http://127.0.0.1:3999/mcp",
-            authorizationHeader: "Bearer t3-test-token",
+            authorizationHeader: "Bearer lecturn-test-token",
+            capabilities: new Set(["pull-requests"]),
           });
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
@@ -340,7 +363,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
                   type: "http",
                   name: "lecturn",
                   url: "http://127.0.0.1:3999/mcp",
-                  headers: [{ name: "Authorization", value: "Bearer t3-test-token" }],
+                  headers: [{ name: "Authorization", value: "Bearer lecturn-test-token" }],
                 },
               ]
             : []),

@@ -102,12 +102,12 @@ import { STAVE_ARCHIVE_DIRECTORY_NAME, StaveWorkspaceReader } from "./StaveWorks
 // ── Limits ────────────────────────────────────────────────────
 
 /** Per-operation ring buffer: whichever of the two bounds is hit first evicts from the front. */
-export const STAVE_OPERATION_EVENT_LIMIT = 2_000;
-export const STAVE_OPERATION_BYTE_LIMIT = 4 * 1024 * 1024;
+const STAVE_OPERATION_EVENT_LIMIT = 2_000;
+const STAVE_OPERATION_BYTE_LIMIT = 4 * 1024 * 1024;
 /** Registry-wide bound; the least recently attached entries lose their oldest events first. */
-export const STAVE_REGISTRY_BYTE_LIMIT = 64 * 1024 * 1024;
+const STAVE_REGISTRY_BYTE_LIMIT = 64 * 1024 * 1024;
 /** How long a finished/failed operation stays attachable. */
-export const STAVE_OPERATION_RETENTION = Duration.hours(24);
+const STAVE_OPERATION_RETENTION = Duration.hours(24);
 
 export interface StaveOperationsLimits {
   readonly eventLimit?: number;
@@ -147,7 +147,7 @@ const recoveryFailureMessage = (previous: string | null, message: string): strin
 };
 
 /** Stable identity of an operation payload; equal payloads may share an id. */
-export function fingerprintOperation(operation: StaveOperation): string {
+function fingerprintOperation(operation: StaveOperation): string {
   return NodeCrypto.createHash("sha256").update(stableStringify(operation)).digest("hex");
 }
 
@@ -158,7 +158,7 @@ const isTerminalEvent = (event: StaveProgressEvent): boolean =>
   event.kind === "finished" || event.kind === "failed";
 
 /** Userinfo in a URL is the one place a repo url can carry a token. */
-export function redactUrl(raw: string): string {
+function redactUrl(raw: string): string {
   try {
     const url = new URL(raw);
     if (url.username.length === 0 && url.password.length === 0) {
@@ -173,10 +173,7 @@ export function redactUrl(raw: string): string {
 }
 
 /** The `stave ...` line shown for a phase; a builder failure shows just the verb. */
-export function commandLineOf(
-  verb: StaveVerb,
-  built: Result.Result<ReadonlyArray<string>, string>,
-) {
+function commandLineOf(verb: StaveVerb, built: Result.Result<ReadonlyArray<string>, string>) {
   return Result.isSuccess(built) ? `stave ${built.success.join(" ")}` : `stave ${verb}`;
 }
 
@@ -187,7 +184,7 @@ export function archiveEntriesMatching(spaceId: string, entries: ReadonlyArray<s
 }
 
 /** The Stave verb each operation kind runs, for errors raised before it is invoked. */
-export const STAVE_OPERATION_VERB: Readonly<Record<StaveOperationKind, StaveVerb>> = {
+const STAVE_OPERATION_VERB: Readonly<Record<StaveOperationKind, StaveVerb>> = {
   lifecycleAction: "space destroy",
   createSpace: "space create",
   registerRepo: "repos add",
@@ -210,9 +207,7 @@ export const STAVE_OPERATION_VERB: Readonly<Record<StaveOperationKind, StaveVerb
   sagaDestroy: "saga destroy",
 };
 
-export function toOperationError(
-  cause: Cause.Cause<StaveError | StaveRefusalError>,
-): StaveOperationError {
+function toOperationError(cause: Cause.Cause<StaveError | StaveRefusalError>): StaveOperationError {
   const failure = Cause.findErrorOption(cause);
   if (Option.isSome(failure)) {
     const error = failure.value;
@@ -314,6 +309,7 @@ export class StaveOperations extends Context.Service<StaveOperations, StaveOpera
 
 type OperationOutcome = StaveOperationResult;
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.fn("StaveOperations.make")(function* (
   limits: StaveOperationsLimits = {},
 ) {

@@ -361,6 +361,7 @@ describe("settled conversation visibility", () => {
     updatedAt: "2026-09-14T00:00:00Z",
     latestUserMessageAt: null,
     hasActionableProposedPlan: false,
+    pullRequests: [],
     session: null,
     archivedAt: null,
     settledOverride: null,

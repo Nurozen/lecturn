@@ -237,7 +237,7 @@ const readThreadTurns = Effect.fn("readCodexImportTurns")(function* (
  * cut by forking again at the last completed turn; the first fork is then an
  * unused two-line rollout that never shows in `thread/list`.
  */
-export const importCodexExternalThread = Effect.fn("importCodexExternalThread")(function* (
+const importCodexExternalThread = Effect.fn("importCodexExternalThread")(function* (
   client: CodexImportClient,
   input: { readonly sessionId: string; readonly cwd: string },
 ) {

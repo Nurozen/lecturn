@@ -30,7 +30,7 @@ export const staleContextual = () =>
     message: "Contextual changed. Refresh and try again.",
   });
 
-export const requireContextualProject = (sql: SqlClient.SqlClient, projectId: ProjectId) =>
+const requireContextualProject = (sql: SqlClient.SqlClient, projectId: ProjectId) =>
   Effect.gen(function* () {
     const rows =
       yield* sql`SELECT project_id FROM projection_projects WHERE project_id = ${projectId} AND deleted_at IS NULL`;

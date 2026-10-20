@@ -49,7 +49,7 @@ export function hydratePosixHome(
   }
 }
 
-export const fixPath = Effect.fn("fixPath")(function* (): Effect.fn.Return<
+const fixPath = Effect.fn("fixPath")(function* (): Effect.fn.Return<
   void,
   never,
   FileSystem.FileSystem | Path.Path

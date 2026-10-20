@@ -11,7 +11,6 @@ import { ContextualService } from "../contextual/ContextualService.ts";
 import { ContextualRepository } from "../contextual/ContextualRepository.ts";
 import type { TaskSnapshotInput } from "../contextual/ContextualService.ts";
 import { contextualPacketText } from "../contextual/ContextualPacketText.ts";
-export { contextualPacketText } from "../contextual/ContextualPacketText.ts";
 import { contextualEvidenceFits } from "../provider/ContextualDispatch.ts";
 import { ContextualTurnQueue, type ContextualQueuedTurn } from "./ContextualTurnQueue.ts";
 

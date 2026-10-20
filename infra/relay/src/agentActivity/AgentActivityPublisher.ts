@@ -1,8 +1,8 @@
-import { makeAggregateState } from "./AgentActivityAggregate.ts";
+import { makeAggregateState } from "./agentActivityAggregate.ts";
 export {
   makeAggregateState,
   TERMINAL_AGENT_ACTIVITY_DISPLAY_TTL_MS,
-} from "./AgentActivityAggregate.ts";
+} from "./agentActivityAggregate.ts";
 import type {
   RelayAgentActivityState,
   RelayDeliveryResult,
@@ -23,8 +23,10 @@ import * as LiveActivities from "./LiveActivities.ts";
 import * as ApnsDeliveries from "./ApnsDeliveries.ts";
 import { TeamRuntime } from "../teams/TeamRuntime.ts";
 import { ManagedAccessUnavailable } from "../billing/ManagedAccess.ts";
+import * as FcmDeliveries from "./FcmDeliveries.ts";
 
 export type AgentActivityPublishError =
+  | FcmDeliveries.FcmDeliveryError
   | AgentActivityRows.AgentActivityRowUpsertPersistenceError
   | AgentActivityRows.AgentActivityRowDeletePersistenceError
   | AgentActivityRows.AgentActivityRowListPersistenceError
@@ -58,6 +60,7 @@ export const make = Effect.gen(function* () {
   const liveActivities = yield* LiveActivities.LiveActivities;
   const apnsDeliveries = yield* ApnsDeliveries.ApnsDeliveries;
   const teams = yield* Effect.serviceOption(TeamRuntime);
+  const fcmDeliveries = yield* FcmDeliveries.FcmDeliveries;
 
   const publishForDeliveryUser = Effect.fn(
     "relay.agent_activity_publisher.publish_for_delivery_user",
@@ -92,8 +95,11 @@ export const make = Effect.gen(function* () {
     const targets = yield* liveActivities.listTargets({ userId: input.deliveryUser.userId });
     const deliveriesByTarget = yield* Effect.forEach(
       targets,
-      (target) =>
-        Effect.all(
+      Effect.fnUntraced(function* (target) {
+        if (target.platform === "android") {
+          return [yield* fcmDeliveries.enqueue({ target, state: input.state })];
+        }
+        return yield* Effect.all(
           [
             apnsDeliveries.sendForTarget({
               target,
@@ -112,7 +118,8 @@ export const make = Effect.gen(function* () {
                 }),
           ],
           { concurrency: 2 },
-        ),
+        );
+      }),
       { concurrency: 4 },
     );
     return deliveriesByTarget.flat();
@@ -137,6 +144,9 @@ export const make = Effect.gen(function* () {
       const target = targets.find((row) => row.device_id === input.deviceId) ?? null;
       if (target === null) {
         return null;
+      }
+      if (target.platform === "android") {
+        return yield* fcmDeliveries.enqueue({ target, state: null, replay: true });
       }
       const now = yield* DateTime.now;
       const aggregate = makeAggregateState({

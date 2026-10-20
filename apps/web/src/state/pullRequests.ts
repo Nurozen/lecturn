@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   createLinkedPullRequestSummaryAtomFamily,
   createPullRequestEnvironmentAtoms,
+  createPullRequestStackAtomFamily,
 } from "@lecturn/client-runtime/state/pull-requests";
 import type {
   EnvironmentId,
@@ -58,8 +59,8 @@ export function useSharedPullRequestSummary(
       : JSON.stringify([
           environmentId,
           reference.projectId,
+          reference.host?.toLowerCase() ?? null,
           reference.repository.toLowerCase(),
-          reference.host?.toLowerCase() ?? "",
           reference.number,
         ]);
   const atom = observedPullRequestSummaryAtom(key);
@@ -73,6 +74,10 @@ export function useSharedPullRequestSummary(
   }, [atom, current, environmentId]);
   return newestPullRequestSummary(current, observed);
 }
+export const pullRequestStackAtom = createPullRequestStackAtomFamily(
+  connectionAtomRuntime,
+  pullRequestEnvironment.refreshes,
+);
 
 export interface EnvironmentQueryTarget<Input> {
   readonly environmentId: EnvironmentId;

@@ -71,7 +71,7 @@ const decodeEvaluation = Schema.decodeUnknownEffect(
 const decodeTask = Schema.decodeUnknownEffect(C.ContextualTaskSnapshot);
 const decodeSelection = Schema.decodeUnknownEffect(Schema.fromJsonString(C.ModelSelection));
 const decodeConflictValue = Schema.decodeUnknownEffect(C.ContextualConflict);
-export const collectionEligible = (status: C.ExtensionFundingStatusResult): boolean =>
+const collectionEligible = (status: C.ExtensionFundingStatusResult): boolean =>
   status.state === "active" && status.reason === "eligible";
 const transient = new Set<C.ContextualPreparationState>([
   "requested",
@@ -83,7 +83,7 @@ export const routineFollowup = (text: string): boolean =>
   /^(?:thanks(?: you)?|thank you|ok(?:ay)?|great|got it|sounds good|continue|go on|yes|yep|sure|nice)[.!\s]*$/iu.test(
     text.trim(),
   );
-export const explicitCurrentDirection = (text: string): boolean =>
+const explicitCurrentDirection = (text: string): boolean =>
   /^(?:please\s+)?(?:switch\b.+\bto\b|change\b.+\bto\b|replace\b.+\bwith\b|use\b.+\b(?:instead|rather than)\b)/imu.test(
     text,
   );

@@ -287,6 +287,7 @@ const sourceThread: OrchestrationThread = {
   latestTurn: null,
   createdAt: t(0),
   updatedAt: t(4),
+  pullRequests: [],
   archivedAt: null,
   settledOverride: null,
   settledAt: null,

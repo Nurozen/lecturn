@@ -13,9 +13,10 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { USER_INPUT_TOGGLE_DURATION_MS } from "./pendingUserInputLayout";
+import { QuestionAttachments } from "./QuestionAttachments";
 
 import { SymbolView } from "../../components/AppSymbol";
-import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
+import { AppText as Text } from "../../components/AppText";
 import { GlassCard } from "../../components/GlassCard";
 import { ControlPill } from "../../components/ControlPill";
 import { cn } from "../../lib/cn";
@@ -322,18 +323,17 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                   );
                 })}
               </View>
-              {question.allowCustomAnswer !== false ? (
-                <TextInput
-                  value={draft?.customAnswer ?? ""}
-                  onChangeText={(value) =>
-                    props.onChangeCustomAnswer(props.pendingUserInput.requestId, question.id, value)
-                  }
-                  onFocus={() => props.onInputFocusChange?.(true)}
-                  onBlur={() => props.onInputFocusChange?.(false)}
-                  placeholder="Or type a custom answer"
-                  className="min-h-[54px] rounded-2xl border border-input-border bg-input px-3.5 py-3 font-sans text-base text-foreground"
-                />
-              ) : null}
+              <QuestionAttachments
+                requestId={props.pendingUserInput.requestId}
+                question={question}
+                questions={props.pendingUserInput.questions}
+                disabled={props.respondingUserInputId === props.pendingUserInput.requestId}
+                value={draft?.customAnswer ?? ""}
+                onChangeText={(value) =>
+                  props.onChangeCustomAnswer(props.pendingUserInput.requestId, question.id, value)
+                }
+                onInputFocusChange={props.onInputFocusChange}
+              />
             </View>
           );
         })}

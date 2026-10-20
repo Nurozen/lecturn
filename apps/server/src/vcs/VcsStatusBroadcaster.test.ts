@@ -1179,9 +1179,9 @@ describe("autoPullPolicyLayer", () => {
           },
           ServerSettings.layerTest({
             defaultAutoPull: true,
-            projectAutoPullOverrides: {
-              [ProjectId.make("opted-out")]: false,
-              [staveProject.id]: true,
+            projectSettingsOverrides: {
+              [ProjectId.make("opted-out")]: { defaultAutoPull: false },
+              [staveProject.id]: { defaultAutoPull: true },
             },
           }),
         ),

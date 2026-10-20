@@ -2,7 +2,7 @@ import * as NodeNet from "node:net";
 
 // One reservation across users, release channels, and data directories. The OS
 // releases it after a crash; there are no PID files to race or stale locks to reap.
-export const DEVICE_RELAY_LEASE_PORT = 47391;
+const DEVICE_RELAY_LEASE_PORT = 47391;
 const protocol = "lecturn-device-relay-v1";
 
 export interface DeviceRelayOwner {

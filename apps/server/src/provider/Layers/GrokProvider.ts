@@ -44,6 +44,7 @@ import { discoverGrokSkills } from "../Drivers/GrokSkills.ts";
 
 export const GROK_PRESENTATION = {
   displayName: "Grok",
+  supportsConversationRollback: false,
   badgeLabel: "Early Access",
   showInteractionModeToggle: false,
   conversationFork: "unsupported",

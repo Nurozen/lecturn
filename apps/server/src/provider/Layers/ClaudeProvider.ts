@@ -57,6 +57,7 @@ const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabili
 export const CLAUDE_PRESENTATION = {
   displayName: "Claude",
   showInteractionModeToggle: true,
+  reportsContextWindow: true,
   conversationFork: "native",
   conversationForkRequiresAnchor: true,
   // The driver turns this off for instances running against a custom home.
@@ -433,7 +434,7 @@ const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
  * expect, so a changed CLI contract degrades to "unknown" rather than to a
  * confident wrong answer.
  */
-export function parseClaudeAuthStatusLoggedIn(stdout: string): boolean | undefined {
+function parseClaudeAuthStatusLoggedIn(stdout: string): boolean | undefined {
   const trimmed = stdout.trim();
   if (trimmed.length === 0) return undefined;
   try {

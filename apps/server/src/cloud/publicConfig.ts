@@ -50,27 +50,27 @@ function normalizeSecureUrl(value: string): string | null {
   }
 }
 
-export const buildTimeHostedAppUrl = readBuildTimeValue(
+const buildTimeHostedAppUrl = readBuildTimeValue(
   typeof __LECTURN_BUILD_HOSTED_APP_URL__ === "undefined"
     ? undefined
     : __LECTURN_BUILD_HOSTED_APP_URL__,
 );
 
-export const buildTimeRelayUrl =
+const buildTimeRelayUrl =
   typeof __LECTURN_BUILD_RELAY_URL__ === "undefined"
     ? ""
     : (normalizeSecureRelayUrl(__LECTURN_BUILD_RELAY_URL__) ?? "");
-export const buildTimeClerkPublishableKey = readBuildTimeValue(
+const buildTimeClerkPublishableKey = readBuildTimeValue(
   typeof __LECTURN_BUILD_CLERK_PUBLISHABLE_KEY__ === "undefined"
     ? undefined
     : __LECTURN_BUILD_CLERK_PUBLISHABLE_KEY__,
 );
-export const buildTimeClerkCliOAuthClientId = readBuildTimeValue(
+const buildTimeClerkCliOAuthClientId = readBuildTimeValue(
   typeof __LECTURN_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__ === "undefined"
     ? undefined
     : __LECTURN_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__,
 );
-export const buildTimeRelayClientTracing = {
+const buildTimeRelayClientTracing = {
   tracesUrl: readBuildTimeValue(
     typeof __LECTURN_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__ === "undefined"
       ? undefined

@@ -366,6 +366,8 @@ export function useSelectedThreadGitActions(repoKey?: string) {
             ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
             ...(input.featureBranch ? { featureBranch: input.featureBranch } : {}),
             ...(input.filePaths?.length ? { filePaths: [...input.filePaths] } : {}),
+            // A pull request the action opens is linked to the thread it ran beside.
+            threadId: thread.id,
           });
           if (AsyncResult.isFailure(result)) {
             return result;

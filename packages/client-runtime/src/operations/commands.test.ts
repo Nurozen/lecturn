@@ -28,6 +28,7 @@ import {
   createProject,
   forkThread,
   importThread,
+  revertThreadCheckpoint,
   reorderActiveThread,
   settleThread,
   stopThreadSession,
@@ -160,6 +161,27 @@ describe("environment commands", () => {
       expect(result).toEqual({ sequence: 1 });
       expect(dispatched).toEqual([
         { ...input, type: "thread.import", commandId: "00000000-0000-4000-8000-000000000000" },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("uses a distinct command when keeping workspace changes", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+      for (const restoreFiles of [undefined, true, false]) {
+        yield* revertThreadCheckpoint({
+          commandId: CommandId.make("rewind-command"),
+          threadId: ThreadId.make("thread-1"),
+          turnCount: 0,
+          ...(restoreFiles !== undefined ? { restoreFiles } : {}),
+          createdAt: "2026-06-06T00:01:00.000Z",
+        }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+      }
+      expect(dispatched.map((command) => command.type)).toEqual([
+        "thread.checkpoint.revert",
+        "thread.checkpoint.revert",
+        "thread.conversation.revert",
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );
