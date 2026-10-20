@@ -149,7 +149,9 @@ class SubscriptionUsageWidget : AppWidgetProvider() {
       child.setTextViewText(R.id.lecturn_widget_percent, percent)
       val visibility = if (remaining == null) View.GONE else View.VISIBLE
       child.setViewVisibility(R.id.lecturn_widget_progress, visibility)
-      if (remaining != null) child.setProgressBar(R.id.lecturn_widget_progress, 100, remaining, false)
+      if (remaining != null) {
+        child.setProgressBar(R.id.lecturn_widget_progress, 100, remaining, false)
+      }
       val reset = window?.optString("reset")
         ?: context.getString(R.string.lecturn_subscription_widget_refresh)
       child.setTextViewText(R.id.lecturn_widget_reset, reset)
