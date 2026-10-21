@@ -23,7 +23,7 @@ concurrency:
 jobs:
   # Lint, typecheck, and the desktop build each get a runner so they run side by
   # side instead of one after another. The `Check` job at the end of this file
-  # passes only when every other job does.
+  # passes only when every job it needs does (all but the macOS native lint).
   lint:
     name: Lint
     runs-on: ubuntu-24.04
