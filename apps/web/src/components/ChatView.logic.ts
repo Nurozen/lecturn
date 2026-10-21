@@ -46,6 +46,7 @@ import {
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import * as Schema from "effect/Schema";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { providerDetectionSendBlock } from "./providerDetection";
 import { environmentThreadDetails, environmentThreadShells } from "../state/threads";
 import { stripInlineContextReferences } from "~/lib/composerContextReferences";
 import { filterTerminalContextsWithText, type TerminalContextDraft } from "../lib/terminalContext";
@@ -671,6 +672,14 @@ export function getAntigravitySendBlockReason(
     return "That Antigravity model is no longer available. Choose another model.";
   }
   return null;
+}
+
+/** Shared by single- and multi-model sends so both wait on provider detection. */
+export function getProviderSendBlockReason(
+  provider: ServerProvider | null | undefined,
+  model: string,
+): string | null {
+  return providerDetectionSendBlock(provider) ?? getAntigravitySendBlockReason(provider, model);
 }
 
 export { buildRevertTurnCountByUserMessageId } from "./chat/MessagesTimeline.logic";

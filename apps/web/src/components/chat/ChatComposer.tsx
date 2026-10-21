@@ -3,7 +3,6 @@ import { useContextualAvailable } from "../../state/contextual";
 import { ContextualControl } from "../contextual/ContextualControl";
 import { ContextualPreparationPanel } from "../contextual/ContextualPreparationPanel";
 import "./composer-glass.css";
-import { providerDetectionSendBlock } from "../providerDetection";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
 import { usePrimaryEnvironmentId } from "../../state/environments";
@@ -89,7 +88,7 @@ import { listContinuationForEnter, listIndentForTab } from "../../composer-list-
 import {
   deriveComposerSendState,
   deriveUnsentImportInstanceId,
-  getAntigravitySendBlockReason,
+  getProviderSendBlockReason,
   readFileAsDataUrl,
   resolveComposerInteractionMode,
   resolveComposerProviderSelection,
@@ -1909,9 +1908,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectModelSelection: activeProjectDefaultModelSelection,
     settings,
   });
-  const providerSendBlockReason =
-    providerDetectionSendBlock(selectedProviderEntry?.snapshot) ??
-    getAntigravitySendBlockReason(selectedProviderEntry?.snapshot, selectedModel);
+  const providerSendBlockReason = getProviderSendBlockReason(
+    selectedProviderEntry?.snapshot,
+    selectedModel,
+  );
   const sendDisabledReason =
     externalSendDisabledReason ??
     (multipleModelSelections?.length === 0 ? "Select at least one model." : null) ??

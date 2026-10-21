@@ -66,12 +66,6 @@ vi.mock("@react-navigation/native", () => ({
   useRoute: () => ({ params: undefined }),
 }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
-vi.mock("../../components/ArcaneBackdrop", () => ({
-  ArcaneBackdrop: () => {
-    ui.text = [];
-    return null;
-  },
-}));
 vi.mock("../../components/GlassCard", () => ({
   GlassCard: ({ children }: { children: ReactNode }) => children,
 }));
@@ -113,12 +107,16 @@ vi.mock("../../components/SegmentedControl", () => ({
   },
 }));
 vi.mock("../settings/components/SettingsScreen", () => ({
-  SettingsScreen: ({ children, trailing }: { children: ReactNode; trailing?: ReactNode }) => (
-    <>
-      {children}
-      {trailing}
-    </>
-  ),
+  // The screen re-renders as a whole; drop text collected by the previous pass.
+  SettingsScreen: ({ children, trailing }: { children: ReactNode; trailing?: ReactNode }) => {
+    ui.text = [];
+    return (
+      <>
+        {children}
+        {trailing}
+      </>
+    );
+  },
 }));
 vi.mock("../settings/components/SettingsSection", () => ({
   SettingsSection: ({ children }: { children: ReactNode }) => children,

@@ -2917,7 +2917,6 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       onToggleWorkGroup,
       onToggleWorkRow,
       props.environmentId,
-      props.threadId,
       props.onUseArtifactTemplate,
       props.skills,
       renderMarkdownImage,

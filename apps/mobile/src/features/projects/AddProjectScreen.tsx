@@ -1,4 +1,3 @@
-import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { GlassCard } from "../../components/GlassCard";
 import { MaterialListRow } from "../../components/MaterialListRow";
 import { SettingsScreen } from "../settings/components/SettingsScreen";
@@ -162,7 +161,6 @@ export function AddProjectShell(props: {
     // "header" sibling, coercing the ScrollView to zero height (blank sheet
     // as soon as the sheet re-lays-out, e.g. when the keyboard opens).
     <SettingsScreen title={props.title ?? "Add project"}>
-      <ArcaneBackdrop emphasis="sidebar" />
       <ScrollView
         keyboardShouldPersistTaps="handled"
         contentInsetAdjustmentBehavior="automatic"

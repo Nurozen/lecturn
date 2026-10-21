@@ -1,5 +1,4 @@
 import { GlassCard } from "../../components/GlassCard";
-import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
 import { EnvironmentId, USAGE_CONTRACT_VERSION } from "@lecturn/contracts";
 import { type RouteProp, useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
@@ -244,7 +243,6 @@ export function UsageRouteScreen() {
 
   return (
     <SettingsScreen title="Usage" trailing={environmentFilter}>
-      <ArcaneBackdrop />
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}

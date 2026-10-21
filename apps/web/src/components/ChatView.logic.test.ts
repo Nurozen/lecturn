@@ -51,6 +51,7 @@ import {
   dismissBranchMismatchForSession,
   ENVIRONMENT_RECONNECT_WARNING_GRACE_MS,
   getAntigravitySendBlockReason,
+  getProviderSendBlockReason,
   getStartedThreadModelChangeBlockReason,
   hasEnvironmentReconnectWarningGraceElapsed,
   hasServerAcknowledgedLocalDispatch,
@@ -1759,6 +1760,25 @@ describe("resolveComposerProviderSelection", () => {
     expect(
       getAntigravitySendBlockReason(provider, "saved-model-not-in-current-catalog"),
     ).toBeNull();
+  });
+
+  it("blocks every selected model while its provider is still detecting", () => {
+    // A snapshot can report "ready" before discovery settles after launch.
+    const provider = entry("codex", "codex", {
+      displayName: "Codex",
+      discovery: { status: "detecting", phase: "provider" },
+    }).snapshot;
+
+    expect(getProviderSendBlockReason(provider, "gpt-model")).toBe("Detecting Codex…");
+    expect(
+      getProviderSendBlockReason(
+        { ...provider, discovery: { status: "ready", phase: "provider" } },
+        "gpt-model",
+      ),
+    ).toBeNull();
+    expect(getProviderSendBlockReason(entry("antigravity").snapshot, "gemini-pro")).toBe(
+      "Refresh Antigravity models in provider settings before sending.",
+    );
   });
 
   it("keeps existing send behavior for other providers", () => {
