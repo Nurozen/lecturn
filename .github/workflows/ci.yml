@@ -455,7 +455,11 @@ jobs:
 
   # Branch protection requires this job by its name, `Check`. It fails when any
   # other job fails, is cancelled, or is skipped without a reason, so splitting
-  # or resharding jobs needs no ruleset change. Add every new job to `needs`.
+  # or resharding jobs needs no ruleset change. Add every new job to `needs`,
+  # except Mobile Native Static Analysis: Lecturn runs it on GitHub-hosted
+  # macos-26, whose runners are not reliably provisioned for this repository,
+  # so it stays a visible but non-required check, as it was before this job
+  # became an aggregate.
   # `always()` rather than `!cancelled()`: a skipped job reports success to
   # branch protection, so a cancelled run must still produce a failing check.
   check:
@@ -471,7 +475,6 @@ jobs:
         test_server,
         rust,
         mobile_native_changes,
-        mobile_native_static_analysis,
         release_smoke,
       ]
     runs-on: ubuntu-24.04
@@ -482,7 +485,4 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          # Only the macOS lint skips on purpose, when no native mobile code changed.
-          echo "$RESULTS" | jq -e 'all(to_entries[];
-            .value.result == "success"
-            or (.key == "mobile_native_static_analysis" and .value.result == "skipped"))' > /dev/null
+          echo "$RESULTS" | jq -e 'all(to_entries[]; .value.result == "success")' > /dev/null
