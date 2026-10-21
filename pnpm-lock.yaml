@@ -72,6 +72,8 @@ overrides:
   '@expo/dom-webview': 58.0.2
   '@expo/metro-config': 58.0.6
   expo-constants: 58.0.9
+  expo-modules-core: 58.0.11
+  expo-notifications: 58.0.11
   expo-router: 58.0.10
   expo-sharing>@expo/config-plugins: 58.0.4
   expo-sharing>@expo/config-types: 58.0.2
@@ -397,7 +399,7 @@ importers:
         specifier: ~58.0.3
         version: 58.0.3(expo@58.0.2)(react@19.3.0)
       expo-notifications:
-        specifier: ~58.0.11
+        specifier: 58.0.11
         version: 58.0.11(patch_hash=5b9c1a7b3ecbaac577857cce9ec8b01ed740a85ac093a17153495aa480685a4d)(expo@58.0.2)(react-native@0.88.0-rc.3(@babel/core@7.29.7)(@react-native/metro-config@0.88.0-rc.3(@babel/core@7.29.7)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(utf-8-validate@6.0.6))(react@19.3.0)(typescript@7.0.2)
       expo-paste-input:
         specifier: ^0.1.15

@@ -169,10 +169,23 @@ export const make = Effect.gen(function* () {
     request: RefreshRequest,
   ) {
     // Backfill looks up settled threads, so its passes read every thread.
-    const snapshot =
+    let snapshot =
       request.threadId === null && (request.backfill || pendingBackfill.size > 0)
         ? yield* snapshots.getShellSnapshot()
         : yield* readSweepSnapshot(snapshots, request.threadId);
+    // A live Stave space without a sole editable checkout must drop inferred
+    // links from its settled threads too (filter below). The unsettled read
+    // omits those threads, so read every thread only while such a space exists.
+    if (
+      request.threadId === null &&
+      !request.backfill &&
+      pendingBackfill.size === 0 &&
+      snapshot.projects.some(
+        (project) => project.stave?.state === "live" && stavePrimaryCwd(project, path) === null,
+      )
+    ) {
+      snapshot = yield* snapshots.getShellSnapshot();
+    }
     const projects = new Map(snapshot.projects.map((project) => [project.id, project]));
     if (request.backfill) {
       for (const thread of snapshot.threads) {

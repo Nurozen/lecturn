@@ -200,9 +200,22 @@ const makeHarness = Effect.fn("makeThreadPullRequestHarness")(function* (options
   const dependencies = Layer.mergeAll(
     Layer.mock(ProjectionSnapshotQuery)({
       getShellSnapshot: (readOptions) =>
-        (options.getShellSnapshot?.(readOptions) ?? Ref.get(snapshots)).pipe(
-          Effect.tap(() => Queue.offer(reads, null)),
-        ),
+        (
+          options.getShellSnapshot?.(readOptions) ??
+          Ref.get(snapshots).pipe(
+            // Match the SQL filter: an unsettled read omits settled threads.
+            Effect.map((snapshot) =>
+              readOptions?.unsettledOnly === true
+                ? {
+                    ...snapshot,
+                    threads: snapshot.threads.filter(
+                      (thread) => thread.settledOverride !== "settled" && thread.settledAt === null,
+                    ),
+                  }
+                : snapshot,
+            ),
+          )
+        ).pipe(Effect.tap(() => Queue.offer(reads, null))),
       getSnapshotSequence: () =>
         Ref.get(snapshots).pipe(Effect.map(({ snapshotSequence }) => ({ snapshotSequence }))),
       getThreadShellById: (threadId) =>
