@@ -58,7 +58,7 @@ export function ProviderDetectionRecovery({
           aria-label="Retry provider detection"
           className="relative size-10 shrink-0"
         >
-          <GoldThreadSpinner className="size-10 opacity-35 grayscale [&_.lecturn-thread-orbit]:animate-none" />
+          <GoldThreadSpinner variant="idle" className="size-10" />
           <RotateCwIcon className="absolute size-4 text-muted-foreground" />
         </Button>
       )}
@@ -74,7 +74,7 @@ export function ProviderDetectionRecovery({
           <>
             <p className="text-muted-foreground">{providerDetectionHint(provider)}</p>
             <div className="flex gap-3">
-              <Button variant="link" size="xs" className="px-0" onClick={() => void retry()}>
+              <Button variant="link" size="xs-flush" onClick={() => void retry()}>
                 Retry
               </Button>
               <Link

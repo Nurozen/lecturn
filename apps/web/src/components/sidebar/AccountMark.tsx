@@ -35,7 +35,7 @@ function KnownAccountMark({
             role="img"
             aria-label={`Account ${mark.email}`}
             className={cn(
-              "max-w-16 shrink-0 truncate rounded-sm bg-muted/60 px-1 text-[0.625rem] text-muted-foreground leading-4",
+              "max-w-16 shrink-0 truncate rounded-sm bg-muted/60 px-1 text-3xs text-muted-foreground leading-4",
               className,
             )}
           />

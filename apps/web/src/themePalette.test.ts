@@ -105,6 +105,21 @@ describe("theme files", () => {
     });
   });
 
+  it("keeps the stock sidebar and chat on distinct surfaces in both appearances", () => {
+    expectThemeColors(getStandardThemeColors("light"), {
+      canvas: "#f4eddf",
+      sidebar: "#ede3d2",
+      sidebarRowActive: "#fff9ee",
+      messageSurface: "#e9deca",
+    });
+    expectThemeColors(getStandardThemeColors("dark"), {
+      canvas: "#061522",
+      sidebar: "#04101a",
+      sidebarRowActive: "#203746",
+      messageSurface: "#142838",
+    });
+  });
+
   it("derives readable, distinctive vivid palettes from exact seeds", () => {
     const seeds: ReadonlyArray<["light" | "dark", string, string]> = [
       ["light", "#f4f9f2", "#1d8a4e"],

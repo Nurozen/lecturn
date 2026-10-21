@@ -1,7 +1,10 @@
 import { assert, describe, it } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { HostProcessEnvironment, HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -31,6 +34,7 @@ import {
   pasteAsText,
   pickProjectFavicon,
   saveTextFile,
+  probeRemoteEditors,
 } from "./window.ts";
 
 const readyWslConfig: DesktopBackendManager.DesktopBackendStartConfig = {
@@ -387,3 +391,34 @@ describe("saveTextFile", () => {
     );
   }
 });
+
+it.effect.skipIf(HostProcessPlatform.defaultValue() === "win32")(
+  "finds remote editors installed without PATH launchers",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-remote-editors-" });
+      for (const app of ["Cursor", "Visual Studio Code", "WebStorm"]) {
+        const executable = path.join(
+          home,
+          "Applications",
+          `${app}.app`,
+          app === "WebStorm" ? "Contents/MacOS/webstorm" : "Contents/Resources/app/bin/code",
+        );
+        yield* fs.makeDirectory(path.dirname(executable), { recursive: true });
+        yield* fs.writeFileString(executable, "#!/bin/sh\n");
+        yield* fs.chmod(executable, 0o755);
+      }
+      const editors = yield* probeRemoteEditors.handler(undefined).pipe(
+        Effect.provideService(HostProcessEnvironment, {
+          HOME: home,
+          PATH: path.join(home, "empty"),
+        }),
+        Effect.provideService(HostProcessPlatform, "darwin"),
+      );
+      assert.include(editors, "cursor");
+      assert.include(editors, "vscode");
+      assert.notInclude(editors, "webstorm");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);

@@ -32,7 +32,7 @@ function Claim({ claim }: { claim: ContextualClaim }) {
           <blockquote className="border-l-2 border-primary/40 pl-2 text-sm whitespace-pre-wrap break-words">
             {e.quote}
           </blockquote>
-          <p className="mt-1 text-[11px] text-muted-foreground">
+          <p className="mt-1 text-2xs text-muted-foreground">
             {e.sourceKind === "thread-message"
               ? `${e.messageRole} · current conversation`
               : `${e.author} · ${new Date(e.occurredAt).toLocaleString()} · ${e.availability}`}

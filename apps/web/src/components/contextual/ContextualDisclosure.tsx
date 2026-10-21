@@ -238,7 +238,7 @@ export function ContextualMessageDisclosure({
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-semibold tracking-wide text-primary">Contextual</span>
-        <span className="text-[11px] text-muted-foreground">For this message</span>
+        <span className="text-2xs text-muted-foreground">For this message</span>
       </div>
       {outcome ? (
         <p className="text-xs leading-relaxed text-muted-foreground" role="status">

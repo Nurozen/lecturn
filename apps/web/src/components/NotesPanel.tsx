@@ -289,7 +289,7 @@ function SavedNotesPanel({
                         }
                       }}
                     >
-                      <div className="mb-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <div className="mb-2 flex items-center gap-2 text-2xs text-muted-foreground">
                         {note.messageRole === "user" ? (
                           <UserIcon className="size-3" />
                         ) : (

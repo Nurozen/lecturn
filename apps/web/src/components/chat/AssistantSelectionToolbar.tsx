@@ -160,7 +160,6 @@ export function AssistantSelectionToolbar({
           variant="glass"
           disabled={tooLong}
           aria-label={tooLong ? "Selection is too long to cite" : "Cite selection in composer"}
-          className="rounded-full px-2.5"
           onClick={() => {
             if (tooLong || !onCite(selection.citation, selection.sourceAnchor)) return;
             window.getSelection()?.removeAllRanges();
@@ -178,7 +177,6 @@ export function AssistantSelectionToolbar({
           variant="glass"
           disabled={tooLong}
           aria-label={tooLong ? "Selection is too long to save" : "Save selection as a note"}
-          className="rounded-full px-2.5"
           onClick={() => {
             if (tooLong) return;
             onSaveNote({

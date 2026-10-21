@@ -281,7 +281,7 @@ export function SagaWorkbenchPage({
           {member.workflow?.summary?.text ?? sagaWorkbenchSummaryFallback(member.workflow)}
         </span>
         {member.workflow?.summary ? (
-          <span className="mt-1 block text-[10px] text-muted-foreground">
+          <span className="mt-1 block text-3xs text-muted-foreground">
             Summary snapshot · {new Date(member.workflow.summary.generatedAt).toLocaleString()}
           </span>
         ) : null}

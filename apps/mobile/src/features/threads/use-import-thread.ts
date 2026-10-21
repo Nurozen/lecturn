@@ -28,7 +28,7 @@ import { stickyComposerModelSelectionAtom } from "../../state/use-composer-draft
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
-import { resolveProviderInteractionMode } from "./legacy-plan-mode";
+import { resolveProviderInteractionMode } from "../../state/legacy-plan-mode";
 import {
   resolveImportModelSelection,
   resolveThreadImportAvailability,

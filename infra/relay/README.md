@@ -84,7 +84,8 @@ these resources requires a separate state migration and must not accompany a
 normal application deployment. Inspect the production dry run: existing keys,
 database, queues, and Worker must be retained rather than recreated.
 
-The relay deploys through Alchemy:
+The relay deploys with the Alchemy CLI (`vp run --filter lecturn-relay deploy` is `alchemy deploy`
+in this directory):
 
 ```sh
 vp run --filter lecturn-relay deploy
@@ -117,9 +118,10 @@ DNS-safe sanitization as Alchemy physical resource names, so `prod` uses
 `<stage>-<digest>.<RELAY_TUNNEL_ZONE_NAME>`. `RELAY_DOMAIN` remains available as an explicit API
 domain override.
 
-After a successful deploy, the wrapper updates the repository-root `.env` file with the derived relay
-URL. That makes subsequent source builds point at the relay that was just deployed without copying
-the URL manually.
+The stack's `PublishClientConfig` action ([`src/clientConfig.ts`](./src/clientConfig.ts)) writes the
+deployed relay URL and tracing configuration into the repository-root `.env`, so subsequent source
+builds point at the relay that was just deployed without copying values manually. It runs only when
+one of those outputs changed, and `LECTURN_RELAY_CLIENT_CONFIG_ENV` redirects it to another file.
 
 ### Deployment CI
 

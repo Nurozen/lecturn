@@ -18,7 +18,7 @@ import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import * as StaveMemoryWiring from "../../stave/StaveMemoryWiring.ts";
-import { layerTest as codexResetCreditLayerTest } from "../Layers/codexResetCredit.ts";
+import * as ResetCreditCoordinator from "../Layers/resetCreditCoordinator.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import * as ModelManifest from "../ModelManifest.ts";
 import {
@@ -34,7 +34,7 @@ const testLayer = ServerConfig.layerTest(process.cwd(), {
   Layer.provideMerge(NodeServices.layer),
   Layer.provideMerge(ServerSettingsService.layerTest()),
   Layer.provideMerge(ModelManifest.layerTest),
-  Layer.provideMerge(codexResetCreditLayerTest),
+  Layer.provideMerge(ResetCreditCoordinator.layerTest),
   Layer.provideMerge(StaveMemoryWiring.layerNoop),
   Layer.provideMerge(
     Layer.mock(BackgroundPolicy.BackgroundPolicy)({

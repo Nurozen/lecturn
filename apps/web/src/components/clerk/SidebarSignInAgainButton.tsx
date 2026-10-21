@@ -11,7 +11,7 @@ export default function SidebarSignInAgainButton({ accountId }: { readonly accou
       <button
         type="button"
         data-lecturn-hover
-        className="shrink-0 cursor-pointer rounded px-1 text-[0.6875rem] font-medium text-warning hover:bg-sidebar-row-hover"
+        className="shrink-0 cursor-pointer rounded px-1 text-2xs font-medium text-warning hover:bg-sidebar-row-hover"
         onClick={() => signInAgainAs(accountId)}
       >
         Sign in again

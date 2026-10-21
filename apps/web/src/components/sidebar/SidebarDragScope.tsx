@@ -512,7 +512,7 @@ export function SidebarDragScope(props: {
           const rootRect = root.getBoundingClientRect();
           const scale = root.offsetWidth > 0 ? rootRect.width / root.offsetWidth : 1;
           const label = header.querySelector<HTMLElement>("[data-sidebar-drag-label]");
-          const hint = tail.querySelector<HTMLElement>(".sidebar-drag-placeholder");
+          const hint = tail.querySelector<HTMLElement>("[data-sidebar-drag-placeholder]");
           const labelRect = label?.getBoundingClientRect();
           // The label's top inset also supplies its bottom clearance.
           const labelHeight = labelRect
@@ -608,6 +608,8 @@ export function SidebarDragScope(props: {
 
 export function ScopedSortableThreadRow(props: {
   thread: EnvironmentThreadShell;
+  /** A row being renamed keeps pointer gestures for text selection. */
+  dragDisabled?: boolean;
   children: (
     bag: SortableThreadRowBag | undefined,
     verb: SidebarDropVerb | null,
@@ -619,7 +621,10 @@ export function ScopedSortableThreadRow(props: {
   const sortable = useSortable({
     id: key,
     disabled: {
-      draggable: !scope?.enabledKeys.has(key) || !scope.draggableKeys.has(key),
+      draggable:
+        props.dragDisabled === true ||
+        !scope?.enabledKeys.has(key) ||
+        !scope.draggableKeys.has(key),
       droppable: !scope?.enabledKeys.has(key),
     },
     animateLayoutChanges: animateSidebarLayoutChanges,
@@ -710,9 +715,10 @@ export function SidebarDragBoundary(props: {
         (placeholder ? (
           <div
             aria-hidden={!showHint}
+            data-sidebar-drag-placeholder=""
             style={{ visibility: showHint ? undefined : "hidden" }}
             className={cn(
-              "sidebar-drag-placeholder absolute inset-x-0 top-0 flex h-9 items-center justify-center rounded-md border border-dashed border-sidebar-foreground/25 text-xs text-sidebar-foreground/80",
+              "absolute inset-x-0 top-0 flex h-9 items-center justify-center rounded-md border border-dashed border-sidebar-foreground/25 text-xs text-sidebar-foreground/80",
               isDropTarget && "border-primary/40 bg-primary/5 text-primary",
             )}
           >

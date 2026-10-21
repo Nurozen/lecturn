@@ -101,7 +101,9 @@ export function ContextualControl({
           }
         >
           <SparklesIcon className="size-3.5" />
-          Contextual · {data?.thread.enabled ? "On" : "Off"}
+          <span data-composer-control-label>
+            Contextual · {data?.thread.enabled ? "On" : "Off"}
+          </span>
         </MenuTrigger>
         <MenuPopup align="start" {...composerFloatingLayerProps}>
           <MenuCheckboxItem
@@ -174,14 +176,16 @@ export function ContextualControl({
               Sources and collection belong to {data?.hostName ?? "the selected host"}.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="space-y-6">
-            {data ? (
-              <ContextualProjectSettings
-                environmentId={environmentId}
-                projectId={data.project.projectId}
-              />
-            ) : null}
-            <ContextualHostSettings environmentId={environmentId} />
+          <DialogPanel>
+            <div className="space-y-6">
+              {data ? (
+                <ContextualProjectSettings
+                  environmentId={environmentId}
+                  projectId={data.project.projectId}
+                />
+              ) : null}
+              <ContextualHostSettings environmentId={environmentId} />
+            </div>
           </DialogPanel>
         </DialogPopup>
       </Dialog>

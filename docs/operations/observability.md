@@ -6,7 +6,7 @@ Lecturn has one server-side observability model:
 
 - pretty logs go to stdout for humans
 - completed spans go to a local NDJSON trace file
-- traces and metrics can also be exported over OTLP to a real backend like Grafana LGTM
+- traces, metrics, and logs can also be exported over OTLP to a real backend like Grafana LGTM
 
 The local trace file is the persisted source of truth for normal local launches. Those launches do not
 write a separate server log file, but SSH-managed launches also persist the remote process's
@@ -22,8 +22,15 @@ Logs are human-facing:
 - format: `Logger.consolePretty()`
 - normal local persistence: none
 - SSH-managed launch persistence: `~/.lecturn/ssh-launch/<state>/server.log`
+- remote export: OTLP only, when configured
 
 If you want a log message to show up in the trace file, emit it inside an active span with `Effect.log...`. `Logger.tracerLogger` will attach it as a span event.
+
+Configuring a logs endpoint takes over that job. The server then exports log records, which cover
+every message instead of only the ones inside an active span and carry the trace and span ids so
+they still line up with the trace. `Logger.tracerLogger` is dropped in that mode, so the same
+message is not exported twice and the trace file stops carrying log messages. stdout output and
+SSH-managed launch persistence stay unchanged either way.
 
 ### Traces
 
@@ -121,6 +128,7 @@ Default Grafana login:
 ```bash
 export LECTURN_OTLP_TRACES_URL=http://localhost:4318/v1/traces
 export LECTURN_OTLP_METRICS_URL=http://localhost:4318/v1/metrics
+export LECTURN_OTLP_LOGS_URL=http://localhost:4318/v1/logs
 export LECTURN_OTLP_SERVICE_NAME=lecturn-local
 ```
 
@@ -160,6 +168,7 @@ macOS app bundle example:
 ```bash
 LECTURN_OTLP_TRACES_URL=http://localhost:4318/v1/traces \
 LECTURN_OTLP_METRICS_URL=http://localhost:4318/v1/metrics \
+LECTURN_OTLP_LOGS_URL=http://localhost:4318/v1/logs \
 LECTURN_OTLP_SERVICE_NAME=lecturn-desktop \
 "/Applications/Lecturn.app/Contents/MacOS/Lecturn"
 ```
@@ -169,6 +178,7 @@ Direct binary example:
 ```bash
 LECTURN_OTLP_TRACES_URL=http://localhost:4318/v1/traces \
 LECTURN_OTLP_METRICS_URL=http://localhost:4318/v1/metrics \
+LECTURN_OTLP_LOGS_URL=http://localhost:4318/v1/logs \
 LECTURN_OTLP_SERVICE_NAME=lecturn-desktop \
 ./path/to/your/desktop-app-binary
 ```
@@ -509,7 +519,16 @@ It provides:
 - local NDJSON tracer
 - optional OTLP trace exporter
 - optional OTLP metrics exporter
+- optional OTLP log exporter
 - Effect trace-level and timing refs
+
+The desktop main process is a second producer, assembled in
+`apps/desktop/src/app/DesktopObservability.ts`. It reads the same `LECTURN_OTLP_*` names and the same
+Settings entries as the backend it supervises, and covers work the backend cannot see: app startup,
+window and menu handling, backend supervision, and updates. It reports as service `desktop`
+regardless of `LECTURN_OTLP_SERVICE_NAME`, so a collector shows it alongside the backend rather than
+mixed into it. It exports traces and logs only; the main process records no metrics, so the metrics
+endpoint applies to the backend alone.
 
 ### Env Vars
 
@@ -526,13 +545,27 @@ OTLP export:
 
 - `LECTURN_OTLP_TRACES_URL`: OTLP trace endpoint
 - `LECTURN_OTLP_METRICS_URL`: OTLP metric endpoint
+- `LECTURN_OTLP_LOGS_URL`: OTLP log endpoint
 - `LECTURN_OTLP_EXPORT_INTERVAL_MS`: export interval, default `10000`
 - `LECTURN_OTLP_SERVICE_NAME`: service name, default `lecturn-server`
-- `LECTURN_OTLP_HEADERS`: extra headers for both exporters, same format as
+- `LECTURN_OTLP_HEADERS`: extra headers for all three exporters, same format as
   `OTEL_EXPORTER_OTLP_HEADERS`: comma-separated `key=value` pairs with percent-encoded values.
 - `LECTURN_OTLP_PROTOCOL`: `http/json` (default) or `http/protobuf`
 
-If the OTLP URLs are unset, local tracing still works and metrics stay in-process only.
+If the OTLP URLs are unset, local tracing still works, metrics stay in-process only, and logs stay
+on stdout only.
+
+### The Kill Switch
+
+`LECTURN_OTEL_SDK_DISABLED` and `OTEL_SDK_DISABLED` turn off every OTLP export in both the server and
+the desktop main process, overriding any endpoint from the environment or Settings. Local trace
+files and stdout logs are unaffected.
+
+`LECTURN_OTEL_SDK_DISABLED` wins when set, so `LECTURN_OTEL_SDK_DISABLED=false` re-enables export on a
+machine that sets `OTEL_SDK_DISABLED` for everything else. It accepts the usual boolean spellings
+(`true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`, `y`/`n`). `OTEL_SDK_DISABLED` follows the
+OpenTelemetry specification and only `true` disables export, so `OTEL_SDK_DISABLED=1` does not.
+Values are case-insensitive and trimmed. An unrecognized value is ignored with a startup warning.
 
 ### What Is Instrumented Today
 

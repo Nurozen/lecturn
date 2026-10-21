@@ -73,6 +73,7 @@ import {
   healthApi,
   metadataApi,
   mobileApi,
+  RELAY_HTTP_ROUTER_CONFIG,
   relayClientAuthLayer,
   relayDpopClientAuthLayer,
   makeRelayCors,
@@ -945,6 +946,7 @@ export const ApiLive = Api.make(
       relayNotFoundRoute,
     ).pipe(
       HttpRouter.toHttpEffect,
+      Effect.provideService(HttpRouter.RouterConfig, RELAY_HTTP_ROUTER_CONFIG),
       withoutCapturedParentSpan,
       Effect.flatMap((httpEffect) =>
         traceRelayHttpRequestWith(

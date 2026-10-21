@@ -1,6 +1,12 @@
-import type { EnvironmentId, RepositoryIdentity, ScopedThreadRef } from "@lecturn/contracts";
+import type {
+  EnvironmentId,
+  PullRequestRef,
+  RepositoryIdentity,
+  ScopedThreadRef,
+} from "@lecturn/contracts";
+import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
-import { type MouseEvent, useCallback } from "react";
+import { type MouseEvent, useCallback, useMemo } from "react";
 
 import { pullRequestHostOf, type SourceControlProviderKind } from "@lecturn/contracts";
 import { parseChangeRequestUrl, type ChangeRequestLink } from "@lecturn/shared/changeRequestUrl";
@@ -16,6 +22,7 @@ import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
 import { resolveProjectGitTargets } from "@lecturn/client-runtime/state/projectGit";
 
 import { useProjects, useServerConfigs } from "../state/entities";
+import { serverEnvironment } from "../state/server";
 import { usePrimaryEnvironmentId } from "../state/environments";
 
 export {
@@ -113,6 +120,53 @@ export function findProjectForChangeRequest(
   link: ChangeRequestLink,
 ): EnvironmentProject | undefined {
   return findChangeRequestTarget(projects, link)?.project;
+}
+
+export function resolvePullRequestPreviewTarget({
+  environmentId,
+  projects,
+  pullRequestsEnabled,
+  url,
+}: {
+  environmentId: EnvironmentId | null;
+  projects: ReadonlyArray<EnvironmentProject>;
+  pullRequestsEnabled: boolean;
+  url: string;
+}): { environmentId: EnvironmentId; input: PullRequestRef } | null {
+  if (!pullRequestsEnabled || environmentId === null) return null;
+  const parsed = parseChangeRequestUrl(url);
+  if (parsed === null) return null;
+  // The matched checkout carries the repository selector, so a Stave workspace with several
+  // repositories previews the one the link points at.
+  const target = findChangeRequestTarget(
+    projects.filter((candidate) => candidate.environmentId === environmentId),
+    parsed,
+  );
+  if (target === undefined) return null;
+  return {
+    environmentId,
+    input: {
+      projectId: target.project.id,
+      host: target.host,
+      repository: target.repository,
+      number: parsed.number,
+    },
+  };
+}
+
+export function usePullRequestPreviewTarget(environmentId: EnvironmentId | null, url: string) {
+  const projects = useProjects();
+  const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
+  return useMemo(
+    () =>
+      resolvePullRequestPreviewTarget({
+        environmentId,
+        projects,
+        pullRequestsEnabled: serverConfig?.environment.capabilities.pullRequests === true,
+        url,
+      }),
+    [environmentId, projects, serverConfig, url],
+  );
 }
 
 /**

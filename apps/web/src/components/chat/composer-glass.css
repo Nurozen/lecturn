@@ -16,11 +16,11 @@
   width: 42px;
   height: 42px;
 }
-[data-chat-composer-resting] .lecturn-composer-attach {
+[data-chat-composer-resting] [data-composer-attach] {
   margin-inline-end: 9px;
   color: var(--foreground);
 }
-[data-chat-composer-resting] .lecturn-composer-attach svg {
+[data-chat-composer-resting] [data-composer-attach] svg {
   width: 21px;
   height: 21px;
   stroke-width: 1.6;

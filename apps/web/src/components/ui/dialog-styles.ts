@@ -13,7 +13,22 @@ const DIALOG_MEDIA_POPUP_CLASS = `${DIALOG_POPUP_BASE_CLASS} max-h-[92vh] w-auto
 const DIALOG_MOBILE_SHEET_CLASS =
   "max-sm:max-w-none max-sm:rounded-none max-sm:border-x-0 max-sm:border-t max-sm:border-b-0 max-sm:opacity-[calc(1-min(var(--nested-dialogs),1))] max-sm:data-ending-style:translate-y-4 max-sm:data-starting-style:translate-y-4";
 
+/**
+ * Lecturn's glass dialog treatments (stylesheets in components/account-surface.css and
+ * components/settings/project-settings-glass.css). "glass" is the account glass used by
+ * project and Stave editors; "settings-glass" is the full-height settings shell.
+ */
+const DIALOG_SURFACE_CLASS = {
+  default: "",
+  glass: "lecturn-account-surface lecturn-project-settings-dialog",
+  "settings-glass": "lecturn-settings-surface lecturn-glass-panel bg-background",
+} as const;
+
+type DialogSurface = keyof typeof DIALOG_SURFACE_CLASS;
+
 export {
+  DIALOG_SURFACE_CLASS,
+  type DialogSurface,
   DIALOG_BACKDROP_CLASS,
   DIALOG_MEDIA_BACKDROP_CLASS,
   DIALOG_MOBILE_SHEET_CLASS,

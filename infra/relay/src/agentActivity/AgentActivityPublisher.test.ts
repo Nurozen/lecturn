@@ -98,7 +98,6 @@ function makeEnvironmentLinks(
           liveActivitiesEnabled: true,
         },
       ]),
-    listPublicKeysForEnvironment: () => Effect.succeed([]),
     listForUser: () => Effect.succeed([]),
     getForUser: () => Effect.succeed(null),
     revokeForUser: () => Effect.succeed(false),
@@ -319,6 +318,7 @@ describe("AgentActivityPublisher", () => {
                 Layer.succeed(
                   EnvironmentLinks.EnvironmentLinks,
                   makeEnvironmentLinks({
+                    listUsersForEnvironment: () => Effect.succeed(["dev:julius"]),
                     listDeliveryUsersForEnvironment: (input) =>
                       Effect.sync(() => {
                         deliveryLookups.push(input);
@@ -517,6 +517,7 @@ describe("AgentActivityPublisher", () => {
               Layer.succeed(
                 EnvironmentLinks.EnvironmentLinks,
                 makeEnvironmentLinks({
+                  listUsersForEnvironment: () => Effect.succeed(["dev:julius"]),
                   listDeliveryUsersForEnvironment: () =>
                     Effect.succeed([
                       {
@@ -591,6 +592,7 @@ describe("AgentActivityPublisher", () => {
                 Layer.succeed(
                   EnvironmentLinks.EnvironmentLinks,
                   makeEnvironmentLinks({
+                    listUsersForEnvironment: () => Effect.succeed(["dev:julius"]),
                     listDeliveryUsersForEnvironment: () =>
                       Effect.succeed([
                         {
@@ -704,6 +706,7 @@ describe("AgentActivityPublisher", () => {
                   Layer.succeed(
                     EnvironmentLinks.EnvironmentLinks,
                     makeEnvironmentLinks({
+                      listUsersForEnvironment: () => Effect.succeed(["dev:julius"]),
                       listDeliveryUsersForEnvironment: () =>
                         Effect.succeed([
                           {

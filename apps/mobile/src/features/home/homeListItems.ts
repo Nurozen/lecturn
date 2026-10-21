@@ -11,15 +11,10 @@ import {
   type SagaProjectTreeNode,
 } from "@lecturn/client-runtime/state/project-grouping";
 import { buildPhysicalSagaProjectGroups } from "@lecturn/client-runtime/state/sagaWorkbench";
-import type {
-  ThreadListV2ListItem,
-  ThreadListV2SettledShelfListItem,
-} from "../threads/threadListV2";
+import type { ThreadListV2ListItem } from "../threads/threadListV2";
 import type { StaveSagaMemberStatus } from "@lecturn/contracts";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 
-import type { PendingNewTask } from "../../state/use-pending-new-tasks";
-import { scopedThreadKey } from "../../lib/scopedEntities";
 import type { HomeThreadGroup } from "./homeThreadList";
 
 /** Threads shown per project before the "Show more" affordance appears. */
@@ -48,34 +43,6 @@ export interface HomeHeaderListItem {
   readonly memberStatus?: StaveSagaMemberStatus | null;
 }
 
-export interface HomeThreadListItem {
-  readonly depth?: number;
-  readonly settledBranch?: boolean;
-  readonly type: "thread";
-  readonly key: string;
-  readonly thread: EnvironmentThreadShell;
-  readonly isLast: boolean;
-}
-
-export interface HomePendingTaskListItem {
-  readonly depth?: number;
-  readonly type: "pending-task";
-  readonly key: string;
-  readonly pendingTask: PendingNewTask;
-  readonly isLast: boolean;
-}
-
-export interface HomeShowMoreListItem {
-  readonly depth?: number;
-  readonly type: "show-more";
-  readonly key: string;
-  readonly groupKey: string;
-  /** Threads still hidden. 0 means the group is fully expanded. */
-  readonly hiddenCount: number;
-  /** Whether more than the initial count is revealed, so "Show less" applies. */
-  readonly canShowLess: boolean;
-}
-
 export interface HomeAccountHeaderListItem {
   readonly type: "account-header";
   readonly key: string;
@@ -84,23 +51,8 @@ export interface HomeAccountHeaderListItem {
   readonly collapsed: boolean;
   readonly depth?: number;
 }
-export type HomeListItem =
-  | HomeAccountHeaderListItem
-  | HomeHeaderListItem
-  | HomePendingTaskListItem
-  | HomeThreadListItem
-  | HomeShowMoreListItem
-  | (ThreadListV2SettledShelfListItem & {
-      readonly depth?: number;
-      readonly settledBranch?: boolean;
-    });
-
-export interface HomeListLayout {
-  readonly items: ReadonlyArray<HomeListItem>;
-  readonly stickyHeaderIndices: ReadonlyArray<number>;
-}
-
-export const EMPTY_HOME_LIST_LAYOUT: HomeListLayout = { items: [], stickyHeaderIndices: [] };
+/** Hierarchy chrome rows the home list and iPad sidebar build over the v2 thread rows. */
+export type HomeListItem = HomeAccountHeaderListItem | HomeHeaderListItem;
 
 export type HomeGroupDisplayAction = "toggle-collapsed" | "show-more" | "show-less";
 
@@ -138,13 +90,6 @@ export function homeListItemsAreEqual(previous: HomeListItem, item: HomeListItem
         previous.attention === item.attention &&
         previous.collapsed === item.collapsed
       );
-    case "v2-settled-shelf":
-      return (
-        previous.type === "v2-settled-shelf" &&
-        previous.count === item.count &&
-        previous.expanded === item.expanded &&
-        previous.groupKey === item.groupKey
-      );
     case "header":
       return (
         previous.type === "header" &&
@@ -153,25 +98,6 @@ export function homeListItemsAreEqual(previous: HomeListItem, item: HomeListItem
         previous.isFirst === item.isFirst &&
         previous.depth === item.depth &&
         previous.memberStatus === item.memberStatus
-      );
-    case "pending-task":
-      return (
-        previous.type === "pending-task" &&
-        previous.pendingTask === item.pendingTask &&
-        previous.isLast === item.isLast
-      );
-    case "thread":
-      return (
-        previous.type === "thread" &&
-        previous.thread === item.thread &&
-        previous.isLast === item.isLast
-      );
-    case "show-more":
-      return (
-        previous.type === "show-more" &&
-        previous.groupKey === item.groupKey &&
-        previous.hiddenCount === item.hiddenCount &&
-        previous.canShowLess === item.canShowLess
       );
   }
 }
@@ -258,172 +184,6 @@ function homeHierarchy(input: {
     input.sagaIndex ?? [],
   );
   return { groupsByKey, tree };
-}
-
-export function buildHomeListLayout(input: {
-  readonly accountSections?: AccountSectionContext | undefined;
-  readonly groups: ReadonlyArray<HomeThreadGroup>;
-  readonly queuedThreadKeys?: ReadonlySet<string>;
-  readonly displayStates: ReadonlyMap<string, HomeGroupDisplayState>;
-  /**
-   * When searching, pagination is suspended so every match stays visible.
-   */
-  readonly showAllThreads?: boolean;
-  readonly sagaIndex?: ReadonlyArray<SagaProjectIndexEntry>;
-}): HomeListLayout {
-  if (input.accountSections) {
-    const context = input.accountSections;
-    const items = [...context.accounts, null].flatMap((account): HomeListItem[] => {
-      const groups = input.groups.filter(
-        (group) =>
-          accountForEnvironment(context, group.representative.environmentId) ===
-          (account?.accountId ?? null),
-      );
-      if (!account && groups.length === 0) return [];
-      const header = makeAccountHeader(account, groups, input.displayStates, input.showAllThreads);
-      return [
-        header,
-        ...(header.collapsed
-          ? []
-          : buildHomeListLayout({ ...input, accountSections: undefined, groups }).items),
-      ];
-    });
-    return { items, stickyHeaderIndices: [] };
-  }
-  const items: HomeListItem[] = [];
-  const stickyHeaderIndices: number[] = [];
-
-  const { groupsByKey, tree } = homeHierarchy(input);
-  const ordered = tree.flatMap((node) => {
-    const collapsed = input.displayStates.get(node.group.key)?.collapsed && !input.showAllThreads;
-    return [
-      { group: groupsByKey.get(node.group.key)!, depth: 0, memberStatus: node.memberStatus },
-      ...(collapsed
-        ? []
-        : node.children.map((child) => ({
-            group: groupsByKey.get(child.group.key)!,
-            depth: 1,
-            memberStatus: child.memberStatus,
-          }))),
-    ];
-  });
-  for (const [groupIndex, { group, depth, memberStatus }] of ordered.entries()) {
-    const display = input.displayStates.get(group.key) ?? DEFAULT_GROUP_DISPLAY_STATE;
-    const collapsed = display.collapsed && input.showAllThreads !== true;
-
-    stickyHeaderIndices.push(items.length);
-    items.push({
-      type: "header",
-      key: `header:${group.key}`,
-      group,
-      collapsed,
-      isFirst: groupIndex === 0,
-      depth,
-      memberStatus,
-    });
-
-    if (collapsed) {
-      continue;
-    }
-
-    const isQueued = (thread: EnvironmentThreadShell) =>
-      input.queuedThreadKeys?.has(scopedThreadKey(thread.environmentId, thread.id)) === true;
-    const activeThreads = group.threads.filter(
-      (thread) => thread.settledOverride !== "settled" || isQueued(thread),
-    );
-    const settledThreads = group.threads.filter(
-      (thread) => thread.settledOverride === "settled" && !isQueued(thread),
-    );
-    const totalCount = activeThreads.length;
-    const recentKeys = new Set(
-      group.recentThreads.map((thread) => scopedThreadKey(thread.environmentId, thread.id)),
-    );
-    const baselineKeys = new Set(
-      activeThreads
-        .filter((thread) => recentKeys.has(scopedThreadKey(thread.environmentId, thread.id)))
-        .slice(0, HOME_INITIAL_VISIBLE_THREADS)
-        .map((thread) => scopedThreadKey(thread.environmentId, thread.id)),
-    );
-    const baselineCount = activeThreads.filter(
-      (thread) =>
-        baselineKeys.has(scopedThreadKey(thread.environmentId, thread.id)) || isQueued(thread),
-    ).length;
-    // Queued rows stay visible outside the current page, in the group's sort order.
-    const visibleThreads = activeThreads.filter(
-      (thread, index) =>
-        input.showAllThreads ||
-        isQueued(thread) ||
-        (display.visibleCount > HOME_INITIAL_VISIBLE_THREADS
-          ? index < display.visibleCount
-          : baselineKeys.has(scopedThreadKey(thread.environmentId, thread.id))),
-    );
-    const hiddenCount = totalCount - visibleThreads.length;
-    const hasShowMoreRow = !input.showAllThreads && totalCount > baselineCount;
-
-    // Pending (unsent) tasks lead the group and are never paginated away.
-    for (const [pendingIndex, pendingTask] of group.pendingTasks.entries()) {
-      items.push({
-        type: "pending-task",
-        depth: depth + 1,
-        key: pendingTask.key,
-        pendingTask,
-        isLast:
-          pendingIndex === group.pendingTasks.length - 1 &&
-          visibleThreads.length === 0 &&
-          !hasShowMoreRow,
-      });
-    }
-
-    for (const [threadIndex, thread] of visibleThreads.entries()) {
-      items.push({
-        type: "thread",
-        depth: depth + 1,
-        key: `thread:${thread.environmentId}:${thread.id}`,
-        thread,
-        isLast: threadIndex === visibleThreads.length - 1 && !hasShowMoreRow,
-      });
-    }
-
-    if (hasShowMoreRow) {
-      items.push({
-        type: "show-more",
-        depth: depth + 1,
-        key: `show-more:${group.key}`,
-        groupKey: group.key,
-        hiddenCount,
-        // Compare against the group's own baseline, not the global page size:
-        // stale projects start below HOME_INITIAL_VISIBLE_THREADS, and "Show
-        // less" must be offered as soon as anything beyond the baseline shows.
-        canShowLess: visibleThreads.length > baselineCount,
-      });
-    }
-    if (settledThreads.length > 0) {
-      const groupKey = `settled:${group.key}`;
-      const expanded =
-        input.showAllThreads === true || input.displayStates.get(groupKey)?.collapsed === false;
-      items.push({
-        type: "v2-settled-shelf",
-        key: groupKey,
-        groupKey,
-        count: settledThreads.length,
-        expanded,
-        depth: depth + 1,
-        settledBranch: true,
-      });
-      if (expanded)
-        for (const [index, thread] of settledThreads.entries())
-          items.push({
-            type: "thread",
-            key: `thread:${thread.environmentId}:${thread.id}`,
-            thread,
-            depth: depth + 2,
-            settledBranch: true,
-            isLast: index === settledThreads.length - 1,
-          });
-    }
-  }
-
-  return { items, stickyHeaderIndices };
 }
 
 export type HomeHierarchyV2Item = (
@@ -562,6 +322,8 @@ export function buildHomeHierarchyV2Items(input: {
         groupKey,
         count: settled.length,
         expanded,
+        // Per-project shelves toggle through display state, not the device shelf preference.
+        disabled: false,
         depth: depth + 1,
         settledBranch: true,
       });

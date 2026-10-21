@@ -648,6 +648,7 @@ function makeThreadStartedNotification(
         id: threadId,
         modelProvider: "openai",
         preview: "",
+        projectId: null,
         sessionId: threadId,
         source,
         status: { type: "idle" as const },
@@ -1280,7 +1281,7 @@ describe("Codex paginated thread rollback", () => {
   const makeHistoryClient = (
     options: {
       historyMode?: "legacy" | "paginated" | null;
-      rollbackError?: CodexErrors.CodexAppServerRequestError;
+      legacyTurns?: ReadonlyArray<{ id: string; items: [] }>;
       pages?: ReadonlyArray<{
         data: ReadonlyArray<{ id: string; status: "completed"; items: [] }>;
         nextCursor?: string | null;
@@ -1293,13 +1294,10 @@ describe("Codex paginated thread rollback", () => {
     const client: Parameters<typeof rollbackCodexThread>[0]["client"] = {
       request: (method, payload) => {
         calls.push({ method, payload });
-        if (method === "thread/rollback" && options.rollbackError) {
-          return Effect.fail(options.rollbackError);
-        }
         const response =
           method === "thread/start"
             ? makeThreadOpenResponse("fresh-thread")
-            : { thread: { id: "source-thread", turns: [] } };
+            : { thread: { id: "source-thread", turns: options.legacyTurns ?? [] } };
         return Effect.succeed(response) as unknown as ReturnType<
           typeof client.request<typeof method>
         >;
@@ -1376,32 +1374,42 @@ describe("Codex paginated thread rollback", () => {
       }),
   );
 
-  it.effect("falls back for the exact paginated rejection when old metadata omits its mode", () =>
+  it.effect("forks legacy history through the last retained turn", () =>
     Effect.gen(function* () {
       const { client, calls } = makeHistoryClient({
         historyMode: null,
-        rollbackError: CodexErrors.CodexAppServerRequestError.invalidParams(
-          "paginated threads do not support thread/rollback",
-        ),
-        pages: [{ data: [turn("turn-1"), turn("turn-2")] }],
+        legacyTurns: [
+          { id: "turn-1", items: [] },
+          { id: "turn-2", items: [] },
+        ],
       });
       const snapshot = yield* rollback(client, 1);
       NodeAssert.equal(snapshot.threadId, "fork-thread");
       NodeAssert.deepStrictEqual(
         calls.map((call) => call.method),
-        ["thread/read", "thread/rollback", "thread/turns/list", "thread/fork"],
+        ["thread/read", "thread/read", "thread/fork"],
       );
+      NodeAssert.equal((calls[2]?.payload as { lastTurnId: string }).lastTurnId, "turn-1");
     }),
   );
 
-  it.effect("does not replace a thread after an unrelated rollback error", () =>
+  it.effect("surfaces Codex rejecting a fork of a legacy thread", () =>
     Effect.gen(function* () {
-      const rollbackError = CodexErrors.CodexAppServerRequestError.invalidParams("thread is busy");
-      const { client, calls } = makeHistoryClient({ historyMode: "legacy", rollbackError });
-      NodeAssert.strictEqual(yield* rollback(client, 1).pipe(Effect.flip), rollbackError);
-      NodeAssert.deepStrictEqual(
-        calls.map((call) => call.method),
-        ["thread/read", "thread/rollback"],
+      const rejection = CodexErrors.CodexAppServerRequestError.invalidRequest(
+        "thread/fork only supports paginated threads",
+      );
+      const { client, calls } = makeHistoryClient({
+        historyMode: "legacy",
+        legacyTurns: [
+          { id: "turn-1", items: [] },
+          { id: "turn-2", items: [] },
+        ],
+        forkError: rejection,
+      });
+      NodeAssert.strictEqual(yield* rollback(client, 1).pipe(Effect.flip), rejection);
+      NodeAssert.equal(
+        calls.some((call) => call.method === "thread/start"),
+        false,
       );
     }),
   );
@@ -1415,18 +1423,6 @@ describe("Codex paginated thread rollback", () => {
       NodeAssert.equal(
         calls.some((call) => call.method === "thread/fork"),
         false,
-      );
-    }),
-  );
-
-  it.effect("preserves legacy in-place rollback", () =>
-    Effect.gen(function* () {
-      const { client, calls } = makeHistoryClient({ historyMode: "legacy" });
-      const snapshot = yield* rollback(client, 1);
-      NodeAssert.equal(snapshot.threadId, "source-thread");
-      NodeAssert.deepStrictEqual(
-        calls.map((call) => call.method),
-        ["thread/read", "thread/rollback"],
       );
     }),
   );

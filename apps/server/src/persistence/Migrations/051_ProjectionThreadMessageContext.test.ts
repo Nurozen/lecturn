@@ -7,7 +7,7 @@ import { runMigrations } from "../Migrations.ts";
 import * as NodeSqliteClient from "@lecturn/shared/nodeSqliteClient";
 import migrateMessageContext from "./051_ProjectionThreadMessageContext.ts";
 
-const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
+const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layer({ filename: ":memory:" })));
 
 // Lecturn's ledger runs upstream migration 51 through compatibility migration 67.
 layer("051_ProjectionThreadMessageContext", (it) => {

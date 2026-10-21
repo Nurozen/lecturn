@@ -268,7 +268,7 @@ export function SagaCreateForm(props: {
                 }
                 renderRow={(row) => (
                   <div key={row.repo} className="flex flex-wrap items-center gap-2">
-                    <Label className="min-w-40 gap-1.5 font-normal">
+                    <Label variant="checkbox" className="min-w-40">
                       <Checkbox
                         data-lecturn-hover
                         checked={row.mode === "reference"}
@@ -288,7 +288,8 @@ export function SagaCreateForm(props: {
                     {row.mode === "reference" ? (
                       <Input
                         size="sm"
-                        className="min-w-40 flex-1 font-mono"
+                        font="mono"
+                        className="min-w-40 flex-1"
                         value={row.ref}
                         placeholder="pin to a ref"
                         spellCheck={false}

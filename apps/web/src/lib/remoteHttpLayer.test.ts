@@ -1,6 +1,5 @@
 import {
   exchangeRemoteDpopAccessToken,
-  fetchRemoteDpopSessionState,
   issueRemoteDpopWebSocketTicket,
 } from "@lecturn/client-runtime/authorization";
 import { fetchRemoteEnvironmentDescriptor } from "@lecturn/client-runtime/environment";
@@ -24,95 +23,74 @@ describe("web remote HTTP transport", () => {
       );
     }),
   );
-  it.effect(
-    "sends native JSON Accept through generated descriptor, OAuth, session and ticket clients",
-    () =>
-      Effect.gen(function* () {
-        vi.stubGlobal("window", { symbaHost: { protocolVersion: 2 } });
-        const descriptor = {
-          environmentId: "synthetic-environment",
-          label: "Synthetic environment",
-          platform: { os: "linux", arch: "x64" },
-          serverVersion: "0.0.0-test",
-          capabilities: { repositoryIdentity: true },
-        };
-        const session = {
-          authenticated: true,
-          auth: {
-            policy: "remote-reachable",
-            bootstrapMethods: ["one-time-token"],
-            sessionMethods: ["dpop-access-token"],
-            sessionCookieName: "lecturn_session",
-          },
-          sessionMethod: "dpop-access-token",
+  it.effect("sends native JSON Accept through generated descriptor, OAuth and ticket clients", () =>
+    Effect.gen(function* () {
+      vi.stubGlobal("window", { symbaHost: { protocolVersion: 2 } });
+      const descriptor = {
+        environmentId: "synthetic-environment",
+        label: "Synthetic environment",
+        platform: { os: "linux", arch: "x64" },
+        serverVersion: "0.0.0-test",
+        capabilities: { repositoryIdentity: true },
+      };
+      const responses = [
+        descriptor,
+        {
+          access_token: "synthetic-access",
+          issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+          token_type: "DPoP",
+          expires_in: 3600,
+          scope: "orchestration:read",
+        },
+        { ticket: "synthetic-ticket", expiresAt: "2030-01-01T00:00:00.000Z" },
+      ];
+      const requests: Array<Request> = [];
+      const fetcher: typeof fetch = async (input, init) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        // These requests need the existing native policy's JSON-fetch classification.
+        expect(new URL(request.url).protocol).toBe("https:");
+        expect(request.headers.get("accept")).toBe("application/json");
+        const response = responses.shift();
+        if (!response) throw new Error("Unexpected request");
+        return Response.json(response);
+      };
+      const httpBaseUrl = "https://environment.example.test/";
+      yield* Effect.gen(function* () {
+        expect(yield* fetchRemoteEnvironmentDescriptor({ httpBaseUrl })).toEqual(descriptor);
+        const token = yield* exchangeRemoteDpopAccessToken({
+          httpBaseUrl,
+          credential: "synthetic-bootstrap",
+          dpopProof: "synthetic-token-proof",
           scopes: ["orchestration:read"],
-          expiresAt: "2030-01-01T00:00:00.000Z",
+        });
+        const auth = {
+          httpBaseUrl,
+          accessToken: token.access_token,
+          dpopProof: "synthetic-resource-proof",
         };
-        const responses = [
-          descriptor,
-          {
-            access_token: "synthetic-access",
-            issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
-            token_type: "DPoP",
-            expires_in: 3600,
-            scope: "orchestration:read",
-          },
-          session,
-          { ticket: "synthetic-ticket", expiresAt: "2030-01-01T00:00:00.000Z" },
-        ];
-        const requests: Array<Request> = [];
-        const fetcher: typeof fetch = async (input, init) => {
-          const request = new Request(input, init);
-          requests.push(request);
-          // These requests need the existing native policy's JSON-fetch classification.
-          expect(new URL(request.url).protocol).toBe("https:");
-          expect(request.headers.get("accept")).toBe("application/json");
-          const response = responses.shift();
-          if (!response) throw new Error("Unexpected request");
-          return Response.json(response);
-        };
-        const httpBaseUrl = "https://environment.example.test/";
-        yield* Effect.gen(function* () {
-          expect(yield* fetchRemoteEnvironmentDescriptor({ httpBaseUrl })).toEqual(descriptor);
-          const token = yield* exchangeRemoteDpopAccessToken({
-            httpBaseUrl,
-            credential: "synthetic-bootstrap",
-            dpopProof: "synthetic-token-proof",
-            scopes: ["orchestration:read"],
-          });
-          const auth = {
-            httpBaseUrl,
-            accessToken: token.access_token,
-            dpopProof: "synthetic-resource-proof",
-          };
-          expect(yield* fetchRemoteDpopSessionState(auth)).toMatchObject({
-            authenticated: true,
-            sessionMethod: "dpop-access-token",
-            scopes: ["orchestration:read"],
-          });
-          expect((yield* issueRemoteDpopWebSocketTicket(auth)).ticket).toBe("synthetic-ticket");
-        }).pipe(Effect.provide(makeWebRemoteHttpClientLayer(fetcher)));
+        expect((yield* issueRemoteDpopWebSocketTicket(auth)).ticket).toBe("synthetic-ticket");
+      }).pipe(Effect.provide(makeWebRemoteHttpClientLayer(fetcher)));
 
-        expect(requests.map(({ method, url }) => ({ method, url }))).toEqual([
-          { method: "GET", url: `${httpBaseUrl}.well-known/lecturn/environment` },
-          { method: "POST", url: `${httpBaseUrl}oauth/token` },
-          { method: "GET", url: `${httpBaseUrl}api/auth/session` },
-          { method: "POST", url: `${httpBaseUrl}api/auth/websocket-ticket` },
-        ]);
-        const [discovery, exchange, ...authenticated] = requests;
-        expect(discovery!.headers.has("authorization")).toBe(false);
-        expect(discovery!.headers.has("dpop")).toBe(false);
-        expect(exchange!.headers.has("authorization")).toBe(false);
-        expect(exchange!.headers.get("dpop")).toBe("synthetic-token-proof");
-        expect(exchange!.headers.get("content-type")).toBe("application/x-www-form-urlencoded");
-        expect(yield* Effect.promise(() => exchange!.text())).toBe(
-          "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token=synthetic-bootstrap&subject_token_type=urn%3Alecturn%3Aparams%3Aoauth%3Atoken-type%3Aenvironment-bootstrap&requested_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aaccess_token&scope=orchestration%3Aread",
-        );
-        for (const request of authenticated) {
-          expect(request.headers.get("authorization")).toBe("DPoP synthetic-access");
-          expect(request.headers.get("dpop")).toBe("synthetic-resource-proof");
-        }
-      }),
+      expect(requests.map(({ method, url }) => ({ method, url }))).toEqual([
+        { method: "GET", url: `${httpBaseUrl}.well-known/lecturn/environment` },
+        { method: "POST", url: `${httpBaseUrl}oauth/token` },
+        { method: "POST", url: `${httpBaseUrl}api/auth/websocket-ticket` },
+      ]);
+      const [discovery, exchange, ...authenticated] = requests;
+      expect(discovery!.headers.has("authorization")).toBe(false);
+      expect(discovery!.headers.has("dpop")).toBe(false);
+      expect(exchange!.headers.has("authorization")).toBe(false);
+      expect(exchange!.headers.get("dpop")).toBe("synthetic-token-proof");
+      expect(exchange!.headers.get("content-type")).toBe("application/x-www-form-urlencoded");
+      expect(yield* Effect.promise(() => exchange!.text())).toBe(
+        "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token=synthetic-bootstrap&subject_token_type=urn%3Alecturn%3Aparams%3Aoauth%3Atoken-type%3Aenvironment-bootstrap&requested_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aaccess_token&scope=orchestration%3Aread",
+      );
+      for (const request of authenticated) {
+        expect(request.headers.get("authorization")).toBe("DPoP synthetic-access");
+        expect(request.headers.get("dpop")).toBe("synthetic-resource-proof");
+      }
+    }),
   );
 
   for (const surface of ["phone", "web", "desktop"] as const) {

@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 
 import { Collapsible, CollapsiblePanel } from "../ui/collapsible";
-import { cn } from "../../lib/utils";
 
 /** Keeps closing content inert while its measured height folds out of view. */
 export function SidebarHierarchyPanel({
@@ -18,7 +17,8 @@ export function SidebarHierarchyPanel({
       <CollapsiblePanel
         inert={!open || undefined}
         aria-hidden={!open || undefined}
-        className={cn("lecturn-hierarchy-panel", className)}
+        variant="hierarchy"
+        className={className}
         style={(state) =>
           state.open && state.transitionStatus === "idle" ? { overflow: "visible" } : {}
         }

@@ -49,7 +49,8 @@ export function BillingSettingsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup
-        className="lecturn-settings-surface lecturn-glass-panel h-[min(760px,85dvh)] max-w-4xl overflow-hidden bg-background"
+        surface="settings-glass"
+        className="h-[min(760px,85dvh)] max-w-4xl overflow-hidden"
         bottomStickOnMobile={false}
       >
         <DialogTitle className="sr-only">Account settings</DialogTitle>
@@ -58,7 +59,7 @@ export function BillingSettingsDialog({
         </DialogDescription>
         <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
           <aside className="lecturn-celestial-sidebar shrink-0 border-b bg-sidebar/70 p-4 sm:w-52 sm:border-e sm:border-b-0 sm:p-5">
-            <p className="mb-4 pe-8 font-heading text-lg font-semibold">Account settings</p>
+            <p className="mb-4 pe-8 text-lg font-semibold">Account settings</p>
             <nav aria-label="Account settings" className="flex gap-2 sm:flex-col">
               <button
                 type="button"

@@ -5,9 +5,10 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   customThemeNames,
   getGeneratedUniwindThemeOutputs,
-  readDefaultThemeVariables,
+  renderDefaultThemeVariablesJSON,
   renderUniwindThemesCSS,
 } from "./generate-uniwind-themes.mts";
+import { readDefaultMobileThemeVariables } from "../src/lib/mobileTheme.test-support";
 
 describe("generate mobile Uniwind themes", () => {
   it("keeps the committed outputs current", () => {
@@ -44,12 +45,15 @@ describe("generate mobile Uniwind themes", () => {
     }
   });
 
-  it("generates the default runtime bridge from the authored CSS", () => {
-    const css = NodeFS.readFileSync(NodePath.resolve(import.meta.dirname, "../global.css"), "utf8");
-    const variables = readDefaultThemeVariables(css);
+  it("keeps the default runtime bridge and generated CSS on the same palette", () => {
+    const variables = JSON.parse(renderDefaultThemeVariablesJSON());
 
+    expect(variables.light).toEqual(readDefaultMobileThemeVariables("light"));
+    expect(variables.dark).toEqual(readDefaultMobileThemeVariables("dark"));
     expect(variables.light["--color-screen"]).toBe("#f4eddf");
+    expect(variables.light["--color-drawer"]).toBe("rgba(255, 255, 255, 0.99)");
     expect(variables.dark["--color-screen"]).toBe("#061522");
+    expect(variables.dark["--color-drawer"]).toBe("rgba(10, 25, 39, 0.99)");
     expect(Object.keys(variables.light)).toEqual(Object.keys(variables.dark));
   });
 
@@ -80,7 +84,7 @@ describe("generate mobile Uniwind themes", () => {
         "--color-clerk-page": isDark ? "#0a1927" : "#f4eddf",
         "--color-clerk-foreground": isDark ? "#e8edf0" : "#302a22",
         "--color-clerk-foreground-muted": isDark ? "#9eacb7" : "#756650",
-        "--color-clerk-border": isDark ? "rgba(38, 55, 70, 0.06)" : "rgba(214, 200, 178, 0.06)",
+        "--color-clerk-border": isDark ? "#263746" : "#d6c8b2",
         "--color-clerk-danger": isDark ? "#fca5a5" : "#dc2626",
       });
     }

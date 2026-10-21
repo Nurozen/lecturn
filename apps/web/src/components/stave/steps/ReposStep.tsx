@@ -64,7 +64,7 @@ function RepoRow(props: {
         </div>
         <ToggleGroup
           aria-label={`${row.repo} mode`}
-          size="xs"
+          size="xs-label"
           variant="outline"
           value={[row.mode]}
           onValueChange={(value) => {
@@ -73,7 +73,7 @@ function RepoRow(props: {
           }}
         >
           {REPO_MODES.map((mode) => (
-            <Toggle data-lecturn-hover key={mode.value} value={mode.value} className="px-2">
+            <Toggle data-lecturn-hover key={mode.value} value={mode.value}>
               {mode.label}
             </Toggle>
           ))}
@@ -83,7 +83,8 @@ function RepoRow(props: {
         <div className="flex flex-wrap items-center gap-2">
           <Input
             size="sm"
-            className="min-w-40 flex-1 font-mono"
+            font="mono"
+            className="min-w-40 flex-1"
             value={row.base}
             placeholder={defaultBranch ?? "default branch"}
             spellCheck={false}
@@ -118,7 +119,7 @@ function RepoRow(props: {
       ) : row.mode === "reference" ? (
         <Input
           size="sm"
-          className="font-mono"
+          font="mono"
           value={row.ref}
           placeholder={
             defaultBranch === undefined ? "pin to a ref" : `pin to a ref (${defaultBranch})`
@@ -192,14 +193,15 @@ function RegisterRepoForm(props: {
         />
         <Input
           size="sm"
-          className="min-w-48 flex-1 font-mono"
+          font="mono"
+          className="min-w-48 flex-1"
           value={form.url}
           placeholder="git@host:org/repo.git or /path"
           spellCheck={false}
           aria-label="Clone URL or path"
           onChange={(event) => setForm({ ...form, url: event.target.value })}
         />
-        <Label className="gap-1.5 font-normal">
+        <Label variant="checkbox">
           <Checkbox
             data-lecturn-hover
             checked={form.adopt}
@@ -255,7 +257,7 @@ export function ReposStep(props: {
             />
           )}
         />
-        <Label className="gap-1.5 font-normal">
+        <Label variant="checkbox">
           <Checkbox
             data-lecturn-hover
             checked={state.emptySpace}
@@ -269,7 +271,7 @@ export function ReposStep(props: {
 
       <div className="flex flex-col gap-2.5">
         <div className="flex items-center justify-between gap-3">
-          <Label htmlFor="stave-wizard-common" className="font-normal">
+          <Label htmlFor="stave-wizard-common" variant="option">
             Include commonly paired references (-c)
           </Label>
           <Switch
@@ -281,7 +283,7 @@ export function ReposStep(props: {
           />
         </div>
         <div className="flex items-center justify-between gap-3 ps-4">
-          <Label htmlFor="stave-wizard-include-weak" className="font-normal text-muted-foreground">
+          <Label htmlFor="stave-wizard-include-weak" variant="option" tone="muted">
             Include weak tethers
           </Label>
           <Switch
@@ -296,7 +298,7 @@ export function ReposStep(props: {
           />
         </div>
         <div className="flex items-center justify-between gap-3">
-          <Label htmlFor="stave-wizard-no-learn" className="font-normal">
+          <Label htmlFor="stave-wizard-no-learn" variant="option">
             Skip tether learning (--no-learn)
           </Label>
           <Switch

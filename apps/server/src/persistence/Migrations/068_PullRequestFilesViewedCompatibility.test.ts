@@ -54,7 +54,7 @@ describe("068 collision compatibility", () => {
       assert.deepEqual(executed.at(-1), latest);
       assert.deepEqual(yield* viewedRows, []);
       yield* assertReconciled;
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
   it.effect("adds the viewed files table to a published Lecturn database", () =>
@@ -75,7 +75,7 @@ describe("068 collision compatibility", () => {
         { title: "Preserved", imported_from_json: '{"kind":"fixture"}' },
       ]);
       yield* assertReconciled;
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
   it.effect("adds Lecturn schema to an upstream 53 database and keeps viewed files", () =>
@@ -119,6 +119,6 @@ describe("068 collision compatibility", () => {
         },
       ]);
       yield* assertReconciled;
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 });

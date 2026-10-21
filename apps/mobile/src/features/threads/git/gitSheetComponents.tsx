@@ -101,21 +101,11 @@ export function SheetListRow(props: {
   return (
     <Pressable
       accessibilityRole="button"
-      className={
-        Platform.OS === "android"
-          ? "min-h-16 flex-row items-center gap-4 px-4 py-3 active:bg-subtle disabled:opacity-[0.45]"
-          : "min-h-14 flex-row items-center gap-3 rounded-2xl px-1 py-3 active:opacity-70 disabled:opacity-[0.45]"
-      }
+      className="flex-row items-center py-3 disabled:opacity-[0.45] android:min-h-16 android:gap-4 android:px-4 android:active:bg-subtle ios:min-h-14 ios:gap-3 ios:rounded-2xl ios:px-1 ios:active:opacity-70"
       disabled={props.disabled}
       onPress={props.onPress}
     >
-      <View
-        className={
-          Platform.OS === "android"
-            ? "size-6 items-center justify-center"
-            : "h-10 w-10 items-center justify-center rounded-full border border-border-subtle bg-glass-surface"
-        }
-      >
+      <View className="items-center justify-center android:size-6 ios:h-10 ios:w-10 ios:rounded-full ios:border ios:border-border-subtle ios:bg-glass-surface">
         <SymbolView
           name={props.icon}
           size={Platform.OS === "android" ? 24 : 16}
@@ -124,13 +114,7 @@ export function SheetListRow(props: {
         />
       </View>
       <View className="flex-1 gap-0.5">
-        <Text
-          className={
-            Platform.OS === "android"
-              ? "text-foreground text-base font-lecturn-medium"
-              : "text-foreground text-base font-lecturn-bold"
-          }
-        >
+        <Text className="text-foreground text-base android:font-lecturn-medium ios:font-lecturn-bold">
           {props.title}
         </Text>
         {props.subtitle ? (

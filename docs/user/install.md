@@ -153,6 +153,12 @@ keeps the technical error available for troubleshooting.
 GitHub Copilot needs a Copilot subscription. See [GitHub Copilot](./providers-copilot.md) for
 install options, token sign-in, and organization policy.
 
+Lecturn warns when a provider version has known compatibility problems with your
+release. Check **Settings → Providers** on that environment for the recommended
+version or range. When its package manager supports installing a specific version,
+you can install the recommendation there. Otherwise use the provider's installer
+on the environment's machine. An unlisted version is unverified.
+
 When a provider CLI is behind its latest release, its provider card shows the
 available version. **Update now** appears only when Lecturn can tell which
 installer owns the CLI (its own update command, Homebrew, or a global npm, pnpm,

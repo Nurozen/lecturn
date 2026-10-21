@@ -68,7 +68,7 @@ describe("065 collision compatibility", () => {
         assert.deepEqual(yield* sql`SELECT * FROM stave_project_lifecycle`, []);
         assert.deepEqual(yield* sql`SELECT * FROM stave_lifecycle_policy`, []);
         assert.deepEqual(yield* runMigrations(), []);
-      }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
     );
   }
   for (const forkId of [49, 63, 64]) {
@@ -121,7 +121,7 @@ describe("065 collision compatibility", () => {
           ],
         );
         assert.deepEqual(yield* runMigrations(), []);
-      }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
     );
   }
 });

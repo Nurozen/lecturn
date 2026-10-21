@@ -13,10 +13,8 @@ import {
   isClaudeUltrathinkPrompt,
   normalizeModelSlug,
 } from "@lecturn/shared/model";
-import type { VariantProps } from "class-variance-authority";
 import type { ReactNode } from "react";
 
-import type { buttonVariants } from "../ui/button";
 import type { DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
 import type { ComposerControlSize } from "./ComposerControl";
@@ -54,7 +52,6 @@ type TraitsRenderInput = {
   onPromptChange: (prompt: string) => void;
   planModeEnabled: boolean;
   size?: ComposerControlSize;
-  triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
   isComposerOwned?: boolean;
   hidden?: boolean;
@@ -177,7 +174,6 @@ function renderTraitsControl(
     onPromptChange,
     planModeEnabled,
     size,
-    triggerVariant,
     triggerClassName,
     isComposerOwned,
     hidden,
@@ -216,7 +212,6 @@ function renderTraitsControl(
       onPromptChange={onPromptChange}
       planModeEnabled={planModeEnabled}
       {...(size !== undefined ? { size } : {})}
-      {...(triggerVariant !== undefined ? { triggerVariant } : {})}
       {...(triggerClassName !== undefined ? { triggerClassName } : {})}
       {...(isComposerOwned ? { isComposerOwned } : {})}
       {...(hidden !== undefined ? { hidden } : {})}

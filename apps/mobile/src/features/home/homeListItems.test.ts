@@ -15,17 +15,21 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  buildHomeListLayout,
   homeListItemsAreEqual,
   buildHomeHierarchyV2Items,
   DEFAULT_GROUP_DISPLAY_STATE,
   HOME_INITIAL_VISIBLE_THREADS,
   HOME_SHOW_MORE_STEP,
   nextGroupDisplayState,
+  type HomeAccountHeaderListItem,
   type HomeGroupDisplayState,
-  type HomeListItem,
+  type HomeHeaderListItem,
 } from "./homeListItems";
-import { buildThreadListV2Items, buildThreadListV2ListItems } from "../threads/threadListV2";
+import {
+  buildThreadListV2Items,
+  buildThreadListV2ListItems,
+  isThreadListV2ListItem,
+} from "../threads/threadListV2";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { buildHomeThreadGroups, type HomeThreadGroup } from "./homeThreadList";
 import { threadJumpTarget } from "../keyboard/threadKeyboardShortcuts";
@@ -84,15 +88,9 @@ function makeGroup(key: string, threadCount: number): HomeThreadGroup {
     projects: [project],
     pendingTasks: [],
     threads,
-    // All threads inside the recency window, so the baseline stays at the
-    // initial page size and the pagination expectations below hold.
     recentThreads: threads,
     newThreadTarget: project,
   };
-}
-
-function itemTypes(items: ReadonlyArray<HomeListItem>): string[] {
-  return items.map((item) => item.type);
 }
 
 function displayStates(
@@ -101,291 +99,117 @@ function displayStates(
   return new Map(Object.entries(entries));
 }
 
+function v2Rows(
+  groups: ReadonlyArray<HomeThreadGroup>,
+  extra: Partial<Parameters<typeof buildThreadListV2Items>[0]> = {},
+) {
+  const layout = buildThreadListV2Items({
+    threads: groups.flatMap((group) => group.threads),
+    environmentId: null,
+    searchQuery: "",
+    now: "2026-09-10T00:00:00Z",
+    ...extra,
+  });
+  return buildThreadListV2ListItems({
+    ...layout,
+    pendingTasks: groups.flatMap((group) => group.pendingTasks),
+    snoozedShelfExpanded: extra.snoozedShelfExpanded,
+    settledShelfExpanded: extra.settledShelfExpanded,
+  });
+}
+
+describe("nextGroupDisplayState", () => {
+  it("toggles collapse and pages threads by the show-more step", () => {
+    const collapsed = nextGroupDisplayState(DEFAULT_GROUP_DISPLAY_STATE, "toggle-collapsed");
+    expect(collapsed).toEqual({ collapsed: true, visibleCount: HOME_INITIAL_VISIBLE_THREADS });
+    const more = nextGroupDisplayState(
+      nextGroupDisplayState(DEFAULT_GROUP_DISPLAY_STATE, "show-more"),
+      "show-more",
+    );
+    expect(more.visibleCount).toBe(HOME_INITIAL_VISIBLE_THREADS + 2 * HOME_SHOW_MORE_STEP);
+    expect(nextGroupDisplayState(more, "show-less").visibleCount).toBe(
+      HOME_INITIAL_VISIBLE_THREADS,
+    );
+  });
+});
+
+describe("homeListItemsAreEqual", () => {
+  const group = makeGroup("alpha", 1);
+  const header: HomeHeaderListItem = {
+    type: "header",
+    key: "v2-active-header:alpha",
+    group,
+    collapsed: false,
+    isFirst: true,
+    depth: 0,
+  };
+  const account: HomeAccountHeaderListItem = {
+    type: "account-header",
+    key: "connect-account:user_a",
+    account: {
+      accountId: "user_a",
+      email: "a@example.test",
+      label: "Work",
+      preset: "jade",
+      signedIn: true,
+    },
+    attention: "",
+    collapsed: false,
+  };
+
+  it("compares project headers structurally on their stable group reference", () => {
+    expect(homeListItemsAreEqual(header, { ...header })).toBe(true);
+    expect(homeListItemsAreEqual(header, { ...header, collapsed: true })).toBe(false);
+    expect(homeListItemsAreEqual(header, { ...header, depth: 1 })).toBe(false);
+    expect(homeListItemsAreEqual(header, { ...header, group: { ...group } })).toBe(false);
+    expect(homeListItemsAreEqual(header, account)).toBe(false);
+  });
+
+  it("compares account headers by visible account state", () => {
+    expect(homeListItemsAreEqual(account, { ...account, account: { ...account.account! } })).toBe(
+      true,
+    );
+    expect(
+      homeListItemsAreEqual(account, {
+        ...account,
+        account: { ...account.account!, signedIn: false },
+      }),
+    ).toBe(false);
+    expect(homeListItemsAreEqual(account, { ...account, attention: "1 awaiting approval" })).toBe(
+      false,
+    );
+    expect(homeListItemsAreEqual(account, header)).toBe(false);
+  });
+});
+
 describe("threadJumpTarget", () => {
-  it("numbers only displayed threads across groups, skipping collapsed groups and pagination rows", () => {
-    const layout = buildHomeListLayout({
-      groups: [makeGroup("collapsed", 3), makeGroup("alpha", 8), makeGroup("beta", 3)],
+  it("numbers only displayed threads across groups, skipping collapsed groups", () => {
+    const groups = [makeGroup("collapsed", 3), makeGroup("alpha", 8), makeGroup("beta", 3)];
+    const rows = buildHomeHierarchyV2Items({
+      groups,
+      items: v2Rows(groups),
       displayStates: displayStates({ collapsed: { collapsed: true, visibleCount: 6 } }),
     });
-    expect(threadJumpTarget(layout.items, "thread.jump.1")?.id).toBe("alpha-thread-0");
-    expect(threadJumpTarget(layout.items, "thread.jump.7")?.id).toBe("beta-thread-0");
-    expect(threadJumpTarget(layout.items, "thread.jump.9")?.id).toBe("beta-thread-2");
+    const items = rows.filter(isThreadListV2ListItem);
+    expect(threadJumpTarget(items, "thread.jump.1")?.projectId).toBe("alpha");
+    expect(threadJumpTarget(items, "thread.jump.8")?.projectId).toBe("alpha");
+    expect(threadJumpTarget(items, "thread.jump.9")?.projectId).toBe("beta");
+    expect(threadJumpTarget(items, "thread.jump.9")?.id).toBe(
+      rows.flatMap((row) => (row.type === "v2-thread" ? [row.item.thread.id] : []))[8],
+    );
   });
 
   it("ignores missing positions and unrelated commands", () => {
-    const layout = buildHomeListLayout({
-      groups: [makeGroup("alpha", 1)],
+    const groups = [makeGroup("alpha", 1)];
+    const items = buildHomeHierarchyV2Items({
+      groups,
+      items: v2Rows(groups),
       displayStates: displayStates({}),
-    });
-    expect(threadJumpTarget(layout.items, "thread.jump.2")).toBeNull();
+    }).filter(isThreadListV2ListItem);
+    expect(threadJumpTarget(items, "thread.jump.1")?.id).toBe("alpha-thread-0");
+    expect(threadJumpTarget(items, "thread.jump.2")).toBeNull();
     expect(threadJumpTarget([], "thread.jump.1")).toBeNull();
-    expect(threadJumpTarget(layout.items, "commandPalette")).toBeNull();
-  });
-});
-
-describe("buildHomeListLayout", () => {
-  it("keeps settled history under its owner in the legacy grouped list", () => {
-    const original = makeGroup("project", 2);
-    const threads = original.threads.map((thread, index) =>
-      index === 1 ? { ...thread, settledOverride: "settled" as const } : thread,
-    );
-    const group = { ...original, threads, recentThreads: threads };
-    const collapsed = buildHomeListLayout({ groups: [group], displayStates: new Map() }).items;
-    expect(itemTypes(collapsed)).toEqual(["header", "thread", "v2-settled-shelf"]);
-    expect(collapsed.at(-1)).toMatchObject({ count: 1, expanded: false, depth: 1 });
-    const expanded = buildHomeListLayout({
-      groups: [group],
-      displayStates: new Map([["settled:project", { collapsed: false, visibleCount: 6 }]]),
-    }).items;
-    expect(expanded.at(-1)).toMatchObject({
-      type: "thread",
-      depth: 2,
-      settledBranch: true,
-      thread: { id: "project-thread-1" },
-    });
-  });
-
-  it("renders a header plus all threads for a small group without a show-more row", () => {
-    const layout = buildHomeListLayout({
-      groups: [makeGroup("alpha", 3)],
-      displayStates: displayStates({}),
-    });
-
-    expect(itemTypes(layout.items)).toEqual(["header", "thread", "thread", "thread"]);
-    expect(layout.stickyHeaderIndices).toEqual([0]);
-    expect(layout.items.at(-1)).toMatchObject({ type: "thread", isLast: true });
-  });
-
-  it("limits large groups to the initial visible count with a show-more row", () => {
-    const layout = buildHomeListLayout({
-      groups: [makeGroup("alpha", 133)],
-      displayStates: displayStates({}),
-    });
-
-    const threadItems = layout.items.filter((item) => item.type === "thread");
-    expect(threadItems).toHaveLength(HOME_INITIAL_VISIBLE_THREADS);
-    expect(layout.items.at(-1)).toMatchObject({
-      type: "show-more",
-      groupKey: "alpha",
-      hiddenCount: 133 - HOME_INITIAL_VISIBLE_THREADS,
-      canShowLess: false,
-    });
-    // The show-more row takes over the last slot, so no thread is marked last.
-    expect(threadItems.every((item) => item.type === "thread" && !item.isLast)).toBe(true);
-  });
-
-  it("reveals more threads per show-more step and offers show-less when exhausted", () => {
-    const group = makeGroup("alpha", 20);
-
-    const expandedOnce = buildHomeListLayout({
-      groups: [group],
-      displayStates: displayStates({
-        alpha: nextGroupDisplayState(DEFAULT_GROUP_DISPLAY_STATE, "show-more"),
-      }),
-    });
-    expect(expandedOnce.items.filter((item) => item.type === "thread")).toHaveLength(
-      HOME_INITIAL_VISIBLE_THREADS + HOME_SHOW_MORE_STEP,
-    );
-    expect(expandedOnce.items.at(-1)).toMatchObject({
-      type: "show-more",
-      hiddenCount: 4,
-      canShowLess: true,
-    });
-
-    const fullyExpanded = buildHomeListLayout({
-      groups: [group],
-      displayStates: displayStates({
-        alpha: nextGroupDisplayState(
-          nextGroupDisplayState(DEFAULT_GROUP_DISPLAY_STATE, "show-more"),
-          "show-more",
-        ),
-      }),
-    });
-    expect(fullyExpanded.items.filter((item) => item.type === "thread")).toHaveLength(20);
-    expect(fullyExpanded.items.at(-1)).toMatchObject({
-      type: "show-more",
-      hiddenCount: 0,
-      canShowLess: true,
-    });
-
-    const reset = nextGroupDisplayState(
-      nextGroupDisplayState(
-        nextGroupDisplayState(DEFAULT_GROUP_DISPLAY_STATE, "show-more"),
-        "show-more",
-      ),
-      "show-less",
-    );
-    expect(reset.visibleCount).toBe(HOME_INITIAL_VISIBLE_THREADS);
-  });
-
-  it("offers show-less after expanding a stale group whose baseline is below the page size", () => {
-    // Stale project: 10 threads total but only 3 within the recency window.
-    const project = makeProject("stale", "stale");
-    const threads = Array.from({ length: 10 }, (_, index) =>
-      makeThread(`stale-thread-${index}`, project.id),
-    );
-    const group: HomeThreadGroup = {
-      key: "stale",
-      title: "stale",
-      representative: project,
-      projects: [project],
-      pendingTasks: [],
-      threads,
-      recentThreads: threads.slice(0, 3),
-      newThreadTarget: project,
-    };
-
-    const collapsedToRecent = buildHomeListLayout({
-      groups: [group],
-      displayStates: displayStates({}),
-    });
-    expect(collapsedToRecent.items.filter((item) => item.type === "thread")).toHaveLength(3);
-    expect(collapsedToRecent.items.at(-1)).toMatchObject({
-      type: "show-more",
-      hiddenCount: 7,
-      canShowLess: false,
-    });
-
-    const expanded = buildHomeListLayout({
-      groups: [group],
-      displayStates: displayStates({
-        stale: nextGroupDisplayState(DEFAULT_GROUP_DISPLAY_STATE, "show-more"),
-      }),
-    });
-    expect(expanded.items.filter((item) => item.type === "thread")).toHaveLength(10);
-    expect(expanded.items.at(-1)).toMatchObject({
-      type: "show-more",
-      hiddenCount: 0,
-      canShowLess: true,
-    });
-  });
-
-  it("hides threads and the show-more row for collapsed groups", () => {
-    const layout = buildHomeListLayout({
-      groups: [makeGroup("alpha", 12), makeGroup("beta", 2)],
-      displayStates: displayStates({
-        alpha: nextGroupDisplayState(DEFAULT_GROUP_DISPLAY_STATE, "toggle-collapsed"),
-      }),
-    });
-
-    expect(itemTypes(layout.items)).toEqual(["header", "header", "thread", "thread"]);
-    expect(layout.items[0]).toMatchObject({ type: "header", collapsed: true, isFirst: true });
-    expect(layout.items[1]).toMatchObject({ type: "header", collapsed: false, isFirst: false });
-    expect(layout.stickyHeaderIndices).toEqual([0, 1]);
-  });
-
-  it("suspends collapse and pagination while searching", () => {
-    const layout = buildHomeListLayout({
-      groups: [makeGroup("alpha", 12)],
-      displayStates: displayStates({
-        alpha: nextGroupDisplayState(DEFAULT_GROUP_DISPLAY_STATE, "toggle-collapsed"),
-      }),
-      showAllThreads: true,
-    });
-
-    expect(layout.items.filter((item) => item.type === "thread")).toHaveLength(12);
-    expect(layout.items.some((item) => item.type === "show-more")).toBe(false);
-  });
-
-  it("keeps sticky indices aligned across multiple expanded groups", () => {
-    const layout = buildHomeListLayout({
-      groups: [makeGroup("alpha", 8), makeGroup("beta", 1)],
-      displayStates: displayStates({}),
-    });
-
-    // header + 6 threads + show-more = 8 items, so beta's header is index 8.
-    expect(layout.stickyHeaderIndices).toEqual([0, 8]);
-    expect(layout.items[8]).toMatchObject({ type: "header", isFirst: false });
-  });
-});
-
-describe("queued threads through legacy grouping and layout", () => {
-  const now = Date.parse("2026-06-28T00:00:00Z");
-  const project = makeProject("queued-project", "Queued project");
-  const groupInput = {
-    projects: [project],
-    environmentId: null,
-    searchQuery: "",
-    projectSortOrder: "updated_at" as const,
-    threadSortOrder: "updated_at" as const,
-    projectGroupingMode: "separate" as const,
-    now,
-  };
-
-  it("adds an old queued row without replacing the stale-project fallback", () => {
-    const threads = Array.from({ length: 5 }, (_, index) => ({
-      ...makeThread(`t${index + 1}`, project.id),
-      updatedAt: `2026-06-${16 - index}T00:00:00Z`,
-    }));
-    const queuedThreadKeys = new Set([`${environmentId}:t5`]);
-    const groups = buildHomeThreadGroups({ ...groupInput, threads, queuedThreadKeys });
-    expect(groups[0]?.recentThreads.map((thread) => thread.id)).toEqual(["t1", "t2", "t3", "t5"]);
-    const layout = (display = DEFAULT_GROUP_DISPLAY_STATE, queued = queuedThreadKeys) =>
-      buildHomeListLayout({
-        groups: buildHomeThreadGroups({ ...groupInput, threads, queuedThreadKeys: queued }),
-        queuedThreadKeys: queued,
-        displayStates: new Map([[groups[0]!.key, display]]),
-      }).items;
-    const rows = layout();
-    expect(rows.flatMap((row) => (row.type === "thread" ? [row.thread.id] : []))).toEqual([
-      "t1",
-      "t2",
-      "t3",
-      "t5",
-    ]);
-    expect(rows.at(-1)).toMatchObject({ type: "show-more", hiddenCount: 1, canShowLess: false });
-    const more = nextGroupDisplayState(DEFAULT_GROUP_DISPLAY_STATE, "show-more");
-    expect(layout(more).flatMap((row) => (row.type === "thread" ? [row.thread.id] : []))).toEqual([
-      "t1",
-      "t2",
-      "t3",
-      "t4",
-      "t5",
-    ]);
-    expect(layout(more).at(-1)).toMatchObject({ hiddenCount: 0, canShowLess: true });
-    expect(layout(nextGroupDisplayState(more, "show-less"))).toEqual(rows);
-    expect(
-      layout(DEFAULT_GROUP_DISPLAY_STATE, new Set()).flatMap((row) =>
-        row.type === "thread" ? [row.thread.id] : [],
-      ),
-    ).toEqual(["t1", "t2", "t3"]);
-  });
-
-  it("keeps queued settled rows beyond both the first and expanded pages", () => {
-    const threads = Array.from({ length: 22 }, (_, index) => ({
-      ...makeThread(`t${index + 1}`, project.id),
-      updatedAt: new Date(now - index * 1000).toISOString(),
-      settledOverride: index === 21 ? ("settled" as const) : null,
-    }));
-    const queuedThreadKeys = new Set([`${environmentId}:t22`]);
-    const groups = buildHomeThreadGroups({ ...groupInput, threads, queuedThreadKeys });
-    const layout = (display: HomeGroupDisplayState, showAllThreads = false) =>
-      buildHomeListLayout({
-        groups,
-        queuedThreadKeys,
-        showAllThreads,
-        displayStates: new Map([[groups[0]!.key, display]]),
-      }).items;
-    const first = layout(DEFAULT_GROUP_DISPLAY_STATE);
-    expect(first.flatMap((row) => (row.type === "thread" ? [row.thread.id] : []))).toEqual([
-      "t1",
-      "t2",
-      "t3",
-      "t4",
-      "t5",
-      "t6",
-      "t22",
-    ]);
-    expect(first.at(-1)).toMatchObject({ hiddenCount: 15, canShowLess: false });
-    expect(first.some((row) => row.type === "v2-settled-shelf")).toBe(false);
-    const expanded = layout(nextGroupDisplayState(DEFAULT_GROUP_DISPLAY_STATE, "show-more"));
-    const expandedThreads = expanded.filter((row) => row.type === "thread");
-    expect(expandedThreads).toHaveLength(17);
-    expect(expandedThreads.at(-1)?.thread.id).toBe("t22");
-    expect(expanded.at(-1)).toMatchObject({ hiddenCount: 5, canShowLess: true });
-    const searching = layout({ collapsed: true, visibleCount: 6 }, true);
-    expect(searching.filter((row) => row.type === "thread")).toHaveLength(22);
-    expect(new Set(searching.map((row) => row.key)).size).toBe(searching.length);
+    expect(threadJumpTarget(items, "commandPalette")).toBeNull();
   });
 });
 
@@ -438,41 +262,51 @@ describe("saga list layout", () => {
       },
     },
   ];
-  it("orders nested headers and keeps sticky header offsets attached to their rows", () => {
-    const layout = buildHomeListLayout({
-      groups: [sagaGroup("b"), sagaGroup("saga", true), sagaGroup("a")],
+  it("orders nested headers under the saga and carries member status", () => {
+    const groups = [sagaGroup("b"), sagaGroup("saga", true), sagaGroup("a")];
+    const rows = buildHomeHierarchyV2Items({
+      groups,
+      items: v2Rows(groups),
       displayStates: new Map(),
       sagaIndex: index,
     });
-    const headers = layout.items.filter((item) => item.type === "header");
+    const headers = rows.filter((item) => item.type === "header");
     expect(headers.map((item) => [item.group.key, item.depth])).toEqual([
       ["saga", 0],
       ["a", 1],
       ["b", 1],
     ]);
-    expect(layout.stickyHeaderIndices).toEqual([0, 2, 4]);
     expect(headers[2]?.memberStatus?.dirty).toBe(true);
   });
   it("collapses the whole saga while search reveals member matches", () => {
+    const groups = [sagaGroup("b"), sagaGroup("saga", true), sagaGroup("a")];
     const input = {
-      groups: [sagaGroup("b"), sagaGroup("saga", true), sagaGroup("a")],
+      groups,
+      items: v2Rows(groups),
       displayStates: new Map([["saga", { collapsed: true, visibleCount: 6 }]]),
       sagaIndex: index,
     };
-    expect(buildHomeListLayout(input).items.map((item) => item.key)).toEqual(["header:saga"]);
-    expect(
-      buildHomeListLayout({ ...input, showAllThreads: true }).items.filter(
-        (item) => item.type === "header",
-      ),
-    ).toHaveLength(3);
+    expect(buildHomeHierarchyV2Items(input).map((item) => item.key)).toEqual([
+      "v2-active-header:saga",
+    ]);
+    const searching = buildHomeHierarchyV2Items({ ...input, searching: true });
+    expect(searching.filter((item) => item.type === "header")).toHaveLength(3);
+    expect(searching.filter((item) => item.type === "v2-thread")).toHaveLength(3);
   });
   it("keeps missing parents and disabled nesting flat", () => {
     const groups = [sagaGroup("b"), sagaGroup("a")];
     for (const sagaIndex of [index, []]) {
-      const layout = buildHomeListLayout({ groups, displayStates: new Map(), sagaIndex });
-      expect(
-        layout.items.filter((item) => item.type === "header").map((item) => item.group.key),
-      ).toEqual(["b", "a"]);
+      const rows = buildHomeHierarchyV2Items({
+        groups,
+        items: v2Rows(groups),
+        displayStates: new Map(),
+        sagaIndex,
+      });
+      const headers = rows.filter((item) => item.type === "header");
+      expect(headers.map((item) => [item.group.key, item.depth])).toEqual([
+        ["b", 0],
+        ["a", 0],
+      ]);
     }
   });
   it("splits member clones and keeps their threads on the owning physical project", () => {
@@ -489,13 +323,15 @@ describe("saga list layout", () => {
       threads: [...member.threads, cloneThread],
       recentThreads: [...member.threads, cloneThread],
     };
-    const rows = buildHomeListLayout({
-      groups: [mixed, sagaGroup("saga", true)],
+    const groups = [mixed, sagaGroup("saga", true)];
+    const rows = buildHomeHierarchyV2Items({
+      groups,
+      items: v2Rows(groups),
       sagaIndex: index,
       displayStates: new Map(),
-    }).items;
+    });
     const headers = rows.filter((row) => row.type === "header");
-    const scopes = threadMoveScopes([mixed, sagaGroup("saga", true)], index);
+    const scopes = threadMoveScopes(groups, index);
     expect(scopes.get(`${environmentId}:a`)).toEqual([`${environmentId}:a`]);
     expect(scopes.get(`${environmentId}:clone`)).toEqual([`${environmentId}:clone`]);
     expect(headers.find((row) => row.group.representative.id === "a")).toMatchObject({ depth: 1 });
@@ -508,26 +344,18 @@ describe("saga list layout", () => {
     expect(headers.find((row) => row.group.representative.id === "clone")?.group.threads).toEqual([
       cloneThread,
     ]);
+    const cloneRow = rows.findIndex(
+      (row) => row.type === "v2-thread" && row.item.thread.id === "clone-thread",
+    );
+    expect(rows[cloneRow - 1]).toMatchObject({
+      type: "header",
+      group: { representative: { id: "clone" } },
+    });
+    expect(rows[cloneRow]).toMatchObject({ depth: 1 });
+    expect(
+      rows.find((row) => row.type === "v2-thread" && row.item.thread.id === "a-thread-0"),
+    ).toMatchObject({ depth: 2 });
   });
-
-  const v2Rows = (
-    groups: ReadonlyArray<HomeThreadGroup>,
-    extra: Partial<Parameters<typeof buildThreadListV2Items>[0]> = {},
-  ) => {
-    const layout = buildThreadListV2Items({
-      threads: groups.flatMap((group) => group.threads),
-      environmentId: null,
-      searchQuery: "",
-      now: "2026-09-10T00:00:00Z",
-      ...extra,
-    });
-    return buildThreadListV2ListItems({
-      ...layout,
-      pendingTasks: groups.flatMap((group) => group.pendingTasks),
-      snoozedShelfExpanded: extra.snoozedShelfExpanded,
-      settledShelfExpanded: extra.settledShelfExpanded,
-    });
-  };
 
   it("preserves queue promotion through account and saga recursion using scoped identities", () => {
     const foreignEnvironment = EnvironmentId.make("environment-2");
@@ -580,33 +408,22 @@ describe("saga list layout", () => {
         now: Date.parse("2026-09-10T00:00:00Z"),
       });
       const input = { accountSections, groups, sagaIndex: index, displayStates: new Map() };
-      return [
-        buildHomeListLayout({ ...input, queuedThreadKeys: queued }).items,
-        buildHomeHierarchyV2Items({
-          ...input,
-          items: v2Rows(groups, { queuedThreadKeys: queued }),
-        }),
-      ];
-    };
-    for (const rows of render()) {
-      const visible = rows.flatMap((row) =>
-        row.type === "thread" ? [row.thread] : row.type === "v2-thread" ? [row.item.thread] : [],
-      );
-      expect(visible).toEqual([memberThread]);
-      expect(rows.find((row) => row.type === "thread" || row.type === "v2-thread")).toMatchObject({
-        depth: 2,
+      return buildHomeHierarchyV2Items({
+        ...input,
+        items: v2Rows(groups, { queuedThreadKeys: queued }),
       });
-      const shelves = rows.filter((row) => row.type === "v2-settled-shelf");
-      expect(shelves).toHaveLength(1);
-      expect(shelves[0]).toMatchObject({ count: 1, expanded: false });
-      expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
-    }
-    for (const rows of render(new Set())) {
-      expect(rows.filter((row) => row.type === "thread" || row.type === "v2-thread")).toHaveLength(
-        0,
-      );
-      expect(rows.filter((row) => row.type === "v2-settled-shelf")).toHaveLength(2);
-    }
+    };
+    const rows = render();
+    const visible = rows.flatMap((row) => (row.type === "v2-thread" ? [row.item.thread] : []));
+    expect(visible).toEqual([memberThread]);
+    expect(rows.find((row) => row.type === "v2-thread")).toMatchObject({ depth: 2 });
+    const shelves = rows.filter((row) => row.type === "v2-settled-shelf");
+    expect(shelves).toHaveLength(1);
+    expect(shelves[0]).toMatchObject({ count: 1, expanded: false, disabled: false });
+    expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
+    const unqueued = render(new Set());
+    expect(unqueued.filter((row) => row.type === "v2-thread")).toHaveLength(0);
+    expect(unqueued.filter((row) => row.type === "v2-settled-shelf")).toHaveLength(2);
   });
 
   it("preserves snooze priority for queued settled rows until they wake", () => {
@@ -855,12 +672,13 @@ describe("saga list layout", () => {
       includeStaveProjects: true,
       sagaIndex: index,
     });
-    const rows = buildHomeListLayout({
+    const rows = buildHomeHierarchyV2Items({
       groups,
+      items: v2Rows(groups),
       sagaIndex: index,
       displayStates: new Map(),
-      showAllThreads: true,
-    }).items;
+      searching: true,
+    });
     expect(
       rows
         .filter((row) => row.type === "header")
@@ -890,7 +708,7 @@ describe("saga list layout", () => {
     return { ...group, representative: project, projects: [project] };
   };
 
-  it("filters physical member clones before retaining search ancestry in V1 and V2", () => {
+  it("filters physical member clones before retaining search ancestry ", () => {
     const source = [
       sagaGroup("saga", true),
       withSharedRepository(sagaGroup("a")),
@@ -908,24 +726,19 @@ describe("saga list layout", () => {
       sagaIndex: index,
     });
     const input = { groups, sagaIndex: index, displayStates: new Map() };
-    const layouts = [
-      buildHomeListLayout({ ...input, showAllThreads: true }).items,
-      buildHomeHierarchyV2Items({
-        ...input,
-        items: v2Rows(groups),
-        searching: true,
-      }),
-    ];
-    for (const rows of layouts) {
-      expect(
-        rows
-          .filter((row) => row.type === "header")
-          .map((row) => [row.group.representative.id, row.depth]),
-      ).toEqual([
-        ["saga", 0],
-        ["a", 1],
-      ]);
-    }
+    const rows = buildHomeHierarchyV2Items({
+      ...input,
+      items: v2Rows(groups),
+      searching: true,
+    });
+    expect(
+      rows
+        .filter((row) => row.type === "header")
+        .map((row) => [row.group.representative.id, row.depth]),
+    ).toEqual([
+      ["saga", 0],
+      ["a", 1],
+    ]);
   });
 
   it("retains an empty physical member when its logical repository representative is ordinary", () => {
@@ -947,19 +760,15 @@ describe("saga list layout", () => {
       sagaIndex: index,
     });
     const input = { groups, sagaIndex: index, displayStates: new Map() };
-    for (const rows of [
-      buildHomeListLayout(input).items,
-      buildHomeHierarchyV2Items({ ...input, items: [] }),
-    ]) {
-      expect(
-        rows
-          .filter((row) => row.type === "header")
-          .map((row) => [row.group.representative.id, row.depth]),
-      ).toEqual([
-        ["saga", 0],
-        ["a", 1],
-      ]);
-    }
+    const rows = buildHomeHierarchyV2Items({ ...input, items: [] });
+    expect(
+      rows
+        .filter((row) => row.type === "header")
+        .map((row) => [row.group.representative.id, row.depth]),
+    ).toEqual([
+      ["saga", 0],
+      ["a", 1],
+    ]);
   });
 });
 
@@ -984,20 +793,46 @@ describe("account sections", () => {
         threads: group.threads.map((thread) => ({ ...thread, hasPendingApprovals: true })),
       },
     ];
-    const expanded = buildHomeListLayout({ groups, displayStates: new Map(), accountSections });
-    const collapsed = buildHomeListLayout({
+    const items = v2Rows(groups);
+    const expanded = buildHomeHierarchyV2Items({
       groups,
+      items,
+      displayStates: new Map(),
+      accountSections,
+    });
+    const collapsed = buildHomeHierarchyV2Items({
+      groups,
+      items,
       displayStates: displayStates({
         "connect-account:user_a": { collapsed: true, visibleCount: 6 },
       }),
       accountSections,
     });
-    expect(collapsed.items.map((item) => item.type)).toEqual(["account-header", "account-header"]);
-    expect(collapsed.items[0]).toMatchObject({ attention: "2 awaiting approval", collapsed: true });
-    expect(expanded.items.some((item) => item.type === "thread")).toBe(true);
-    expect(homeListItemsAreEqual(expanded.items[0]!, collapsed.items[0]!)).toBe(false);
-    expect(homeListItemsAreEqual(expanded.items.at(-1)!, collapsed.items.at(-1)!)).toBe(true);
-    expect(expanded.stickyHeaderIndices).toEqual([]);
+    expect(collapsed.map((item) => item.type)).toEqual(["account-header", "account-header"]);
+    expect(collapsed[0]).toMatchObject({ attention: "2 awaiting approval", collapsed: true });
+    expect(expanded.map((item) => item.type)).toEqual([
+      "account-header",
+      "header",
+      "v2-thread",
+      "v2-thread",
+      "account-header",
+    ]);
+    const accountHeaders = (rows: typeof expanded) =>
+      rows.filter((row): row is HomeAccountHeaderListItem => row.type === "account-header");
+    const [expandedWork, expandedOther] = accountHeaders(expanded);
+    const [collapsedWork, collapsedOther] = accountHeaders(collapsed);
+    expect(homeListItemsAreEqual(expandedWork!, collapsedWork!)).toBe(false);
+    expect(homeListItemsAreEqual(expandedOther!, collapsedOther!)).toBe(true);
+    const searching = buildHomeHierarchyV2Items({
+      groups,
+      items,
+      displayStates: displayStates({
+        "connect-account:user_a": { collapsed: true, visibleCount: 6 },
+      }),
+      accountSections,
+      searching: true,
+    });
+    expect(searching.filter((item) => item.type === "v2-thread")).toHaveLength(2);
   });
   it("keeps expired empty accounts visible with a sign-in state", () => {
     const layout = buildHomeHierarchyV2Items({
@@ -1092,34 +927,29 @@ describe("draft ownership through the mobile hierarchy", () => {
       expect(scopes.get(`${project.environmentId}:${project.id}`)).toEqual([
         `${project.environmentId}:${project.id}`,
       ]);
-    const layouts = [
-      buildHomeListLayout({ groups, accountSections, displayStates: new Map() }).items,
-      buildHomeHierarchyV2Items({
-        groups,
-        accountSections,
-        displayStates: new Map(),
-        items: buildThreadListV2ListItems({ items: [], pendingTasks: tasks }),
-      }),
-    ];
-    for (const rows of layouts) {
-      const owned = new Map<string | null, string[]>();
-      let accountId: string | null = null;
-      for (const row of rows) {
-        if (row.type === "account-header") accountId = row.account?.accountId ?? null;
-        if (row.type === "pending-task" || row.type === "v2-pending")
-          owned.set(accountId, [...(owned.get(accountId) ?? []), row.pendingTask.key]);
-      }
-      expect(owned.get("work-user")?.sort()).toEqual([
-        "draft-task:new-task:draft-0",
-        "draft-task:new-task:draft-1",
-      ]);
-      expect(owned.get("personal-user")?.sort()).toEqual([
-        "draft-task:new-task:draft-2",
-        "pending-task:pending",
-      ]);
-      expect(owned.get(null)).toEqual(["draft-task:new-task:draft-3"]);
-      expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
+    const rows = buildHomeHierarchyV2Items({
+      groups,
+      accountSections,
+      displayStates: new Map(),
+      items: buildThreadListV2ListItems({ items: [], pendingTasks: tasks }),
+    });
+    const owned = new Map<string | null, string[]>();
+    let accountId: string | null = null;
+    for (const row of rows) {
+      if (row.type === "account-header") accountId = row.account?.accountId ?? null;
+      if (row.type === "v2-pending")
+        owned.set(accountId, [...(owned.get(accountId) ?? []), row.pendingTask.key]);
     }
+    expect(owned.get("work-user")?.sort()).toEqual([
+      "draft-task:new-task:draft-0",
+      "draft-task:new-task:draft-1",
+    ]);
+    expect(owned.get("personal-user")?.sort()).toEqual([
+      "draft-task:new-task:draft-2",
+      "pending-task:pending",
+    ]);
+    expect(owned.get(null)).toEqual(["draft-task:new-task:draft-3"]);
+    expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
     const collapsed = buildHomeHierarchyV2Items({
       groups,
       accountSections,

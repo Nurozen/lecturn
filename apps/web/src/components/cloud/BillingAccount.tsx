@@ -156,7 +156,7 @@ function SignedBillingAccount({
         <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
           Lecturn Connect
         </p>
-        <h2 className="mt-2 font-heading text-2xl font-semibold">Your connection, everywhere.</h2>
+        <h2 className="mt-2 text-2xl font-semibold">Your connection, everywhere.</h2>
       </header>
       <p className="text-sm text-muted-foreground">
         Local connections, direct pairing, SSH and Tailscale remain free.

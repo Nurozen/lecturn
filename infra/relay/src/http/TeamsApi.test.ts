@@ -205,7 +205,6 @@ function run(
               upsert: () => Effect.void,
               listUsersForEnvironment: () => Effect.succeed([]),
               listDeliveryUsersForEnvironment: () => Effect.succeed([]),
-              listPublicKeysForEnvironment: () => Effect.succeed([]),
               listForUser: () => Effect.succeed([]),
               getForUser: () => Effect.succeed(null),
               revokeForUser: () => Effect.succeed(false),

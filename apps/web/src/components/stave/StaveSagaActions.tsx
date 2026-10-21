@@ -458,15 +458,12 @@ function SagaMemberEditor({
         if (!open && !restoring) onClose();
       }}
     >
-      <DialogPopup
-        {...glass}
-        className="lecturn-account-surface lecturn-project-settings-dialog max-w-md"
-      >
+      <DialogPopup {...glass} surface="glass" className="max-w-md">
         <DialogHeader>
           <DialogTitle>{editor.member ? "Edit dependencies" : "Adopt existing space"}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-4 px-6 pb-5">
-          <Label className="flex flex-col gap-2">
+          <Label className="flex flex-col">
             Space path
             <Input
               list="stave-saga-spaces"
@@ -486,7 +483,7 @@ function SagaMemberEditor({
             </datalist>
           </Label>
           {!editor.member && canRestore ? (
-            <Label className="gap-2 text-xs font-normal">
+            <Label variant="option" size="sm">
               <Switch
                 size="sm"
                 checked={showArchived}
@@ -508,7 +505,7 @@ function SagaMemberEditor({
               failureTitle={`Could not restore ${member?.logicalId ?? member?.id ?? "the space"}`}
             />
           ) : null}
-          <Label className="flex flex-col gap-2">
+          <Label className="flex flex-col">
             After member ids
             <Input
               value={afterText}
@@ -516,7 +513,7 @@ function SagaMemberEditor({
               onChange={(event) => setAfterText(event.target.value)}
             />
           </Label>
-          <Label className="flex items-center gap-2">
+          <Label className="flex items-center">
             <Checkbox
               data-lecturn-hover
               checked={clearAfter}
@@ -607,7 +604,7 @@ export function StaveSpaceMembership({
             </p>
           ) : (
             <>
-              <Label className="flex flex-col gap-2">
+              <Label className="flex flex-col">
                 Join saga
                 <Input
                   list="stave-membership-sagas"

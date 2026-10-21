@@ -17,14 +17,6 @@ import * as SourceControlProviderRegistry from "../sourceControl/SourceControlPr
 import * as ThreadTitleLinks from "./ThreadTitleLinks.ts";
 import type { TextGenerationPolicy } from "./TextGenerationPolicy.ts";
 
-export type TextGenerationProvider =
-  | "codex"
-  | "claudeAgent"
-  | "cursor"
-  | "grok"
-  | "githubCopilot"
-  | "opencode";
-
 export interface CommitMessageGenerationInput {
   cwd: string;
   branch: string | null;

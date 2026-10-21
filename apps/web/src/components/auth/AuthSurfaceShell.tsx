@@ -45,7 +45,7 @@ export function AuthSurfaceShell({
           ) : null}
           <div className={`relative h-full ${compact ? "px-6 py-4" : "p-5 sm:p-6"}`}>
             <p
-              className={`text-[10px] font-semibold tracking-[0.2em] ${compact ? "text-muted-foreground" : "text-white/80"} uppercase`}
+              className={`text-3xs font-semibold tracking-widest ${compact ? "text-muted-foreground" : "text-white/80"} uppercase`}
             >
               {APP_DISPLAY_NAME}
             </p>

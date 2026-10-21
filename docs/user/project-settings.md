@@ -1,8 +1,9 @@
 # Settings and project overrides
 
-On web and desktop, the Settings breadcrumb ends with the environment and project a change applies to. They start
-at **All environments** and **All projects** and stay selected as you move between categories or
-search for a setting.
+On web and desktop, the "Applying settings for …" sentence at the top of Settings pages picks
+the project and environment a change applies to. Pages that only hold device preferences, such as
+Appearance, don't show it. They start at **All projects** and **All environments**
+and stay selected as you move between categories or search for a setting.
 
 Preferences saved on this device, such as appearance, confirmations and browser profiles, always
 show and ignore the selection. Everything else is stored on a server. Choose one environment to
@@ -51,8 +52,17 @@ on each selected environment, and reset returns to the environment's shared list
 project and choose **Project settings**. When using multiple Connect accounts, a selected
 account-scoped project applies changes only to that account's project group.
 
-For workspace mode, a project's `lecturn.json` preference applies when the project has no override.
+Settings a repository can also declare in `lecturn.json`, such as the workspace for new threads,
+resolve in one order: a project override, then the environment setting, then `lecturn.json`, then the
+built-in default. Leave a setting on **Inherit** to let the next tier decide.
 Browser access changes apply when an agent session next starts.
+
+New worktrees initialize git submodules recursively. If that step is slow because the repository
+declares many nested submodules, set **Submodules** in **Settings → General** (with the project
+selected to override it there) to **Top level only** to stop at the ones the repository declares
+itself, or **Skip** to leave them for a setup script. It resolves in the same order as the
+workspace default: a `"worktreeSubmodules"` value in the `lecturn.json` of the branch being checked out
+applies when the project and environment are both on **Inherit**.
 
 ## Storage cleanup
 

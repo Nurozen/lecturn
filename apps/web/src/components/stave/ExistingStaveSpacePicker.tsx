@@ -320,7 +320,7 @@ export function ExistingStaveSpacePicker(props: {
                 {kind === "saga" ? "Sagas" : "Spaces"} on this environment that are not open as
                 projects.
               </p>
-              <Label className="gap-2 text-xs font-normal">
+              <Label variant="option" size="sm">
                 <Switch
                   size="sm"
                   checked={showArchived}

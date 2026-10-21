@@ -49,7 +49,7 @@ export default function AccountGoneNotice({ account }: { readonly account: Signe
             <TooltipTrigger
               render={
                 // Stays focusable and hoverable so the reason can be read.
-                <Button aria-disabled="true" className="cursor-not-allowed opacity-64" />
+                <Button aria-disabled="true" />
               }
             >
               Sign in again

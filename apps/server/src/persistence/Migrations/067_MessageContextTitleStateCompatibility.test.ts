@@ -61,7 +61,7 @@ describe("067 collision compatibility", () => {
       const executed = yield* runMigrations();
       assert.deepEqual(executed.at(-1), latest);
       yield* assertReconciled;
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
   it.effect("adds upstream columns to a published Lecturn database", () =>
@@ -86,7 +86,7 @@ describe("067 collision compatibility", () => {
       assert.deepEqual(yield* sql`SELECT mode FROM pull_request_watch_settings`, [{ mode: "off" }]);
       yield* sql`UPDATE pull_request_watch_settings SET mode = 'follow-pr'`;
       yield* assertReconciled;
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
   it.effect("adds Lecturn schema to an upstream 52 database", () =>
@@ -120,6 +120,6 @@ describe("067 collision compatibility", () => {
         { title: "Preserved", title_state_json: '{"kind":"manual"}' },
       ]);
       yield* assertReconciled;
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 });

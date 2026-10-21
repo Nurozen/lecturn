@@ -1,5 +1,5 @@
 import { FolderGit2Icon, ChevronDownIcon } from "lucide-react";
-import { Button } from "../ui/button";
+import { ComposerControl } from "../chat/ComposerControl";
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popover";
 import type { describeStaveWorkspace } from "./staveWorkspaceContext.logic";
 
@@ -11,8 +11,7 @@ export function StaveWorkspaceContext({
   return (
     <Popover>
       <PopoverTrigger
-        render={<Button variant="ghost" size="xs" />}
-        className="min-w-0 font-normal text-xs! text-muted-foreground/70 hover:text-foreground/80"
+        render={<ComposerControl size="xs" className="min-w-0 text-xs" />}
         aria-label={context.label}
         data-composer-context-control
       >

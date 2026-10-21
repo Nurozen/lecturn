@@ -1,11 +1,10 @@
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 import type { OrchestrationThread } from "@lecturn/contracts";
 import { DEFAULT_PROVIDER_INTERACTION_MODE, DEFAULT_RUNTIME_MODE } from "@lecturn/contracts";
-import { Atom } from "effect/unstable/reactivity";
 
 import { deriveThreadTitleFromPrompt } from "../lib/projectThreadStartTurn";
 import { scopedThreadKey } from "../lib/scopedEntities";
-import { appAtomRegistry } from "./atom-registry";
+import type { PendingThreadCreationOutcome } from "./pending-thread-creation-outcomes";
 import type { QueuedThreadMessage } from "./thread-outbox-model";
 
 /**
@@ -16,9 +15,12 @@ import type { QueuedThreadMessage } from "./thread-outbox-model";
  * and the first turn (keep showing setup) and a rejected creation
  * (the drain restored the content into the project draft; offer to reopen it).
  */
-export type PendingThreadCreationOutcome =
-  | { readonly kind: "delivered"; readonly message: QueuedThreadMessage }
-  | { readonly kind: "failed"; readonly message: QueuedThreadMessage; readonly reason: string };
+export {
+  clearPendingThreadCreationOutcome,
+  pendingThreadCreationOutcomesAtom,
+  recordPendingThreadCreationOutcome,
+  type PendingThreadCreationOutcome,
+} from "./pending-thread-creation-outcomes";
 
 export type PendingThreadCreation = {
   readonly message: QueuedThreadMessage;
@@ -65,28 +67,6 @@ export function resolvePendingThreadCreation(input: {
     return null;
   }
   return creation;
-}
-
-export const pendingThreadCreationOutcomesAtom = Atom.make<
-  Readonly<Record<string, PendingThreadCreationOutcome>>
->({}).pipe(Atom.keepAlive, Atom.withLabel("mobile:pending-thread-creation:outcomes"));
-
-export function recordPendingThreadCreationOutcome(outcome: PendingThreadCreationOutcome): void {
-  const key = scopedThreadKey(outcome.message.environmentId, outcome.message.threadId);
-  appAtomRegistry.set(pendingThreadCreationOutcomesAtom, {
-    ...appAtomRegistry.get(pendingThreadCreationOutcomesAtom),
-    [key]: outcome,
-  });
-}
-
-export function clearPendingThreadCreationOutcome(threadKey: string): void {
-  const current = appAtomRegistry.get(pendingThreadCreationOutcomesAtom);
-  if (!current[threadKey]) {
-    return;
-  }
-  const next = { ...current };
-  delete next[threadKey];
-  appAtomRegistry.set(pendingThreadCreationOutcomesAtom, next);
 }
 
 /**

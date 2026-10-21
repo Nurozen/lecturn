@@ -221,37 +221,39 @@ export function StaveGitOverview(props: Props) {
               repository.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="space-y-3">
-            {open
-              ? selection.targets.map((target) => (
-                  <RepoRow
-                    key={target.key}
-                    {...props}
-                    target={target}
-                    selected={selection.selected?.key === target.key}
-                    onSelect={() => selection.select(target.key)}
-                    onInspect={() => {
-                      selection.select(target.key);
-                      setOpen(false);
-                      props.onOpenDiff();
-                    }}
-                    {...(props.onOpenPullRequest
-                      ? {
-                          onOpenPullRequest: (
-                            number: number,
-                            repository?: StavePullRequestTarget,
-                          ) => {
-                            setOpen(false);
-                            props.onOpenPullRequest?.(number, repository);
-                          },
-                        }
-                      : {})}
-                  />
-                ))
-              : null}
-            {selection.targets.length === 0 ? (
-              <p className="text-sm text-muted-foreground">This space has no repositories.</p>
-            ) : null}
+          <DialogPanel>
+            <div className="space-y-3">
+              {open
+                ? selection.targets.map((target) => (
+                    <RepoRow
+                      key={target.key}
+                      {...props}
+                      target={target}
+                      selected={selection.selected?.key === target.key}
+                      onSelect={() => selection.select(target.key)}
+                      onInspect={() => {
+                        selection.select(target.key);
+                        setOpen(false);
+                        props.onOpenDiff();
+                      }}
+                      {...(props.onOpenPullRequest
+                        ? {
+                            onOpenPullRequest: (
+                              number: number,
+                              repository?: StavePullRequestTarget,
+                            ) => {
+                              setOpen(false);
+                              props.onOpenPullRequest?.(number, repository);
+                            },
+                          }
+                        : {})}
+                    />
+                  ))
+                : null}
+              {selection.targets.length === 0 ? (
+                <p className="text-sm text-muted-foreground">This space has no repositories.</p>
+              ) : null}
+            </div>
           </DialogPanel>
         </DialogPopup>
       </Dialog>

@@ -31,7 +31,6 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import { resolveProjectSettings } from "@lecturn/shared/projectSettings";
-import { resolveDefaultThreadEnvMode } from "@lecturn/shared/threadEnvMode";
 import { readProjects, readThreadShell, useProjects, useThread } from "../state/entities";
 import {
   hasExplicitComposerModelSelection,
@@ -40,7 +39,7 @@ import {
   resolveNewThreadEnvModeSources,
   resolveNewThreadModelSelectionOverride,
 } from "../lib/chatThreadActions";
-import { readLecturnProjectFileDefaultThreadEnvMode } from "../lib/lecturnProjectFileDefaults";
+import { readLecturnProjectFile } from "../lib/lecturnProjectFileDefaults";
 import { environmentServerConfigsAtom } from "../state/server";
 import { resolveThreadRouteTarget, type ThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
@@ -158,10 +157,6 @@ export function useNewThreadHandler() {
       );
       const projectDefaultModelSelection = projectSettings.settings.defaultModelSelection;
       const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;
-      const projectThreadEnvMode =
-        projectSettings.sources.defaultThreadEnvMode === "project"
-          ? projectSettings.settings.defaultThreadEnvMode
-          : undefined;
       const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
         resolveNewThreadModelSelectionOverride({
           projectDefaultSelection: projectDefaultModelSelection ?? null,
@@ -172,26 +167,22 @@ export function useNewThreadHandler() {
         });
       // The shared resolver owns the priority order. The lecturn.json read is
       // skipped entirely when a higher-priority source decides (a Stave
-      // space forces local, then the per-project setting), and its query
-      // atom caches per project after the first call.
+      // space forces its mode, then the project and environment settings),
+      // and its query atom caches per project after the first call.
       const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
-        // A Stave space forces its mode; otherwise only a project-scoped
-        // override counts as the project setting.
         const { forcedMode } = resolveNewThreadEnvModeSources(project);
+        if (forcedMode !== undefined) return forcedMode;
         const consultProjectFile =
-          project !== undefined && forcedMode === undefined && projectThreadEnvMode == null;
-        return resolveDefaultThreadEnvMode({
-          forcedMode,
-          projectSetting: projectThreadEnvMode,
-          projectFile:
-            consultProjectFile && project !== undefined
-              ? await readLecturnProjectFileDefaultThreadEnvMode(
-                  project.environmentId,
-                  project.workspaceRoot,
-                )
-              : null,
-          globalDefault: projectSettings.settings.defaultThreadEnvMode,
-        });
+          project !== undefined && projectSettings.settings.defaultThreadEnvMode === null;
+        const projectFile = consultProjectFile
+          ? await readLecturnProjectFile(project.environmentId, project.workspaceRoot)
+          : null;
+        return resolveProjectSettings(
+          targetServerSettings,
+          project?.id ?? null,
+          project,
+          projectFile,
+        ).settings.defaultThreadEnvMode;
       };
       const logicalProjectKey = project
         ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)

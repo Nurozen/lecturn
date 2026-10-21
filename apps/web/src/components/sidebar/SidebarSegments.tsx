@@ -1,4 +1,3 @@
-import "./account-glass.css";
 import { accountTintColor } from "@lecturn/shared/accountTint";
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/models";
@@ -161,7 +160,7 @@ function SegmentedLists<Node>(
               <CollapsiblePanel
                 inert={segment.collapsed || undefined}
                 aria-hidden={segment.collapsed || undefined}
-                className="lecturn-account-collapse lecturn-hierarchy-panel"
+                variant="account-hierarchy"
                 style={(state) =>
                   ({
                     // Preserve row focus rings and project glow when the fold is idle.
