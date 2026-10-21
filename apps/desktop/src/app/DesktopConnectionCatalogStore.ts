@@ -215,7 +215,7 @@ const readDocument = (
       raw === null
         ? Effect.succeed(Option.none<EncryptedConnectionCatalogDocument>())
         : decodeEncryptedConnectionCatalogDocumentJson(raw).pipe(
-            Effect.map(Option.some),
+            Effect.asSome,
             Effect.mapError(
               (cause) =>
                 new DesktopConnectionCatalogStoreDocumentDecodeError({

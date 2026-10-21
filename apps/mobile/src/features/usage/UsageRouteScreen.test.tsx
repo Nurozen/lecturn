@@ -122,6 +122,8 @@ vi.mock("../settings/components/SettingsSection", () => ({
   SettingsSection: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("./UsageDailyChart", () => ({ UsageDailyChart: () => null }));
+vi.mock("./ChatGptUsageSummary", () => ({ ChatGptUsageSummary: () => null }));
+vi.mock("../../components/ProviderIcon", () => ({ ProviderIcon: () => null }));
 vi.mock("./UsageLimitsSection", () => ({
   useRefreshLimits: () => ({
     now: 0,
@@ -155,13 +157,17 @@ vi.mock("../../state/presentation", () => ({
     presentationAtom: (id: EnvironmentId) => backend.getPresentation!(id),
   },
 }));
-vi.mock("../../state/server", () => ({
-  serverEnvironment: {
-    usageSummary: ({ environmentId }: { environmentId: EnvironmentId }) =>
-      backend.getQuery!(environmentId),
-    refreshUsageRates: { label: "test refresh rates", run: async () => AsyncResult.success({}) },
-  },
-}));
+vi.mock("../../state/server", () => {
+  const providers = Atom.make(null);
+  return {
+    serverEnvironment: {
+      providersValueAtom: () => providers,
+      usageSummary: ({ environmentId }: { environmentId: EnvironmentId }) =>
+        backend.getQuery!(environmentId),
+      refreshUsageRates: { label: "test refresh rates", run: async () => AsyncResult.success({}) },
+    },
+  };
+});
 
 import { UsageRouteScreen } from "./UsageRouteScreen";
 

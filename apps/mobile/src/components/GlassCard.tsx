@@ -1,13 +1,13 @@
 import { useGlassPalette } from "../lib/useGlassPalette";
 import type { ReactNode, Ref } from "react";
-import { StyleSheet, View, type ViewProps } from "react-native";
+import { StyleSheet, View, type ViewInstance, type ViewProps } from "react-native";
 
 import { cn } from "../lib/cn";
 import { useUniwindTheme } from "../lib/useUniwindTheme";
 import { themeColorWithAlpha } from "../lib/mobileTheme";
 
 export interface GlassCardProps extends ViewProps {
-  readonly ref?: Ref<View>;
+  readonly ref?: Ref<ViewInstance>;
   readonly children: ReactNode;
   readonly tone?: "default" | "accent" | "settled";
   readonly radius?: number;

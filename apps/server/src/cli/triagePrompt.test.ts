@@ -54,7 +54,8 @@ it("context file carries every path the playbook depends on", () => {
       dbPath: "/home/u/.lecturn/userdata/state.sqlite",
       settingsPath: "/home/u/.lecturn/userdata/settings.json",
       logsDir: "/home/u/.lecturn/userdata/logs",
-      serverLogPath: "/home/u/.lecturn/userdata/logs/server.log",
+      serviceLogPath: "/home/u/.lecturn/userdata/logs/boot-service.log",
+      desktopBackendLogGlob: "/home/u/.lecturn/userdata/logs/server-child*.log*",
       serverTracePath: "/home/u/.lecturn/userdata/logs/server.trace.ndjson",
       providerEventLogPath: "/home/u/.lecturn/userdata/logs/provider/events.log",
       terminalLogsDir: "/home/u/.lecturn/userdata/logs/terminals",
@@ -65,6 +66,8 @@ it("context file carries every path the playbook depends on", () => {
   });
   assert.include(context, "/home/u/.lecturn/userdata/state.sqlite");
   assert.include(context, "/home/u/.lecturn/userdata/logs/server.trace.ndjson");
+  assert.include(context, "/home/u/.lecturn/userdata/logs/boot-service.log");
+  assert.include(context, "/home/u/.lecturn/userdata/logs/server-child*.log*");
   assert.include(context, "/home/u/.lecturn/userdata/logs/provider/events.log");
   assert.include(context, "/home/u/.lecturn/userdata/secrets");
   assert.include(context, "/home/u/.lecturn/source");

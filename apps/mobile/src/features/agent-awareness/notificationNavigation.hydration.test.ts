@@ -18,8 +18,10 @@ vi.mock("react", () => ({
   useEffect: (effect: () => void) => {
     state.effect = effect;
   },
+  useLayoutEffect: () => {},
   useRef: (current: unknown) => ({ current }),
 }));
+vi.mock("./androidNotifications", () => ({ setAndroidThreadOnScreen: vi.fn() }));
 vi.mock("@effect/atom-react", () => ({
   useAtomValue: (atom: unknown) =>
     atom === state.accountReadyAtom ? state.accountsReady : { isReady: state.catalogReady },
@@ -49,6 +51,7 @@ vi.mock("expo-notifications", () => ({
   addNotificationResponseReceivedListener: state.listen,
   getLastNotificationResponseAsync: state.readResponse,
   clearLastNotificationResponseAsync: state.clearResponse,
+  setNotificationHandler: vi.fn(),
 }));
 
 import { useAgentNotificationNavigation } from "./notificationNavigation";
@@ -70,17 +73,17 @@ describe("cold notification hydration", () => {
     state.clearResponse.mockImplementation(async () => {
       cleared();
     });
-    useAgentNotificationNavigation();
+    useAgentNotificationNavigation("/");
     state.effect?.();
     expect(state.readResponse).not.toHaveBeenCalled();
     expect(state.clearResponse).not.toHaveBeenCalled();
     state.catalogReady = true;
     state.accountsReady = false;
-    useAgentNotificationNavigation();
+    useAgentNotificationNavigation("/");
     state.effect?.();
     expect(state.readResponse).not.toHaveBeenCalled();
     state.accountsReady = true;
-    useAgentNotificationNavigation();
+    useAgentNotificationNavigation("/");
     const cleanup = state.effect?.();
     await completed;
     expect(state.expand).toHaveBeenCalledWith("b");

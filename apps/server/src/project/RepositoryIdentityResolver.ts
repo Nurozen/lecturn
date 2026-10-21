@@ -16,7 +16,11 @@ import * as ProcessRunner from "../processRunner.ts";
 import { STAVE_MANIFEST_FILE_NAME } from "../stave/staveManifest.ts";
 
 const DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY = 512;
-const DEFAULT_POSITIVE_CACHE_TTL = Duration.minutes(1);
+// Background sweeps resolve every project each minute. A long TTL keeps them
+// from spawning git each time. Clone, publish, and PR discovery (after a turn
+// and before it saves links) resolve with `refresh: true`.
+const DEFAULT_POSITIVE_CACHE_TTL = Duration.minutes(15);
+// Short, so a folder that gains a repository or a remote shows up quickly.
 const DEFAULT_NEGATIVE_CACHE_TTL = Duration.minutes(1);
 
 export interface RepositoryIdentityResolverOptions {
@@ -146,42 +150,36 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const cacheCapacity = options.cacheCapacity ?? DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY;
+  const refine = options.refine ?? Effect.succeed;
+  // Git errors and timeouts resolve to null, so they use the negative TTL like
+  // "no repository" or "no remote". Only interrupts and defects skip the cache.
+  const timeToLive = (exit: Exit.Exit<unknown>) =>
+    Exit.match(exit, {
+      onSuccess: (value) =>
+        value === null
+          ? (options.negativeCacheTtl ?? DEFAULT_NEGATIVE_CACHE_TTL)
+          : (options.positiveCacheTtl ?? DEFAULT_POSITIVE_CACHE_TTL),
+      onFailure: () => Duration.zero,
+    });
 
   const repositoryRootCache = yield* Cache.makeWith<string, string | null>(
     (cwd) =>
       resolveRepositoryIdentityCacheKey(cwd).pipe(
         Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
       ),
-    {
-      capacity: cacheCapacity,
-      timeToLive: Exit.match({
-        onSuccess: (value) =>
-          value === null ? Duration.zero : (options.positiveCacheTtl ?? DEFAULT_POSITIVE_CACHE_TTL),
-        onFailure: () => Duration.zero,
-      }),
-    },
+    { capacity: cacheCapacity, timeToLive },
   );
 
   const repositoryIdentityCache = yield* Cache.makeWith<string, RepositoryIdentity | null>(
     (cacheKey) =>
       resolveRepositoryIdentityFromCacheKey(cacheKey).pipe(
         Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
-        Effect.flatMap((identity) =>
-          identity !== null && options.refine
-            ? options.refine(identity).pipe(Effect.catch(() => Effect.succeed(identity)))
-            : Effect.succeed(identity),
+        Effect.filterOrElse(
+          (identity): identity is null => identity === null,
+          (identity) => refine(identity).pipe(Effect.orElseSucceed(() => identity)),
         ),
       ),
-    {
-      capacity: cacheCapacity,
-      timeToLive: Exit.match({
-        onSuccess: (value) =>
-          value === null
-            ? (options.negativeCacheTtl ?? DEFAULT_NEGATIVE_CACHE_TTL)
-            : (options.positiveCacheTtl ?? DEFAULT_POSITIVE_CACHE_TTL),
-        onFailure: () => Duration.zero,
-      }),
-    },
+    { capacity: cacheCapacity, timeToLive },
   );
 
   const hasStaveManifest = (cwd: string) =>
@@ -189,19 +187,21 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
       .exists(path.join(cwd, STAVE_MANIFEST_FILE_NAME))
       .pipe(Effect.orElseSucceed(() => false));
 
-  const resolve: RepositoryIdentityResolver["Service"]["resolve"] = Effect.fn(
-    "RepositoryIdentityResolver.resolve",
-  )(function* (cwd, options) {
-    if (options?.refresh) yield* Cache.invalidate(repositoryRootCache, cwd);
-    // A Stave space root is a directory of checkouts, not a checkout: it must
-    // never take its primary repo's (or an ancestor repo's) identity, or the
-    // space would collapse into that repository's project group.
-    if (yield* hasStaveManifest(cwd)) return null;
-    const cacheKey = yield* Cache.get(repositoryRootCache, cwd);
-    if (cacheKey === null) return null;
-    if (options?.refresh) yield* Cache.invalidate(repositoryIdentityCache, cacheKey);
-    return yield* Cache.get(repositoryIdentityCache, cacheKey);
-  });
+  // Untraced because almost every call is a cache hit. The lookups that spawn
+  // git keep their own spans.
+  const resolve: RepositoryIdentityResolver["Service"]["resolve"] = Effect.fnUntraced(
+    function* (cwd, options) {
+      if (options?.refresh) yield* Cache.invalidate(repositoryRootCache, cwd);
+      // A Stave space root is a directory of checkouts, not a checkout: it must
+      // never take its primary repo's (or an ancestor repo's) identity, or the
+      // space would collapse into that repository's project group.
+      if (yield* hasStaveManifest(cwd)) return null;
+      const cacheKey = yield* Cache.get(repositoryRootCache, cwd);
+      if (cacheKey === null) return null;
+      if (options?.refresh) yield* Cache.invalidate(repositoryIdentityCache, cacheKey);
+      return yield* Cache.get(repositoryIdentityCache, cacheKey);
+    },
+  );
 
   return RepositoryIdentityResolver.of({ resolve });
 });

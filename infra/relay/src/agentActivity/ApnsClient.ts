@@ -169,6 +169,12 @@ function makeLiveActivityRequest(input: MakeLiveActivityRequestInput): ApnsLiveA
   };
 }
 
+function notificationThreadId(notification: ApnsNotificationPayload): string {
+  return notification.threadId.length > 0
+    ? `${notification.environmentId}/${notification.threadId}`
+    : "lecturn-agent-alerts";
+}
+
 function makePushNotificationRequest(input: {
   readonly token: string;
   readonly notification: ApnsNotificationPayload;
@@ -183,6 +189,9 @@ function makePushNotificationRequest(input: {
           body: input.notification.body,
         },
         sound: "default",
+        // Notification Center stacks alerts by thread so a chatty thread does
+        // not bury the others; a grouped alert for several threads stays alone.
+        "thread-id": notificationThreadId(input.notification),
       },
       ...(input.notification.accountId ? { accountId: input.notification.accountId } : {}),
       environmentId: input.notification.environmentId,

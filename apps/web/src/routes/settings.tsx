@@ -1,12 +1,5 @@
 import { AccountSurface } from "../components/AccountSurface";
-import {
-  Outlet,
-  createFileRoute,
-  redirect,
-  useLocation,
-  useCanGoBack,
-  useNavigate,
-} from "@tanstack/react-router";
+import { Outlet, createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ArrowLeftIcon, RotateCcwIcon } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -15,6 +8,7 @@ import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { SettingsBreadcrumb } from "../components/settings/SettingsBreadcrumb";
 import { PhoneSettingsCategorySelect } from "../components/settings/PhoneSettingsCategorySelect";
 import { SidebarInset, useSidebar } from "../components/ui/sidebar";
+import { useNavigateToMainApp } from "../components/sidebar/mainAppLocation";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isElectron } from "../env";
 import { useBackToChat } from "../components/settings/SettingsNavigation";
@@ -123,14 +117,14 @@ function SettingsContentLayout() {
   const location = useLocation();
   const backToChat = useBackToChat();
   const { isMobile } = useSidebar();
-  const navigate = useNavigate();
-  const canGoBack = useCanGoBack();
+  const navigateToMainApp = useNavigateToMainApp();
   const { search } = useSettingsScope();
+  // Phones unwind to the chat they came from; wider layouts return to the
+  // last main app page however many utility pages were visited since.
   const navigateBackWithinApp = useCallback(() => {
     if (isMobile) backToChat();
-    else if (canGoBack) window.history.back();
-    else void navigate({ to: "/" });
-  }, [backToChat, canGoBack, isMobile, navigate]);
+    else void navigateToMainApp();
+  }, [backToChat, isMobile, navigateToMainApp]);
   const viewportRef = usePhoneAuthViewport(!isElectron);
   const [restoreSignal, setRestoreSignal] = useState(0);
   const showRestoreDefaults = location.pathname === "/settings/general";
@@ -138,7 +132,7 @@ function SettingsContentLayout() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
+      if (event.defaultPrevented || event.repeat || event.isComposing) return;
       // A nested settings dialog owns Escape and returns focus to its trigger.
       if (event.target instanceof HTMLElement && event.target.closest('[role="dialog"]')) return;
       if (event.key === "Escape") {
@@ -217,6 +211,7 @@ function SettingsRouteLayout() {
   return (
     <SettingsScopeProvider
       search={rawSearch}
+      singleEnvironment={pathname === "/settings/providers"}
       onChange={(next) => {
         // Send every axis so the retain middleware sees an explicit target
         // even when the choice is "all", which is the absence of a key.

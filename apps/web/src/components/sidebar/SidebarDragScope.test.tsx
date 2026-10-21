@@ -53,6 +53,7 @@ const actions = {
   settleThread: vi.fn<Actions["settleThread"]>(),
   snoozeThread: vi.fn<Actions["snoozeThread"]>(),
   confirmAndUnpinThread: vi.fn<Actions["confirmAndUnpinThread"]>(),
+  setThreadAutoSettle: vi.fn<Actions["setThreadAutoSettle"]>(),
 } satisfies Actions;
 const key = (row: EnvironmentThreadShell) =>
   scopedThreadKey(scopeThreadRef(row.environmentId, row.id));

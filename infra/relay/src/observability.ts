@@ -230,8 +230,9 @@ export const makeRelayTraceLayer = (input: {
     OtlpTracer.make({
       url: input.tracesEndpoint,
       resource: {
-        serviceName: "lecturn-relay-worker",
+        serviceName: "lecturn-relay",
         attributes: {
+          "service.namespace": "lecturn",
           "service.runtime": "cloudflare-worker",
           "service.component": "relay",
         },

@@ -847,9 +847,9 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
                   })),
                 });
               }
-              // The attachments dir grant lets the agent read pasted files at
-              // the paths ProviderService injects into the turn text. It is a
-              // leaf directory holding only uploads.
+              // The attachments dir grant lets the agent read path-only uploads
+              // at the paths ProviderService injects into the turn text. It is
+              // a leaf directory holding only uploads.
               const runtime = yield* options.makeRuntime({
                 cwd,
                 clientInfo: { name: "lecturn", version: "0.0.0" },
@@ -896,7 +896,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
               const model = yield* applyAntigravityAcpModelSelection({
                 runtime,
                 model: input.modelSelection?.model,
-                defaultModel: yield* options.defaultModel ?? Effect.succeed(undefined),
+                defaultModel: yield* options.defaultModel ?? Effect.undefined,
                 mapError: (cause) => cause,
               });
               yield* runtime.setMode(antigravityPermissionMode(input.runtimeMode));
@@ -1087,7 +1087,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
           const model = resolveAntigravityModel({
             configOptions,
             model: requestedModel,
-            defaultModel: yield* options.defaultModel ?? Effect.succeed(undefined),
+            defaultModel: yield* options.defaultModel ?? Effect.undefined,
           });
           const availableModels = antigravityModelOptions(configOptions);
           if (model && !availableModels.some((option) => option.value === model)) {

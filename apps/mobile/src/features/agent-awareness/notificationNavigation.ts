@@ -4,11 +4,13 @@ import { relayAccountByEnvironmentId } from "@lecturn/client-runtime/relay";
 import { environmentCatalog } from "../../connection/catalog";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { connectAccountsReadyAtom, knownConnectAccountsAtom } from "../cloud/knownAccounts";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import * as Notifications from "expo-notifications";
 import { useLinkTo, useNavigation } from "@react-navigation/native";
 
-import { routeAgentNotificationResponseOnce } from "./notificationPayload";
+import { setAndroidThreadOnScreen } from "./androidNotifications";
+import { foregroundNotificationBehavior } from "./foregroundNotificationBehavior";
+import { routeAgentNotificationResponseOnce, threadDeepLinkOnScreen } from "./notificationPayload";
 import { consumeLastAgentNotificationResponse } from "./notificationResponseConsumer";
 import {
   pendingLiveActivityResponses,
@@ -17,7 +19,7 @@ import {
   subscribeLiveActivityLinks,
 } from "./activityLinking";
 
-export function useAgentNotificationNavigation(): void {
+export function useAgentNotificationNavigation(pathname: string): void {
   const linkTo = useLinkTo();
   const navigation = useNavigation();
   const accountsReady = useAtomValue(connectAccountsReadyAtom);
@@ -29,6 +31,26 @@ export function useAgentNotificationNavigation(): void {
   const initialResponseRead = useRef(false);
   const notificationTapRevision = useRef(0);
   const observedLinkRevision = useRef(0);
+  // Read through a ref so the native handler registered once below sees the
+  // current route without re-registering on every navigation.
+  const deepLinkOnScreen = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const thread = threadDeepLinkOnScreen(pathname);
+    deepLinkOnScreen.current = thread;
+    // Android alerts are built natively from FCM data, so update the native
+    // route at commit time alongside the iOS handler's route reference.
+    setAndroidThreadOnScreen(thread);
+  }, [pathname]);
+
+  useEffect(() => {
+    Notifications.setNotificationHandler({
+      handleNotification: (notification) =>
+        Promise.resolve(foregroundNotificationBehavior(notification, deepLinkOnScreen.current)),
+    });
+    return () => {
+      Notifications.setNotificationHandler(null);
+    };
+  }, []);
 
   useEffect(() => {
     if (!accountsReady || !catalog.isReady) return;

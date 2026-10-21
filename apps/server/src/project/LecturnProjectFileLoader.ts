@@ -69,7 +69,7 @@ export const make = Effect.gen(function* () {
   )(function* (workspaceRoot) {
     const filePath = path.join(workspaceRoot, LECTURN_PROJECT_FILE_NAME);
     const raw = yield* fileSystem.readFileString(filePath).pipe(
-      Effect.map(Option.some),
+      Effect.asSome,
       Effect.catchTags({
         PlatformError: (error) =>
           error.reason._tag === "NotFound"
@@ -88,7 +88,7 @@ export const make = Effect.gen(function* () {
       return Option.none<LecturnProjectFile>();
     }
     return yield* decodeLecturnProjectFileJson(raw.value).pipe(
-      Effect.map(Option.some),
+      Effect.asSome,
       Effect.catchTags({
         SchemaError: (error) =>
           logLecturnProjectFileLoadError(

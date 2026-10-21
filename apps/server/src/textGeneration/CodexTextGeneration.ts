@@ -85,6 +85,11 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
   codexConfig: CodexSettings,
   environment?: NodeJS.ProcessEnv,
   getModels: Effect.Effect<ReadonlyArray<ServerProviderModel>> = Effect.succeed([]),
+  resolveRuntime?: Effect.Effect<
+    import("../provider/CodexManagedRuntime.ts").CodexEffectiveRuntime,
+    import("@lecturn/contracts").ProviderSetupError,
+    Scope.Scope
+  >,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -157,7 +162,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       );
 
   const safeUnlink = (filePath: string): Effect.Effect<void, never> =>
-    fileSystem.remove(filePath).pipe(Effect.catch(() => Effect.void));
+    fileSystem.remove(filePath).pipe(Effect.ignore);
 
   const encodeJsonForOperation = (
     operation:
@@ -254,6 +259,15 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     const outputPath = yield* writeTempFile(operation, "codex-output", "");
 
     const runCodexCommand = Effect.fn("runCodexJson.runCodexCommand")(function* () {
+      const resolved = resolveRuntime
+        ? yield* resolveRuntime.pipe(
+            Effect.mapError(
+              (cause) => new TextGenerationError({ operation, detail: cause.detail }),
+            ),
+          )
+        : undefined;
+      const effectiveConfig = resolved?.config ?? codexConfig;
+      const effectiveEnvironment = resolved?.environment ?? resolvedEnvironment;
       const model = yield* resolveModelSlug(modelSelection.model);
       const inference =
         operation === "generateWorkflowSummary" ||
@@ -275,7 +289,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
             ),
           )
         : cwd;
-      const launchArgs = resolveCodexLaunchArgs(codexConfig.launchArgs, resolvedEnvironment);
+      const launchArgs = resolveCodexLaunchArgs(effectiveConfig.launchArgs, effectiveEnvironment);
       const inferenceInstructions = inference
         ? yield* writeTempFile(
             operation,
@@ -288,10 +302,12 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         (operation === "generateDecisionNotes"
           ? undefined
           : DEFAULT_TEXT_GENERATION_REASONING_EFFORT);
-      const serviceTier = getCodexServiceTierOptionValue(modelSelection);
+      const serviceTier = resolved ? undefined : getCodexServiceTierOptionValue(modelSelection);
       const commandEnvironment = {
-        ...resolvedEnvironment,
-        ...(codexConfig.homePath ? { CODEX_HOME: expandHomePath(codexConfig.homePath) } : {}),
+        ...effectiveEnvironment,
+        ...(effectiveConfig.homePath
+          ? { CODEX_HOME: expandHomePath(effectiveConfig.homePath) }
+          : {}),
       };
       const inferenceArgs = inference
         ? [`model_instructions_file=${inferenceInstructions}`, ...CODEX_INFERENCE_CONFIG].flatMap(
@@ -300,7 +316,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         : [];
       const isolation = inference
         ? yield* prepareIsolation({
-            binary: codexConfig.binaryPath || "codex",
+            binary: effectiveConfig.binaryPath || "codex",
             args: [...codexExecLaunchArgs(launchArgs), ...inferenceArgs],
             env: commandEnvironment,
             cwd: commandCwd,
@@ -310,7 +326,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         : undefined;
       yield* isolation?.verify ?? Effect.void;
       const spawnCommand = yield* resolveSpawnCommand(
-        codexConfig.binaryPath || "codex",
+        effectiveConfig.binaryPath || "codex",
         [
           "exec",
           ...codexExecLaunchArgs(launchArgs),
@@ -330,7 +346,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           ...imagePaths.flatMap((imagePath) => ["--image", imagePath]),
           "-",
         ],
-        { env: resolvedEnvironment },
+        { env: effectiveEnvironment },
       );
       const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
         env: commandEnvironment,
@@ -377,8 +393,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       }
     });
 
-    const cleanup = Effect.all(
-      [schemaPath, outputPath, ...cleanupPaths].map((filePath) => safeUnlink(filePath)),
+    const cleanup = Effect.forEach(
+      [schemaPath, outputPath, ...cleanupPaths],
+      (filePath) => safeUnlink(filePath),
       {
         concurrency: "unbounded",
       },
@@ -620,17 +637,29 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
               }),
           ),
         );
+      const resolved = resolveRuntime
+        ? yield* resolveRuntime.pipe(
+            Effect.mapError(
+              (cause) =>
+                new TextGenerationError({ operation: "checkDecisionWriter", detail: cause.detail }),
+            ),
+          )
+        : undefined;
+      const effectiveConfig = resolved?.config ?? codexConfig;
+      const effectiveEnvironment = resolved?.environment ?? resolvedEnvironment;
       const isolation = yield* prepareIsolation({
-        binary: codexConfig.binaryPath || "codex",
+        binary: effectiveConfig.binaryPath || "codex",
         args: [
           ...codexExecLaunchArgs(
-            resolveCodexLaunchArgs(codexConfig.launchArgs, resolvedEnvironment),
+            resolveCodexLaunchArgs(effectiveConfig.launchArgs, effectiveEnvironment),
           ),
           ...CODEX_INFERENCE_CONFIG.flatMap((value) => ["--config", value]),
         ],
         env: {
-          ...resolvedEnvironment,
-          ...(codexConfig.homePath ? { CODEX_HOME: expandHomePath(codexConfig.homePath) } : {}),
+          ...effectiveEnvironment,
+          ...(effectiveConfig.homePath
+            ? { CODEX_HOME: expandHomePath(effectiveConfig.homePath) }
+            : {}),
         },
         cwd,
         operation: "checkDecisionWriter",

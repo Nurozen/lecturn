@@ -12,6 +12,7 @@ import { SortableContext, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { scopeThreadRef, scopedThreadKey } from "@lecturn/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/models";
+import { sortSettledThreads } from "@lecturn/client-runtime/state/thread-sort";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -42,7 +43,6 @@ import {
   resolveSidebarDropVerb,
   sidebarListItemId,
   sidebarMarkerId,
-  sortSettledThreadsForSidebar,
   type SidebarListMarker,
   type SidebarSection,
   type SidebarThreadDropPlan,
@@ -144,6 +144,10 @@ export function SidebarDragScope(props: {
   actions: ReturnType<typeof useThreadActions>;
   lists: SidebarLists;
   enabled: boolean;
+  /** Working beta shelf; its rows are neither drag sources nor destinations. */
+  workingExpanded?: boolean;
+  /** Working beta: the inbox is time-ordered, so drops there only change lifecycle. */
+  sortInbox?: (threads: readonly EnvironmentThreadShell[]) => EnvironmentThreadShell[];
   snoozedExpanded: boolean;
   settledExpanded: boolean;
   settledLimit: number;
@@ -230,10 +234,15 @@ export function SidebarDragScope(props: {
       ),
     [props.lists],
   );
-  const lists = useMemo(() => projectSidebarDrop(props.lists, hold), [props.lists, hold]);
+  const { sortInbox } = props;
+  const lists = useMemo(
+    () => projectSidebarDrop(props.lists, hold, sortInbox),
+    [props.lists, hold, sortInbox],
+  );
   const items = useMemo(
     () =>
       buildScopedSidebarItems(lists, {
+        workingExpanded: props.workingExpanded === true,
         snoozedExpanded: props.snoozedExpanded,
         settledExpanded: props.settledExpanded,
         settledLimit: props.settledLimit,
@@ -244,6 +253,7 @@ export function SidebarDragScope(props: {
       }),
     [
       lists,
+      props.workingExpanded,
       props.snoozedExpanded,
       props.settledExpanded,
       props.settledLimit,
@@ -289,7 +299,7 @@ export function SidebarDragScope(props: {
   const sectionOf = useCallback(
     (key: string) =>
       (Object.keys(props.lists) as SidebarSection[]).find((section) =>
-        props.lists[section].some((thread) => keyOf(thread) === key),
+        props.lists[section]?.some((thread) => keyOf(thread) === key),
       ),
     [props.lists],
   );
@@ -321,6 +331,7 @@ export function SidebarDragScope(props: {
         activeKeysById,
         reorderableKeys: draggableKeys,
         activeReorderableKeys,
+        activeTimeOrdered: sortInbox !== undefined,
       });
     },
     [
@@ -334,6 +345,7 @@ export function SidebarDragScope(props: {
       pinnedKeysById,
       activeKeysById,
       activeReorderableKeys,
+      sortInbox,
     ],
   );
   const sensors = useSensors(
@@ -342,7 +354,7 @@ export function SidebarDragScope(props: {
   const strategyInput = {
     items,
     ...drag?.geometry,
-    settledOrder: sortSettledThreadsForSidebar(
+    settledOrder: sortSettledThreads(
       drag && canonical.has(drag.key)
         ? [
             ...lists.settled.filter((thread) => keyOf(thread) !== drag.key),
@@ -350,6 +362,16 @@ export function SidebarDragScope(props: {
           ]
         : lists.settled,
     ).map(keyOf),
+    // Working beta: the inbox is time-ordered too, so the preview shows the
+    // slot a drop will land in, not the slot under the pointer.
+    ...(sortInbox && drag && canonical.has(drag.key)
+      ? {
+          activeOrder: sortInbox([
+            ...lists.active.filter((thread) => keyOf(thread) !== drag.key),
+            applySidebarThreadDrop(canonical.get(drag.key)!, "active", drag.occurredAt),
+          ]).map(keyOf),
+        }
+      : {}),
     settledExpanded: props.settledExpanded,
     settledVisibleCount: props.settledLimit,
     snoozedThreadCount: lists.snoozed.length,
@@ -408,7 +430,8 @@ export function SidebarDragScope(props: {
         );
       };
       const run = async (operation: () => Promise<AtomCommandResult<unknown, unknown> | null>) => {
-        if (!stillOwned(activeKey, plan.kind === "move-active")) {
+        // A time-ordered inbox (Working beta) places nothing, so it needs no active ordering.
+        if (!stillOwned(activeKey, plan.kind === "move-active" && plan.order !== null)) {
           release();
           return false;
         }
@@ -484,7 +507,7 @@ export function SidebarDragScope(props: {
     },
     [],
   );
-  const baselineKey = `${props.enabled}:${props.snoozedExpanded}:${props.settledExpanded}:${props.settledLimit}:${props.routeThreadKey}`;
+  const baselineKey = `${props.enabled}:${props.workingExpanded === true}:${props.snoozedExpanded}:${props.settledExpanded}:${props.settledLimit}:${props.routeThreadKey}`;
   const from = drag?.section ?? null;
   const dragging = drag !== null;
   const enabledIds = props.enabled ? items.map(sidebarListItemId) : [];
@@ -498,7 +521,8 @@ export function SidebarDragScope(props: {
       onDragStart={(event) => {
         const key = String(event.active.id);
         const section = sectionOf(key);
-        if (!props.enabled || hold || !section || !draggableKeys.has(key)) return;
+        if (!props.enabled || hold || !section || section === "working" || !draggableKeys.has(key))
+          return;
         const occurredAt = new Date().toISOString();
         suspend();
         labelTopRef.current = null;
@@ -537,7 +561,7 @@ export function SidebarDragScope(props: {
           const overflow = createSidebarSortingStrategy({
             ...strategyInput,
             ...geometry,
-            settledOrder: sortSettledThreadsForSidebar([
+            settledOrder: sortSettledThreads([
               ...lists.settled.filter((thread) => keyOf(thread) !== key),
               applySidebarThreadDrop(canonical.get(key)!, "settled", occurredAt),
             ]).map(keyOf),
@@ -678,7 +702,9 @@ export function SidebarDragBoundary(props: {
         ? "settled"
         : props.marker === "snoozed-header"
           ? "snoozed"
-          : "active";
+          : props.marker === "working-header"
+            ? "working"
+            : "active";
   const boundary = props.marker === "pinned-header" || props.marker === "pinned-divider";
   const placeholder = props.marker.endsWith("-placeholder");
   const visible = scope?.dragging === true;

@@ -39,7 +39,10 @@ import {
   effectiveSnoozed,
   threadWokeAt,
 } from "@lecturn/client-runtime/state/thread-settled";
-import { resolveSettledThreadTimestamp } from "@lecturn/client-runtime/state/thread-sort";
+import {
+  resolveSettledThreadTimestamp,
+  sortSettledThreads,
+} from "@lecturn/client-runtime/state/thread-sort";
 import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
@@ -173,6 +176,7 @@ import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
   type SidebarDropVerb,
+  type SidebarSection,
   buildBulkTitleRegenerationContextMenuItem,
   buildBulkUnpinContextMenuItem,
   deleteSelectedThreadEntries,
@@ -180,18 +184,20 @@ import {
   firstValidTimestampMs,
   hasUnseenCompletion,
   isSidebarNestedLinkClick,
+  isSidebarThreadWorking,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
+  resolveSidebarRowAccessibility,
   resolveSidebarThreadStatus,
   searchSidebarThreads,
   shouldCreateNewThreadInCurrentProject,
   shouldNavigateAfterThreadPark,
   shouldRecedeSidebarThread,
+  sortInboxThreadsByReturn,
   sortLogicalProjectsForSidebar,
   sortPinnedThreadsForSidebar,
-  sortSettledThreadsForSidebar,
   sortThreadsForSidebar,
   useRetainedValue,
   useSidebarRowSubscriptionLease,
@@ -206,6 +212,7 @@ import {
   resolveThreadPullRequestBadge,
   type ThreadPr,
   terminalStatusFromRunningIds,
+  synchronizeTerminalPulse,
   type TerminalStatusIndicator,
   useLinkedThreadPullRequest,
 } from "./ThreadStatusIndicators";
@@ -264,6 +271,46 @@ const SETTLED_TAIL_PAGE_COUNT = 25;
 // Fresh keys deliberately reset both shelves to collapsed for existing users.
 const SETTLED_SHELF_EXPANDED_KEY = "lecturn:sidebar:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "lecturn:sidebar:snoozed-expanded";
+const WORKING_SHELF_EXPANDED_KEY = "lecturn:sidebar:working-expanded";
+
+// Working beta: when this client saw each thread leave the Working shelf.
+// Module scope keeps the inbox order across routes that unmount the sidebar.
+let lastWorkingThreadKeys: ReadonlySet<string> | null = null;
+const observedInboxReturns = new Map<string, number>();
+
+/** Stamps threads that stopped working since the last call. The first call
+    only takes a baseline, so mounting never reshuffles the inbox. Pass null
+    to reset when the beta is off. */
+function observeInboxReturns(threads: readonly EnvironmentThreadShell[] | null): void {
+  if (threads === null) {
+    lastWorkingThreadKeys = null;
+    observedInboxReturns.clear();
+    return;
+  }
+  const working = new Set<string>();
+  const present = new Set<string>();
+  for (const thread of threads) {
+    const key = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+    present.add(key);
+    if (isSidebarThreadWorking(thread)) working.add(key);
+  }
+  // Drop deleted threads so the map stays bounded by the live thread list.
+  for (const key of observedInboxReturns.keys()) {
+    if (!present.has(key)) observedInboxReturns.delete(key);
+  }
+  const now = Date.now();
+  for (const key of lastWorkingThreadKeys ?? []) {
+    if (present.has(key) && !working.has(key)) observedInboxReturns.set(key, now);
+  }
+  lastWorkingThreadKeys = working;
+}
+
+/** Working beta: the inbox order, newest return first. */
+function sortInboxForSidebar<T extends EnvironmentThreadShell>(threads: readonly T[]): T[] {
+  return sortInboxThreadsByReturn(threads, (thread) =>
+    observedInboxReturns.get(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
+  );
+}
 
 function compactSidebarTimeLabel(label: string): string {
   if (label === "just now") return "now";
@@ -598,6 +645,12 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
     promptPreview.length > 0
       ? promptPreview
       : `${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}`;
+  const accessibility = resolveSidebarRowAccessibility({
+    title: preview,
+    statusLabel: "Unsent draft",
+    projectDisplayName: props.projectDisplayName,
+    isActive: props.isActive,
+  });
   const handleActivate = useCallback(() => onNavigate(draftId), [draftId, onNavigate]);
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent) => {
@@ -625,14 +678,17 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
       <div
         role="button"
         tabIndex={0}
+        aria-label={accessibility.label}
+        aria-current={accessibility.current}
         data-testid="sidebar-draft-row"
         className={cn(
-          "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left text-sidebar-foreground outline-none select-none",
+          "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left text-sidebar-foreground outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
           props.isActive ? "bg-sidebar-row-active" : draftSurfaceClassName,
         )}
         onClick={handleActivate}
         onKeyDown={handleKeyDown}
       >
+        <span className="sr-only">{preview}</span>
         <div className="relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)">
           <div className="flex h-5 min-w-0 items-center gap-1.5">
             <SquarePenIcon aria-hidden className={draftPenClassName} />
@@ -660,7 +716,9 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
               </Tooltip>
             </span>
           </div>
-          <div className="mt-0.5 truncate text-sm font-medium text-foreground/90">{preview}</div>
+          <div aria-hidden className="mt-0.5 truncate text-sm font-medium text-foreground/90">
+            {preview}
+          </div>
         </div>
       </div>
     </li>
@@ -1352,7 +1410,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // a useful hierarchy nor a reliable hover cue. Status now lives in the row
   // content; surface is reserved for interaction (hover, multi-select, route).
   const rowSurfaceClassName = cn(
-    "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left outline-none select-none",
+    "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
     status === "working" && "lecturn-thread-active",
     status === "working" && borderVisible && "lecturn-thread-active-visible",
     variantAction === "unsettle" && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
@@ -1365,6 +1423,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           : shouldRecede
             ? "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
             : "bg-transparent text-sidebar-foreground hover:bg-sidebar-row-hover",
+    // Background work fades as a whole row, status label included, so it
+    // takes less attention than rows that need a human (input, approval).
+    shouldRecede &&
+      (status === "working" || status === "monitoring") &&
+      "opacity-70 transition-opacity hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
     isFileDragOver && "ring-1 ring-inset ring-primary/70",
     // The hover tint must not clobber an active/selected row's own surface.
     isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",
@@ -1404,6 +1467,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       </span>
     ) : null;
 
+  const accessibility = resolveSidebarRowAccessibility({
+    title: thread.title,
+    statusLabel: topStatus?.label ?? null,
+    projectDisplayName: props.projectDisplayName,
+    isActive: props.isActive,
+  });
+
   const title = isRenaming ? (
     <input
       autoFocus
@@ -1419,6 +1489,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     />
   ) : (
     <span
+      aria-hidden
       className={cn(
         "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
         shouldRecede ? "font-normal" : "font-medium",
@@ -1450,16 +1521,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       {thread.title}
     </span>
   );
+  const accessibleTitle = isRenaming ? null : <span className="sr-only">{thread.title}</span>;
 
   // Server-linked pull requests use the shared badge: a stack shows its layer
-  // count and several unrelated links their total, colored by aggregate state.
-  // Otherwise the watched and branch PRs stay individual links. All are real
-  // links so cmd/ctrl+click and middle-click open the host in the browser; a
-  // plain click still opens Lecturn's pull request view.
+  // count and several unrelated links their total, colored by aggregate state;
+  // either opens the thread's pull requests tab. Otherwise the watched and
+  // branch PRs stay individual links. All are real links so cmd/ctrl+click and
+  // middle-click open the host in the browser; a plain click still opens
+  // Lecturn's pull request view.
   const prBadgeShape = supportsMultiplePullRequests
     ? resolveThreadPullRequestBadge(thread.pullRequests)
     : null;
-  const handlePrStackClick = useCallback(() => {
+  const handlePrListClick = useCallback(() => {
     useRightPanelStore.getState().open(threadRef, "pull-requests");
     if (!props.isActive) onThreadActivate(threadRef);
   }, [onThreadActivate, props.isActive, threadRef]);
@@ -1473,7 +1546,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         number={pr?.number ?? currentLinkedPr?.number}
         url={pr?.url ?? currentLinkedPr?.url}
         status={prStatus}
-        onOpenStack={handlePrStackClick}
+        onOpenList={handlePrListClick}
         onOpenPullRequest={(event) => handlePrClick(event, pr?.url ?? currentLinkedPr?.url)}
       />
     ) : pullRequestLinks.length > 0 ? (
@@ -1520,7 +1593,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       data-testid={`sidebar-terminal-status-${thread.id}`}
       className={cn("inline-flex shrink-0 items-center justify-center", terminalStatus.colorClass)}
     >
-      <TerminalIcon className={cn("size-3.5", terminalStatus.pulse && "animate-status-pulse")} />
+      <TerminalIcon
+        className={cn("size-3.5", terminalStatus.pulse && "motion-safe:animate-status-pulse")}
+        onAnimationStart={synchronizeTerminalPulse}
+      />
     </span>
   ) : null;
   // Same pen the new-thread draft rows lead with, so both kinds of unsent
@@ -1593,6 +1669,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 ref={attachRow}
                 role="button"
                 tabIndex={0}
+                aria-label={accessibility.label}
+                aria-current={accessibility.current}
                 data-lecturn-thread-surface
                 data-thread-project={`${thread.environmentId}:${thread.projectId}`}
                 data-thread-account={threadAccountId}
@@ -1608,6 +1686,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               />
             }
           >
+            {accessibleTitle}
             {!props.nested && props.project ? (
               <ProjectFavicon project={props.project} className="size-4 shrink-0" />
             ) : null}
@@ -1755,6 +1834,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ref={attachRow}
               role="button"
               tabIndex={0}
+              aria-label={accessibility.label}
+              aria-current={accessibility.current}
               data-lecturn-thread-surface
               data-thread-project={`${thread.environmentId}:${thread.projectId}`}
               data-thread-account={threadAccountId}
@@ -1762,7 +1843,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               data-account-selected={props.isActive || isSelected || undefined}
               data-testid="sidebar-row-card"
               aria-busy={isRegeneratingTitle || status === "working" || undefined}
-              aria-label={status === "working" ? `${thread.title} · Working` : undefined}
               className={rowSurfaceClassName}
               onClick={handleClick}
               onDoubleClick={handleDoubleClick}
@@ -1771,6 +1851,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
+          {accessibleTitle}
           <div
             className={cn(
               "relative z-10 px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
@@ -2022,7 +2103,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       showBadge={showInstanceBadge}
                       // Glyph dims, badge stays saturated; offset matches the composer trigger.
                       iconClassName="size-3.5 opacity-60"
-                      badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-3xs"
+                      badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-5xs"
                     />
                   </span>
                 ) : null}
@@ -2063,6 +2144,12 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   onFileDropThreads: (threadRef: ScopedThreadRef, files: File[]) => void;
 }) {
   const { thread } = props;
+  const accessibility = resolveSidebarRowAccessibility({
+    title: thread.title,
+    statusLabel: null,
+    projectDisplayName: props.projectDisplayName,
+    isActive: props.isRouteActive,
+  });
   const threadRef = useMemo(
     () => scopeThreadRef(thread.environmentId, thread.id),
     [thread.environmentId, thread.id],
@@ -2150,12 +2237,8 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
               // which owns all keyboard interaction for the listbox.
               tabIndex={-1}
               aria-selected={props.isHighlighted}
-              aria-current={props.isRouteActive ? "page" : undefined}
-              aria-label={
-                props.projectDisplayName
-                  ? `${thread.title}, ${props.projectDisplayName}`
-                  : thread.title
-              }
+              aria-current={accessibility.current}
+              aria-label={accessibility.label}
               onMouseMove={props.onHighlight}
               onClick={props.onSelect}
               className={cn(
@@ -2241,6 +2324,7 @@ export default function Sidebar() {
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
+  const workingShelfEnabled = useClientSettings((s) => s.sidebarWorkingShelfEnabled);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const threadActions = useThreadActions();
   const {
@@ -2250,6 +2334,7 @@ export default function Sidebar() {
     unsnoozeThread,
     pinThread,
     confirmAndUnpinThread,
+    setThreadAutoSettle,
     archiveThread,
     deleteThread,
   } = threadActions;
@@ -2620,72 +2705,101 @@ export default function Sidebar() {
   // the partition works directly off live shells: no archived-snapshot
   // merging. Drag holds belong to the rendered account/project list. Archived threads remain hidden here —
   // archive keeps its original "remove from sidebar" meaning.
-  const { pinnedThreads, activeThreads, snoozedThreads, settledThreads, snoozeNow } =
-    useMemo(() => {
-      // Snooze classification uses a REAL clock, not the quantized minute:
-      // wake times are second-precise and a woken thread must not linger on
-      // the shelf for the rest of the minute. snoozeWakeTick re-runs this
-      // memo exactly at the next wake boundary.
-      void snoozeWakeTick;
-      const preciseNow = new Date().toISOString();
-      const visible = threads.filter(
-        (thread) =>
-          thread.archivedAt === null &&
-          !archivedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`) &&
-          (scopedProjectKeys === null ||
-            scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
-      );
-      const pinned: EnvironmentThreadShell[] = [];
-      const active: EnvironmentThreadShell[] = [];
-      const snoozed: EnvironmentThreadShell[] = [];
-      const settled: EnvironmentThreadShell[] = [];
-      for (const thread of visible) {
-        // Threads on servers without the settlement capability (old server,
-        // or descriptor not loaded yet) never classify as settled: the user
-        // could neither un-settle nor pin them, so auto-settling them would
-        // strand rows in a tail with no working affordances.
-        const supportsSettlement =
-          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement ===
-          true;
-        const supportsSnooze =
-          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
-        // Snooze outranks settlement and pinning until the thread wakes.
-        if (supportsSnooze && effectiveSnoozed(thread, { now: preciseNow })) {
-          snoozed.push(thread);
-        } else if (supportsSettlement && thread.settledOverride === "settled") {
-          settled.push(thread);
-        } else if (thread.pinnedAt != null) {
-          pinned.push(thread);
-        } else {
-          active.push(thread);
-        }
+  const {
+    pinnedThreads,
+    activeThreads,
+    workingThreads,
+    snoozedThreads,
+    settledThreads,
+    snoozeNow,
+  } = useMemo(() => {
+    // Snooze classification uses a REAL clock, not the quantized minute:
+    // wake times are second-precise and a woken thread must not linger on
+    // the shelf for the rest of the minute. snoozeWakeTick re-runs this
+    // memo exactly at the next wake boundary.
+    void snoozeWakeTick;
+    const preciseNow = new Date().toISOString();
+    const visible = threads.filter(
+      (thread) =>
+        thread.archivedAt === null &&
+        !archivedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`) &&
+        (scopedProjectKeys === null ||
+          scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
+    );
+    observeInboxReturns(workingShelfEnabled ? threads : null);
+    const pinned: EnvironmentThreadShell[] = [];
+    const active: EnvironmentThreadShell[] = [];
+    const working: EnvironmentThreadShell[] = [];
+    // Working beta: only inbox threads fold away. Pins stay where the user
+    // put them, and snoozed or settled threads keep their shelves.
+    const inbox = (thread: EnvironmentThreadShell) =>
+      workingShelfEnabled && isSidebarThreadWorking(thread) ? working : active;
+    const snoozed: EnvironmentThreadShell[] = [];
+    const settled: EnvironmentThreadShell[] = [];
+    for (const thread of visible) {
+      // Threads on servers without the settlement capability (old server,
+      // or descriptor not loaded yet) never classify as settled: the user
+      // could neither un-settle nor pin them, so auto-settling them would
+      // strand rows in a tail with no working affordances.
+      const supportsSettlement =
+        serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement === true;
+      const supportsSnooze =
+        serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
+      // Snooze outranks settlement and pinning until the thread wakes.
+      if (supportsSnooze && effectiveSnoozed(thread, { now: preciseNow })) {
+        snoozed.push(thread);
+      } else if (supportsSettlement && thread.settledOverride === "settled") {
+        settled.push(thread);
+      } else if (thread.pinnedAt != null) {
+        pinned.push(thread);
+      } else {
+        inbox(thread).push(thread);
       }
-      // One shared rule on every platform (see sortPinnedThreadsByOrderKey):
-      // user-arranged keys first, keyless threads in creation order below.
-      // Server capability only gates DRAGGING — it must not influence the
-      // sort, or mixed-version fleets would render different pinned orders on
-      // web and mobile from the same data.
-      return {
-        pinnedThreads: sortPinnedThreadsForSidebar(pinned),
-        activeThreads: sortThreadsForSidebar(active),
-        // Soonest wake first: "what comes back next" is the shelf's question.
-        snoozedThreads: snoozed.toSorted(
-          (left, right) =>
-            firstValidTimestampMs(left.snoozedUntil ?? null) -
-            firstValidTimestampMs(right.snoozedUntil ?? null),
-        ),
-        settledThreads: sortSettledThreadsForSidebar(settled),
-        snoozeNow: preciseNow,
-      };
-    }, [archivedProjectKeys, nowMinute, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
+    }
+    // One shared rule on every platform (see sortPinnedThreadsByOrderKey):
+    // user-arranged keys first, keyless threads in creation order below.
+    // Server capability only gates DRAGGING — it must not influence the
+    // sort, or mixed-version fleets would render different pinned orders on
+    // web and mobile from the same data.
+    return {
+      pinnedThreads: sortPinnedThreadsForSidebar(pinned),
+      activeThreads: workingShelfEnabled
+        ? sortInboxForSidebar(active)
+        : sortThreadsForSidebar(active),
+      // Newest work first, by the same clock as the inbox.
+      workingThreads: sortInboxThreadsByReturn(working),
+      // Soonest wake first: "what comes back next" is the shelf's question.
+      snoozedThreads: snoozed.toSorted(
+        (left, right) =>
+          firstValidTimestampMs(left.snoozedUntil ?? null) -
+          firstValidTimestampMs(right.snoozedUntil ?? null),
+      ),
+      settledThreads: sortSettledThreads(settled),
+      snoozeNow: preciseNow,
+    };
+  }, [
+    archivedProjectKeys,
+    nowMinute,
+    scopedProjectKeys,
+    serverConfigs,
+    snoozeWakeTick,
+    threads,
+    workingShelfEnabled,
+  ]);
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
   const searchableThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...snoozedThreads, ...settledThreads],
-    [activeThreads, pinnedThreads, settledThreads, snoozedThreads],
+    () => [
+      ...pinnedThreads,
+      ...activeThreads,
+      ...workingThreads,
+      ...snoozedThreads,
+      ...settledThreads,
+    ],
+    [activeThreads, pinnedThreads, settledThreads, snoozedThreads, workingThreads],
   );
   const searchEnvironmentIds = useMemo(
     () =>
@@ -2821,6 +2935,28 @@ export default function Sidebar() {
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
+  // The Working shelf (beta) collapses the same way, with the same route
+  // exception: sending a message folds the open thread into the shelf, and
+  // its row must stay visible there.
+  const [workingShelfExpanded, setWorkingShelfExpanded] = useLocalStorage(
+    WORKING_SHELF_EXPANDED_KEY,
+    false,
+    Schema.Boolean,
+  );
+  const toggleWorkingShelf = useCallback(
+    () => setWorkingShelfExpanded((value) => !value),
+    [setWorkingShelfExpanded],
+  );
+  const visibleWorkingThreads = useMemo(() => {
+    if (workingShelfExpanded) return workingThreads;
+    if (routeThreadKey === null) return EMPTY_THREADS;
+    const routeThread = workingThreads.find(
+      (thread) =>
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
+    );
+    return routeThread === undefined ? EMPTY_THREADS : [routeThread];
+  }, [routeThreadKey, workingShelfExpanded, workingThreads]);
+
   const scopedSagaTree = useMemo(() => {
     if (!scopedProjectKeys) return sagaTree;
     const matches = (node: (typeof sagaTree)[number]) =>
@@ -2867,6 +3003,8 @@ export default function Sidebar() {
     projects,
     pinnedThreads,
     activeThreads,
+    workingThreads,
+    visibleWorkingThreads,
     snoozedThreads,
     visibleSnoozedThreads,
     settledThreads,
@@ -2878,8 +3016,10 @@ export default function Sidebar() {
     collapsedProjectKeys,
     settledVisibleCount,
     settledPageCount: SETTLED_TAIL_PAGE_COUNT,
+    workingShelfExpanded,
     snoozedShelfExpanded,
     settledShelfExpanded,
+    toggleWorkingShelf,
     toggleSnoozedShelf,
     toggleSettledShelf,
     showMoreSettled,
@@ -2892,6 +3032,7 @@ export default function Sidebar() {
     const rows = [
       ...pinnedThreads,
       ...activeThreads,
+      ...visibleWorkingThreads,
       ...visibleSnoozedThreads,
       ...(nestSagaProjects ? nestedSettledThreads : renderedSettledThreads),
     ];
@@ -2900,6 +3041,7 @@ export default function Sidebar() {
   }, [
     pinnedThreads,
     activeThreads,
+    visibleWorkingThreads,
     visibleSnoozedThreads,
     renderedSettledThreads,
     nestedSettledThreads,
@@ -3662,6 +3804,9 @@ export default function Sidebar() {
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
         const supportsPinning =
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadPinning === true;
+        const supportsAutoSettleOptOut =
+          serverConfigs.get(thread.environmentId)?.environment.capabilities
+            .threadAutoSettleOptOut === true;
         const supportsTitleRegeneration =
           serverConfigs.get(thread.environmentId)?.environment.capabilities
             .threadTitleRegeneration === true;
@@ -3691,6 +3836,7 @@ export default function Sidebar() {
                 : null,
               isPinned,
               isSettled,
+              autoSettleEnabled: thread.autoSettleDisabledAt == null,
               isSnoozed,
               canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
               isRegeneratingTitle,
@@ -3699,6 +3845,7 @@ export default function Sidebar() {
               canForkNow: readForkAtLatestTurn(threadRef).blockReason === null,
               supports: {
                 settlement: supportsSettlement,
+                autoSettleOptOut: supportsAutoSettleOptOut,
                 snooze: supportsSnooze,
                 pinning: supportsPinning,
                 titleRegeneration: supportsTitleRegeneration,
@@ -3775,6 +3922,24 @@ export default function Sidebar() {
           case "unpin":
             attemptUnpin(threadRef);
             return;
+          case "auto-settle:enabled":
+          case "auto-settle:disabled": {
+            const result = await setThreadAutoSettle(
+              threadRef,
+              clicked.value === "auto-settle:enabled",
+            );
+            if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+              const error = squashAtomCommandFailure(result);
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Failed to update auto-settle",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+            }
+            return;
+          }
           case "rename":
             startThreadRename(threadRef, thread.title);
             return;
@@ -3902,6 +4067,7 @@ export default function Sidebar() {
       projectByKey,
       serverConfigs,
       setProjectScopeKey,
+      setThreadAutoSettle,
       startThreadRename,
       updateThreadMetadata,
       timestampFormat,
@@ -4266,7 +4432,7 @@ export default function Sidebar() {
           </SidebarGroup>
         }
       >
-        <SidebarGroup className="flex-1">
+        <SidebarGroup className="flex-1" role="presentation">
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
               <TooltipProvider
@@ -4346,7 +4512,10 @@ export default function Sidebar() {
                 orderedThreads={orderedThreads}
                 orderedPinnedThreads={orderedPinnedThreads}
                 ref={null}
-                role="list"
+                // VoiceOver treats an exposed list as an interaction boundary,
+                // which hides its rows from ordinary linear navigation. The one
+                // list is presentational; account lists stay labeled lists.
+                role={sidebarSegments.segments === null ? "presentation" : "list"}
                 className={cn(
                   "flex flex-col gap-px",
                   // One flat list grows to the sidebar's height so its shelves
@@ -4355,6 +4524,7 @@ export default function Sidebar() {
                     !nestSagaProjects &&
                     pinnedThreads.length +
                       activeThreads.length +
+                      workingThreads.length +
                       snoozedThreads.length +
                       settledThreads.length >
                       0 &&
@@ -4363,13 +4533,14 @@ export default function Sidebar() {
               >
                 {(segment) => {
                   const { pinnedThreads, orderedPinnedThreads, activeThreads } = segment;
-                  const { snoozedThreads, settledThreads } = segment;
+                  const { workingThreads, snoozedThreads, settledThreads } = segment;
                   const { scopedSagaTree } = segment;
                   const { scopedProjectKeys, snoozedShelfExpanded, settledShelfExpanded } = segment;
+                  const { workingShelfExpanded, toggleWorkingShelf } = segment;
                   const { toggleSnoozedShelf, toggleSettledShelf } = segment;
                   const renderThreadRow = (
                     thread: EnvironmentThreadShell,
-                    section: "pinned" | "active" | "snoozed" | "settled",
+                    section: SidebarSection,
                   ) => {
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
@@ -4378,13 +4549,16 @@ export default function Sidebar() {
                     // row: every other thread is a full card. Density comes
                     // from users (or the auto rules) actually parking work,
                     // not from the sidebar second-guessing what still matters.
-                    const isCard = section === "active" || section === "pinned";
+                    // Working rows stay cards so their live status shows.
+                    const isCard =
+                      section === "active" || section === "pinned" || section === "working";
                     const rowVariant = isCard ? "card" : "slim";
                     return (
                       <ScopedSortableThreadRow
                         key={threadKey}
                         thread={thread}
-                        dragDisabled={renamingThreadKey === threadKey}
+                        // The Working shelf (beta) follows live status: never a drag source.
+                        dragDisabled={renamingThreadKey === threadKey || section === "working"}
                       >
                         {(sortable, dropVerb, dragOverPinned) => (
                           <SidebarThreadRow
@@ -4488,7 +4662,7 @@ export default function Sidebar() {
                   };
                   const renderShelfRows = (
                     rows: readonly EnvironmentThreadShell[],
-                    section: "snoozed" | "settled",
+                    section: "working" | "snoozed" | "settled",
                     expanded: boolean,
                   ) => {
                     const partition = partitionShelfRows(
@@ -4734,6 +4908,7 @@ export default function Sidebar() {
                                 lists={{
                                   pinned: orderedPinnedThreads.filter(matches),
                                   active: activeThreads.filter(matches),
+                                  working: workingThreads.filter(matches),
                                   snoozed: snoozedThreads.filter(matches),
                                   settled: settledThreads.filter(matches),
                                 }}
@@ -4743,16 +4918,19 @@ export default function Sidebar() {
                                   !("collapsed" in segment && segment.collapsed)
                                 }
                                 retainCurrentSettled={false}
+                                workingExpanded={workingShelfExpanded}
+                                {...(workingShelfEnabled ? { sortInbox: sortInboxForSidebar } : {})}
                                 snoozedExpanded={snoozedShelfExpanded}
                                 settledExpanded={settledExpanded}
                                 settledLimit={settledPage.limit}
                                 routeThreadKey={routeThreadKey}
                                 onSettle={settleFromDrag}
                               >
-                                {({ pinned, active, snoozed, settled }) => {
+                                {({ pinned, active, working = [], snoozed, settled }) => {
                                   if (
                                     !pinned.length &&
                                     !active.length &&
+                                    !working.length &&
                                     !snoozed.length &&
                                     !settled.length
                                   )
@@ -4790,6 +4968,34 @@ export default function Sidebar() {
                                           {active.map((thread) =>
                                             renderThreadRow(thread, "active"),
                                           )}
+                                          {working.length ? (
+                                            <SidebarDragBoundary
+                                              marker="working-header"
+                                              label="Working"
+                                            />
+                                          ) : null}
+                                          {working.map((thread) => {
+                                            const key = scopedThreadKey(
+                                              scopeThreadRef(thread.environmentId, thread.id),
+                                            );
+                                            return (
+                                              <li
+                                                key={key}
+                                                data-sidebar-motion-skip
+                                                className="list-none [&:has(>[data-slot=collapsible]:empty)]:hidden"
+                                              >
+                                                <SidebarHierarchyPanel
+                                                  open={
+                                                    workingShelfExpanded || key === routeThreadKey
+                                                  }
+                                                >
+                                                  <SidebarMotionList>
+                                                    {renderThreadRow(thread, "working")}
+                                                  </SidebarMotionList>
+                                                </SidebarHierarchyPanel>
+                                              </li>
+                                            );
+                                          })}
                                           {snoozed.length ? (
                                             <SidebarDragBoundary
                                               marker="snoozed-header"
@@ -4932,6 +5138,25 @@ export default function Sidebar() {
                           className="lecturn-projects-heading flex list-none items-center gap-2 px-2 py-2 text-xs text-muted-foreground"
                         >
                           <span className="mr-auto font-medium">Projects</span>
+                          {workingThreads.length ? (
+                            <button
+                              type="button"
+                              data-lecturn-hover
+                              aria-expanded={workingShelfExpanded}
+                              onClick={toggleWorkingShelf}
+                              data-testid="sidebar-working-shelf-toggle"
+                              className="flex items-center gap-1"
+                            >
+                              <ChevronDownIcon
+                                aria-hidden
+                                className={cn(
+                                  "lecturn-hierarchy-chevron size-3",
+                                  !workingShelfExpanded && "-rotate-90",
+                                )}
+                              />
+                              Working ({workingThreads.length})
+                            </button>
+                          ) : null}
                           {snoozedThreads.length ? (
                             <button
                               type="button"
@@ -4964,10 +5189,13 @@ export default function Sidebar() {
                       lists={{
                         pinned: pinnedThreads,
                         active: activeThreads,
+                        working: workingThreads,
                         snoozed: snoozedThreads,
                         settled: settledThreads,
                       }}
                       enabled={!("collapsed" in segment && segment.collapsed)}
+                      workingExpanded={workingShelfExpanded}
+                      {...(workingShelfEnabled ? { sortInbox: sortInboxForSidebar } : {})}
                       snoozedExpanded={snoozedShelfExpanded}
                       settledExpanded={settledShelfExpanded}
                       settledLimit={
@@ -4981,6 +5209,7 @@ export default function Sidebar() {
                       {({
                         pinned: orderedPinnedThreads,
                         active: activeThreads,
+                        working: workingThreads = [],
                         snoozed: snoozedThreads,
                         settled: settledThreads,
                       }) => {
@@ -5001,6 +5230,7 @@ export default function Sidebar() {
                         if (
                           !orderedPinnedThreads.length &&
                           !activeThreads.length &&
+                          !workingThreads.length &&
                           !snoozedThreads.length &&
                           !settledThreads.length
                         )
@@ -5022,6 +5252,44 @@ export default function Sidebar() {
                         for (const thread of activeThreads) {
                           items.push(renderThreadRow(thread, "active"));
                         }
+                        // Working shelf (beta): busy threads that do not need the
+                        // user fold away below the inbox. Live status keeps them
+                        // cards; the header carries the count while collapsed.
+                        if (workingThreads.length > 0) {
+                          items.push(
+                            <SidebarDragBoundary
+                              marker="working-header"
+                              label="Working"
+                              key="working-shelf-header"
+                              className="mt-auto list-none"
+                            >
+                              <button
+                                type="button"
+                                onClick={toggleWorkingShelf}
+                                aria-expanded={workingShelfExpanded}
+                                data-testid="sidebar-working-shelf-toggle"
+                                className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                              >
+                                <span className="text-xs font-medium text-sidebar-muted-foreground/60">
+                                  {workingShelfExpanded
+                                    ? "Working"
+                                    : `Working (${workingThreads.length})`}
+                                </span>
+                                <span className="h-px flex-1 bg-sidebar-border/60" />
+                                <ChevronDownIcon
+                                  aria-hidden
+                                  className={cn(
+                                    "lecturn-hierarchy-chevron size-3 text-muted-foreground/50",
+                                    workingShelfExpanded && "rotate-180",
+                                  )}
+                                />
+                              </button>
+                            </SidebarDragBoundary>,
+                          );
+                          items.push(
+                            ...renderShelfRows(workingThreads, "working", workingShelfExpanded),
+                          );
+                        }
                         // Snoozed shelf: between the inbox and Settled — out of the
                         // way, never gone. The header always renders while anything
                         // is snoozed (the count is the whole footprint when
@@ -5033,7 +5301,7 @@ export default function Sidebar() {
                               marker="snoozed-header"
                               label="Snoozed"
                               key="snoozed-shelf-header"
-                              className="mt-auto list-none"
+                              className={cn("list-none", workingThreads.length === 0 && "mt-auto")}
                             >
                               <button
                                 type="button"
@@ -5068,7 +5336,10 @@ export default function Sidebar() {
                               marker="settled-header"
                               label="Settled"
                               key="settled-shelf-header"
-                              className={cn("list-none", snoozedThreads.length === 0 && "mt-auto")}
+                              className={cn(
+                                "list-none",
+                                workingThreads.length + snoozedThreads.length === 0 && "mt-auto",
+                              )}
                             >
                               <button
                                 type="button"
@@ -5145,6 +5416,7 @@ export default function Sidebar() {
           visibleDraftSessionCount === 0 &&
           pinnedThreads.length +
             activeThreads.length +
+            workingThreads.length +
             snoozedThreads.length +
             settledThreads.length ===
             0 ? (

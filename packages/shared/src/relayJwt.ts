@@ -10,6 +10,7 @@ export const RELAY_HEALTH_REQUEST_TYP = "lecturn-cloud-health+jwt";
 export const RELAY_MINT_RESPONSE_TYP = "lecturn-env-mint+jwt";
 export const RELAY_HEALTH_RESPONSE_TYP = "lecturn-env-health+jwt";
 export const RELAY_ACTIVITY_PUBLISH_TYP = "lecturn-env-activity+jwt";
+export const RELAY_MANAGED_TUNNEL_RECOVERY_TYP = "lecturn-env-managed-tunnel-recovery+jwt";
 
 export class RelayJwtError extends Schema.TaggedError<RelayJwtError>()("RelayJwtError", {
   operation: Schema.Literals(["sign", "verify"]),

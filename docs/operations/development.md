@@ -89,8 +89,7 @@ Put that value in the main checkout's gitignored `.env`:
 LECTURN_DEV_AUTH_TOKEN=<the value generated above>
 ```
 
-The `lecturn.json` Setup Worktree commands on Unix and Windows link that file to each worktree's
-`.env`. The dev runner reads repository env files at startup. `.env.local` and inherited process
+The `lecturn.json` Setup Worktree action links that file to each worktree's `.env`. The dev runner reads repository env files at startup. `.env.local` and inherited process
 environment values override `.env`, so no per-worktree export is needed after setup.
 
 For a manual worktree or launcher without that link, export the same fixed value instead:

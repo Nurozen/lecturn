@@ -314,7 +314,7 @@ export const make = Effect.fn("RelayEnvironmentDiscovery.make")(function* () {
         if (failure._tag === "ConnectionBlockedError" && failure.reason === "authentication") {
           return yield* settle;
         }
-        return yield* Effect.fail(failure);
+        return yield* failure;
       }
       const clerkToken = tokenResult.success;
       // A token for someone else would list that account's environments under

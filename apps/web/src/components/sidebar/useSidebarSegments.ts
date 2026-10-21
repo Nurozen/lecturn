@@ -28,6 +28,7 @@ export type SidebarThreadSegmentView<Node> = SidebarSegmentView<EnvironmentThrea
 
 /** What a list's shelf headers and "Show more" call. */
 export interface SidebarShelfActions {
+  readonly toggleWorkingShelf: () => void;
   readonly toggleSnoozedShelf: () => void;
   readonly toggleSettledShelf: () => void;
   readonly showMoreSettled: () => void;
@@ -85,6 +86,7 @@ const useAccountSidebarSegments: UseSidebarSegments = <Node extends SegmentSagaN
     projects,
     pinnedThreads,
     activeThreads,
+    workingThreads,
     snoozedThreads,
     settledThreads,
     nestedSettledThreads,
@@ -94,6 +96,7 @@ const useAccountSidebarSegments: UseSidebarSegments = <Node extends SegmentSagaN
     collapsedProjectKeys,
     settledVisibleCount,
     settledPageCount,
+    workingShelfExpanded,
     snoozedShelfExpanded,
     settledShelfExpanded,
     routeThreadKey,
@@ -108,6 +111,13 @@ const useAccountSidebarSegments: UseSidebarSegments = <Node extends SegmentSagaN
   }
   const shelfActionsOf = useCallback(
     (segmentId: string): SidebarShelfActions => ({
+      toggleWorkingShelf: () =>
+        setShelves((current) =>
+          changeSegmentShelf(current, segmentId, (shelf) => ({
+            ...shelf,
+            workingExpanded: !(shelf.workingExpanded ?? workingShelfExpanded),
+          })),
+        ),
       toggleSnoozedShelf: () =>
         setShelves((current) =>
           changeSegmentShelf(current, segmentId, (shelf) => ({
@@ -131,7 +141,13 @@ const useAccountSidebarSegments: UseSidebarSegments = <Node extends SegmentSagaN
           })),
         ),
     }),
-    [settledPageCount, settledShelfExpanded, settledVisibleCount, snoozedShelfExpanded],
+    [
+      settledPageCount,
+      settledShelfExpanded,
+      settledVisibleCount,
+      snoozedShelfExpanded,
+      workingShelfExpanded,
+    ],
   );
 
   const environmentFilters = useMemo(
@@ -159,6 +175,7 @@ const useAccountSidebarSegments: UseSidebarSegments = <Node extends SegmentSagaN
             projects,
             pinnedThreads,
             activeThreads,
+            workingThreads,
             snoozedThreads,
             settledThreads,
             nestedSettledThreads,
@@ -169,6 +186,7 @@ const useAccountSidebarSegments: UseSidebarSegments = <Node extends SegmentSagaN
             nestSagaProjects,
             collapsedProjectKeys,
             settledVisibleCount,
+            workingShelfExpanded,
             snoozedShelfExpanded,
             settledShelfExpanded,
             shelves,
@@ -195,6 +213,8 @@ const useAccountSidebarSegments: UseSidebarSegments = <Node extends SegmentSagaN
       shelves,
       snoozedShelfExpanded,
       snoozedThreads,
+      workingShelfExpanded,
+      workingThreads,
     ],
   );
   return {

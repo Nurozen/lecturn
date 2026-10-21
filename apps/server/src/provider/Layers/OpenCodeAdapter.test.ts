@@ -2,6 +2,7 @@ import * as NodeAssert from "node:assert/strict";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
@@ -637,7 +638,7 @@ const providerSessionDirectoryTestLayer = Layer.succeed(ProviderSessionDirectory
   recordImportedTranscript: () => Effect.die("unused"),
   getProvider: () =>
     Effect.die(new Error("ProviderSessionDirectory.getProvider is not used in test")),
-  getBinding: () => Effect.succeed(Option.none()),
+  getBinding: () => Effect.succeedNone,
   listThreadIds: () => Effect.succeed([]),
   listBindings: () => Effect.succeed([]),
 });
@@ -914,7 +915,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
 
   it.effect("bounds Lecturn MCP registration before Stave or session startup", () =>
     Effect.gen(function* () {
-      const threadId = asThreadId("t3-held-mcp-add");
+      const threadId = asThreadId("lecturn-held-mcp-add");
       McpProviderSession.setMcpProviderSession({
         environmentId: EnvironmentId.make("mcp-timeout-environment"),
         threadId,
@@ -1292,6 +1293,56 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       NodeAssert.deepEqual(runtimeMock.state.closeCalls, ["http://127.0.0.1:9999"]);
       NodeAssert.equal(yield* adapter.hasSession(threadId), false);
     }),
+  );
+
+  it.effect(
+    "stopSession completes after sendTurn is interrupted before the prompt is submitted",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* OpenCodeAdapter;
+        const threadId = asThreadId("thread-opencode-interrupted-before-submit");
+        runtimeMock.state.createdSessionIds.push("ses_interrupted_before_submit");
+        yield* adapter.startSession({
+          provider: ProviderDriverKind.make("opencode"),
+          threadId,
+          runtimeMode: "full-access",
+        });
+
+        const baseClock = yield* Clock.clockWith(Effect.succeed);
+        const reached = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        let calls = 0;
+        const gatedClock: Clock.Clock = {
+          ...baseClock,
+          currentTimeMillisUnsafe: () => baseClock.currentTimeMillisUnsafe(),
+          currentTimeMillis: Effect.suspend(() => {
+            calls += 1;
+            return calls === 2
+              ? Deferred.succeed(reached, undefined).pipe(
+                  Effect.andThen(Deferred.await(release)),
+                  Effect.andThen(baseClock.currentTimeMillis),
+                )
+              : baseClock.currentTimeMillis;
+          }),
+        };
+
+        const sendFiber = yield* adapter
+          .sendTurn({
+            threadId,
+            input: "This prompt must not be submitted",
+            modelSelection: createModelSelection(
+              ProviderInstanceId.make("opencode"),
+              "opencode/kimi-k3",
+            ),
+          })
+          .pipe(Effect.provideService(Clock.Clock, gatedClock), Effect.exit, Effect.forkChild);
+        yield* Deferred.await(reached);
+        yield* Fiber.interrupt(sendFiber);
+
+        const stopExit = yield* adapter.stopSession(threadId).pipe(Effect.exit);
+        NodeAssert.equal(Exit.isSuccess(stopExit), true);
+        NodeAssert.equal(yield* adapter.hasSession(threadId), false);
+      }),
   );
 
   it.effect("aborts a held teardown request before closing the session scope", () =>

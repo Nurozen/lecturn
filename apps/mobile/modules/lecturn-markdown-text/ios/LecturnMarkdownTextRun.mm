@@ -4,7 +4,7 @@
 #import <react/renderer/components/LecturnMarkdownTextSpec/EventEmitters.h>
 #import <react/renderer/components/LecturnMarkdownTextSpec/Props.h>
 #import <react/renderer/components/LecturnMarkdownTextSpec/RCTComponentViewHelpers.h>
-#import "RCTFabricComponentsPlugins.h"
+#import <React/RCTFabricComponentsPlugins.h>
 #import "Utils.h"
 
 using namespace facebook::react;

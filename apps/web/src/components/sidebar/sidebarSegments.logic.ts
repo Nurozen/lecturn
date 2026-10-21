@@ -302,6 +302,9 @@ export interface SegmentSagaNode {
 export interface SidebarListScope<Thread, Node> {
   readonly pinnedThreads: ReadonlyArray<Thread>;
   readonly activeThreads: ReadonlyArray<Thread>;
+  /** Working beta: inbox threads busy with work that does not need the user. */
+  readonly workingThreads: ReadonlyArray<Thread>;
+  readonly visibleWorkingThreads: ReadonlyArray<Thread>;
   readonly snoozedThreads: ReadonlyArray<Thread>;
   readonly visibleSnoozedThreads: ReadonlyArray<Thread>;
   readonly settledThreads: ReadonlyArray<Thread>;
@@ -311,6 +314,7 @@ export interface SidebarListScope<Thread, Node> {
   readonly scopedSagaTree: ReadonlyArray<Node>;
   /** `environmentId:projectId` keys the draft block keeps, or null for all. */
   readonly scopedProjectKeys: ReadonlySet<string> | null;
+  readonly workingShelfExpanded: boolean;
   readonly snoozedShelfExpanded: boolean;
   readonly settledShelfExpanded: boolean;
 }
@@ -368,6 +372,7 @@ export function buildSegmentEnvironmentFilters(
  * follows the one-list sidebar's setting.
  */
 export interface SegmentShelfState {
+  readonly workingExpanded?: boolean | undefined;
   readonly snoozedExpanded?: boolean | undefined;
   readonly settledExpanded?: boolean | undefined;
   readonly settledVisibleCount?: number | undefined;
@@ -395,8 +400,16 @@ export function resetSegmentSettledPages(shelves: SegmentShelves): SegmentShelve
 
 export interface SidebarSegmentViewsInput<Thread, Node> extends Omit<
   SidebarListScope<Thread, Node>,
-  "orderedThreads" | "renderedSettledThreads" | "visibleSnoozedThreads"
+  | "orderedThreads"
+  | "renderedSettledThreads"
+  | "visibleSnoozedThreads"
+  | "workingThreads"
+  | "visibleWorkingThreads"
+  | "workingShelfExpanded"
 > {
+  /** Empty unless the Working beta is on. */
+  readonly workingThreads?: ReadonlyArray<Thread>;
+  readonly workingShelfExpanded?: boolean;
   readonly segmentation: SidebarSegmentation;
   readonly collapsedSegmentIds: ReadonlyArray<string>;
   readonly projects: ReadonlyArray<EnvironmentScoped & { readonly id: string }>;
@@ -428,6 +441,7 @@ export function buildSidebarSegmentViews<
     threads: [
       ...input.pinnedThreads,
       ...input.activeThreads,
+      ...(input.workingThreads ?? []),
       ...input.snoozedThreads,
       ...input.settledThreads,
     ],
@@ -438,6 +452,7 @@ export function buildSidebarSegmentViews<
     const mine = (threads: ReadonlyArray<Thread>) => threads.filter((thread) => own.has(thread));
     const environmentIds = new Set(segment.projects.map((project) => project.environmentId));
     const shelf = input.shelves.get(segment.id) ?? {};
+    const workingShelfExpanded = shelf.workingExpanded ?? input.workingShelfExpanded ?? false;
     const snoozedShelfExpanded = shelf.snoozedExpanded ?? input.snoozedShelfExpanded;
     const settledShelfExpanded = shelf.settledExpanded ?? input.settledShelfExpanded;
     const settledThreads = mine(input.settledThreads);
@@ -452,14 +467,19 @@ export function buildSidebarSegmentViews<
     );
     const pinnedThreads = mine(input.pinnedThreads);
     const activeThreads = mine(input.activeThreads);
+    const workingThreads = mine(input.workingThreads ?? []);
     const snoozedThreads = mine(input.snoozedThreads);
     // The open thread keeps its row behind a closed shelf, as in the one list.
+    const visibleWorkingThreads = workingShelfExpanded
+      ? workingThreads
+      : workingThreads.filter(input.isRouteThread);
     const visibleSnoozedThreads = snoozedShelfExpanded
       ? snoozedThreads
       : snoozedThreads.filter(input.isRouteThread);
     const rows = [
       ...pinnedThreads,
       ...activeThreads,
+      ...visibleWorkingThreads,
       ...visibleSnoozedThreads,
       ...(input.nestSagaProjects ? mine(input.nestedSettledThreads) : settledPage.rendered),
     ];
@@ -467,12 +487,16 @@ export function buildSidebarSegmentViews<
       id: segment.id,
       accountId: segment.accountId,
       collapsed: segment.collapsed,
-      attention: rollupAttention([...pinnedThreads, ...activeThreads].map(input.statusOf)),
+      attention: rollupAttention(
+        [...pinnedThreads, ...activeThreads, ...workingThreads].map(input.statusOf),
+      ),
       hasRows: segment.threads.length > 0 || (input.nestSagaProjects && scopedSagaTree.length > 0),
       hiddenSettledCount: settledPage.hiddenCount,
       settledVisibleCount: shelf.settledVisibleCount ?? input.settledVisibleCount,
       pinnedThreads,
       activeThreads,
+      workingThreads,
+      visibleWorkingThreads,
       snoozedThreads,
       visibleSnoozedThreads,
       settledThreads,
@@ -486,6 +510,7 @@ export function buildSidebarSegmentViews<
         : rows,
       scopedSagaTree,
       scopedProjectKeys: input.scopedProjectKeys,
+      workingShelfExpanded,
       snoozedShelfExpanded,
       settledShelfExpanded,
       ownsEnvironment: input.environmentFilters.get(segment.id) ?? OWNS_EVERY_ENVIRONMENT,
