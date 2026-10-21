@@ -7,7 +7,7 @@ const relayClientTracingConfig = resolveRelayClientTracingConfig();
 export const headlessRelayClientTracingLayer = makeRelayClientTracingLayer(
   relayClientTracingConfig,
   {
-    serviceName: "lecturn-headless-relay-client",
+    serviceName: "lecturn-server",
     runtime: "node",
     client: "headless-cli",
   },

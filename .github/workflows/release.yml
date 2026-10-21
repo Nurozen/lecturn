@@ -479,6 +479,9 @@ jobs:
             exit 1
           fi
 
+      # Windows installs straight from the registry. There, linking the packages
+      # takes the time, not downloading them, so a package cache restore did not
+      # pay for itself (measured upstream across nightlies on x64 and arm64).
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         env:
@@ -489,19 +492,6 @@ jobs:
           node-version-file: package.json
           cache: ${{ matrix.platform != 'win' }}
           run-install: false
-
-      - name: Resolve Windows package cache path
-        if: matrix.platform == 'win'
-        id: package_cache_path
-        shell: pwsh
-        run: '"path=$(vp pm cache dir)" >> $env:GITHUB_OUTPUT'
-
-      - name: Cache Windows packages
-        if: matrix.platform == 'win'
-        uses: actions/cache@v6
-        with:
-          path: ${{ steps.package_cache_path.outputs.path }}
-          key: windows-release-packages-v1-${{ matrix.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
 
       # pnpm checks the lockfile and policy before reusing this result. A missing
       # artifact leaves the cache empty, so installation runs the checks again.
@@ -911,6 +901,7 @@ jobs:
             "release/*.dmg" \
             "release/*.zip" \
             "release/*.AppImage" \
+            "release/*.deb" \
             "release/*.exe" \
             "release/*.blockmap" \
             "release/*.yml"; do
@@ -1139,6 +1130,7 @@ jobs:
             release-assets/*.dmg
             release-assets/*.zip
             release-assets/*.AppImage
+            release-assets/*.deb
             release-assets/*.exe
             release-assets/*.blockmap
             release-assets/*.yml
@@ -1162,6 +1154,7 @@ jobs:
             release-assets/*.dmg
             release-assets/*.zip
             release-assets/*.AppImage
+            release-assets/*.deb
             release-assets/*.exe
             release-assets/*.blockmap
             release-assets/*.yml

@@ -6,6 +6,7 @@ import { SymbolView } from "./AppSymbol";
 import { AppText as Text } from "./AppText";
 import { MaterialIconButton } from "./MaterialIconButton";
 import { MaterialButton } from "./MaterialButton";
+import { useAndroidControlSizing } from "./useAndroidControlSizing";
 
 export { ControlPillMenu } from "./ControlPillMenu";
 
@@ -24,6 +25,7 @@ export function ControlPill(props: {
   const [pressed, setPressed] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
+  const { smallIconSize } = useAndroidControlSizing();
   const activatedOnPressInRef = useRef(false);
 
   const handlePressIn = () => {
@@ -150,7 +152,7 @@ export function ControlPill(props: {
       ) : props.icon ? (
         <SymbolView
           name={props.icon}
-          size={16}
+          size={smallIconSize}
           tintColorClassName={iconTintClassName}
           type="monochrome"
         />

@@ -20,6 +20,7 @@
         "scripts/cli.ts",
         "scripts/evaluate-thread-titles.ts",
         "scripts/measure-pr-preview.ts",
+        "scripts/update-test-shard-weights.ts",
         "src/provider/testFixtures/*.mjs",
       ],
       // Keep the transitive Effect runtime pinned for standalone npm installs.
@@ -34,6 +35,8 @@
         "src/snapShot/GlobalShiftShortcutWorker.ts!",
         "src/snapShot/RegionSnapShotWorker.ts!",
         "src/snapShot/SnapShotAccessibilityWorker.ts!",
+        "src/boot.ts!",
+        "src/compileCache.ts!",
         "src/main.ts!",
         "src/preload.ts!",
         "src/preview-pick-preload.ts!",
@@ -47,7 +50,9 @@
       "ignoreDependencies": ["playwright-core", "electron-builder"],
     },
     "apps/web": {
-      // Worktree setup invokes this directly from lecturn.json.
+      // Vitest loads this through the per-file @vitest-environment directive.
+      "ignoreDependencies": ["jsdom"],
+      // Worktree setup (scripts/setup-worktree.ts) runs this directly.
       "entry": ["scripts/warm-dep-cache.ts"],
       // Replaced in the sidebar by useSagaSidebarTree; kept until the fork decides its fate.
       "ignore": ["src/components/stave/SagaSidebarSection.tsx"],
@@ -89,7 +94,8 @@
       // Maintainer scripts run by hand (NOTICE.md, assets/provider-emblems/README.md). The upstream
       // icon exporters stay beside export-lecturn-icons.ts, which icons:export runs instead.
       // Knip loads its preprocessor (knip-schemas.ts) through a CLI option, not a source import.
-      // mobile-native-client.ts runs directly for native client verification (AGENTS.md).
+      // mobile-native-client.ts runs directly for native client verification (AGENTS.md),
+      // and setup-worktree.ts runs directly from the lecturn.json setup action.
       "entry": [
         "export-android-icons.ts",
         "export-brand-icons.ts",
@@ -97,6 +103,7 @@
         "generate-legal-notices.ts",
         "knip-schemas.ts",
         "mobile-native-client.ts",
+        "setup-worktree.ts",
       ],
     },
     "packages/*": {

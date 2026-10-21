@@ -12,7 +12,8 @@ import Upstream52 from "./052_ProjectionThreadTitleState.ts";
 import Upstream53 from "./053_PullRequestFilesViewed.ts";
 
 const at = "2026-01-01T00:00:00.000Z";
-const latest = [68, "PullRequestFilesViewedCompatibility"] as const;
+const compatibility = [68, "PullRequestFilesViewedCompatibility"] as const;
+const latest = [69, "ProjectionThreadsAutoSettleDisabledAtCompatibility"] as const;
 
 const columnNames = (table: string) =>
   Effect.gen(function* () {
@@ -66,7 +67,7 @@ describe("068 collision compatibility", () => {
         VALUES ('thread', 'project', 'Preserved', '{"instanceId":"codex","model":"fixture"}', '{"kind":"fixture"}', ${at}, ${at})`;
       const ledger = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
 
-      assert.deepEqual(yield* runMigrations(), [latest]);
+      assert.deepEqual(yield* runMigrations(), [compatibility, latest]);
       assert.deepEqual(
         yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= 67 ORDER BY migration_id`,
         ledger,

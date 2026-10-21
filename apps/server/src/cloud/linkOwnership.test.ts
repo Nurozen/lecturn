@@ -3,6 +3,7 @@ import * as NodeCrypto from "node:crypto";
 import { expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
@@ -54,6 +55,9 @@ const blockedRuntime = Effect.gen(function* () {
         }
         return { status: "disabled" };
       }),
+    recoveryRequests: Stream.empty,
+    requestRecovery: () => Effect.void,
+    withLinkStateLock: (effect) => effect,
   };
   return { endpointRuntime, entered, release, calls: () => calls };
 });
@@ -139,6 +143,9 @@ for (const alreadyLinked of [false, true]) {
               published.push(options?.published ?? false);
               return { status: "disabled" };
             }),
+          recoveryRequests: Stream.empty,
+          requestRecovery: () => Effect.void,
+          withLinkStateLock: (effect) => effect,
         };
         const dependencies = { secrets, endpointRuntime };
         if (alreadyLinked) yield* applyCloudRelayConfig(dependencies, payload("account-a"));
@@ -165,7 +172,12 @@ it.effect("a losing same-home installation cannot clear the owner's stored crede
     const result = yield* Effect.result(
       unlinkCloudRelayConfig({
         secrets: store.secrets,
-        endpointRuntime: { applyConfig: () => Effect.die("must not stop owner") },
+        endpointRuntime: {
+          applyConfig: () => Effect.die("must not stop owner"),
+          recoveryRequests: Stream.empty,
+          requestRecovery: () => Effect.void,
+          withLinkStateLock: (effect) => effect,
+        },
       }).pipe(Effect.provideService(ServerSecretStore.ServerSecretStore, store.secrets)),
     );
     expect(Result.isFailure(result)).toBe(true);

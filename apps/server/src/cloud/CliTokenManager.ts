@@ -359,7 +359,7 @@ const pollDeviceToken = Effect.fn("cloud.cli_token.poll_device_token")(function*
       httpClient.execute,
       // Token endpoints never redirect; refuse to follow one with credentials.
       Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-      Effect.map(Option.some),
+      Effect.asSome,
       Effect.catchIf(isTransportError, () => Effect.succeedNone),
     );
     // Transport failures and upstream 5xx are transient while the device code

@@ -29,10 +29,14 @@ import { StaveWizardDialog } from "../components/stave/StaveWizardDialog";
 import { ImportFolderSessionsDialog } from "../components/ImportFolderSessionsDialog";
 import { SnapShotCoordinator } from "../components/desktop/SnapShotCoordinator";
 import { DesktopAppActivationCoordinator } from "../components/desktop/DesktopAppActivationCoordinator";
+import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepAlive";
 import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
 import { ThreadNotificationCoordinator } from "../components/ThreadNotificationCoordinator";
+import { QueuedMessageSender } from "../components/QueuedMessageSender";
 import { ProjectCloneToastCoordinator } from "../components/ProjectCloneToastCoordinator";
 import { SlowRpcRequestToastCoordinator } from "../components/SlowRpcRequestToastCoordinator";
+import { ChatGptWelcomeCoordinator } from "../components/settings/ChatGptWelcomeCoordinator";
+import { ProviderAuthCallbackCoordinator } from "../components/settings/ProviderAuthCallbackCoordinator";
 import { ThemeEditorHost } from "../components/settings/ThemeEditorHost";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useDefaultThemeAdoption } from "../hooks/useDefaultTheme";
@@ -46,6 +50,7 @@ import {
   toastManager,
 } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
+import { isElectron } from "../env";
 import { applyAppearanceFontVariables } from "~/appearanceFonts";
 import { applyAppearanceContrast } from "~/appearanceContrast";
 import { useClientSettings } from "../hooks/useSettings";
@@ -185,6 +190,7 @@ function RootRouteView() {
           <EnvironmentThemeSync />
           <GlassAppearanceSync />
           <FontAppearanceSync />
+          <ProviderAuthCallbackCoordinator />
           <CustomSnoozeDialogHost />
           <CommandPalette>
             <AppSidebarLayout>
@@ -225,17 +231,21 @@ function RootRouteView() {
         <EnvironmentThemeSync />
         <GlassAppearanceSync />
         <FontAppearanceSync />
+        <ProviderAuthCallbackCoordinator />
+        <ChatGptWelcomeCoordinator />
         <FirstRunGate
           enabled={primaryEnvironmentAuthenticated}
           hostedStatic={authGateState.status === "hosted-static"}
         >
           {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
           {primaryEnvironmentAuthenticated ? <DesktopAppActivationCoordinator /> : null}
+          {isElectron ? <RunningThreadKeepAlive /> : null}
           <RelayClientInstallDialog />
           <ConnectOnboardingDialog />
           <SshPasswordPromptDialog />
           <SnapShotCoordinator />
           <ThreadNotificationCoordinator />
+          <QueuedMessageSender />
           <ConfirmDialogHost />
           <StaveWizardDialog />
           <ImportFolderSessionsDialog />
@@ -275,6 +285,11 @@ function ContrastAppearanceSync() {
   useEffect(() => {
     document.documentElement.dataset.diffColorScheme = diffColorScheme;
   }, [diffColorScheme]);
+
+  const chatWidth = useClientSettings((settings) => settings.chatWidth);
+  useEffect(() => {
+    document.documentElement.dataset.chatWidth = chatWidth;
+  }, [chatWidth]);
 
   useEffect(() => {
     applyAppearanceContrast(document.documentElement, appearanceContrast);

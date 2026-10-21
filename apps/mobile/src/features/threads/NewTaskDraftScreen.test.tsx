@@ -129,6 +129,7 @@ vi.mock("../../state/entities", () => ({
   useListedProjects: () => native.projects,
   useListedThreadShells: () => [],
   useEnvironmentServerConfig: () => null,
+  useServerConfigs: () => new Map(),
 }));
 vi.mock("../../state/project-grouping", () => ({
   useMobileProjectGroupingSettings: () => ({ sidebarProjectGroupingMode: "none" }),

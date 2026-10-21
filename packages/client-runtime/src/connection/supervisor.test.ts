@@ -1583,11 +1583,11 @@ describe("EnvironmentSupervisor", () => {
             Layer.succeed(ManagedRelayClient, relay),
             Layer.succeed(ClientCapabilities.CloudSession, {
               accountIds: Effect.succeed(["test-account"]),
-              identity: () => Effect.succeed(Option.some(sessionIdentity)),
+              identity: () => Effect.succeedSome(sessionIdentity),
               clerkToken: () => Effect.succeed("clerk-token"),
             }),
             Layer.succeed(ClientCapabilities.RelayDeviceIdentity, {
-              deviceId: Effect.succeed(Option.none()),
+              deviceId: Effect.succeedNone,
             }),
             TokenStore.layer({
               get: () => Ref.get(token),

@@ -32,6 +32,7 @@ import {
   ServerCliPublishIconSourceMissingError,
   ServerCliPublishIconTargetMissingError,
 } from "./cliErrors.ts";
+import { publishPlatformsThenLauncher } from "./publishOrder.ts";
 
 interface PackageJson {
   license: string;
@@ -345,8 +346,8 @@ interface PublishFlags extends PublishCommandConfig {
 
 /**
  * Publishes the tarballs scripts/build-npm-platform-packages.ts produced:
- * every `@lecturn/lecturn-<platform>.tgz` first, `lecturn.tgz` (the launcher)
- * last, so the launcher is never installable before the executables it
+ * every `@lecturn/lecturn-<platform>.tgz` first (concurrently), `lecturn.tgz`
+ * (the launcher) last, so the launcher is never installable before the executables it
  * depends on. Tarballs rather than directories because `npm publish <dir>`
  * strips the `node_modules/` the executable loads its native addons from.
  */
@@ -381,7 +382,7 @@ const publishPlatformTarballs = Effect.fn("publishPlatformTarballs")(function* (
   if (config.provenance) args.push("--provenance");
   if (config.dryRun) args.push("--dry-run");
 
-  for (const tarball of [...platformTarballs, launcherTarball]) {
+  const publish = Effect.fn("publish")(function* (tarball: string) {
     const spawnCommand = yield* resolveSpawnCommand("npm", [...args, tarball]);
     yield* Effect.log(`[cli] npm ${args.join(" ")} ${path.basename(tarball)}`);
     yield* runCommand(
@@ -392,7 +393,10 @@ const publishPlatformTarballs = Effect.fn("publishPlatformTarballs")(function* (
         shell: spawnCommand.shell,
       }),
     );
-  }
+  });
+
+  // Each publish takes about 17s, so the platform packages go at once.
+  yield* publishPlatformsThenLauncher({ platformTarballs, launcherTarball, publish });
 });
 
 /**

@@ -1,13 +1,16 @@
 import { scopeThreadRef, scopedThreadKey } from "@lecturn/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/models";
+import { sortSettledThreads } from "@lecturn/client-runtime/state/thread-sort";
 import {
   applySidebarThreadDrop,
-  sortSettledThreadsForSidebar,
   type SidebarListItem,
   type SidebarSection,
 } from "../Sidebar.logic";
 
-export type SidebarLists = Readonly<Record<SidebarSection, readonly EnvironmentThreadShell[]>>;
+/** The Working shelf (beta) is optional: lists without it render as before. */
+export type SidebarLists = Readonly<
+  Record<Exclude<SidebarSection, "working">, readonly EnvironmentThreadShell[]>
+> & { readonly working?: readonly EnvironmentThreadShell[] };
 export interface SidebarDropHold {
   readonly key: string;
   readonly sourceSection: SidebarSection;
@@ -24,6 +27,8 @@ const keyOf = (thread: EnvironmentThreadShell) =>
 export function buildScopedSidebarItems(
   lists: SidebarLists,
   input: {
+    /** Working beta shelf. Collapsed when omitted. */
+    workingExpanded?: boolean;
     snoozedExpanded: boolean;
     settledExpanded: boolean;
     settledLimit: number;
@@ -42,6 +47,18 @@ export function buildScopedSidebarItems(
   marker("pinned-divider");
   marker("active-placeholder");
   rows("active", lists.active);
+  // Working beta: neither a drag source nor a destination, but its rows
+  // shift with the list like every other shelf.
+  const working = lists.working ?? [];
+  if (working.length) {
+    marker("working-header");
+    rows(
+      "working",
+      working.filter(
+        (thread) => input.workingExpanded === true || keyOf(thread) === input.routeThreadKey,
+      ),
+    );
+  }
   if (lists.snoozed.length) {
     marker("snoozed-header");
     rows(
@@ -63,23 +80,26 @@ export function buildScopedSidebarItems(
   return items;
 }
 
+/** `sortInbox` is the time order of a Working-beta inbox, where a drop has no placement. */
 export function projectSidebarDrop(
   lists: SidebarLists,
   hold: SidebarDropHold | null,
+  sortInbox?: (threads: readonly EnvironmentThreadShell[]) => EnvironmentThreadShell[],
 ): SidebarLists {
   if (!hold) return lists;
   const source = Object.values(lists)
     .flat()
     .find((thread) => keyOf(thread) === hold.key);
   if (!source) return lists;
-  const result = {
+  const result: Record<SidebarSection, EnvironmentThreadShell[]> = {
     pinned: [] as EnvironmentThreadShell[],
     active: [] as EnvironmentThreadShell[],
+    working: [] as EnvironmentThreadShell[],
     snoozed: [] as EnvironmentThreadShell[],
     settled: [] as EnvironmentThreadShell[],
   };
   for (const section of Object.keys(result) as SidebarSection[]) {
-    result[section] = lists[section]
+    result[section] = (lists[section] ?? [])
       .filter((thread) => keyOf(thread) !== hold.key)
       .map((thread) => {
         const assigned =
@@ -108,19 +128,20 @@ export function projectSidebarDrop(
     result[hold.section].sort(
       (a, b) => (ranks.get(keyOf(a)) ?? Infinity) - (ranks.get(keyOf(b)) ?? Infinity),
     );
-  } else result.settled = sortSettledThreadsForSidebar(result.settled);
+  } else if (hold.section === "active" && sortInbox) result.active = sortInbox(result.active);
+  else result.settled = sortSettledThreads(result.settled);
   return result;
 }
 
 /** Release only against this scope's canonical members and all assigned keys. */
 export function sidebarDropConfirmed(lists: SidebarLists, hold: SidebarDropHold): boolean {
   const sourceSection = (Object.keys(lists) as SidebarSection[]).find((section) =>
-    lists[section].some((thread) => keyOf(thread) === hold.key),
+    lists[section]?.some((thread) => keyOf(thread) === hold.key),
   );
   if (!sourceSection || (sourceSection !== hold.sourceSection && sourceSection !== hold.section))
     return true;
   if (sourceSection !== hold.section) return false;
-  const source = lists[sourceSection].find((thread) => keyOf(thread) === hold.key)!;
+  const source = lists[sourceSection]!.find((thread) => keyOf(thread) === hold.key)!;
   if (hold.clearsSnooze && source.snoozedUntil != null) return false;
   if (!hold.order) return source.pinnedAt == null;
   const members = lists[hold.section];

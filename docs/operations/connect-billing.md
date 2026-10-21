@@ -152,7 +152,7 @@ A green client build does not prove that the independently deployed relay accept
 4. Publish agent activity and verify the intended mobile notification path. Record trace IDs without retaining bearer tokens, signed proofs or private keys in public logs.
 5. For a coordinated protocol replacement, verify obsolete JWT types and environment issuers are rejected. Explicitly identify the desktop and mobile versions users must install and whether they must sign in again. Remove the isolated test environment after validation.
 
-The current wire contract uses `lecturn-env-link+jwt`, the `lecturn-env:` issuer/audience namespace, `lecturn-cloud-health+jwt` and `lecturn-cloud-mint+jwt`, and `/api/lecturn-connect/health` and `/api/lecturn-connect/mint-credential`. These are protocol identifiers, not display branding.
+The current wire contract uses `lecturn-env-link+jwt`, the `lecturn-env:` issuer/audience namespace, `lecturn-cloud-health+jwt`, `lecturn-cloud-mint+jwt` and `lecturn-env-managed-tunnel-recovery+jwt`, and `/api/lecturn-connect/health` and `/api/lecturn-connect/mint-credential`. These are protocol identifiers, not display branding.
 
 ## Decisions allowance
 

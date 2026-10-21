@@ -24,17 +24,17 @@ import * as SagaWorkbenchRepository from "./persistence/Layers/SagaWorkbenchRepo
 import * as StaveExecution from "./stave/StaveExecution.ts";
 import * as StaveRuntimeFence from "./stave/StaveRuntimeFence.ts";
 import * as StaveMemoryWiring from "./stave/StaveMemoryWiring.ts";
-import {
-  EnvironmentHttpApi,
-  ProviderDriverKind,
-  type RepositoryIdentity,
-} from "@lecturn/contracts";
+import { EnvironmentHttpApi, type RepositoryIdentity } from "@lecturn/contracts";
+import type { RelayManagedEndpointRuntimeConfig } from "@lecturn/contracts/relay";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Random from "effect/Random";
 import * as Schedule from "effect/Schedule";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
@@ -51,6 +51,7 @@ import {
   staticAndDevRouteLayer,
   browserApiCorsLayer,
   httpCompressionLayer,
+  untracedRequestsLayer,
 } from "./http.ts";
 import { guardHttpResponseWriteErrors } from "./httpResponseErrorGuard.ts";
 import { startPathDiscovery } from "./os-jank.ts";
@@ -72,6 +73,7 @@ import * as ResetCreditCoordinator from "./provider/Layers/resetCreditCoordinato
 import * as ProviderEventLoggers from "./provider/Layers/ProviderEventLoggers.ts";
 import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
 import { ProviderAuthServiceLive } from "./provider/Layers/ProviderAuthService.ts";
+import { CodexInstallation } from "./provider/CodexInstallation.ts";
 import { AntigravityInstallation } from "./provider/AntigravityInstallation.ts";
 import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
@@ -151,15 +153,21 @@ import * as SourceControlRepositoryService from "./sourceControl/SourceControlRe
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
+import * as HeapSnapshot from "./observability/HeapSnapshot.ts";
+import * as EventLoopMonitor from "./observability/EventLoopMonitor.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
+import * as ReplayMarkers from "./auth/replayMarkers.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import {
   connectHttpApiLayer,
   pendingServiceUpdateExists,
-  reconcileDesiredCloudLink,
+  reconcileDesiredCloudLinkIfStillDesired,
+  recoverManagedCloudTunnel,
+  registerManagedCloudTunnelRecovery,
+  startManagedCloudTunnelIfOriginConfirmed,
   releaseManagedTunnelOnShutdown,
   syncManagedEndpointOrigin,
 } from "./cloud/http.ts";
@@ -167,6 +175,12 @@ import { serverRelayBrokerTracingLayer } from "./cloud/relayTracing.ts";
 import { shouldRetryCloudLink } from "./cloud/relayResponse.ts";
 import * as DeviceRelayReservation from "./cloud/DeviceRelayReservation.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
+import {
+  MANAGED_TUNNEL_FIRST_REGISTRATION_JITTER,
+  MANAGED_TUNNEL_RECOVERY_COOLDOWN,
+  managedTunnelStartupAction,
+  retryManagedTunnelRegistration,
+} from "./cloud/managedTunnelStartup.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
 import * as CloudCliState from "./cloud/CliState.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
@@ -210,7 +224,8 @@ export const HTTP_ROUTER_CONFIG = {
 // those finalizers get a chance to run.
 const HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS = 0;
 const ResourceAttributionLayerLive = ResourceAttribution.layer;
-const ApplicationObservabilityLive = ObservabilityLive.pipe(
+const ApplicationObservabilityLive = EventLoopMonitor.layer.pipe(
+  Layer.provideMerge(ObservabilityLive),
   Layer.provideMerge(ResourceAttributionLayerLive),
 );
 
@@ -512,6 +527,9 @@ const StaveWorkspaceReaderLayerLive = StaveWorkspaceReader.layer.pipe(
 const StaveExecutionLayerLive = StaveExecution.layer.pipe(
   Layer.provide(Layer.mergeAll(StaveBinaryLayerLive, ServerSettingsLayerLive)),
 );
+// Settings are provideMerge'd after the merge: the workspace reader now
+// needs them too (Bitbucket credentials reach it via the source control
+// registry), and Layer.mergeAll builds its members in parallel.
 const StaveRpcRuntimeLayerLive = StaveRpcHandlers.runtimeLayer.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -519,8 +537,7 @@ const StaveRpcRuntimeLayerLive = StaveRpcHandlers.runtimeLayer.pipe(
       StaveWorkspaceReaderLayerLive,
       StaveReadCache.layer,
       StaveExecutionLayerLive,
-      ServerSettingsLayerLive,
-    ),
+    ).pipe(Layer.provideMerge(ServerSettingsLayerLive)),
   ),
 );
 const ThreadNoteLayerLive = ThreadNoteService.layer.pipe(Layer.provide(PersistenceLayerLive));
@@ -685,22 +702,27 @@ const SagaWorkbenchLayerLive = SagaWorkbenchService.layer.pipe(
   ),
 );
 
-const AntigravityInstallationRefreshLive = Layer.effectDiscard(
+const ProviderInstallationRefreshLive = Layer.effectDiscard(
   Effect.gen(function* () {
-    const installation = yield* AntigravityInstallation;
+    const antigravity = yield* AntigravityInstallation;
+    const codex = yield* CodexInstallation;
     const instances = yield* ProviderInstanceRegistry;
     const providers = yield* ProviderRegistry;
-    yield* installation.changes.pipe(
-      Stream.map((state) => state.installedVersion),
-      Stream.changes,
-      Stream.drop(1),
-      Stream.runForEach(() =>
+    yield* Stream.merge(
+      antigravity.changes.pipe(
+        Stream.changesWith((a, b) => a.installedVersion === b.installedVersion),
+        Stream.drop(1),
+      ),
+      codex.changes.pipe(
+        Stream.changesWith((a, b) => a.installedVersion === b.installedVersion),
+        Stream.drop(1),
+      ),
+    ).pipe(
+      Stream.runForEach((state) =>
         instances.listInstances.pipe(
           Effect.flatMap((entries) =>
             Effect.forEach(
-              entries.filter(
-                (instance) => instance.driverKind === ProviderDriverKind.make("antigravity"),
-              ),
+              entries.filter((instance) => instance.driverKind === state.driver),
               (instance) => providers.refreshInstance(instance.instanceId),
               { discard: true },
             ),
@@ -717,7 +739,8 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(
     Layer.mergeAll(DecisionIngestionLayerLive, DecisionWorkerLayerLive, DecisionCloudLayerLive),
   ),
-  Layer.provideMerge(AntigravityInstallationRefreshLive),
+  // Nested to keep this pipe within Effect's 20-argument ceiling (same order).
+  Layer.provideMerge(ProviderInstallationRefreshLive.pipe(Layer.provideMerge(ReplayMarkers.layer))),
   Layer.provideMerge(SagaWorkbenchLayerLive),
   Layer.provideMerge(PullRequestWatchDiscoveryLayerLive),
   Layer.provideMerge(PullRequestWatchLayerLive),
@@ -750,7 +773,6 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // with explicit `providerInstances` entries on boot.
   Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
 ).pipe(
-  Layer.provideMerge(AntigravityInstallation.layer),
   // Shared native/canonical NDJSON writers used by both the per-instance
   // drivers (native stream, written from inside each `<X>Adapter`) and
   // `ProviderService` (canonical stream, written after event normalization).
@@ -759,8 +781,18 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // `ModelManifest.layer` is the legacy-model classification data, refreshed
   // from the repo's `model-manifest.json` on `main` and applied by the
   // Codex/Claude drivers.
+  // Nested so this pipe stays within Effect's 20-argument ceiling; the
+  // installations still see the loggers and manifest, as upstream's order gives.
   Layer.provideMerge(
-    Layer.mergeAll(ProviderEventLoggers.layer, ModelManifest.layer, ResetCreditCoordinator.layer),
+    Layer.mergeAll(AntigravityInstallation.layer, CodexInstallation.layer).pipe(
+      Layer.provideMerge(
+        Layer.mergeAll(
+          ProviderEventLoggers.layer,
+          ModelManifest.layer,
+          ResetCreditCoordinator.layer,
+        ),
+      ),
+    ),
   ),
   // `OpenCodeDriver.create()` yields `OpenCodeRuntime`; previously the old
   // `ProviderRegistryLive` pulled `OpenCodeRuntimeLive` in for itself, but
@@ -828,6 +860,8 @@ export const makeRoutesLayer = Layer.mergeAll(
     websocketRpcRouteLayer,
   ),
   McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
+  // Last, so no route layer can replace the server's one TracerDisabledWhen.
+  untracedRequestsLayer,
 ).pipe(
   // Reusing the exact layer object shares the runtime instance by memoization;
   // isolated route harnesses can also supply its dependencies directly.
@@ -957,10 +991,6 @@ const makeServerLayer = Layer.unwrap(
       : Layer.empty;
     const cloudDesiredLinkReconcileLayer = Layer.effectDiscard(
       Effect.gen(function* () {
-        if (!hasCloudPublicConfig) {
-          yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);
-          return;
-        }
         const releaseManagedTunnel = releaseManagedTunnelOnShutdown().pipe(
           Effect.timeout("10 seconds"),
           Effect.tap((released) =>
@@ -992,22 +1022,83 @@ const makeServerLayer = Layer.unwrap(
             const server = yield* HttpServer.HttpServer;
             const address = server.address;
             if (typeof address === "string" || !("port" in address)) return;
-            const retryTransientFailures = {
-              while: shouldRetryCloudLink,
-              schedule: Schedule.exponential("1 second").pipe(
-                Schedule.modifyDelay(({ duration }) =>
-                  Effect.succeed(Duration.min(duration, Duration.seconds(30))),
+            const localOrigin = `http://127.0.0.1:${address.port}`;
+            const endpointRuntime = yield* CloudManagedEndpointRuntime.CloudManagedEndpointRuntime;
+            const recoveryLock = yield* Semaphore.make(1);
+            let lastRecoveryAtMillis = 0;
+            const recoverManagedTunnel = (config: RelayManagedEndpointRuntimeConfig) =>
+              recoveryLock.withPermits(1)(
+                Effect.gen(function* () {
+                  const elapsed = (yield* Clock.currentTimeMillis) - lastRecoveryAtMillis;
+                  const wait = Duration.toMillis(MANAGED_TUNNEL_RECOVERY_COOLDOWN) - elapsed;
+                  if (wait > 0) yield* Effect.sleep(Duration.millis(wait));
+                  lastRecoveryAtMillis = yield* Clock.currentTimeMillis;
+                }).pipe(
+                  Effect.andThen(
+                    recoverManagedCloudTunnel(localOrigin, config, {
+                      retryRuntimeFailures: true,
+                    }),
+                  ),
+                  Effect.retry({
+                    while: (error) =>
+                      shouldRetryCloudLink(error) &&
+                      error._tag !== "EnvironmentCloudEndpointUnavailableError",
+                    schedule: Schedule.exponential("1 second").pipe(
+                      Schedule.modifyDelay(({ duration }) =>
+                        Effect.succeed(Duration.min(duration, Duration.seconds(30))),
+                      ),
+                      Schedule.jittered,
+                    ),
+                  }),
+                  Effect.tap((recovered) =>
+                    recovered
+                      ? Effect.logInfo("Lecturn Connect managed tunnel recovered")
+                      : Effect.void,
+                  ),
+                  Effect.catchCause((cause) =>
+                    Cause.hasInterrupts(cause)
+                      ? Effect.interrupt
+                      : Effect.logWarning("Failed to recover the Lecturn Connect managed tunnel", {
+                          cause,
+                        }),
+                  ),
                 ),
-                Schedule.upTo({ duration: "10 minutes" }),
-              ),
-            };
-            if (!(yield* CloudCliState.readCliDesiredCloudLink)) {
+              );
+            yield* endpointRuntime.recoveryRequests.pipe(
+              Stream.runForEach(recoverManagedTunnel),
+              Effect.forkScoped,
+            );
+            // No settling delay before the first attempt: routes are already
+            // serving by the time activation opens this gate (the startup
+            // sequence awaits routesReady), and the retry schedule below
+            // covers anything this sleep used to hedge against. Every
+            // millisecond here is dead time on the path to remote
+            // reachability after a restart.
+            const wantsCliLink = hasCloudPublicConfig
+              ? yield* CloudCliState.readCliDesiredCloudLink.pipe(
+                  Effect.catch((cause) =>
+                    Effect.logWarning("Failed to read the desired Lecturn Connect link", {
+                      cause,
+                    }).pipe(Effect.as(false)),
+                  ),
+                )
+              : false;
+            if (hasCloudPublicConfig && !wantsCliLink) {
               // A link installed from a web/mobile client is never re-provisioned
               // at boot, so its tunnel still targets the port recorded at link
               // time. Repoint it at the port this launch actually bound. The
               // CLI reconcile below already links with the current origin.
-              yield* syncManagedEndpointOrigin(`http://127.0.0.1:${address.port}`).pipe(
-                Effect.retry(retryTransientFailures),
+              // Forked so its retries never delay recovery registration.
+              yield* syncManagedEndpointOrigin(localOrigin).pipe(
+                Effect.retry({
+                  while: shouldRetryCloudLink,
+                  schedule: Schedule.exponential("1 second").pipe(
+                    Schedule.modifyDelay(({ duration }) =>
+                      Effect.succeed(Duration.min(duration, Duration.seconds(30))),
+                    ),
+                    Schedule.upTo({ duration: "10 minutes" }),
+                  ),
+                }),
                 Effect.tap((updated) =>
                   updated
                     ? Effect.logInfo("Lecturn Connect managed tunnel origin synced on startup", {
@@ -1018,29 +1109,131 @@ const makeServerLayer = Layer.unwrap(
                 Effect.catch((cause) =>
                   Effect.logWarning(
                     "Failed to sync the Lecturn Connect managed tunnel origin on startup",
-                    { message: cause.message },
+                    { cause },
                   ),
                 ),
+                Effect.forkScoped,
               );
-              return;
             }
-            // No settling delay before the first attempt: routes are already
-            // serving by the time activation opens this gate (the startup
-            // sequence awaits routesReady), and the retry schedule below
-            // covers anything this sleep used to hedge against. Every
-            // millisecond here is dead time on the path to remote
-            // reachability after a restart.
-            yield* reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`).pipe(
-              Effect.retry(retryTransientFailures),
-              Effect.tap(() =>
-                Effect.logInfo("Lecturn Connect desired link reconciled on startup"),
+            // A failed read must not end this fiber before it registers
+            // recovery and starts consuming recovery requests. "managed" is
+            // what a missing value means, so it is the safe fallback.
+            const desiredCliLinkMode = wantsCliLink
+              ? yield* CloudCliState.readCliDesiredLinkMode.pipe(
+                  Effect.catch((cause) =>
+                    Effect.logWarning("Failed to read the desired Lecturn Connect link mode", {
+                      cause,
+                    }).pipe(Effect.as("managed" as const)),
+                  ),
+                )
+              : null;
+            // A publish-only link must not expose the host, even if a managed
+            // config from an earlier link is still stored.
+            const startedConfirmed =
+              desiredCliLinkMode === "publish_only"
+                ? false
+                : yield* startManagedCloudTunnelIfOriginConfirmed(localOrigin).pipe(
+                    Effect.catch((cause) =>
+                      Effect.logWarning("Failed to start the confirmed Lecturn Connect tunnel", {
+                        cause,
+                      }).pipe(Effect.as(false)),
+                    ),
+                  );
+            const startStoredManagedTunnel = startManagedCloudTunnelIfOriginConfirmed(localOrigin, {
+              requireConfirmedOrigin: false,
+            }).pipe(
+              Effect.tap((started) =>
+                started
+                  ? Effect.logWarning(
+                      "Lecturn Connect started the stored tunnel without relay confirmation",
+                    )
+                  : Effect.void,
               ),
               Effect.catch((cause) =>
-                Effect.logWarning("Failed to reconcile Lecturn Connect desired link on startup", {
-                  message: cause.message,
-                }),
+                Effect.logWarning("Failed to start the stored Lecturn Connect tunnel", { cause }),
+              ),
+              Effect.asVoid,
+            );
+            const registerManagedTunnel = retryManagedTunnelRegistration(
+              registerManagedCloudTunnelRecovery(localOrigin, {
+                retryRuntimeFailures: true,
+              }),
+              (error) =>
+                shouldRetryCloudLink(error) &&
+                error._tag !== "EnvironmentCloudEndpointUnavailableError",
+              startedConfirmed ? Effect.void : startStoredManagedTunnel,
+            ).pipe(
+              Effect.tap((result) =>
+                result.status === "ready"
+                  ? Effect.logInfo("Lecturn Connect managed tunnel recovery registered")
+                  : Effect.void,
+              ),
+              Effect.catchCause((cause) =>
+                Cause.hasInterrupts(cause)
+                  ? Effect.interrupt
+                  : Effect.logWarning(
+                      "Failed to register Lecturn Connect managed tunnel recovery",
+                      {
+                        cause,
+                      },
+                    ).pipe(Effect.as({ status: "unavailable" as const })),
               ),
             );
+            // A host without a confirmed marker is on its first boot after the
+            // upgrade. Spread those registrations so an auto-update wave does
+            // not hit the relay all at once.
+            if (!startedConfirmed && desiredCliLinkMode !== "publish_only") {
+              const jitter = yield* Random.nextIntBetween(
+                0,
+                Duration.toMillis(MANAGED_TUNNEL_FIRST_REGISTRATION_JITTER),
+              );
+              yield* Effect.sleep(Duration.millis(jitter));
+            }
+            const registration =
+              desiredCliLinkMode === "publish_only"
+                ? { status: "not_linked" as const }
+                : yield* registerManagedTunnel;
+            // A terminal registration failure also allows the stored config
+            // to start. Transient outages use the fallback above and keep
+            // registration retrying in this scoped startup fiber.
+            if (registration.status === "unavailable" && !startedConfirmed) {
+              yield* startStoredManagedTunnel;
+            }
+            const startupAction = managedTunnelStartupAction({ wantsCliLink, registration });
+            if (startupAction.action === "request_recovery") {
+              yield* endpointRuntime.requestRecovery(startupAction.config);
+            }
+            if (startupAction.action === "reconcile_link") {
+              const reconciledMode = yield* reconcileDesiredCloudLinkIfStillDesired(
+                localOrigin,
+              ).pipe(
+                Effect.retry({
+                  while: shouldRetryCloudLink,
+                  schedule: Schedule.exponential("1 second").pipe(
+                    Schedule.modifyDelay(({ duration }) =>
+                      Effect.succeed(Duration.min(duration, Duration.seconds(30))),
+                    ),
+                    Schedule.upTo({ duration: "10 minutes" }),
+                  ),
+                }),
+                Effect.tap((mode) =>
+                  mode === null
+                    ? Effect.void
+                    : Effect.logInfo("Lecturn Connect desired link reconciled on startup"),
+                ),
+                Effect.catch((cause) =>
+                  Effect.logWarning("Failed to reconcile Lecturn Connect desired link on startup", {
+                    cause,
+                  }).pipe(Effect.as(null)),
+                ),
+              );
+              if (reconciledMode === "managed") {
+                const afterReconcile = yield* registerManagedTunnel;
+                if (afterReconcile.status === "recovery_required") {
+                  yield* endpointRuntime.requestRecovery(afterReconcile.config);
+                }
+              }
+            }
           }),
         );
         yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);
@@ -1071,6 +1264,7 @@ const makeServerLayer = Layer.unwrap(
       runtimeStateLayer.pipe(Layer.provide(launcherLayer)),
       tailscaleServeLayer,
       cloudDesiredLinkReconcileLayer,
+      HeapSnapshot.layer,
     );
 
     return serverApplicationLayer.pipe(

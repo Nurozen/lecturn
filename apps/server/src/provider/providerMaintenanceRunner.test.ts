@@ -242,7 +242,11 @@ const makeTestRunner = (
   manifest: ModelManifest.ModelManifestData = {
     version: 1,
     currentModels: {},
-    compatibility: [{ driver: CODEX_DRIVER, lecturnRange: ">=0.0.42", ranges: [] }],
+    compatibility: [CODEX_DRIVER, CURSOR_DRIVER, OPENCODE_DRIVER].map((driver) => ({
+      driver,
+      lecturnRange: ">=0.0.42",
+      ranges: [],
+    })),
   },
 ) =>
   Effect.gen(function* () {

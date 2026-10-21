@@ -108,7 +108,6 @@ const makeCliTestServerConfig = (baseDir: string) =>
       otlpTracesExport: DEFAULT_SIGNAL_EXPORT,
       otlpMetricsExport: DEFAULT_SIGNAL_EXPORT,
       otlpLogsExport: DEFAULT_SIGNAL_EXPORT,
-      otlpServiceName: "lecturn-server",
       otelEnvironment: OtelEnvironment.none,
       mode: "web",
       port: 0,

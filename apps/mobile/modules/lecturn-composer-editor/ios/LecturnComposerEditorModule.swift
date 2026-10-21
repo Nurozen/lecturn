@@ -36,14 +36,18 @@ enum LecturnComposerClipboard {
   }
 }
 
+// Expo Modules 2.0: the clipboard function is a @JS member; the view stays in
+// definition() until the 2.0 view API lands.
+@ExpoModule("LecturnComposerEditor")
 public class LecturnComposerEditorModule: Module {
+  // UIPasteboard is main-thread only, so the member is main-actor isolated.
+  @JS
+  @MainActor
+  func writeContextClipboard(text: String, fragment: String) async {
+    LecturnComposerClipboard.write(text: text, fragment: fragment)
+  }
+
   public func definition() -> ModuleDefinition {
-    Name("LecturnComposerEditor")
-
-    AsyncFunction("writeContextClipboard") { (text: String, fragment: String) in
-      LecturnComposerClipboard.write(text: text, fragment: fragment)
-    }.runOnQueue(.main)
-
     View(LecturnComposerEditorView.self) {
       Prop("controlledDocumentJson") { (view: LecturnComposerEditorView, documentJson: String) in
         view.setControlledDocumentJson(documentJson)

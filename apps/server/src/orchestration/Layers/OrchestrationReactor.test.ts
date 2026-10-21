@@ -129,6 +129,7 @@ describe("OrchestrationReactor", () => {
         Layer.provideMerge(
           Layer.succeed(AgentAwarenessRelay.AgentAwarenessRelay, {
             publishThread: () => Effect.void,
+            requestCatchUp: () => Effect.void,
             start: () => {
               started.push("agent-awareness-relay");
               return Effect.void;

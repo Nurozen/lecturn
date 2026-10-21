@@ -5,6 +5,7 @@ import {
   StyleSheet,
   View,
   type ColorValue,
+  type ViewInstance,
   type ViewProps,
   type ViewStyle,
 } from "react-native";
@@ -22,7 +23,7 @@ const ThemedGlassView = withUniwind(GlassView, {
 });
 
 interface GlassSurfaceProps extends ViewProps {
-  readonly ref?: Ref<View>;
+  readonly ref?: Ref<ViewInstance>;
   readonly children: ReactNode;
   readonly glassEffectStyle?: "clear" | "regular" | "none";
   readonly tintColor?: ColorValue;

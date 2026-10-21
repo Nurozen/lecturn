@@ -20,6 +20,8 @@ import { useAccountSections } from "./useAccountSections";
 import { AccountSectionHeader } from "./AccountSectionHeader";
 import { useMobileSagaIndex, useSidebarNestSagas } from "../../state/stave";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
+import { useAndroidControlSizing } from "../../components/useAndroidControlSizing";
+import type { LegendListRef } from "@legendapp/list/react-native";
 import {
   type EnvironmentProject,
   type EnvironmentThreadShell,
@@ -37,7 +39,14 @@ import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Platform, View } from "react-native";
+import {
+  ActivityIndicator,
+  Platform,
+  View,
+  type GestureResponderEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -94,6 +103,7 @@ import {
   sortHomeProjectScopes,
   type HomeProjectSortOrder,
 } from "./homeThreadList";
+import { createSwipeRowActivation } from "./swipe-row-activation";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "./thread-swipe-actions";
 import { useMaterialFabScroll } from "./MaterialFabScrollContext";
 
@@ -132,6 +142,10 @@ interface HomeScreenProps {
   readonly onUnsettleThread: (thread: EnvironmentThreadShell) => void;
   readonly onPinThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
   readonly onUnpinThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
+  readonly onSetThreadAutoSettle: (
+    thread: EnvironmentThreadShell,
+    enabled: boolean,
+  ) => Promise<boolean>;
   readonly onMoveThread: (
     thread: EnvironmentThreadShell,
     direction: ThreadMoveDestination,
@@ -167,6 +181,10 @@ const ESTIMATED_THREAD_LIST_V2_ROW_HEIGHT = 72;
 /** Hierarchy groups only supply project/saga structure here (row order comes
     from the v2 partition), so their internal thread order is fixed. */
 const HIERARCHY_THREAD_SORT_ORDER = "updated_at";
+// Rows away from the viewport are cheap dormant frames (see
+// swipe-row-activation), so render further ahead: a fast fling then reaches
+// rows that are already built instead of rows still being rebuilt.
+const THREAD_LIST_V2_DRAW_DISTANCE = 1_000;
 const PRE_LIQUID_GLASS_BOTTOM_TOOLBAR_HEIGHT = 44;
 /**
  * Top spacing between the list and the Android custom header. The Android
@@ -258,6 +276,7 @@ export function HomeScreen(props: HomeScreenProps) {
   const queuedThreadKeys = useQueuedThreadKeys();
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const insets = useSafeAreaInsets();
+  const { fabClearance } = useAndroidControlSizing();
   const iosBottomToolbarClearance =
     Platform.OS === "ios" && !NATIVE_LIQUID_GLASS_SUPPORTED
       ? PRE_LIQUID_GLASS_BOTTOM_TOOLBAR_HEIGHT
@@ -348,8 +367,45 @@ export function HomeScreen(props: HomeScreenProps) {
     openSwipeableRef.current?.close();
   }, []);
   const onMaterialFabScroll = useMaterialFabScroll();
+  const listRef = useRef<LegendListRef>(null);
+  const swipeRowActivation = useMemo(() => createSwipeRowActivation(), []);
+  const activateVisibleRows = useCallback(
+    (rows: ReadonlyArray<{ readonly key: string }>) => {
+      const state = listRef.current?.getState();
+      if (state === undefined || !(state.end >= 0)) return;
+      swipeRowActivation.activate(
+        rows.slice(Math.max(0, state.start - 2), state.end + 3).map((row) => row.key),
+      );
+    },
+    [swipeRowActivation],
+  );
+  // Status-bar, accessibility and programmatic scrolls never arm the scroll
+  // gate, so every scroll also activates the visible rows once it settles.
+  const activationTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(activationTimerRef.current), []);
+  const handleListScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      onMaterialFabScroll?.(event);
+      clearTimeout(activationTimerRef.current);
+      activationTimerRef.current = setTimeout(
+        () => activateVisibleRows(listRef.current?.getState().data ?? []),
+        200,
+      );
+    },
+    [activateVisibleRows, onMaterialFabScroll],
+  );
+  const trackListTouches = useCallback(
+    (event: GestureResponderEvent, started: boolean) => {
+      const { changedTouches, touches } = event.nativeEvent;
+      swipeRowActivation.trackTouches(
+        started ? changedTouches.map((touch) => String(touch.identifier)) : [],
+        touches.map((touch) => String(touch.identifier)),
+      );
+    },
+    [swipeRowActivation],
+  );
   const { swipeEnabled, scrollGateHandlers } = useSwipeableScrollGate({
-    onScroll: onMaterialFabScroll,
+    onScroll: handleListScroll,
     onScrollBeginDrag: handleScrollBeginDrag,
   });
 
@@ -553,6 +609,12 @@ export function HomeScreen(props: HomeScreenProps) {
     },
     [props.onUnpinThread],
   );
+  const handleSetThreadAutoSettle = useCallback(
+    (thread: EnvironmentThreadShell, enabled: boolean) => {
+      void props.onSetThreadAutoSettle(thread, enabled);
+    },
+    [props.onSetThreadAutoSettle],
+  );
   const handleRegenerateThreadTitle = useCallback(
     (thread: EnvironmentThreadShell) => {
       void props.onRegenerateThreadTitle(thread);
@@ -626,6 +688,15 @@ export function HomeScreen(props: HomeScreenProps) {
     const supported = new Set<EnvironmentId>();
     for (const [environmentId, config] of serverConfigs) {
       if (config.environment.capabilities.threadPinning === true) {
+        supported.add(environmentId);
+      }
+    }
+    return supported;
+  }, [serverConfigs]);
+  const autoSettleOptOutEnvironmentIds = useMemo(() => {
+    const supported = new Set<EnvironmentId>();
+    for (const [environmentId, config] of serverConfigs) {
+      if (config.environment.capabilities.threadAutoSettleOptOut === true) {
         supported.add(environmentId);
       }
     }
@@ -889,6 +960,9 @@ export function HomeScreen(props: HomeScreenProps) {
     [threadListV2Items],
   );
   useThreadJumpShortcuts(shortcutItems, props.onSelectThread);
+  useEffect(() => {
+    if (swipeEnabled) activateVisibleRows(threadListV2Items);
+  }, [activateVisibleRows, swipeEnabled, threadListV2Items]);
 
   const renderV2Row = useCallback(
     ({ item }: { readonly item: HomeHierarchyV2Item }) => {
@@ -1020,6 +1094,7 @@ export function HomeScreen(props: HomeScreenProps) {
           onSettleThread={handleSettleThread}
           snoozeSupported={snoozeEnvironmentIds.has(thread.environmentId)}
           pinningSupported={pinningEnvironmentIds.has(thread.environmentId)}
+          autoSettleOptOutSupported={autoSettleOptOutEnvironmentIds.has(thread.environmentId)}
           reorderSupported={
             item.item.pinned
               ? pinReorderEnvironmentIds.has(thread.environmentId)
@@ -1032,9 +1107,11 @@ export function HomeScreen(props: HomeScreenProps) {
           onUnsettleThread={handleUnsettleThread}
           onPinThread={handlePinThread}
           onUnpinThread={handleUnpinThread}
+          onSetThreadAutoSettle={handleSetThreadAutoSettle}
           onMoveThread={handleMoveThread}
           onSwipeableClose={handleSwipeableClose}
           onSwipeableWillOpen={handleSwipeableWillOpen}
+          activationKey={item.key}
         />
       );
     },
@@ -1054,6 +1131,8 @@ export function HomeScreen(props: HomeScreenProps) {
       handleSwipeableClose,
       handleSwipeableWillOpen,
       handleUnsettleThread,
+      handleSetThreadAutoSettle,
+      autoSettleOptOutEnvironmentIds,
       pinningEnvironmentIds,
       machineByEnvironmentId,
       pinReorderEnvironmentIds,
@@ -1220,7 +1299,7 @@ export function HomeScreen(props: HomeScreenProps) {
     );
   }
 
-  const listHeader = Platform.OS === "ios" ? null : <HomeTopContentSpacer />;
+  const listHeader = Platform.OS === "ios" ? undefined : <HomeTopContentSpacer />;
 
   // Project scoping lives in the header filter menu (no inline chip row on
   // mobile — the menu is the one filter surface).
@@ -1229,7 +1308,7 @@ export function HomeScreen(props: HomeScreenProps) {
   // Use the v2 project scope for its empty state. Snoozed threads need no
   // special empty state: their shelf header is a list row even while collapsed.
   const v2ListEmpty =
-    hasSearchQuery && threadSearch.isPending ? null : hasSearchQuery ? (
+    hasSearchQuery && threadSearch.isPending ? undefined : hasSearchQuery ? (
       <EmptyState
         title="No results"
         detail={`No threads matching "${props.searchQuery}".`}
@@ -1283,8 +1362,13 @@ export function HomeScreen(props: HomeScreenProps) {
             shell update) from re-rendering untouched rows. Sticky headers are
             deliberately not wired up: LegendList's JS sticky implementation
             mispositions pinned headers under iOS automatic content insets. */}
-        <SwipeableScrollGateProvider enabled={swipeEnabled}>
+        <SwipeableScrollGateProvider enabled={swipeEnabled} activation={swipeRowActivation}>
           <AnimatedLegendList
+            ref={listRef}
+            onLoad={() => activateVisibleRows(threadListV2Items)}
+            onTouchStart={(event) => trackListTouches(event, true)}
+            onTouchEnd={(event) => trackListTouches(event, false)}
+            onTouchCancel={(event) => trackListTouches(event, false)}
             itemLayoutAnimation={HIERARCHY_LAYOUT_TRANSITION}
             viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
             data={threadListV2Items}
@@ -1293,7 +1377,7 @@ export function HomeScreen(props: HomeScreenProps) {
             getItemType={(item) => item.type}
             itemsAreEqual={hierarchyItemsAreEqual}
             estimatedItemSize={ESTIMATED_THREAD_LIST_V2_ROW_HEIGHT}
-            drawDistance={500}
+            drawDistance={THREAD_LIST_V2_DRAW_DISTANCE}
             recycleItems
             extraData={v2ExtraData}
             ListHeaderComponent={v2ListHeader}
@@ -1318,7 +1402,7 @@ export function HomeScreen(props: HomeScreenProps) {
               paddingBottom:
                 Platform.OS === "ios"
                   ? Math.max(insets.bottom, 24) + 96 + iosBottomToolbarClearance
-                  : Math.max(insets.bottom, 16) + (Platform.OS === "android" ? 148 : 88),
+                  : Math.max(insets.bottom, 16) + (Platform.OS === "android" ? fabClearance : 88),
             }}
           />
         </SwipeableScrollGateProvider>

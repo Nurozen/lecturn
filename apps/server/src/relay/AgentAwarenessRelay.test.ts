@@ -107,7 +107,7 @@ function makeMemorySecretStore() {
   };
 }
 
-describe.sequential("signRelayAgentActivityPublishProof", () => {
+describe("signRelayAgentActivityPublishProof", { concurrent: false }, () => {
   it("distinguishes pending link credentials from disabled publication", () => {
     expect(
       AgentAwarenessRelay.resolveAgentActivityPublishingStartupState({
@@ -636,7 +636,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
               yield* Deferred.await(releaseThreadShell);
               return Option.some(thread);
             }),
-          getProjectShellById: () => Effect.succeed(Option.some(project)),
+          getProjectShellById: () => Effect.succeedSome(project),
         } as unknown as ProjectionSnapshotQueryShape;
 
         const descriptor = {
@@ -855,8 +855,8 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
                 threads: [thread],
                 updatedAt: now,
               } satisfies OrchestrationShellSnapshot),
-            getThreadShellById: () => Effect.succeed(Option.some(thread)),
-            getProjectShellById: () => Effect.succeed(Option.some(project)),
+            getThreadShellById: () => Effect.succeedSome(thread),
+            getProjectShellById: () => Effect.succeedSome(project),
           } as unknown as ProjectionSnapshotQueryShape),
         );
 
@@ -978,7 +978,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
           Layer.succeed(OrchestrationEngineService, {} as OrchestrationEngineShape),
           Layer.succeed(ProjectionSnapshotQuery, {
             getThreadShellById: () => Effect.sync(() => Option.fromNullishOr(currentThread)),
-            getProjectShellById: () => Effect.succeed(Option.some(project)),
+            getProjectShellById: () => Effect.succeedSome(project),
           } as unknown as ProjectionSnapshotQueryShape),
         );
 
@@ -1083,7 +1083,7 @@ it.effect(
     ).pipe(Effect.provide(NodeServices.layer)),
 );
 
-describe.sequential("user presence", () => {
+describe("user presence", { concurrent: false }, () => {
   const now = "2026-05-25T00:00:00.000Z";
   const projectId = "project-1" as ProjectId;
   const project = {
@@ -1339,4 +1339,116 @@ describe.sequential("user presence", () => {
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
   );
+});
+
+describe("startup catch-up", { concurrent: false }, () => {
+  // An unlinked relay with publishing off. `link` writes the link secrets and
+  // `enablePublishing` the opt-in. Counts link checks (relay URL reads) and
+  // catch-up publishes (shell snapshot reads).
+  function makeUnlinkedRelay() {
+    const secrets = makeMemorySecretStore();
+    const counts = { linkChecks: 0, catchUpPublishes: 0 };
+    const countingStore = {
+      ...secrets.store,
+      get: (name: string) =>
+        Effect.suspend(() => {
+          if (name === RELAY_URL_SECRET) counts.linkChecks += 1;
+          return secrets.store.get(name);
+        }),
+    } satisfies ServerSecretStore.ServerSecretStore["Service"];
+
+    const layer = AgentAwarenessRelay.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.succeed(ServerSecretStore.ServerSecretStore, countingStore),
+          Layer.succeed(ServerEnvironment.ServerEnvironment, {
+            getEnvironmentId: Effect.succeed("env-1" as EnvironmentId),
+            getDescriptor: Effect.die("unused descriptor"),
+          }),
+          Layer.succeed(OrchestrationEngineService, {
+            streamDomainEvents: Stream.never,
+          } as unknown as OrchestrationEngineShape),
+          Layer.succeed(BackgroundPolicy, backgroundPolicyStub(Effect.succeed(false))),
+          Layer.succeed(ProjectionSnapshotQuery, {
+            getShellSnapshot: () =>
+              Effect.sync(() => {
+                counts.catchUpPublishes += 1;
+                return {
+                  snapshotSequence: 1,
+                  projects: [],
+                  threads: [],
+                  updatedAt: "2026-05-25T00:00:00.000Z",
+                } satisfies OrchestrationShellSnapshot;
+              }),
+          } as unknown as ProjectionSnapshotQueryShape),
+        ),
+      ),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    const link = Effect.all(
+      [
+        secrets.setString(RELAY_URL_SECRET, "https://relay.example.test"),
+        secrets.setString(RELAY_ENVIRONMENT_CREDENTIAL_SECRET, "relay-credential"),
+      ],
+      { discard: true },
+    );
+    const enablePublishing = secrets.setString(PUBLISH_AGENT_ACTIVITY_SECRET, "true");
+    return { counts, layer, link, enablePublishing };
+  }
+
+  it.effect("checks an unlinked environment once a minute and still catches up once linked", () => {
+    const { counts, layer, link, enablePublishing } = makeUnlinkedRelay();
+    return Effect.gen(function* () {
+      const relay = yield* AgentAwarenessRelay.AgentAwarenessRelay;
+      yield* enablePublishing;
+      yield* relay.start();
+
+      // Get past the backoff ramp, then count checks in a steady window.
+      yield* TestClock.adjust("10 minutes");
+      const checksBeforeWindow = counts.linkChecks;
+      yield* TestClock.adjust("10 minutes");
+      expect(counts.linkChecks - checksBeforeWindow).toBe(10);
+      expect(counts.catchUpPublishes).toBe(0);
+
+      yield* link;
+      yield* TestClock.adjust("1 minute");
+      expect(counts.catchUpPublishes).toBe(1);
+    }).pipe(Effect.provide(layer), Effect.scoped);
+  });
+
+  it.effect("publishes at once when this process links while the check is backed off", () => {
+    const { counts, layer, link, enablePublishing } = makeUnlinkedRelay();
+    return Effect.gen(function* () {
+      const relay = yield* AgentAwarenessRelay.AgentAwarenessRelay;
+      yield* enablePublishing;
+      yield* relay.start();
+
+      // Backed off to 60 s: the next check is still seconds away.
+      yield* TestClock.adjust("10 minutes");
+      yield* link;
+      yield* TestClock.adjust("1 second");
+      expect(counts.catchUpPublishes).toBe(0);
+
+      yield* relay.requestCatchUp();
+      yield* TestClock.adjust("1 second");
+      expect(counts.catchUpPublishes).toBe(1);
+    }).pipe(Effect.provide(layer), Effect.scoped);
+  });
+
+  it.effect("catches up within 5 s when another process enables publishing on a link", () => {
+    const { counts, layer, link, enablePublishing } = makeUnlinkedRelay();
+    return Effect.gen(function* () {
+      const relay = yield* AgentAwarenessRelay.AgentAwarenessRelay;
+      yield* link;
+      yield* relay.start();
+
+      yield* TestClock.adjust("10 minutes");
+      expect(counts.catchUpPublishes).toBe(0);
+
+      // `lecturn connect publish` writes the opt-in without waking this process.
+      yield* enablePublishing;
+      yield* TestClock.adjust("5 seconds");
+      expect(counts.catchUpPublishes).toBe(1);
+    }).pipe(Effect.provide(layer), Effect.scoped);
+  });
 });

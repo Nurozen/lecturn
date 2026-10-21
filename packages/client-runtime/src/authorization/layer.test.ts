@@ -234,7 +234,7 @@ const makeHarness = Effect.fn("TestRemoteAuthorization.makeHarness")(function* (
               )),
         }),
         Layer.succeed(ClientCapabilities.RelayDeviceIdentity, {
-          deviceId: Effect.succeed(Option.some("device-1")),
+          deviceId: Effect.succeedSome("device-1"),
         }),
         Layer.succeed(TokenStore.RemoteDpopAccessTokenStore, tokenStore),
         Layer.succeed(

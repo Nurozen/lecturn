@@ -97,6 +97,12 @@ function activityAccountId(activity: LiveActivity<AgentActivityProps>): string |
     (typeof activity.getId === "function" ? (activityOwners.get(activity.getId()) ?? null) : null)
   );
 }
+// Locally started activities carry the same stale window the relay puts on
+// every push (STALE_AFTER_SECONDS in ApnsClient.ts), so a card whose relay
+// registration never lands still degrades instead of looking alive forever.
+const LIVE_ACTIVITY_STALE_AFTER_MS = 10 * 60_000;
+const liveActivityStaleDate = () => new Date(Date.now() + LIVE_ACTIVITY_STALE_AFTER_MS);
+
 function makeAccountRegistration(scopeAccountId: string | null) {
   function accountActivities(): ReadonlyArray<LiveActivity<AgentActivityProps>> {
     return getAgentLiveActivities().filter((activity) => {
@@ -111,12 +117,15 @@ function makeAccountRegistration(scopeAccountId: string | null) {
   ): LiveActivity<AgentActivityProps> | null {
     const identity = scopeAccountId ?? relayTokenProviderIdentity;
     const appearance = identity ? accountAppearances.get(identity) : undefined;
-    const activity = startAgentLiveActivity({
-      ...props,
-      ...(identity ? { accountId: identity } : {}),
-      ...appearance,
-      iosMajorVersion: iosMajorVersion(),
-    });
+    const activity = startAgentLiveActivity(
+      {
+        ...props,
+        ...(identity ? { accountId: identity } : {}),
+        ...appearance,
+        iosMajorVersion: iosMajorVersion(),
+      },
+      liveActivityStaleDate(),
+    );
     if (!activity) return null;
     if (identity && typeof activity.getId === "function")
       activityOwners.set(activity.getId(), identity);
