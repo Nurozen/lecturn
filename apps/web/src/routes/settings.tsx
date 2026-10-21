@@ -7,28 +7,26 @@ import {
   useCanGoBack,
   useNavigate,
 } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ArrowLeftIcon, RotateCcwIcon } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 
 import { SettingsBreadcrumb } from "../components/settings/SettingsBreadcrumb";
 import { PhoneSettingsCategorySelect } from "../components/settings/PhoneSettingsCategorySelect";
-import "../components/settings/project-settings-glass.css";
 import { SidebarInset, useSidebar } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isElectron } from "../env";
 import { useBackToChat } from "../components/settings/SettingsNavigation";
 import { usePhoneAuthViewport } from "../onboarding/usePhoneAuthViewport";
-import "../components/settings/phone-settings.css";
 import {
   SettingsScopeProvider,
   useSettingsScope,
 } from "../components/settings/SettingsScopeContext";
-import { useSettingsProjectGroups } from "../components/settings/ProjectSettingsPanel";
-import { useProjectAccountScope } from "../components/sidebar/accountProjectGroups";
 import { useEnvironments } from "../state/environments";
 import { SettingsScopeNotice } from "../components/settings/SettingsScopeNotice";
+import { SETTINGS_DEVICE_ONLY_PATHS } from "../components/settings/SettingsScopeSentence";
+import { SettingsPageContainer } from "../components/settings/settingsLayout";
 import {
   retainSettingsScope,
   validateSettingsRouteSearch,
@@ -53,15 +51,6 @@ function RestoreDeviceDefaultsButton({ onRestored }: { onRestored: () => void })
     </Button>
   );
 }
-
-/** Pages whose every row is saved on this client; the scope selects are hidden there. */
-const DEVICE_ONLY_PATHS = new Set([
-  "/settings/appearance",
-  "/settings/snap-shot",
-  "/settings/connections",
-  // Relay health and publishing follow this device's primary environment.
-  "/settings/relay",
-]);
 
 function SettingsScopeBoundary({ pathname, children }: { pathname: string; children: ReactNode }) {
   const { scope, connectedEnvironments } = useSettingsScope();
@@ -108,16 +97,23 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
   }
   // Device-local pages ignore the scope entirely; the project page follows
   // remembered members while a grouping change replaces its URL key.
-  if (DEVICE_ONLY_PATHS.has(pathname) || pathname === "/settings/projects") {
+  if (SETTINGS_DEVICE_ONLY_PATHS.has(pathname) || pathname === "/settings/projects") {
     return children;
   }
+  // Keep the scope sentence on screen so the selection can be changed back.
   if (scope.kind === "unavailable")
-    return <p className="p-8 text-sm text-muted-foreground">{scope.message}</p>;
+    return (
+      <SettingsPageContainer>
+        <p className="text-sm text-muted-foreground">{scope.message}</p>
+      </SettingsPageContainer>
+    );
   if (scope.kind === "environment" && connectedEnvironments.length === 0) {
     return (
-      <p className="p-8 text-sm text-muted-foreground">
-        Reconnect {scope.label} to change its settings.
-      </p>
+      <SettingsPageContainer>
+        <p className="text-sm text-muted-foreground">
+          Reconnect {scope.label} to change its settings.
+        </p>
+      </SettingsPageContainer>
     );
   }
   return children;
@@ -129,22 +125,7 @@ function SettingsContentLayout() {
   const { isMobile } = useSidebar();
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
-  const { search, selectScope } = useSettingsScope();
-  // The project select lists the groups the segmented sidebar shows, and an
-  // account-scoped key narrows it to that account's groups, named with its email.
-  const projectGroups = useSettingsProjectGroups(search.project ?? "", true);
-  const accountEmail = useProjectAccountScope(search.project ?? "")?.email;
-  const groups = useMemo(
-    () =>
-      accountEmail
-        ? projectGroups.map((group) => ({
-            ...group,
-            displayName: `${group.displayName} · ${accountEmail}`,
-          }))
-        : projectGroups,
-    [accountEmail, projectGroups],
-  );
-  const { environments } = useEnvironments();
+  const { search } = useSettingsScope();
   const navigateBackWithinApp = useCallback(() => {
     if (isMobile) backToChat();
     else if (canGoBack) window.history.back();
@@ -154,10 +135,6 @@ function SettingsContentLayout() {
   const [restoreSignal, setRestoreSignal] = useState(0);
   const showRestoreDefaults = location.pathname === "/settings/general";
   const handleRestored = () => setRestoreSignal((value) => value + 1);
-  const showScope = !DEVICE_ONLY_PATHS.has(location.pathname);
-  const scopeProps = showScope
-    ? { value: search, groups, environments, onChange: selectScope }
-    : undefined;
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -185,9 +162,9 @@ function SettingsContentLayout() {
   return (
     <SidebarInset
       ref={viewportRef}
-      className="phone-settings-viewport h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate"
+      className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate"
     >
-      <AccountSurface className="lecturn-settings-surface lecturn-project-settings flex min-h-0 min-w-0 flex-1 flex-col text-foreground">
+      <AccountSurface className="phone-settings-viewport lecturn-settings-surface lecturn-project-settings flex min-h-0 min-w-0 flex-1 flex-col text-foreground">
         <WorkspacePageHeader electron={isElectron}>
           <div className="flex min-w-0 w-full items-center gap-2">
             <Button
@@ -205,7 +182,7 @@ function SettingsContentLayout() {
               <PhoneSettingsCategorySelect />
             </div>
             <div className="hidden min-w-0 flex-1 md:block">
-              <SettingsBreadcrumb pathname={location.pathname} scope={scopeProps} />
+              <SettingsBreadcrumb pathname={location.pathname} />
             </div>
             {showRestoreDefaults ? (
               <div className="ms-auto hidden shrink-0 items-center gap-2 sm:flex">
@@ -215,13 +192,6 @@ function SettingsContentLayout() {
           </div>
         </WorkspacePageHeader>
 
-        {scopeProps ? (
-          // Phones show the category select in the header, so the scope
-          // selects take their own row beneath it.
-          <div className="flex min-w-0 shrink-0 px-4 pb-2 md:hidden">
-            <SettingsBreadcrumb pathname={location.pathname} scope={scopeProps} />
-          </div>
-        ) : null}
         {showRestoreDefaults ? (
           <div className="flex shrink-0 justify-end px-4 pb-2 sm:hidden">
             <RestoreDeviceDefaultsButton onRestored={handleRestored} />

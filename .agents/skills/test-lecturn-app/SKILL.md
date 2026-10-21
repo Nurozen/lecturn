@@ -7,7 +7,7 @@ description: Launch, retain, and test the Lecturn web app in isolated developmen
 
 Use this skill for the web client. For iOS Simulator, Android Emulator, or physical-device testing against an isolated Lecturn backend, use the sibling [`test-lecturn-mobile`](../test-lecturn-mobile/SKILL.md) skill.
 
-## Start an isolated web environment
+## Start the app
 
 1. Run commands from the repository root.
 2. Choose a base directory that belongs only to the current worktree or test:
@@ -20,11 +20,20 @@ Treat a base directory as disposable only when it was created or deliberately se
 
 The worktree-local default deliberately outranks an ambient `LECTURN_HOME`; do not pass the shared home through to a worktree dev server.
 
-Ports are derived from the worktree path but can shift when occupied. Always read the actual values from the `[dev-runner]` line.
+## Use the Browser panel
 
-Shared browser dev is single-origin: Vite proxies the backend paths, so never set `VITE_HTTP_URL` or `VITE_WS_URL` for `dev`/`dev:web`.
+Prefer Lecturn's built-in Browser panel when its tools are available. Call
+`preview_status`, then `preview_open` if the Browser panel is closed. Navigate to the complete startup pairing URL once with
+`preview_navigate`, then use `preview_snapshot` and Lecturn's interaction tools.
+If the token was consumed or expired, run `node apps/server/src/bin.ts pair`
+for a fresh one. Keep using the same tab.
 
-The dev runner disables browser auto-open by default. Do not pass `--browser` during automated testing: an automatically opened page can consume the one-time bootstrap token before the controlled browser uses it.
+## Verify and retain
+
+Exercise the affected flow and capture the state that proves it works. Keep
+the server, state, and panel available while the user inspects or iterates.
+An assistant turn ending is not teardown. Stop only processes you started,
+using retained terminal sessions or captured PIDs.
 
 ### Verify a shared environment before human handoff
 

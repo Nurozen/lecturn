@@ -230,17 +230,14 @@ export function StaveConfirmDialog({
         if (!open && !busy) onClose();
       }}
     >
-      <AlertDialogPopup
-        {...glass}
-        className="lecturn-account-surface lecturn-project-settings-dialog max-w-xl"
-      >
+      <AlertDialogPopup {...glass} surface="glass" className="max-w-xl">
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{staveOperationLossCopy(operation)}</AlertDialogDescription>
         </AlertDialogHeader>
         <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto px-6 pb-6">
           {changesMemory && !started ? (
-            <Label className="flex items-center justify-between gap-3">
+            <Label className="flex items-center justify-between">
               Memory fate
               <Select
                 value={memory}
@@ -253,7 +250,7 @@ export function StaveConfirmDialog({
                     setMemory(value);
                 }}
               >
-                <SelectTrigger data-lecturn-hover className="w-44">
+                <SelectTrigger data-lecturn-hover className="ms-1 w-44">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectPopup>

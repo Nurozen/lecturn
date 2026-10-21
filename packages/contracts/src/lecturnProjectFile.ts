@@ -1,8 +1,9 @@
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
-import { ThreadEnvMode } from "./environment.ts";
+import { ThreadEnvMode, WorktreeSubmodules } from "./environment.ts";
 import { ProjectScriptIcon } from "./orchestration.ts";
+import type { ProjectScopedServerSettingKey, ServerSettings } from "./settings.ts";
 
 /** File name of the checked-in Lecturn project file, resolved at the workspace root. */
 export const LECTURN_PROJECT_FILE_NAME = "lecturn.json";
@@ -87,6 +88,12 @@ export const LecturnProjectFile = Schema.Struct({
         'Where new threads start for this repository: "worktree" for a fresh git worktree, "local" for the current checkout. A per-project setting in Lecturn overrides this; when neither is set, the global default applies.',
     }),
   ),
+  worktreeSubmodules: Schema.optionalKey(
+    WorktreeSubmodules.annotate({
+      description:
+        'How new worktrees populate git submodules: "recursive" (the default) initializes nested submodules too, "top-level" initializes only those declared by this repository, and "none" leaves every submodule empty for a setup script to handle. A project or environment setting in Lecturn overrides this.',
+    }),
+  ),
   scripts: Schema.optionalKey(
     Schema.Array(LecturnProjectFileScript)
       .annotate({
@@ -100,3 +107,38 @@ export const LecturnProjectFile = Schema.Struct({
     "Checked-in project configuration for Lecturn (lecturn.json at the repository root). See https://lecturn.cloudgatherer.net for documentation.",
 });
 export type LecturnProjectFile = typeof LecturnProjectFile.Type;
+
+/**
+ * Settings a repository can also declare in lecturn.json. A key here must be
+ * nullable on `ServerSettings` (null means inherit) so both the project
+ * override and the environment value can defer to the file; `field` names
+ * the lecturn.json field carrying the same value and `builtIn` is what applies
+ * when every tier is unset. `resolveProjectSettings` walks project override,
+ * environment value, file, built-in, so listing a key here is the whole
+ * change for a new file-backed setting.
+ */
+export const PROJECT_FILE_BACKED_SETTINGS = {
+  defaultThreadEnvMode: { field: "defaultThreadEnvMode", builtIn: "local" },
+  worktreeSubmodules: { field: "worktreeSubmodules", builtIn: "recursive" },
+} as const satisfies {
+  readonly [K in ProjectScopedServerSettingKey]?: {
+    readonly field: {
+      readonly [F in keyof LecturnProjectFile]: LecturnProjectFile[F] extends
+        | Exclude<ServerSettings[K], null>
+        | undefined
+        ? F
+        : never;
+    }[keyof LecturnProjectFile];
+    readonly builtIn: Exclude<ServerSettings[K], null>;
+  };
+};
+export type ProjectFileBackedSettingKey = keyof typeof PROJECT_FILE_BACKED_SETTINGS;
+
+/**
+ * `ServerSettings` with every file-backed key resolved to a concrete value.
+ * What `resolveProjectSettings(...).settings` produces once a lecturn.json (or
+ * its absence) has been accounted for.
+ */
+export type ResolvedServerSettings = Omit<ServerSettings, ProjectFileBackedSettingKey> & {
+  readonly [K in ProjectFileBackedSettingKey]: Exclude<ServerSettings[K], null>;
+};

@@ -9,6 +9,7 @@ export const SHOWCASE_SCENES = [
   "review",
   "environments",
   "pr-watch",
+  "agent-activity",
 ] as const;
 export type ShowcaseScene = (typeof SHOWCASE_SCENES)[number];
 

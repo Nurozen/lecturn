@@ -64,7 +64,9 @@ it.effect("creates a fresh schema with fork lineage and branch PR discovery", ()
     yield* assertCompatible;
   }).pipe(
     Effect.provide(
-      ProjectionThreadRepositoryLive.pipe(Layer.provideMerge(NodeSqliteClient.layerMemory())),
+      ProjectionThreadRepositoryLive.pipe(
+        Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
+      ),
     ),
   ),
 );
@@ -110,7 +112,9 @@ for (const throughId of [48, 49, 63, 64]) {
         yield* assertCompatible;
       }).pipe(
         Effect.provide(
-          ProjectionThreadRepositoryLive.pipe(Layer.provideMerge(NodeSqliteClient.layerMemory())),
+          ProjectionThreadRepositoryLive.pipe(
+            Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
+          ),
         ),
       ),
   );
@@ -158,7 +162,9 @@ it.effect(
       yield* assertCompatible;
     }).pipe(
       Effect.provide(
-        ProjectionThreadRepositoryLive.pipe(Layer.provideMerge(NodeSqliteClient.layerMemory())),
+        ProjectionThreadRepositoryLive.pipe(
+          Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
+        ),
       ),
     ),
 );

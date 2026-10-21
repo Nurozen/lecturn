@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as NodeSqliteClient from "@lecturn/shared/nodeSqliteClient";
 import { runMigrations } from "../Migrations.ts";
-it.layer(NodeSqliteClient.layerMemory())("054_ThreadNotes", (it) => {
+it.layer(NodeSqliteClient.layer({ filename: ":memory:" }))("054_ThreadNotes", (it) => {
   it.effect("upgrades a previous database with typed note columns and lookup indexes", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

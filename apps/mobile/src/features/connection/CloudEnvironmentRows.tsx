@@ -39,22 +39,21 @@ import { type RelayEnvironmentView, useConnectionController } from "./useConnect
 interface CloudEnvironmentRowsProps {
   readonly accountId?: string;
   readonly connectedCloudEnvironments: ReadonlyArray<ConnectedEnvironmentSummary>;
+  readonly onOpenEnvironment?: (environmentId: EnvironmentId) => void;
   readonly onSetEnvironmentEnabled: (environmentId: EnvironmentId, enabled: boolean) => void;
   /** Long-press on a saved row. The callback owns the confirm. */
   readonly onRemoveEnvironment: (environmentId: EnvironmentId) => void;
   readonly showcaseAvailableEnvironments?: ReadonlyArray<RelayEnvironmentView>;
   readonly showcaseSignedIn?: boolean;
   /**
-   * Hide the "Lecturn Connect" section title + refresh button for hosts that
-   * provide their own chrome (the onboarding sheet's native header and
-   * pull-to-refresh).
+   * Hide the "Lecturn Connect" section title when the host provides its own header.
    */
   readonly showHeader?: boolean;
 }
 
 /**
  * "Lecturn Connect" section: every environment published to the signed-in account,
- * with connect switches, availability status, refresh, and loading/error
+ * with connect switches, availability status, and loading/error
  * states. Shared between the Settings environments screen and the Lecturn Connect
  * onboarding sheet.
  *
@@ -127,31 +126,10 @@ function CloudEnvironmentRowsContent(
   return (
     <View collapsable={false} className={cn("gap-3", showHeader && "mt-5")}>
       {showHeader ? (
-        <View className="flex-row items-center justify-between px-1">
+        <View className="px-1">
           <Text className="text-sm font-lecturn-bold uppercase text-foreground-muted">
             Lecturn Connect
           </Text>
-          {discoveryAvailable ? (
-            <Pressable
-              accessibilityRole="button"
-              disabled={controller.relayDiscovery.isRefreshing}
-              onPress={() => {
-                void controller.refreshRelayEnvironments();
-              }}
-              className="h-9 w-9 items-center justify-center rounded-full bg-subtle active:opacity-70 disabled:opacity-50"
-            >
-              {controller.relayDiscovery.isRefreshing ? (
-                <ActivityIndicator colorClassName={"accent-icon"} size="small" />
-              ) : (
-                <SymbolView
-                  name="arrow.clockwise"
-                  size={14}
-                  tintColorClassName={"accent-icon"}
-                  type="monochrome"
-                />
-              )}
-            </Pressable>
-          ) : null}
         </View>
       ) : null}
 
@@ -199,6 +177,11 @@ function CloudEnvironmentRowsContent(
                       props.onSetEnvironmentEnabled(environment.environmentId, enabled)
                     }
                     onRemove={() => props.onRemoveEnvironment(environment.environmentId)}
+                    onOpen={
+                      props.onOpenEnvironment
+                        ? () => props.onOpenEnvironment?.(environment.environmentId)
+                        : undefined
+                    }
                     errorExpanded={expandedErrorId === environment.environmentId}
                     onToggleError={() => handleToggleCloudError(environment.environmentId)}
                   />
@@ -208,6 +191,7 @@ function CloudEnvironmentRowsContent(
                     key={environment.environment.environmentId}
                     environment={environment}
                     borderTop={connected.length > 0 || index !== 0}
+                    showChevron={props.onOpenEnvironment !== undefined}
                     onConnect={() => handleConnectCloudEnvironment(environment)}
                     errorExpanded={expandedErrorId === environment.environment.environmentId}
                     onToggleError={() =>
@@ -275,6 +259,7 @@ function ConnectedCloudEnvironmentRow(props: {
   readonly errorExpanded: boolean;
   readonly onSetEnabled: (enabled: boolean) => void;
   readonly onRemove: () => void;
+  readonly onOpen?: (() => void) | undefined;
   readonly onToggleError: () => void;
 }) {
   const serverConfig = useAtomValue(
@@ -291,10 +276,14 @@ function ConnectedCloudEnvironmentRow(props: {
   return (
     <Pressable
       accessibilityHint="Long press to remove from this device"
+      accessibilityRole={props.onOpen ? "button" : undefined}
+      accessibilityLabel={props.onOpen ? `Manage ${props.environment.environmentLabel}` : undefined}
+      onPress={props.onOpen}
       onLongPress={props.onRemove}
     >
       <CloudEnvironmentRowShell
         borderTop={props.borderTop}
+        opensDetails={props.onOpen !== undefined}
         connectionError={enabled || unsupported ? props.environment.connectionError : null}
         connectionErrorTraceId={enabled ? props.environment.connectionErrorTraceId : null}
         connectionState={enabled || unsupported ? props.environment.connectionState : "available"}
@@ -316,6 +305,7 @@ function ConnectedCloudEnvironmentRow(props: {
 function CloudEnvironmentRow(props: {
   readonly environment: RelayEnvironmentView;
   readonly borderTop: boolean;
+  readonly showChevron: boolean;
   readonly errorExpanded: boolean;
   readonly onConnect: () => void;
   readonly onToggleError: () => void;
@@ -330,6 +320,7 @@ function CloudEnvironmentRow(props: {
   return (
     <CloudEnvironmentRowShell
       borderTop={props.borderTop}
+      showChevron={props.showChevron}
       connectionError={presentation.connectionError}
       connectionErrorTraceId={presentation.connectionErrorTraceId}
       connectionState={presentation.connectionState}
@@ -355,6 +346,8 @@ function CloudEnvironmentRow(props: {
 
 function CloudEnvironmentRowShell(props: {
   readonly borderTop: boolean;
+  readonly showChevron?: boolean;
+  readonly opensDetails?: boolean;
   readonly connectionError: string | null;
   readonly connectionErrorTraceId: string | null;
   readonly connectionState: EnvironmentConnectionPhase;
@@ -478,10 +471,16 @@ function CloudEnvironmentRowShell(props: {
         </StatusContainer>
       </View>
       <ThemedSwitch
+        style={{ alignSelf: "center" }}
         disabled={props.disabled}
         onValueChange={props.onValueChange}
         value={props.value}
       />
+      {props.opensDetails || props.showChevron ? (
+        <View style={{ opacity: props.opensDetails ? 1 : 0.4 }}>
+          <SymbolView name="chevron.right" size={12} tintColorClassName="accent-icon-subtle" />
+        </View>
+      ) : null}
     </View>
   );
 }

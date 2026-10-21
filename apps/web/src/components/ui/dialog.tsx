@@ -10,10 +10,10 @@ import {
   DIALOG_MEDIA_POPUP_CLASS,
   DIALOG_MOBILE_SHEET_CLASS,
   DIALOG_POPUP_CLASS,
+  DIALOG_SURFACE_CLASS,
+  type DialogSurface,
 } from "~/components/ui/dialog-styles";
 import { ScrollArea } from "~/components/ui/scroll-area";
-
-const DialogCreateHandle = DialogPrimitive.createHandle;
 
 const Dialog = DialogPrimitive.Root;
 
@@ -64,26 +64,30 @@ function DialogPopup({
   showCloseButton = true,
   bottomStickOnMobile = true,
   viewportRef,
-  backdropClassName,
-  viewportClassName,
   variant = "default",
+  surface = "default",
+  layout = "default",
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean;
   bottomStickOnMobile?: boolean;
   viewportRef?: React.Ref<HTMLDivElement>;
-  backdropClassName?: string;
-  viewportClassName?: string;
   variant?: "default" | "media";
+  /** Lecturn glass treatment; see DIALOG_SURFACE_CLASS. */
+  surface?: DialogSurface;
+  /** "phone-setup" pads for the phone's safe area (components/settings/phone-settings.css). */
+  layout?: "default" | "phone-setup";
 }) {
   return (
     <DialogPortal>
-      <DialogBackdrop className={backdropClassName} variant={variant} />
+      {/* Media opens from inside other overlays (a composer chip, a popover), so it sits above them. */}
+      <DialogBackdrop className={variant === "media" ? "z-[60]" : undefined} variant={variant} />
       <DialogViewport
         ref={viewportRef}
         className={cn(
           bottomStickOnMobile && "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12",
-          viewportClassName,
+          variant === "media" &&
+            "z-[60] grid-rows-1 place-items-center px-4 py-6 [-webkit-app-region:no-drag]",
         )}
       >
         <DialogPrimitive.Popup
@@ -92,6 +96,8 @@ function DialogPopup({
             "row-start-2 text-popover-foreground",
             variant === "default" && "max-h-full max-w-lg",
             bottomStickOnMobile && DIALOG_MOBILE_SHEET_CLASS,
+            DIALOG_SURFACE_CLASS[surface],
+            layout === "phone-setup" && "phone-setup-viewport",
             className,
           )}
           data-slot="dialog-popup"
@@ -150,7 +156,7 @@ function DialogFooter({
 function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   return (
     <DialogPrimitive.Title
-      className={cn("font-heading font-semibold text-xl leading-none", className)}
+      className={cn("wrap-anywhere font-semibold text-xl leading-none", className)}
       data-slot="dialog-title"
       {...props}
     />
@@ -176,7 +182,7 @@ function DialogPanel({
     <ScrollArea scrollFade={scrollFade}>
       <div
         className={cn(
-          "p-6 in-[[data-slot=dialog-popup]:has([data-slot=dialog-header])]:pt-1 in-[[data-slot=dialog-popup]:has([data-slot=dialog-footer]:not(.border-t))]:pb-1",
+          "space-y-4 p-6 in-[[data-slot=dialog-popup]:has([data-slot=dialog-header])]:pt-1 in-[[data-slot=dialog-popup]:has([data-slot=dialog-footer]:not(.border-t))]:pb-1",
           className,
         )}
         data-slot="dialog-panel"
@@ -187,7 +193,6 @@ function DialogPanel({
 }
 
 export {
-  DialogCreateHandle,
   Dialog,
   DialogTrigger,
   DialogPortal,

@@ -70,7 +70,7 @@ export function SidebarAccountBar(props: {
       </Tooltip>
       {props.needsSignIn ? (
         <>
-          <span className="shrink-0 text-[0.6875rem] text-warning">Needs sign-in</span>
+          <span className="shrink-0 text-2xs text-warning">Needs sign-in</span>
           {hasCloudPublicConfig() ? (
             <Suspense fallback={null}>
               <SidebarSignInAgainButton accountId={props.accountId} />
@@ -78,9 +78,7 @@ export function SidebarAccountBar(props: {
           ) : null}
         </>
       ) : !props.hasRows ? (
-        <span className="shrink-0 text-[0.6875rem] text-sidebar-muted-foreground/60">
-          No threads
-        </span>
+        <span className="shrink-0 text-2xs text-sidebar-muted-foreground/60">No threads</span>
       ) : null}
       {props.attention ? (
         // No pulse here: a bar is always on screen, and a repainting dot never rests.

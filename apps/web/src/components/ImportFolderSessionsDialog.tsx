@@ -220,7 +220,9 @@ function ImportFolderSessionsContent(props: {
     <>
       <DialogHeader>
         <DialogTitle>Import sessions</DialogTitle>
-        <DialogDescription className="truncate">{request.folder}</DialogDescription>
+        <DialogDescription>
+          <span className="block truncate">{request.folder}</span>
+        </DialogDescription>
       </DialogHeader>
       <DialogPanel>
         {isLoading ? (

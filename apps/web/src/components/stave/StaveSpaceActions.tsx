@@ -86,7 +86,7 @@ export function StaveSpaceActions({
                 >
                   Sync
                 </Button>
-                <Label className="flex items-center gap-2 text-xs">
+                <Label size="sm" className="flex items-center">
                   <Checkbox
                     data-lecturn-hover
                     checked={referencesOnly}
@@ -292,16 +292,13 @@ function SpaceEditDialog({
         if (!open) onClose();
       }}
     >
-      <DialogPopup
-        {...glass}
-        className="lecturn-account-surface lecturn-project-settings-dialog max-w-md"
-      >
+      <DialogPopup {...glass} surface="glass" className="max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-4 px-6 pb-6">
           {editor.kind === "memory" ? (
-            <Label className="flex flex-col gap-2">
+            <Label className="flex flex-col">
               Memory store
               <Input
                 value={memory}
@@ -316,7 +313,7 @@ function SpaceEditDialog({
             <>
               {editor.kind === "add" ? (
                 <>
-                  <Label className="flex flex-col gap-2">
+                  <Label className="flex flex-col">
                     Registered repo
                     <Input
                       list="stave-edit-repos"
@@ -329,7 +326,7 @@ function SpaceEditDialog({
                       ))}
                     </datalist>
                   </Label>
-                  <Label className="flex flex-col gap-2">
+                  <Label className="flex flex-col">
                     Mode
                     <Select
                       value={mode}
@@ -355,7 +352,7 @@ function SpaceEditDialog({
                   </Label>
                 </>
               ) : null}
-              <Label className="flex flex-col gap-2">
+              <Label className="flex flex-col">
                 {mode === "reference"
                   ? "Ref (optional)"
                   : editor.kind === "retarget"
@@ -376,12 +373,12 @@ function SpaceEditDialog({
               {editor.kind === "add" ? (
                 <>
                   {mode === "edit" ? (
-                    <Label className="flex flex-col gap-2">
+                    <Label className="flex flex-col">
                       Branch (optional)
                       <Input value={branch} onChange={(event) => setBranch(event.target.value)} />
                     </Label>
                   ) : (
-                    <Label className="flex items-center gap-2">
+                    <Label className="flex items-center">
                       <Checkbox
                         data-lecturn-hover
                         checked={linkMemory}
@@ -390,7 +387,7 @@ function SpaceEditDialog({
                       Link reference memory
                     </Label>
                   )}
-                  <Label className="flex items-center gap-2">
+                  <Label className="flex items-center">
                     <Checkbox
                       data-lecturn-hover
                       checked={noFetch}

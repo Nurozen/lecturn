@@ -86,7 +86,7 @@ export function DecisionSourceDialog({
           <DialogTitle>Decision evidence</DialogTitle>
           <DialogDescription>{note.title}</DialogDescription>
         </DialogHeader>
-        <DialogPanel className="space-y-4">
+        <DialogPanel>
           <div className="flex items-center gap-2">
             <DecisionAttributionChip attribution={note.attribution} />
             <span className="text-xs text-muted-foreground">{note.reviewState}</span>

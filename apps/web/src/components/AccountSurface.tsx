@@ -21,7 +21,6 @@ import {
 } from "./accountTransition.logic";
 import { knockCard } from "./cardKnock";
 import { CelestialOrnaments } from "./CelestialOrnaments";
-import "./account-surface.css";
 
 type AccountSurfaceProps = ComponentProps<"div"> & {
   environmentId?: EnvironmentId | null;
@@ -226,7 +225,7 @@ function AccountWave({ reveal, accent }: { reveal: Reveal; accent: string }) {
           <linearGradient id={shineId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--glass-accent)" />
             <stop offset="36%" stopColor="var(--glass-light)" />
-            <stop offset="55%" stopColor="#f2fffc" />
+            <stop offset="55%" stopColor="var(--lecturn-account-wave-shine)" />
             <stop offset="74%" stopColor="var(--glass-light)" />
             <stop offset="100%" stopColor="var(--glass-accent)" />
           </linearGradient>

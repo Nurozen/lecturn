@@ -1,15 +1,80 @@
 ---
 name: test-lecturn-mobile
-description: Launch and test Lecturn Mobile on an iOS Simulator or Android Emulator against disposable local Lecturn environments, including Metro and dev-client reuse, native rebuild decisions, per-client pairing, seeded projects, semantic UI control, screenshots, and iOS serve-sim streaming. Use after mobile UI or native changes, when reproducing phone or tablet behavior, pairing an emulator to isolated state, or verifying mobile behavior on macOS, Linux, or Windows.
+description: Test Lecturn Mobile's native iOS and Android app through Lecturn's Device panel and its returned AgentDevice command against disposable local Lecturn environments, including native-client builds, Metro launch, and per-client pairing. Falls back to XcodeBuildMCP/adb only on hosts without Lecturn device tools.
 ---
 
 # Test Lecturn Mobile
 
 Run one focused, end-to-end mobile verification pass against disposable Lecturn state. Use the sibling [`test-lecturn-app`](../test-lecturn-app/SKILL.md) skill as the detailed reference for pairing-token semantics and SQLite fixtures.
 
+## Open the device
+
+Call `device_list`, then `device_open` with the selected host and device IDs.
+Lecturn boots the device and shows its live stream in the Device panel. Follow its
+returned `quickStart`, using the exact `agentDevice.command` and all `targetArgs`
+on every operation. Use `device_screenshot` to inspect the screen.
+
+If Lecturn device tools or the selected device are unavailable, report the blocker.
+Use the fallback below only on hosts where the `device_*` tools are not exposed
+at all; when they are present, do not call simctl, adb, xcrun, or serve-sim directly.
+
+## Use an isolated backend
+
+Reuse this task's healthy backend. Otherwise run `vp run dev` from the
+repository root, retain its terminal session, and read the actual backend port
+from the dev-runner output. Use the worktree's ignored `.lecturn` state. Never run
+against `~/.lecturn/userdata`. The Browser panel is not required for this workflow.
+
+Test with meaningful project and thread data. Read the shared
+[SQLite fixture reference](../test-lecturn-app/references/sqlite-fixtures.md) only
+when inspecting or seeding SQLite. Stop the test server before fixture writes.
+
+## Launch Lecturn Dev
+
+From the checkout being tested on the selected device host, run:
+
+```bash
+node scripts/mobile-native-client.ts ensure <ios|android> <device-id>
+```
+
+This reuses a matching native client or builds and installs one. Authorized
+mobile verification includes that build step unless the user prohibits it.
+
+Start `vp run dev:client` from `apps/mobile`, or reuse a healthy Metro belonging
+to this checkout. Open its printed development-client URL with AgentDevice
+`open com.cloudgatherer.lecturn.dev <url>` and all returned target arguments.
+The device must be able to reach both Metro and the isolated backend.
+
+## Pair and verify
+
+Use the helper from the repository root, with the returned executable and target
+arguments stored in `agent_device_command` and the Bash array
+`agent_device_target_args`:
+
+```bash
+.agents/skills/test-lecturn-mobile/scripts/pair-client.sh \
+  <server-port> <base-dir> <device-reachable-backend-origin> \
+  "$agent_device_command" "${agent_device_target_args[@]}"
+```
+
+It issues a fresh credential and opens Lecturn Dev's existing pairing route
+through AgentDevice. For a backend on the device host, use
+`http://127.0.0.1:<server-port>` on iOS or `http://10.0.2.2:<server-port>`
+on Android. For a remote backend, use its reachable origin.
+
+Confirm the intended projects appear, exercise the affected flow, and capture
+evidence. Retain the app and environment while iterating. At teardown, remove
+the disposable connection, close the AgentDevice session, call `device_close`,
+and stop only your backend and Metro processes.
+
+## Without Lecturn device tools
+
+Use this fallback only when the session exposes no `device_*` tools (for
+example a non-Lecturn agent host). It drives simulators and emulators directly.
+
 Command examples use POSIX shell syntax. On Windows, use PowerShell equivalents: set variables with `$env:NAME = "value"`, use an explicit temporary directory from `[System.IO.Path]::GetTempPath()`, and run multiline examples on one line or with PowerShell backticks. Use `$env:ANDROID_HOME\platform-tools\adb.exe` when `adb` is not already on `PATH`.
 
-## Select a viable platform
+### Select a viable platform
 
 Inspect the host and the affected code before launching processes:
 
@@ -19,7 +84,7 @@ Inspect the host and the affected code before launching processes:
 
 Do not treat unavailable iOS tooling as a blocker when Android is a valid representative target.
 
-## Ensure a compatible native client
+### Ensure a compatible native client
 
 Authorized mobile verification includes building and installing a development client. A missing, stale, or unknown native client is not a reason to skip verification or leave a PR in draft. Build and install it, then continue. Respect an explicit user instruction not to rebuild; otherwise do not ask for separate permission.
 
@@ -38,7 +103,7 @@ A JavaScript-only diff, bundle identifier, app version, or recent install date d
 
 The development identity is `Lecturn Dev`, bundle/package `com.cloudgatherer.lecturn.dev`, scheme `lecturn-dev`. If a build fails, investigate the build error and fix the local prerequisites. Report the concrete failure if it cannot be resolved, not “no compatible client.”
 
-## Start one disposable Lecturn environment
+### Start one disposable Lecturn environment
 
 Run backend commands from the repository root. Use the ignored, worktree-local `.lecturn` directory or create a fresh directory with the host OS's temporary-directory mechanism. An explicit base directory stores state in `<base-dir>/userdata`; never point testing at shared `~/.lecturn` state.
 
@@ -72,7 +137,7 @@ Use these client origins:
 
 Enter the complete `http://` origin to make the test transport explicit. Bare IP addresses default to HTTP, while bare hostnames default to HTTPS. When testing web and mobile together, run `vp run dev --home-dir <base-dir> --host 127.0.0.1` instead and do not launch a second backend over the same base directory.
 
-## Start or reuse Metro safely
+### Start or reuse Metro safely
 
 Run Metro from `apps/mobile`.
 
@@ -92,7 +157,7 @@ Run Metro from `apps/mobile`.
 
 4. Open the exact development-client URL for the selected device and confirm the loaded bundle belongs to this worktree and Metro port.
 
-### iOS launch
+#### iOS launch
 
 Use `ios-debugger-agent` to select one UDID and set these XcodeBuildMCP session defaults:
 
@@ -110,7 +175,7 @@ xcrun simctl openurl <simulator-udid> <printed-dev-client-url>
 
 Accept the iOS confirmation prompt and dismiss the developer menu when it obscures the app.
 
-### Android launch
+#### Android launch
 
 Use the emulator serial already checked by `ensure`:
 
@@ -124,7 +189,7 @@ adb -s <emulator-serial> shell am start -W \
 
 Do not start, stop, erase, or reconfigure an emulator owned by another task. Track and later stop only processes owned by this test.
 
-## Pair each client once
+### Pair each client once
 
 Use the bundled helper from the repository root. It issues a fresh credential against the running backend's exact base directory, opens the existing Add Environment route with the credential in an encoded query parameter, and asks that route to connect once:
 
@@ -152,19 +217,19 @@ Verify the expected seeded projects appear before exercising the affected flow.
 
 Pairing credentials are secret, short-lived, and single-use. Create a different credential for every simulator, emulator, physical device, or browser. If an attempt fails, issue a new credential rather than retrying the old one. Do not expose tokens in screenshots, commits, or final responses.
 
-## Drive and observe the affected flow
+### Drive and observe the affected flow
 
-### iOS
+#### iOS
 
 Use `snapshot_ui` and current element references from XcodeBuildMCP for taps and typing. Stream the same UDID through `ios-simulator-browser` so the user can watch in Lecturn when the host supports it. Use the stream as a visual feed rather than a reason to switch to fragile browser coordinates.
 
-### Android
+#### Android
 
 Prefer semantic Android automation exposed by the current agent host. Otherwise inspect the current hierarchy with `adb shell uiautomator dump`, target stable resource IDs, content descriptions, text, or bounds, and use scoped `adb shell input` actions. Refresh the hierarchy after navigation. Capture the final state with `adb exec-out screencap -p`.
 
 Android does not use serve-sim. Use a browser-compatible Android mirror when the host already provides one; otherwise return focused emulator screenshots as evidence rather than installing unrelated streaming infrastructure during verification.
 
-## Verify and clean up
+### Verify and clean up
 
 Exercise only the affected flow on one representative device unless the change specifically concerns platform, OS version, or screen size. Before finishing:
 
@@ -177,7 +242,7 @@ Exercise only the affected flow on one representative device unless the change s
 
 Keep local verification focused. Do not turn this workflow into a full repository test run.
 
-## Troubleshoot predictable failures
+### Troubleshoot predictable failures
 
 - **Old UI or an old error appears:** verify Metro's worktree, variant, URL, and port before diagnosing the app.
 - **Metro serves stale or invalid transforms after those checks:** stop the owned Metro process and run `vp run dev:client:reset` once on the standard port. For a custom port, add `--clear` to the complete explicit `expo start` command above.

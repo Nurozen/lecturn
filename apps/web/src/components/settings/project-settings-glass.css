@@ -1,5 +1,3 @@
-@import "../account-surface.css";
-
 /* Scoped to settings pages, project settings, and Stave editors (including portals). */
 .lecturn-project-settings [data-slot="settings-section-card"] {
   border-radius: 18px;

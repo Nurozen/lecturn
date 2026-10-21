@@ -268,7 +268,8 @@ class GeometryNode {
   querySelector(selector: string) {
     if (selector === "[data-sidebar-drag-label]" || selector === ".sidebar-drag-boundary-label")
       return new GeometryNode(this.top + 4, 16, this.scale);
-    if (selector === ".sidebar-drag-placeholder") return new GeometryNode(this.top, 36, this.scale);
+    if (selector === "[data-sidebar-drag-placeholder]")
+      return new GeometryNode(this.top, 36, this.scale);
     return null;
   }
 }

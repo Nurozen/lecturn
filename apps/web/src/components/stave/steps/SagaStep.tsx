@@ -62,7 +62,7 @@ export function SagaStep(props: {
           ) : (
             <div className="flex flex-col gap-1.5">
               {members.map((member) => (
-                <Label key={member} className="gap-1.5 font-normal">
+                <Label key={member} variant="checkbox">
                   <Checkbox
                     data-lecturn-hover
                     checked={state.after.includes(member)}

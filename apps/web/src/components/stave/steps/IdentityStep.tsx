@@ -66,7 +66,7 @@ export function IdentityStep(props: {
         <div className="flex flex-wrap items-center gap-2">
           <ToggleGroup
             aria-labelledby="stave-wizard-kind-label"
-            size="sm"
+            size="sm-label"
             variant="outline"
             value={[state.kindChip]}
             onValueChange={(value) => {
@@ -75,8 +75,8 @@ export function IdentityStep(props: {
             }}
           >
             {STAVE_SPACE_KIND_CHIPS.map((chip) => (
-              <Toggle data-lecturn-hover key={chip} value={chip} className="px-2.5 capitalize">
-                {chip}
+              <Toggle data-lecturn-hover key={chip} value={chip}>
+                <span className="capitalize">{chip}</span>
               </Toggle>
             ))}
           </ToggleGroup>
@@ -110,7 +110,7 @@ export function IdentityStep(props: {
           placeholder="Paste the ticket, brief or design note the space is for."
           onChange={(event) => onChange(updateWizardState(state, { specText: event.target.value }))}
         />
-        <Label htmlFor="stave-wizard-spec-path" className="mt-1 text-muted-foreground">
+        <Label htmlFor="stave-wizard-spec-path" tone="muted" className="mt-1">
           or a spec path on the server
         </Label>
         <Input
@@ -119,7 +119,7 @@ export function IdentityStep(props: {
           value={state.specPath}
           placeholder="/absolute/path/to/spec.md"
           spellCheck={false}
-          className="font-mono"
+          font="mono"
           onChange={(event) => onChange(updateWizardState(state, { specPath: event.target.value }))}
         />
       </div>

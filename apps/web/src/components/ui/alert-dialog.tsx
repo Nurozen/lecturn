@@ -7,17 +7,13 @@ import {
   DIALOG_BACKDROP_CLASS,
   DIALOG_MOBILE_SHEET_CLASS,
   DIALOG_POPUP_CLASS,
+  DIALOG_SURFACE_CLASS,
+  type DialogSurface,
 } from "~/components/ui/dialog-styles";
-
-const AlertDialogCreateHandle = AlertDialogPrimitive.createHandle;
 
 const AlertDialog = AlertDialogPrimitive.Root;
 
 const AlertDialogPortal = AlertDialogPrimitive.Portal;
-
-function AlertDialogTrigger(props: AlertDialogPrimitive.Trigger.Props) {
-  return <AlertDialogPrimitive.Trigger data-slot="alert-dialog-trigger" {...props} />;
-}
 
 function AlertDialogBackdrop({ className, ...props }: AlertDialogPrimitive.Backdrop.Props) {
   return (
@@ -47,10 +43,13 @@ function AlertDialogPopup({
   className,
   bottomStickOnMobile = true,
   portalContainer,
+  surface = "default",
   ...props
 }: AlertDialogPrimitive.Popup.Props & {
   bottomStickOnMobile?: boolean;
   portalContainer?: AlertDialogPrimitive.Portal.Props["container"];
+  /** Lecturn glass treatment; see DIALOG_SURFACE_CLASS. */
+  surface?: DialogSurface;
 }) {
   return (
     <AlertDialogPortal container={portalContainer}>
@@ -63,6 +62,7 @@ function AlertDialogPopup({
             DIALOG_POPUP_CLASS,
             "row-start-2 max-h-full max-w-lg text-popover-foreground",
             bottomStickOnMobile && DIALOG_MOBILE_SHEET_CLASS,
+            DIALOG_SURFACE_CLASS[surface],
             className,
           )}
           data-slot="alert-dialog-popup"
@@ -107,7 +107,7 @@ function AlertDialogFooter({
 function AlertDialogTitle({ className, ...props }: AlertDialogPrimitive.Title.Props) {
   return (
     <AlertDialogPrimitive.Title
-      className={cn("font-heading font-semibold text-xl leading-none", className)}
+      className={cn("wrap-anywhere font-semibold text-xl leading-none", className)}
       data-slot="alert-dialog-title"
       {...props}
     />
@@ -129,12 +129,10 @@ function AlertDialogClose(props: AlertDialogPrimitive.Close.Props) {
 }
 
 export {
-  AlertDialogCreateHandle,
   AlertDialog,
   AlertDialogPortal,
   AlertDialogBackdrop,
   AlertDialogBackdrop as AlertDialogOverlay,
-  AlertDialogTrigger,
   AlertDialogPopup,
   AlertDialogPopup as AlertDialogContent,
   AlertDialogHeader,

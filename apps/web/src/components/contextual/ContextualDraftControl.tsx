@@ -86,9 +86,11 @@ export function ContextualDraftControl({
           <DialogHeader>
             <DialogTitle>Contextual for this project</DialogTitle>
           </DialogHeader>
-          <DialogPanel className="space-y-6">
-            <ContextualProjectSettings environmentId={environmentId} projectId={projectId} />
-            <ContextualHostSettings environmentId={environmentId} />
+          <DialogPanel>
+            <div className="space-y-6">
+              <ContextualProjectSettings environmentId={environmentId} projectId={projectId} />
+              <ContextualHostSettings environmentId={environmentId} />
+            </div>
           </DialogPanel>
         </DialogPopup>
       </Dialog>

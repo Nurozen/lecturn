@@ -26,11 +26,9 @@ type GitBranchesSheetProps = StaticScreenProps<{
 }>;
 
 const SECTION_TITLE_CLASS_NAME =
-  Platform.OS === "android"
-    ? "text-foreground text-base font-lecturn-medium"
-    : "text-foreground-secondary text-2xs font-lecturn-bold tracking-[1px] uppercase";
+  "android:text-foreground android:text-base android:font-lecturn-medium ios:text-foreground-secondary ios:text-2xs ios:font-lecturn-bold ios:tracking-[1px] ios:uppercase";
 
-const INPUT_CLASS_NAME = Platform.OS === "android" ? "rounded-xl bg-sheet-solid" : "rounded-[18px]";
+const INPUT_CLASS_NAME = "android:rounded-xl android:bg-sheet-solid ios:rounded-[18px]";
 
 /** Android uses flat Material cards; iOS keeps Lecturn's glass cards. */
 function BranchSheetCard(props: { readonly children: ReactNode }) {
@@ -88,7 +86,7 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
   return (
     <View
       collapsable={false}
-      className={Platform.OS === "android" ? "bg-sheet" : "flex-1 bg-sheet"}
+      className="bg-sheet ios:flex-1"
       style={Platform.OS === "android" ? { maxHeight: windowHeight * 0.92 } : undefined}
     >
       {Platform.OS === "android" ? (
@@ -108,11 +106,11 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
       ) : null}
       <MaterialScreenContent fitToContents>
         <ScrollView
-          className={Platform.OS === "android" ? "shrink grow-0" : "flex-1"}
+          className="android:shrink android:grow-0 ios:flex-1"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           contentInset={{ bottom: Math.max(insets.bottom, 18) + 18 }}
-          contentContainerClassName={Platform.OS === "android" ? "gap-2 p-2" : "gap-4 px-5 pt-2"}
+          contentContainerClassName="android:gap-2 android:p-2 ios:gap-4 ios:px-5 ios:pt-2"
           contentContainerStyle={
             Platform.OS === "android"
               ? { paddingBottom: Math.max(insets.bottom, 18) + 18 }
@@ -120,9 +118,7 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
           }
         >
           {props.route.params.repoKey ? (
-            <Text
-              className={cn("text-sm font-lecturn-bold", Platform.OS === "android" && "px-4 pt-2")}
-            >
+            <Text className="text-sm font-lecturn-bold android:px-4 android:pt-2">
               {selectedThreadGitRepository?.repoName ?? "Repository unavailable"}
             </Text>
           ) : null}
@@ -199,32 +195,16 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
           ) : null}
 
           <View className="gap-2">
-            <Text
-              className={
-                Platform.OS === "android"
-                  ? "px-4 pb-1 pt-3 text-foreground-secondary text-sm font-lecturn-medium"
-                  : "text-foreground-secondary text-2xs font-lecturn-bold tracking-[1px] uppercase"
-              }
-            >
+            <Text className="text-foreground-secondary android:px-4 android:pb-1 android:pt-3 android:text-sm android:font-lecturn-medium ios:text-2xs ios:font-lecturn-bold ios:tracking-[1px] ios:uppercase">
               Existing branches
             </Text>
             {branchesLoading ? (
-              <Text
-                className={cn(
-                  "text-foreground-secondary text-sm font-medium",
-                  Platform.OS === "android" && "px-4",
-                )}
-              >
+              <Text className="text-foreground-secondary text-sm font-medium android:px-4">
                 Loading branches...
               </Text>
             ) : null}
             {!branchesLoading && availableBranches.length === 0 ? (
-              <Text
-                className={cn(
-                  "text-foreground-secondary text-sm font-medium",
-                  Platform.OS === "android" && "px-4",
-                )}
-              >
+              <Text className="text-foreground-secondary text-sm font-medium android:px-4">
                 No local branches found.
               </Text>
             ) : null}
@@ -242,16 +222,10 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
                 <Pressable
                   key={branch.name}
                   className={cn(
-                    "gap-1 px-4 py-3 disabled:opacity-[0.45]",
-                    Platform.OS === "android"
-                      ? cn(
-                          "rounded-[20px] active:bg-subtle",
-                          branch.current ? "bg-secondary" : "bg-card",
-                        )
-                      : cn(
-                          "rounded-[18px] border",
-                          branch.current ? "border-subtle-strong" : "border-border",
-                        ),
+                    "gap-1 px-4 py-3 disabled:opacity-[0.45] android:rounded-[20px] android:active:bg-subtle ios:rounded-[18px] ios:border",
+                    branch.current
+                      ? "android:bg-secondary ios:border-subtle-strong"
+                      : "android:bg-card ios:border-border",
                   )}
                   accessibilityRole="button"
                   accessibilityState={{ selected: branch.current, disabled: busy || disabled }}
@@ -265,12 +239,7 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
                   {Platform.OS !== "android" ? (
                     <View className="absolute inset-0 rounded-[18px] bg-glass-surface" />
                   ) : null}
-                  <Text
-                    className={cn(
-                      "text-foreground text-base",
-                      Platform.OS === "android" ? "font-lecturn-medium" : "font-lecturn-bold",
-                    )}
-                  >
+                  <Text className="text-foreground text-base android:font-lecturn-medium ios:font-lecturn-bold">
                     {branch.name}
                   </Text>
                   <Text className="text-foreground-secondary text-xs font-medium">{subtitle}</Text>

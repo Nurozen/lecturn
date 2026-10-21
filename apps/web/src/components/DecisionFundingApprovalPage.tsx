@@ -161,7 +161,7 @@ export function ExtensionsFundingApprovalPage({
             <div className="flex items-center gap-3 p-3.5">
               {userId === activeAccountId ? <UserButton /> : null}
               <div className="min-w-0">
-                <p className="text-[11px] text-muted-foreground">Membership account</p>
+                <p className="text-2xs text-muted-foreground">Membership account</p>
                 <p className="break-all text-sm font-medium">
                   {account.email ??
                     (userId === activeAccountId
@@ -175,11 +175,11 @@ export function ExtensionsFundingApprovalPage({
               <div className="flex items-start gap-3 border-t border-border/70 p-3.5">
                 <LaptopIcon className="mt-1 size-5 shrink-0 text-muted-foreground" aria-hidden />
                 <div className="min-w-0">
-                  <p className="text-[11px] text-muted-foreground">Lecturn host</p>
+                  <p className="text-2xs text-muted-foreground">Lecturn host</p>
                   <p className="break-words text-sm font-medium">
                     {info.environmentLabel || "This Lecturn host"}
                   </p>
-                  <details className="mt-1 text-[11px] text-muted-foreground">
+                  <details className="mt-1 text-2xs text-muted-foreground">
                     <summary className="cursor-pointer">Host details</summary>
                     <p className="mt-1 break-all">{info.environmentId}</p>
                     <p className="mt-1">

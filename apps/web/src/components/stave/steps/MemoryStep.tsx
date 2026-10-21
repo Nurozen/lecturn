@@ -41,7 +41,7 @@ export function MemoryStep(props: {
           <Input
             id="stave-wizard-memory-spec"
             size="sm"
-            className="font-mono"
+            font="mono"
             value={draft}
             placeholder="[provider:]<id> or . for a fresh task store"
             spellCheck={false}
@@ -92,10 +92,9 @@ export function MemoryStep(props: {
                 key={suggestion.value}
                 size="xs"
                 variant="outline"
-                className="font-mono"
                 onClick={() => onToggle(suggestion.value)}
               >
-                {suggestion.label}
+                <span className="font-mono">{suggestion.label}</span>
               </Button>
             ))}
           </div>

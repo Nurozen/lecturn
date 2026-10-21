@@ -19,7 +19,7 @@ export function DecisionAttributionChip({
     <Tooltip>
       <TooltipTrigger
         render={<span tabIndex={0} />}
-        className="inline-flex items-center rounded-full border border-border/70 bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-foreground"
+        className="inline-flex items-center rounded-full border border-border/70 bg-muted/40 px-2 py-0.5 text-3xs font-medium text-foreground"
       >
         {labels[attribution]}
       </TooltipTrigger>

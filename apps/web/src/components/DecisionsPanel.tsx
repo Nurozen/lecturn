@@ -564,7 +564,7 @@ function AvailableDecisionsPanel({
               }
             }}
           >
-            <div className="mb-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+            <div className="mb-2 flex flex-wrap gap-2 text-2xs text-muted-foreground">
               <DecisionAttributionChip attribution={note.attribution} />
               <span>{note.reviewState}</span>
               {note.lifecycle === "superseded" ? <span>Superseded</span> : null}
@@ -601,7 +601,7 @@ function AvailableDecisionsPanel({
                     onClick={() => setSource({ note, evidence })}
                   >
                     <span className="block whitespace-pre-wrap">{evidence.quote}</span>
-                    <span className="mt-1 block text-[10px] text-muted-foreground">
+                    <span className="mt-1 block text-3xs text-muted-foreground">
                       {evidence.availability === "available"
                         ? "Open source"
                         : "Saved evidence · source may be unavailable"}
@@ -804,7 +804,7 @@ function AvailableDecisionsPanel({
               Settings apply to this project on this environment.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="space-y-4">
+          <DialogPanel>
             <DecisionsFunding environmentId={environmentId} onChange={status.refresh} />
             <p className="text-sm">
               Lecturn’s evaluation service finds decisions in conversation excerpts. Your thread’s
@@ -948,7 +948,7 @@ function AvailableDecisionsPanel({
               Both notes and their evidence stay available. This changes which decision is current.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="space-y-4">
+          <DialogPanel>
             {relationshipReview ? (
               <>
                 <div>
@@ -1005,7 +1005,7 @@ function AvailableDecisionsPanel({
               Historical analysis uses detection allowance and your agent’s account.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="space-y-4">
+          <DialogPanel>
             {scan ? (
               <>
                 <p className="text-sm">

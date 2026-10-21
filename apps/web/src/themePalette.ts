@@ -9,6 +9,8 @@ import {
   IRIS_THEME,
   OCEAN_THEME,
   LECTURN_CHAT_THEME,
+  STANDARD_LIGHT_THEME_COLORS,
+  STANDARD_DARK_THEME_COLORS,
   RESERVED_THEME_IDS,
   THEME_COLOR_ROLES,
   type ThemeAppearance,
@@ -327,133 +329,6 @@ function legacyThemeMode(theme: ThemePreference): ThemeAppearance | null {
 }
 
 /**
- * The palette Lecturn wears with no theme installed, captured from the app's
- * stock tokens (index.css) so a draft seeded from the default look paints the
- * pixels the user is already seeing. Alpha-bearing tokens are flattened over
- * their real backdrops (canvas, or the sidebar for its rows) because theme
- * colors are stored as opaque OKLCH tokens.
- */
-const LECTURN_LIGHT_THEME_COLORS: ThemeColors = {
-  canvas: "#f4eddf",
-  chrome: "#f4eddf",
-  toolbar: "#f4eddf",
-  toolbarForeground: "#302a22",
-  toolbarBorder: "#d6c8b2",
-  toolbarControl: "#fff9ee",
-  toolbarControlForeground: "#302a22",
-  toolbarControlHover: "#e9deca",
-  surface: "#fff9ee",
-  surfaceRaised: "#f4eddf",
-  surfaceOverlay: "#fff9ee",
-  text: "#302a22",
-  textMuted: "#756650",
-  border: "#d6c8b2",
-  input: "#bca98a",
-  focus: "#805419",
-  accent: "#805419",
-  accentForeground: "#fff9ee",
-  secondary: "#ede3d2",
-  secondaryForeground: "#302a22",
-  muted: "#ede3d2",
-  mutedForeground: "#756650",
-  placeholder: "#756650",
-  secondaryLabel: "#756650",
-  iconMuted: "#756650",
-  error: "#fb2c36",
-  errorForeground: "#c10007",
-  errorSurface: "#fcebec",
-  warning: "#fe9a00",
-  warningForeground: "#bb4d00",
-  warningSurface: "#fcf4e8",
-  update: "#805419",
-  updateForeground: "#805419",
-  updateSurface: "#e9dcc4",
-  accentSurface: "#e9deca",
-  accentSurfaceForeground: "#302a22",
-  messageSurface: "#e9deca",
-  messageForeground: "#302a22",
-  messageAction: "#805419",
-  messageActionForeground: "#fff9ee",
-  messageActionHover: "#694211",
-  codeBackground: "#fff9ee",
-  codeForeground: "#302a22",
-  sidebar: "#ede3d2",
-  sidebarForeground: "#302a22",
-  sidebarMutedForeground: "#756650",
-  sidebarControlSurface: "#e9deca",
-  sidebarRowHover: "#f4eddf",
-  sidebarRowActive: "#fff9ee",
-  sidebarRowSelected: "#fff9ee",
-  sidebarBorder: "#d6c8b2",
-  terminalBackground: "#f4eddf",
-  terminalForeground: "#302a22",
-  terminalCursor: "#805419",
-  terminalSelection: "#d5bd91",
-  terminalScrollbar: "#c7b494",
-  terminalScrollbarHover: "#a48e6a",
-};
-
-const LECTURN_DARK_THEME_COLORS: ThemeColors = {
-  canvas: "#061522",
-  chrome: "#061522",
-  toolbar: "#061522",
-  toolbarForeground: "#dfc7a4",
-  toolbarBorder: "#263746",
-  toolbarControl: "#0c1d2b",
-  toolbarControlForeground: "#dfc7a4",
-  toolbarControlHover: "#142838",
-  surface: "#0c1d2b",
-  surfaceRaised: "#0c1d2b",
-  surfaceOverlay: "#0c1d2b",
-  text: "#dfc7a4",
-  textMuted: "#a5957f",
-  border: "#263746",
-  input: "#354451",
-  focus: "#d9a34e",
-  accent: "#d9a34e",
-  accentForeground: "#061522",
-  secondary: "#0c1d2b",
-  secondaryForeground: "#dfc7a4",
-  muted: "#0c1d2b",
-  mutedForeground: "#a5957f",
-  placeholder: "#a5957f",
-  secondaryLabel: "#a5957f",
-  iconMuted: "#a5957f",
-  error: "#fb414a",
-  errorForeground: "#ff6467",
-  errorSurface: "#301214",
-  warning: "#fe9a00",
-  warningForeground: "#ffb900",
-  warningSurface: "#312108",
-  update: "#d9a34e",
-  updateForeground: "#d9a34e",
-  updateSurface: "#2b2c28",
-  accentSurface: "#142838",
-  accentSurfaceForeground: "#dfc7a4",
-  messageSurface: "#142838",
-  messageForeground: "#dfc7a4",
-  messageAction: "#d9a34e",
-  messageActionForeground: "#061522",
-  messageActionHover: "#edb864",
-  codeBackground: "#0c1d2b",
-  codeForeground: "#dfc7a4",
-  sidebar: "#04101a",
-  sidebarForeground: "#dfc7a4",
-  sidebarMutedForeground: "#9eacb7",
-  sidebarControlSurface: "#061522",
-  sidebarRowHover: "#132a39",
-  sidebarRowActive: "#203746",
-  sidebarRowSelected: "#0c1d2b",
-  sidebarBorder: "#142838",
-  terminalBackground: "#061522",
-  terminalForeground: "#dfc7a4",
-  terminalCursor: "#d9a34e",
-  terminalSelection: "#3e413a",
-  terminalScrollbar: "#263746",
-  terminalScrollbarHover: "#415367",
-};
-
-/**
  * The standard Lecturn look as a theme palette, for seeding a new theme when
  * no theme is installed. Distinct from {@link getDefaultThemeColors}, which
  * carries the flagship Lecturn Chat palette used to fill roles omitted by theme
@@ -461,9 +336,9 @@ const LECTURN_DARK_THEME_COLORS: ThemeColors = {
  */
 export function getStandardThemeColors(appearance: ThemeAppearance): ThemeColors {
   if (appearance === "dark") {
-    return (standardDarkThemeColors ??= decodeThemeColors(LECTURN_DARK_THEME_COLORS));
+    return (standardDarkThemeColors ??= decodeThemeColors(STANDARD_DARK_THEME_COLORS));
   }
-  return (standardLightThemeColors ??= decodeThemeColors(LECTURN_LIGHT_THEME_COLORS));
+  return (standardLightThemeColors ??= decodeThemeColors(STANDARD_LIGHT_THEME_COLORS));
 }
 
 type ThemeRgbColor = {

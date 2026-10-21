@@ -18,12 +18,9 @@ import {
   LECTURN_PROJECT_FILE_NAME,
   ThreadId,
 } from "@lecturn/contracts";
+import { sanitizeNewRefName } from "@lecturn/shared/git";
 import { resolveProjectSettings } from "@lecturn/shared/projectSettings";
 import { parseLecturnProjectFile } from "@lecturn/shared/lecturnProjectFile";
-import {
-  isDefaultThreadEnvModeSettled,
-  resolveDefaultThreadEnvMode,
-} from "@lecturn/shared/threadEnvMode";
 import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
 
@@ -102,9 +99,10 @@ import { useMobileProjectGroupingSettings } from "../../state/project-grouping";
 import {
   resolvePendingTaskInteractionMode,
   resolveProviderInteractionMode,
-} from "./legacy-plan-mode";
+} from "../../state/legacy-plan-mode";
 import { useLegacyPlanModeState } from "./use-legacy-plan-mode-enabled";
 import {
+  filterNewTaskBranches,
   resolveNewTaskBranchWorktreePath,
   resolveNewTaskGitCwd,
   resolveNewTaskLocalWorkspaceSelection,
@@ -151,6 +149,9 @@ export function branchBadgeLabel(input: {
     input.branch.worktreePath !== resolveProjectGitCwd({ project: input.project })
   ) {
     return "worktree";
+  }
+  if (input.branch.isRemote) {
+    return "remote";
   }
   if (input.branch.isDefault) {
     return "default";
@@ -446,40 +447,38 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       : null,
   );
   const lecturnProjectFileData = lecturnProjectFileQuery.data as ProjectReadFileResult | null;
-  const lecturnProjectFileDefaultMode = useMemo(() => {
-    if (lecturnProjectFileData === null || lecturnProjectFileData.truncated) return null;
-    return parseLecturnProjectFile(lecturnProjectFileData.contents)?.defaultThreadEnvMode ?? null;
-  }, [lecturnProjectFileData]);
-  // Environment settings with the project's overrides applied; the
-  // aggregate's own legacy fields still count until the server folds them.
+  const lecturnProjectFile = useMemo(
+    () =>
+      lecturnProjectFileData === null || lecturnProjectFileData.truncated
+        ? null
+        : parseLecturnProjectFile(lecturnProjectFileData.contents),
+    [lecturnProjectFileData],
+  );
+  // Environment settings with the project's overrides and its lecturn.json
+  // applied; the aggregate's own legacy fields still count until the server
+  // folds them.
   const projectSettings = useMemo(
     () =>
       resolveProjectSettings(
         selectedEnvironmentServerConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
         selectedProject?.id ?? null,
-        selectedProject ?? undefined,
+        selectedProject,
+        lecturnProjectFile,
       ),
-    [selectedEnvironmentServerConfig?.settings, selectedProject],
+    [selectedEnvironmentServerConfig?.settings, selectedProject, lecturnProjectFile],
   );
-  const projectThreadEnvMode =
-    projectSettings.sources.defaultThreadEnvMode === "project"
-      ? projectSettings.settings.defaultThreadEnvMode
-      : undefined;
-  const defaultWorkspaceMode: WorkspaceMode = resolveDefaultThreadEnvMode({
-    forcedMode: forcedWorkspaceMode,
-    projectSetting: projectThreadEnvMode,
-    projectFile: lecturnProjectFileDefaultMode,
-    globalDefault: projectSettings.settings.defaultThreadEnvMode,
-  });
-  // While unsettled the resolved default is provisional. Nothing may write
-  // it into the draft during that window (the auto-branch effect does), or
-  // the frozen interim value beats the lecturn.json default once it loads.
-  const defaultWorkspaceModeSettled = isDefaultThreadEnvModeSettled({
-    explicitMode: selectedProjectDraft.workspaceSelection?.mode,
-    forcedMode: forcedWorkspaceMode,
-    projectSetting: projectThreadEnvMode,
-    projectFilePending: lecturnProjectFileQuery.isPending,
-  });
+  // A forced mode (Stave) outranks every settings tier and the file.
+  const defaultWorkspaceMode: WorkspaceMode =
+    forcedWorkspaceMode ?? projectSettings.settings.defaultThreadEnvMode;
+  // While the file read is pending and nothing above it decided, the
+  // resolved default is provisional. Nothing may write it into the draft
+  // during that window (the auto-branch effect does), or the frozen interim
+  // value beats the lecturn.json default once it loads.
+  const defaultWorkspaceModeSettled =
+    selectedProjectDraft.workspaceSelection?.mode !== undefined ||
+    forcedWorkspaceMode !== undefined ||
+    projectSettings.sources.defaultThreadEnvMode !== "environment" ||
+    !lecturnProjectFileQuery.isPending;
   // The forced mode also beats a stale explicit pick left in the draft.
   const workspaceMode =
     forcedWorkspaceMode ?? selectedProjectDraft.workspaceSelection?.mode ?? defaultWorkspaceMode;
@@ -655,7 +654,8 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     }
     replaceComposerDraftAttachments(selectedProjectDraftKey, []);
   }, [selectedProjectDraftKey]);
-  const debouncedBranchQuery = useDebouncedValue(branchQuery, BRANCH_SEARCH_DEBOUNCE_MS);
+  const branchSearchQuery = sanitizeNewRefName(branchQuery);
+  const debouncedBranchQuery = useDebouncedValue(branchSearchQuery, BRANCH_SEARCH_DEBOUNCE_MS);
   const branchTarget = useMemo(
     () => ({
       environmentId: selectedProject?.environmentId ?? null,
@@ -666,7 +666,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     [debouncedBranchQuery, selectedProject?.environmentId, selectedProjectGitCwd],
   );
   const branchState = usePaginatedBranches(branchTarget);
-  const branchSearchIsDebouncing = branchQuery.trim() !== debouncedBranchQuery.trim();
+  const branchSearchIsDebouncing = branchSearchQuery !== debouncedBranchQuery;
   const branchesLoading =
     branchSearchIsDebouncing || (branchState.isPending && branchState.data === null);
   const branchesFetchingNextPage = branchState.isFetchingNextPage;
@@ -698,17 +698,10 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   );
   const currentCheckoutBranchName = projectGitStatus.data?.refName ?? null;
 
-  const filteredBranches = useMemo(() => {
-    const query = branchQuery.trim().toLowerCase();
-    if (query.length === 0) {
-      return availableBranches;
-    }
-
-    return pipe(
-      availableBranches,
-      Arr.filter((branch) => branch.name.toLowerCase().includes(query)),
-    );
-  }, [availableBranches, branchQuery]);
+  const filteredBranches = useMemo(
+    () => filterNewTaskBranches(allBranchRefs, branchQuery),
+    [allBranchRefs, branchQuery],
+  );
 
   // The composer's draft follows the project it will be sent to: switching
   // mid-compose keeps the same draft and moves it, so typed text follows the
@@ -906,10 +899,10 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
 
   useEffect(() => {
     if (
+      !selectedProjectDraftKey ||
       !defaultWorkspaceModeSettled ||
       workspaceMode !== "worktree" ||
-      selectedBranchName !== null ||
-      !selectedProjectDraftKey
+      selectedBranchName !== null
     ) {
       return;
     }
@@ -918,6 +911,13 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       getComposerDraftSnapshot(selectedProjectDraftKey).workspaceSelection !==
       selectedProjectDraft.workspaceSelection
     ) {
+      return;
+    }
+    // The draft screen writes a thread's branch and worktree into the draft in
+    // the same commit this effect runs, so the rendered selection above can be
+    // stale. Re-read the draft before replacing it.
+    const live = getComposerDraftSnapshot(selectedProjectDraftKey).workspaceSelection;
+    if (live && (live.mode !== "worktree" || live.branch !== null)) {
       return;
     }
     // The default may only exist as origin/<default> (isRemote), which

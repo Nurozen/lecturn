@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  shouldCheckoutNewTaskBranch,
+  filterNewTaskBranches,
   resolveNewTaskBranchWorktreePath,
   resolveNewTaskBranchLabel,
   resolveNewTaskGitCwd,
   resolveNewTaskLocalWorkspaceSelection,
+  shouldCheckoutNewTaskBranch,
 } from "./new-task-context-presentation";
 
 const staveProject = {
@@ -203,5 +204,28 @@ describe("Stave branch checkout", () => {
     expect(
       shouldCheckoutNewTaskBranch({ ...input, staveProject: true, branchIsCurrent: true }),
     ).toBe(false);
+  });
+});
+
+describe("filterNewTaskBranches", () => {
+  const branches = [
+    { name: "main", isRemote: false },
+    { name: "Feature/Login-Page", isRemote: false },
+    { name: "origin/fix/remote-only", isRemote: true },
+  ];
+  const search = (query: string) =>
+    filterNewTaskBranches(branches, query).map((branch) => branch.name);
+
+  it("ignores case in both the query and the branch name", () => {
+    expect(search("feature/login")).toEqual(["Feature/Login-Page"]);
+    expect(search("MAIN")).toEqual(["main"]);
+  });
+
+  it("keeps remote-only branches searchable", () => {
+    expect(search("remote-only")).toEqual(["origin/fix/remote-only"]);
+  });
+
+  it("matches a typed space against the dash a branch name uses", () => {
+    expect(search("  login page ")).toEqual(["Feature/Login-Page"]);
   });
 });

@@ -1,10 +1,6 @@
 import {
-  BUILT_IN_THEMES,
-  LECTURN_CHAT_THEME,
-  getThemeColorsForAppearance,
-} from "@lecturn/shared/themePalettes";
-
-import {
+  DEFAULT_MOBILE_THEME_ID,
+  getMobileThemeColors,
   getMobileThemeVariables,
   themeColorToNativeColor,
   type MobileThemeId,
@@ -107,10 +103,10 @@ export function getMobileTerminalTheme(
   scheme: TerminalAppearanceScheme,
 ): TerminalTheme {
   const base = getPierreTerminalTheme(scheme);
-  if (themeId === "lecturn" || themeId === "material-you") return base;
+  // Lecturn's default palette (and Material You) keeps the Pierre terminal colors.
+  if (themeId === DEFAULT_MOBILE_THEME_ID || themeId === "material-you") return base;
 
-  const theme = BUILT_IN_THEMES.find((candidate) => candidate.id === themeId) ?? LECTURN_CHAT_THEME;
-  const palette = getThemeColorsForAppearance(theme, scheme) ?? theme.colors;
+  const palette = getMobileThemeColors(themeId, scheme);
   const colors = getMobileThemeVariables(themeId, scheme);
   const background = themeColorToNativeColor(palette.terminalBackground);
   return {

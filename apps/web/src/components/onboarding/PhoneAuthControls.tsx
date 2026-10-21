@@ -248,7 +248,8 @@ function PhoneAuthCodeEntry({
         id={id}
         type="password"
         nativeInput
-        className="text-base [&_input]:min-h-12 [&_input]:text-base"
+        font="touch"
+        className="[&_input]:min-h-12"
         enterKeyHint="send"
         autoComplete="off"
         autoCapitalize="none"

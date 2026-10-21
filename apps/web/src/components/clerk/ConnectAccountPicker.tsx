@@ -68,12 +68,7 @@ function ConnectAccountPicker(props: {
                 <TooltipTrigger
                   render={
                     // Stays focusable and hoverable so the reason can be read.
-                    <SelectItem
-                      hideIndicator
-                      value={row.accountId}
-                      aria-disabled="true"
-                      className="cursor-not-allowed opacity-64"
-                    />
+                    <SelectItem hideIndicator value={row.accountId} aria-disabled="true" />
                   }
                 >
                   <span className="truncate">{row.name}</span>

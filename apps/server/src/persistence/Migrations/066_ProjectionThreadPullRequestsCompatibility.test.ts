@@ -34,7 +34,7 @@ describe("066 collision compatibility", () => {
       assert.deepEqual(executed.at(-1), [68, "PullRequestFilesViewedCompatibility"]);
       assert.deepEqual(yield* linkRows, []);
       assert.deepEqual(yield* runMigrations(), []);
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
   it.effect("backfills legacy links when upgrading a published Lecturn database", () =>
@@ -61,7 +61,7 @@ describe("066 collision compatibility", () => {
           source: "manual",
         },
       ]);
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
   it.effect("adds Lecturn schema to an upstream 50 database without replaying its links", () =>
@@ -111,6 +111,6 @@ describe("066 collision compatibility", () => {
       }>`PRAGMA table_info(stave_project_lifecycle)`;
       assert.ok(lifecycleColumns.some((column) => column.name === "saga_teardown_json"));
       assert.deepEqual(yield* runMigrations(), []);
-    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 });

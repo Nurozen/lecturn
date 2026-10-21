@@ -117,9 +117,10 @@ handling is documented under [citations](./assistant-citations.md).
 
 ## Codex conversation rollback
 
-Legacy Codex history uses `thread/rollback`. Paginated history is read with `thread/turns/list`
+Codex 0.156 removed `thread/rollback`, so every rollback replaces the native thread at a turn
+boundary. Paginated history is read with `thread/turns/list` (legacy history with `thread/read`)
 and reverted by forking through the last retained turn; removing every turn starts a fresh native
-thread. The Lecturn thread ID stays unchanged. The runtime adopts the replacement resume cursor
+thread. If Codex refuses to fork legacy history, that error is surfaced unchanged. The Lecturn thread ID stays unchanged. The runtime adopts the replacement resume cursor
 only after the request succeeds and ignores later notifications from the retired native thread.
 `ProviderService` persists the updated session binding before reporting rollback success, so
 reconnects and later forks use the retained history.

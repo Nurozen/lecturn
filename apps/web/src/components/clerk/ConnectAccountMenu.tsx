@@ -51,7 +51,7 @@ function AccountAvatar({
     <span
       aria-hidden="true"
       className={cn(
-        "flex size-6 shrink-0 items-center justify-center rounded-full bg-muted font-medium text-[0.625rem] text-muted-foreground",
+        "flex size-6 shrink-0 items-center justify-center rounded-full bg-muted font-medium text-3xs text-muted-foreground",
         className,
       )}
     >
@@ -176,7 +176,12 @@ export function ConnectAccountMenu() {
           aria-label={
             attention ? "Lecturn Connect accounts, one needs sign-in" : "Lecturn Connect accounts"
           }
-          className="relative rounded-lg p-1 outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-sidebar-row-hover"
+          render={
+            <button
+              type="button"
+              className="relative rounded-lg p-1 outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-sidebar-row-hover"
+            />
+          }
         >
           <AccountAvatar row={current} className="size-7 text-xs" />
           {attention ? (
@@ -261,11 +266,7 @@ export function ConnectAccountMenu() {
               <TooltipTrigger
                 render={
                   // Stays focusable and hoverable so the reason can be read.
-                  <MenuItem
-                    aria-disabled="true"
-                    closeOnClick={false}
-                    className="cursor-not-allowed opacity-64"
-                  />
+                  <MenuItem aria-disabled="true" closeOnClick={false} />
                 }
               >
                 <PlusIcon />

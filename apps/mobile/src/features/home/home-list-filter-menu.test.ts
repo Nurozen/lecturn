@@ -14,12 +14,8 @@ describe("buildHomeListFilterMenu", () => {
       ],
       selectedEnvironmentId: null,
       selectedProjectKey: "environment-1:project-1",
-      projectSortOrder: "updated_at",
-      threadSortOrder: "updated_at",
       onEnvironmentChange: vi.fn(),
       onProjectChange,
-      onProjectSortOrderChange: vi.fn(),
-      onThreadSortOrderChange: vi.fn(),
     });
 
     const projectMenu = menu.items.find(
@@ -63,12 +59,8 @@ it("groups matching environment names under their owning account and keeps atten
     projects: [],
     selectedEnvironmentId: null,
     selectedProjectKey: null,
-    projectSortOrder: "updated_at",
-    threadSortOrder: "updated_at",
     onEnvironmentChange,
     onProjectChange: vi.fn(),
-    onProjectSortOrderChange: vi.fn(),
-    onThreadSortOrderChange: vi.fn(),
     accountSections: {
       accounts,
       owners: new Map([

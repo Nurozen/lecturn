@@ -3,14 +3,19 @@ import {
   BUILT_IN_THEME_IDS,
   BUILT_IN_THEMES,
   LECTURN_CHAT_THEME,
+  getThemeColorsForAppearance,
 } from "@lecturn/shared/themePalettes";
+import { LECTURN_MOBILE_THEME_VARIABLES } from "./lecturnMobilePalette";
 import { readDefaultMobileThemeVariables } from "./mobileTheme.test-support";
+import { getMobileThemeRuntimeVariables } from "./mobileThemeVariables";
 
 import {
+  MOBILE_THEME_VARIABLE_NAMES,
   createMobileThemePairPatch,
   createMobileThemeSelectionPatch,
   createMobileThemeVariables,
   DEFAULT_MOBILE_THEME_ID,
+  flattenThemeColor,
   getMobileThemePreviewColors,
   getMobileThemeVariables,
   normalizeMobileThemeId,
@@ -78,6 +83,86 @@ describe("mobile themes", () => {
     );
   });
 
+  it.each(["light", "dark"] as const)(
+    "keeps Lecturn's hand-tuned %s tokens and derives the rest from its palette",
+    (appearance) => {
+      const variables = getMobileThemeVariables(DEFAULT_MOBILE_THEME_ID, appearance);
+      expect(variables).toMatchObject(LECTURN_MOBILE_THEME_VARIABLES[appearance]);
+      expect(Object.keys(variables).sort()).toEqual([...MOBILE_THEME_VARIABLE_NAMES].sort());
+      expect(readDefaultMobileThemeVariables(appearance)).toEqual(variables);
+    },
+  );
+
+  // Lecturn's default palette pins its hand-tuned tokens instead of following desktop roles.
+  it.each(BUILT_IN_THEME_IDS)("uses the web color roles for %s in both appearances", (themeId) => {
+    for (const appearance of ["light", "dark"] as const) {
+      const theme = BUILT_IN_THEMES.find((candidate) => candidate.id === themeId)!;
+      const colors = getThemeColorsForAppearance(theme, appearance)!;
+      const variables = getMobileThemeVariables(themeId, appearance);
+      expect(variables["--color-screen"]).toBe(themeColorToNativeColor(colors.canvas));
+      expect(variables["--color-thread-canvas"]).toBe(variables["--color-screen"]);
+      expect(variables["--color-drawer"]).toBe(themeColorToNativeColor(colors.sidebar));
+      expect(variables["--color-thread-hover"]).toBe(
+        themeColorToNativeColor(colors.sidebarRowHover),
+      );
+      expect(variables["--color-card"]).toBe(themeColorToNativeColor(colors.surface));
+      expect(variables["--color-composer-surface"]).toBe(
+        themeColorWithAlpha(
+          themeColorToNativeColor(colors.surface),
+          appearance === "dark" ? 0.9 : 0.94,
+        ),
+      );
+      expect(variables["--color-thread-selected"]).toBe(
+        themeColorToNativeColor(colors.sidebarRowActive),
+      );
+      expect(variables["--color-thread-selected-foreground"]).toBe(
+        themeColorToNativeColor(colors.sidebarForeground),
+      );
+      expect(variables["--color-primary"]).toBe(themeColorToNativeColor(colors.messageAction));
+      expect(variables["--color-user-bubble"]).toBe(themeColorToNativeColor(colors.messageSurface));
+      expect(
+        contrastRatio(variables["--color-foreground"], variables["--color-screen"]),
+      ).toBeGreaterThanOrEqual(4.5);
+      for (const [foreground, surface] of [
+        ["--color-drawer-foreground", "--color-drawer"],
+        ["--color-drawer-foreground-muted", "--color-drawer"],
+        ["--color-drawer-foreground", "--color-thread-hover"],
+        ["--color-drawer-foreground-muted", "--color-thread-hover"],
+        ["--color-thread-selected-foreground-muted", "--color-thread-selected"],
+        ["--color-primary-foreground", "--color-primary"],
+        ["--color-primary-text", "--color-screen"],
+        ["--color-primary-text", "--color-card"],
+        ["--color-primary-text", "--color-card-alt"],
+        ["--color-primary-text", "--color-sheet-solid"],
+        ["--color-foreground", "--color-sheet-solid"],
+        ["--color-foreground-muted", "--color-sheet-solid"],
+        ["--color-primary-text", "--color-grouped-card"],
+        ["--color-foreground", "--color-grouped-card"],
+        ["--color-foreground-muted", "--color-grouped-card"],
+        ["--color-placeholder", "--color-grouped-card"],
+        ["--color-secondary-foreground", "--color-secondary"],
+        ["--color-user-bubble-foreground", "--color-user-bubble"],
+        ["--color-warning-foreground", "--color-warning"],
+        ["--color-danger-foreground", "--color-danger"],
+        ["--color-md-body", "--color-screen"],
+        ["--color-md-strong", "--color-screen"],
+        ["--color-md-link", "--color-screen"],
+        ["--color-md-code-text", "--color-md-code-bg"],
+      ] as const) {
+        expect(
+          contrastRatio(variables[foreground], variables[surface]),
+          `${appearance}: ${foreground} on ${surface}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+      expect(
+        contrastRatio(
+          variables["--color-thread-selected-foreground"],
+          variables["--color-thread-selected"],
+        ),
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
   it("applies palette overrides on top of the selected built-in theme", () => {
     const variables = getMobileThemeVariables("ocean", "dark", {
       "--color-primary": "#123456",
@@ -86,6 +171,48 @@ describe("mobile themes", () => {
     expect(variables["--color-primary"]).toBe("#123456");
     expect(variables["--color-screen"]).toMatch(/^#/);
   });
+
+  it.each(["light", "dark"] as const)(
+    "keeps default %s navigation chrome labels readable",
+    (appearance) => {
+      const variables = getMobileThemeVariables(DEFAULT_MOBILE_THEME_ID, appearance);
+      for (const [foreground, surface] of [
+        ["--color-drawer-foreground", "--color-drawer"],
+        ["--color-drawer-foreground-muted", "--color-drawer"],
+        ["--color-header-foreground", "--color-screen"],
+        ["--color-primary-text", "--color-screen"],
+        ["--color-primary-text", "--color-card"],
+        ["--color-primary-text", "--color-grouped-card"],
+      ] as const) {
+        const background = flattenThemeColor(variables[surface], variables["--color-screen"]);
+        expect(
+          contrastRatio(variables[foreground], background),
+          `${appearance}: ${foreground} on ${surface}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+      for (const platform of ["ios", "android"]) {
+        const runtime = getMobileThemeRuntimeVariables(
+          DEFAULT_MOBILE_THEME_ID,
+          appearance,
+          platform,
+        );
+        const chrome = flattenThemeColor(
+          runtime[platform === "android" ? "--color-header" : "--color-drawer"],
+          runtime["--color-screen"],
+        );
+        const foregroundRoles =
+          platform === "android"
+            ? (["--color-header-foreground", "--color-foreground-muted"] as const)
+            : (["--color-drawer-foreground", "--color-drawer-foreground-muted"] as const);
+        for (const role of foregroundRoles) {
+          expect(
+            contrastRatio(runtime[role], chrome),
+            `${platform} ${appearance}: ${role}`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    },
+  );
 
   it("previews the actual mobile palette and retains shared custom palettes", () => {
     expect(getMobileThemePreviewColors(DEFAULT_MOBILE_THEME_ID, "light")).toEqual({
@@ -157,7 +284,6 @@ describe("mobile themes", () => {
 
   it("maps semantic palette roles onto every mobile color variable", () => {
     const variables = createMobileThemeVariables(LECTURN_CHAT_THEME.colors, "light");
-    expect(Object.keys(variables)).toHaveLength(75);
     expect(variables["--color-sheet-solid"]).toBe(
       themeColorToNativeColor(LECTURN_CHAT_THEME.colors.chrome),
     );
@@ -257,8 +383,6 @@ describe("mobile themes", () => {
     }
   });
 
-  // The default palette lives in global.css rather than BUILT_IN_THEMES, so the loops above
-  // never reached it; it kept an unreadable hardcoded bubble until this covered it.
   it("keeps the default user bubble readable in both appearances", () => {
     for (const appearance of ["light", "dark"] as const) {
       const variables = readDefaultMobileThemeVariables(appearance);

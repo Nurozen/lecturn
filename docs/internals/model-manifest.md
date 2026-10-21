@@ -28,9 +28,11 @@ For supplemental Claude metadata, add an object to `providers.claudeAgent.models
 profile where possible. Add or change a profile only when the required capability combination does
 not already exist.
 
-`currentModels.claudeAgent` is frozen for releases that predate catalog discovery.
-Do not extend it when adding Claude models. All `currentModels` lists are compatibility
-metadata for older clients; new clients do not interpret absence from a list as legacy.
+`currentModels.claudeAgent` is the current-model classification overlay for
+releases that predate catalog discovery; it does not add models to their catalogs.
+Catalog-aware releases use `providers.claudeAgent.models[].status` instead.
+All `currentModels` lists are compatibility metadata for older clients; new clients do not
+interpret absence from a list as legacy.
 
 Runtime-discovered models remain visible by default. Only a matching entry in
 `providers.<driver>.models` with `status: "legacy"` moves a model into Legacy. A `current`

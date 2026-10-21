@@ -23,7 +23,7 @@ export function TeamsAccount({ account }: { readonly account?: PickedConnectAcco
     );
   return (
     <section className="space-y-5 p-6">
-      <h2 className="font-heading text-2xl">Lecturn Teams</h2>
+      <h2 className="text-2xl">Lecturn Teams</h2>
       {chosen?.picker}
       <TeamSelector key={key} accountId={chosen?.accountId} />
       <p className="text-sm text-muted-foreground">
@@ -124,7 +124,7 @@ function HostedTeamsAccount({
     <div className="space-y-6 p-6">
       <header>
         <p className="text-xs uppercase tracking-widest text-primary">Lecturn Teams</p>
-        <h2 className="mt-2 font-heading text-2xl">One company. Your own workspace.</h2>
+        <h2 className="mt-2 text-2xl">One company. Your own workspace.</h2>
         <p className="mt-2 text-sm text-muted-foreground">
           Manage seats centrally. Members retain private environments, projects and provider
           credentials.
@@ -167,7 +167,7 @@ function HostedTeamsAccount({
               });
             }}
           >
-            <h3 className="font-heading text-lg">Create your company</h3>
+            <h3 className="text-lg">Create your company</h3>
             <label className="block text-sm">
               Company name
               <input
@@ -185,7 +185,7 @@ function HostedTeamsAccount({
         ) : (
           <>
             <section className="border-b pb-5">
-              <h3 className="font-heading text-xl">{data.organization.name}</h3>
+              <h3 className="text-xl">{data.organization.name}</h3>
               <p className="mt-2 text-sm">
                 {data.organization.assignedSeats} assigned / {data.organization.purchasedSeats}{" "}
                 purchased seats ·{" "}
@@ -198,7 +198,7 @@ function HostedTeamsAccount({
             </section>
             {admin && (
               <section className="space-y-3">
-                <h3 className="font-heading text-lg">Members</h3>
+                <h3 className="text-lg">Members</h3>
                 <form
                   className="flex gap-2"
                   onSubmit={(event) => {
@@ -301,7 +301,7 @@ function HostedTeamsAccount({
             )}
             {owner && data.billing && (
               <section className="space-y-3">
-                <h3 className="font-heading text-lg">Seats and billing</h3>
+                <h3 className="text-lg">Seats and billing</h3>
                 <div className="flex gap-3">
                   <label className="flex-1 text-sm">
                     Purchased seats
@@ -417,7 +417,7 @@ function HostedTeamsAccount({
             )}
             {admin && (
               <section className="space-y-3">
-                <h3 className="font-heading text-lg">Managed settings</h3>
+                <h3 className="text-lg">Managed settings</h3>
                 <fieldset className="space-y-2">
                   <legend className="mb-2 text-sm font-medium">Allowed providers</legend>
                   <label className="flex min-h-9 items-center gap-2 text-sm">
@@ -488,7 +488,7 @@ function HostedTeamsAccount({
             )}
             {admin && (
               <section className="space-y-3">
-                <h3 className="font-heading text-lg">Environment inventory</h3>
+                <h3 className="text-lg">Environment inventory</h3>
                 {data.environments.length === 0 && (
                   <p className="text-sm text-muted-foreground">
                     No company-funded environments yet.
@@ -508,7 +508,7 @@ function HostedTeamsAccount({
             )}
             {admin && (
               <section className="space-y-3">
-                <h3 className="font-heading text-lg">Audit history</h3>
+                <h3 className="text-lg">Audit history</h3>
                 {data.audit.length === 0 && (
                   <p className="text-sm text-muted-foreground">No recorded changes.</p>
                 )}

@@ -1,5 +1,6 @@
 import { resolveProjectGitCwd } from "@lecturn/client-runtime/state/projectGit";
 import type { OrchestrationProjectShell } from "@lecturn/contracts";
+import { sanitizeNewRefName } from "@lecturn/shared/git";
 
 type WorkspaceMode = "local" | "worktree";
 
@@ -113,4 +114,14 @@ export function shouldCheckoutNewTaskBranch(input: {
     !input.branchIsCurrent &&
     (input.staveProject === true || !input.branchWorktreePath)
   );
+}
+
+export function filterNewTaskBranches<T extends { readonly name: string }>(
+  branches: ReadonlyArray<T>,
+  rawQuery: string,
+): ReadonlyArray<T> {
+  const query = sanitizeNewRefName(rawQuery).toLowerCase();
+  return query.length === 0
+    ? branches
+    : branches.filter((branch) => branch.name.toLowerCase().includes(query));
 }

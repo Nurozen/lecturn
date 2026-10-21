@@ -6,7 +6,6 @@ import {
 import type { PullRequestCheckStatus } from "@lecturn/contracts";
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import "./activityWatchVisual.css";
 
 const stateColor = (state: ActivityVisualState) =>
   `light-dark(${activityVisualColor(state, "light")}, ${activityVisualColor(state, "dark")})`;

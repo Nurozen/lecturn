@@ -81,11 +81,11 @@ function CheckStatusGlyph({ status }: { status: string }) {
     <Tooltip>
       <TooltipTrigger render={<span className="inline-flex shrink-0" aria-label={status} />}>
         {status === "success" ? (
-          <CheckCircle2Icon className="size-3.5 text-emerald-500" />
+          <CheckCircle2Icon className="size-3.5 text-success" />
         ) : status === "failure" ? (
           <CircleAlertIcon className="size-3.5 text-destructive" />
         ) : status === "action-required" ? (
-          <CircleAlertIcon className="size-3.5 text-amber-500" />
+          <CircleAlertIcon className="size-3.5 text-warning" />
         ) : status === "pending" ? (
           <ClockIcon className="size-3.5 text-primary" />
         ) : (

@@ -195,42 +195,44 @@ function OccurrenceEvidence({
         <DialogHeader>
           <DialogTitle>Supporting exchange</DialogTitle>
         </DialogHeader>
-        <DialogPanel className="space-y-3">
-          <p role="status">
-            {result?.outcome === "exact"
-              ? "Exact supporting passage"
-              : result?.outcome === "message-only"
-                ? "Source changed; exact passage is unavailable"
-                : result?.outcome === "unavailable"
-                  ? "Source unavailable"
-                  : "Loading source…"}
-          </p>
-          {source.error ? (
-            <p role="alert" className="text-destructive">
-              {source.error}
+        <DialogPanel>
+          <div className="space-y-3">
+            <p role="status">
+              {result?.outcome === "exact"
+                ? "Exact supporting passage"
+                : result?.outcome === "message-only"
+                  ? "Source changed; exact passage is unavailable"
+                  : result?.outcome === "unavailable"
+                    ? "Source unavailable"
+                    : "Loading source…"}
             </p>
-          ) : null}
-          {result?.messages.map((message) => (
-            <article key={message.id} className="lecturn-panel-tile p-3">
-              <p className="text-xs text-muted-foreground">
-                {message.role === "user" ? "You" : "Assistant"}
+            {source.error ? (
+              <p role="alert" className="text-destructive">
+                {source.error}
               </p>
-              <p className="whitespace-pre-wrap break-words text-sm">
-                {result.outcome === "exact" &&
-                message.id === result.messageId &&
-                result.start !== null &&
-                result.end !== null ? (
-                  <>
-                    {message.text.slice(0, result.start)}
-                    <mark>{message.text.slice(result.start, result.end)}</mark>
-                    {message.text.slice(result.end)}
-                  </>
-                ) : (
-                  message.text
-                )}
-              </p>
-            </article>
-          ))}
+            ) : null}
+            {result?.messages.map((message) => (
+              <article key={message.id} className="lecturn-panel-tile p-3">
+                <p className="text-xs text-muted-foreground">
+                  {message.role === "user" ? "You" : "Assistant"}
+                </p>
+                <p className="whitespace-pre-wrap break-words text-sm">
+                  {result.outcome === "exact" &&
+                  message.id === result.messageId &&
+                  result.start !== null &&
+                  result.end !== null ? (
+                    <>
+                      {message.text.slice(0, result.start)}
+                      <mark>{message.text.slice(result.start, result.end)}</mark>
+                      {message.text.slice(result.end)}
+                    </>
+                  ) : (
+                    message.text
+                  )}
+                </p>
+              </article>
+            ))}
+          </div>
         </DialogPanel>
       </DialogPopup>
     </Dialog>

@@ -10,7 +10,7 @@ function BillingRoute() {
   return (
     <main className="min-h-dvh">
       <AccountSurface seam={false} className="lecturn-settings-surface min-h-dvh">
-        <div aria-hidden="true" className="p-8 font-heading text-xl text-muted-foreground">
+        <div aria-hidden="true" className="p-8 text-xl text-muted-foreground">
           Lecturn
         </div>
         <BillingSettingsDialog

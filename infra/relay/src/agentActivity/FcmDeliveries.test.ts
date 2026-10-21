@@ -180,7 +180,6 @@ function harness() {
               ]
             : [],
         ),
-      listPublicKeysForEnvironment: () => Effect.succeed([]),
       listForUser: () => Effect.succeed([]),
       revokeForUser: () => Effect.succeed(false),
       getForUser: (input) =>

@@ -36,7 +36,8 @@ import {
   loadPreferences,
   saveAgentAwarenessRegistrationRecord,
 } from "../../persistence/imperative";
-import AgentActivity, { type AgentActivityProps } from "../../widgets/AgentActivity";
+import type { AgentActivityProps } from "../../widgets/AgentActivity";
+import { getAgentLiveActivities, startAgentLiveActivity } from "./agentLiveActivity";
 import { resolveCloudPublicConfig } from "../cloud/publicConfig";
 import { supportsAgentAwarenessPush } from "./capabilities";
 import { makeRelayDeviceRegistrationRequest, resolveApsEnvironment } from "./registrationPayload";
@@ -98,22 +99,25 @@ function activityAccountId(activity: LiveActivity<AgentActivityProps>): string |
 }
 function makeAccountRegistration(scopeAccountId: string | null) {
   function accountActivities(): ReadonlyArray<LiveActivity<AgentActivityProps>> {
-    return AgentActivity.getInstances().filter((activity) => {
+    return getAgentLiveActivities().filter((activity) => {
       const owner = activityAccountId(activity);
       return scopeAccountId === null
         ? owner === null || owner === relayTokenProviderIdentity
         : owner === scopeAccountId;
     });
   }
-  function startAccountActivity(props: AgentActivityProps): LiveActivity<AgentActivityProps> {
+  function startAccountActivity(
+    props: AgentActivityProps,
+  ): LiveActivity<AgentActivityProps> | null {
     const identity = scopeAccountId ?? relayTokenProviderIdentity;
     const appearance = identity ? accountAppearances.get(identity) : undefined;
-    const activity = AgentActivity.start({
+    const activity = startAgentLiveActivity({
       ...props,
       ...(identity ? { accountId: identity } : {}),
       ...appearance,
       iosMajorVersion: iosMajorVersion(),
     });
+    if (!activity) return null;
     if (identity && typeof activity.getId === "function")
       activityOwners.set(activity.getId(), identity);
     return activity;
@@ -697,6 +701,9 @@ function makeAccountRegistration(scopeAccountId: string | null) {
           },
         ],
       });
+      if (!activity) {
+        return;
+      }
       logRegistrationDebug("live activity card armed for local work", {
         threadTitle: input.threadTitle,
       });
@@ -1429,7 +1436,7 @@ export function syncAgentAwarenessAccounts(
       // Native cards survive process restarts, while the in-memory map does not.
       // This is an authoritative signed-in set, including secondary accounts on
       // older relays that currently register only the primary account.
-      for (const activity of AgentActivity.getInstances()) {
+      for (const activity of getAgentLiveActivities()) {
         const owner = activityAccountId(activity);
         if (owner === null || !providers.has(owner)) {
           void activity.end("immediate").catch(() => {});
@@ -1458,7 +1465,7 @@ export function syncAgentAwarenessAccounts(
       // Session revocation/expiry can bypass Lecturn's explicit sign-out flow.
       // Retire only that owner's cards without requiring its lost credential.
       try {
-        for (const activity of AgentActivity.getInstances())
+        for (const activity of getAgentLiveActivities())
           if (activityAccountId(activity) === id) void activity.end("immediate").catch(() => {});
       } catch {
         /* Native activities may be unavailable during teardown. */
@@ -1507,7 +1514,7 @@ export function unregisterAgentAwarenessAccount(
       clearAndroidAgentNotifications();
     }
     if (drain) yield* Effect.promise(() => drain);
-    const activities = yield* Effect.try(() => AgentActivity.getInstances()).pipe(
+    const activities = yield* Effect.try(() => getAgentLiveActivities()).pipe(
       Effect.orElseSucceed(() => []),
     );
     for (const activity of activities)

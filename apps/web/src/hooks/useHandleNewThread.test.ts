@@ -106,17 +106,24 @@ vi.mock("@lecturn/contracts", () => ({
 vi.mock("@lecturn/shared/projectSettings", () => ({
   // Environment settings pass through; the tests set project fields on the
   // project record, which the hook still honors until the server folds them.
-  resolveProjectSettings: (settings: Record<string, unknown>) => ({
-    settings,
+  // With a file argument the env mode resolves like the real chain.
+  resolveProjectSettings: (
+    settings: Record<string, unknown>,
+    _projectId: unknown,
+    _project: unknown,
+    projectFile?: { defaultThreadEnvMode?: "local" | "worktree" } | null,
+  ) => ({
+    settings:
+      projectFile === undefined
+        ? settings
+        : {
+            ...settings,
+            defaultThreadEnvMode:
+              settings.defaultThreadEnvMode ?? projectFile?.defaultThreadEnvMode ?? "local",
+          },
     sources: { defaultModelSelection: "environment", defaultThreadEnvMode: "environment" },
     overrides: {},
   }),
-}));
-vi.mock("@lecturn/shared/threadEnvMode", () => ({
-  resolveDefaultThreadEnvMode: (input: {
-    readonly projectFile: "local" | "worktree" | null;
-    readonly globalDefault: "local" | "worktree";
-  }) => input.projectFile ?? input.globalDefault,
 }));
 vi.mock("@tanstack/react-router", () => ({
   useParams: () => null,
@@ -150,7 +157,7 @@ vi.mock("../lib/chatThreadActions", async (importOriginal) => ({
   }),
 }));
 vi.mock("../lib/lecturnProjectFileDefaults", () => ({
-  readLecturnProjectFileDefaultThreadEnvMode: () => testState.projectFileRead,
+  readLecturnProjectFile: () => testState.projectFileRead,
 }));
 vi.mock("../lib/utils", () => ({
   newDraftId: () => "draft-delayed",

@@ -1,4 +1,4 @@
-import type { ContextualDraft } from "../features/contextual/contextualDraft";
+import type { ContextualDraft } from "./contextualDraft";
 import {
   CommandId,
   MessageId,
