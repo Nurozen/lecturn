@@ -29,12 +29,12 @@ export function withGlassAccessibility(
  * Update every registered palette so changing themes never flashes transparent controls.
  * Material You shares the default Uniwind theme, so each theme name is updated once.
  */
-export function glassAccessibilityThemeUpdates(opaque: boolean) {
+export function glassAccessibilityThemeUpdates(opaque: boolean, platform: string) {
   const updates = MOBILE_THEME_IDS.flatMap((id) =>
     (["light", "dark"] as const).map((appearance) => ({
       themeName: getMobileUniwindThemeName(id, appearance),
       variables: glassAccessibilityVariables(
-        getMobileThemeRuntimeVariables(id, appearance),
+        getMobileThemeRuntimeVariables(id, appearance, platform),
         opaque,
       ),
     })),

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo } from "react";
+import * as DateTime from "effect/DateTime";
 
 import { isStaveProject } from "@lecturn/client-runtime/state/projectGit";
 import type { EnvironmentId, OrchestrationCheckpointSummary, ThreadId } from "@lecturn/contracts";
@@ -77,7 +78,7 @@ export function useReviewSections(input: {
     () =>
       buildReviewSectionItems({
         checkpoints: readyCheckpoints,
-        gitSections: reviewCache.gitSections,
+        gitSections: diffPreview.data?.sources ?? reviewCache.gitSections,
         turnDiffById: reviewCache.turnDiffById,
         loadingTurnIds,
         loadingGitSections: diffPreview.isPending,
@@ -97,6 +98,7 @@ export function useReviewSections(input: {
       diffPreview.isPending,
       checkpointsAvailable,
       selectedThreadGitRepository,
+      diffPreview.data?.sources,
       loadingTurnIds,
       readyCheckpoints,
       reviewCache.gitSections,
@@ -197,7 +199,12 @@ export function useReviewSections(input: {
 
   return {
     error: diffPreview.error ?? activeTurnDiff.error ?? reviewCache.asyncState.error,
+    isSelectedSectionPending:
+      selectedSection?.kind === "turn" ? activeTurnDiff.isPending : diffPreview.isPending,
     loadingGitDiffs: diffPreview.isPending,
+    diffPreviewRevision: diffPreview.data
+      ? DateTime.formatIso(diffPreview.data.generatedAt)
+      : undefined,
     loadingTurnIds,
     reviewSections,
     selectedSection,

@@ -66,7 +66,8 @@ async function openThreadForProject(
     project.id,
     sortOrder,
   );
-  if (latestThread) {
+  // A settled latest thread stays settled; adding the project starts a new one.
+  if (latestThread && latestThread.settledOverride !== "settled") {
     await deps.navigate({
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(scopeThreadRef(latestThread.environmentId, latestThread.id)),

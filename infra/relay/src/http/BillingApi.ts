@@ -7,7 +7,7 @@ import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpIncomingMessage from "effect/unstable/http/HttpIncomingMessage";
-import * as FileSystem from "effect/FileSystem";
+import * as ByteSize from "effect/ByteSize";
 import { RelayBillingCheckoutRequest, RelayBillingReconcileRequest } from "@lecturn/contracts";
 import { BillingService } from "../billing/BillingService.ts";
 import { BillingError } from "../billing/BillingStore.ts";
@@ -124,7 +124,7 @@ export function billingRoutes(config: BillingConfig, clerkWebhookSecret = "") {
       }
       return json(yield* service.portal(userId));
     }).pipe(
-      Effect.provideService(HttpIncomingMessage.MaxBodySize, FileSystem.Size(16 * 1024)),
+      Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(16 * 1024)),
       Effect.catchTag("BillingError", (error) =>
         Effect.succeed(
           json({ code: error.code, message: error.message }, statusForCode(error.code)),
@@ -141,7 +141,7 @@ export function billingRoutes(config: BillingConfig, clerkWebhookSecret = "") {
     yield* service.receiveStripeWebhook(new Uint8Array(body), signature);
     return json({ received: true });
   }).pipe(
-    Effect.provideService(HttpIncomingMessage.MaxBodySize, FileSystem.Size(512 * 1024)),
+    Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(512 * 1024)),
     Effect.catchTag("BillingError", (error) =>
       Effect.succeed(json({ code: error.code, message: error.message }, statusForCode(error.code))),
     ),
@@ -158,7 +158,7 @@ export function billingRoutes(config: BillingConfig, clerkWebhookSecret = "") {
     yield* service.receiveClerkWebhook(web, clerkWebhookSecret);
     return json({ received: true });
   }).pipe(
-    Effect.provideService(HttpIncomingMessage.MaxBodySize, FileSystem.Size(512 * 1024)),
+    Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(512 * 1024)),
     Effect.catchTag("BillingError", (error) =>
       Effect.succeed(json({ code: error.code, message: error.message }, statusForCode(error.code))),
     ),

@@ -11,7 +11,8 @@ import Upstream51 from "./051_ProjectionThreadMessageContext.ts";
 import Upstream52 from "./052_ProjectionThreadTitleState.ts";
 
 const at = "2026-01-01T00:00:00.000Z";
-const latest = [67, "MessageContextTitleStateCompatibility"] as const;
+const compatibility = [67, "MessageContextTitleStateCompatibility"] as const;
+const latest = [68, "PullRequestFilesViewedCompatibility"] as const;
 
 const columnNames = (table: string) =>
   Effect.gen(function* () {
@@ -73,7 +74,7 @@ describe("067 collision compatibility", () => {
       yield* sql`UPDATE pull_request_watch_settings SET mode = 'off'`;
       const ledger = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
 
-      assert.deepEqual(yield* runMigrations(), [latest]);
+      assert.deepEqual(yield* runMigrations(), [compatibility, latest]);
       assert.deepEqual(
         yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= 66 ORDER BY migration_id`,
         ledger,

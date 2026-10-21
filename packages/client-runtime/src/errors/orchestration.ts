@@ -16,3 +16,9 @@ export function wasBootstrapThreadDeleted(error: unknown): boolean {
 export function threadImportFailureReason(error: unknown): ExternalSessionImportFailure | null {
   return isOrchestrationDispatchCommandError(error) ? (error.threadImportFailure ?? null) : null;
 }
+
+export function wasBootstrapThreadNotCreated(error: unknown): boolean {
+  return (
+    isOrchestrationDispatchCommandError(error) && error.bootstrapThreadDisposition === "not-created"
+  );
+}

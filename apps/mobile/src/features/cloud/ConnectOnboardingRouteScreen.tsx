@@ -1,9 +1,10 @@
+import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { NativeHeaderToolbar } from "../../native/StackHeader";
 import { useAuth } from "@clerk/expo";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
-import { Platform, Pressable, RefreshControl, ScrollView, View } from "react-native";
+import { Platform, Pressable, RefreshControl, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { reportAtomCommandResult, settlePromise } from "@lecturn/client-runtime/state/runtime";

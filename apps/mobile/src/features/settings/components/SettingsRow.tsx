@@ -1,10 +1,10 @@
+import { MaterialListRow } from "../../../components/MaterialListRow";
 import { useNavigation } from "@react-navigation/native";
 import { useState, type ComponentProps } from "react";
 import { ArcaneControlHighlight } from "../../../components/ArcaneControlHighlight";
-import { Pressable, View } from "react-native";
+import { Platform, Pressable, View } from "react-native";
 
 import { SymbolView } from "../../../components/AppSymbol";
-
 import { AppText as Text } from "../../../components/AppText";
 import type { SettingsLegalDocumentTarget, SettingsSheetTarget } from "./settings-sheet-targets";
 
@@ -15,6 +15,7 @@ export function SettingsRow(props: {
   readonly icon: SymbolName;
   readonly label: string;
   readonly value?: string;
+  readonly valuePosition?: "below" | "trailing";
   readonly target?: SettingsSheetTarget;
   readonly fullScreenTarget?: SettingsLegalDocumentTarget;
   readonly onPress?: () => void;
@@ -23,6 +24,42 @@ export function SettingsRow(props: {
   const [pressed, setPressed] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
+  if (Platform.OS === "android") {
+    return (
+      <MaterialListRow
+        title={props.label}
+        subtitle={props.valuePosition === "trailing" ? undefined : props.value}
+        accessibilityLabel={[props.label, props.value].filter(Boolean).join(", ")}
+        trailing={
+          props.valuePosition === "trailing" && props.value ? (
+            <View className="flex-row items-center gap-3">
+              <Text className="text-sm text-foreground-muted">{props.value}</Text>
+              <SymbolView name="chevron.right" size={16} tintColorClassName="accent-chevron" />
+            </View>
+          ) : undefined
+        }
+        disabled={props.disabled}
+        leading={
+          <SymbolView
+            name={props.icon}
+            size={24}
+            tintColorClassName="accent-icon"
+            type="monochrome"
+            weight="regular"
+          />
+        }
+        onPress={() => {
+          if (props.target)
+            navigation.navigate("SettingsSheet", {
+              screen: "SettingsContent",
+              params: { screen: props.target },
+            });
+          else if (props.fullScreenTarget) navigation.navigate(props.fullScreenTarget);
+          else props.onPress?.();
+        }}
+      />
+    );
+  }
   const content = (
     <View
       className={
@@ -57,7 +94,7 @@ export function SettingsRow(props: {
       <SymbolView
         name="chevron.right"
         size={16}
-        tintColorClassName={"accent-chevron"}
+        tintColorClassName="accent-chevron"
         type="monochrome"
         weight="semibold"
       />

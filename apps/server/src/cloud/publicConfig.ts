@@ -103,9 +103,9 @@ export function resolveRelayClientTracingConfig(
 }
 
 export function makeRelayUrlConfig(fallback = buildTimeRelayUrl) {
-  const runtimeConfig = Config.nonEmptyString("LECTURN_RELAY_URL");
+  const runtimeConfig = Config.NonEmptyString("LECTURN_RELAY_URL");
   return (fallback ? runtimeConfig.pipe(Config.withDefault(fallback)) : runtimeConfig).pipe(
-    Config.mapOrFail(validateRelayUrl),
+    Config.mapEffect(validateRelayUrl),
   );
 }
 
@@ -118,7 +118,7 @@ export const relayUrlConfig = makeRelayUrlConfig();
  */
 export function makeHostedAppUrlConfig(fallback = buildTimeHostedAppUrl || DEFAULT_HOSTED_APP_URL) {
   return makePublicValueConfig("LECTURN_HOSTED_APP_URL", fallback).pipe(
-    Config.mapOrFail(validateHostedAppUrl),
+    Config.mapEffect(validateHostedAppUrl),
   );
 }
 
@@ -153,7 +153,7 @@ function validateHostedAppUrl(value: string) {
 }
 
 function makePublicValueConfig(name: string, fallback: string) {
-  const runtimeConfig = Config.nonEmptyString(name);
+  const runtimeConfig = Config.NonEmptyString(name);
   return (fallback ? runtimeConfig.pipe(Config.withDefault(fallback)) : runtimeConfig).pipe(
     Config.map((value) => value.trim()),
   );
@@ -192,7 +192,7 @@ export function makeCloudCliOAuthConfig({
       clerkCliOAuthClientIdFallback,
     ),
   }).pipe(
-    Config.mapOrFail(({ clerkPublishableKey, clientId }) =>
+    Config.mapEffect(({ clerkPublishableKey, clientId }) =>
       Effect.try({
         try: () => clerkFrontendApiUrlFromPublishableKey(clerkPublishableKey),
         catch: (cause) =>

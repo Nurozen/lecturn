@@ -148,7 +148,7 @@ const applyDevelopmentIconOverrides = Effect.fn("applyDevelopmentIconOverrides")
 const buildCmd = Command.make(
   "build",
   {
-    verbose: Flag.boolean("verbose").pipe(Flag.withDefault(false)),
+    verbose: Flag.Boolean("verbose").pipe(Flag.withDefault(false)),
   },
   (config) =>
     Effect.gen(function* () {
@@ -214,8 +214,8 @@ const assertStaveBinaries = Effect.fn("assertStaveBinaries")(function* (serverDi
 const buildExeCmd = Command.make(
   "build-exe",
   {
-    verbose: Flag.boolean("verbose").pipe(Flag.withDefault(false)),
-    target: Flag.string("target").pipe(
+    verbose: Flag.Boolean("verbose").pipe(Flag.withDefault(false)),
+    target: Flag.String("target").pipe(
       Flag.withDescription(
         "Cross-build for <platform>-<arch> in nodejs.org naming (for example darwin-x64); defaults to the host.",
       ),
@@ -475,21 +475,21 @@ const publishNodePackage = Effect.fn("publishNodePackage")(function* (config: Pu
 const publishCmd = Command.make(
   "publish",
   {
-    packagesDir: Flag.string("packages-dir").pipe(
+    packagesDir: Flag.String("packages-dir").pipe(
       Flag.withDescription(
         "Output dir of scripts/build-npm-platform-packages.ts. When set, publishes the per-platform executable tarballs and then the launcher; otherwise publishes apps/server as the Node package.",
       ),
       Flag.optional,
     ),
-    tag: Flag.string("tag").pipe(Flag.withDefault("latest")),
-    access: Flag.string("access").pipe(Flag.withDefault("public")),
-    appVersion: Flag.string("app-version").pipe(Flag.optional),
-    packageName: Flag.string("package-name").pipe(Flag.optional),
-    binName: Flag.string("bin-name").pipe(Flag.optional),
-    provenance: Flag.boolean("provenance").pipe(Flag.withDefault(false)),
-    dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
-    requireStave: Flag.boolean("require-stave").pipe(Flag.withDefault(false)),
-    verbose: Flag.boolean("verbose").pipe(Flag.withDefault(false)),
+    tag: Flag.String("tag").pipe(Flag.withDefault("latest")),
+    access: Flag.String("access").pipe(Flag.withDefault("public")),
+    appVersion: Flag.String("app-version").pipe(Flag.optional),
+    packageName: Flag.String("package-name").pipe(Flag.optional),
+    binName: Flag.String("bin-name").pipe(Flag.optional),
+    provenance: Flag.Boolean("provenance").pipe(Flag.withDefault(false)),
+    dryRun: Flag.Boolean("dry-run").pipe(Flag.withDefault(false)),
+    requireStave: Flag.Boolean("require-stave").pipe(Flag.withDefault(false)),
+    verbose: Flag.Boolean("verbose").pipe(Flag.withDefault(false)),
   },
   (config) =>
     Option.match(config.packagesDir, {

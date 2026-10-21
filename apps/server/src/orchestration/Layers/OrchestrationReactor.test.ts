@@ -17,6 +17,7 @@ import { makeOrchestrationReactor } from "./OrchestrationReactor.ts";
 import { StaveLifecycleService } from "../Services/StaveLifecycleService.ts";
 import { SagaInferenceReactor } from "../../stave/SagaInferenceReactor.ts";
 import * as AgentAwarenessRelay from "../../relay/AgentAwarenessRelay.ts";
+import { StorageCleanup } from "../../storageCleanup.ts";
 
 describe("OrchestrationReactor", () => {
   let runtime: ManagedRuntime.ManagedRuntime<OrchestrationReactor, never> | null = null;
@@ -50,6 +51,15 @@ describe("OrchestrationReactor", () => {
             },
             drain: Effect.void,
             sweep: Effect.void,
+          }),
+        ),
+        Layer.provideMerge(
+          Layer.succeed(StorageCleanup, {
+            start: () => {
+              started.push("storage-cleanup");
+              return Effect.void;
+            },
+            drain: Effect.void,
           }),
         ),
         Layer.provideMerge(
@@ -144,6 +154,7 @@ describe("OrchestrationReactor", () => {
       "stave-lifecycle",
       "agent-awareness-relay",
       "saga-inference",
+      "storage-cleanup",
     ]);
 
     await Effect.runPromise(Scope.close(scope, Exit.void));

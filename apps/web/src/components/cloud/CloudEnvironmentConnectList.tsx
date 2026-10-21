@@ -4,14 +4,22 @@ import {
   type EnvironmentConnectionPresentation,
   RelayConnectionRegistration,
   RelayConnectionTarget,
+  orchestrationProtocolCompatibilityError,
 } from "@lecturn/client-runtime/connection";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
 import { bucketByAccount } from "@lecturn/client-runtime/relay";
-import type { EnvironmentId } from "@lecturn/contracts";
-import type { RelayClientEnvironmentRecord } from "@lecturn/contracts/relay";
+import {
+  type EnvironmentId,
+  resolveEnvironmentMachineKind,
+  type ServerConfig,
+} from "@lecturn/contracts";
+import type {
+  RelayClientEnvironmentRecord,
+  RelayEnvironmentStatusResponse,
+} from "@lecturn/contracts/relay";
 import * as Option from "effect/Option";
 import { type ReactNode, useCallback, useEffect, useEffectEvent, useState } from "react";
 
@@ -23,6 +31,7 @@ import { relayEnvironmentDiscovery } from "~/state/relay";
 import { useRelayEnvironmentDiscovery } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { ConnectionStatusDot } from "../ConnectionStatusDot";
+import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { AccountMark } from "../sidebar/AccountMark";
 import { ITEM_ROW_CLASSNAME, ITEM_ROW_INNER_CLASSNAME } from "../settings/itemRows";
 import { Checkbox } from "../ui/checkbox";
@@ -34,10 +43,19 @@ import { presentSavedCloudEnvironmentConnection } from "./cloudEnvironmentConnec
 
 const EMPTY_DISCOVERY_REFRESH_INTERVAL_MS = 5_000;
 
+function discoveredCompatibilityError(
+  status: Option.Option<RelayEnvironmentStatusResponse> | undefined,
+) {
+  const descriptor = status === undefined ? undefined : Option.getOrNull(status)?.descriptor;
+  return descriptor === undefined ? null : orchestrationProtocolCompatibilityError(descriptor);
+}
+
 export interface SavedCloudEnvironmentConnection {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly connection: EnvironmentConnectionPresentation;
+  /** Present once connected; carries the user's icon override. */
+  readonly serverConfig?: ServerConfig | null;
 }
 
 function RemoteEnvironmentRowsSkeleton() {
@@ -147,6 +165,12 @@ export function CloudEnvironmentConnectRows({
   }, [refreshRelayEnvironments, refreshWhileEmpty, onDiscoveryReady]);
 
   const connectEnvironment = async (environment: RelayClientEnvironmentRecord) => {
+    if (
+      discoveredCompatibilityError(
+        environmentsState.environments.get(environment.environmentId)?.status,
+      ) !== null
+    )
+      return false;
     setConnectingEnvironmentIds((current) => new Set([...current, environment.environmentId]));
     const result = await connectRelayEnvironment(environment);
     setConnectingEnvironmentIds((current) => {
@@ -205,14 +229,24 @@ export function CloudEnvironmentConnectRows({
             environment: { environmentId, label },
             availability: "offline" as const,
             error: Option.none(),
+            status: undefined,
           }))
       : []),
   ];
   const selectNewComputers = useEffectEvent(() => {
     const seen = selection?.autoSelectedComputers;
     if (!selection || !seen) return;
-    for (const { environment } of discoveredEnvironments) {
+    for (const { environment, status, availability } of discoveredEnvironments) {
       const id = environment.environmentId;
+      if (availability === "checking") continue;
+      if (
+        discoveredCompatibilityError(status) !== null ||
+        savedById.get(id)?.connection.phase === "unsupported"
+      ) {
+        seen.add(id);
+        if (selection.selectedIds.has(id)) selection.onChange(id, false);
+        continue;
+      }
       if (seen.has(id)) continue;
       seen.add(id);
       selection.onChange(id, true);
@@ -314,11 +348,31 @@ export function CloudEnvironmentConnectRows({
     environment,
     availability,
     error,
+    status,
   }: (typeof visibleEnvironments)[number]) => {
     const savedEnvironment = savedById.get(environment.environmentId);
-    const savedConnection = savedEnvironment
-      ? presentSavedCloudEnvironmentConnection(savedEnvironment.connection)
-      : null;
+    const compatibilityError = discoveredCompatibilityError(status);
+    const unsupported =
+      compatibilityError !== null || savedEnvironment?.connection.phase === "unsupported";
+    const unsupportedDetail =
+      compatibilityError?.message ?? savedEnvironment?.connection.error ?? null;
+    const savedConnection = unsupported
+      ? presentSavedCloudEnvironmentConnection({
+          phase: "unsupported",
+          error: unsupportedDetail,
+          traceId: null,
+        })
+      : savedEnvironment
+        ? presentSavedCloudEnvironmentConnection(savedEnvironment.connection)
+        : null;
+    // A connected machine's own config (with the user's icon pick) wins. Before
+    // that, the relay's health probe already carries the server's descriptor, so
+    // a machine can wear its detected glyph before this device ever connects.
+    const descriptor = status === undefined ? undefined : Option.getOrNull(status)?.descriptor;
+    const machineKind = resolveEnvironmentMachineKind(
+      savedEnvironment?.serverConfig ??
+        (descriptor === undefined ? null : { environment: descriptor }),
+    );
     const dotClassName = savedConnection
       ? savedConnection.tone === "connected"
         ? "bg-success"
@@ -334,16 +388,19 @@ export function CloudEnvironmentConnectRows({
           : availability === "checking"
             ? "bg-warning"
             : "bg-muted-foreground/35";
-    const statusText = savedConnection
-      ? savedConnection.statusText
-      : availability === "online"
-        ? "Lecturn Connect · Not added · Relay online"
-        : availability === "offline"
-          ? "Lecturn Connect · Not added · Relay offline"
-          : availability === "checking"
-            ? "Lecturn Connect · Not added · Checking relay status…"
-            : (Option.getOrNull(error)?.message ??
-              "Lecturn Connect · Not added · Relay status unavailable");
+    const statusText =
+      unsupported && !savedEnvironment
+        ? "Lecturn Connect · Not added · Client not supported"
+        : savedConnection
+          ? savedConnection.statusText
+          : availability === "online"
+            ? "Lecturn Connect · Not added · Relay online"
+            : availability === "offline"
+              ? "Lecturn Connect · Not added · Relay offline"
+              : availability === "checking"
+                ? "Lecturn Connect · Not added · Checking relay status…"
+                : (Option.getOrNull(error)?.message ??
+                  "Lecturn Connect · Not added · Relay status unavailable");
     if (selection) {
       return (
         <label
@@ -351,9 +408,10 @@ export function CloudEnvironmentConnectRows({
           className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 has-disabled:cursor-default"
         >
           <Checkbox
-            checked={selection.selectedIds.has(environment.environmentId)}
-            disabled={connectingEnvironmentIds.has(environment.environmentId)}
+            checked={!unsupported && selection.selectedIds.has(environment.environmentId)}
+            disabled={unsupported || connectingEnvironmentIds.has(environment.environmentId)}
             onCheckedChange={async (checked) => {
+              if (unsupported) return;
               selection.onChange(environment.environmentId, checked);
               const discovered = environmentsState.environments.get(environment.environmentId);
               if (checked && !savedEnvironment && discovered) {
@@ -361,6 +419,11 @@ export function CloudEnvironmentConnectRows({
                 if (!connected) selection.onChange(environment.environmentId, false);
               }
             }}
+          />
+          <EnvironmentMachineIcon
+            aria-hidden
+            kind={machineKind}
+            className="size-4 shrink-0 text-muted-foreground"
           />
           <span className="min-w-0 flex-1 truncate text-sm font-medium">{environment.label}</span>
           <AccountMark environmentId={environment.environmentId} />
@@ -383,7 +446,9 @@ export function CloudEnvironmentConnectRows({
                         ? "Unavailable"
                         : "Checking…"))}
             </TooltipTrigger>
-            <TooltipPopup className="max-w-80 break-words">{statusText}</TooltipPopup>
+            <TooltipPopup className="max-w-80 break-words">
+              {unsupportedDetail ?? statusText}
+            </TooltipPopup>
           </Tooltip>
         </label>
       );
@@ -402,16 +467,23 @@ export function CloudEnvironmentConnectRows({
                     : null
                 }
                 tooltipText={
-                  savedConnection
-                    ? savedConnection.statusText
-                    : availability === "online"
-                      ? "Relay online"
-                      : availability === "offline"
-                        ? "Relay offline"
-                        : availability === "checking"
-                          ? "Checking relay status"
-                          : (Option.getOrNull(error)?.message ?? "Relay status unavailable")
+                  unsupportedDetail !== null
+                    ? unsupportedDetail
+                    : savedConnection
+                      ? savedConnection.statusText
+                      : availability === "online"
+                        ? "Relay online"
+                        : availability === "offline"
+                          ? "Relay offline"
+                          : availability === "checking"
+                            ? "Checking relay status"
+                            : (Option.getOrNull(error)?.message ?? "Relay status unavailable")
                 }
+              />
+              <EnvironmentMachineIcon
+                aria-hidden
+                kind={machineKind}
+                className="size-4 shrink-0 text-muted-foreground"
               />
               <p className="truncate text-sm font-medium">{environment.label}</p>
               <AccountMark environmentId={environment.environmentId} />
@@ -429,7 +501,18 @@ export function CloudEnvironmentConnectRows({
               {statusText}
             </p>
           </div>
-          {savedConnection ? (
+          {unsupported && !savedEnvironment ? (
+            <Tooltip>
+              <TooltipTrigger render={<span className="inline-flex" tabIndex={0} />}>
+                <Button size="sm" disabled>
+                  Add
+                </Button>
+              </TooltipTrigger>
+              <TooltipPopup className="max-w-80 break-words">
+                {unsupportedDetail ?? "Client not supported"}
+              </TooltipPopup>
+            </Tooltip>
+          ) : savedConnection ? (
             <Button size="sm" variant="outline" disabled>
               {savedConnection.buttonLabel}
             </Button>

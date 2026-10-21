@@ -8,7 +8,8 @@ This document covers the unified release workflow for stable and nightly desktop
 
 - Workflow: `.github/workflows/release.yml`
 - Triggers:
-  - manual `workflow_dispatch` with `channel=stable`, the normal way to ship stable
+  - manual `workflow_dispatch` with `channel=stable`, the normal way to ship stable. Stable
+    and nightly dispatches must select `main`.
   - push tag matching `v*.*.*` for a stable release of an explicit commit
   - scheduled nightly check once daily at 10:38 UTC
   - manual `workflow_dispatch` with `channel=nightly`

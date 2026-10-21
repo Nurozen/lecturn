@@ -30,7 +30,9 @@ export function parseLecturnProjectFile(contents: string): LecturnProjectFile | 
  * editors get LSP support via a `$schema` reference.
  */
 export function buildLecturnProjectFileJsonSchema(): Record<string, unknown> {
-  const document = Schema.toJsonSchemaDocument(LecturnProjectFile);
+  // Closed objects, as before effect rc.113 changed the generator default;
+  // editors then flag unknown keys in lecturn.json.
+  const document = Schema.toJsonSchemaDocument(LecturnProjectFile, { onExcessProperty: "error" });
   const jsonSchema: Record<string, unknown> = {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     $id: LECTURN_PROJECT_FILE_SCHEMA_URL,

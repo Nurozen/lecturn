@@ -42,6 +42,7 @@ import { ControlPillMenu } from "../../components/ControlPill";
 import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { cn } from "../../lib/cn";
+import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { HOME_HORIZONTAL_INSET } from "../../lib/layoutMetrics";
 import { relativeTime } from "../../lib/time";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
@@ -363,7 +364,7 @@ export const ThreadListShowMoreRow = memo(function ThreadListShowMoreRow(props: 
         <SymbolView
           name={icon}
           size={10}
-          tintColorClassName={"accent-icon-subtle"}
+          tintColorClassName="accent-icon-subtle"
           type="monochrome"
           weight="semibold"
         />
@@ -513,7 +514,7 @@ export const PendingTaskListRow = memo(function PendingTaskListRow(props: {
               <SymbolView
                 name="chevron.right"
                 size={13}
-                tintColorClassName={"accent-icon-subtle"}
+                tintColorClassName="accent-icon-subtle"
                 type="monochrome"
               />
             </View>
@@ -717,6 +718,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
         canForkNow: thread.latestTurn?.state === "completed",
       }),
       THREAD_ROW_MENU_ACTIONS[1]!,
+      { id: "copy-thread-id", title: "Copy thread ID", image: "doc.on.doc" },
       ...buildThreadTitleRegenerationMenuItems({
         supported: props.titleRegenerationSupported,
         isRegenerating: thread.titleRegeneration != null,
@@ -746,6 +748,9 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
       if (nativeEvent.event === "archive") handleArchive();
       if (nativeEvent.event === "fork-thread") handleFork();
       if (nativeEvent.event === "rename") handleRename();
+      if (nativeEvent.event === "copy-thread-id") {
+        copyTextWithHaptic(thread.id, { target: "thread-id" });
+      }
       if (nativeEvent.event === "regenerate-title") handleRegenerateTitle();
       if (nativeEvent.event === "delete") handleDelete();
     },
@@ -923,7 +928,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
                   <SymbolView
                     name="chevron.right"
                     size={13}
-                    tintColorClassName={"accent-icon-subtle"}
+                    tintColorClassName="accent-icon-subtle"
                     type="monochrome"
                   />
                 </View>

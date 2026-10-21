@@ -1,3 +1,4 @@
+import { withWorkspaceLease } from "../../workspace/workspaceLease.ts";
 import {
   type ChatAttachment,
   CommandId,
@@ -28,6 +29,7 @@ import * as Equal from "effect/Equal";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -268,6 +270,7 @@ const make = Effect.gen(function* () {
   const providerSessionDirectory = yield* ProviderSessionDirectory;
   const gitWorkflow = yield* GitWorkflowService;
   const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
@@ -2049,6 +2052,14 @@ const make = Effect.gen(function* () {
 
   const contextualWorkers = new Set<ThreadId>();
   const contextualOutstanding = yield* TxRef.make(0);
+  // Serializes turn startup with checkout removal for threads sharing a worktree.
+  const withThreadWorkspaceLease = <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
+    Effect.gen(function* () {
+      const thread = yield* resolveThreadShell(threadId);
+      return yield* thread?.worktreePath
+        ? withWorkspaceLease(path.resolve(thread.worktreePath), effect)
+        : effect;
+    });
   const contextualDirty = new Set<ThreadId>();
   const contextualConcurrency = yield* Semaphore.make(4);
   const wakeContextualThread = (threadId: ThreadId) =>
@@ -2079,7 +2090,10 @@ const make = Effect.gen(function* () {
               });
               yield* queue.finish(threadId, next.event.eventId, "unknown");
             } else {
-              yield* processTurnStartRequested(next.event, next);
+              yield* withThreadWorkspaceLease(
+                threadId,
+                processTurnStartRequested(next.event, next),
+              );
               const remaining = yield* queue.head(threadId);
               if (remaining?.event.eventId === next.event.eventId) {
                 if (remaining.state === "held") break;
@@ -2149,18 +2163,24 @@ const make = Effect.gen(function* () {
           return;
         }
         const cachedModelSelection = threadModelSelections.get(event.payload.threadId);
-        yield* ensureSessionForThread(
+        const resume = ensureSessionForThread(
           event.payload.threadId,
           event.occurredAt,
           cachedModelSelection !== undefined ? { modelSelection: cachedModelSelection } : {},
         );
+        yield* thread.worktreePath
+          ? withWorkspaceLease(path.resolve(thread.worktreePath), resume)
+          : resume;
         return;
       }
-      case "thread.turn-start-requested":
-        if (Option.isSome(contextualQueue) && (yield* contextualQueue.value.contains(event)))
+      case "thread.turn-start-requested": {
+        if (Option.isSome(contextualQueue) && (yield* contextualQueue.value.contains(event))) {
           yield* wakeContextualThread(event.payload.threadId);
-        else yield* processTurnStartRequested(event);
+        } else {
+          yield* withThreadWorkspaceLease(event.payload.threadId, processTurnStartRequested(event));
+        }
         return;
+      }
       case "thread.turn-interrupt-requested":
         yield* processTurnInterruptRequested(event);
         return;

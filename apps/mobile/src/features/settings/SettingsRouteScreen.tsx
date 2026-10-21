@@ -1,125 +1,92 @@
-import { ContextualButton } from "../contextual/ContextualControls";
+import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
-import { LECTURN_LEGAL_NOTICES } from "@lecturn/shared/legalNotices";
-import { useAuth } from "@clerk/expo";
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import Constants from "expo-constants";
-import * as Notifications from "expo-notifications";
-import { useNavigation } from "@react-navigation/native";
-import { NativeStackScreenOptions } from "../../native/StackHeader";
-import { SymbolView } from "../../components/AppSymbol";
-import { AsyncResult } from "effect/unstable/reactivity";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Alert, AppState, Linking, Platform, Pressable, ScrollView, View } from "react-native";
+import { AppText as Text } from "../../components/AppText";
+import { useNavigation, type NavigationProp } from "@react-navigation/native";
+import { Platform, View } from "react-native";
+import { deriveProjectGroupLabel } from "@lecturn/client-runtime/state/project-grouping";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import {
-  isAtomCommandInterrupted,
-  reportAtomCommandResult,
-  settleAsyncResult,
-  settlePromise,
-  squashAtomCommandFailure,
-} from "@lecturn/client-runtime/state/runtime";
-import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
-import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
-import { supportsAgentAwarenessPush } from "../agent-awareness/capabilities";
-import {
-  openAndroidLiveUpdateSettings,
-  supportsAndroidLiveUpdateSettings,
-} from "../agent-awareness/androidNotifications";
-import { setLiveActivityUpdatesEnabled } from "../agent-awareness/liveActivityPreferences";
-import {
-  enableAgentNotifications,
-  requestAgentNotificationPermission,
-} from "../agent-awareness/notificationPermissions";
-import {
-  getAgentAwarenessRegistrationStatus,
-  getAgentNotificationRegistrationEnabled,
-  refreshAgentAwarenessRegistration,
-  subscribeAgentAwarenessRegistrationStatus,
-} from "../agent-awareness/remoteRegistration";
-import { refreshManagedRelayEnvironments } from "../cloud/managedRelayState";
-import { hasCloudPublicConfig } from "../cloud/publicConfig";
-import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
-import { WorkspaceSidebarToolbar } from "../layout/workspace-sidebar-toolbar";
-import { runtime } from "../../lib/runtime";
-import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
-import { serverEnvironment } from "../../state/server";
-import { useAtomCommand } from "../../state/use-atom-command";
-import { useEnvironments } from "../../state/environments";
-import {
-  DEFAULT_SERVER_SETTINGS,
-  MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
-  MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
-} from "@lecturn/contracts";
-import { supportsSharedSettingsSync } from "@lecturn/client-runtime/state/shared-settings";
-import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
-import {
-  type AppUpdateCheckState,
-  isAppUpdateCheckAvailable,
-  registerHiddenUpdateTap,
-  runAppUpdateCheck,
-} from "../updates/app-updates";
-import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { TeamSelector } from "../cloud/TeamSelector";
-import { useSessionRelayToken } from "../cloud/useSessionRelayToken";
-import { useConnectAccounts } from "../cloud/knownAccounts";
+import { hasCloudPublicConfig } from "../cloud/publicConfig";
+import { ContextualButton } from "../contextual/ContextualControls";
+import { WorkspaceSidebarToolbar } from "../layout/workspace-sidebar-toolbar";
+import { useEnvironments } from "../../state/environments";
+import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { ConnectAccountsSettings } from "./ConnectAccountsSettings";
 import { ConnectBillingStatus } from "./components/ConnectBillingStatus";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
-import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
-import { resolveAgentAwarenessPlatformPresentation } from "./SettingsRouteScreen.logic";
-import { planAutoSettleSettingsSync, type AutoSettleSettings } from "./autoSettleSettingsSync";
-
-type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
-type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
-
-// Reflects whether the relay actually accepted this device's registration.
-// Live Activities depend on relay registration; notification permission has
-// its own switch and delivery status.
-function useDeviceRegistered(): boolean {
-  const status = useSyncExternalStore(
-    subscribeAgentAwarenessRegistrationStatus,
-    getAgentAwarenessRegistrationStatus,
-    () => "unknown" as const,
-  );
-  return status === "registered";
-}
+import { SettingsScreen } from "./components/SettingsScreen";
+import {
+  AndroidSettingsEnvironmentFilter,
+  SettingsEnvironmentFilterHeader,
+} from "./components/SettingsEnvironmentFilterHeader";
+import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
+import { useSettingsConnectAccount } from "./useSettingsConnectAccount";
 
 export function SettingsRouteScreen() {
-  const navigation = useNavigation();
+  const content = hasCloudPublicConfig() ? (
+    <ConfiguredSettingsRouteScreen />
+  ) : (
+    <LocalSettingsRouteScreen />
+  );
 
   return (
     <>
       <WorkspaceSidebarToolbar />
+      <SettingsEnvironmentFilterHeader closeSettings />
       {Platform.OS === "android" ? (
-        <>
-          {/* Android renders its own in-screen header instead of the native bar. */}
-          <NativeStackScreenOptions options={{ headerShown: false }} />
-          <AndroidScreenHeader title="Settings" onBack={() => navigation.goBack()} />
-        </>
+        <SettingsScreen title="Settings" trailing={<AndroidSettingsEnvironmentFilter />}>
+          {content}
+        </SettingsScreen>
       ) : (
-        <NativeStackScreenOptions
-          options={{
-            unstable_headerRightItems:
-              Platform.OS === "ios"
-                ? () => [
-                    withNativeGlassHeaderItem({
-                      accessibilityLabel: "Close settings",
-                      icon: { name: "xmark", type: "sfSymbol" } as const,
-                      identifier: "settings-close",
-                      label: "",
-                      onPress: () => navigation.goBack(),
-                      type: "button",
-                    }),
-                  ]
-                : undefined,
-          }}
-        />
+        content
       )}
-      {hasCloudPublicConfig() ? <ConfiguredSettingsRouteScreen /> : <LocalSettingsRouteScreen />}
     </>
+  );
+}
+
+function ConfiguredSettingsRouteScreen() {
+  const insets = useSafeAreaInsets();
+  const { selectedAccountId, setPickedAccountId } = useSettingsConnectAccount();
+  const { savedConnectionsById } = useSavedRemoteConnections();
+
+  return (
+    <View collapsable={false} className="flex-1 bg-sheet">
+      <ArcaneBackdrop emphasis="sidebar" />
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        showsVerticalScrollIndicator={false}
+        className="flex-1"
+        contentContainerClassName="gap-4 px-5 pt-4"
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
+      >
+        <View className="gap-3">
+          <ConnectAccountsSettings
+            selectedAccountId={selectedAccountId}
+            onSelect={setPickedAccountId}
+          />
+          <TeamSelector accountId={selectedAccountId} />
+          <ConnectBillingStatus accountId={selectedAccountId} />
+          <Text className="px-2 text-sm text-foreground-muted">
+            Lecturn works locally without signing in. Cloud features are optional.
+          </Text>
+        </View>
+
+        <SettingsSection title="Connections">
+          <SettingsRow
+            icon="desktopcomputer"
+            label="Environments"
+            value={`${Object.keys(savedConnectionsById).length}`}
+            valuePosition="trailing"
+            target="SettingsEnvironments"
+          />
+          <SettingsRow icon="bell.badge" label="Notifications" target="SettingsNotifications" />
+        </SettingsSection>
+
+        <SettingsIndexSections />
+      </ScrollView>
+    </View>
   );
 }
 
@@ -135,816 +102,107 @@ function LocalSettingsRouteScreen() {
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
         className="flex-1"
-        contentContainerClassName="gap-6 px-5 pt-4"
+        contentContainerClassName="gap-4 px-5 pt-4"
         contentContainerStyle={{
           paddingBottom: Math.max(insets.bottom, 18) + 18,
         }}
       >
-        <SettingsSection title="Configuration">
+        <SettingsSection title="Connections">
           <SettingsRow
             icon="desktopcomputer"
             label="Environments"
             value={`${environmentCount}`}
+            valuePosition="trailing"
             target="SettingsEnvironments"
           />
         </SettingsSection>
 
-        <ContextualSettingsSection />
-        <GeneralSettingsSection />
-
-        <SettingsSection title="Appearance">
-          <SettingsRow icon="paintbrush" label="Appearance" target="SettingsAppearance" />
-        </SettingsSection>
-
-        <LegacySettingsSection />
-
-        <ArchivedThreadsSettingsSection />
-
-        <AppSettingsSection />
+        <SettingsIndexSections />
       </ScrollView>
     </View>
   );
 }
 
-function ConfiguredSettingsRouteScreen() {
-  const preferencesResult = useAtomValue(mobilePreferencesAtom);
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
-  const agentAwarenessPushAvailable = supportsAgentAwarenessPush();
-  const agentAwarenessPlatform = resolveAgentAwarenessPlatformPresentation(Platform.OS);
-  const agentAwarenessSubtitle =
-    Platform.OS === "android" && !agentAwarenessPushAvailable
-      ? "Install a newer app build to enable notifications"
-      : agentAwarenessPlatform.subtitle;
-  const insets = useSafeAreaInsets();
-  const navigation = useNavigation();
-  const { sessionId, isLoaded } = useAuth({ treatPendingAsSignedOut: false });
-  const connectAccounts = useConnectAccounts();
-  const isSignedIn = connectAccounts.some((account) => account.signedIn);
-  const [pickedAccountId, setPickedAccountId] = useState<string | null>(null);
-  const selectedAccountId =
-    pickedAccountId && connectAccounts.some((account) => account.accountId === pickedAccountId)
-      ? pickedAccountId
-      : (connectAccounts.find((account) => account.signedIn)?.accountId ??
-        connectAccounts[0]?.accountId ??
-        null);
-  const getRelayToken = useSessionRelayToken({
-    userId: selectedAccountId,
-    sessionId,
-    isSignedIn,
-  });
-  const { savedConnectionsById } = useSavedRemoteConnections();
-  const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>("checking");
-  const [liveActivityStatus, setLiveActivityStatus] = useState<LiveActivityStatus>("checking");
-  const deviceRegistered = useDeviceRegistered();
-  const notificationsRegistered = useSyncExternalStore(
-    subscribeAgentAwarenessRegistrationStatus,
-    getAgentNotificationRegistrationEnabled,
-    () => false,
-  );
-  const [requestingNotifications, setRequestingNotifications] = useState(false);
-  const liveActivitiesPreferenceEnabled = AsyncResult.isSuccess(preferencesResult)
-    ? preferencesResult.value.liveActivitiesEnabled !== false
-    : true;
-
-  const connections = useMemo(() => Object.values(savedConnectionsById), [savedConnectionsById]);
-  const environmentCount = connections.length;
-  const refreshNotifications = useCallback(async () => {
-    if (Platform.OS !== "ios" && Platform.OS !== "android") {
-      setNotificationStatus("unsupported");
-      return;
-    }
-    const result = await settlePromise(() => Notifications.getPermissionsAsync());
-    if (result._tag === "Failure") {
-      reportAtomCommandResult(result, { label: "notification permission refresh" });
-      setNotificationStatus("disabled");
-      return;
-    }
-    setNotificationStatus(result.value.granted ? "enabled" : "disabled");
-    if (result.value.granted) {
-      // Reopening Settings retries delivery setup without delaying permission UI.
-      void runtime.runPromiseExit(refreshAgentAwarenessRegistration());
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshNotifications();
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void refreshNotifications();
-    });
-    return () => subscription.remove();
-  }, [refreshNotifications]);
-
-  useEffect(() => {
-    if (!isLoaded) {
-      setLiveActivityStatus("checking");
-      return;
-    }
-    if (!isSignedIn) {
-      setLiveActivityStatus("signed-out");
-      return;
-    }
-    if (!AsyncResult.isSuccess(preferencesResult)) {
-      if (AsyncResult.isFailure(preferencesResult)) {
-        reportAtomCommandResult(preferencesResult, { label: "live activity preference load" });
-        setLiveActivityStatus("enabled");
-      } else {
-        setLiveActivityStatus("checking");
-      }
-      return;
-    }
-    setLiveActivityStatus(
-      preferencesResult.value.liveActivitiesEnabled === false ? "disabled" : "enabled",
-    );
-  }, [isLoaded, isSignedIn, preferencesResult]);
-
-  const promptSignIn = useCallback(() => {
-    Alert.alert(
-      "Sign in to Lecturn Connect",
-      "Notifications and Live Activities require Lecturn Connect to deliver updates to this device.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Continue",
-          onPress: () => navigation.navigate("SettingsSheet", { screen: "SettingsAuth" }),
-        },
-      ],
-    );
-  }, [navigation]);
-
-  const requestNotifications = useCallback(async () => {
-    if (!isSignedIn) {
-      promptSignIn();
-      return;
-    }
-    setRequestingNotifications(true);
-    const result = await settleAsyncResult(() =>
-      runtime.runPromiseExit(
-        enableAgentNotifications(refreshAgentAwarenessRegistration(), () =>
-          setNotificationStatus("enabled"),
-        ),
-      ),
-    );
-    setRequestingNotifications(false);
-    if (result._tag === "Failure") {
-      if (!isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        Alert.alert(
-          "Notifications unavailable",
-          error instanceof Error ? error.message : "Could not request notification permission.",
-        );
-      }
-      return;
-    }
-    if (result.value.type === "granted") {
-      setNotificationStatus("enabled");
-      // The switch already reflects permission. Report delivery readiness
-      // separately from the access the user just allowed.
-      if (getAgentNotificationRegistrationEnabled()) {
-        Alert.alert("Notifications enabled", "Agent notifications are enabled for this device.");
-      } else {
-        Alert.alert(
-          "Couldn't finish enabling notifications",
-          "Notification permission is allowed, but push notification setup hasn't completed. Check your internet connection and reopen Settings to retry. Push delivery will start once Lecturn Connect accepts this device's push token.",
-        );
-      }
-      return;
-    }
-    if (result.value.type === "unsupported") {
-      setNotificationStatus("unsupported");
-      Alert.alert(
-        "Notifications unavailable",
-        "Agent notifications are unavailable on this platform.",
-      );
-      return;
-    }
-    setNotificationStatus("disabled");
-    if (result.value.canAskAgain) {
-      Alert.alert("Notifications disabled", "Notifications were not enabled.");
-      return;
-    }
-    Alert.alert(
-      "Notifications disabled",
-      "Notifications were denied for this app. Open Settings to enable them.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Open Settings", onPress: () => void Linking.openSettings() },
-      ],
-    );
-  }, [isSignedIn, promptSignIn]);
-
-  const linkEnvironments = useCallback(async () => {
-    if (!isSignedIn) {
-      promptSignIn();
-      return;
-    }
-
-    setLiveActivityStatus("linking");
-    if (Platform.OS === "android") {
-      const permission = await settleAsyncResult(() =>
-        runtime.runPromiseExit(requestAgentNotificationPermission),
-      );
-      if (permission._tag === "Failure") {
-        setLiveActivityStatus("disabled");
-        const error = squashAtomCommandFailure(permission);
-        Alert.alert(
-          "Ongoing activity unavailable",
-          error instanceof Error ? error.message : "Could not enable agent notifications.",
-        );
-        return;
-      }
-      if (permission.value.type !== "granted") {
-        setLiveActivityStatus("disabled");
-        Alert.alert(
-          "Notification permission needed",
-          "Enable notifications in system Settings to show ongoing agent activity.",
-          [
-            { text: "Cancel", style: "cancel" },
-            { text: "Open Settings", onPress: () => void Linking.openSettings() },
-          ],
-        );
-        return;
-      }
-      setNotificationStatus("enabled");
-    }
-    const tokenResult = await settlePromise(() => getRelayToken());
-    if (tokenResult._tag === "Failure") {
-      setLiveActivityStatus("disabled");
-      const error = squashAtomCommandFailure(tokenResult);
-      Alert.alert(
-        Platform.OS === "android" ? "Ongoing activity unavailable" : "Live Activities unavailable",
-        error instanceof Error ? error.message : "Could not enable agent activity updates.",
-      );
-      return;
-    }
-    if (!tokenResult.value) {
-      promptSignIn();
-      setLiveActivityStatus("signed-out");
-      return;
-    }
-
-    const updateResult = await settleAsyncResult(() =>
-      runtime.runPromiseExit(
-        setLiveActivityUpdatesEnabled({
-          enabled: true,
-          previousEnabled: liveActivitiesPreferenceEnabled,
-          clerkToken: tokenResult.value,
-          connections,
-          ...(selectedAccountId ? { accountId: selectedAccountId } : {}),
-        }),
-      ),
-    );
-    if (updateResult._tag === "Failure") {
-      setLiveActivityStatus("disabled");
-      if (!isAtomCommandInterrupted(updateResult)) {
-        const error = squashAtomCommandFailure(updateResult);
-        Alert.alert(
-          Platform.OS === "android"
-            ? "Ongoing activity unavailable"
-            : "Live Activities unavailable",
-          error instanceof Error ? error.message : "Could not enable agent activity updates.",
-        );
-      }
-      return;
-    }
-
-    savePreferences({ liveActivitiesEnabled: true });
-    refreshManagedRelayEnvironments();
-    setLiveActivityStatus("enabled");
-    // The environment link can succeed while this device's own registration
-    // (the push-to-start token the relay needs) has not — don't claim Live
-    // Activities are live until the device is actually registered.
-    if (getAgentAwarenessRegistrationStatus() === "registered") {
-      Alert.alert(
-        Platform.OS === "android" ? "Ongoing activity enabled" : "Live Activities enabled",
-        environmentCount > 0
-          ? `${environmentCount} environment${environmentCount === 1 ? "" : "s"} linked for agent activity updates.`
-          : "Agent activity updates are enabled. Add an environment to start receiving updates.",
-      );
-    } else {
-      Alert.alert(
-        "Couldn't finish enabling activity updates",
-        "This device could not be registered with Lecturn Connect, so activity updates won't appear yet. They'll start once registration succeeds.",
-      );
-    }
-  }, [
-    connections,
-    environmentCount,
-    getRelayToken,
-    selectedAccountId,
-    isSignedIn,
-    liveActivitiesPreferenceEnabled,
-    promptSignIn,
-    savePreferences,
-  ]);
-
-  const handleDeviceNotificationsChange = useCallback(
-    (enabled: boolean) => {
-      if (enabled) {
-        if (!isSignedIn) {
-          promptSignIn();
-          return;
-        }
-        void requestNotifications();
-        return;
-      }
-
-      Alert.alert(
-        "Disable notifications",
-        "Open system Settings to disable notifications for Lecturn.",
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Open Settings", onPress: () => void Linking.openSettings() },
-        ],
-      );
-    },
-    [isSignedIn, promptSignIn, requestNotifications],
-  );
-
-  const handleLiveActivitiesChange = useCallback(
-    (enabled: boolean) => {
-      if (!enabled) {
-        setLiveActivityStatus("disabled");
-        void (async () => {
-          let token: string | null = null;
-          if (isSignedIn) {
-            const tokenResult = await settlePromise(() => getRelayToken());
-            if (tokenResult._tag === "Failure") {
-              reportAtomCommandResult(tokenResult, {
-                label: "live activity disable token lookup",
-              });
-              return;
-            }
-            token = tokenResult.value;
-          }
-
-          const updateResult = await settleAsyncResult(() =>
-            runtime.runPromiseExit(
-              setLiveActivityUpdatesEnabled({
-                enabled: false,
-                previousEnabled: liveActivitiesPreferenceEnabled,
-                clerkToken: token,
-                connections,
-                ...(selectedAccountId ? { accountId: selectedAccountId } : {}),
-              }),
-            ),
-          );
-          if (updateResult._tag === "Failure") {
-            setLiveActivityStatus("enabled");
-            reportAtomCommandResult(updateResult, {
-              label: "live activity disable",
-            });
-            return;
-          }
-          savePreferences({ liveActivitiesEnabled: false });
-          refreshManagedRelayEnvironments();
-        })();
-        return;
-      }
-
-      if (!isSignedIn) {
-        promptSignIn();
-        return;
-      }
-
-      void linkEnvironments();
-    },
-    [
-      connections,
-      getRelayToken,
-      selectedAccountId,
-      isSignedIn,
-      linkEnvironments,
-      liveActivitiesPreferenceEnabled,
-      promptSignIn,
-      savePreferences,
-    ],
-  );
-
-  return (
-    <View collapsable={false} className="flex-1 bg-sheet">
-      <ArcaneBackdrop emphasis="sidebar" />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        showsVerticalScrollIndicator={false}
-        className="flex-1"
-        contentContainerClassName="gap-6 px-5 pt-4"
-        contentContainerStyle={{
-          paddingBottom: Math.max(insets.bottom, 18) + 18,
-        }}
-      >
-        <View className="gap-3">
-          <ConnectAccountsSettings
-            selectedAccountId={selectedAccountId}
-            onSelect={setPickedAccountId}
-          />
-          <TeamSelector accountId={selectedAccountId} />
-          <ConnectBillingStatus accountId={selectedAccountId} />
-          <Text className="px-2 text-sm text-foreground-muted">
-            Lecturn works locally without signing in. Cloud features are optional.
-          </Text>
-        </View>
-
-        <SettingsSection title="Configuration">
-          <SettingsRow
-            icon="desktopcomputer"
-            label="Environments"
-            value={`${environmentCount}`}
-            target="SettingsEnvironments"
-          />
-          <SettingsSwitchRow
-            icon="bell.badge"
-            label="Device Notifications"
-            disabled={
-              !agentAwarenessPlatform.supported ||
-              !agentAwarenessPushAvailable ||
-              requestingNotifications ||
-              notificationStatus === "checking" ||
-              notificationStatus === "unsupported"
-            }
-            subtitle={
-              agentAwarenessSubtitle ??
-              (requestingNotifications
-                ? "Enabling notifications…"
-                : notificationStatus === "enabled" && !notificationsRegistered
-                  ? "Notification permission allowed. Push delivery setup is still pending."
-                  : undefined)
-            }
-            // This is the system permission switch. Relay delivery readiness is
-            // shown separately so allowing permission responds immediately.
-            value={agentAwarenessPushAvailable && notificationStatus === "enabled"}
-            onValueChange={handleDeviceNotificationsChange}
-          />
-          <SettingsSwitchRow
-            disabled={
-              !agentAwarenessPlatform.supported ||
-              !agentAwarenessPushAvailable ||
-              !isLoaded ||
-              liveActivityStatus === "checking" ||
-              liveActivityStatus === "linking"
-            }
-            icon="bolt.circle"
-            label={
-              Platform.OS === "android"
-                ? supportsAndroidLiveUpdateSettings()
-                  ? "Agent Live Updates"
-                  : "Ongoing Agent Activity"
-                : "Live Activity Updates"
-            }
-            subtitle={agentAwarenessSubtitle}
-            // Same gate: a saved preference is meaningless until the device
-            // registration the relay needs to push updates has succeeded.
-            value={
-              agentAwarenessPushAvailable &&
-              (liveActivityStatus === "enabled" || liveActivityStatus === "linking") &&
-              deviceRegistered
-            }
-            onValueChange={handleLiveActivitiesChange}
-          />
-          {supportsAndroidLiveUpdateSettings() ? (
-            <SettingsRow
-              icon="bolt.circle"
-              label="Live Update Settings"
-              onPress={() => {
-                void openAndroidLiveUpdateSettings().catch(() => {
-                  Alert.alert(
-                    "Couldn't open Settings",
-                    "Open Android Settings, select Lecturn, then enable Live Updates in Notifications.",
-                  );
-                });
-              }}
-            />
-          ) : null}
-        </SettingsSection>
-
-        <ContextualSettingsSection />
-        <GeneralSettingsSection />
-
-        <SettingsSection title="Appearance">
-          <SettingsRow icon="paintbrush" label="Appearance" target="SettingsAppearance" />
-        </SettingsSection>
-
-        <LegacySettingsSection />
-
-        <ArchivedThreadsSettingsSection />
-
-        <AppSettingsSection />
-      </ScrollView>
-    </View>
-  );
-}
-
-function GeneralSettingsSection() {
-  return (
-    <SettingsSection title="General">
-      <SettingsRow icon="folder" label="Project Grouping" target="SettingsProjectGrouping" />
-      {Platform.OS === "ios" ? (
-        <SettingsRow icon="keyboard" label="Keyboard" target="SettingsKeyboard" />
-      ) : null}
-      <AutoSettleSettingsRows />
-      <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
-    </SettingsSection>
-  );
-}
-
-const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_SERVER_SETTINGS.sidebarAutoSettleAfterDays ?? 3;
-
-/**
- * Mobile edits auto-settle defaults across connected, capable environments.
- * The first target supplies the displayed values. Applying them leaves each
- * environment's other defaults and overrides intact.
- */
-function AutoSettleSettingsRows() {
-  const { environments } = useEnvironments();
-  const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
-    label: "server settings update",
-    reportFailure: true,
-  });
-
-  const syncTargets = environments.filter(supportsSharedSettingsSync);
-  const reference = syncTargets[0] ?? null;
-  const referenceSettings = reference?.serverConfig?.settings ?? null;
-
-  const [daysDraft, setDaysDraft] = useState<string | null>(null);
-
-  if (reference === null || referenceSettings === null) {
-    return null;
-  }
-
-  const writeToAll = (patch: Partial<AutoSettleSettings>) => {
-    for (const environment of syncTargets) {
-      void updateSettings({ environmentId: environment.environmentId, input: { patch } });
-    }
-  };
-
-  const { patch: autoSettlePatch, mismatches } = planAutoSettleSettingsSync(
-    { environmentId: reference.environmentId, settings: referenceSettings },
-    syncTargets.map((environment) => ({
-      environmentId: environment.environmentId,
-      label: environment.label,
-      settings: environment.serverConfig?.settings ?? null,
-    })),
-  );
-
-  const afterDays = referenceSettings.sidebarAutoSettleAfterDays;
-  const commitDays = () => {
-    const draft = (daysDraft ?? "").trim();
-    setDaysDraft(null);
-    // Whole-string check so "3.5" and "3days" are rejected instead of
-    // silently becoming 3 on every eligible sync target.
-    const parsed = /^\d+$/.test(draft) ? Number(draft) : Number.NaN;
-    if (
-      Number.isInteger(parsed) &&
-      parsed >= MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS &&
-      parsed <= MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS &&
-      parsed !== afterDays
-    ) {
-      writeToAll({ sidebarAutoSettleAfterDays: parsed });
-    }
-  };
-
+function SettingsIndexSections() {
+  const { selectedTargets, projectGroups, selectedProjectKey } = useSettingsEnvironmentFilter();
+  const noServerTargets = selectedTargets.length === 0;
+  const selectedProject = projectGroups.find((group) => group.key === selectedProjectKey);
+  const scopedProjectMembers =
+    selectedProject?.members
+      .map((member) => member.project)
+      .filter((project) =>
+        selectedTargets.some((target) => target.environmentId === project.environmentId),
+      ) ?? [];
+  const projectLabel =
+    scopedProjectMembers.length > 0
+      ? deriveProjectGroupLabel({
+          representative: scopedProjectMembers[0]!,
+          members: scopedProjectMembers,
+        })
+      : (selectedProject?.label ?? "Unavailable project");
   return (
     <>
-      <SettingsSwitchRow
-        icon="arrow.triangle.branch"
-        label="Auto-settle merged threads"
-        value={referenceSettings.sidebarAutoSettleOnMerge}
-        onValueChange={(value) => writeToAll({ sidebarAutoSettleOnMerge: value })}
-      />
-      <SettingsSwitchRow
-        icon="clock"
-        label="Auto-settle inactive threads"
-        subtitle={afterDays === null ? undefined : `After ${afterDays} days without activity`}
-        value={afterDays !== null}
-        onValueChange={(value) =>
-          writeToAll({ sidebarAutoSettleAfterDays: value ? AUTO_SETTLE_DEFAULT_DAYS : null })
-        }
-      />
-      {afterDays !== null ? (
-        <View className="flex-row items-center gap-4 border-t border-border-subtle p-4">
-          <Text className="flex-1 text-lg text-foreground">Days before auto-settle</Text>
-          <TextInput
-            className="min-h-10 w-20 rounded-xl px-3 py-2 text-center text-base"
-            keyboardType="number-pad"
-            returnKeyType="done"
-            value={daysDraft ?? String(afterDays)}
-            onChangeText={setDaysDraft}
-            onBlur={commitDays}
-            onSubmitEditing={commitDays}
-            accessibilityLabel="Days before auto-settle"
+      <SettingsSection title="Interface">
+        <SettingsRow icon="paintbrush" label="Appearance" target="SettingsAppearance" />
+        {Platform.OS === "ios" ? (
+          <SettingsRow icon="keyboard" label="Keyboard" target="SettingsKeyboard" />
+        ) : null}
+      </SettingsSection>
+
+      <SettingsSection title="Projects & threads">
+        {selectedProjectKey !== null ? (
+          <SettingsRow
+            icon="folder"
+            label="Overview"
+            value={projectLabel}
+            target="SettingsProjectOverview"
           />
-        </View>
-      ) : null}
-      {mismatches.length > 0 ? (
-        <View className="flex-row items-center gap-4 border-t border-border-subtle p-4">
-          <View className="min-w-0 flex-1">
-            <Text className="text-lg text-foreground">Auto-settle defaults differ</Text>
-            <Text className="text-sm text-foreground-muted">
-              {mismatches.map((mismatch) => mismatch.label).join(", ")}
-            </Text>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => {
-              for (const mismatch of mismatches) {
-                void updateSettings({
-                  environmentId: mismatch.environmentId,
-                  input: { patch: autoSettlePatch },
-                });
-              }
-            }}
-            className="rounded-full bg-subtle px-4 py-2 active:opacity-70"
-          >
-            <Text className="text-base font-lecturn-medium text-foreground">
-              Apply auto-settle defaults
-            </Text>
-          </Pressable>
-        </View>
-      ) : null}
-    </>
-  );
-}
+        ) : null}
+        <SettingsRow icon="folder" label="Organization" target="SettingsOrganization" />
+        <SettingsRow icon="text.bubble" label="Thread behavior" target="SettingsThreads" />
+        <SettingsRow icon="archivebox" label="Archived Threads" target="SettingsArchive" />
+      </SettingsSection>
 
-/**
- * Device-local legacy toggles. Mobile has no client-settings sync, so this is
- * the counterpart of web's Settings → General → Legacy features backed by
- * mobile preferences.
- */
-function LegacySettingsSection() {
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
-  const preferences = useAtomValue(mobilePreferencesAtom);
-  const threadListV2Enabled = useThreadListV2Enabled();
-  const planModeEnabled =
-    AsyncResult.isSuccess(preferences) && preferences.value.planModeEnabled === true;
+      <ContextualSettingsSection />
 
-  return (
-    <View className="gap-3">
-      <SettingsSection title="Legacy">
-        <SettingsSwitchRow
-          icon="sidebar.left"
-          label="Legacy Thread List"
-          value={!threadListV2Enabled}
-          onValueChange={(value) => savePreferences({ legacyThreadListEnabled: value })}
+      <SettingsSection title="Server settings">
+        <SettingsRow
+          icon="text.bubble"
+          label="New threads"
+          target="SettingsEnvironmentNewThreads"
+          disabled={noServerTargets}
         />
-        <SettingsSwitchRow
-          icon="hammer"
-          label="Plan Mode"
-          value={planModeEnabled}
-          onValueChange={(value) => savePreferences({ planModeEnabled: value })}
+        <SettingsRow
+          icon="arrow.triangle.branch"
+          label="Source control"
+          target="SettingsEnvironmentSourceControl"
+          disabled={noServerTargets}
+        />
+        <SettingsRow
+          icon="text.alignleft"
+          label="Agent behavior"
+          target="SettingsEnvironmentAgentBehavior"
+          disabled={noServerTargets}
+        />
+        <SettingsRow
+          icon="arrow.clockwise"
+          label="Maintenance"
+          target="SettingsEnvironmentMaintenance"
+          disabled={noServerTargets}
         />
       </SettingsSection>
-      <Text className="px-2 text-sm text-foreground-muted">
-        Opt into retired interfaces kept for compatibility. Plan Mode restores the Build/Plan
-        control; otherwise every task runs in Build mode.
-      </Text>
-    </View>
-  );
-}
 
-function AppSettingsSection() {
-  const [showLegalNotices, setShowLegalNotices] = useState(false);
-  const [updateState, setUpdateState] = useState<AppUpdateCheckState>("idle");
-  const updateInFlight = useRef(false);
-  const hiddenUpdateTapCount = useRef(0);
-
-  const version = Constants.expoConfig?.version ?? "0.0.0";
-  // Fall back to "production" to match resolveAppVariant in app.config.ts, so a
-  // missing variant never mislabels a production build as development.
-  const variant = (Constants.expoConfig?.extra?.appVariant as string | undefined) ?? "production";
-  const variantLabel = variant === "production" ? "" : capitalize(variant);
-  const versionLabel = variantLabel ? `${version} · ${variantLabel}` : version;
-  const updateCheckAvailable = isAppUpdateCheckAvailable();
-  const busy =
-    updateState === "checking" || updateState === "downloading" || updateState === "restarting";
-
-  // "Up to date" is a transient acknowledgement, not a state worth persisting —
-  // return the version row to its normal, deliberately quiet state.
-  useEffect(() => {
-    if (updateState !== "current") return;
-    const timer = setTimeout(() => setUpdateState("idle"), 3000);
-    return () => clearTimeout(timer);
-  }, [updateState]);
-
-  const checkForUpdate = useCallback(async () => {
-    // `disabled={busy}` only takes effect on the next render, so two taps in the
-    // same frame would both get through. The ref closes that window.
-    if (updateInFlight.current) return;
-    updateInFlight.current = true;
-    try {
-      // The user asked for this restart by tapping the version row, so it may
-      // apply immediately instead of prompting.
-      await runAppUpdateCheck({
-        applyMode: "immediate",
-        onFailure: (message) => Alert.alert("Update failed", message),
-        onStateChange: setUpdateState,
-      });
-    } finally {
-      updateInFlight.current = false;
-    }
-  }, []);
-
-  const handleVersionPress = useCallback(() => {
-    if (!updateCheckAvailable || updateInFlight.current) return;
-    const tap = registerHiddenUpdateTap(hiddenUpdateTapCount.current);
-    hiddenUpdateTapCount.current = tap.nextCount;
-    if (tap.shouldCheck) {
-      void checkForUpdate();
-    }
-  }, [checkForUpdate, updateCheckAvailable]);
-
-  const statusLabel =
-    updateState === "checking"
-      ? "Checking…"
-      : updateState === "downloading"
-        ? "Downloading…"
-        : // "ready" appears only when this check joined an in-flight background-mode
-          // check; that download installs at the next backgrounding.
-          updateState === "ready"
-          ? "Update ready"
-          : updateState === "restarting"
-            ? "Restarting…"
-            : updateState === "current"
-              ? "Up to date"
-              : null;
-
-  const versionRow = (
-    <View className="flex-row items-center gap-4 p-4">
-      <SymbolView
-        name="info.circle"
-        size={22}
-        tintColorClassName={"accent-icon"}
-        type="monochrome"
-        weight="regular"
-      />
-      <Text className="flex-1 text-lg text-foreground">Version</Text>
-      <View className="items-end">
-        <Text className="text-lg text-foreground-muted">{versionLabel}</Text>
-        {statusLabel ? (
-          <Text className="text-xs text-foreground-muted/70">{statusLabel}</Text>
-        ) : null}
-      </View>
-    </View>
-  );
-
-  return (
-    <SettingsSection title="App">
-      <SettingsRow icon="internaldrive" label="Client Storage" target="SettingsClientStorage" />
-      <SettingsRow icon="stethoscope" label="Diagnostics" target="SettingsDiagnostics" />
-      <SettingsRow
-        icon="doc.on.doc"
-        label="Open source licenses"
-        target="SettingsOpenSourceLicenses"
-      />
-      <SettingsRow icon="doc.text" label="Legal" fullScreenTarget="SettingsLegal" />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: showLegalNotices }}
-        onPress={() => setShowLegalNotices((visible) => !visible)}
-        className="p-4"
-      >
-        <Text className="text-lg text-foreground">Open-source attribution</Text>
-        <Text className="text-sm text-foreground-muted">
-          {showLegalNotices ? "Hide notices" : "View license and attribution"}
-        </Text>
-      </Pressable>
-      {showLegalNotices ? (
-        <Text selectable className="px-4 pb-4 text-sm leading-normal text-foreground-muted">
-          {LECTURN_LEGAL_NOTICES}
-        </Text>
-      ) : null}
-      {updateCheckAvailable ? (
-        <Pressable
-          accessibilityLabel={`Version ${versionLabel}`}
-          accessibilityRole="text"
-          disabled={busy}
-          onPress={handleVersionPress}
-        >
-          {versionRow}
-        </Pressable>
-      ) : (
-        versionRow
-      )}
-    </SettingsSection>
-  );
-}
-
-function capitalize(value: string): string {
-  return value.length > 0 ? value.charAt(0).toUpperCase() + value.slice(1) : value;
-}
-
-function ArchivedThreadsSettingsSection() {
-  return (
-    <SettingsSection title="Threads">
-      <SettingsRow icon="archivebox" label="Archived Threads" target="SettingsArchive" />
-    </SettingsSection>
+      <SettingsSection title="App">
+        <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
+        <SettingsRow icon="info.circle" label="About Lecturn" target="SettingsAbout" />
+      </SettingsSection>
+    </>
   );
 }
 
 function ContextualSettingsSection() {
   const { environments } = useEnvironments();
-  const navigation =
-    useNavigation<
-      import("@react-navigation/native").NavigationProp<{ Contextual: { environmentId: string } }>
-    >();
+  const navigation = useNavigation<NavigationProp<{ Contextual: { environmentId: string } }>>();
   const supported = environments.filter(
     (environment) => environment.serverConfig?.environment.capabilities.contextual === true,
   );

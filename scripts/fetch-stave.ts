@@ -209,7 +209,7 @@ export const parseLatestReleaseResponse = (json: unknown) =>
     Effect.mapError((cause) => new StaveLatestReleaseError({ operation: "decode", cause })),
   );
 
-const GitHubToken = Config.string("GITHUB_TOKEN").pipe(
+const GitHubToken = Config.String("GITHUB_TOKEN").pipe(
   Config.option,
   Config.map((token) => Option.filter(token, (value) => value.length > 0)),
 );
@@ -650,7 +650,7 @@ export const writeStaveTagOutput = Effect.fn("writeStaveTagOutput")(function* (
     return;
   }
   const fs = yield* FileSystem.FileSystem;
-  const githubOutputPath = yield* Config.nonEmptyString("GITHUB_OUTPUT").pipe(
+  const githubOutputPath = yield* Config.NonEmptyString("GITHUB_OUTPUT").pipe(
     Effect.mapError((cause) => new StaveGitHubOutputConfigError({ cause })),
   );
   yield* fs
@@ -689,27 +689,27 @@ export const runFetchStave = Effect.fn("runFetchStave")(function* (options: RunF
 const command = Command.make(
   "fetch-stave",
   {
-    version: Flag.string("version").pipe(
+    version: Flag.String("version").pipe(
       Flag.withDescription("Stave release tag (v0.4.0), bare version (0.4.0) or 'latest'."),
       Flag.withDefault("latest"),
     ),
-    platformKey: Flag.choice("platform-key", STAVE_PLATFORM_KEYS).pipe(
+    platformKey: Flag.Literals("platform-key", STAVE_PLATFORM_KEYS).pipe(
       Flag.withDescription("Fetch the binary for a single Lecturn platform key."),
       Flag.optional,
     ),
-    all: Flag.boolean("all").pipe(
+    all: Flag.Boolean("all").pipe(
       Flag.withDescription("Fetch binaries for every supported platform key."),
       Flag.withDefault(false),
     ),
-    resolveOnly: Flag.boolean("resolve-only").pipe(
+    resolveOnly: Flag.Boolean("resolve-only").pipe(
       Flag.withDescription("Only resolve the release tag; download nothing."),
       Flag.withDefault(false),
     ),
-    out: Flag.string("out").pipe(
+    out: Flag.String("out").pipe(
       Flag.withDescription("Directory receiving <platform-key>/ subdirectories."),
       Flag.optional,
     ),
-    githubOutput: Flag.boolean("github-output").pipe(
+    githubOutput: Flag.Boolean("github-output").pipe(
       Flag.withDescription("Also append stave_tag=<tag> to GITHUB_OUTPUT."),
       Flag.withDefault(false),
     ),

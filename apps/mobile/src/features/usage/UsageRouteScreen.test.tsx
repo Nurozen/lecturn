@@ -66,12 +66,6 @@ vi.mock("@react-navigation/native", () => ({
   useRoute: () => ({ params: undefined }),
 }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
-vi.mock("../../components/ArcaneBackdrop", () => ({
-  ArcaneBackdrop: () => {
-    ui.text = [];
-    return null;
-  },
-}));
 vi.mock("../../components/GlassCard", () => ({
   GlassCard: ({ children }: { children: ReactNode }) => children,
 }));
@@ -96,6 +90,32 @@ vi.mock("../../components/ControlPill", () => ({
   }) => {
     ui.selectEnvironment = onPressAction;
     return children;
+  },
+}));
+// Android routes SegmentedControl to the native Material control; keep plain
+// pressable segments so tests can switch tabs by label.
+vi.mock("../../components/SegmentedControl", () => ({
+  SegmentedControl: ({
+    options,
+    onSelect,
+  }: {
+    options: readonly { value: string | number; label: string }[];
+    onSelect: (value: string | number) => void;
+  }) => {
+    for (const option of options) ui.press.set(option.label, () => onSelect(option.value));
+    return null;
+  },
+}));
+vi.mock("../settings/components/SettingsScreen", () => ({
+  // The screen re-renders as a whole; drop text collected by the previous pass.
+  SettingsScreen: ({ children, trailing }: { children: ReactNode; trailing?: ReactNode }) => {
+    ui.text = [];
+    return (
+      <>
+        {children}
+        {trailing}
+      </>
+    );
   },
 }));
 vi.mock("../settings/components/SettingsSection", () => ({

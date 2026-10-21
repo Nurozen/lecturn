@@ -127,6 +127,16 @@ const imageProps = {
           </div>
         </div>
       </section>
+
+      <section class="platform-section platform-section--cli" data-rise style="--d:480ms">
+        <div class="platform-header">
+          <svg class="platform-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7l5 5-5 5M12 17h7"/></svg>
+          <h2 class="platform-name">Terminal</h2>
+        </div>
+        <code class="cli-line cli-line--stable">npx lecturn@latest</code>
+        <code class="cli-line cli-line--nightly">npx lecturn@nightly</code>
+        <p class="cli-note">Requires Node.js. See the <a href={installationUrl}>installation guide</a> for other options.</p>
+      </section>
     </div>
 
     <p class="channel-help">
@@ -403,6 +413,37 @@ const imageProps = {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
+  }
+
+  /* The CLI ships on both trains; only the command differs. */
+  .cli-line--nightly,
+  .download-page[data-channel="nightly"] .cli-line--stable {
+    display: none;
+  }
+
+  .download-page[data-channel="nightly"] .cli-line--nightly {
+    display: block;
+  }
+
+  .cli-note {
+    color: var(--fg-muted);
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+  }
+
+  .cli-note a {
+    text-decoration: underline;
+  }
+
+  .cli-line {
+    align-self: flex-start;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    padding: 0.6rem 0.9rem;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--fg);
   }
 
   .platform-header {

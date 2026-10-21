@@ -1,6 +1,5 @@
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import {
-  GitMergeIcon,
   SendIcon,
   RefreshCwIcon,
   EyeIcon,
@@ -23,6 +22,7 @@ import {
 import { ActivityWatchFrame, ActivityWatchState, ActivityCheckBar } from "./ActivityWatchVisual";
 import { useEnvironment } from "../../state/environments";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { PullRequestGlyph } from "./pullRequestIcons";
 import { StaveIcon } from "../StaveIcon";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelName } from "../chat/providerIconUtils";
@@ -426,7 +426,7 @@ function WatchCard({
                 }
               }}
             >
-              <GitMergeIcon className="size-3.5" /> Merge when ready
+              <PullRequestGlyph.merged className="size-3.5" /> Merge when ready
             </Button>
           </TooltipTrigger>
           <TooltipPopup>

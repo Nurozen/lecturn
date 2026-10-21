@@ -205,19 +205,19 @@ export const ApiLive = Api.make(
     //
     // 2. Create bindings
     //
-    const apnsEnabled = yield* Config.boolean("APNS_ENABLED").pipe(Config.withDefault(true));
+    const apnsEnabled = yield* Config.Boolean("APNS_ENABLED").pipe(Config.withDefault(true));
     const apnsCredentials = apnsEnabled
       ? {
           environment: yield* Config.schema(RelayConfiguration.ApnsEnvironment, "APNS_ENVIRONMENT"),
-          teamId: yield* Config.string("APNS_TEAM_ID"),
-          keyId: yield* Config.string("APNS_KEY_ID"),
-          bundleId: yield* Config.string("APNS_BUNDLE_ID"),
-          privateKey: yield* Config.redacted("APNS_PRIVATE_KEY"),
+          teamId: yield* Config.String("APNS_TEAM_ID"),
+          keyId: yield* Config.String("APNS_KEY_ID"),
+          bundleId: yield* Config.String("APNS_BUNDLE_ID"),
+          privateKey: yield* Config.Redacted("APNS_PRIVATE_KEY"),
         }
       : null;
     const fcmServiceAccount = Option.getOrUndefined(
       Option.filter(
-        yield* Config.option(Config.redacted("FCM_SERVICE_ACCOUNT")),
+        yield* Config.option(Config.Redacted("FCM_SERVICE_ACCOUNT")),
         (value) => Redacted.value(value).trim().length > 0,
       ),
     );
@@ -230,36 +230,36 @@ export const ApiLive = Api.make(
     const axiomIngestToken = yield* observability.workerIngestToken.token;
     const axiomTracesEndpoint = yield* observability.traces.otelTracesEndpoint;
 
-    const clerkSecretKey = yield* Config.redacted("CLERK_SECRET_KEY");
-    const clerkPublishableKey = yield* Config.string("CLERK_PUBLISHABLE_KEY");
-    const clerkJwtAudience = yield* Config.string("CLERK_JWT_AUDIENCE");
-    const billingMode = yield* Config.string("BILLING_MODE").pipe(Config.withDefault("disabled"));
-    const billingCheckout = yield* Config.string("BILLING_CHECKOUT_ENABLED").pipe(
+    const clerkSecretKey = yield* Config.Redacted("CLERK_SECRET_KEY");
+    const clerkPublishableKey = yield* Config.String("CLERK_PUBLISHABLE_KEY");
+    const clerkJwtAudience = yield* Config.String("CLERK_JWT_AUDIENCE");
+    const billingMode = yield* Config.String("BILLING_MODE").pipe(Config.withDefault("disabled"));
+    const billingCheckout = yield* Config.String("BILLING_CHECKOUT_ENABLED").pipe(
       Config.withDefault("false"),
     );
-    const sandboxManagedAccess = yield* Config.string(
+    const sandboxManagedAccess = yield* Config.String(
       "BILLING_SANDBOX_MANAGED_ACCESS_ENABLED",
     ).pipe(Config.withDefault("false"));
-    const billingAppOrigin = yield* Config.string("BILLING_APP_ORIGIN").pipe(
+    const billingAppOrigin = yield* Config.String("BILLING_APP_ORIGIN").pipe(
       Config.withDefault("https://lecturn.cloudgatherer.net"),
     );
-    const billingGrace = yield* Config.string("BILLING_RENEWAL_GRACE_SECONDS").pipe(
+    const billingGrace = yield* Config.String("BILLING_RENEWAL_GRACE_SECONDS").pipe(
       Config.withDefault("0"),
     );
-    const stripeSecret = yield* Config.redacted("STRIPE_SECRET_KEY").pipe(
+    const stripeSecret = yield* Config.Redacted("STRIPE_SECRET_KEY").pipe(
       Config.withDefault(Redacted.make("")),
     );
-    const stripeWebhook = yield* Config.redacted("STRIPE_WEBHOOK_SECRET").pipe(
+    const stripeWebhook = yield* Config.Redacted("STRIPE_WEBHOOK_SECRET").pipe(
       Config.withDefault(Redacted.make("")),
     );
-    const clerkBillingWebhook = yield* Config.redacted("CLERK_BILLING_WEBHOOK_SECRET").pipe(
+    const clerkBillingWebhook = yield* Config.Redacted("CLERK_BILLING_WEBHOOK_SECRET").pipe(
       Config.withDefault(Redacted.make("")),
     );
-    const monthlyPrice = yield* Config.string("STRIPE_MONTHLY_PRICE_ID").pipe(
+    const monthlyPrice = yield* Config.String("STRIPE_MONTHLY_PRICE_ID").pipe(
       Config.withDefault(""),
     );
-    const annualPrice = yield* Config.string("STRIPE_ANNUAL_PRICE_ID").pipe(Config.withDefault(""));
-    const portalConfiguration = yield* Config.string("STRIPE_PORTAL_CONFIGURATION_ID").pipe(
+    const annualPrice = yield* Config.String("STRIPE_ANNUAL_PRICE_ID").pipe(Config.withDefault(""));
+    const portalConfiguration = yield* Config.String("STRIPE_PORTAL_CONFIGURATION_ID").pipe(
       Config.withDefault(""),
     );
     const billingExtra = yield* Effect.all(
@@ -276,10 +276,10 @@ export const ApiLive = Api.make(
           "BILLING_ENFORCEMENT_USERS",
           "BILLING_CHECKOUT_USERS",
           "BILLING_ADDITIONAL_APP_ORIGINS",
-        ].map((key) => [key, Config.string(key).pipe(Config.withDefault(""))]),
+        ].map((key) => [key, Config.String(key).pipe(Config.withDefault(""))]),
       ),
     );
-    const identityReconciliation = yield* Config.boolean(
+    const identityReconciliation = yield* Config.Boolean(
       "BILLING_IDENTITY_RECONCILIATION_ENABLED",
     ).pipe(Config.withDefault(false));
     const billingConfig = yield* Effect.try(() =>
@@ -301,7 +301,7 @@ export const ApiLive = Api.make(
       Object.fromEntries(
         extensionEnvironmentKeys.map((key) => [
           key,
-          Config.string(key).pipe(Config.withDefault("")),
+          Config.String(key).pipe(Config.withDefault("")),
         ]),
       ),
     );
@@ -309,7 +309,7 @@ export const ApiLive = Api.make(
       Object.entries(decisionsSettings).filter(([, value]) => value !== ""),
     );
     const extensionsConfig = parseExtensionsConfig(extensionSettings);
-    const evaluatorWorker = yield* Config.string("EXTENSIONS_EVALUATOR_WORKER").pipe(
+    const evaluatorWorker = yield* Config.String("EXTENSIONS_EVALUATOR_WORKER").pipe(
       Config.withDefault(""),
     );
     if (evaluatorWorker) yield* registerExtensionEvaluatorBinding(evaluatorWorker);
@@ -317,20 +317,20 @@ export const ApiLive = Api.make(
       ...Object.fromEntries(Object.entries(decisionsSettings).filter(([, value]) => value !== "")),
       EXTENSIONS_EVALUATOR_WORKER: evaluatorWorker,
     });
-    const teamsEnabled = yield* Config.boolean("TEAMS_ENABLED").pipe(Config.withDefault(false));
-    const teamMonthlyPrice = yield* Config.string("STRIPE_TEAM_MONTHLY_PRICE_ID").pipe(
+    const teamsEnabled = yield* Config.Boolean("TEAMS_ENABLED").pipe(Config.withDefault(false));
+    const teamMonthlyPrice = yield* Config.String("STRIPE_TEAM_MONTHLY_PRICE_ID").pipe(
       Config.withDefault(""),
     );
-    const teamAnnualPrice = yield* Config.string("STRIPE_TEAM_ANNUAL_PRICE_ID").pipe(
+    const teamAnnualPrice = yield* Config.String("STRIPE_TEAM_ANNUAL_PRICE_ID").pipe(
       Config.withDefault(""),
     );
-    const teamPortal = yield* Config.string("STRIPE_TEAM_PORTAL_CONFIGURATION_ID").pipe(
+    const teamPortal = yield* Config.String("STRIPE_TEAM_PORTAL_CONFIGURATION_ID").pipe(
       Config.withDefault(""),
     );
-    const teamStripeWebhook = yield* Config.redacted("STRIPE_TEAM_WEBHOOK_SECRET").pipe(
+    const teamStripeWebhook = yield* Config.Redacted("STRIPE_TEAM_WEBHOOK_SECRET").pipe(
       Config.withDefault(Redacted.make("")),
     );
-    const teamClerkWebhook = yield* Config.redacted("CLERK_TEAM_WEBHOOK_SECRET").pipe(
+    const teamClerkWebhook = yield* Config.Redacted("CLERK_TEAM_WEBHOOK_SECRET").pipe(
       Config.withDefault(Redacted.make("")),
     );
     if (
@@ -365,7 +365,7 @@ export const ApiLive = Api.make(
           "MANAGED_GATEWAY_ENABLED",
           "MANAGED_GATEWAY_ORIGIN_GUARD_VERIFIED",
           "MANAGED_GATEWAY_ROUTE_VERIFIED",
-        ].map((name) => [name, Config.string(name).pipe(Config.withDefault("false"))]),
+        ].map((name) => [name, Config.String(name).pipe(Config.withDefault("false"))]),
       ),
     );
     const gatewayConfig = yield* Effect.try(() =>

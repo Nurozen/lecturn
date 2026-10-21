@@ -5,53 +5,55 @@ to keep a terminal open.
 
 ## Manage the service
 
-Run these commands on the machine that will host Lecturn:
+Install the `lecturn` CLI first ([Install Lecturn](./install.md#command-line)),
+then run these commands on the machine that will host Lecturn:
 
-| Task                            | Command                                |
-| ------------------------------- | -------------------------------------- |
-| Install and start               | `npx lecturn@latest service install`   |
-| Inspect status and log location | `npx lecturn@latest service status`    |
-| Update or repair                | `npx lecturn@latest service update`    |
-| Stop and remove from startup    | `npx lecturn@latest service uninstall` |
+| Task                            | Command                     |
+| ------------------------------- | --------------------------- |
+| Install and start               | `lecturn service install`   |
+| Inspect status and log location | `lecturn service status`    |
+| Move to a newer release         | `lecturn update`            |
+| Restart                         | `lecturn service restart`   |
+| Stop and remove from startup    | `lecturn service uninstall` |
+
+Without an installed `lecturn`, run the same commands through
+`npx lecturn@latest`, for example `npx lecturn@latest service install`.
 
 Uninstalling the service leaves your projects, threads, and settings intact.
-
-Install and update use the version of the CLI you invoke. For nightly, use
-`npx lecturn@nightly service update`; replace `nightly` with an exact version to pin
-one. An older CLI refuses to replace a newer service unless you explicitly add
-`--allow-downgrade`.
-
-Updating restarts the server. Finish active work first, and wait for any remote
-update already in progress. To match a remote client's version, follow
-[Updating Lecturn](./updating.md).
+Running `lecturn service install` again repairs a service that `lecturn service status`
+reports as broken.
 
 Service installation and updates run the service from a self-contained Lecturn
 runtime downloaded from a Lecturn release, so the service does not depend on
 Node.js or npm. They are unavailable until a Lecturn runtime is published: until
-then `service install` and `service update` stop with an explanation. Use the
+then `service install` and `lecturn update` stop with an explanation. Use the
 Lecturn desktop app to host Lecturn Connect in the meantime.
 
 ## Self-contained CLI
 
-The [install script](./install.md#choose-an-installation) places a self-contained
+The [install script](./install.md#command-line) places a self-contained
 `lecturn` in `~/.local/bin`. It follows the stable train by default; set
 `LECTURN_CHANNEL=nightly` for nightlies, `LECTURN_VERSION` to pin an exact
 version, or `LECTURN_RELEASE_BASE_URL` to download from a mirror.
 
-`lecturn update` moves a self-contained install to the newest release on its
-channel. It is unavailable until Lecturn publishes standalone CLI release
-archives; update through the Lecturn desktop app or your package manager instead.
-Once available, it asks before restarting a background service for the same
-Lecturn home, because a restart interrupts running agent turns, terminals, and
-remote clients. Pass `--yes` from a script. A server you started by hand keeps
-running the old version until you restart it. Pass an exact version to pin one,
-`--channel` to switch between stable and nightly, or `--allow-downgrade` to move
-backwards.
+`lecturn update` downloads the newest release on your channel and switches
+`lecturn` and the service to it. It is unavailable until Lecturn publishes
+standalone CLI release archives; update through the Lecturn desktop app or your
+package manager instead. Once available, restarting interrupts running agent
+turns, terminals, and remote clients, so it asks first; answer no and the
+service keeps running the old version until you run `lecturn service restart`.
+Pass `--yes` from a script. A server you started by hand is left running; stop
+and start it again to pick up the new version. Wait for any remote update
+already in progress before updating; to match a remote client's version, follow
+[Updating Lecturn](./updating.md).
 
-`lecturn uninstall` reverses the install script: it shows what it found (the
-background service, the `lecturn` launcher, and downloaded versions under
-`~/.lecturn/runtime`), asks once, and removes them. Your projects, threads, and
-settings under `~/.lecturn/userdata` are kept. Pass `--yes` from a script.
+Pass an exact version to pin one, `--channel` to switch between stable and
+nightly, or `--allow-downgrade` to move backwards.
+
+`lecturn uninstall` removes the background service, the `lecturn` launcher, and
+the downloaded versions under `~/.lecturn/runtime` after showing you the list
+and asking once. Your projects, threads, and settings under
+`~/.lecturn/userdata` are kept. Pass `--yes` from a script.
 
 ## Platform support
 
@@ -102,7 +104,7 @@ that session open.
 
 On macOS, check **System Settings → General → Login Items** if the service no
 longer starts at login. If agent work cannot access Desktop, Documents, or
-Downloads, it may need Full Disk Access for the Node executable listed in
+Downloads, it may need Full Disk Access for the `lecturn` executable listed in
 `ProgramArguments` in
 `~/Library/LaunchAgents/com.cloudgatherer.lecturn.service.plist`.
 
