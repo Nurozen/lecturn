@@ -10525,20 +10525,29 @@ export default function ChatView(props: ChatViewProps) {
                         <ComposerBannerStack items={feedbackBannerItems} />
                         {/* Feature-owned copper surface (index.css .settled-thread-action),
                             so a plain button rather than a restyled ui Button. */}
-                        <button
-                          type="button"
-                          className="settled-thread-action flex min-h-20 w-full cursor-pointer items-center justify-between gap-2 rounded-2xl border px-5 py-6 font-medium text-base outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-64 sm:text-sm"
-                          disabled={isUnsettling || activeEnvironmentUnavailable}
-                          aria-label="Unsettle thread"
-                          aria-busy={isUnsettling}
-                          onClick={() => void handleUnsettleActiveThread()}
-                        >
-                          <span className="lecturn-settled-label flex items-center gap-2">
-                            <CheckCircle2Icon className="size-5" />
-                            Settled
-                          </span>
-                          <span>{isUnsettling ? "Unsettling…" : "Unsettle"}</span>
-                        </button>
+                        <Tooltip>
+                          <TooltipTrigger render={<div className="flex w-full" />}>
+                            <button
+                              type="button"
+                              className="settled-thread-action flex min-h-20 w-full cursor-pointer items-center justify-between gap-2 rounded-2xl border px-5 py-6 font-medium text-base outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-64 sm:text-sm"
+                              disabled={isUnsettling || activeEnvironmentUnavailable}
+                              aria-label="Unsettle thread"
+                              aria-busy={isUnsettling}
+                              onClick={() => void handleUnsettleActiveThread()}
+                            >
+                              <span className="lecturn-settled-label flex items-center gap-2">
+                                <CheckCircle2Icon className="size-5" />
+                                Settled
+                              </span>
+                              <span>{isUnsettling ? "Unsettling…" : "Unsettle"}</span>
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipPopup side="top">
+                            {activeEnvironmentUnavailable
+                              ? "Reconnect to unsettle this thread"
+                              : "Unsettle to continue this conversation"}
+                          </TooltipPopup>
+                        </Tooltip>
                         <SettledThreadMetadata
                           modelSelection={activeThread.modelSelection}
                           providerStatuses={providerStatuses as ServerProvider[]}

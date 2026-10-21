@@ -5,7 +5,7 @@
     "input": "#fff9ee",
     "danger": "#dc2626",
     "success": "#059669",
-    "warning": "#b45309",
+    "warning": "#d97706",
     "foreground": "#302a22",
     "mutedForeground": "#756650",
     "primaryForeground": "#fff9ee",
@@ -14,7 +14,7 @@
     "border": "#d6c8b2",
     "ring": "#984e29",
     "muted": "#f4eddf",
-    "shadow": "#000000"
+    "shadow": "#302a22"
   },
   "darkColors": {
     "primary": "#d9a34e",
@@ -22,7 +22,7 @@
     "input": "#0c1d2b",
     "danger": "#fca5a5",
     "success": "#34d399",
-    "warning": "#fcd34d",
+    "warning": "#fbbf24",
     "foreground": "#e8edf0",
     "mutedForeground": "#9eacb7",
     "primaryForeground": "#061522",

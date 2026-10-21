@@ -170,7 +170,8 @@ const clerkColorsFor = (appearance: MobileThemeAppearance) => {
     input: variables["--color-input"],
     danger: variables["--color-danger-foreground"],
     success: appearance === "dark" ? "#34d399" : "#059669",
-    warning: variables["--color-warning-foreground"],
+    // Lecturn keeps Clerk's amber warning rather than the in-app warning text color.
+    warning: appearance === "dark" ? "#fbbf24" : "#d97706",
     foreground: variables["--color-foreground"],
     mutedForeground: variables["--color-foreground-muted"],
     primaryForeground: variables["--color-primary-foreground"],
@@ -179,7 +180,11 @@ const clerkColorsFor = (appearance: MobileThemeAppearance) => {
     border: variables["--color-border"],
     ring: variables["--color-focus"],
     muted: variables["--color-subtle"],
-    shadow: variables["--color-primary-shadow"],
+    // Lecturn's light Clerk shadow is warm ink, not black.
+    shadow:
+      appearance === "light"
+        ? variables["--color-foreground"]
+        : variables["--color-primary-shadow"],
   };
 };
 
