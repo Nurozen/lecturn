@@ -544,7 +544,7 @@ export const ChatHeader = memo(function ChatHeader({
                     type="button"
                     aria-label={forkChipLabel}
                     onClick={openParentThread}
-                    className="ml-2 inline-flex h-5 max-w-48 shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded-full border border-border/70 px-1.5 text-2xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                    className="relative ml-2 inline-flex h-5 max-w-48 shrink-0 cursor-pointer items-center justify-center gap-1 whitespace-nowrap rounded-full border border-border/70 px-1.5 text-2xs text-muted-foreground transition-[color,background-color,scale] hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring active:scale-97 pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 pointer-coarse:after:min-w-11"
                   />
                 }
               >
