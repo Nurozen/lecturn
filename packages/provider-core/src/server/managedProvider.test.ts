@@ -173,7 +173,7 @@ describe("makeManagedServerProvider", () => {
             streamSettings: Stream.empty,
             haveSettingsChanged: () => false,
             initialSnapshot: () => Effect.succeed({ ...signedOut, installed: false }),
-            discovery: { waitForShell: false, refreshEnvironment: () => {} },
+            discovery: { waitForShell: false, refreshEnvironment: () => Effect.void },
             checkProvider: Ref.update(calls, (count) => count + 1).pipe(
               Effect.andThen(Ref.get(nextProbe)),
             ),
@@ -234,9 +234,10 @@ describe("makeManagedServerProvider", () => {
           initialSnapshot: () => Effect.succeed(initialSnapshot),
           discovery: {
             waitForShell: false,
-            refreshEnvironment: () => {
-              shellLoaded = true;
-            },
+            refreshEnvironment: () =>
+              Effect.sync(() => {
+                shellLoaded = true;
+              }),
           },
           checkProvider: Effect.succeed(refreshedSnapshot),
           refreshOnInterval: false,
@@ -278,7 +279,7 @@ describe("makeManagedServerProvider", () => {
           streamSettings: Stream.empty,
           haveSettingsChanged: () => false,
           initialSnapshot: () => Effect.succeed(initialSnapshot),
-          discovery: { waitForShell: false, refreshEnvironment: () => {} },
+          discovery: { waitForShell: false, refreshEnvironment: () => Effect.void },
           checkProvider: Effect.succeed(refreshedSnapshot),
           enrichSnapshot: () =>
             resolveMaintenance().pipe(
@@ -316,7 +317,7 @@ describe("makeManagedServerProvider", () => {
           streamSettings: Stream.empty,
           haveSettingsChanged: () => false,
           initialSnapshot: () => Effect.succeed(initialSnapshot),
-          discovery: { waitForShell: false, refreshEnvironment: () => {} },
+          discovery: { waitForShell: false, refreshEnvironment: () => Effect.void },
           checkProvider: Effect.gen(function* () {
             if ((yield* Ref.updateAndGet(checks, (count) => count + 1)) > 1) {
               yield* Deferred.succeed(refreshStarted, undefined);
@@ -348,7 +349,7 @@ describe("makeManagedServerProvider", () => {
           streamSettings: Stream.empty,
           haveSettingsChanged: () => false,
           initialSnapshot: () => Effect.succeed(initialSnapshot),
-          discovery: { waitForShell: false, refreshEnvironment: () => {} },
+          discovery: { waitForShell: false, refreshEnvironment: () => Effect.void },
           checkProvider: Effect.gen(function* () {
             yield* Deferred.succeed(started, undefined);
             if (yield* Ref.get(shouldHang)) return yield* Effect.never;
@@ -386,7 +387,7 @@ describe("makeManagedServerProvider", () => {
           streamSettings: Stream.empty,
           haveSettingsChanged: () => false,
           initialSnapshot: () => Effect.succeed(initialSnapshot),
-          discovery: { waitForShell: false, refreshEnvironment: () => {} },
+          discovery: { waitForShell: false, refreshEnvironment: () => Effect.void },
           // The probe itself reports running out of time (a busy host), twice.
           checkProvider: Ref.updateAndGet(checks, (count) => count + 1).pipe(
             Effect.map((count) => (count <= 2 ? probeTimedOutSnapshot : refreshedSnapshot)),
@@ -868,9 +869,16 @@ describe("makeManagedServerProvider", () => {
           checkProvider: Ref.updateAndGet(refreshCount, (count) => count + 1).pipe(
             Effect.map((count) =>
               count === 1
-                ? { ...refreshedSnapshot, usageLimits: probedLimits }
+                ? {
+                    ...refreshedSnapshot,
+                    auth: { ...refreshedSnapshot.auth, workspaceId: "ws-a" },
+                    usageLimits: probedLimits,
+                  }
                 : {
                     ...refreshedSnapshotSecond,
+                    ...(count === 3
+                      ? { auth: { ...refreshedSnapshotSecond.auth, workspaceId: "ws-b" } }
+                      : {}),
                     usageLimits: {
                       checkedAt: "2026-04-10T00:00:03.000Z",
                       windows: [],
@@ -917,6 +925,13 @@ describe("makeManagedServerProvider", () => {
         const refreshed = yield* provider.refresh;
         assert.strictEqual(refreshed.message, refreshedSnapshotSecond.message);
         assert.deepStrictEqual(refreshed.usageLimits?.windows, [liveWindow]);
+        // ...and the workspace they were read for.
+        assert.strictEqual(refreshed.auth.workspaceId, "ws-a");
+
+        // A failed read for another workspace does not inherit those windows.
+        const switched = yield* provider.refresh;
+        assert.strictEqual(switched.auth.workspaceId, "ws-b");
+        assert.strictEqual(switched.usageLimits?.unavailable?.reason, "probeFailed");
       }),
     ).pipe(Effect.provide(layerAlwaysRunTest)),
   );
@@ -948,7 +963,7 @@ describe("makeManagedServerProvider", () => {
           streamSettings: Stream.empty,
           haveSettingsChanged: () => false,
           initialSnapshot: () => Effect.succeed(initialSnapshot),
-          discovery: { waitForShell: false, refreshEnvironment: () => {} },
+          discovery: { waitForShell: false, refreshEnvironment: () => Effect.void },
           checkProvider: Ref.getAndUpdate(calls, (count) => count + 1).pipe(
             Effect.tap((call) => Queue.offer(started, call)),
             Effect.flatMap((call) =>

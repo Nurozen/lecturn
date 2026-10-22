@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -138,7 +138,7 @@ it.effect("inherits the host environment only when the runtime does", () =>
 it.layer(NodeServices.layer)("Codex MCP inventory fixture CLI", (it) => {
   it.effect("reads fixture inventory with explicit process environment and launch cwd", () =>
     Effect.gen(function* () {
-      if ((yield* HostProcessPlatform) === "win32") return;
+      if ((yield* HostProcess.Platform) === "win32") return;
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fs.realPath(yield* fs.makeTempDirectoryScoped());

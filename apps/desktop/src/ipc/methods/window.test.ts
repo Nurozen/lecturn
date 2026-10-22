@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { HostProcessEnvironment, HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -436,7 +436,7 @@ describe("saveTextFile", () => {
   );
 });
 
-it.effect.skipIf(HostProcessPlatform.defaultValue() === "win32")(
+it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
   "finds remote editors installed without PATH launchers",
   () =>
     Effect.gen(function* () {
@@ -455,11 +455,11 @@ it.effect.skipIf(HostProcessPlatform.defaultValue() === "win32")(
         yield* fs.chmod(executable, 0o755);
       }
       const editors = yield* probeRemoteEditors.handler(undefined).pipe(
-        Effect.provideService(HostProcessEnvironment, {
+        Effect.provideService(HostProcess.Environment, {
           HOME: home,
           PATH: path.join(home, "empty"),
         }),
-        Effect.provideService(HostProcessPlatform, "darwin"),
+        Effect.provideService(HostProcess.Platform, "darwin"),
       );
       assert.include(editors, "cursor");
       assert.include(editors, "vscode");

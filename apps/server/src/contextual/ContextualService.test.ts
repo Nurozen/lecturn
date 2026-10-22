@@ -32,7 +32,7 @@ import {
 import { nativeContextualFixture } from "./ContextualNativeTestFixture.ts";
 import { applyContextualSelection, contextualEvidenceCovered } from "./ContextualSelection.ts";
 import { contextualPacketText } from "./ContextualPacketText.ts";
-import { HostProcessPlatform, HostProcessArchitecture } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 
 const environmentId = C.EnvironmentId.make("synthetic-env");
 const projectId = C.ProjectId.make("synthetic-project");
@@ -1798,8 +1798,8 @@ it.layer(SqlitePersistence.layerMemory)("Contextual actual native helper admissi
       Effect.acquireUseRelease(
         Effect.promise(() =>
           nativeContextualFixture(nativeHelperBinary!, scenario.messages, {
-            platform: HostProcessPlatform.defaultValue(),
-            architecture: HostProcessArchitecture.defaultValue(),
+            platform: HostProcess.Platform.defaultValue(),
+            architecture: HostProcess.Architecture.defaultValue(),
           }),
         ),
         ({ runtime, replaceMessages }) =>

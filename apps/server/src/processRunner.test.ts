@@ -9,7 +9,7 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/process";
-import { HostProcessEnvironment, HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { SpawnExecutableResolution } from "@lecturn/shared/shell";
 
 import * as ProcessRunner from "./processRunner.ts";
@@ -154,8 +154,8 @@ describe("runProcess", () => {
       args: ["repos", "pr", "list", "--source-branch", "feature & release"],
       env: { AZURE_CONFIG_DIR: "C:\\Users\\tester\\.azure" },
     }).pipe(
-      Effect.provideService(HostProcessPlatform, "win32"),
-      Effect.provideService(HostProcessEnvironment, {
+      Effect.provideService(HostProcess.Platform, "win32"),
+      Effect.provideService(HostProcess.Environment, {
         PATH: "C:\\Users\\tester\\AppData\\Roaming\\npm",
         PATHEXT: ".COM;.EXE;.BAT;.CMD",
       }),
@@ -549,7 +549,7 @@ describe("runProcess unsetEnv", () => {
         env: { KEEP: "yes", DROP: "value" },
         extendEnv: false,
         unsetEnv,
-      }).pipe(Effect.provideService(HostProcessEnvironment, { HOST_SECRET: "absent" }));
+      }).pipe(Effect.provideService(HostProcess.Environment, { HOST_SECRET: "absent" }));
     }),
   );
 
@@ -569,7 +569,7 @@ describe("runProcess unsetEnv", () => {
         env: { FOO: "from-input", STAVE_CD_FD: "3" },
         unsetEnv: ["STAVE_CD_FD", "INHERITED_SECRET"],
       }).pipe(
-        Effect.provideService(HostProcessEnvironment, {
+        Effect.provideService(HostProcess.Environment, {
           PATH: "/usr/bin",
           INHERITED_SECRET: "host-only",
           FOO: "from-host",
@@ -607,7 +607,7 @@ describe("isWindowsCommandNotFound", () => {
       const isCommandNotFound = yield* ProcessRunner.isWindowsCommandNotFound(
         1,
         "wird nicht als interner oder externer Befehl, betriebsfahiges Programm oder Batch-Datei erkannt",
-      ).pipe(Effect.provideService(HostProcessPlatform, "win32"));
+      ).pipe(Effect.provideService(HostProcess.Platform, "win32"));
       expect(isCommandNotFound).toBe(true);
     }),
   );

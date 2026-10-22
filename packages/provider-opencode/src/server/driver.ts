@@ -214,7 +214,7 @@ export const OpenCodeDriver: ProviderDriver<
       const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
       const crypto = yield* Crypto.Crypto;
       const host = yield* ProviderHost.ProviderHost;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const processEnv = yield* mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,
@@ -472,7 +472,11 @@ export const OpenCodeDriver: ProviderDriver<
           discovery: {
             waitForShell: !/[\\/]/.test(effectiveConfig.binaryPath?.trim() ?? ""),
             refreshEnvironment: () =>
-              Object.assign(processEnv, mergeProviderInstanceEnvironment(environment)),
+              mergeProviderInstanceEnvironment(environment).pipe(
+                Effect.map((next) => {
+                  Object.assign(processEnv, next);
+                }),
+              ),
           },
           getSettings: snapshotSettings.getSettings,
           streamSettings: snapshotSettings.streamSettings,

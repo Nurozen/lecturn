@@ -7,7 +7,7 @@ import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { AuthStandardClientScopes } from "@lecturn/contracts";
 import * as NetService from "@lecturn/shared/Net";
-import { HostProcessEnvironment } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { assert, describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -184,7 +184,7 @@ describe("lecturn pair", () => {
       }),
     ).pipe(
       Effect.provide(NodeServices.layer),
-      Effect.provideService(HostProcessEnvironment, {
+      Effect.provideService(HostProcess.Environment, {
         ...process.env,
         [SERVICE_LAUNCHER_CONTEXT_ENV]: JSON.stringify({
           protocol: SERVICE_LAUNCHER_PROTOCOL,

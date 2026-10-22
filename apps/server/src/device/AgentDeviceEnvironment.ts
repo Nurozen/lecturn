@@ -6,7 +6,7 @@
  * adapters apply it with `withAgentDeviceEnvironment`. Per-host configuration
  * still comes from `device_open`; this only installs the local launcher.
  */
-import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -31,7 +31,7 @@ export const makeAgentDeviceEnvironmentResolver: Effect.Effect<
   const config = yield* Effect.serviceOption(ServerConfig.ServerConfig);
   const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem);
   const path = yield* Effect.serviceOption(Path.Path);
-  const platform = yield* HostProcessPlatform;
+  const platform = yield* HostProcess.Platform;
   if (
     Option.isNone(devices) ||
     Option.isNone(config) ||

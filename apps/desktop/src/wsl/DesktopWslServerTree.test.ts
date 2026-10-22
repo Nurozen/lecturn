@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -188,7 +188,7 @@ describe("DesktopWslServerTree", () => {
         const extractedStave = path.join(root, "apps/server/dist/stave/linux-x64/stave");
         assert.equal(yield* fileSystem.readFileString(extractedStave), "stave-binary");
         // Windows does not model the exec bit, so only the copy is checked there.
-        if ((yield* HostProcessPlatform) !== "win32") {
+        if ((yield* HostProcess.Platform) !== "win32") {
           const info = yield* fileSystem.stat(extractedStave);
           assert.notEqual(info.mode & 0o111, 0);
         }

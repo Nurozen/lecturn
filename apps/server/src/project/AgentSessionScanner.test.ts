@@ -9,6 +9,7 @@ import {
   type ServerSettings as ContractServerSettings,
 } from "@lecturn/contracts";
 import { symlinksSupported } from "@lecturn/shared/testing/symlinks";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -19,19 +20,11 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
-import { afterEach, vi } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as AgentSessionScanner from "./AgentSessionScanner.ts";
-
-vi.mock("node:os", async (importOriginal) => {
-  const os = await importOriginal<typeof import("node:os")>();
-  return { ...os, homedir: vi.fn(os.homedir) };
-});
-
-afterEach(() => vi.mocked(NodeOS.homedir).mockReset());
 
 const makeProjectShell = (workspaceRoot: string): OrchestrationProjectShell => ({
   id: ProjectId.make("project-1"),
@@ -62,6 +55,8 @@ interface ScannerTestInput {
   /** Base dir for the test ServerConfig; worktreesDir derives from it. */
   readonly configBaseDir?: string;
   readonly providerInstances?: ContractServerSettings["providerInstances"];
+  /** Overrides the host home directory the scanner excludes and expands `~` against. */
+  readonly homeDirectory?: string;
 }
 
 const layerScannerTest = (input: ScannerTestInput) =>
@@ -89,6 +84,11 @@ const layerScannerTest = (input: ScannerTestInput) =>
         ),
         layerProjectStore(input.importedWorkspaceRoots ?? []),
       ),
+    ),
+    Layer.provide(
+      input.homeDirectory === undefined
+        ? Layer.empty
+        : Layer.succeed(HostProcess.HomeDirectory, input.homeDirectory),
     ),
   );
 
@@ -816,7 +816,6 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
         const configBaseDir = yield* makeTempDir("lecturn-scanner-base-");
         const workspace = yield* makeTempDir("lecturn-workspace-");
         const home = yield* makeTempDir("lecturn-scanner-home-");
-        vi.mocked(NodeOS.homedir).mockReturnValue(home);
 
         for (const [index, cwd] of [home, NodeOS.tmpdir(), configBaseDir, workspace].entries()) {
           yield* writeTranscript({
@@ -826,7 +825,12 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
           });
         }
 
-        const result = yield* runScan({ claudeHomePath, codexHomePath, configBaseDir });
+        const result = yield* runScan({
+          claudeHomePath,
+          codexHomePath,
+          configBaseDir,
+          homeDirectory: home,
+        });
 
         expect(result.candidates.map((candidate) => candidate.path)).toEqual([workspace]);
       }),
@@ -860,7 +864,6 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
         const claudeHomePath = yield* makeTempDir("lecturn-claude-home-");
         const codexHomePath = yield* makeTempDir("lecturn-codex-home-");
         const home = yield* makeTempDir("lecturn-scanner-home-");
-        vi.mocked(NodeOS.homedir).mockReturnValue(home);
         const scratchRoot = path.join(home, "Documents", "Codex");
         const scratch = path.join(scratchRoot, "2026-09-01", "some-conversation");
         const downloadsRoot = path.join(home, "Downloads");
@@ -891,7 +894,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
           });
         }
 
-        const result = yield* runScan({ claudeHomePath, codexHomePath });
+        const result = yield* runScan({ claudeHomePath, codexHomePath, homeDirectory: home });
 
         expect(result.candidates.map((candidate) => candidate.path)).toEqual([keep]);
       }),
@@ -925,7 +928,6 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
                 path.join(home, "Documents", "Codex"),
               );
             }
-            vi.mocked(NodeOS.homedir).mockReturnValue(home);
             const now = Date.parse("2026-09-01T00:00:00.000Z");
             yield* TestClock.setTime(now);
             const excluded = [downloads, scratch, ...(linkHome ? [physicalHome] : [])];
@@ -947,7 +949,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
                 mtimeMs: now,
               });
             }
-            const input = { claudeHomePath, codexHomePath };
+            const input = { claudeHomePath, codexHomePath, homeDirectory: home };
             const result = yield* runScan(input);
             expect(result.candidates.map((candidate) => candidate.path)).toEqual([keep]);
             for (const workspaceRoot of excluded) {

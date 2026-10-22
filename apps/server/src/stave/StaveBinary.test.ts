@@ -3,14 +3,7 @@ import * as NodeOS from "node:os";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import {
-  HostProcessArchitecture,
-  HostProcessEnvironment,
-  HostProcessExecutablePath,
-  HostProcessIsExecutable,
-  HostProcessPlatform,
-  HostProcessWorkingDirectory,
-} from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { CommandResolutionCache } from "@lecturn/shared/shell";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -90,12 +83,12 @@ const makeHarness = Effect.fn(function* (baseDir: string, options: HarnessOption
     options.bundledBaseDir === undefined ? {} : { bundledBaseDir: options.bundledBaseDir },
   ).pipe(
     Effect.provide(context),
-    Effect.provideService(HostProcessPlatform, options.platform ?? "linux"),
-    Effect.provideService(HostProcessArchitecture, "x64"),
-    Effect.provideService(HostProcessEnvironment, options.env ?? {}),
-    Effect.provideService(HostProcessWorkingDirectory, options.workingDirectory ?? process.cwd()),
-    Effect.provideService(HostProcessIsExecutable, options.executablePath !== undefined),
-    Effect.provideService(HostProcessExecutablePath, options.executablePath ?? process.execPath),
+    Effect.provideService(HostProcess.Platform, options.platform ?? "linux"),
+    Effect.provideService(HostProcess.Architecture, "x64"),
+    Effect.provideService(HostProcess.Environment, options.env ?? {}),
+    Effect.provideService(HostProcess.WorkingDirectory, options.workingDirectory ?? process.cwd()),
+    Effect.provideService(HostProcess.IsExecutable, options.executablePath !== undefined),
+    Effect.provideService(HostProcess.ExecutablePath, options.executablePath ?? process.execPath),
     Effect.provideService(CommandResolutionCache, new Map()),
   );
   const settings = Context.get(context, ServerSettings.ServerSettingsService);

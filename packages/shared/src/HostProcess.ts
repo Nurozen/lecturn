@@ -4,50 +4,51 @@ import * as NodeDns from "node:dns";
 import * as NodeOS from "node:os";
 import * as NodeSea from "node:sea";
 
-export const HostProcessPlatform = Context.Reference<NodeJS.Platform>(
-  "@lecturn/shared/hostProcess/HostProcessPlatform",
-  {
-    defaultValue: () => process.platform,
-  },
-);
+export const Platform = Context.Reference<NodeJS.Platform>("@lecturn/shared/HostProcess/Platform", {
+  defaultValue: () => process.platform,
+});
 
-export const HostProcessArchitecture = Context.Reference<NodeJS.Architecture>(
-  "@lecturn/shared/hostProcess/HostProcessArchitecture",
+export const Architecture = Context.Reference<NodeJS.Architecture>(
+  "@lecturn/shared/HostProcess/Architecture",
   {
     defaultValue: () => process.arch,
   },
 );
 
-export const HostProcessHostname = Context.Reference<string>(
-  "@lecturn/shared/hostProcess/HostProcessHostname",
+export const Hostname = Context.Reference<string>("@lecturn/shared/HostProcess/Hostname", {
+  defaultValue: () => NodeOS.hostname(),
+});
+
+export const HomeDirectory = Context.Reference<string>(
+  "@lecturn/shared/HostProcess/HomeDirectory",
   {
-    defaultValue: () => NodeOS.hostname(),
+    defaultValue: () => NodeOS.homedir(),
   },
 );
 
-export const HostProcessEnvironment = Context.Reference<NodeJS.ProcessEnv>(
-  "@lecturn/shared/hostProcess/HostProcessEnvironment",
+export const Environment = Context.Reference<NodeJS.ProcessEnv>(
+  "@lecturn/shared/HostProcess/Environment",
   {
     defaultValue: () => process.env,
   },
 );
 
-export const HostProcessWorkingDirectory = Context.Reference<string>(
-  "@lecturn/shared/hostProcess/HostProcessWorkingDirectory",
+export const WorkingDirectory = Context.Reference<string>(
+  "@lecturn/shared/HostProcess/WorkingDirectory",
   {
     defaultValue: () => process.cwd(),
   },
 );
 
-export const HostProcessExecutablePath = Context.Reference<string>(
-  "@lecturn/shared/hostProcess/HostProcessExecutablePath",
+export const ExecutablePath = Context.Reference<string>(
+  "@lecturn/shared/HostProcess/ExecutablePath",
   {
     defaultValue: () => process.execPath,
   },
 );
 
-export const HostProcessArguments = Context.Reference<ReadonlyArray<string>>(
-  "@lecturn/shared/hostProcess/HostProcessArguments",
+export const Arguments = Context.Reference<ReadonlyArray<string>>(
+  "@lecturn/shared/HostProcess/Arguments",
   {
     defaultValue: () => process.argv,
   },
@@ -58,12 +59,9 @@ export const HostProcessArguments = Context.Reference<ReadonlyArray<string>>(
  * `lecturn` for a PATH lookup, `./lecturn` or the launcher symlink for an explicit
  * path. `process.argv[0]` and `execPath` are always the resolved binary.
  */
-export const HostProcessInvokedAs = Context.Reference<string>(
-  "@lecturn/shared/hostProcess/HostProcessInvokedAs",
-  {
-    defaultValue: () => process.argv0,
-  },
-);
+export const InvokedAs = Context.Reference<string>("@lecturn/shared/HostProcess/InvokedAs", {
+  defaultValue: () => process.argv0,
+});
 
 /**
  * Whether this process is a Node single-executable rather than a script run
@@ -71,12 +69,9 @@ export const HostProcessInvokedAs = Context.Reference<string>(
  * one branches on this: an executable hosts such things as hidden
  * subcommands of itself.
  */
-export const HostProcessIsExecutable = Context.Reference<boolean>(
-  "@lecturn/shared/hostProcess/HostProcessIsExecutable",
-  {
-    defaultValue: () => NodeSea.isSea(),
-  },
-);
+export const IsExecutable = Context.Reference<boolean>("@lecturn/shared/HostProcess/IsExecutable", {
+  defaultValue: () => NodeSea.isSea(),
+});
 
 /**
  * Every IP address this machine answers to: the interface addresses, plus
@@ -88,8 +83,8 @@ export const HostProcessIsExecutable = Context.Reference<boolean>(
  *
  * Best effort: a failed lookup just leaves the interface set.
  */
-export const HostProcessAddresses = Context.Reference<Effect.Effect<ReadonlySet<string>>>(
-  "@lecturn/shared/hostProcess/HostProcessAddresses",
+export const Addresses = Context.Reference<Effect.Effect<ReadonlySet<string>>>(
+  "@lecturn/shared/HostProcess/Addresses",
   {
     defaultValue: () =>
       Effect.gen(function* () {
@@ -108,11 +103,8 @@ export const HostProcessAddresses = Context.Reference<Effect.Effect<ReadonlySet<
 );
 
 /** Undefined on platforms without POSIX uids (Windows). */
-export const HostProcessUserId = Context.Reference<number | undefined>(
-  "@lecturn/shared/hostProcess/HostProcessUserId",
-  {
-    defaultValue: () => process.getuid?.(),
-  },
-);
+export const UserId = Context.Reference<number | undefined>("@lecturn/shared/HostProcess/UserId", {
+  defaultValue: () => process.getuid?.(),
+});
 
-export const isHostWindows = Effect.map(HostProcessPlatform, (platform) => platform === "win32");
+export const isWindows = Effect.map(Platform, (platform) => platform === "win32");

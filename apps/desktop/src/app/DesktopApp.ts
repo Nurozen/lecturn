@@ -35,6 +35,7 @@ import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopSnapShot from "../snapShot/DesktopSnapShot.ts";
 import * as DesktopWslBackend from "../wsl/DesktopWslBackend.ts";
 import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 
 const DEFAULT_DESKTOP_BACKEND_PORT = 3773;
 const MAX_TCP_PORT = 65_535;
@@ -281,7 +282,8 @@ const startup = Effect.gen(function* () {
 
   // Waiting here would hide the macOS window during a slow .zprofile/.zshrc.
   // Parent-owned SSH/editor actions still need their own hydrated environment;
-  // the backend independently shares its discovery across all providers.
+  // the backend independently shares its discovery across all providers
+  // (DesktopBackendConfiguration only claims shellEnvironmentPrepared off macOS).
   // Linux still needs shell-derived desktop/session settings before Electron ready.
   if (environment.platform !== "darwin") {
     yield* shellEnvironment.installIntoProcess;
@@ -293,7 +295,9 @@ const startup = Effect.gen(function* () {
     preReadyElectronOptions.linuxPasswordStoreCommandLine !== null;
   const linuxElectronOptions =
     environment.platform === "linux" && !hasCommandLinePasswordStore
-      ? DesktopPreReadyPlatform.resolveEarlyLinuxElectronOptionsFromProcess()
+      ? DesktopPreReadyPlatform.resolveEarlyLinuxElectronOptionsFromProcess(
+          yield* HostProcess.HomeDirectory,
+        )
       : preReadyElectronOptions.linux;
   if (linuxElectronOptions !== null && !hasCommandLinePasswordStore) {
     if (

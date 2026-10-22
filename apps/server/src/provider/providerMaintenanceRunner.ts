@@ -7,7 +7,7 @@ import {
   type ServerProviderUpdatedPayload,
   type ServerProviderUpdateState,
 } from "@lecturn/contracts";
-import { HostProcessEnvironment } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { resolveSpawnCommand } from "@lecturn/shared/shell";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -109,7 +109,7 @@ const runProviderMaintenanceCommandWithSpawner = Effect.fn("ProviderMaintenanceR
         // resolveSpawnCommand finds the real `.cmd` and routes it through the
         // shell. On Linux/macOS (incl. the WSL backend) this is a no-op.
         const resolved = yield* resolveSpawnCommand(input.command, input.args);
-        const hostEnvironment = yield* HostProcessEnvironment;
+        const hostEnvironment = yield* HostProcess.Environment;
         const env = Object.fromEntries(
           Object.entries({ ...hostEnvironment, ...input.env }).filter(
             ([name]) => !UPDATE_ENV_BLOCKLIST.has(name),

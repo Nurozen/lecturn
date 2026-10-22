@@ -1,4 +1,3 @@
-import * as NodeOS from "node:os";
 import type { ServerProviderUsageWindow } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -14,6 +13,7 @@ import {
   makeUnavailableUsageLimits,
   makeUsageLimits,
 } from "@lecturn/provider-core/server/usageLimits";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 
 const GrokCredentials = Schema.Record(
   Schema.String,
@@ -100,7 +100,10 @@ const readGrokCredential = Effect.fn("readGrokCredential")(function* (
   const path = yield* Path.Path;
   const home =
     environment.GROK_HOME?.trim() ||
-    path.join(environment.HOME || environment.USERPROFILE || NodeOS.homedir(), ".grok");
+    path.join(
+      environment.HOME || environment.USERPROFILE || (yield* HostProcess.HomeDirectory),
+      ".grok",
+    );
   for (const configPath of [
     path.join(home, "config.toml"),
     path.join(home, "managed_config.toml"),

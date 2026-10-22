@@ -84,7 +84,7 @@ export function AccountAppearanceDialog({
               {ACCOUNT_TINT_PRESETS.map((entry) => (
                 <label
                   key={entry.id}
-                  className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border p-2 text-xs has-checked:ring-2 has-checked:ring-ring has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ring"
+                  className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border p-2 text-xs has-checked:ring-2 has-checked:ring-inset has-checked:ring-ring has-focus-visible:outline-2 has-focus-visible:-outline-offset-2 has-focus-visible:outline-ring"
                 >
                   <input
                     type="radio"

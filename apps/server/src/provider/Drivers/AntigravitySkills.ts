@@ -1,4 +1,3 @@
-import * as NodeOS from "node:os";
 import type { ServerProviderSkill } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -17,15 +16,16 @@ import { parse as parseYamlDocument } from "yaml";
 export function resolveAntigravityUserHome(
   platform: NodeJS.Platform,
   environment: NodeJS.ProcessEnv,
+  home: string,
 ): string {
   if (platform === "win32") {
     if (environment.USERPROFILE) return environment.USERPROFILE;
     if (environment.HOMEDRIVE && environment.HOMEPATH) {
       return `${environment.HOMEDRIVE}${environment.HOMEPATH}`;
     }
-    return NodeOS.homedir();
+    return home;
   }
-  return environment.HOME || NodeOS.homedir();
+  return environment.HOME || home;
 }
 
 /**

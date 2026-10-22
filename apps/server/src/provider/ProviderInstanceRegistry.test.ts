@@ -40,7 +40,7 @@ import * as ProviderLatestVersions from "@lecturn/provider-core/server/ProviderL
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import type { GrokSettings } from "@lecturn/provider-grok/settings";
 import type { CursorSettings } from "@lecturn/provider-cursor/settings";
-import { HostProcessPlatform, isHostWindows } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -52,7 +52,6 @@ import { HttpClient, HttpClientResponse } from "effect/http";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as AntigravityInstallation from "./AntigravityInstallation.ts";
 import * as ServerConfig from "../config.ts";
-import { expandHomePath } from "@lecturn/provider-core/server/pathExpansion";
 import * as ServerSettings from "../serverSettings.ts";
 import { ClaudeDriver, type ClaudeDriverEnv } from "./Drivers/ClaudeDriver.ts";
 import { CodexDriver, type CodexDriverEnv } from "./Drivers/CodexDriver.ts";
@@ -164,7 +163,7 @@ const makeTildeProviderFixtures = Effect.fn(
 )(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const homePath = expandHomePath("~");
+  const homePath = yield* HostProcess.HomeDirectory;
   const fixtureDir = yield* fileSystem.makeTempDirectoryScoped({
     directory: homePath,
     prefix: ".lecturn-provider-path-test-",
@@ -377,7 +376,7 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
 
   it.live("reports Codex's answer when a redemption changed nothing", () =>
     Effect.gen(function* () {
-      if (yield* isHostWindows) return;
+      if (yield* HostProcess.isWindows) return;
       const fileSystem = yield* FileSystem.FileSystem;
       const fixtures = yield* makeTildeProviderFixtures();
       yield* fileSystem.writeFileString(
@@ -418,7 +417,7 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
 
   it.live("runs Codex and Claude readiness probes from configured tilde paths", () =>
     Effect.gen(function* () {
-      if (yield* isHostWindows) return;
+      if (yield* HostProcess.isWindows) return;
 
       const fixtures = yield* makeTildeProviderFixtures();
 
@@ -536,7 +535,7 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
       return { outcome, after: yield* instance!.snapshot.getSnapshot };
     }).pipe(
       // macOS logins live in the Keychain, where resets are never read.
-      Effect.provideService(HostProcessPlatform, "linux"),
+      Effect.provideService(HostProcess.Platform, "linux"),
       Effect.provide(layerTest),
     );
 

@@ -17,7 +17,7 @@ import * as Schema from "effect/Schema";
 import { Command, Flag } from "effect/cli";
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
-import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import {
   STAVE_PLATFORM_KEYS,
   type StavePlatformKey,
@@ -514,7 +514,7 @@ export const extractStaveArchive = Effect.fn("extractStaveArchive")(function* (
   yield* fs
     .writeFile(executablePath, executable.data)
     .pipe(Effect.mapError(writeError(executablePath)));
-  const hostPlatform = yield* HostProcessPlatform;
+  const hostPlatform = yield* HostProcess.Platform;
   if (hostPlatform !== "win32") {
     yield* fs.chmod(executablePath, 0o755).pipe(Effect.mapError(writeError(executablePath)));
   }

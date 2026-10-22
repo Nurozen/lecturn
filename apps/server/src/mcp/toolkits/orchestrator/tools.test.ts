@@ -22,7 +22,7 @@ describe("orchestrator MCP tool guidance", () => {
     assert.include(DelegateTaskTool.description ?? "", "childThreadId is backing storage");
     assert.include(
       OrchestratorToolkit.tools.lecturn_thread_send.description ?? "",
-      "Do not use a delegated task's childThreadId to start another review round",
+      "a requested follow-up creates a fresh task",
     );
     assert.include(
       OrchestratorToolkit.tools.task_cancel.description ?? "",

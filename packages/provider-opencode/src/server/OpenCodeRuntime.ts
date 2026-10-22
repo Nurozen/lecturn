@@ -36,7 +36,8 @@ import { isWindowsCommandNotFound } from "@lecturn/provider-core/server/snapshot
 import * as OpenCodeServerLedger from "./OpenCodeServerLedger.ts";
 import { collectStreamAsString } from "@lecturn/provider-core/server/snapshotProbe";
 import * as NetService from "@lecturn/shared/Net";
-import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import { AgentScope } from "@lecturn/shared/AgentScope";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { compareSemverVersions, parseSemver } from "@lecturn/shared/semver";
 import { resolveSpawnCommand } from "@lecturn/shared/shell";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
@@ -595,8 +596,9 @@ function ensureRuntimeError(
 const makeOpenCodeRuntime = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const netService = yield* NetService.NetService;
-  const hostPlatform = yield* HostProcessPlatform;
+  const hostPlatform = yield* HostProcess.Platform;
   const serverLedger = yield* OpenCodeServerLedger.OpenCodeServerLedger;
+  const agentScope = yield* AgentScope;
   const resolveCommand = (command: string, args: ReadonlyArray<string>, env?: NodeJS.ProcessEnv) =>
     resolveSpawnCommand(command, args, env ? { env } : {});
 
@@ -693,7 +695,14 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
         ));
       const timeoutMs = input.timeoutMs ?? DEFAULT_OPENCODE_SERVER_TIMEOUT_MS;
       const args = ["serve", `--hostname=${hostname}`, `--port=${port}`];
-      const spawnCommand = yield* resolveCommand(input.binaryPath, args, input.environment);
+      // One server runs every session of the instance, so its scope has no thread.
+      const launch = yield* agentScope.wrap({
+        command: input.binaryPath,
+        args,
+        name: "opencode",
+        env: input.environment,
+      });
+      const spawnCommand = yield* resolveCommand(launch.command, launch.args, input.environment);
       const serverPassword = resolveOpenCodeServerPassword({
         external: false,
         ...(input.serverPassword !== undefined ? { serverPassword: input.serverPassword } : {}),

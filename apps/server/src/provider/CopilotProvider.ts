@@ -1,5 +1,3 @@
-import * as NodeOS from "node:os";
-
 import {
   type CustomModelSetting,
   type GithubCopilotSettings,
@@ -8,6 +6,7 @@ import {
   type ServerProviderAuth,
   type ServerProviderModel,
 } from "@lecturn/contracts";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as ProviderLatestVersions from "@lecturn/provider-core/server/ProviderLatestVersions";
 import { causeErrorTag } from "@lecturn/shared/observability";
 import { createModelCapabilities } from "@lecturn/shared/model";
@@ -140,7 +139,9 @@ const readCopilotConfigLogin = Effect.fn("readCopilotConfigLogin")(function* (
   const home = environment.COPILOT_HOME?.trim()
     ? environment.COPILOT_HOME.trim()
     : path.join(
-        environment.HOME?.trim() || environment.USERPROFILE?.trim() || NodeOS.homedir(),
+        environment.HOME?.trim() ||
+          environment.USERPROFILE?.trim() ||
+          (yield* HostProcess.HomeDirectory),
         ".copilot",
       );
   const raw = yield* fileSystem

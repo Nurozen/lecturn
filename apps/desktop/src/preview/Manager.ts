@@ -25,7 +25,7 @@ import type {
   DesktopPreviewTabDefaults,
   PreviewForwardedShortcut,
 } from "@lecturn/contracts";
-import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { matchesKeybindingShortcut } from "@lecturn/shared/keybindings";
 import { normalizePreviewUrl } from "@lecturn/shared/preview";
 import {
@@ -544,7 +544,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const rendererHistory = yield* DesktopRendererHistory.DesktopRendererHistory;
-  const hostPlatform = yield* HostProcessPlatform;
+  const hostPlatform = yield* HostProcess.Platform;
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
   const parentScope = yield* Scope.Scope;

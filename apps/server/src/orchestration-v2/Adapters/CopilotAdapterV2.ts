@@ -23,7 +23,7 @@ import {
   ProviderDriverKind,
   type OrchestrationV2ProviderCapabilities,
 } from "@lecturn/contracts";
-import { HostProcessEnvironment } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { resolveSelfInvocation, type SelfInvocation } from "@lecturn/shared/nodeRuntime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -250,7 +250,7 @@ export const CopilotAdapterV2Driver: ProviderAdapterDriver<
   defaultConfig: (): GithubCopilotSettings => DEFAULT_COPILOT_SETTINGS,
   create: Effect.fn("CopilotAdapterV2Driver.create")(
     function* (input: ProviderAdapterDriverCreateInput<GithubCopilotSettings>) {
-      const hostEnvironment = yield* HostProcessEnvironment;
+      const hostEnvironment = yield* HostProcess.Environment;
       const selfInvocation = yield* resolveSelfInvocation();
       const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
       const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
@@ -259,7 +259,8 @@ export const CopilotAdapterV2Driver: ProviderAdapterDriver<
       return yield* makeCopilotAdapterV2({
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
-        environment: mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
+        environment: yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
+        homeDir: yield* HostProcess.HomeDirectory,
         selfInvocation,
         continuationRequests,
         extraMcpServers: staveMemoryAcpExtraMcpServers(resolveStaveMemory),

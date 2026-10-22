@@ -1,12 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, expect, it } from "@effect/vitest";
-import {
-  HostProcessArguments,
-  HostProcessEnvironment,
-  HostProcessExecutablePath,
-  HostProcessIsExecutable,
-  HostProcessPlatform,
-} from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -88,11 +82,11 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
     readonly executable?: boolean;
   }) =>
     resolveRootCliCommand("browser setup").pipe(
-      Effect.provideService(HostProcessExecutablePath, input.node),
-      Effect.provideService(HostProcessArguments, [input.node, input.entry]),
-      Effect.provideService(HostProcessIsExecutable, input.executable ?? false),
-      Effect.provideService(HostProcessPlatform, "linux"),
-      Effect.provideService(HostProcessEnvironment, { PATH: input.path ?? "", ...input.env }),
+      Effect.provideService(HostProcess.ExecutablePath, input.node),
+      Effect.provideService(HostProcess.Arguments, [input.node, input.entry]),
+      Effect.provideService(HostProcess.IsExecutable, input.executable ?? false),
+      Effect.provideService(HostProcess.Platform, "linux"),
+      Effect.provideService(HostProcess.Environment, { PATH: input.path ?? "", ...input.env }),
     );
 
   /** A directory holding an executable `lecturn`, to stand in for one on PATH. */
@@ -178,10 +172,10 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
         yield* fs.makeDirectory(path.dirname(entry), { recursive: true });
         yield* fs.writeFileString(entry, "");
         const installation = yield* resolveServerInstallation.pipe(
-          Effect.provideService(HostProcessArguments, ["node", entry]),
-          Effect.provideService(HostProcessExecutablePath, entry),
-          Effect.provideService(HostProcessIsExecutable, entry.endsWith("/lecturn")),
-          Effect.provideService(HostProcessPlatform, "linux"),
+          Effect.provideService(HostProcess.Arguments, ["node", entry]),
+          Effect.provideService(HostProcess.ExecutablePath, entry),
+          Effect.provideService(HostProcess.IsExecutable, entry.endsWith("/lecturn")),
+          Effect.provideService(HostProcess.Platform, "linux"),
         );
         expect(installation).toBeNull();
       }

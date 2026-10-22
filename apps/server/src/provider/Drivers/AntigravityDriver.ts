@@ -2,7 +2,7 @@ import { StaveMemoryWiring } from "../../stave/StaveMemoryWiring.ts";
 import { withAgentDeviceEnvironment } from "@lecturn/provider-core/server/mcpSession";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import { AntigravitySettings, ProviderDriverKind, ProviderSetupError } from "@lecturn/contracts";
-import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { resolveSelfInvocation } from "@lecturn/shared/nodeRuntime";
 import {
   NodeRuntimeUnavailableError,
@@ -116,8 +116,12 @@ export const AntigravityDriver: ProviderDriver<
         gcpLocation: settings.gcpLocation,
       };
       const authConfigIssue = antigravityAuthConfigIssue(auth);
-      const processEnvironment = mergeProviderInstanceEnvironment(environment);
-      const userHome = resolveAntigravityUserHome(yield* HostProcessPlatform, processEnvironment);
+      const processEnvironment = yield* mergeProviderInstanceEnvironment(environment);
+      const userHome = resolveAntigravityUserHome(
+        yield* HostProcess.Platform,
+        processEnvironment,
+        yield* HostProcess.HomeDirectory,
+      );
       const directories = yield* resolveAntigravityInstanceDirectories(
         host.paths.stateDir,
         instanceId,
@@ -393,7 +397,11 @@ export const AntigravityDriver: ProviderDriver<
         discovery: {
           waitForShell: !/[\\/]/.test(settings.binaryPath?.trim() ?? ""),
           refreshEnvironment: () =>
-            Object.assign(processEnvironment, mergeProviderInstanceEnvironment(environment)),
+            mergeProviderInstanceEnvironment(environment).pipe(
+              Effect.map((next) => {
+                Object.assign(processEnvironment, next);
+              }),
+            ),
         },
         stampIdentity: classifyModels,
         probe,
