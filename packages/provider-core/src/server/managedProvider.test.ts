@@ -15,7 +15,7 @@ import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
-import { TestClock } from "effect/testing";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as ProviderHost from "./ProviderHost.ts";
 import { makeManagedServerProvider } from "./managedProvider.ts";
@@ -106,7 +106,7 @@ const probeTimedOutSnapshot: ServerProvider = {
 /** A host whose settings never change and whose background demand is fixed. */
 function layerProviderHost(input: {
   readonly runBackgroundWork: boolean;
-  readonly settings?: Pick<ProviderHost.ProviderHostShape, "settings">["settings"];
+  readonly settings?: Pick<ProviderHost.ProviderHost["Service"], "settings">["settings"];
 }) {
   return Layer.succeed(
     ProviderHost.ProviderHost,
@@ -116,9 +116,11 @@ function layerProviderHost(input: {
         baseDir: "/lecturn",
         stateDir: "/lecturn/userdata",
         providerStatusCacheDir: "/lecturn/caches",
+        attachmentsDir: "/lecturn/userdata/attachments",
       },
       settings: input.settings ?? {
         get: Effect.succeed(DEFAULT_SERVER_SETTINGS),
+        withSnapshot: (use) => use(DEFAULT_SERVER_SETTINGS),
         changes: Stream.empty,
         subscribe: Effect.succeed(Stream.empty),
       },
@@ -128,6 +130,7 @@ function layerProviderHost(input: {
         status: () => "ready",
         await: () => Effect.succeed({ status: "ready" }),
       },
+      credentials: () => Effect.die("unused"),
     }),
   );
 }
@@ -557,8 +560,9 @@ describe("makeManagedServerProvider", () => {
         };
         const serverSettingsRef = yield* Ref.make(initialServerSettings);
         const serverSettingsChanges = yield* PubSub.unbounded<typeof initialServerSettings>();
-        const hostSettings: ProviderHost.ProviderHostShape["settings"] = {
+        const hostSettings: ProviderHost.ProviderHost["Service"]["settings"] = {
           get: Ref.get(serverSettingsRef),
+          withSnapshot: (use) => Ref.get(serverSettingsRef).pipe(Effect.flatMap(use)),
           changes: Stream.empty,
           subscribe: PubSub.subscribe(serverSettingsChanges).pipe(
             Effect.map((subscription) => Stream.fromSubscription(subscription)),

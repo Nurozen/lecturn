@@ -24,12 +24,10 @@ import {
 } from "@lecturn/contracts";
 import { MuseSettings } from "@lecturn/provider-muse/settings";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
-import { ProviderHost } from "@lecturn/provider-core/server/ProviderHost";
-import { layerTestProviderHost } from "@lecturn/provider-testing/host";
+import * as TestProviderHost from "@lecturn/provider-testing/TestProviderHost";
 import {
   museInitializeParams,
   museServeArgs,
@@ -38,7 +36,7 @@ import {
 } from "@lecturn/provider-muse/testing";
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
 import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
-import * as ProviderContinuationRequests from "@lecturn/provider-core/server/continuationRequests";
+import * as ProviderContinuationRequests from "@lecturn/provider-core/server/ProviderContinuationRequests";
 import type { OrchestratorV2ProviderReplayHarness } from "../testkit/ProviderReplayHarness.ts";
 import { makeMuseAdapterV2 } from "@lecturn/provider-muse/server";
 
@@ -449,13 +447,10 @@ export function layer(input: {
   return ProviderAdapterRegistry.layerFromAdaptersEffect(
     Effect.gen(function* () {
       return [
-        makeMuseAdapterV2({
+        yield* makeMuseAdapterV2({
           instanceId: ProviderInstanceId.make(MUSE_PROVIDER_KIND),
           settings: DEFAULT_MUSE_SETTINGS,
           environment: input.environment ?? {},
-          idAllocator: yield* IdAllocator.IdAllocatorV2,
-          host: yield* ProviderHost,
-          fileSystem: yield* FileSystem.FileSystem,
           createHost: input.createHost,
           // Same queue the continuation worker drains when the fixture runs it.
           continuationRequests: yield* ProviderContinuationRequests.ProviderContinuationRequests,
@@ -465,7 +460,7 @@ export function layer(input: {
   ).pipe(
     Layer.provide(
       Layer.mergeAll(
-        layerTestProviderHost().pipe(Layer.provide(NodeServices.layer)),
+        TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer)),
         NodeServices.layer,
         IdAllocator.layer,
       ),

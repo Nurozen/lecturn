@@ -11,11 +11,12 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { createModelSelection } from "@lecturn/shared/model";
 import { expect } from "vite-plus/test";
-import { GrokSettings, ProviderInstanceId } from "@lecturn/contracts";
+import { ProviderInstanceId } from "@lecturn/contracts";
+import { GrokSettings } from "@lecturn/provider-grok/settings";
 
 import * as ServerConfig from "../config.ts";
 import * as TextGeneration from "./TextGeneration.ts";
-import { makeGrokTextGeneration } from "./GrokTextGeneration.ts";
+import { makeGrokTextGeneration } from "@lecturn/provider-grok/testing";
 import { execScriptSource, writeFakeCli } from "@lecturn/provider-testing/fakeCli";
 const decodeGrokSettings = Schema.decodeSync(GrokSettings);
 

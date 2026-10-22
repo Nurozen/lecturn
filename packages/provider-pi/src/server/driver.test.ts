@@ -10,21 +10,26 @@ import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { HttpClient } from "effect/http";
-import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import * as HttpClient from "effect/http/HttpClient";
+import * as ChildProcess from "effect/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
+import * as ProviderLatestVersions from "@lecturn/provider-core/server/ProviderLatestVersions";
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
-import { layerTestProviderHost } from "@lecturn/provider-testing/host";
+import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
+import * as TestProviderHost from "@lecturn/provider-testing/TestProviderHost";
 import type { PiSettings } from "../settings.ts";
 import { PiDriver } from "./driver.ts";
 
 const layerTest = Layer.mergeAll(
-  layerTestProviderHost({
+  TestProviderHost.layer({
     cwd: "/machine",
     settings: { ...DEFAULT_SERVER_SETTINGS, enableProviderUpdateChecks: false },
     runBackgroundWork: false,
   }),
   IdAllocator.layer,
+  McpProviderSessions.layer,
+  ProviderLatestVersions.layer,
   Layer.succeed(
     HttpClient.HttpClient,
     HttpClient.make(() => Effect.die("Unexpected HTTP")),

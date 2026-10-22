@@ -1,16 +1,16 @@
 import {
-  AcpRegistrySettings,
   AntigravitySettings,
   ClaudeSettings,
   CodexSettings,
-  CursorSettings,
   GithubCopilotSettings,
-  GrokSettings,
-  OpenCodeSettings,
   ProviderDriverKind,
 } from "@lecturn/contracts";
+import { acpRegistryClient } from "@lecturn/provider-acp-registry/client";
 import { makeProviderClientRegistry } from "@lecturn/provider-core/client";
+import { cursorClient } from "@lecturn/provider-cursor/client";
+import { grokClient } from "@lecturn/provider-grok/client";
 import { museClient } from "@lecturn/provider-muse/client";
+import { openCodeClient } from "@lecturn/provider-opencode/client";
 import { piClient } from "@lecturn/provider-pi/client";
 
 /** The provider client definitions this web build ships, in presentation order. */
@@ -25,25 +25,8 @@ export const providerClients = makeProviderClientRegistry([
     label: "Claude",
     settingsSchema: ClaudeSettings,
   },
-  {
-    driverKind: ProviderDriverKind.make("cursor"),
-    label: "Cursor",
-    settingsSchema: CursorSettings,
-    environmentFields: [
-      {
-        name: "CURSOR_API_KEY",
-        label: "Cursor API key",
-        description: "Optional. Overrides browser sign-in for this provider.",
-        placeholder: "Paste API key",
-        sensitive: true,
-      },
-    ],
-  },
-  {
-    driverKind: ProviderDriverKind.make("grok"),
-    label: "Grok",
-    settingsSchema: GrokSettings,
-  },
+  cursorClient,
+  grokClient,
   {
     // Lecturn: GitHub Copilot stays a built-in provider driver.
     driverKind: ProviderDriverKind.make("githubCopilot"),
@@ -51,11 +34,7 @@ export const providerClients = makeProviderClientRegistry([
     badgeLabel: "Early Access",
     settingsSchema: GithubCopilotSettings,
   },
-  {
-    driverKind: ProviderDriverKind.make("opencode"),
-    label: "OpenCode",
-    settingsSchema: OpenCodeSettings,
-  },
+  openCodeClient,
   {
     driverKind: ProviderDriverKind.make("antigravity"),
     label: "Antigravity",
@@ -63,10 +42,5 @@ export const providerClients = makeProviderClientRegistry([
   },
   museClient,
   piClient,
-  {
-    driverKind: ProviderDriverKind.make("acpRegistry"),
-    label: "ACP Registry",
-    settingsSchema: AcpRegistrySettings,
-    hasDefaultInstance: false,
-  },
+  acpRegistryClient,
 ]);

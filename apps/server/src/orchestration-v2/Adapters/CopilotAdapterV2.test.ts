@@ -19,7 +19,6 @@ import {
   type RuntimeMode,
 } from "@lecturn/contracts";
 import { resolveSelfInvocation } from "@lecturn/shared/nodeRuntime";
-import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -33,14 +32,12 @@ import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/process";
 import type * as EffectAcpSchema from "effect-acp/compat";
 
-import * as ServerConfig from "../../config.ts";
-import type * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
-import * as AcpSessionRuntimeModule from "../../provider/acp/AcpSessionRuntime.ts";
+import type * as AcpSessionRuntime from "@lecturn/provider-acp/server/AcpSessionRuntime";
+import * as AcpSessionRuntimeModule from "@lecturn/provider-acp/server/AcpSessionRuntime";
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
-import {
-  ProviderAdapterV2RuntimePolicy,
-  type ProviderAdapterV2TurnInput,
-} from "@lecturn/provider-core/server/ProviderAdapter";
+import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
+import * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
+import * as TestProviderHost from "@lecturn/provider-testing/TestProviderHost";
 import {
   COPILOT_CANCELLED_STREAM_GRACE,
   withCopilotCancelledStreamDiscard,
@@ -52,6 +49,7 @@ import {
   makeCopilotAcpAdapterFlavor,
   makeCopilotAdapterV2,
   type CopilotAdapterV2Options,
+  type CopilotFlavorServices,
 } from "./CopilotAdapterV2.ts";
 
 const MODE_URL = "https://agentclientprotocol.com/protocol/session-modes";
@@ -61,18 +59,14 @@ const DEFAULT_SETTINGS = Schema.decodeSync(GithubCopilotSettings)({});
 const unused = <A>(): A => undefined as unknown as A;
 
 const flavorOptions = (
-  overrides: Partial<CopilotAdapterV2Options> = {},
-): CopilotAdapterV2Options => ({
+  overrides: Partial<CopilotAdapterV2Options & CopilotFlavorServices> = {},
+): CopilotAdapterV2Options & CopilotFlavorServices => ({
   instanceId: ProviderInstanceId.make("githubCopilot"),
   settings: DEFAULT_SETTINGS,
   environment: { COPILOT_HOME },
   childProcessSpawner: unused(),
-  crypto: unused(),
   selfInvocation: unused(),
-  fileSystem: unused(),
   path: NodePath as unknown as Path.Path,
-  idAllocator: unused(),
-  serverConfig: unused(),
   ...overrides,
 });
 
@@ -355,9 +349,8 @@ describe("withCopilotCancelledStreamDiscard", () => {
 const integrationLayer = Layer.mergeAll(
   NodeServices.layer,
   IdAllocator.layer,
-  ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-copilot-v2-adapter-" }).pipe(
-    Layer.provide(NodeServices.layer),
-  ),
+  McpProviderSessions.layer,
+  TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer)),
 );
 
 /** Runs one plan turn against the mock agent's Copilot profile. */
@@ -375,17 +368,11 @@ const runCopilotPlanTurn = (input: { readonly planMarkdown: string | null }) =>
     );
     const instanceId = ProviderInstanceId.make("githubCopilot");
     const threadId = ThreadId.make(`thread-copilot-plan-${input.planMarkdown === null}`);
-    const adapter = makeCopilotAdapterV2({
+    const adapter = yield* makeCopilotAdapterV2({
       instanceId,
       settings: DEFAULT_SETTINGS,
       environment: { COPILOT_HOME: copilotHome },
-      childProcessSpawner,
-      crypto: yield* Crypto.Crypto,
       selfInvocation: yield* resolveSelfInvocation(),
-      fileSystem,
-      path,
-      idAllocator: yield* IdAllocator.IdAllocatorV2,
-      serverConfig: yield* ServerConfig.ServerConfig,
       makeRuntime: ({ runtimePolicy: _policy, processEnvironment: _env, ...runtimeInput }) =>
         Effect.gen(function* () {
           const context = yield* Layer.build(
@@ -418,7 +405,7 @@ const runCopilotPlanTurn = (input: { readonly planMarkdown: string | null }) =>
           return yield* withCopilotCancelledStreamDiscard(runtime);
         }),
     });
-    const runtimePolicy = ProviderAdapterV2RuntimePolicy.make({
+    const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
       runtimeMode: "approval-required",
       interactionMode: "plan",
       cwd: process.cwd(),
@@ -474,7 +461,7 @@ const runCopilotPlanTurn = (input: { readonly planMarkdown: string | null }) =>
       },
       modelSelection,
       runtimePolicy,
-    } as ProviderAdapterV2TurnInput);
+    } as ProviderAdapter.ProviderAdapterV2TurnInput);
     const events = yield* session.events.pipe(
       Stream.takeUntil((event) => event.type === "turn.terminal"),
       Stream.runCollect,

@@ -26,9 +26,10 @@ import {
   COPILOT_DETECTION_TIMEOUT_MS,
   enrichCopilotSnapshot,
 } from "../CopilotProvider.ts";
-import * as ProviderEventLoggers from "../ProviderEventLoggers.ts";
+import * as ProviderEventLoggers from "@lecturn/provider-core/server/ProviderEventLoggers";
 import { makeManagedServerProvider } from "@lecturn/provider-core/server/managedProvider";
-import { ProviderHost } from "@lecturn/provider-core/server/ProviderHost";
+import * as ProviderHost from "@lecturn/provider-core/server/ProviderHost";
+import * as ProviderLatestVersions from "@lecturn/provider-core/server/ProviderLatestVersions";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
@@ -98,7 +99,8 @@ export type CopilotDriverEnv =
   | HttpClient.HttpClient
   | Path.Path
   | ProviderEventLoggers.ProviderEventLoggers
-  | ProviderHost
+  | ProviderHost.ProviderHost
+  | ProviderLatestVersions.ProviderLatestVersions
   | ServerConfig.ServerConfig;
 
 export const CopilotDriver: ProviderDriver<GithubCopilotSettings, CopilotDriverEnv> = {
@@ -116,7 +118,7 @@ export const CopilotDriver: ProviderDriver<GithubCopilotSettings, CopilotDriverE
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
-      const host = yield* ProviderHost;
+      const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -171,7 +173,7 @@ export const CopilotDriver: ProviderDriver<GithubCopilotSettings, CopilotDriverE
         Effect.provideService(Path.Path, path),
       );
 
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, host.settings);
+      const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
       const snapshot = yield* makeManagedServerProvider<
         ProviderSnapshotSettings<GithubCopilotSettings>
       >({
@@ -197,6 +199,7 @@ export const CopilotDriver: ProviderDriver<GithubCopilotSettings, CopilotDriverE
                 enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
                 publishSnapshot,
                 httpClient,
+                latestVersions,
               }),
             ),
           ),

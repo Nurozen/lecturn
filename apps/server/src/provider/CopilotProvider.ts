@@ -8,6 +8,7 @@ import {
   type ServerProviderAuth,
   type ServerProviderModel,
 } from "@lecturn/contracts";
+import * as ProviderLatestVersions from "@lecturn/provider-core/server/ProviderLatestVersions";
 import { causeErrorTag } from "@lecturn/shared/observability";
 import { createModelCapabilities } from "@lecturn/shared/model";
 import { fromLenientJson } from "@lecturn/shared/schemaJson";
@@ -365,11 +366,13 @@ export const enrichCopilotSnapshot = (input: {
   readonly enableProviderUpdateChecks?: boolean;
   readonly publishSnapshot: (snapshot: ServerProvider) => Effect.Effect<void>;
   readonly httpClient: HttpClient.HttpClient;
+  readonly latestVersions: ProviderLatestVersions.ProviderLatestVersions["Service"];
 }): Effect.Effect<void> =>
   enrichProviderSnapshotWithVersionAdvisory(input.snapshot, input.maintenanceCapabilities, {
     enableProviderUpdateChecks: input.enableProviderUpdateChecks,
   }).pipe(
     Effect.provideService(HttpClient.HttpClient, input.httpClient),
+    Effect.provideService(ProviderLatestVersions.ProviderLatestVersions, input.latestVersions),
     Effect.flatMap(input.publishSnapshot),
     Effect.catchCause((cause) =>
       Effect.logWarning("GitHub Copilot version advisory enrichment failed", {

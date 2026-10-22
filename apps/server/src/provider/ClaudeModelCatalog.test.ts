@@ -1,8 +1,8 @@
 import { assert, describe, it } from "@effect/vitest";
-import { ProviderInstanceId } from "@lecturn/contracts";
+import { ProviderDriverKind, ProviderInstanceId } from "@lecturn/contracts";
 
 import { hasValidClaudeManifestAdapters } from "./ClaudeModelManifest.ts";
-import type { ModelManifestData } from "./ModelManifest.ts";
+import { resolveProviderCatalog, type ModelManifestData } from "./ModelManifest.ts";
 import {
   formatClaudeVersionUpgradeMessage,
   getClaudeCatalogModelCapabilities,
@@ -73,9 +73,15 @@ const manifest = (): ModelManifestData => ({
   },
 });
 
+const CLAUDE = ProviderDriverKind.make("claudeAgent");
+
+/** Resolves Claude's catalog the way the driver does: through its manifest catalog entry. */
+const catalogFromManifest = (data: ModelManifestData) =>
+  resolveClaudeModelCatalog(resolveProviderCatalog(data, CLAUDE) ?? undefined);
+
 describe("Claude model catalog", () => {
   it("discovers future runtime models, deduplicates aliases and dispatches their exact IDs", () => {
-    const catalog = mergeClaudeRuntimeModelCatalog(resolveClaudeModelCatalog(manifest()), [
+    const catalog = mergeClaudeRuntimeModelCatalog(catalogFromManifest(manifest()), [
       {
         value: "default",
         resolvedModel: "claude-synthetic-future[1m]",
@@ -123,7 +129,7 @@ describe("Claude model catalog", () => {
   });
 
   it("uses explicit runtime capability removals and availability over stale manifest data", () => {
-    const catalog = mergeClaudeRuntimeModelCatalog(resolveClaudeModelCatalog(manifest()), [
+    const catalog = mergeClaudeRuntimeModelCatalog(catalogFromManifest(manifest()), [
       {
         value: "synthetic",
         resolvedModel: "claude-synthetic-next",
@@ -145,7 +151,7 @@ describe("Claude model catalog", () => {
   });
 
   it("keeps absent capability metadata and legacy supplements, but never pins unresolved aliases", () => {
-    const original = resolveClaudeModelCatalog(manifest());
+    const original = catalogFromManifest(manifest());
     assert.strictEqual(mergeClaudeRuntimeModelCatalog(original, []), original);
     assert.strictEqual(mergeClaudeRuntimeModelCatalog(original), original);
     assert.strictEqual(mergeClaudeRuntimeModelCatalog(original, null), original);
@@ -179,7 +185,7 @@ describe("Claude model catalog", () => {
   });
 
   it("preserves resolved suffixes without applying an old manifest suffix again", () => {
-    const catalog = mergeClaudeRuntimeModelCatalog(resolveClaudeModelCatalog(manifest()), [
+    const catalog = mergeClaudeRuntimeModelCatalog(catalogFromManifest(manifest()), [
       {
         value: "synthetic",
         resolvedModel: "claude-synthetic-next[large]",
@@ -205,7 +211,7 @@ describe("Claude model catalog", () => {
   });
 
   it("lets native efforts and the runtime default override old manifest mappings", () => {
-    const base = resolveClaudeModelCatalog(manifest());
+    const base = catalogFromManifest(manifest());
     const catalog = mergeClaudeRuntimeModelCatalog(
       {
         models: base.models.map((entry) => ({
@@ -289,7 +295,7 @@ describe("Claude model catalog", () => {
   it("resolves capacity from selected options and fixed catalog windows without guessing custom models", () => {
     const source = manifest();
     const profile = source.providers!.claudeAgent!.profiles.synthetic!;
-    const catalog = resolveClaudeModelCatalog({
+    const catalog = catalogFromManifest({
       ...source,
       providers: {
         claudeAgent: {
@@ -335,7 +341,7 @@ describe("Claude model catalog", () => {
   });
 
   it("filters models at runtime-version boundaries and derives the upgrade message", () => {
-    const catalog = resolveClaudeModelCatalog(manifest());
+    const catalog = catalogFromManifest(manifest());
     assert.deepStrictEqual(resolveClaudeModelsForVersion(catalog, "3.1.9"), []);
     assert.deepStrictEqual(
       resolveClaudeModelsForVersion(catalog, "3.2.0").map((model) => model.slug),
@@ -371,7 +377,7 @@ describe("Claude model catalog", () => {
         },
       },
     };
-    const catalog = resolveClaudeModelCatalog(input);
+    const catalog = catalogFromManifest(input);
     assert.strictEqual(resolveClaudeModelSlug(catalog, "synthetic"), "claude-synthetic-next");
     assert.strictEqual(
       resolveClaudeModelSlug(catalog, "claude-synthetic-next"),
@@ -409,7 +415,7 @@ describe("Claude model catalog", () => {
   });
 
   it("appends custom models with their own descriptors and keeps bare slugs opaque", () => {
-    const catalog = scopeClaudeModelCatalog(resolveClaudeModelCatalog(manifest()), [
+    const catalog = scopeClaudeModelCatalog(catalogFromManifest(manifest()), [
       "synthetic",
       {
         slug: "claude-custom-tuned",

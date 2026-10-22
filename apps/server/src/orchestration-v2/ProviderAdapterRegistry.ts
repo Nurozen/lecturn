@@ -49,11 +49,11 @@ export type ProviderAdapterRegistryV2Error = typeof ProviderAdapterRegistryV2Err
 export interface ProviderAdapterRegistryV2Shape {
   readonly get: (
     instanceId: ProviderInstanceId,
-  ) => Effect.Effect<ProviderAdapter.ProviderAdapterV2Shape, ProviderAdapterRegistryV2Error>;
+  ) => Effect.Effect<ProviderAdapter.ProviderAdapterV2["Service"], ProviderAdapterRegistryV2Error>;
   readonly list: () => Effect.Effect<ReadonlyArray<ProviderInstanceId>>;
   readonly getMetadata?: (instanceId: ProviderInstanceId) => Effect.Effect<
     {
-      readonly driver: ProviderAdapter.ProviderAdapterV2Shape["driver"];
+      readonly driver: ProviderAdapter.ProviderAdapterV2["Service"]["driver"];
       readonly continuationKey: string;
       readonly enabled: boolean;
       readonly capabilities: OrchestrationV2ProviderCapabilities;
@@ -74,8 +74,8 @@ export class ProviderAdapterRegistryV2 extends Context.Service<
  */
 function gateProviderDiscovery(
   instance: Pick<ProviderInstance, "instanceId" | "snapshot">,
-  adapter: ProviderAdapter.ProviderAdapterV2Shape,
-): ProviderAdapter.ProviderAdapterV2Shape {
+  adapter: ProviderAdapter.ProviderAdapterV2["Service"],
+): ProviderAdapter.ProviderAdapterV2["Service"] {
   return {
     ...adapter,
     openSession: (input) =>
@@ -107,8 +107,8 @@ function gateProviderDiscovery(
 /** Gates an instance that reports provider discovery; others keep their adapter as-is. */
 const withProviderDiscoveryGate = (
   instance: Pick<ProviderInstance, "instanceId" | "snapshot">,
-  adapter: ProviderAdapter.ProviderAdapterV2Shape,
-): Effect.Effect<ProviderAdapter.ProviderAdapterV2Shape> =>
+  adapter: ProviderAdapter.ProviderAdapterV2["Service"],
+): Effect.Effect<ProviderAdapter.ProviderAdapterV2["Service"]> =>
   instance.snapshot.getSnapshot.pipe(
     Effect.map((snapshot) =>
       snapshot.discovery === undefined ? adapter : gateProviderDiscovery(instance, adapter),
@@ -183,7 +183,7 @@ export const layerFromProviderInstanceRegistry: Layer.Layer<
                   ),
                 );
               },
-            } satisfies ProviderAdapter.ProviderAdapterV2Shape);
+            } satisfies ProviderAdapter.ProviderAdapterV2["Service"]);
           }),
         ),
       list: () =>
@@ -218,7 +218,7 @@ export const ProviderAdapterRegistryBuildError = Schema.Union([ProviderAdapterDr
 export type ProviderAdapterRegistryBuildError = typeof ProviderAdapterRegistryBuildError.Type;
 
 function makeRegistry(
-  adapters: ReadonlyArray<ProviderAdapter.ProviderAdapterV2Shape>,
+  adapters: ReadonlyArray<ProviderAdapter.ProviderAdapterV2["Service"]>,
 ): ProviderAdapterRegistryV2Shape {
   return {
     get: (instanceId) =>
@@ -234,7 +234,7 @@ function makeRegistry(
 }
 
 export function layerFromAdapters(
-  adapters: ReadonlyArray<ProviderAdapter.ProviderAdapterV2Shape>,
+  adapters: ReadonlyArray<ProviderAdapter.ProviderAdapterV2["Service"]>,
 ): Layer.Layer<ProviderAdapterRegistryV2> {
   return Layer.succeed(
     ProviderAdapterRegistryV2,
@@ -243,7 +243,7 @@ export function layerFromAdapters(
 }
 
 export function layerFromAdaptersEffect<R, E>(
-  adapters: Effect.Effect<ReadonlyArray<ProviderAdapter.ProviderAdapterV2Shape>, E, R>,
+  adapters: Effect.Effect<ReadonlyArray<ProviderAdapter.ProviderAdapterV2["Service"]>, E, R>,
 ): Layer.Layer<ProviderAdapterRegistryV2, E, R> {
   return Layer.effect(
     ProviderAdapterRegistryV2,
@@ -252,7 +252,7 @@ export function layerFromAdaptersEffect<R, E>(
 }
 
 export function layerSingle(
-  adapter: ProviderAdapter.ProviderAdapterV2Shape,
+  adapter: ProviderAdapter.ProviderAdapterV2["Service"],
 ): Layer.Layer<ProviderAdapterRegistryV2> {
   return layerFromAdapters([adapter]);
 }
@@ -266,7 +266,7 @@ const decodedConfigEnabled = (config: unknown): boolean | undefined => {
 };
 
 interface LiveAdapterEntry {
-  readonly adapter: ProviderAdapter.ProviderAdapterV2Shape;
+  readonly adapter: ProviderAdapter.ProviderAdapterV2["Service"];
   readonly scope: Scope.Closeable;
   readonly entry: ProviderInstanceConfig;
 }

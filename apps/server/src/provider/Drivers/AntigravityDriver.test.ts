@@ -30,11 +30,13 @@ import {
   ANTIGRAVITY_AUTH_STDOUT_PREFIX,
   resolveAntigravityInstanceDirectories,
 } from "../antigravityAuthSupport.ts";
-import * as ProviderEventLoggers from "../ProviderEventLoggers.ts";
+import * as ProviderEventLoggers from "@lecturn/provider-core/server/ProviderEventLoggers";
+import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import * as ModelManifest from "../ModelManifest.ts";
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
 import { AntigravityDriver } from "./AntigravityDriver.ts";
 import * as ProviderHostLive from "../ProviderHostLive.ts";
+import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 
 const hostPlatform = HostProcessPlatform.defaultValue();
 const windowsHost = hostPlatform === "win32";
@@ -277,8 +279,12 @@ const layerDeps = ServerConfig.layerTest(process.cwd(), {
   ),
   Layer.provideMerge(ModelManifest.layerTest),
   Layer.provideMerge(IdAllocator.layer),
+  Layer.provideMerge(McpProviderSessions.layer),
 );
-const layerTest = ProviderHostLive.layer.pipe(Layer.provideMerge(layerDeps));
+const layerTest = ProviderHostLive.layer.pipe(
+  Layer.provideMerge(ServerSecretStore.layer),
+  Layer.provideMerge(layerDeps),
+);
 
 it.layer(layerTest)("AntigravityDriver", (it) => {
   for (const missingInstallation of [true, false]) {

@@ -6,7 +6,7 @@ import {
   ProviderInstanceId,
 } from "@lecturn/contracts";
 
-import { AcpProviderCapabilitiesV2 } from "./Adapters/AcpAdapterV2.ts";
+import { AcpProviderCapabilitiesV2 } from "@lecturn/provider-acp/server/adapter";
 import { acpSelectionTransition } from "@lecturn/provider-core/server/selectionTransition";
 
 const selection = (model: string, effort = "medium"): ModelSelection => ({

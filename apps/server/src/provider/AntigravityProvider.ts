@@ -18,7 +18,7 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 import type * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/compat";
 
-import type { AcpSessionRuntimeStartResult } from "./acp/AcpSessionRuntime.ts";
+import type * as AcpSessionRuntime from "@lecturn/provider-acp/server/AcpSessionRuntime";
 import { makeManagedServerProvider } from "@lecturn/provider-core/server/managedProvider";
 import {
   makeManualOnlyProviderMaintenanceCapabilities,
@@ -46,7 +46,7 @@ const AUTH_UNCHECKED_MESSAGE =
   "Antigravity is installed. Google account access is not checked yet.";
 
 type SessionSetupResult = Pick<
-  AcpSessionRuntimeStartResult["sessionSetupResult"],
+  AcpSessionRuntime.AcpSessionRuntimeStartResult["sessionSetupResult"],
   "configOptions" | "models"
 >;
 
@@ -266,7 +266,7 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
   });
 
   const onSessionStarted = Effect.fn("AntigravityProvider.onSessionStarted")(function* (
-    started: AcpSessionRuntimeStartResult,
+    started: AcpSessionRuntime.AcpSessionRuntimeStartResult,
     cwd?: string,
   ) {
     const before = yield* SubscriptionRef.get(metadata);

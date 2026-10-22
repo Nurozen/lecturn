@@ -1,5 +1,4 @@
 /** Reads only the exact space root generated MCP entry; never writes provider configuration. */
-import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -9,27 +8,23 @@ import * as Schema from "effect/Schema";
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { readManifest, mapManifestToProjectInfo } from "./StaveWorkspaceReader.ts";
+import {
+  StaveMemoryMcpConfig,
+  StaveMemoryWiring,
+  type StaveMemoryResolution,
+} from "@lecturn/provider-core/server/staveMemory";
 
-const McpConfig = Schema.Struct({
-  command: Schema.String.check(Schema.isMinLength(1)),
-  args: Schema.Array(Schema.String),
-  env: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
-});
 const McpDocument = Schema.Struct({
-  mcpServers: Schema.Struct({ "context-marmot": McpConfig }),
+  mcpServers: Schema.Struct({ "context-marmot": StaveMemoryMcpConfig }),
 });
 const decodeMcpDocument = Schema.decodeUnknownEffect(Schema.fromJsonString(McpDocument));
-export type StaveMemoryConfig = typeof McpConfig.Type;
-export type StaveMemoryResolution =
-  | { readonly state: "absent" }
-  | { readonly state: "configured"; readonly config: StaveMemoryConfig }
-  | { readonly state: "unavailable"; readonly code: "missing_config" | "invalid_config" };
-export class StaveMemoryWiring extends Context.Service<
+export {
+  layerNoop,
+  noop,
   StaveMemoryWiring,
-  {
-    readonly resolve: (cwd: string) => Effect.Effect<StaveMemoryResolution>;
-  }
->()("lecturn/stave/StaveMemoryWiring") {}
+  type StaveMemoryConfig,
+  type StaveMemoryResolution,
+} from "@lecturn/provider-core/server/staveMemory";
 
 export const make = Effect.fn("StaveMemoryWiring.make")(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -77,5 +72,3 @@ export const make = Effect.fn("StaveMemoryWiring.make")(function* () {
   return StaveMemoryWiring.of({ resolve });
 });
 export const layer = Layer.effect(StaveMemoryWiring, make());
-export const noop = StaveMemoryWiring.of({ resolve: () => Effect.succeed({ state: "absent" }) });
-export const layerNoop = Layer.succeed(StaveMemoryWiring, noop);

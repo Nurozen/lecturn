@@ -6,6 +6,7 @@
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
+import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import {
   CommandId,
   ProjectId,
@@ -69,6 +70,7 @@ const OrchestrationLayer = Layer.mergeAll(
 ).pipe(
   Layer.provideMerge(RuntimeLayer.layerLecturnOrchestrationHooks),
   Layer.provide(McpSessionRegistryTestkit.layer),
+  Layer.provide(McpProviderSessions.layer),
   Layer.provide(Layer.mock(CheckpointStore.CheckpointStore)({})),
   Layer.provide(ServerSettings.layerTest()),
   Layer.provide(

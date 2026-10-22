@@ -7,15 +7,15 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import * as GitHubProvider from "../pullRequest/GitHubPullRequestProvider.ts";
-import { GitHubPullRequestApi } from "../pullRequest/GitHubPullRequestApi.ts";
+import * as GitHubProvider from "@lecturn/source-control-github/server/GitHubPullRequestProvider";
+import { GitHubPullRequestApi } from "@lecturn/source-control-github/server/GitHubPullRequestApi";
 import * as ProcessRunner from "../processRunner.ts";
 import { PullRequestProviderRegistry } from "../pullRequest/PullRequestProviderRegistry.ts";
 import {
   PullRequestProviderError,
   type ProviderAcceptanceEvidence,
   type PullRequestProviderApi,
-} from "../pullRequest/PullRequestProvider.ts";
+} from "@lecturn/source-control-core/server/PullRequestProvider";
 import * as Evidence from "./SagaWorkbenchEvidence.ts";
 
 const projectId = Schema.decodeUnknownSync(ProjectId)("p1");

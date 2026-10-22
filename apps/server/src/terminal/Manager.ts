@@ -47,7 +47,7 @@ import * as KeyedLock from "@lecturn/shared/KeyedLock";
 import { HostProcessArchitecture, HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import { mergePathEntries } from "@lecturn/shared/shell";
 
-import { acpRegistryManagedBinaryDirectories } from "../provider/acp/AcpRegistrySupport.ts";
+import { acpRegistryManagedBinaryDirectories } from "@lecturn/provider-acp-registry/server";
 import { getTerminalLabel } from "@lecturn/shared/terminalLabels";
 import * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
@@ -79,7 +79,7 @@ import { expandHomePath } from "@lecturn/provider-core/server/pathExpansion";
 import * as ProcessRunner from "../processRunner.ts";
 import * as PortScanner from "../preview/PortScanner.ts";
 import * as NativeTelemetryClient from "../resourceTelemetry/NativeTelemetryClient.ts";
-import * as PtyAdapter from "./PtyAdapter.ts";
+import * as PtyAdapter from "@lecturn/shared/PtyAdapter";
 
 export {
   TerminalCwdError,
@@ -2277,13 +2277,14 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
               options.managedBinaryToolsDir !== undefined
             ) {
               const managedDirectories = yield* acpRegistryManagedBinaryDirectories({
-                fileSystem,
-                path,
                 cacheDir: options.managedBinaryCacheDir,
                 toolsDir: options.managedBinaryToolsDir,
                 platform,
                 architecture,
-              });
+              }).pipe(
+                Effect.provideService(FileSystem.FileSystem, fileSystem),
+                Effect.provideService(Path.Path, path),
+              );
               if (managedDirectories.length > 0) {
                 const delimiter = platform === "win32" ? ";" : ":";
                 const pathKey =

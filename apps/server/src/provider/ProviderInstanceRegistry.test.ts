@@ -31,14 +31,15 @@ import {
   EnvironmentId,
   type ClaudeSettings,
   type CodexSettings,
-  type CursorSettings,
-  type GrokSettings,
   type GithubCopilotSettings,
-  type OpenCodeSettings,
   ProviderDriverKind,
   type ProviderInstanceConfigMap,
   ProviderInstanceId,
 } from "@lecturn/contracts";
+import * as ProviderLatestVersions from "@lecturn/provider-core/server/ProviderLatestVersions";
+import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
+import type { GrokSettings } from "@lecturn/provider-grok/settings";
+import type { CursorSettings } from "@lecturn/provider-cursor/settings";
 import { HostProcessPlatform, isHostWindows } from "@lecturn/shared/hostProcess";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -56,15 +57,16 @@ import * as ServerSettings from "../serverSettings.ts";
 import { ClaudeDriver, type ClaudeDriverEnv } from "./Drivers/ClaudeDriver.ts";
 import { CodexDriver, type CodexDriverEnv } from "./Drivers/CodexDriver.ts";
 import { CopilotDriver, type CopilotDriverEnv } from "./Drivers/CopilotDriver.ts";
-import { CursorDriver, type CursorDriverEnv } from "./Drivers/CursorDriver.ts";
-import { GrokDriver, type GrokDriverEnv } from "./Drivers/GrokDriver.ts";
-import { OpenCodeDriver, type OpenCodeDriverEnv } from "./Drivers/OpenCodeDriver.ts";
+import { CursorDriver, type CursorDriverEnv } from "@lecturn/provider-cursor/server";
+import { GrokDriver, type GrokDriverEnv } from "@lecturn/provider-grok/server";
+import { OpenCodeDriver, type OpenCodeDriverEnv } from "@lecturn/provider-opencode/server";
+import type { OpenCodeSettings } from "@lecturn/provider-opencode/settings";
 import * as ModelManifest from "./ModelManifest.ts";
 import * as StaveMemoryWiring from "../stave/StaveMemoryWiring.ts";
-import * as OpenCodeRuntime from "./opencodeRuntime.ts";
-import * as OpenCodeServerLedger from "./OpenCodeServerLedger.ts";
+import * as OpenCodeRuntime from "@lecturn/provider-opencode/server/OpenCodeRuntime";
+import * as OpenCodeServerLedger from "@lecturn/provider-opencode/server/OpenCodeServerLedger";
 import * as ResetCreditCoordinator from "./resetCreditCoordinator.ts";
-import * as ProviderEventLoggers from "./ProviderEventLoggers.ts";
+import * as ProviderEventLoggers from "@lecturn/provider-core/server/ProviderEventLoggers";
 import { makeProviderInstanceRegistry } from "./ProviderInstanceRegistry.ts";
 import * as ProviderOrchestrationAdapterInfrastructure from "./ProviderOrchestrationAdapterInfrastructure.ts";
 import * as ProviderHostLive from "./ProviderHostLive.ts";
@@ -239,6 +241,8 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
         ProviderEventLoggers.NoOpProviderEventLoggers,
       ),
     ),
+    Layer.provideMerge(ProviderLatestVersions.layer),
+    Layer.provideMerge(McpProviderSessions.layer),
     Layer.provideMerge(ModelManifest.layerTest),
     Layer.provideMerge(StaveMemoryWiring.layerNoop),
     Layer.provideMerge(ResetCreditCoordinator.layerTest),
@@ -645,6 +649,8 @@ describe("ProviderInstanceRegistry — all drivers slice", () => {
         ProviderEventLoggers.NoOpProviderEventLoggers,
       ),
     ),
+    Layer.provideMerge(ProviderLatestVersions.layer),
+    Layer.provideMerge(McpProviderSessions.layer),
     Layer.provideMerge(ModelManifest.layerTest),
     Layer.provideMerge(StaveMemoryWiring.layerNoop),
     Layer.provideMerge(ResetCreditCoordinator.layerTest),

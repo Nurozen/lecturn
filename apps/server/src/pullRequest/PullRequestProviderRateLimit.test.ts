@@ -1,14 +1,14 @@
 import { assert, it } from "@effect/vitest";
 
-import * as AzureDevOpsCli from "../sourceControl/AzureDevOpsCli.ts";
-import * as BitbucketApi from "../sourceControl/BitbucketApi.ts";
-import * as GitHubApi from "../sourceControl/GitHubApi.ts";
-import * as SourceControlRateLimit from "../sourceControl/SourceControlRateLimit.ts";
-import * as GitLabCli from "../sourceControl/GitLabCli.ts";
-import { azureDevOpsProviderFailure } from "./AzureDevOpsPullRequestProvider.ts";
-import { bitbucketProviderFailure } from "./BitbucketPullRequestProvider.ts";
-import { gitHubProviderFailure } from "./GitHubPullRequestProvider.ts";
-import { gitLabProviderFailure } from "./GitLabPullRequestProvider.ts";
+import * as AzureDevOpsCli from "@lecturn/source-control-azure-devops/server/AzureDevOpsCli";
+import * as BitbucketApi from "@lecturn/source-control-bitbucket/server/BitbucketApi";
+import * as GitHubApi from "@lecturn/source-control-github/server/GitHubApi";
+import * as SourceControlRateLimit from "@lecturn/source-control-core/server/SourceControlRateLimit";
+import * as GitLabCli from "@lecturn/source-control-gitlab/server/GitLabCli";
+import { azureDevOpsProviderFailure } from "@lecturn/source-control-azure-devops/server/AzureDevOpsPullRequestProvider";
+import { bitbucketProviderFailure } from "@lecturn/source-control-bitbucket/server/BitbucketPullRequestProvider";
+import { gitHubProviderFailure } from "@lecturn/source-control-github/server/GitHubPullRequestProvider";
+import { gitLabProviderFailure } from "@lecturn/source-control-gitlab/server/GitLabPullRequestProvider";
 
 const cause = new Error("redacted provider failure");
 

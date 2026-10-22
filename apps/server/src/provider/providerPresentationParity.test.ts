@@ -5,20 +5,16 @@ import { AntigravityProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/
 import { ClaudeProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import { CopilotProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CopilotAdapterV2.ts";
-import { CursorProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CursorAdapterV2.ts";
-import { GrokProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/GrokAdapterV2.ts";
-import { OpenCodeProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/OpenCodeAdapterV2.ts";
 import { ANTIGRAVITY_PRESENTATION } from "./AntigravityProvider.ts";
 import { CLAUDE_PRESENTATION } from "./ClaudeProvider.ts";
 import { CODEX_PRESENTATION } from "./CodexProvider.ts";
 import { COPILOT_PRESENTATION } from "./CopilotProvider.ts";
-import { CURSOR_PRESENTATION } from "./CursorProvider.ts";
-import { GROK_PRESENTATION } from "./GrokProvider.ts";
-import { OPENCODE_PRESENTATION } from "./OpenCodeProvider.ts";
 
 describe("conversationFork capability/presentation parity", () => {
   // Presentation says "native" exactly when the orchestration adapter forks the
   // provider thread itself; every other provider forks through a portable handoff.
+  // Drivers that live in their own provider packages (Cursor, Grok, OpenCode)
+  // cannot be imported here; their packages own the same parity check.
   const drivers = [
     {
       driver: "antigravity",
@@ -35,17 +31,6 @@ describe("conversationFork capability/presentation parity", () => {
       capabilities: ClaudeProviderCapabilitiesV2,
       presentation: CLAUDE_PRESENTATION,
     },
-    {
-      driver: "opencode",
-      capabilities: OpenCodeProviderCapabilitiesV2,
-      presentation: OPENCODE_PRESENTATION,
-    },
-    {
-      driver: "cursor",
-      capabilities: CursorProviderCapabilitiesV2,
-      presentation: CURSOR_PRESENTATION,
-    },
-    { driver: "grok", capabilities: GrokProviderCapabilitiesV2, presentation: GROK_PRESENTATION },
     {
       driver: "githubCopilot",
       capabilities: CopilotProviderCapabilitiesV2,

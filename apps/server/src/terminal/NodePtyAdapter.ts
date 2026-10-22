@@ -9,7 +9,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { HostProcessArchitecture, HostProcessPlatform } from "@lecturn/shared/hostProcess";
 
-import * as PtyAdapter from "./PtyAdapter.ts";
+import * as PtyAdapter from "@lecturn/shared/PtyAdapter";
 
 export class NodePtyModuleLoadError extends Schema.TaggedError<NodePtyModuleLoadError>()(
   "NodePtyModuleLoadError",

@@ -9,6 +9,7 @@ const capabilities = (slug: string): ClaudeCapabilitiesProbe => ({
   email: `${slug}@example.test`,
   subscriptionType: undefined,
   tokenSource: undefined,
+  apiKeySource: undefined,
   apiProvider: undefined,
   slashCommands: [],
   models: [{ value: slug, displayName: slug, description: "Synthetic model" }],

@@ -6,7 +6,7 @@ import * as Stream from "effect/Stream";
 import * as Option from "effect/Option";
 import { ChildProcessSpawner } from "effect/process";
 import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
-import { ProviderHost } from "@lecturn/provider-core/server/ProviderHost";
+import * as ProviderHost from "@lecturn/provider-core/server/ProviderHost";
 import { chatGptModels } from "../CodexChatGptModels.ts";
 import { makeCodexManagedRuntime } from "../CodexManagedRuntime.ts";
 import { ProviderDriverError } from "../Errors.ts";
@@ -35,7 +35,7 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
   const { instanceId, enabled, displayName, accentColor, config } = input;
   const http = yield* HttpClient.HttpClient;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const host = yield* ProviderHost;
+  const host = yield* ProviderHost.ProviderHost;
   const runtime = yield* makeCodexManagedRuntime({
     instanceId,
     enabled,

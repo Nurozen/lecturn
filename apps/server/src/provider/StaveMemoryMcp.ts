@@ -1,98 +1,28 @@
 /**
- * Stave memory MCP wiring for orchestration-v2 adapters.
+ * Codex-specific Stave memory MCP wiring for orchestration-v2 adapters.
  *
  * A live Stave space whose manifest enables Marmot memory carries a generated
  * `context-marmot` entry in its root `.mcp.json`. `StaveMemoryWiring` reads and
- * validates that entry; these helpers turn its resolution into each provider's
- * own MCP server shape, registered next to the `lecturn` MCP server.
+ * validates that entry. Provider-neutral helpers (resolver, ACP, Cursor and
+ * OpenCode shapes) live in `@lecturn/provider-core/server/staveMemory`; this
+ * module only adds the Codex overrides, which need the server's process runner
+ * and Codex MCP inventory.
  *
  * @module provider/StaveMemoryMcp
  */
 import type { CodexSettings } from "@lecturn/contracts";
+import {
+  configuredStaveMemory,
+  STAVE_MEMORY_MCP_SERVER_NAME,
+  type StaveMemoryConfig,
+  type StaveMemoryResolver,
+} from "@lecturn/provider-core/server/staveMemory";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import type * as Schema from "effect/Schema";
-import type * as EffectAcpSchema from "effect-acp/compat";
 
 import type { ProcessRunner } from "../processRunner.ts";
-import {
-  StaveMemoryWiring,
-  type StaveMemoryConfig,
-  type StaveMemoryResolution,
-} from "../stave/StaveMemoryWiring.ts";
 import { resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
 import { type CodexMcpInventoryError, hasCanonicalMarmotServer } from "./codexMcpInventory.ts";
-
-export const STAVE_MEMORY_MCP_SERVER_NAME = "context-marmot";
-
-/** Resolves the Stave memory MCP entry for a session's working directory. */
-export type StaveMemoryResolver = (cwd: string) => Effect.Effect<StaveMemoryResolution>;
-
-const noStaveMemory: StaveMemoryResolver = () => Effect.succeed({ state: "absent" });
-
-/**
- * The resolver to hand an adapter. Optional at the adapter-driver layer so
- * upstream test kits run without the service; the provider drivers require
- * `StaveMemoryWiring` in their environment and provide it here.
- */
-export const currentStaveMemoryResolver: Effect.Effect<StaveMemoryResolver> = Effect.serviceOption(
-  StaveMemoryWiring,
-).pipe(
-  Effect.map(Option.match({ onNone: () => noStaveMemory, onSome: (wiring) => wiring.resolve })),
-);
-
-export function configuredStaveMemory(
-  resolution: StaveMemoryResolution,
-): StaveMemoryConfig | undefined {
-  return resolution.state === "configured" ? resolution.config : undefined;
-}
-
-/** ACP stdio server list (Grok, Antigravity, Copilot and other ACP flavors). */
-export function staveMemoryAcpMcpServers(
-  resolution: StaveMemoryResolution,
-): ReadonlyArray<EffectAcpSchema.McpServer> {
-  const config = configuredStaveMemory(resolution);
-  if (config === undefined) return [];
-  return [
-    {
-      name: STAVE_MEMORY_MCP_SERVER_NAME,
-      command: config.command,
-      args: [...config.args],
-      env: Object.entries(config.env ?? {}).map(([name, value]) => ({ name, value })),
-    },
-  ];
-}
-
-/** `AcpAdapterV2Options.extraMcpServers` for a resolver. */
-export function staveMemoryAcpExtraMcpServers(
-  resolve: StaveMemoryResolver,
-): (cwd: string) => Effect.Effect<ReadonlyArray<EffectAcpSchema.McpServer>> {
-  return (cwd) => resolve(cwd).pipe(Effect.map(staveMemoryAcpMcpServers));
-}
-
-/** Cursor Agent SDK `mcpServers` entries (stdio). */
-export function staveMemoryCursorMcpServers(resolution: StaveMemoryResolution):
-  | Record<
-      string,
-      {
-        readonly type: "stdio";
-        readonly command: string;
-        readonly args: Array<string>;
-        readonly env?: Record<string, string>;
-      }
-    >
-  | undefined {
-  const config = configuredStaveMemory(resolution);
-  if (config === undefined) return undefined;
-  return {
-    [STAVE_MEMORY_MCP_SERVER_NAME]: {
-      type: "stdio",
-      command: config.command,
-      args: [...config.args],
-      ...(config.env === undefined ? {} : { env: { ...config.env } }),
-    },
-  };
-}
 
 /**
  * Codex `thread/start|resume|fork` config overrides for Stave memory.
@@ -169,14 +99,4 @@ export function makeCodexStaveMemoryMcpResolver(deps: {
 /** Session-local Codex MCP server name for one session's memory server. */
 function codexStaveMemorySessionServerName(uuid: string): string {
   return `sm_${uuid.replaceAll("-", "").slice(0, 12)}`;
-}
-
-/** OpenCode `mcp.add` config for the memory server. */
-export function staveMemoryOpenCodeMcpConfig(config: StaveMemoryConfig) {
-  return {
-    type: "local" as const,
-    command: [config.command, ...config.args],
-    ...(config.env ? { environment: { ...config.env } } : {}),
-    enabled: true,
-  };
 }

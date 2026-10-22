@@ -12,8 +12,11 @@ import * as Scope from "effect/Scope";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import type * as EffectAcpErrors from "effect-acp/errors";
 
-import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
-import { collectSessionConfigOptionValues, findSessionConfigOption } from "./AcpRuntimeModel.ts";
+import * as AcpSessionRuntime from "@lecturn/provider-acp/server/AcpSessionRuntime";
+import {
+  collectSessionConfigOptionValues,
+  findSessionConfigOption,
+} from "@lecturn/provider-acp/server/runtimeModel";
 
 /** `authenticate` with this method is a no-op when the CLI already has a GitHub login. */
 export const COPILOT_AUTH_METHOD_ID = "copilot-login";
