@@ -165,6 +165,16 @@ function accountKeyResolver(reports: Iterable<AccountReport>) {
   };
 }
 
+const presentationsKeyResolver = (presentations: LimitPresentations) =>
+  accountKeyResolver(
+    [...presentations.values()].flatMap((presentation) => [
+      ...(presentation.serverConfig?.providers ?? [])
+        .filter((provider) => provider.enabled)
+        .map(nativeReport),
+      ...(presentation.serverConfig?.usageLimitSources ?? []).flatMap((source) => source.accounts),
+    ]),
+  );
+
 /**
  * One subscription account as the pooled views see it, whichever way it was
  * reported. Matching emails or credentials across environments name one
@@ -259,14 +269,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
       },
     });
   };
-  const resolveKey = accountKeyResolver(
-    [...presentations.values()].flatMap((presentation) => [
-      ...(presentation.serverConfig?.providers ?? [])
-        .filter((provider) => provider.enabled)
-        .map(nativeReport),
-      ...(presentation.serverConfig?.usageLimitSources ?? []).flatMap((source) => source.accounts),
-    ]),
-  );
+  const resolveKey = presentationsKeyResolver(presentations);
   for (const [environmentId, presentation] of presentations) {
     const label = presentation.entry.target.label;
     for (const provider of providersWithLimits(presentation.serverConfig?.providers ?? [])) {
@@ -335,6 +338,7 @@ export function collectLimitNotices(presentations: LimitPresentations): readonly
   const label = (environmentLabel: string, subject: string) =>
     presentations.size > 1 ? `${environmentLabel} · ${subject}` : subject;
   const notices: string[] = [];
+  const resolveKey = presentationsKeyResolver(presentations);
   const nativeAccounts = new Set<string>();
   for (const presentation of presentations.values()) {
     const environmentLabel = presentation.entry.target.label;
@@ -343,7 +347,7 @@ export function collectLimitNotices(presentations: LimitPresentations): readonly
       // failed, or reported nothing at all, is worth a line.
       if (provider.usageLimits?.unavailable?.reason === "unsupported") continue;
       const notice = provider.usageLimits ? limitsNotice(provider.usageLimits) : null;
-      const key = accountKey(provider.driver, provider.auth.email, provider.usageLimits);
+      const key = resolveKey(nativeReport(provider));
       if (key && notice === null) nativeAccounts.add(key);
       const name = provider.displayName?.trim() || String(provider.driver);
       if (notice) notices.push(`${label(environmentLabel, name)}: ${notice}`);
@@ -361,7 +365,7 @@ export function collectLimitNotices(presentations: LimitPresentations): readonly
       const missing = new Map<string, number>();
       for (const account of source.accounts) {
         if (account.usageLimits.unavailable?.reason === "unsupported") continue;
-        const key = accountKey(account.driver, account.email, account.usageLimits);
+        const key = resolveKey(account);
         if (key && nativeAccounts.has(key)) continue;
         const notice = limitsNotice(account.usageLimits);
         if (notice) {

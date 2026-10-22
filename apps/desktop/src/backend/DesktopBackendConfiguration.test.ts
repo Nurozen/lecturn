@@ -114,6 +114,7 @@ const withHarness = <A, E, R>(
     | FileSystem.FileSystem
     | DesktopBackendConfiguration.DesktopBackendConfiguration
   >,
+  options?: { readonly platform?: NodeJS.Platform },
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -128,7 +129,7 @@ const withHarness = <A, E, R>(
           Layer.provideMerge(DesktopAppSettings.layerTest()),
           Layer.provideMerge(DesktopWslEnvironment.layerTest()),
           Layer.provideMerge(DesktopWslServerTree.layerTest()),
-          Layer.provideMerge(layerEnvironment(baseDir)),
+          Layer.provideMerge(layerEnvironment(baseDir, options)),
         ),
       ),
     );
@@ -325,7 +326,7 @@ describe("DesktopBackendConfiguration", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("only the local primary bootstrap claims the prepared shell environment", () =>
+  it.effect("only a local primary that waited for the shell environment claims it", () =>
     withHarness(
       Effect.gen(function* () {
         const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
@@ -333,10 +334,23 @@ describe("DesktopBackendConfiguration", () => {
         const primary = yield* configuration.resolvePrimary;
         const wsl = yield* configuration.resolveWsl({ port: 5000, distro: null });
 
-        assert.equal(primary.bootstrap.shellEnvironmentPrepared, true);
+        // macOS loads the shell environment in the background, so the backend
+        // may start before it lands and must run its own login-shell probe.
+        assert.isUndefined(primary.bootstrap.shellEnvironmentPrepared);
         // A WSL server runs on its own Linux user environment and must hydrate it.
         assert.isUndefined(wsl.bootstrap.shellEnvironmentPrepared);
       }),
+    ),
+  );
+
+  it.effect("a Linux primary claims the shell environment DesktopApp waited for", () =>
+    withHarness(
+      Effect.gen(function* () {
+        const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+        const primary = yield* configuration.resolvePrimary;
+        assert.equal(primary.bootstrap.shellEnvironmentPrepared, true);
+      }),
+      { platform: "linux" },
     ),
   );
 

@@ -1296,6 +1296,51 @@ describe("collectLimitNotices", () => {
     );
   });
 
+  it.each([
+    ["ws-a", []],
+    ["ws-b", ["hub: Quota read failed. 1 account excluded from pool."]],
+  ])("matches hub omissions to native coverage per workspace: %s", (workspaceId, expected) => {
+    const input = new Map([
+      [
+        EnvironmentId.make("env-a"),
+        {
+          ...laptop,
+          serverConfig: {
+            providers: [
+              provider({
+                driver: claude,
+                auth: { status: "authenticated", email: "same@example.test", workspaceId: "ws-a" },
+                usageLimits: { checkedAt, windows: [window] },
+              }),
+            ],
+            usageLimitSources: [
+              {
+                ...hub,
+                accounts: [
+                  {
+                    id: "seat.json",
+                    driver: claude,
+                    email: "same@example.test",
+                    workspaceId,
+                    usageLimits: {
+                      checkedAt,
+                      windows: [],
+                      unavailable: {
+                        reason: "probeFailed" as const,
+                        message: "Quota read failed.",
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    ]);
+    expect(collectLimitNotices(input)).toEqual(expected);
+  });
+
   it("names failures and silence, skips unsupported accounts, and labels environments only when several", () => {
     const failed = provider({
       instanceId: ProviderInstanceId.make("claude"),

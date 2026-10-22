@@ -638,10 +638,12 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       host: backendExposure.bindHost,
       desktopBootstrapToken: input.bootstrapToken,
       desktopBootstrapSecret: input.bootstrapSecret,
-      // DesktopApp installs the shell environment into process.env before any
-      // backend starts, and this child extends it (extendEnv below). WSL gets
-      // a different environment, so its bootstrap never sets this.
-      shellEnvironmentPrepared: true,
+      // Off macOS, DesktopApp installs the shell environment into process.env
+      // before any backend starts, and this child extends it (extendEnv below).
+      // On macOS DesktopApp loads it in the background so a slow .zprofile does
+      // not hide the window, so the backend must run its own login-shell probe.
+      // WSL gets a different environment, so its bootstrap never sets this.
+      ...(environment.platform === "darwin" ? {} : { shellEnvironmentPrepared: true }),
       tailscaleServeEnabled: backendExposure.tailscaleServeEnabled,
       tailscaleServePort: backendExposure.tailscaleServePort,
       desktopTelemetryFd: 4,

@@ -282,7 +282,8 @@ const startup = Effect.gen(function* () {
 
   // Waiting here would hide the macOS window during a slow .zprofile/.zshrc.
   // Parent-owned SSH/editor actions still need their own hydrated environment;
-  // the backend independently shares its discovery across all providers.
+  // the backend independently shares its discovery across all providers
+  // (DesktopBackendConfiguration only claims shellEnvironmentPrepared off macOS).
   // Linux still needs shell-derived desktop/session settings before Electron ready.
   if (environment.platform !== "darwin") {
     yield* shellEnvironment.installIntoProcess;
