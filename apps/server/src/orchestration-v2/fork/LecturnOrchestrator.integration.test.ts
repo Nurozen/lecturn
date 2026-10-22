@@ -230,12 +230,16 @@ const writeRun = (input: {
   readonly status: OrchestrationV2Run["status"];
   readonly providerThreadId: ProviderThreadId;
   readonly withExecution?: boolean;
+  /** Attached to the user message, which then also gets its visible turn item. */
+  readonly attachments?: ReadonlyArray<ChatAttachment>;
 }) =>
   Effect.gen(function* () {
     const eventSink = yield* EventSink.EventSinkV2;
     const now = yield* DateTime.now;
     const runId = RunId.make(`${input.threadId}:run:${input.ordinal}`);
     const messageId = MessageId.make(`${input.threadId}:message:${input.ordinal}`);
+    const text = `message ${input.ordinal}`;
+    const attachments = input.attachments ?? [];
     yield* eventSink.write({
       events: [
         {
@@ -252,8 +256,8 @@ const writeRun = (input: {
             runId,
             nodeId: null,
             role: "user",
-            text: `message ${input.ordinal}`,
-            attachments: [],
+            text,
+            attachments,
             streaming: false,
             createdAt: now,
             updatedAt: now,
@@ -284,6 +288,40 @@ const writeRun = (input: {
             contextHandoffId: null,
           },
         },
+        ...(input.attachments === undefined
+          ? []
+          : [
+              {
+                id: EventId.make(`${runId}:user-item`),
+                type: "turn-item.updated" as const,
+                threadId: input.threadId,
+                runId,
+                occurredAt: now,
+                payload: {
+                  id: TurnItemId.make(`${runId}:user-item`),
+                  threadId: input.threadId,
+                  runId,
+                  nodeId: null,
+                  providerThreadId: null,
+                  providerTurnId: null,
+                  nativeItemRef: null,
+                  parentItemId: null,
+                  ordinal: input.ordinal,
+                  status: "completed" as const,
+                  title: null,
+                  startedAt: now,
+                  completedAt: now,
+                  updatedAt: now,
+                  createdBy: "user" as const,
+                  creationSource: "web" as const,
+                  type: "user_message" as const,
+                  messageId,
+                  inputIntent: "turn_start" as const,
+                  text,
+                  attachments,
+                },
+              },
+            ]),
       ],
     });
     return { runId, messageId };
@@ -891,6 +929,121 @@ it.layer(TestLayer)("Lecturn fork behavior on the V2 orchestrator", (it) => {
         ResourceCleanupService.live.pipe(
           Layer.provideMerge(
             ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-fork-attachments-" }),
+          ),
+          Layer.provide(Layer.mock(TerminalManager.TerminalManager)({})),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("keeps attachment files a native fork shows by reference while it is live", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const sql = yield* SqlClient.SqlClient;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cleanup = yield* ResourceCleanupService.ResourceCleanupService;
+      const { attachmentsDir } = yield* ServerConfig.ServerConfig;
+      const projectId = ProjectId.make("project:native-fork-attachments");
+      yield* seedProject(projectId, "/repo/native-fork-attachments");
+      const image = (id: string): ChatAttachment => ({
+        type: "image",
+        id,
+        name: "shot.png",
+        mimeType: "image/png",
+        sizeBytes: 4,
+      });
+      const sourceImage = "thread-native-fork-source-7c2e9a40-1b3d-4f5e-8a6b-0c1d2e3f4a5b";
+      const childImage = "thread-native-fork-child-3e4f5a6b-7c8d-4e9f-a0b1-c2d3e4f5a6b7";
+      yield* fileSystem.makeDirectory(attachmentsDir, { recursive: true });
+      const fileOf = (id: string) => `${attachmentsDir}/${id}.png`;
+      const exists = (id: string) => fileSystem.exists(fileOf(id));
+      yield* fileSystem.writeFileString(fileOf(sourceImage), "png!");
+      yield* fileSystem.writeFileString(fileOf(childImage), "png!");
+
+      const withRun = (threadId: ThreadId, attachmentId: string) =>
+        Effect.flatMap(writeProviderThread(threadId), (providerThreadId) =>
+          writeRun({
+            threadId,
+            ordinal: 1,
+            status: "completed",
+            providerThreadId,
+            attachments: [image(attachmentId)],
+          }),
+        );
+      const fork = (
+        sourceThreadId: ThreadId,
+        targetThreadId: ThreadId,
+        sourceMessageId: MessageId,
+      ) =>
+        orchestrator.dispatch({
+          type: "thread.fork",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`${targetThreadId}:fork`),
+          sourceThreadId,
+          targetThreadId,
+          sourcePoint: { type: "latest_stable" },
+          sourceMessageId,
+        });
+      // source <- child <- grandchild, each a native fork storing no copies.
+      const sourceThreadId = ThreadId.make("thread:native-fork-attachments-source");
+      const childThreadId = ThreadId.make("thread:native-fork-attachments-child");
+      const grandchildThreadId = ThreadId.make("thread:native-fork-attachments-grandchild");
+      yield* createThread(sourceThreadId, projectId);
+      const sourceRun = yield* withRun(sourceThreadId, sourceImage);
+      yield* fork(sourceThreadId, childThreadId, sourceRun.messageId);
+      const childRun = yield* withRun(childThreadId, childImage);
+      yield* fork(childThreadId, grandchildThreadId, childRun.messageId);
+      const grandchild = yield* orchestrator.getThreadProjection(grandchildThreadId);
+      assert.equal(grandchild.thread.forkedFrom?.type, "run");
+      assert.lengthOf(grandchild.messages, 0);
+      const shownImages = (projection: OrchestrationV2ThreadProjection) =>
+        projection.visibleTurnItems.flatMap((row) =>
+          row.item.type === "user_message"
+            ? row.item.attachments.map((attachment) => attachment.id)
+            : [],
+        );
+      assert.deepEqual(shownImages(grandchild), [sourceImage, childImage]);
+
+      const deleteAndClean = (threadId: ThreadId) =>
+        Effect.gen(function* () {
+          yield* orchestrator.dispatch({
+            type: "thread.delete",
+            commandId: CommandId.make(`${threadId}:delete`),
+            threadId,
+          });
+          const rows = yield* sql<{ readonly payload_json: string }>`
+            SELECT payload_json FROM orchestration_v2_effect_outbox
+            WHERE thread_id = ${threadId} AND effect_type = 'attachment.cleanup'`;
+          assert.lengthOf(rows, 1);
+          const request = yield* decodeEffectRequest(rows[0]!.payload_json);
+          assert(request.type === "attachment.cleanup");
+          yield* cleanup.cleanupAttachments(request.attachmentIds, threadId);
+        });
+      // Deleting the child, then the source (reached only through the deleted
+      // child), keeps what the live grandchild shows.
+      yield* deleteAndClean(childThreadId);
+      yield* deleteAndClean(sourceThreadId);
+      assert.isTrue(yield* exists(sourceImage));
+      assert.isTrue(yield* exists(childImage));
+      // The grandchild still renders the deleted threads' history.
+      assert.deepEqual(shownImages(yield* orchestrator.getThreadProjection(grandchildThreadId)), [
+        sourceImage,
+        childImage,
+      ]);
+      // With no live descendant, a deleted thread's own files are removed.
+      yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make(`${grandchildThreadId}:delete`),
+        threadId: grandchildThreadId,
+      });
+      yield* cleanup.cleanupAttachments([childImage], childThreadId);
+      assert.isFalse(yield* exists(childImage));
+    }).pipe(
+      Effect.provide(
+        ResourceCleanupService.live.pipe(
+          Layer.provideMerge(
+            ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-native-fork-attachments-" }),
           ),
           Layer.provide(Layer.mock(TerminalManager.TerminalManager)({})),
         ),

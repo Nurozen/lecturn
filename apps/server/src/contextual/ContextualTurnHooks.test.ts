@@ -311,6 +311,13 @@ it.layer(SqlitePersistenceMemory)("Contextual V2 turn hooks", (it) => {
       yield* f.hooks.onRunTerminal(terminal("run-off", "completed"));
       assert.isDefined(yield* f.hooks.beforeTurnStart(turnInput("run-on", "message-on")));
       assert.equal(f.prepareCalls.length, 1);
+      // A rolled-back run's terminal releases its pin too.
+      yield* f.sql`UPDATE contextual_thread_settings SET enabled=0`;
+      assert.isUndefined(yield* f.hooks.beforeTurnStart(turnInput("run-back", "message-back")));
+      yield* f.sql`UPDATE contextual_thread_settings SET enabled=1`;
+      yield* f.hooks.onRunTerminal(terminal("run-back", "rolled_back"));
+      yield* f.hooks.beforeTurnStart(turnInput("run-back", "message-back"));
+      assert.equal(f.prepareCalls.length, 2);
     }),
   );
 

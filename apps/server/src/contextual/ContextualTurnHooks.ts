@@ -249,6 +249,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const at = yield* contextualNow;
       if (notice.status === "rolled_back") {
+        inFlight.delete(notice.runId);
         yield* lifecycle.applyThreadRemoval({ threadId: notice.threadId, kind: "rolled-back", at });
         return;
       }
