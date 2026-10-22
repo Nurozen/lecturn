@@ -2,8 +2,7 @@ import * as NodeCrypto from "node:crypto";
 import * as C from "@lecturn/contracts";
 import { Context, DateTime, Effect, Layer, Option, Schema, Semaphore, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { ProviderService } from "../provider/Services/ProviderService.ts";
-import { getContextualProviderCapabilities } from "../provider/ContextualCapabilities.ts";
+import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
 import { ExtensionsRuntime } from "../extensions/ExtensionsRuntime.ts";
 import { ExtensionsCloudClient } from "../extensions/ExtensionsCloudClient.ts";
 import {
@@ -90,7 +89,7 @@ const explicitCurrentDirection = (text: string): boolean =>
 
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const providers = yield* ProviderService;
+  const providers = yield* ProviderInstanceRegistry;
   const settings = yield* ContextualSettings;
   const repository = yield* ContextualRepository;
   const helper = yield* ExtensionsRuntime;
@@ -176,19 +175,19 @@ export const make = Effect.gen(function* () {
     const project = yield* settings.project(projectId);
     const selections = yield* sql<{
       model_selection_json: string;
-    }>`SELECT model_selection_json FROM projection_threads WHERE thread_id=${input.threadId}`;
+    }>`SELECT json_extract(payload_json,'$.modelSelection') AS model_selection_json FROM orchestration_v2_projection_threads WHERE thread_id=${input.threadId}`;
     const selection = yield* decodeSelection(selections[0]?.model_selection_json ?? "{}").pipe(
       Effect.option,
     );
     // Contextual prepares for the selected next-turn instance, which can differ
     // from the existing session after a model/provider change.
     const instance = Option.isSome(selection)
-      ? yield* providers.getInstanceInfo(selection.value.instanceId).pipe(Effect.option)
+      ? Option.fromNullishOr(yield* providers.getInstance(selection.value.instanceId))
       : Option.none();
-    const providerSupported =
-      Option.isSome(instance) &&
-      instance.value.enabled &&
-      getContextualProviderCapabilities(instance.value.driverKind).delivery !== "unsupported";
+    // V2 delivers the packet as orchestrator-owned turn input and receipts come
+    // from the orchestrator's provider-turn record, so every enabled instance
+    // supports delivery (V1 gated this on adapter-specific receipt hooks).
+    const providerSupported = Option.isSome(instance) && instance.value.enabled;
     const funding = yield* fundingStatus({ featureId: "contextual" });
     const capture = yield* helper.request("contextual.capture.status", {}).pipe(Effect.option);
     const decisionsAvailable =
@@ -1234,7 +1233,7 @@ export const make = Effect.gen(function* () {
       const members = input.guidanceId.startsWith("group:")
         ? yield* sql<{
             decision_id: string;
-          }>`SELECT m.decision_id FROM contextual_group_members m JOIN contextual_decision_groups g ON g.id=m.group_id WHERE m.group_id=${input.guidanceId.slice(6)} AND g.project_id=(SELECT project_id FROM projection_threads WHERE thread_id=${input.threadId})`
+          }>`SELECT m.decision_id FROM contextual_group_members m JOIN contextual_decision_groups g ON g.id=m.group_id WHERE m.group_id=${input.guidanceId.slice(6)} AND g.project_id=(SELECT project_id FROM orchestration_v2_projection_threads WHERE thread_id=${input.threadId})`
         : [];
       // Exclusions belong to the occurrences selected now, not a mutable presentation group.
       // Current membership resolves their aliases at retrieval, without transferring the

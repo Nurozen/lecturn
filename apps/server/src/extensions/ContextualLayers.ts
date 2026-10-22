@@ -1,7 +1,7 @@
 import * as DisplaySummary from "../contextual/ContextualDisplaySummary.ts";
 import * as DecisionRelations from "../threadDecisions/DecisionRelations.ts";
-import * as Lifecycle from "../orchestration/ContextualLifecycle.ts";
-import { Layer } from "effect";
+import * as Lifecycle from "../contextual/ContextualLifecycle.ts";
+import { Effect, Layer } from "effect";
 import * as Runtime from "../extensions/ExtensionsRuntime.ts";
 import * as Cloud from "../extensions/ExtensionsCloudClient.ts";
 import * as Settings from "../contextual/ContextualSettings.ts";
@@ -11,8 +11,12 @@ import * as Notifications from "../contextual/ContextualNotifications.ts";
 import * as Purge from "../contextual/ContextualPurge.ts";
 import * as Groups from "../contextual/ContextualGroups.ts";
 import * as Service from "../contextual/ContextualService.ts";
-import * as Queue from "../orchestration/ContextualTurnQueue.ts";
-import * as Coordinator from "../orchestration/ContextualTurnCoordinator.ts";
+import * as Queue from "../contextual/ContextualTurnQueue.ts";
+import * as Coordinator from "../contextual/ContextualTurnCoordinator.ts";
+import * as TurnHooks from "../contextual/ContextualTurnHooks.ts";
+import { LecturnOrchestrationHooks } from "../orchestration-v2/fork/LecturnOrchestrationHooks.ts";
+import { ProviderWorkAdmission } from "../provider/ProviderWorkAdmission.ts";
+import { makeProviderWorkAdmissionContribution } from "../provider/ProviderWorkAdmissionHooks.ts";
 
 const base = Layer.mergeAll(
   Runtime.layer,
@@ -34,5 +38,38 @@ const base = Layer.mergeAll(
 const groupDependencies = Layer.mergeAll(Purge.layer, Groups.layer).pipe(Layer.provideMerge(base));
 const dependencies = DecisionRelations.layer.pipe(Layer.provideMerge(groupDependencies));
 const service = Service.layer.pipe(Layer.provideMerge(dependencies));
-/** Keep this exact object shared by reactors and RPC handlers. */
-export const layer = Coordinator.layer.pipe(Layer.provideMerge(service));
+const coordinated = Coordinator.layer.pipe(Layer.provideMerge(service));
+/** Keep this exact object shared by the turn hooks and RPC handlers. */
+export const layer = TurnHooks.layer.pipe(Layer.provideMerge(coordinated));
+
+/**
+ * Registers the Lecturn turn hooks owned by this area on the V2 runtime's hook
+ * registry. The registry orders contributions by name (LECTURN_HOOK_ORDER):
+ * team provider policy and Stave run first, then Contextual (preparation; a
+ * conflict review defers the start without holding an effect slot), then
+ * provider work admission (foreground claim right before the provider turn,
+ * never during a hold). Also recovers uncertain Contextual dispatches and
+ * starts the compaction tail.
+ *
+ * Requires: LecturnOrchestrationHooks (the instance OrchestrationV2 outputs),
+ * ProviderWorkAdmission (the instance decisions use), ContextualTurnHooks
+ * (`layer` above) and OrchestrationEventStore.
+ */
+export const hooksLayer = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const hooks = yield* LecturnOrchestrationHooks;
+    const contextual = yield* TurnHooks.ContextualTurnHooks;
+    const admission = yield* ProviderWorkAdmission;
+    yield* contextual.recover.pipe(
+      Effect.catchCause((cause) => Effect.logWarning("Contextual recovery failed", { cause })),
+    );
+    yield* hooks.register(contextual.contribution);
+    yield* hooks.register(makeProviderWorkAdmissionContribution(admission));
+    yield* contextual.observeCompactions.pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Contextual compaction tail stopped", { cause }),
+      ),
+      Effect.forkScoped,
+    );
+  }),
+);

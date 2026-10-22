@@ -1,38 +1,76 @@
 // @effect-diagnostics globalDate:off -- UI activity timestamps use the device locale.
-import type { OrchestrationMessage } from "@lecturn/contracts";
+import * as DateTime from "effect/DateTime";
+
 import type { EnvironmentThreadShell } from "./models.ts";
+
+/** Plan step progress, when a caller has it (V2 shells do not carry it). */
+export interface ActivityPlanProgress {
+  readonly step: string;
+  readonly completedSteps: number;
+  readonly totalSteps: number;
+}
 
 export type ActivityThreadContext = Pick<
   EnvironmentThreadShell,
-  "title" | "session" | "hasPendingApprovals" | "hasPendingUserInput"
+  "title" | "runtime" | "hasPendingApprovals" | "hasPendingUserInput"
 > &
-  Partial<Pick<EnvironmentThreadShell, "planProgress" | "latestUserMessageAt">>;
+  Partial<Pick<EnvironmentThreadShell, "latestUserMessageAt">> & {
+    readonly planProgress?: ActivityPlanProgress | null;
+  };
+
+/** V2 projection messages carry DateTime stamps; cached/test messages may carry ISO strings. */
+type ActivityTimestamp = string | DateTime.DateTime;
+
+export interface ActivityMessage {
+  readonly role: "user" | "assistant" | "system";
+  readonly text: string;
+  readonly createdAt: ActivityTimestamp;
+  readonly updatedAt: ActivityTimestamp;
+}
+
+function timestampMs(value: ActivityTimestamp): number {
+  return typeof value === "string" ? Date.parse(value) : DateTime.toEpochMillis(value);
+}
+
+function latestCurrentTurnResponse(
+  thread: ActivityThreadContext,
+  messages: readonly ActivityMessage[],
+): ActivityMessage | undefined {
+  const turnStartedAt = thread.latestUserMessageAt ? Date.parse(thread.latestUserMessageAt) : null;
+  return messages.findLast(
+    (message) =>
+      message.role === "assistant" &&
+      message.text.trim().length > 0 &&
+      (turnStartedAt === null || timestampMs(message.createdAt) >= turnStartedAt),
+  );
+}
 
 /** Report evidence of progress/blocking; elapsed time alone never means stuck. */
 export function describeThreadActivity(
   thread: ActivityThreadContext,
-  messages: readonly Pick<OrchestrationMessage, "role" | "text" | "createdAt" | "updatedAt">[] = [],
+  messages: readonly ActivityMessage[] = [],
 ): string {
-  const latest = messages.findLast(
-    (message) =>
-      message.role === "assistant" &&
-      message.text.trim().length > 0 &&
-      (!thread.latestUserMessageAt || message.createdAt >= thread.latestUserMessageAt),
-  );
+  const latest = latestCurrentTurnResponse(thread, messages);
+  const runtime = thread.runtime;
   const blocker = thread.hasPendingApprovals
     ? "Waiting for your approval."
     : thread.hasPendingUserInput
       ? "Waiting for your answer."
-      : thread.session?.status === "error"
-        ? `Agent error: ${thread.session.lastError ?? "Open the thread for details."}`
-        : thread.session?.status === "interrupted"
+      : runtime?.status === "failed"
+        ? `Agent error: ${runtime.lastError ?? "Open the thread for details."}`
+        : runtime?.status === "interrupted"
           ? "Agent interrupted."
           : null;
   const plan = thread.planProgress
     ? `Current step: ${thread.planProgress.step} (${thread.planProgress.completedSteps}/${thread.planProgress.totalSteps} complete)`
     : null;
   const progress = latest?.text.trim().replace(/\s+/g, " ").slice(0, 650);
-  const observedAt = latest?.updatedAt ?? thread.session?.updatedAt;
+  const observedAtMs =
+    latest !== undefined
+      ? timestampMs(latest.updatedAt)
+      : runtime
+        ? Date.parse(runtime.updatedAt)
+        : null;
   return [
     blocker,
     plan,
@@ -41,7 +79,9 @@ export function describeThreadActivity(
       : !plan
         ? `Task: ${thread.title}. No progress update yet.`
         : null,
-    observedAt ? `Last update ${new Date(observedAt).toLocaleString()}` : null,
+    observedAtMs !== null && Number.isFinite(observedAtMs)
+      ? `Last update ${new Date(observedAtMs).toLocaleString()}`
+      : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -110,22 +150,17 @@ export function activityVisualColor(
 /** Short evidence-based copy: never infer that silence means a blocked agent. */
 export function threadActivityExcerpt(
   thread: ActivityThreadContext,
-  messages: readonly Pick<OrchestrationMessage, "role" | "text" | "createdAt" | "updatedAt">[] = [],
+  messages: readonly ActivityMessage[] = [],
 ): string {
   if (thread.hasPendingApprovals) return "Waiting for your approval";
   if (thread.hasPendingUserInput) return "Waiting for your answer";
-  if (thread.session?.status === "error")
-    return (thread.session.lastError ?? "Agent error").slice(0, 180);
-  const latest = messages.findLast(
-    (message) =>
-      message.role === "assistant" &&
-      message.text.trim() &&
-      (!thread.latestUserMessageAt || message.createdAt >= thread.latestUserMessageAt),
-  );
+  const runtime = thread.runtime;
+  if (runtime?.status === "failed") return (runtime.lastError ?? "Agent error").slice(0, 180);
+  const latest = latestCurrentTurnResponse(thread, messages);
   const value =
     latest?.text ??
     thread.planProgress?.step ??
-    (thread.session?.status === "interrupted" || thread.session?.status === "stopped"
+    (runtime?.status === "interrupted" || runtime?.status === "cancelled"
       ? "Stopped"
       : "No task update yet");
   return value.replace(/\s+/g, " ").trim().slice(0, 180);

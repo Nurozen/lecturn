@@ -94,34 +94,31 @@ describe("threadRoutes", () => {
     ).toBeNull();
   });
 
-  it("keeps shell-only server threads in the loading state", () => {
+  it("renders authoritative server-thread shells when bootstrap is complete", () => {
     expect(
       resolveThreadRouteRenderState({
         bootstrapComplete: true,
-        serverThreadShellExists: true,
-        serverThreadDetailExists: false,
-        serverThreadDetailDeleted: false,
+        serverThreadExists: true,
+        serverThreadDeleted: false,
         draftThreadExists: false,
       }),
-    ).toBe("loading");
+    ).toBe("ready");
   });
 
-  it("renders server details and local drafts when they are ready", () => {
+  it("renders server threads and local drafts when they are ready", () => {
     expect(
       resolveThreadRouteRenderState({
         bootstrapComplete: true,
-        serverThreadShellExists: true,
-        serverThreadDetailExists: true,
-        serverThreadDetailDeleted: false,
+        serverThreadExists: true,
+        serverThreadDeleted: false,
         draftThreadExists: false,
       }),
     ).toBe("ready");
     expect(
       resolveThreadRouteRenderState({
         bootstrapComplete: true,
-        serverThreadShellExists: false,
-        serverThreadDetailExists: false,
-        serverThreadDetailDeleted: false,
+        serverThreadExists: false,
+        serverThreadDeleted: false,
         draftThreadExists: true,
       }),
     ).toBe("ready");
@@ -131,30 +128,27 @@ describe("threadRoutes", () => {
     expect(
       resolveThreadRouteRenderState({
         bootstrapComplete: false,
-        serverThreadShellExists: false,
-        serverThreadDetailExists: false,
-        serverThreadDetailDeleted: false,
+        serverThreadExists: false,
+        serverThreadDeleted: false,
         draftThreadExists: false,
       }),
     ).toBe("loading");
     expect(
       resolveThreadRouteRenderState({
         bootstrapComplete: true,
-        serverThreadShellExists: false,
-        serverThreadDetailExists: false,
-        serverThreadDetailDeleted: false,
+        serverThreadExists: false,
+        serverThreadDeleted: false,
         draftThreadExists: false,
       }),
     ).toBe("missing");
   });
 
-  it("redirects deleted shell-only threads", () => {
+  it("redirects deleted server threads", () => {
     expect(
       resolveThreadRouteRenderState({
         bootstrapComplete: true,
-        serverThreadShellExists: true,
-        serverThreadDetailExists: false,
-        serverThreadDetailDeleted: true,
+        serverThreadExists: true,
+        serverThreadDeleted: true,
         draftThreadExists: false,
       }),
     ).toBe("missing");
@@ -163,9 +157,8 @@ describe("threadRoutes", () => {
   it("explains a thread whose account was signed out instead of treating it as missing", () => {
     const gone = {
       bootstrapComplete: false,
-      serverThreadShellExists: false,
-      serverThreadDetailExists: false,
-      serverThreadDetailDeleted: false,
+      serverThreadExists: false,
+      serverThreadDeleted: false,
       draftThreadExists: false,
     };
     expect(resolveThreadRouteRenderState({ ...gone, accountGone: true })).toBe("account-gone");

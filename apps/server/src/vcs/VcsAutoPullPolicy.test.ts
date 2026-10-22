@@ -5,7 +5,6 @@ import * as PlatformError from "effect/PlatformError";
 import * as TestClock from "effect/testing/TestClock";
 import {
   ProjectId,
-  type OrchestrationProject,
   type OrchestrationProjectShell,
   type VcsStatusLocalResult,
   type VcsStatusRemoteResult,
@@ -14,14 +13,31 @@ import { symlinksSupported } from "@lecturn/shared/testing/symlinks";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import { StaveProjectShells } from "../stave/StaveProjectShells.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as VcsStatusBroadcaster from "./VcsStatusBroadcaster.ts";
 
 const PROJECT_COUNT = 100;
 const timestamp = "2026-01-01T00:00:00.000Z";
+/** A project shell plus its deletion stamp (the V1 `OrchestrationProject` read shape). */
+type OrchestrationProject = OrchestrationProjectShell & { readonly deletedAt: string | null };
 const toShell = ({ deletedAt: _deletedAt, ...project }: OrchestrationProject) =>
   project satisfies OrchestrationProjectShell;
+const toRow = (project: OrchestrationProject): ProjectStore.ProjectRow => ({
+  projectId: project.id,
+  title: project.title,
+  workspaceRoot: project.workspaceRoot,
+  defaultModelSelection: project.defaultModelSelection,
+  defaultThreadEnvMode: null,
+  autoPull: project.autoPull ?? false,
+  faviconPath: null,
+  projectIcon: null,
+  scripts: project.scripts,
+  createdAt: project.createdAt,
+  updatedAt: project.updatedAt,
+  deletedAt: project.deletedAt,
+});
 
 const makeFixture = Effect.fn("VcsAutoPullPolicy.test.makeFixture")(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -82,19 +98,19 @@ const makeFixture = Effect.fn("VcsAutoPullPolicy.test.makeFixture")(function* ()
   });
   const policyLayer = VcsStatusBroadcaster.autoPullPolicyLayer.pipe(
     Layer.provide(
-      Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
-        getActiveProjectByWorkspaceRoot: (cwd) =>
+      Layer.mock(ProjectStore.ProjectStoreV2)({
+        findActiveByWorkspaceRoot: (cwd) =>
           Effect.sync(() =>
-            Option.fromUndefinedOr(state.projects.find((project) => project.workspaceRoot === cwd)),
+            Option.fromUndefinedOr(
+              state.projects.find((project) => project.workspaceRoot === cwd),
+            ).pipe(Option.map(toRow)),
           ),
-        getShellSnapshot: () =>
-          Effect.sync(() => ({
-            snapshotSequence: state.snapshotSequence,
-            // A projection query rehydrates rows; cache reuse cannot rely on object identity.
-            projects: state.projects.map(toShell),
-            threads: [],
-            updatedAt: timestamp,
-          })),
+      }),
+    ),
+    Layer.provide(
+      Layer.mock(StaveProjectShells)({
+        // A projection query rehydrates rows; cache reuse cannot rely on object identity.
+        list: Effect.sync(() => state.projects.map(toShell)),
       }),
     ),
     Layer.provide(ServerSettings.layerTest()),

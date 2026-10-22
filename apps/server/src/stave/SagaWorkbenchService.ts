@@ -6,7 +6,6 @@ import {
   SagaWorkbenchInferenceResult,
   type ModelSelection,
   type MessageId,
-  type OrchestrationEvent,
   type ThreadId,
   type SagaWorkbenchConfigureInput,
   SagaWorkbenchError,
@@ -33,7 +32,7 @@ import {
 } from "effect";
 import { ServerConfig } from "../config.ts";
 import type { AuthenticatedSession } from "../auth/EnvironmentAuth.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { StaveOrchestration } from "./StaveOrchestration.ts";
 import { SagaWorkbenchRepository } from "../persistence/Services/SagaWorkbenchRepository.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
@@ -149,10 +148,15 @@ const refuseBlockers = (blockers: readonly string[]) =>
     ? Effect.fail(new SagaWorkbenchError({ code: "blocked", message: blockers[0]!, blockers }))
     : Effect.void;
 
-export type PromptInferenceEvent = Extract<
-  OrchestrationEvent,
-  { type: "thread.turn-start-requested" }
->;
+/** A user turn request (V2 `run.created`) that may feed saga inference. */
+export interface PromptInferenceEvent {
+  readonly eventId: string;
+  readonly sequence: number;
+  readonly threadId: ThreadId;
+  /** The user message that started the run; inference reads turns before it. */
+  readonly messageId: MessageId;
+  readonly modelSelection?: ModelSelection;
+}
 export interface SagaInferenceRequest {
   readonly identity: SagaWorkbenchIdentity;
   readonly threadId: ThreadId;
@@ -217,7 +221,7 @@ export class SagaWorkbenchService extends Context.Service<
 export const make = Effect.gen(function* () {
   const repo = yield* SagaWorkbenchRepository;
   const reader = yield* StaveWorkspaceReader;
-  const projections = yield* ProjectionSnapshotQuery;
+  const projections = yield* StaveOrchestration;
   const runtime = yield* StaveRpcRuntime;
   const settings = yield* ServerSettingsService;
   const evidenceReader = yield* SagaWorkbenchEvidence;
@@ -433,7 +437,7 @@ export const make = Effect.gen(function* () {
     event: PromptInferenceEvent,
   ) {
     if (!config.staveEnabled || !(yield* settings.getSettings).stave.enabled) return null;
-    const thread = yield* projections.getThreadShellById(event.payload.threadId);
+    const thread = yield* projections.getThreadShellById(event.threadId);
     if (Option.isNone(thread) || thread.value.archivedAt) return null;
     const identity = yield* identityFor(thread.value.projectId).pipe(Effect.option);
     if (Option.isNone(identity)) return null;
@@ -441,14 +445,14 @@ export const make = Effect.gen(function* () {
     if (Option.isNone(member)) return null;
     const turns = yield* projections.getInferenceTurnPairs({
       threadId: thread.value.id,
-      beforeMessageId: event.payload.messageId,
+      beforeMessageId: event.messageId,
     });
     if (turns.length === 0) return null;
     return {
       identity: identity.value,
       threadId: thread.value.id,
-      beforeMessageId: event.payload.messageId,
-      modelSelection: event.payload.modelSelection ?? thread.value.modelSelection,
+      beforeMessageId: event.messageId,
+      modelSelection: event.modelSelection ?? thread.value.modelSelection,
       turns,
       eventId: event.eventId,
       sequence: event.sequence,

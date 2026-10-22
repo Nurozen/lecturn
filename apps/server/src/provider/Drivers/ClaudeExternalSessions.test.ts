@@ -51,7 +51,7 @@ function list(
   input: {
     readonly searchTerm?: string;
     readonly limit?: number;
-    readonly knownResumeCursors?: ReadonlyArray<unknown>;
+    readonly knownNativeSessionIds?: ReadonlyArray<string>;
   } = {},
 ) {
   return makeClaudeExternalSessionsLister({
@@ -61,7 +61,7 @@ function list(
   })({
     searchTerm: input.searchTerm,
     limit: input.limit ?? 50,
-    knownResumeCursors: input.knownResumeCursors ?? [],
+    knownNativeSessionIds: new Set(input.knownNativeSessionIds ?? []),
   });
 }
 
@@ -73,14 +73,9 @@ describe("makeClaudeExternalSessionsLister", () => {
       const legacyOwned = session(1);
       const external = session(0);
       const result = yield* list(home, [owned, legacyOwned, external], {
-        knownResumeCursors: [
-          { resume: owned.sessionId },
-          { sessionId: legacyOwned.sessionId },
-          // Another provider's cursor, even one naming this id, is not a Claude cursor.
-          { threadId: external.sessionId },
-          null,
-          "not-a-cursor",
-        ],
+        // Native ids Lecturn owns (provider threads, legacy cursors) hide
+        // their sessions; unrelated ids are ignored.
+        knownNativeSessionIds: [owned.sessionId, legacyOwned.sessionId, "not-a-session"],
       });
       assert.deepStrictEqual(
         result.sessions.map((entry) => entry.sessionId),
@@ -217,7 +212,9 @@ describe("makeClaudeExternalSessionsLister", () => {
         listSessions: async () => {
           throw cause;
         },
-      })({ cwd: "/synthetic/workspace", limit: 10, knownResumeCursors: [] }).pipe(Effect.flip);
+      })({ cwd: "/synthetic/workspace", limit: 10, knownNativeSessionIds: new Set() }).pipe(
+        Effect.flip,
+      );
       assert.strictEqual(error.reason, "unreadable");
       assert.strictEqual(error.providerInstanceId, INSTANCE);
       assert.strictEqual(error.cwd, "/synthetic/workspace");

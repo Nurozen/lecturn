@@ -8,15 +8,14 @@ import {
   EMPTY_ENVIRONMENT_THREAD_STATE,
   type EnvironmentThreadState,
   createThreadEnvironmentAtoms,
-  isThreadSessionRunning,
 } from "@lecturn/client-runtime/state/threads";
-import type { EnvironmentId, OrchestrationThreadShell, ThreadId } from "@lecturn/contracts";
+import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@lecturn/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
-import { withAndroidAccess } from "./androidAccessCommand";
+import { withAndroidAccess, withAndroidAccessFor } from "./androidAccessCommand";
 import { environmentSnapshotAtom } from "./shell";
 
 const commands = createThreadEnvironmentAtoms(connectionAtomRuntime, environmentSnapshotAtom);
@@ -24,8 +23,9 @@ export const threadEnvironment = {
   ...commands,
   create: withAndroidAccess(commands.create),
   import: withAndroidAccess(commands.import),
-  fork: withAndroidAccess(
+  fork: withAndroidAccessFor(
     commands.fork,
+    (value) => value.input.targetThreadId,
     (registry, value) =>
       registry.get(
         environmentThreadShells.threadShellAtom({
@@ -59,11 +59,15 @@ export function useEnvironmentThread(
       ? environmentThreads.stateAtom(environmentId, threadId)
       : EMPTY_THREAD_STATE_ATOM,
   );
-  return Option.getOrElse(
+  const state = Option.getOrElse(
     AsyncResult.value(result),
     () => EMPTY_ENVIRONMENT_THREAD_STATE,
   ) as EnvironmentThreadState;
+  return state;
 }
+
+const isRunning = (status: string) =>
+  status === "preparing" || status === "starting" || status === "running";
 
 type KeptThreads = ReadonlyMap<EnvironmentId, ReadonlySet<ThreadId>>;
 
@@ -75,7 +79,8 @@ function isDetailDone<E>(result: AsyncResult.AsyncResult<EnvironmentThreadState,
   const { status, data, error } = result.value;
   if (status === "deleted" || Option.isSome(error)) return true;
   return (
-    status === "live" && !Option.exists(data, (thread) => isThreadSessionRunning(thread.session))
+    status === "live" &&
+    !Option.exists(data, (thread) => thread.runs.some((run) => isRunning(run.status)))
   );
 }
 
@@ -92,7 +97,7 @@ export function createRunningThreadKeepAliveAtom<E>(input: {
   readonly environmentIdsAtom: Atom.Atom<ReadonlyArray<EnvironmentId>>;
   readonly threadsAtom: (
     environmentId: EnvironmentId,
-  ) => Atom.Atom<ReadonlyArray<Pick<OrchestrationThreadShell, "id" | "session">>>;
+  ) => Atom.Atom<ReadonlyArray<Pick<OrchestrationV2ThreadShell, "id" | "status">>>;
   readonly stateAtom: (
     environmentId: EnvironmentId,
     threadId: ThreadId,
@@ -104,7 +109,7 @@ export function createRunningThreadKeepAliveAtom<E>(input: {
     let previous: ReadonlyArray<ThreadId> = [];
     return Atom.make((get) => {
       const running = get(input.threadsAtom(environmentId)).flatMap((thread) =>
-        isThreadSessionRunning(thread.session) ? [thread.id] : [],
+        isRunning(thread.status) ? [thread.id] : [],
       );
       if (arrayElementsEqual(previous, running)) return previous;
       previous = running;

@@ -13,7 +13,7 @@ import {
 } from "@lecturn/contracts";
 import { VcsDriverRegistry } from "../vcs/VcsDriverRegistry.ts";
 import { Context, DateTime, Effect, Layer, Option, Path, Schema } from "effect";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ProjectService } from "../project/ProjectService.ts";
 import { PullRequestProviderRegistry } from "./PullRequestProviderRegistry.ts";
 import {
   projectRepositories,
@@ -53,7 +53,7 @@ export class PullRequestWatchProvider extends Context.Service<
 >()("lecturn/pullRequest/PullRequestWatchProvider") {}
 
 export const make = Effect.gen(function* () {
-  const projections = yield* ProjectionSnapshotQuery;
+  const projects = yield* ProjectService;
   const registry = yield* PullRequestProviderRegistry;
   const path = yield* Path.Path;
   const vcs = yield* Effect.serviceOption(VcsDriverRegistry);
@@ -70,7 +70,7 @@ export const make = Effect.gen(function* () {
   const observe = Effect.fn("PullRequestWatchProvider.observe")(function* (
     reference: PullRequestRef,
   ) {
-    const projectOption = yield* projections.getProjectShellById(reference.projectId);
+    const projectOption = yield* projects.getShell(reference.projectId);
     if (Option.isNone(projectOption))
       return yield* new PullRequestWatchError({
         code: "not-found",

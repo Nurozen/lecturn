@@ -16,11 +16,20 @@ export function withAndroidAccess<
     value,
   ) => value.input.runtimeMode,
 ): AtomCommand<W, A, E> {
+  return withAndroidAccessFor(command, (value) => value.input.threadId, runtimeMode);
+}
+
+/** Same boundary for commands whose thread id is not `input.threadId` (V2 thread.fork). */
+export function withAndroidAccessFor<W, A, E>(
+  command: AtomCommand<W, A, E>,
+  threadId: (value: W) => string,
+  runtimeMode: (registry: AtomRegistry.AtomRegistry, value: W) => RuntimeMode | undefined,
+): AtomCommand<W, A, E> {
   return {
     ...command,
     async run(registry, value) {
       try {
-        await requireAndroidFullAccess(value.input.threadId, runtimeMode(registry, value));
+        await requireAndroidFullAccess(threadId(value), runtimeMode(registry, value));
       } catch (error) {
         return AsyncResult.failure(Cause.die(error));
       }

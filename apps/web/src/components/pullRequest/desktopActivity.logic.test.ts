@@ -4,10 +4,11 @@ import {
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
+  RunId,
   ThreadId,
-  TurnId,
   type PullRequestWatchSnapshot,
 } from "@lecturn/contracts";
+import { makeThreadFixture } from "../../test-fixtures";
 import {
   activityRowVisualState,
   withActivityAccountMarks,
@@ -17,6 +18,15 @@ import {
   scopedPullRequestProjectIds,
   threadActivityRows,
 } from "./desktopActivity.logic";
+
+const runningRuntime = {
+  status: "running" as const,
+  activeRunId: RunId.make("run"),
+  providerInstanceId: ProviderInstanceId.make("codex"),
+  providerName: "Codex",
+  lastError: null,
+  updatedAt: "2026-09-14T04:00:00Z",
+};
 
 const snapshot: PullRequestWatchSnapshot = {
   defaultMergeMode: "follow-pr",
@@ -210,22 +220,25 @@ it("shows actual active conversations and approval state while excluding idle, a
     projectId: ProjectId.make("project"),
     title: "Task",
     modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
-    session: null,
+    runtime: null,
     archivedAt: null,
     settledOverride: null,
-    backgroundLiveness: null,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
   };
   const rows = threadActivityRows(
     [
       base,
-      { ...base, id: ThreadId.make("monitor"), backgroundLiveness: "monitoring" },
+      {
+        ...base,
+        id: ThreadId.make("monitor"),
+        pendingBackgroundTasks: [{ kind: "command" as const, taskId: "watch-logs" }],
+      },
       {
         ...base,
         id: ThreadId.make("approval"),
         hasPendingApprovals: true,
-        backgroundLiveness: "working",
+        runtime: runningRuntime,
       },
       {
         ...base,
@@ -243,7 +256,7 @@ it("shows actual active conversations and approval state while excluding idle, a
     new Set([local]),
   );
   expect(rows.map((row) => [row.threadId, row.status])).toEqual([
-    ["monitor", "Monitoring"],
+    ["monitor", "Working · background tasks"],
     ["approval", "Needs approval"],
   ]);
   expect(rows.every((row) => !row.watchId)).toBe(true);
@@ -283,10 +296,9 @@ it("always retains the three latest interacted threads, including idle and offli
     projectId: ProjectId.make("project"),
     title: id,
     modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
-    session: null,
+    runtime: null,
     archivedAt: null,
     settledOverride: null,
-    backgroundLiveness: null,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     latestUserMessageAt: at,
@@ -323,7 +335,7 @@ describe("native watch activity state", () => {
     const manager = {
       hasPendingApprovals: true,
       hasPendingUserInput: false,
-      session: null,
+      runtime: null,
       settledOverride: null,
     };
     expect(activityRowVisualState(row, manager)).toBe("attention");
@@ -346,31 +358,17 @@ describe("settled conversation visibility", () => {
   const makeThread = (
     id: string,
     overrides: Partial<EnvironmentThreadShell> = {},
-  ): EnvironmentThreadShell => ({
-    id: ThreadId.make(id),
-    environmentId: local,
-    projectId: ProjectId.make("project"),
-    title: id,
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    branch: null,
-    worktreePath: null,
-    latestTurn: null,
-    createdAt: "2026-09-14T00:00:00Z",
-    updatedAt: "2026-09-14T00:00:00Z",
-    latestUserMessageAt: null,
-    hasActionableProposedPlan: false,
-    pullRequests: [],
-    session: null,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    backgroundLiveness: null,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    ...overrides,
-  });
+  ): EnvironmentThreadShell =>
+    makeThreadFixture({
+      id: ThreadId.make(id),
+      environmentId: local,
+      projectId: ProjectId.make("project"),
+      title: id,
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
+      createdAt: "2026-09-14T00:00:00Z",
+      updatedAt: "2026-09-14T00:00:00Z",
+      ...overrides,
+    });
 
   it("fills all three recent slots from unsettled threads, including offline conversations", () => {
     const threads = [
@@ -394,19 +392,10 @@ describe("settled conversation visibility", () => {
   });
 
   it.each([
-    ...(["running", "starting", "error", "stopped", "ready"] as const).map((status) => ({
-      session: {
-        threadId: ThreadId.make("settled"),
-        status,
-        providerName: "Codex",
-        runtimeMode: "full-access" as const,
-        activeTurnId: TurnId.make("turn"),
-        lastError: null,
-        updatedAt: "2026-09-14T04:00:00Z",
-      },
+    ...(["running", "starting", "failed", "interrupted", "idle"] as const).map((status) => ({
+      runtime: { ...runningRuntime, status },
     })),
-    { backgroundLiveness: "working" as const },
-    { backgroundLiveness: "monitoring" as const },
+    { pendingBackgroundTasks: [{ kind: "command" as const, taskId: "watch-logs" }] },
     { hasPendingApprovals: true },
     { hasPendingUserInput: true },
   ])("ignores stale activity on settled threads: %j", (activity) => {

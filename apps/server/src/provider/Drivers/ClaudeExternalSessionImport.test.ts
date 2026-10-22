@@ -10,7 +10,6 @@ import { assert, describe, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
-import { readClaudeResumeState } from "../Layers/ClaudeAdapter.ts";
 import {
   convertClaudeSessionMessages,
   makeClaudeExternalSessionImporter,
@@ -192,10 +191,7 @@ describe("makeClaudeExternalSessionImporter", () => {
       assert.deepStrictEqual(forkInputs, [
         { sourceSessionId: sourceId, environment: { CLAUDE_CONFIG_DIR: home } },
       ]);
-      assert.deepStrictEqual(readClaudeResumeState(imported.resumeCursor), {
-        resume: forkId,
-        turnCount: 0,
-      });
+      assert.strictEqual(imported.nativeThreadId, forkId);
       assert.strictEqual(imported.title, "Summary");
       assert.strictEqual(imported.cwd, "/synthetic/source");
       assert.deepStrictEqual(

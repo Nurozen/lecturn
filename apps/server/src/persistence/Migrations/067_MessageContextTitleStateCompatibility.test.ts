@@ -53,13 +53,13 @@ const assertReconciled = Effect.gen(function* () {
   assert.deepEqual(yield* sql`SELECT id, mode FROM pull_request_watch_settings`, [
     { id: 1, mode: "follow-pr" },
   ]);
-  assert.deepEqual(yield* runMigrations(), []);
+  assert.deepEqual(yield* runMigrations({ toMigrationInclusive: 69 }), []);
 });
 
 describe("067 collision compatibility", () => {
   it.effect("adds upstream columns on a fresh database", () =>
     Effect.gen(function* () {
-      const executed = yield* runMigrations();
+      const executed = yield* runMigrations({ toMigrationInclusive: 69 });
       assert.deepEqual(executed.at(-1), latest);
       yield* assertReconciled;
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -75,7 +75,11 @@ describe("067 collision compatibility", () => {
       yield* sql`UPDATE pull_request_watch_settings SET mode = 'off'`;
       const ledger = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
 
-      assert.deepEqual(yield* runMigrations(), [compatibility, viewedFiles, latest]);
+      assert.deepEqual(yield* runMigrations({ toMigrationInclusive: 69 }), [
+        compatibility,
+        viewedFiles,
+        latest,
+      ]);
       assert.deepEqual(
         yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= 66 ORDER BY migration_id`,
         ledger,
@@ -110,7 +114,7 @@ describe("067 collision compatibility", () => {
         VALUES ('thread', 'project', 'Preserved', '{"instanceId":"codex","model":"fixture"}', '{"kind":"manual"}', ${at}, ${at})`;
       const ledger = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
 
-      const executed = yield* runMigrations();
+      const executed = yield* runMigrations({ toMigrationInclusive: 69 });
       assert.deepEqual(executed[0], [53, "ProjectionThreadImportOrigin"]);
       assert.deepEqual(executed.at(-1), latest);
       assert.deepEqual(

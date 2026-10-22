@@ -12,14 +12,11 @@ import {
   type StaveLifecycleRepositoryShape,
   StaveLifecycleRepository,
 } from "../persistence/Services/StaveLifecycleRepository.ts";
-import { ProviderService } from "../provider/Services/ProviderService.ts";
 import { TerminalManager } from "../terminal/Manager.ts";
 import * as StaveSpaceLock from "./StaveSpaceLock.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import {
-  type OrchestrationCommand,
-  type OrchestrationProject,
   type OrchestrationProjectShell,
   DEFAULT_SERVER_SETTINGS,
   ProjectId,
@@ -43,8 +40,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as ServerConfig from "../config.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { StaveOrchestration, type StaveOrchestrationCommand } from "./StaveOrchestration.ts";
 import { ProcessRunner, type ProcessRunInput, type ProcessRunOutput } from "../processRunner.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as StaveAdmission from "./StaveAdmission.ts";
@@ -158,10 +154,8 @@ const projectShell = (id: string, workspaceRoot: string): OrchestrationProjectSh
   updatedAt: NOW,
 });
 
-const project = (id: string, workspaceRoot: string): OrchestrationProject => ({
-  ...projectShell(id, workspaceRoot),
-  deletedAt: null,
-});
+const project = (id: string, workspaceRoot: string): OrchestrationProjectShell =>
+  projectShell(id, workspaceRoot);
 
 const processOutput = (stdout: string): ProcessRunOutput => ({
   stdout,
@@ -197,7 +191,7 @@ interface HarnessOptions {
   readonly productionLayer?: boolean;
   readonly settingsEnabled?: boolean;
   readonly serverEnabled?: boolean;
-  readonly threadAnchors?: ProjectionSnapshotQuery["Service"]["listThreadLifecycleAnchorsByProjectId"];
+  readonly threadAnchors?: StaveOrchestration["Service"]["listThreadLifecycleAnchorsByProjectId"];
   readonly executionLayer?: Layer.Layer<StaveExecution.StaveExecution>;
   readonly cliLayer?: Layer.Layer<StaveCli>;
   readonly configReaderLayer?: Layer.Layer<StaveConfigReader.StaveConfigReader>;
@@ -215,7 +209,7 @@ interface HarnessOptions {
   readonly processStdout?: (input: ProcessRunInput) => string;
   readonly shellProjects?: ReadonlyArray<OrchestrationProjectShell>;
   /** What `getActiveProjectByWorkspaceRoot` answers for every root. */
-  readonly activeProject?: OrchestrationProject;
+  readonly activeProject?: OrchestrationProjectShell;
   /** Called with the running count on every config load (ordering probe for lock tests). */
   readonly onConfigLoad?: (count: number) => Effect.Effect<void>;
 }
@@ -227,7 +221,7 @@ interface Harness extends Roots {
   }>;
   readonly layer: Layer.Layer<StaveOperations>;
   readonly cliCalls: Ref.Ref<ReadonlyArray<CliCall>>;
-  readonly dispatched: Ref.Ref<ReadonlyArray<OrchestrationCommand>>;
+  readonly dispatched: Ref.Ref<ReadonlyArray<StaveOrchestrationCommand>>;
   readonly invalidated: Ref.Ref<ReadonlyArray<string>>;
 }
 
@@ -271,7 +265,7 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
       properties: Readonly<Record<string, unknown>> | undefined;
     }> = [];
     const cliCalls = yield* Ref.make<ReadonlyArray<CliCall>>([]);
-    const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
+    const dispatched = yield* Ref.make<ReadonlyArray<StaveOrchestrationCommand>>([]);
     const invalidated = yield* Ref.make<ReadonlyArray<string>>([]);
     const configLoads = yield* Ref.make(0);
     const { fs, path, agentWorkDir } = roots;
@@ -361,13 +355,6 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
             getByWorkspaceRoot: () => Effect.succeed(Option.none()),
             ...options.lifecycle,
           }),
-          Layer.mock(ProviderService)({
-            listSessions: () => Effect.succeed([]),
-            stopSessionsUnder: () =>
-              Effect.sync(() => {
-                options.quiesced?.push("providers");
-              }).pipe(Effect.andThen(options.onQuiesce ?? Effect.void)),
-          }),
           Layer.mock(TerminalManager)({
             closeSessionsUnder: () =>
               Effect.sync(() => {
@@ -383,13 +370,16 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
           Layer.mock(ProcessRunner)({
             run: (input) => Effect.succeed(processOutput(options.processStdout?.(input) ?? "")),
           }),
-          Layer.mock(OrchestrationEngineService)({
+          Layer.mock(StaveOrchestration)({
             dispatch: (command) =>
               Ref.update(dispatched, (commands) => [...commands, command]).pipe(
                 Effect.as({ sequence: ENGINE_SEQUENCE }),
               ),
-          }),
-          Layer.mock(ProjectionSnapshotQuery)({
+            listSessions: () => Effect.succeed([]),
+            stopSessionsUnder: () =>
+              Effect.sync(() => {
+                options.quiesced?.push("providers");
+              }).pipe(Effect.andThen(options.onQuiesce ?? Effect.void)),
             listThreadLifecycleAnchorsByProjectId:
               options.threadAnchors ?? (() => Effect.succeed([])),
             getShellSnapshot: () =>
@@ -397,7 +387,6 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
                 snapshotSequence: 0,
                 projects: options.shellProjects ?? [],
                 threads: [],
-                updatedAt: NOW,
               }),
             getProjectShellById: (id) =>
               Effect.succeed(
@@ -411,7 +400,7 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
                 Option.fromNullishOr(
                   options.activeProject ??
                     options.shellProjects?.find((project) => project.workspaceRoot === root),
-                ).pipe(Option.map((project) => ({ ...project, deletedAt: null }))),
+                ),
               ),
           }),
           WorkspacePaths.layer,
@@ -614,7 +603,6 @@ describe("StaveOperations createSpace", () => {
         }
         expect(command.title).toBe("Demo space");
         expect(command.workspaceRoot).toBe(spacePath);
-        expect(command.createWorkspaceRootIfMissing).toBe(false);
         expect(command.projectId).toBe(result.result.projectId);
         expect(command.commandId.startsWith(`server:stave:create:${SPACE_ID}:`)).toBe(true);
 

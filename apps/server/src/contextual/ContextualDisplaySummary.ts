@@ -28,7 +28,7 @@ export const make = Effect.gen(function* () {
       JOIN contextual_host_state h ON h.singleton=1
       JOIN contextual_thread_settings ts ON ts.thread_id=p.thread_id
       JOIN contextual_project_settings ps ON ps.project_id=ts.project_id
-      JOIN projection_threads t ON t.thread_id=p.thread_id
+      JOIN orchestration_v2_projection_threads t ON t.thread_id=p.thread_id
       JOIN projection_projects pr ON pr.project_id=t.project_id
       WHERE p.id=${receipt.packetId} AND p.retention='available' AND p.packet_json IS NOT NULL
         AND json_extract(r.receipt_json,'$.acceptance')='accepted' AND json_extract(r.receipt_json,'$.evidenceIncluded')=1

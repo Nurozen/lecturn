@@ -20,7 +20,7 @@ import {
   type EnvironmentId,
   type ExternalSessionSummary,
   type OrchestrationProjectShell,
-  type OrchestrationThreadShell,
+  type OrchestrationV2ThreadShell,
   ProviderInstanceId,
 } from "@lecturn/contracts";
 import { LegendList } from "@legendapp/list/react-native";
@@ -71,7 +71,7 @@ import { errorMessage, PrimaryActionButton, useDispatchProjectCreate } from "./A
 const EMPTY_PROJECT_SHELLS = Atom.make<ReadonlyArray<OrchestrationProjectShell>>([]).pipe(
   Atom.withLabel("mobile-add-project-import:empty-projects"),
 );
-const EMPTY_THREAD_SHELLS = Atom.make<ReadonlyArray<OrchestrationThreadShell>>([]).pipe(
+const EMPTY_THREAD_SHELLS = Atom.make<ReadonlyArray<OrchestrationV2ThreadShell>>([]).pipe(
   Atom.withLabel("mobile-add-project-import:empty-threads"),
 );
 

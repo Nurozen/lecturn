@@ -5,20 +5,22 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
-  ThreadId,
 } from "@lecturn/contracts";
-import { it, assert } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import * as ProviderSessionRuntime from "../persistence/ProviderSessionRuntime.ts";
 import type * as TextGeneration from "../textGeneration/TextGeneration.ts";
-import { importExternalSession, listExternalSessions } from "./externalSessions.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { ProviderSessionDirectoryLive } from "./Layers/ProviderSessionDirectory.ts";
+import {
+  importExternalSession,
+  listExternalSessions,
+  nativeSessionIdsFromLegacyCursor,
+} from "./externalSessions.ts";
 import type {
   ImportExternalSessionInput,
   ListExternalSessionsInput,
@@ -26,8 +28,8 @@ import type {
 } from "./ProviderDriver.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "./providerMaintenance.ts";
 import { ProviderInstanceRegistry } from "./Services/ProviderInstanceRegistry.ts";
-import { ProviderSessionDirectory } from "./Services/ProviderSessionDirectory.ts";
 
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const CLAUDE_DRIVER = ProviderDriverKind.make("claudeAgent");
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
 const LISTING_INSTANCE = ProviderInstanceId.make("claude-work");
@@ -68,7 +70,7 @@ const makeFakeInstance = (
     streamChanges: Stream.empty,
     applyUsageLimits: () => Effect.void,
   },
-  adapter: {} as unknown as ProviderInstance["adapter"],
+  orchestrationAdapter: {} as unknown as ProviderInstance["orchestrationAdapter"],
   textGeneration: {} as unknown as TextGeneration.TextGeneration["Service"],
   ...overrides,
 });
@@ -93,7 +95,7 @@ const importOneSession: NonNullable<ProviderInstance["importExternalSession"]> =
     : Effect.sync(() => {
         importerCalls.push(input);
         return {
-          resumeCursor: { resume: "forked-session" },
+          nativeThreadId: "forked-session",
           title:
             input.sessionId === "session-long"
               ? `  ${"t".repeat(300)}  `
@@ -127,22 +129,40 @@ const fakeInstanceRegistryLayer = Layer.succeed(ProviderInstanceRegistry, {
   subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), (pubsub) => PubSub.subscribe(pubsub)),
 });
 
-// An imported thread that was never sent to: a fork cursor and no binding.
-const unsentImportSource = {
-  providerInstanceId: LISTING_INSTANCE,
-  resumeCursor: { resume: "session-unsent-import-fork" },
-};
-
 const layer = Layer.mergeAll(
   fakeInstanceRegistryLayer,
-  Layer.mock(ProjectionSnapshotQuery)({
-    listThreadImportSources: () => Effect.succeed([unsentImportSource]),
-  }),
-  ProviderSessionDirectoryLive.pipe(
-    Layer.provide(ProviderSessionRuntime.layer.pipe(Layer.provide(SqlitePersistenceMemory))),
-  ),
+  SqlitePersistenceMemory,
   NodeServices.layer,
 );
+
+const insertProviderThread = (providerThreadId: string, nativeId: string | null) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const payload = encodeJson({
+      id: providerThreadId,
+      nativeThreadRef:
+        nativeId === null ? null : { driver: CLAUDE_DRIVER, nativeId, strength: "strong" },
+    });
+    yield* sql`
+      INSERT INTO orchestration_v2_projection_provider_threads
+        (provider_thread_id, thread_id, provider, status, updated_at, payload_json)
+      VALUES
+        (${providerThreadId}, ${`thread-${providerThreadId}`}, ${CLAUDE_DRIVER}, 'idle',
+         '2026-01-01T00:00:00.000Z', ${payload})
+    `;
+  });
+
+const insertLegacySession = (threadId: string, resumeCursor: unknown) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      INSERT INTO provider_session_runtime
+        (thread_id, provider_name, adapter_key, status, last_seen_at, resume_cursor_json)
+      VALUES
+        (${threadId}, 'codex', 'codex', 'stopped', '2026-01-01T00:00:00.000Z',
+         ${encodeJson(resumeCursor)})
+    `;
+  });
 
 const failureOf = (effect: ReturnType<typeof listExternalSessions>) =>
   effect.pipe(
@@ -180,32 +200,14 @@ it.layer(layer)("listExternalSessions", (it) => {
       );
     }));
 
-  it("hands the lister every bound and unsent-import resume cursor and shapes its result", () =>
+  it("hands the lister every native session id Lecturn owns and shapes its result", () =>
     Effect.gen(function* () {
-      const directory = yield* ProviderSessionDirectory;
-      yield* directory.upsert({
-        threadId: ThreadId.make("thread-own"),
-        provider: CLAUDE_DRIVER,
-        providerInstanceId: LISTING_INSTANCE,
-        resumeCursor: { resume: "session-own" },
-      });
-      yield* directory.upsert({
-        threadId: ThreadId.make("thread-no-cursor"),
-        provider: CLAUDE_DRIVER,
-        providerInstanceId: LISTING_INSTANCE,
-      });
-      yield* directory.upsert({
-        threadId: ThreadId.make("thread-other-instance"),
-        provider: CLAUDE_DRIVER,
-        providerInstanceId: OTHER_LISTING_INSTANCE,
-        resumeCursor: { resume: "session-other" },
-      });
-      yield* directory.upsert({
-        threadId: ThreadId.make("thread-other-provider"),
-        provider: CODEX_DRIVER,
-        providerInstanceId: PLAIN_INSTANCE,
-        resumeCursor: { threadId: "codex-thread" },
-      });
+      // Provider threads, imported forks included, across every instance.
+      yield* insertProviderThread("provider-thread-own", "session-own");
+      yield* insertProviderThread("provider-thread-other", "session-other");
+      yield* insertProviderThread("provider-thread-unbound", null);
+      // A pre-orchestration-v2 session that came over in the copied database.
+      yield* insertLegacySession("thread-legacy", { threadId: "codex-thread" });
 
       listerCalls.length = 0;
       const result = yield* listExternalSessions({
@@ -216,17 +218,12 @@ it.layer(layer)("listExternalSessions", (it) => {
       });
 
       assert.strictEqual(listerCalls.length, 1);
-      const [{ knownResumeCursors, ...rest }] = listerCalls as [ListExternalSessionsInput];
+      const [{ knownNativeSessionIds, ...rest }] = listerCalls as [ListExternalSessionsInput];
       assert.deepStrictEqual(rest, { cwd: "/workspace", searchTerm: undefined, limit: 2 });
-      // Instances can share a provider home, so cursors are not narrowed to this one.
-      assert.sameDeepMembers(
-        [...knownResumeCursors],
-        [
-          { resume: "session-own" },
-          { resume: "session-other" },
-          { threadId: "codex-thread" },
-          unsentImportSource.resumeCursor,
-        ],
+      // Instances can share a provider home, so ids are not narrowed to this one.
+      assert.sameMembers(
+        [...knownNativeSessionIds],
+        ["session-own", "session-other", "codex-thread"],
       );
       // The lister over-returned, so the service enforces the limit itself.
       assert.strictEqual(result.truncated, true);
@@ -288,7 +285,7 @@ it.layer(layer)("importExternalSession", (it) => {
       const imported = yield* importFrom(LISTING_INSTANCE);
       assert.deepStrictEqual(importerCalls, [{ sessionId: "session-0", cwd: "/workspace/thread" }]);
       assert.strictEqual(imported.driverKind, CLAUDE_DRIVER);
-      assert.deepStrictEqual(imported.resumeCursor, { resume: "forked-session" });
+      assert.strictEqual(imported.nativeThreadId, "forked-session");
     }));
 
   it("caps the session's title and the thread's, client-supplied included", () =>
@@ -311,4 +308,19 @@ it.layer(layer)("importExternalSession", (it) => {
       assert.strictEqual(untitled.title, "");
       assert.strictEqual(untitled.threadTitle, "Imported session");
     }));
+});
+
+describe("nativeSessionIdsFromLegacyCursor", () => {
+  it("reads Claude and Codex cursor ids and ignores everything else", () => {
+    assert.deepStrictEqual(nativeSessionIdsFromLegacyCursor({ resume: "claude-1", turnCount: 2 }), [
+      "claude-1",
+    ]);
+    assert.deepStrictEqual(nativeSessionIdsFromLegacyCursor({ sessionId: "claude-2" }), [
+      "claude-2",
+    ]);
+    assert.deepStrictEqual(nativeSessionIdsFromLegacyCursor({ threadId: "codex-1" }), ["codex-1"]);
+    assert.deepStrictEqual(nativeSessionIdsFromLegacyCursor(null), []);
+    assert.deepStrictEqual(nativeSessionIdsFromLegacyCursor("not-a-cursor"), []);
+    assert.deepStrictEqual(nativeSessionIdsFromLegacyCursor({ resume: "  " }), []);
+  });
 });

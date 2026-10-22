@@ -2,12 +2,16 @@ import { useCallback, useEffect, useMemo } from "react";
 import * as DateTime from "effect/DateTime";
 
 import { isStaveProject } from "@lecturn/client-runtime/state/projectGit";
-import type { EnvironmentId, OrchestrationCheckpointSummary, ThreadId } from "@lecturn/contracts";
+import {
+  deriveThreadCheckpointSummaries,
+  type ThreadCheckpointSummary,
+} from "@lecturn/client-runtime/state/thread-checkpoints";
+import type { EnvironmentId, ThreadId } from "@lecturn/contracts";
 
 import { useCheckpointDiff } from "../../state/queries";
 import { useEnvironmentQuery } from "../../state/query";
 import { reviewEnvironment } from "../../state/review";
-import { useSelectedThreadDetail } from "../../state/use-thread-detail";
+import { useSelectedThreadProjection } from "../../state/use-thread-detail";
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import {
@@ -34,7 +38,7 @@ export function useReviewSections(input: {
 }) {
   const { environmentId, reviewCache, threadId } = input;
   const enabled = input.enabled ?? true;
-  const selectedThread = useSelectedThreadDetail();
+  const selectedThread = useSelectedThreadProjection();
   const { selectedThreadProject } = useThreadSelection();
   const { selectedThreadGitCwd, selectedThreadGitRepository } = useSelectedThreadWorktree(
     input.repoKey,
@@ -61,8 +65,10 @@ export function useReviewSections(input: {
 
   const readyCheckpoints = useMemo(
     () =>
-      checkpointsAvailable ? getReadyReviewCheckpoints(selectedThread?.checkpoints ?? []) : [],
-    [checkpointsAvailable, selectedThread?.checkpoints],
+      checkpointsAvailable && selectedThread !== null
+        ? getReadyReviewCheckpoints(deriveThreadCheckpointSummaries(selectedThread.projection))
+        : [],
+    [checkpointsAvailable, selectedThread],
   );
   const checkpointBySectionId = useMemo(
     () =>
@@ -71,7 +77,7 @@ export function useReviewSections(input: {
           getReviewSectionIdForCheckpoint(checkpoint),
           checkpoint,
         ]),
-      ) as Record<string, OrchestrationCheckpointSummary>,
+      ) as Record<string, ThreadCheckpointSummary>,
     [readyCheckpoints],
   );
   const reviewSections = useMemo(

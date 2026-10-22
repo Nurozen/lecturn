@@ -10,6 +10,7 @@ import {
 } from "@lecturn/contracts";
 import { Context, Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { v2Messages } from "../threadDecisions/V2ProjectionSources.ts";
 import { DecisionRepository } from "../threadDecisions/DecisionRepository.ts";
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import { contextualBoundary } from "./ContextualSettings.ts";
@@ -208,7 +209,7 @@ export const make = Effect.gen(function* () {
       role: string | null;
       generation: number | null;
       deleted_at: string | null;
-    }>`SELECT e.id, m.text, m.role, s.source_generation AS generation, t.deleted_at FROM decision_evidence e LEFT JOIN projection_thread_messages m ON m.thread_id=e.thread_id AND m.message_id=e.message_id LEFT JOIN decision_thread_state s ON s.thread_id=e.thread_id LEFT JOIN projection_threads t ON t.thread_id=e.thread_id WHERE e.decision_id=${note.id}`;
+    }>`SELECT e.id, m.text, m.role, s.source_generation AS generation, t.deleted_at FROM decision_evidence e LEFT JOIN ${v2Messages(sql)} m ON m.thread_id=e.thread_id AND m.message_id=e.message_id LEFT JOIN decision_thread_state s ON s.thread_id=e.thread_id LEFT JOIN orchestration_v2_projection_threads t ON t.thread_id=e.thread_id WHERE e.decision_id=${note.id}`;
     const invalid = new Set(
       anchors
         .filter((a) => {

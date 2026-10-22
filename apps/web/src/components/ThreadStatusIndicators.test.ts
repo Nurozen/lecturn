@@ -1,19 +1,19 @@
-import { Effect } from "effect";
-import { AtomRegistry } from "effect/unstable/reactivity";
 import { ProjectId, type PullRequestSummary, type VcsStatusResult } from "@lecturn/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import { AtomRegistry } from "effect/unstable/reactivity";
 import type { AnimationEvent } from "react";
 
 import {
-  resolveThreadPr,
+  ChangeRequestStatusIcon,
+  nextThreadChangeRequestSnapshot,
+  prStatusIndicator,
   resolveDisplayedThreadPr,
   resolveDisplayedThreadPrProvider,
-  nextThreadChangeRequestSnapshot,
+  resolveThreadPr,
   threadChangeRequestSnapshotsEqual,
   threadChangeRequestSnapshotsAtom,
   type ThreadChangeRequestSnapshot,
-  ChangeRequestStatusIcon,
-  prStatusIndicator,
   resolveThreadPullRequestBadgePresentation,
   synchronizeTerminalPulse,
 } from "./ThreadStatusIndicators";
@@ -564,6 +564,25 @@ describe("resolveDisplayedThreadPr + nextThreadChangeRequestSnapshot", () => {
         retainTerminalOnBranchMismatch: true,
       }),
     ).toEqual(mergedPr);
+  });
+
+  it("shows the last matching PR snapshot while its live status lease is released", () => {
+    const openPr = { ...mergedPr, state: "open" as const };
+    const input = {
+      threadBranch: featureBranch,
+      gitStatus: null,
+      snapshot: snapshotFor(featureBranch, openPr, provider),
+      retainTerminalOnBranchMismatch: false,
+    };
+    expect(resolveDisplayedThreadPr(input)).toEqual(openPr);
+    expect(resolveDisplayedThreadPrProvider(input)).toEqual(provider);
+    expect(resolveDisplayedThreadPr({ ...input, threadBranch: "feature/other" })).toBeNull();
+    expect(
+      resolveDisplayedThreadPr({
+        ...input,
+        snapshot: { ...input.snapshot, linkedPullRequest },
+      }),
+    ).toBeNull();
   });
 
   it("retains a merged PR after a main checkout", () => {

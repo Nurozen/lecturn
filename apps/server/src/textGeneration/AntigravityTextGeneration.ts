@@ -3,7 +3,7 @@ import {
   type ProviderSetupError,
   TextGenerationError,
 } from "@lecturn/contracts";
-import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@lecturn/shared/git";
+import { formatGeneratedBranchName, sanitizeFeatureBranchName } from "@lecturn/shared/git";
 import { extractJsonObject } from "@lecturn/shared/schemaJson";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -189,7 +189,7 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
           );
           yield* runtime.handleElicitation(() =>
             reject("Antigravity text generation requested user input.").pipe(
-              Effect.as({ action: { action: "decline" as const } }),
+              Effect.as({ action: "decline" as const }),
             ),
           );
           yield* runtime.handleReadTextFile(rejectToolRequest);
@@ -384,10 +384,14 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
     Effect.fn("AntigravityTextGeneration.generateBranchName")(function* (input) {
       const generated = yield* runAntigravityJson({
         operation: "generateBranchName",
-        ...buildBranchNamePrompt({ message: input.message, attachments: input.attachments }),
+        ...buildBranchNamePrompt({
+          message: input.message,
+          attachments: input.attachments,
+          naming: input.naming,
+        }),
         modelSelection: input.modelSelection,
       });
-      return { branch: sanitizeBranchFragment(generated.branch) };
+      return { branch: formatGeneratedBranchName(generated.branch, input.naming) };
     });
 
   const generateThreadTitle: TextGeneration.TextGeneration["Service"]["generateThreadTitle"] =

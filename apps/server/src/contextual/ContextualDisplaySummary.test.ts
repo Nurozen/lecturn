@@ -12,6 +12,10 @@ import { ContextualNotifications, make as makeNotifications } from "./Contextual
 import { ContextualDisplaySummary, make } from "./ContextualDisplaySummary.ts";
 import { make as makeRepository } from "./ContextualRepository.ts";
 import { contextualPacketText } from "./ContextualPacketText.ts";
+import {
+  clearV2Projection,
+  installLegacyProjectionMirror,
+} from "../threadDecisions/V2ProjectionTestFixtures.ts";
 const at = "2026-09-25T00:00:00.000Z";
 const threadId = C.ThreadId.make("summary-thread");
 const projectId = C.ProjectId.make("summary-project");
@@ -122,6 +126,8 @@ const fixture = (
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    yield* installLegacyProjectionMirror(sql);
+    yield* clearV2Projection(sql);
     yield* sql`DELETE FROM contextual_packets`;
     yield* sql`DELETE FROM contextual_receipts`;
     yield* sql`INSERT OR REPLACE INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES(${projectId},'Synthetic','/tmp/never-read','[]',${at},${at})`;

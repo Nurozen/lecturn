@@ -1,4 +1,4 @@
-import { ProjectIconOverride } from "./orchestration.ts";
+import { ProjectIconOverride } from "./project.ts";
 import { PullRequestCheckStatus } from "./pullRequest.ts";
 import * as Schema from "effect/Schema";
 
@@ -12,7 +12,7 @@ import {
   PreviewAutomationTypeInput,
   PreviewAutomationWaitForInput,
 } from "./previewAutomation.ts";
-import { SnapShotSource } from "./orchestration.ts";
+import { SnapShotSource } from "./chatAttachment.ts";
 import { EnvironmentId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { BrowserProfileId } from "./browserProfile.ts";
 import type {

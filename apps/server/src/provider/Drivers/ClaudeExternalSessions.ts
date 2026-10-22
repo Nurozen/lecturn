@@ -12,7 +12,6 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
-import { readClaudeResumeState } from "../Layers/ClaudeAdapter.ts";
 import type { ExternalSessionListing, ProviderInstance } from "../ProviderDriver.ts";
 
 // The SDK returns newest first, so the cap only ever hides the oldest sessions.
@@ -132,9 +131,7 @@ export function makeClaudeExternalSessionsLister(options: {
       catch: unreadable,
     });
 
-    const knownSessionIds = new Set(
-      input.knownResumeCursors.flatMap((cursor) => readClaudeResumeState(cursor)?.resume ?? []),
-    );
+    const knownSessionIds = input.knownNativeSessionIds;
     const needle = input.searchTerm?.trim().toLowerCase();
     const matched = listed
       .filter(

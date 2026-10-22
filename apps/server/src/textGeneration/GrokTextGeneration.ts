@@ -8,7 +8,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpErrors from "effect-acp/errors";
 
 import { type GrokSettings, type ModelSelection } from "@lecturn/contracts";
-import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@lecturn/shared/git";
+import { formatGeneratedBranchName, sanitizeFeatureBranchName } from "@lecturn/shared/git";
 import { getModelSelectionStringOptionValue } from "@lecturn/shared/model";
 import { extractJsonObject } from "@lecturn/shared/schemaJson";
 
@@ -66,7 +66,6 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
     modelSelection: ModelSelection;
   }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
     Effect.gen(function* () {
-      const resolvedModel = resolveGrokAcpBaseModelId(modelSelection.model);
       const inference = operation === "generateWorkflowSummary";
       const commandCwd = inference
         ? yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-workflow-inference-" }).pipe(
@@ -109,6 +108,7 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       });
 
       const promptResult = yield* Effect.gen(function* () {
+        const resolvedModel = resolveGrokAcpBaseModelId(modelSelection.model);
         const started = yield* runtime.start();
         const requestedReasoningEffort = getModelSelectionStringOptionValue(
           modelSelection,
@@ -129,7 +129,6 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
               cause,
             }),
         });
-
         return yield* runtime.prompt({
           prompt: [{ type: "text", text: prompt }],
         });
@@ -256,6 +255,7 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       const { prompt, outputSchema } = buildBranchNamePrompt({
         message: input.message,
         attachments: input.attachments,
+        naming: input.naming,
       });
 
       const generated = yield* runGrokJson({
@@ -267,7 +267,7 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       });
 
       return {
-        branch: sanitizeBranchFragment(generated.branch),
+        branch: formatGeneratedBranchName(generated.branch, input.naming),
       };
     });
 

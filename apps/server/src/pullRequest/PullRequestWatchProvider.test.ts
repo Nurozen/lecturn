@@ -9,7 +9,7 @@ import {
   type StaveRepoEntry,
 } from "@lecturn/contracts";
 
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ProjectService } from "../project/ProjectService.ts";
 import { StaveWorkspaceReader } from "../stave/StaveWorkspaceReader.ts";
 import * as SourceControlRateLimit from "../sourceControl/SourceControlRateLimit.ts";
 import {
@@ -146,9 +146,8 @@ function make(input: {
     Effect.provide(
       Layer.mergeAll(
         input.vcs ? Layer.succeed(VcsDriverRegistry, input.vcs) : Layer.empty,
-        Layer.mock(ProjectionSnapshotQuery)({
-          getProjectShellById: () =>
-            Effect.succeed(input.missingProject ? Option.none() : Option.some(shell)),
+        Layer.mock(ProjectService)({
+          getShell: () => Effect.succeed(input.missingProject ? Option.none() : Option.some(shell)),
         }),
         Layer.succeed(PullRequestProviderRegistry, fromProviders([input.provider ?? provider()])),
         Layer.mock(PullRequestService)({

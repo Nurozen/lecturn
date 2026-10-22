@@ -72,8 +72,9 @@ the part you cannot see.
   offer to create a new worktree on the first message.
 - **Keep the original Codex session.** Deleting the original Codex session later breaks the
   imported thread.
-- **Forking works.** After your first reply you can [fork](./forking-threads.md) an imported
-  thread like any other.
+- **Forking works.** You can [fork](./forking-threads.md) an imported thread like any other, even
+  before you send to it: forking at an imported reply or message copies the history up to that
+  point into the new thread, and its first message hands that history to the agent.
 
 ## Availability
 

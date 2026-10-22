@@ -2,6 +2,7 @@ import {
   listGitHubAcceptanceCandidates,
   readGitHubAcceptanceEvidence,
 } from "./gitHubAcceptanceEvidence.ts";
+import { makeChecksRevalidator } from "./gitHubConditionalChecks.ts";
 import { runGitHubStackAction, type GitHubStackActionError } from "./githubStackActions.ts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -581,6 +582,8 @@ export class GitHubPullRequestCli extends Context.Service<
       readonly host: string;
       readonly number: number;
     }) => Effect.Effect<ProviderChangeRequestSummary, GitHubPullRequestCliError>;
+
+    readonly revalidateChecks: Effect.Success<typeof makeChecksRevalidator>;
 
     readonly getPullRequestDetail: (input: {
       readonly cwd: string;
@@ -1180,6 +1183,7 @@ export const make = Effect.gen(function* () {
         number: input.number,
       });
   });
+  const revalidateChecks = yield* makeChecksRevalidator;
   const routingIdentities = new Map<
     string,
     {
@@ -1999,6 +2003,7 @@ export const make = Effect.gen(function* () {
         ),
       ),
     withVerifiedCredential,
+    revalidateChecks,
     getRoutingIdentity,
     getViewerLogin: (input) =>
       getRoutingIdentity(input).pipe(Effect.map((identity) => identity.viewer)),

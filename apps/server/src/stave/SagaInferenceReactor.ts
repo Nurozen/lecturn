@@ -1,8 +1,28 @@
 import { Context, Effect, Layer, Stream, SubscriptionRef, Cause } from "effect";
 import { makeDrainableWorker } from "@lecturn/shared/DrainableWorker";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import type { ApplicationStoredEvent } from "@lecturn/contracts";
 import { forkParked } from "../serverActivation.ts";
 import { SagaWorkbenchService, type SagaInferenceRequest } from "./SagaWorkbenchService.ts";
+import type { PromptInferenceEvent } from "./SagaWorkbenchService.ts";
+import { StaveOrchestration } from "./StaveOrchestration.ts";
+
+/**
+ * A user-started V2 run is the turn-start signal V1 carried as
+ * `thread.turn-start-requested`. Server-generated runs (restart
+ * continuations, plan implementations) do not feed saga inference.
+ */
+export function promptInferenceEventOf(event: ApplicationStoredEvent): PromptInferenceEvent | null {
+  if (!("event" in event) || event.event.type !== "run.created") return null;
+  const run = event.event.payload;
+  if (run.restartContinuationOfRunId !== undefined || run.sourcePlanRef !== undefined) return null;
+  return {
+    eventId: event.event.id,
+    sequence: event.sequence,
+    threadId: run.threadId,
+    messageId: run.userMessageId,
+    modelSelection: run.modelSelection,
+  };
+}
 
 export class SagaInferenceReactor extends Context.Service<
   SagaInferenceReactor,
@@ -13,7 +33,7 @@ export class SagaInferenceReactor extends Context.Service<
 >()("lecturn/stave/SagaInferenceReactor") {}
 
 export const make = Effect.gen(function* () {
-  const engine = yield* OrchestrationEngineService;
+  const orchestration = yield* StaveOrchestration;
   const workbench = yield* SagaWorkbenchService;
   const seen = yield* SubscriptionRef.make(0);
   const recover = (cause: Cause.Cause<unknown>) =>
@@ -26,22 +46,23 @@ export const make = Effect.gen(function* () {
     workbench.inferFromPrompt(request).pipe(Effect.asVoid, Effect.catchCause(recover)),
   );
   const start = Effect.fn("SagaInferenceReactor.start")(function* () {
-    const events = yield* engine.subscribeDomainEvents;
-    yield* SubscriptionRef.set(seen, yield* engine.latestSequence);
+    // Live tail only: a restart does not re-infer turns that were requested before it.
+    const from = yield* orchestration.latestSequence.pipe(Effect.orElseSucceed(() => 0));
+    yield* SubscriptionRef.set(seen, from);
     yield* forkParked(
-      Stream.runForEach(events, (event) =>
+      Stream.runForEach(orchestration.streamEvents(from), (event) =>
         Effect.gen(function* () {
-          if (event.type === "thread.turn-start-requested") {
-            const request = yield* workbench.preparePromptInference(event);
-            if (request) yield* worker.enqueue(request);
-          }
+          const prompt = promptInferenceEventOf(event);
+          if (prompt === null) return;
+          const request = yield* workbench.preparePromptInference(prompt);
+          if (request) yield* worker.enqueue(request);
         }).pipe(
           Effect.catchCause(recover),
           Effect.ensuring(
             SubscriptionRef.update(seen, (sequence) => Math.max(sequence, event.sequence)),
           ),
         ),
-      ),
+      ).pipe(Effect.catchCause(recover)),
     );
   });
   const drainThrough = (sequence: number) =>

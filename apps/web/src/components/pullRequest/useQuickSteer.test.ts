@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
-import {
-  CommandId,
-  EnvironmentId,
-  MessageId,
-  ThreadId,
-  type ThreadTurnStartCommand,
-} from "@lecturn/contracts";
-import { sendQuickSteerIntent } from "./useQuickSteer";
+import { CommandId, EnvironmentId, MessageId, ThreadId } from "@lecturn/contracts";
+import { sendQuickSteerIntent, type SteerCommand } from "./useQuickSteer";
 
 function storage() {
   const values = new Map<string, string>();
@@ -21,9 +15,8 @@ function storage() {
     },
   };
 }
-function command(text = "Please check CI", id = "original"): typeof ThreadTurnStartCommand.Type {
+function command(text = "Please check CI", id = "original"): SteerCommand {
   return {
-    type: "thread.turn.start",
     commandId: CommandId.make(id),
     threadId: ThreadId.make("thread"),
     message: { messageId: MessageId.make(id), role: "user", text, attachments: [] },
@@ -40,7 +33,7 @@ const target = {
 describe("durable quick steering", () => {
   it("reuses the entire persisted command after an ambiguous dispatch failure", async () => {
     const store = storage();
-    const accepted: Array<typeof ThreadTurnStartCommand.Type> = [];
+    const accepted: Array<SteerCommand> = [];
     await expect(
       sendQuickSteerIntent({
         ...target,
@@ -69,7 +62,7 @@ describe("durable quick steering", () => {
   it("refuses edited text without dispatching or discarding the unconfirmed original", async () => {
     const store = storage();
     const sent: string[] = [];
-    const send = async (input: typeof ThreadTurnStartCommand.Type) => {
+    const send = async (input: SteerCommand) => {
       sent.push(input.message.text);
     };
     await expect(

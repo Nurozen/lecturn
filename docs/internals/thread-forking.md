@@ -9,178 +9,141 @@ natively the first time the user sends a message in it. The guiding invariant: t
 perfect reconstruction of its parent at the fork point, and deviates only through user or agent
 action afterwards.
 
-## Command and materialization
+## Command and planning
 
-Clients dispatch a small `thread.fork` command ([`orchestration.ts`][contracts],
-`ClientThreadForkCommand`): a client-minted child `ThreadId`, the source thread, the fork turn
-(`throughTurnId`), and a workspace choice that defaults to inheriting the parent's
-branch/worktree. The server-materialized shape shares the `"thread.fork"` type literal but lives
-in the dispatch union only; the normalizer rejects a raw client fork on any transport that skips
-materialization, so a partial fork can never reach the decider ([`Normalizer.ts`][normalizer]).
+Clients dispatch `thread.fork` ([`orchestrationV2.ts`][contracts]): a client-minted
+`targetThreadId`, the source thread, a `sourcePoint` (`latest_stable`, a run, or a checkpoint),
+an optional title, and three Lecturn fields: `sourceMessageId` (the user message the fork is cut
+at, inclusive), `workspace` (`inherit` by default, or `new-worktree`), and `prepareWorktree`
+(required with `new-worktree`). The ws dispatcher ([`ws.ts`][ws]) applies the kill-switch below,
+then hands the command to the V2 orchestrator and records `client.thread.forked` on success.
 
-The ws dispatcher ([`ws.ts`][ws]) materializes the command before normal dispatch. It
-canonicalizes the client timestamps first — the child's `createdAt` becomes server time, which
-the auto-retitle gate and message ordering depend on — then feeds the source thread's detail,
-its turn rows (`listThreadTurnsById`), its full activity history, its fork context, and its live
-provider binding into the pure assembler `assembleThreadFork`
-([`threadFork.ts`][threadfork]). The branch also enforces the guards: the `threadForking`
-capability/kill-switch, an existing and non-deleted source in the same project, no running turn
-at the fork point, and (in v1) workspace inheritance only.
+`dispatchThreadFork` in [`Orchestrator.ts`][orchestrator] resolves the source run. A
+message-anchored fork cuts at the run that user message started (`resolveForkCut` in
+[`ThreadForkDeltas.ts`][deltas]); otherwise the run comes from the source point. Only
+provider-finished runs are forkable: completed, waiting (checkpoint capture pending), failed,
+interrupted, or cancelled. In-progress and rolled-back runs are rejected.
 
-`assembleThreadFork` does no IO. It slices the history through the fork turn, mints child-side
-ids for copied messages, activities, and proposed plans — turn ids are preserved, so the
-fork-point reference and checkpoint turn numbering stay stable across the copy — re-namespaces
-canonical checkpoint refs to the child's `turn/<n>` names, plans deterministic attachment copies (child attachment ids are uuid-v5 of the source id
-and child thread id, so retries land on the same files), and snapshots the provider session into
-`forkSource`. Open async questions (a message-mode `user-input.requested` with no later
-`user-input.resolved` in the copied range) stay with the source: the decider derives the
-answer's activity and message ids from the request id alone, so a copied request answered in both
-threads would re-parent the first answer's rows onto the second thread. Answered questions copy
-as request/resolution pairs, so the child rejects a second answer the same way the source does. It returns the materialized command plus the side-effect plans. The dispatcher
-runs those side effects before dispatch — checkpoint ref aliasing all-or-nothing with
-compensation of partial aliases, attachment file copies rolled back on failure — then dispatches
-and records the `client.thread.forked` analytics event once on success.
+Run-less history (a V1 migration transcript or an imported session, `hasRunlessHistory` in
+[`ProjectionStore.ts`][projection]) has no run to cut at, so it is forked by message instead.
+`sourceMessageId` at a run-less user message cuts through that message's turn (its reply, up to
+the next user message), and `latest_stable` on a thread with no stable run takes all of it.
+`planRunlessForkHistory` ([`ThreadForkDeltas.ts`][deltas]) copies the source's own run-less items
+and messages up to the cut onto the child, with ids derived from the child and source ids and the
+source timestamps kept (so imported rows still read as imported). `planRunlessThreadFork`
+([`ThreadForkService.ts`][forkservice]) plans that child with fork `lineage`, `forkedFrom: null`,
+and a pending fork transfer anchored at the last copied item with no run. Only history the source
+thread itself stores counts: a V2 fork child of an imported or migrated thread inherits
+`importedFrom`/`historyOrigin` but stores none of that history, so the server rejects a run-less
+fork of it ("No stable source run was found…"), and clients (`hasRunlessForkHistory` in
+[`threadForkPoints.ts`][forkpoints]) only offer whole-thread and per-reply run-less forks on a
+thread with `forkedFrom` null. Its own completed runs fork normally.
 
-## Decider and projection
+The upstream [`ThreadForkService.ts`][forkservice] plans the child as a copy of the source app
+thread with fork `lineage`, `forkedFrom: { type: "run", threadId, runId }`, no provider thread,
+and a default title of "&lt;parent title&gt; fork". It also plans a pending `fork` context
+transfer. The spread of the source thread carries `importedFrom` and the linked pull request onto
+the child. `applyForkDeltas` then adds the Lecturn fields: `forkOrigin` (`{ threadId, messageId }`,
+with `messageId` null for a fork at the end) and, for `new-worktree`, the branch and worktree that
+`provisionForkWorktree` created. A child on a new branch drops only the branch pull request found
+for the parent's branch. The orchestrator emits `thread.created` and `context-transfer.created`.
 
-The `thread.fork` case in [`decider.ts`][decider] validates the materialized command against the
-read model and emits two events on the child aggregate: `thread.created` followed by
-`thread.forked`. The `thread.forked` payload carries `forkedFrom` lineage, the nullable
-`forkSource` provider snapshot, the full `ThreadForkHistory`, and the source thread's linked
-pull request (inherited per the reconstruction invariant). As a belt, a `thread.fork` without a
-materialized history is rejected with an invariant error.
+## Inherited history
 
-Projection splits by arm. The SQL arms in [`ProjectionPipeline.ts`][pipeline] turn the history
-into real rows — messages, activities, proposed plans, and the inherited turn rows including each
-turn's `providerTurnRef` — while its threads arm stamps the `forkedFrom`/`forkSource` lineage on
-the child row, sets `latestTurnId` to the fork turn, and refreshes the thread shell summary. The
-in-memory model in [`projector.ts`][projector] projects only lineage and summary state (fork
-origin, linked pull request, latest turn, proposed plans); message and activity bodies stay empty
-there because the in-memory model mirrors post-boot hydration, which seeds those arrays empty.
-Migration [`048_ProjectionThreadForkLineage.ts`][mig048] adds `forked_from_json` and
-`fork_source_json` to `projection_threads` and `provider_turn_ref` to `projection_turns`.
-Upstream published a different migration 048 for branch PR links. Both ledger identities
-remain unchanged: [migration 064](../../apps/server/src/persistence/Migrations/064_ProjectionThreadMigrationCompatibility.ts)
-adds whichever columns are missing after either upgrade path. Do not rewrite migration 048
-or its ledger entry; the runner skips IDs below the last applied migration.
-[`ProjectionSnapshotQuery.ts`][snapshot] exposes the lineage via `getThreadForkContextById` and
-the turn rows via `listThreadTurnsById`. Inherited rows keep their original timestamps; only the
-child thread's `createdAt` is the fork time.
+A run fork copies nothing. The child's projection reads the source's turn items through the fork run,
+adds a synthetic `fork` marker item, then appends its own items (`buildVisibleTurnItems` in
+[`ProjectionStore.ts`][projection]). History paging follows `forkedFrom` into the source, and a
+fork of a fork chains. Shell item counts include the inherited prefix. A V1 fork migrated by the
+[legacy importer](./legacy-orchestration-migration.md) is different: V1 copied the parent's
+history into the child, so the importer keeps that copy as the child's own transcript, records
+the parent in `lineage`, leaves `forkedFrom` null, and keeps the user-facing fork point in
+`forkOrigin`. `forkOrigin` exists for that reason; V1 fork points have no V2 run to reference.
+A run-less fork (above) is the other copy: its history is the child's own, `forkedFrom` is null,
+and `forkOrigin` records the parent and cut message.
 
-Checkpoint refs live under a shared per-repository ref store, so the child's inherited
-checkpoints are plain ref aliases: `CheckpointStore.aliasCheckpointRefs`
-([`CheckpointStore.ts`][ckpt]) points the child's canonical `turn/<n>` refs — the names already
-embedded in the copied history — at the source's checkpoint commits. Turn diffs and reverts into
-inherited history then work in the child without copying any git data.
+## Native fork or portable handoff
 
-## Lazy native provider fork
+The child has no provider session until its first send. At turn start the pending fork transfer
+is resolved by `decideForkExecution` in [`CommandPolicy.ts`][policy]. A native fork needs a
+provider-finished run that completed (or is waiting), the same provider instance as the source,
+a strong native thread ref on the source, and adapter capabilities `threads.canForkThread`
+(plus `canForkFromTurn` when cutting at a specific run). The turn start then calls the adapter's
+`forkThread` with the source provider thread and the provider turn of the fork run
+([`ProviderTurnStartService.ts`][turnstart]). Codex uses `thread/fork`, Claude calls the Agent
+SDK's `forkSession` (with `upToMessageId` for a mid-thread cut), and OpenCode calls `session.fork`.
+Capability declarations are in [providers.md](./providers.md#adapter-capabilities).
 
-The child has no provider session until its first send, like any new thread. When the first turn
-starts, `resolveForkStartOptions` in [`ProviderCommandReactor.ts`][reactor] checks the fork
-context: only a child with a `forkSource` and no provider binding of its own forks; once a
-binding exists, restarts resume the child's own cursor and never re-fork. The parent's live
-cursor is preferred over the persisted snapshot (the snapshot goes stale if the parent keeps
-working), and the session start receives a `fork` input with the source cursor, the fork point's
-`providerTurnRef`, `throughTurnOrdinal`, and an `atEnd` flag.
+Everything else takes a portable context handoff: the child starts a fresh provider session
+seeded with a bounded transcript of the source up to the fork point (`full_thread_summary`; see
+[context-handoffs.md](./context-handoffs.md)). That covers providers without a native fork
+(Cursor and ACP agents that do not advertise `session.fork`), a different provider instance than
+the source's, and sources whose run failed, was interrupted, or has no strong native thread id.
+Every provider can fork. A run-less fork always takes the portable path: its first turn hands
+the child's own copied run-less items over as `full_thread_summary`. A run fork of a thread with
+run-less history includes that history in the handoff too.
 
-Each adapter maps that input onto its provider's native mechanism
-(capability declarations in [providers.md](./providers.md#adapter-capabilities)):
-
-- **Codex** passes a `fork` runtime option whose `lastTurnId` is the recorded provider turn ref
-  (falling back to the Lecturn turn id). The child never inherits the source's resume cursor — the
-  forked session mints its own.
-- **Claude** resumes the parent session with `forkSession: true`, plus `resumeSessionAt` set to
-  the fork point's provider turn ref for mid-thread forks; the SDK mints the child session id at
-  init. Seeding a session id instead would write into the parent's history.
-- **OpenCode** calls `session.fork` and, for a mid-thread fork, `session.revert` to the fork
-  turn's assistant message in the forked session.
-- **Cursor**, **Grok**, and **GitHub Copilot** declare `conversationFork: "unsupported"` and fail a start that
-  carries a `fork` input with a `ProviderAdapterValidationError` — no silent cold session.
-
-The `providerTurnRef` anchors come from turn completion: a `thread.session-set` event carries
-the provider's native turn id in its event metadata alongside the completed turn id, and
-[`ProjectionPipeline.ts`][pipeline] stamps it onto the completed turn row. Turns completed
-before this feature shipped have no anchor, which is why mid-thread fork points on such Claude
-turns are unavailable (fork at end still works).
-
-A fork also auto-titles like a fresh thread: the first-turn title gate in
-[`ProviderCommandReactor.ts`][reactor] treats the first user message newer than the thread's
-`createdAt` as the first turn, and clients seed the title with "&lt;parent title&gt; (fork)" so
-replacement is allowed.
+A child that still has its default fork title generates a real title on its first new turn
+(`shouldGenerateForkChildTitle`). An explicit title is kept.
 
 ## Kill-switch
 
 The `LECTURN_THREAD_FORKING` server config toggle (default on) drives the `threadForking`
-capability advertised by [`ServerEnvironment.ts`][env] and is enforced again inside the ws fork
-branch with a typed "unsupported" rejection, so disabling it both hides the action on clients
-and hard-stops forks from older or misbehaving ones.
+capability advertised by [`ServerEnvironment.ts`][env]. `forkKillSwitchRejection` in
+[`ws.ts`][ws] enforces it again: it rejects `thread.fork` and `thread.import` (which natively forks
+the external session) before either reaches the orchestrator. Disabling it hides the action on
+clients and hard-stops forks from older or misbehaving ones.
 
 ## Importing external sessions
 
-An imported thread is a new thread aggregate created from an
+An imported thread is a new thread created from an
 [external session](./providers.md#external-sessions), a provider session made outside Lecturn. It
-reuses the fork history payload and projection arms but is not a fork: there is no parent thread,
-the history carries no turns and no checkpoints, and the native provider fork is cut eagerly while
-the command is materialized, so the first send plainly resumes that fork. The original session is
-never resumed or written. The fork is eager because Codex serves no turns for a thread it has not
-loaded, and forking is what loads one without touching the source; because both providers' forks
-are local, cheap, and need no auth or model call; and because a session that cannot be forked then
-fails the import rather than the first message.
+is not a fork: there is no parent thread, and the imported history belongs to no run, so it has no
+checkpoint and nothing to revert or queue. The native provider fork is cut eagerly while the
+command is dispatched, and the new thread binds it as its provider thread, so the first send
+plainly resumes that fork as run 1. The original session is never resumed or written. The fork is
+eager because Codex serves no turns for a thread it has not loaded, and forking is what loads one
+without touching the source; because both providers' forks are local, cheap, and need no auth or
+model call; and because a session that cannot be forked then fails the import rather than the
+first message.
 
-Clients dispatch `thread.import` (`ClientThreadImportCommand` in [`orchestration.ts`][contracts]):
-a client-minted `ThreadId`, the project, the provider instance, the `sessionId` from
-`externalSessions.list`, an optional title, and the usual thread settings. As with forks, the
-materialized `ThreadImportCommand` shares the type literal, lives in the dispatch union only, and
-the normalizer rejects the client shape. The fork is the materializer's only side effect and
-cannot be undone, so `dispatchThreadImport` in [`ws.ts`][ws] validates first: the `threadForking`
-kill-switch, the command's receipt (a retried import returns the recorded outcome instead of
-forking twice), an existing project, an unused thread id, a model selection on the instance the
-session comes from, and the Stave worktree rule the skipped normalizer would have applied. Only
-then does it call the optional `ProviderInstance.importExternalSession` seam
-([`ProviderDriver.ts`][driver]), which returns the fork's resume cursor, the session's title and
-cwd, and a provider-neutral transcript. The `thread.import` case in [`decider.ts`][decider] keeps
-the fork's materialization belt, requires the project and an absent thread, and emits
-`thread.created` then `thread.imported`. The fork arms in [`ProjectionPipeline.ts`][pipeline]
-write the message and activity rows; the threads arm leaves `latestTurnId` null.
+Clients dispatch `thread.import` ([`orchestrationV2.ts`][contracts]): a client-minted `threadId`,
+the project, the provider instance, the `sessionId` from `externalSessions.list`, an optional
+title, and the usual thread settings. The fork cannot be undone, so everything is validated
+first: the kill-switch in [`ws.ts`][ws], the V2 command receipt (a retried import returns the
+recorded outcome instead of forking twice), Stave admission through the orchestration hooks, and,
+in `dispatchThreadImport` ([`Orchestrator.ts`][orchestrator]), a model selection on the instance
+the session comes from, an existing project, and an unused thread id. Only then does
+`ExternalSessionImporterV2` ([`ThreadImport.ts`][threadimport]) call the optional
+`ProviderInstance.importExternalSession` seam ([`ProviderDriver.ts`][driver]), which returns the
+fork's native thread id, the session's title and cwd, and a provider-neutral transcript. The
+orchestrator emits `thread.created`, `provider-thread.updated` (the fork, with a strong native
+ref), one `message.updated` or `turn-item.updated` per history row (all with a null `runId`), and
+`thread.imported`. The app thread payload carries `importedFrom` (`ThreadImportOrigin`):
+instance, driver kind, the original session's id, cwd and title, `importedAt`, and
+`historyTruncated`. The fork's native id lives only on the provider thread, which is also how
+`externalSessions.list` hides sessions Lecturn already owns: a Claude fork keeps its source's
+entrypoint and would otherwise be listed and importable again.
 
-Two things are stored, in columns added by [`053_ProjectionThreadImportOrigin.ts`][mig053].
-`importedFrom` (`ThreadImportOrigin`) is client-visible on thread shells and details: instance,
-driver kind, the original session's id, cwd and title, `importedAt`, and `historyTruncated`.
-`importSource` (`ThreadImportSource`) holds the fork's opaque resume cursor and is server-only: it
-rides the persisted event but never a wire thread shape, and is read only through
-`getThreadImportSourceById` and `listThreadImportSources` in
-[`ProjectionSnapshotQuery.ts`][snapshot]. On the first send, `resolveImportStartOptions` in
-[`ProviderCommandReactor.ts`][reactor] passes it as the session start's `resumeCursor` when the
-thread has no provider binding yet. The cursor only means something to the instance that cut the
-fork, so a first send on any other instance fails the turn start rather than binding a cold
-session under history it never saw; switching back resumes as usual. Until that first send the
-fork has no binding, so `externalSessions.list` also hides every stored import cursor: a Claude
-fork keeps its source's entrypoint and would otherwise be listed and importable again.
-
-`buildImportedThreadHistory` ([`threadImport.ts`][threadimport]) is pure. It keeps the session's
+`buildImportedThreadHistoryV2` ([`ThreadImport.ts`][threadimport]) is pure. It keeps the session's
 last 200 messages (and, within that window, the newest 1,000 activities), caps message text at
 20,000 characters with a visible suffix, and reduces activities to summary rows — a title, an item
-type, one short detail line — that never carry a tool input or output. Every row has a null
-`turnId`. Timestamps are rewritten to be strictly increasing and no later than the command's
-`createdAt`, which is also `importedFrom.importedAt`, because projections order by timestamp and
-then by random id, so ties would shuffle the transcript. `historyTruncated` records that rows were
+type, one short detail line — that never carry a tool input or output. Every row has a null `runId`,
+and ids derive from the thread id and position, so a replayed plan is identical. Timestamps are
+rewritten to be strictly increasing and no later than `importedFrom.importedAt`, so ties cannot
+shuffle the transcript. `historyTruncated` records that rows were
 dropped or text was capped. Titles, the session's and a client-supplied one, are capped at 200
 characters in `importExternalSession` ([`externalSessions.ts`][external-service]).
 
-Those two properties define an imported history row: `isImportedHistoryRow` in
-[`orchestration.ts`][contracts] is true for a turnless row stamped at or before
-`importedFrom.importedAt`. The boundary is the import time rather than the thread's `createdAt`
-because a fork of an imported thread copies the imported rows: `assembleThreadFork` carries
-`importedFrom` onto the child when it keeps at least one of them (never `importSource`; the child
-forks the parent's live session), and the child's own creation time would also cover the parent's
-genuine turnless user messages. Three places depend on it. `retainProjectionMessagesAfterRevert`
-always keeps imported messages and leaves them out of its per-turn fallbacks. The queued-turn
-heuristics (`threadHasQueuedTurnStart` in [`ThreadSettlementPolicy.ts`][settlement], the client's
-`hasQueuedTurnStart` in [`threadSettled.ts`][settled]) never treat an imported user message as a
-pending start. The client revert reducer ([`threadReducer.ts`][reducer]) keeps imported messages
-as the server does. One windowing rule completes this: in `getThreadDetailSnapshot`, the page that
-holds the thread's oldest turn has no lower bound, so it also returns the older turnless rows,
-which have no older page to land on.
+Those two properties define an imported history row: `isImportedHistoryMessage` in
+[`orchestrationV2.ts`][contracts] is true for a run-less message stamped at or before
+`importedFrom.importedAt`. The boundary is the import time rather than the thread's creation
+because a fork of an imported thread keeps `importedFrom` (it rides the spread of the source
+thread) and inherits the imported rows, while its own creation time would also cover genuine
+run-less messages. The queued-turn heuristics (`threadHasQueuedTurnStart` in
+[`ThreadSettlementService.ts`][settlement], the client's `hasQueuedTurnStart` in
+[`threadSettled.ts`][settled]) never treat an imported user message as a pending start. A
+message inside imported history is a run-less fork point: forking there copies the imported
+history through that turn (see [Command and planning](#command-and-planning)).
 
 - **Claude** ([`ClaudeExternalSessionImport.ts`][claude-import]) forks the whole session with no
   anchor message and no `cwd`: the SDK rejects a fork directed at another project, and a fork
@@ -202,14 +165,17 @@ Nameable failures travel as `threadImportFailure` on the dispatch error
 `unreadable`, and `empty-session`. The other pre-fork rejections are plain dispatch errors.
 
 The web client derives an imported thread's look from `importedFrom` alone, in
-[`ChatView.logic.ts`][web-logic]. `resolveThreadHistoryDividers` draws the import divider above the
-first row that is not imported history, or at the end until one exists, so a fork of an import
-shows the import divider, the parent's turns, then the fork divider. `deriveUnsentImportInstanceId`
-pins the composer to `importedFrom.providerInstanceId` while the thread has no session and is not a
-fork, which is exactly the window in which the server rejects any other instance; models within
-that instance stay selectable. `buildRevertTurnCountByUserMessageId` skips imported rows, and the
-truncated-history note shares the timeline's "Load earlier turns" header slot, so it appears only
-once the oldest page is loaded.
+[`ChatView.logic.ts`][web-logic]. `resolveThreadImportDivider` draws the import divider above the
+first message that is not imported history, or at the end until one exists; a fork of an import
+also gets the fork line from its inherited V2 items. `deriveUnsentImportInstanceId` pins the
+composer to `importedFrom.providerInstanceId` until the thread is continued, unless it is a fork
+(`forkedFrom` or `forkOrigin` set); the fork only resumes on the instance that cut it.
+"Continued" means a run, or a user message newer than `importedAt`, because a V1-migrated import
+has no V2 run even after the user sent to it. The pin is also dropped when a loaded provider
+catalog no longer has the instance, so the picker keeps a selectable provider. Models within the
+pinned instance stay selectable.
+`shouldShowImportTruncatedNote` waits for the oldest page, so the truncated-history note appears
+only once there is nothing earlier to load.
 
 The picker is a command palette sub-page, opened by the palette's "Import session…" action (and the
 legacy sidebar's project menu, which opens the same page). A session is importable only when its
@@ -221,31 +187,26 @@ helper a new thread uses, falling back to the contract defaults only when nothin
 
 Known limits: a forked session is never cleaned up, so an orphan stays in the provider home when
 a Codex fork holds no messages (its turns cannot be read before forking) or the dispatch fails
-after the fork. The first-turn gate in
-[`ProviderCommandReactor.ts`][reactor] counts imported user messages, so an imported thread's first
-send generates no title; the title already comes from the external session. The message cap bounds
+after the fork. Title generation on a first send counts imported user messages, so an imported
+thread's first send generates no title; the title already comes from the external session. The message cap bounds
 only what Lecturn shows: the first resumed turn makes the provider re-read the whole session.
 
-[contracts]: ../../packages/contracts/src/orchestration.ts
+[contracts]: ../../packages/contracts/src/orchestrationV2.ts
 [web-logic]: ../../apps/web/src/components/ChatView.logic.ts
-[normalizer]: ../../apps/server/src/orchestration/Normalizer.ts
 [ws]: ../../apps/server/src/ws.ts
-[threadfork]: ../../apps/server/src/orchestration/threadFork.ts
-[decider]: ../../apps/server/src/orchestration/decider.ts
-[projector]: ../../apps/server/src/orchestration/projector.ts
-[pipeline]: ../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts
-[snapshot]: ../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts
-[mig048]: ../../apps/server/src/persistence/Migrations/048_ProjectionThreadForkLineage.ts
-[ckpt]: ../../apps/server/src/checkpointing/CheckpointStore.ts
-[reactor]: ../../apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
+[orchestrator]: ../../apps/server/src/orchestration-v2/Orchestrator.ts
+[forkservice]: ../../apps/server/src/orchestration-v2/ThreadForkService.ts
+[deltas]: ../../apps/server/src/orchestration-v2/fork/ThreadForkDeltas.ts
+[projection]: ../../apps/server/src/orchestration-v2/ProjectionStore.ts
+[policy]: ../../apps/server/src/orchestration-v2/CommandPolicy.ts
+[turnstart]: ../../apps/server/src/orchestration-v2/ProviderTurnStartService.ts
 [env]: ../../apps/server/src/environment/ServerEnvironment.ts
-[threadimport]: ../../apps/server/src/orchestration/threadImport.ts
-[mig053]: ../../apps/server/src/persistence/Migrations/053_ProjectionThreadImportOrigin.ts
+[threadimport]: ../../apps/server/src/orchestration-v2/fork/ThreadImport.ts
 [external-contract]: ../../packages/contracts/src/externalSessions.ts
 [external-service]: ../../apps/server/src/provider/externalSessions.ts
 [driver]: ../../apps/server/src/provider/ProviderDriver.ts
 [claude-import]: ../../apps/server/src/provider/Drivers/ClaudeExternalSessionImport.ts
 [codex-import]: ../../apps/server/src/provider/Drivers/CodexExternalSessionImport.ts
-[settlement]: ../../apps/server/src/orchestration/ThreadSettlementPolicy.ts
+[settlement]: ../../apps/server/src/orchestration-v2/ThreadSettlementService.ts
 [settled]: ../../packages/client-runtime/src/state/threadSettled.ts
-[reducer]: ../../packages/client-runtime/src/state/threadReducer.ts
+[forkpoints]: ../../packages/client-runtime/src/state/threadForkPoints.ts

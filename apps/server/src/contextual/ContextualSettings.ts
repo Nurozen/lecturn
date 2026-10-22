@@ -40,7 +40,9 @@ const requireContextualProject = (sql: SqlClient.SqlClient, projectId: ProjectId
 
 export const requireContextualThread = (sql: SqlClient.SqlClient, threadId: ThreadId) =>
   Effect.gen(function* () {
-    const rows = yield* sql<{ project_id: string }>`SELECT t.project_id FROM projection_threads t
+    const rows = yield* sql<{
+      project_id: string;
+    }>`SELECT t.project_id FROM orchestration_v2_projection_threads t
       JOIN projection_projects p ON p.project_id = t.project_id
       WHERE t.thread_id = ${threadId} AND t.deleted_at IS NULL AND p.deleted_at IS NULL`;
     if (!rows[0])

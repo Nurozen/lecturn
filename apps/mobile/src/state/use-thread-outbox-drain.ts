@@ -1,11 +1,17 @@
 import { contextualBootstrap } from "../lib/contextualDraft";
 import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
 import { useAtomValue } from "@effect/atom-react";
-import type {
-  EnvironmentProject,
-  EnvironmentThreadShell,
+import {
+  threadRuntimeIsActive,
+  type EnvironmentProject,
+  type EnvironmentThreadShell,
 } from "@lecturn/client-runtime/state/shell";
 import type { AtomCommandResult } from "@lecturn/client-runtime/state/runtime";
+import { deriveThreadTitleSeed } from "@lecturn/client-runtime/operations";
+import {
+  forkParentThreadId,
+  resolveTurnTitleSeed,
+} from "@lecturn/client-runtime/state/thread-fork-points";
 import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -48,7 +54,6 @@ import {
 import { removeThreadOutboxMessage } from "./thread-outbox-removal";
 import {
   isQueuedThreadCreationSendable,
-  modelSelectionsEqual,
   resolveThreadOutboxDeliveryAction,
   resolveThreadOutboxDispatchStep,
   resolveThreadOutboxFailureAction,
@@ -181,9 +186,31 @@ function finishDispatchingQueuedMessage(queuedMessageId: MessageId): void {
   appAtomRegistry.set(dispatchingQueuedMessageIdAtom, current === queuedMessageId ? null : current);
 }
 
+/** The `titleSeed` for a queued message's turn (see resolveTurnTitleSeed). */
+export function turnTitleSeedForQueuedMessage(
+  threads: ReadonlyArray<EnvironmentThreadShell>,
+  message: Pick<QueuedThreadMessage, "environmentId" | "threadId" | "text" | "attachments">,
+): string | undefined {
+  const messageTitleSeed = deriveThreadTitleSeed({
+    text: message.text,
+    attachments: message.attachments,
+  });
+  const thread = findThread(threads, message);
+  if (thread === undefined) return messageTitleSeed;
+  const parentId = forkParentThreadId(thread);
+  return resolveTurnTitleSeed({
+    thread,
+    parentTitle:
+      parentId === null
+        ? null
+        : findThread(threads, { environmentId: message.environmentId, threadId: parentId })?.title,
+    messageTitleSeed,
+  });
+}
+
 function findThread(
   threads: ReadonlyArray<EnvironmentThreadShell>,
-  message: QueuedThreadMessage,
+  message: Pick<QueuedThreadMessage, "environmentId" | "threadId">,
 ): EnvironmentThreadShell | undefined {
   return threads.find(
     (candidate) =>
@@ -624,9 +651,6 @@ async function preserveUploadedAttachmentsForEditor(
 
 export function useThreadOutboxDrain(): void {
   const startTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
-  const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
-    reportFailure: false,
-  });
   const setThreadRuntimeMode = useAtomCommand(threadEnvironment.setRuntimeMode, {
     reportFailure: false,
   });
@@ -783,21 +807,6 @@ export function useThreadOutboxDrain(): void {
       }
       const { reportFailure } = makeDeliveryHelpers(queuedMessage);
 
-      if (!modelSelectionsEqual(settings.modelSelection, thread.modelSelection)) {
-        const updateResult = await updateThreadMetadata({
-          environmentId: queuedMessage.environmentId,
-          input: {
-            commandId: settingsCommandId(queuedMessage, "model-selection"),
-            threadId: queuedMessage.threadId,
-            modelSelection: settings.modelSelection,
-          },
-        });
-        if (AsyncResult.isFailure(updateResult)) {
-          reportFailure(updateResult, "settings-sync");
-          return false;
-        }
-      }
-
       if (settings.runtimeMode !== thread.runtimeMode) {
         const runtimeResult = await setThreadRuntimeMode({
           environmentId: queuedMessage.environmentId,
@@ -864,20 +873,6 @@ export function useThreadOutboxDrain(): void {
       if (!isQueuedMessagePayloadCurrent(persistedMessage, deliveryRevision)) {
         return true;
       }
-      // A forked thread keeps its minted "<parent> (fork)" title until its
-      // first turn; sending that title as the seed lets the server swap in a
-      // generated title once the turn completes, while a user rename (which
-      // drops the suffix) keeps the title untouched. An imported thread sends
-      // no seed: its title comes from the external session, and the server's
-      // retitle gate replaces a title only when a seed matches it.
-      const targetThread = findThread(
-        appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
-        queuedMessage,
-      );
-      const forkTitleSeed =
-        targetThread?.forkedFrom != null && targetThread.title.trim().endsWith("(fork)")
-          ? targetThread.title.trim()
-          : undefined;
       const currentConfig = appAtomRegistry.get(
         serverEnvironment.configValueAtom(queuedMessage.environmentId),
       );
@@ -893,10 +888,18 @@ export function useThreadOutboxDrain(): void {
         settings,
         currentConfig.providers,
       );
+      // A fork child sends its minted default title as the seed so the server
+      // swaps in a generated title after the first turn; a fork child the user
+      // renamed sends no seed so the rename stands.
+      const turnTitleSeed = turnTitleSeedForQueuedMessage(
+        appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
+        queuedMessage,
+      );
       const deliveryResult = await startTurn({
         environmentId: queuedMessage.environmentId,
         input: {
           commandId: queuedMessage.commandId,
+          creationSource: "mobile",
           threadId: queuedMessage.threadId,
           message: {
             messageId: queuedMessage.messageId,
@@ -913,10 +916,14 @@ export function useThreadOutboxDrain(): void {
             attachments: prepared.attachments,
           },
           modelSelection: sendSettings.modelSelection,
+          ...(turnTitleSeed === undefined ? {} : { titleSeed: turnTitleSeed }),
           runtimeMode: sendSettings.runtimeMode,
           interactionMode: sendSettings.interactionMode,
-          ...(forkTitleSeed !== undefined ? { titleSeed: forkTitleSeed } : {}),
           createdAt: queuedMessage.createdAt,
+          // Rows written before follow-up behavior existed keep the previous
+          // delivery, which the server turns into a queued run when a turn is
+          // already active.
+          dispatchMode: queuedMessage.dispatchMode ?? "start",
         },
       });
       const failure = reportFailure(deliveryResult, "start-turn");
@@ -939,7 +946,6 @@ export function useThreadOutboxDrain(): void {
       setThreadInteractionMode,
       setThreadRuntimeMode,
       startTurn,
-      updateThreadMetadata,
       restoreQueuedMessage,
     ],
   );
@@ -1096,10 +1102,10 @@ export function useThreadOutboxDrain(): void {
         threads.some(
           (thread) =>
             scopedThreadKey(thread.environmentId, thread.id) === threadKey &&
-            (thread.latestTurn !== null ||
-              thread.session?.status === "error" ||
-              thread.session?.status === "stopped" ||
-              thread.session?.status === "interrupted"),
+            (thread.latestRun !== null ||
+              thread.runtime?.status === "failed" ||
+              thread.runtime?.status === "cancelled" ||
+              thread.runtime?.status === "interrupted"),
         )
       ) {
         clearPendingThreadCreationOutcome(threadKey);
@@ -1188,7 +1194,7 @@ export function useThreadOutboxDrain(): void {
         threadExists: thread !== undefined,
         shellStatus,
         environmentConnected: environment?.connectionState === "connected",
-        threadBusy: thread?.session?.status === "running" || thread?.session?.status === "starting",
+        threadBusy: threadRuntimeIsActive(thread?.runtime),
       });
       // The delivery action resolves first; capability checks apply only to
       // a message that will send. Checking earlier would restore a
@@ -1294,8 +1300,7 @@ export function useThreadOutboxDrain(): void {
             appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
             nextQueuedMessage,
           );
-          const liveThreadBusy =
-            liveThread?.session?.status === "running" || liveThread?.session?.status === "starting";
+          const liveThreadBusy = threadRuntimeIsActive(liveThread?.runtime);
           const liveDeliveryAction = resolveThreadOutboxDeliveryAction({
             isCreation: creation !== undefined,
             threadExists: liveThread !== undefined,

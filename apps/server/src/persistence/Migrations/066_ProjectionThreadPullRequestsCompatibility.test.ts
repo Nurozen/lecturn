@@ -30,10 +30,10 @@ const linkRows = Effect.gen(function* () {
 describe("066 collision compatibility", () => {
   it.effect("creates the thread pull request table on a fresh database", () =>
     Effect.gen(function* () {
-      const executed = yield* runMigrations();
+      const executed = yield* runMigrations({ toMigrationInclusive: 69 });
       assert.deepEqual(executed.at(-1), [69, "ProjectionThreadsAutoSettleDisabledAtCompatibility"]);
       assert.deepEqual(yield* linkRows, []);
-      assert.deepEqual(yield* runMigrations(), []);
+      assert.deepEqual(yield* runMigrations({ toMigrationInclusive: 69 }), []);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
@@ -43,7 +43,7 @@ describe("066 collision compatibility", () => {
       yield* runMigrations({ toMigrationInclusive: 65 });
       yield* seed;
       const ledger = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
-      assert.deepEqual(yield* runMigrations(), [
+      assert.deepEqual(yield* runMigrations({ toMigrationInclusive: 69 }), [
         [66, "ProjectionThreadPullRequestsCompatibility"],
         [67, "MessageContextTitleStateCompatibility"],
         [68, "PullRequestFilesViewedCompatibility"],
@@ -81,7 +81,7 @@ describe("066 collision compatibility", () => {
       yield* sql`DELETE FROM projection_thread_pull_requests`;
       const ledger = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
 
-      const executed = yield* runMigrations();
+      const executed = yield* runMigrations({ toMigrationInclusive: 69 });
       assert.deepEqual(executed[0], [51, "SagaWorkbench"]);
       assert.deepEqual(executed.at(-1), [69, "ProjectionThreadsAutoSettleDisabledAtCompatibility"]);
       assert.deepEqual(
@@ -111,7 +111,7 @@ describe("066 collision compatibility", () => {
         readonly name: string;
       }>`PRAGMA table_info(stave_project_lifecycle)`;
       assert.ok(lifecycleColumns.some((column) => column.name === "saga_teardown_json"));
-      assert.deepEqual(yield* runMigrations(), []);
+      assert.deepEqual(yield* runMigrations({ toMigrationInclusive: 69 }), []);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 });

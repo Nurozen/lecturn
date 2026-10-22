@@ -2,7 +2,7 @@ import type { EnvironmentConnectionPhase } from "../connection/presentation.ts";
 import type {
   CommandId,
   EnvironmentId,
-  OrchestrationCommand,
+  ProjectMutation,
   ProjectId,
   SourceControlDiscoveryResult,
   SourceControlProviderKind,
@@ -395,12 +395,11 @@ export function buildProjectCreateCommand(input: {
   readonly commandId: CommandId;
   readonly projectId: ProjectId;
   readonly workspaceRoot: string;
-  readonly createdAt: string;
   /** Defaults to the folder name; a Stave space passes its manifest id. */
   readonly title?: string;
   /** Defaults to true; a Stave space root already exists when its project is created. */
   readonly createWorkspaceRootIfMissing?: boolean;
-}): Extract<OrchestrationCommand, { type: "project.create" }> {
+}): Extract<ProjectMutation, { type: "project.create" }> {
   return {
     type: "project.create",
     commandId: input.commandId,
@@ -409,6 +408,5 @@ export function buildProjectCreateCommand(input: {
     workspaceRoot: input.workspaceRoot,
     createWorkspaceRootIfMissing: input.createWorkspaceRootIfMissing ?? true,
     defaultModelSelection: null,
-    createdAt: input.createdAt,
   };
 }

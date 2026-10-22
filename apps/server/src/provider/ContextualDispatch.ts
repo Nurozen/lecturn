@@ -7,7 +7,15 @@ import type {
 } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import type { ProviderContextualReceiptObserver } from "./Services/ProviderAdapter.ts";
+
+/**
+ * Durable receipt sink for one dispatch. On V2 the Contextual turn hook builds
+ * receipts from the orchestrator's provider-turn record at run terminal
+ * instead of from adapter-specific acknowledgements.
+ */
+export type ProviderContextualReceiptObserver = (
+  receipt: ContextualDeliveryReceipt,
+) => Effect.Effect<void, Error>;
 export type ContextualDispatchInput = {
   readonly threadId: ThreadId;
   readonly contextualEvidence?: ProviderContextualEvidence | undefined;

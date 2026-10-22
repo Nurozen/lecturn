@@ -128,6 +128,7 @@ vi.mock("../../state/thread-outbox-storage", () => ({
 vi.mock("../../state/entities", () => ({
   useListedProjects: () => native.projects,
   useListedThreadShells: () => [],
+  useThreadShells: () => [],
   useEnvironmentServerConfig: () => null,
   useServerConfigs: () => new Map(),
 }));

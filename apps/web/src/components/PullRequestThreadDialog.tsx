@@ -15,7 +15,7 @@ import { cn } from "~/lib/utils";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { parsePullRequestReference } from "~/pullRequestReference";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
-import { useProject, useThread } from "~/state/entities";
+import { useProject, useThreadShell } from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";
 import { vcsEnvironment } from "~/state/vcs";
 import { Button } from "./ui/button";
@@ -58,7 +58,7 @@ export function PullRequestThreadDialog({
     [environmentId, threadId],
   );
   const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
-  const serverThread = useThread(threadRef, { waitForShell: draftThread !== null });
+  const serverThread = useThreadShell(threadRef);
   const projectRef = serverThread
     ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
     : draftThread

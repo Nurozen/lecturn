@@ -16,6 +16,7 @@ import { make as makeAdmission, ProviderWorkAdmission } from "../provider/Provid
 import { buildUnavailableProviderSnapshot } from "../provider/unavailableProviderSnapshot.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../provider/providerMaintenance.ts";
 import { make } from "./DecisionWriterBinding.ts";
+import { clearV2Projection, installLegacyProjectionMirror } from "./V2ProjectionTestFixtures.ts";
 
 const projectId = ProjectId.make("binding-project");
 const threadId = ThreadId.make("binding-thread");
@@ -24,6 +25,8 @@ const driverKind = ProviderDriverKind.make("codex");
 const encodeSelection = Schema.encodeEffect(Schema.fromJsonString(Schema.toType(ModelSelection)));
 const fixture = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  yield* installLegacyProjectionMirror(sql);
+  yield* clearV2Projection(sql);
   yield* sql`INSERT OR REPLACE INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${projectId},'QA','/tmp/binding','[]','now','now')`;
   const selection = yield* encodeSelection({ instanceId, model: "selected-model", options: [] });
   yield* sql`INSERT OR REPLACE INTO projection_threads(thread_id,project_id,title,model_selection_json,created_at,updated_at,runtime_mode,interaction_mode) VALUES (${threadId},${projectId},'QA',${selection},'now','now','full-access','default')`;
@@ -60,7 +63,7 @@ const fixture = Effect.gen(function* () {
       streamChanges: Stream.empty,
       applyUsageLimits: () => Effect.void,
     },
-    adapter: {} as ProviderInstance["adapter"],
+    orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
     textGeneration: {
       generateCommitMessage: () => Effect.die("unused"),
       generatePrContent: () => Effect.die("unused"),

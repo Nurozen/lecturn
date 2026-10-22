@@ -14,10 +14,9 @@ import * as Effect from "effect/Effect";
 
 import {
   classifyToolItemType,
-  claudeForkResumeState,
   extractAssistantTextBlocks,
   titleForTool,
-} from "../Layers/ClaudeAdapter.ts";
+} from "./ExternalSessionPresentation.ts";
 import type { ImportedTranscriptEntry, ProviderInstance } from "../ProviderDriver.ts";
 import { ClaudeSessionNotFound, forkClaudeSession } from "./ClaudeSessionFork.ts";
 
@@ -223,7 +222,7 @@ export function makeClaudeExternalSessionImporter(options: {
       ?.trim()
       .replaceAll(/\s+/g, " ");
     return {
-      resumeCursor: claudeForkResumeState(forked.sessionId),
+      nativeThreadId: forked.sessionId,
       title:
         (info?.customTitle || info?.summary)?.trim() ||
         (firstPrompt && firstPrompt.length > FALLBACK_TITLE_MAX_LENGTH

@@ -30,6 +30,7 @@ import {
 } from "@lecturn/shared/decisionEvidence";
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { v2Messages } from "./V2ProjectionSources.ts";
 import {
   requireDecisionProject,
   readDecisionRevision,
@@ -216,8 +217,8 @@ export const make = Effect.gen(function* () {
   const readRow = Effect.fn("Decisions.readRow")(function* (row: StoredDecision) {
     const anchors =
       yield* sql<StoredEvidence>`SELECT e.*, m.text AS source_text, t.thread_id AS live_thread_id, t.deleted_at AS thread_deleted, t.archived_at AS thread_archived, s.source_generation AS current_generation
-      FROM decision_evidence e LEFT JOIN projection_threads t ON t.thread_id = e.thread_id
-      LEFT JOIN projection_thread_messages m ON m.thread_id = e.thread_id AND m.message_id = e.message_id
+      FROM decision_evidence e LEFT JOIN orchestration_v2_projection_threads t ON t.thread_id = e.thread_id
+      LEFT JOIN ${v2Messages(sql)} m ON m.thread_id = e.thread_id AND m.message_id = e.message_id
       LEFT JOIN decision_thread_state s ON s.thread_id = e.thread_id
       WHERE e.decision_id = ${row.id} ORDER BY e.source_sequence, e.start_offset, e.id`;
     const evidence = yield* Effect.forEach(anchors, (anchor) =>
@@ -435,7 +436,7 @@ export const make = Effect.gen(function* () {
         current_generation: number;
         project_id: string;
       }>`SELECT m.text, m.role, s.source_hash, s.source_generation, ts.source_generation AS current_generation, t.project_id
-        FROM projection_thread_messages m JOIN projection_threads t ON t.thread_id = m.thread_id
+        FROM ${v2Messages(sql)} m JOIN orchestration_v2_projection_threads t ON t.thread_id = m.thread_id
         JOIN decision_sources s ON s.thread_id = m.thread_id AND s.message_id = m.message_id AND s.source_generation = ${anchor.sourceGeneration}
         JOIN decision_thread_state ts ON ts.thread_id = m.thread_id
         WHERE m.thread_id = ${anchor.threadId} AND m.message_id = ${anchor.messageId} AND m.is_streaming = 0 AND t.deleted_at IS NULL AND s.project_id = ${projectId}`;
@@ -498,7 +499,7 @@ export const make = Effect.gen(function* () {
     if (suppressed.length > 0) return null;
     const threads = yield* sql<{
       title: string;
-    }>`SELECT title FROM projection_threads WHERE thread_id = ${input.threadId} AND project_id = ${input.projectId} AND deleted_at IS NULL`;
+    }>`SELECT title FROM orchestration_v2_projection_threads WHERE thread_id = ${input.threadId} AND project_id = ${input.projectId} AND deleted_at IS NULL`;
     if (!threads[0]) return yield* fail("not-found", "The decision's thread no longer exists.");
     const at = yield* now;
     yield* decodeDecision({

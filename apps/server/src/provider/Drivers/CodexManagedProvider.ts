@@ -1,5 +1,6 @@
 import { StaveMemoryWiring } from "../../stave/StaveMemoryWiring.ts";
 import { ProviderDriverKind, TextGenerationError, type CodexSettings } from "@lecturn/contracts";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import * as Option from "effect/Option";
@@ -9,7 +10,9 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { chatGptModels } from "../CodexChatGptModels.ts";
 import { makeCodexManagedRuntime } from "../CodexManagedRuntime.ts";
 import { ProviderDriverError } from "../Errors.ts";
-import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
+import { createCodexAdapterV2 } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
+import * as ProcessRunner from "../../processRunner.ts";
+import { makeCodexStaveMemoryMcpResolver } from "../StaveMemoryMcp.ts";
 import {
   checkCodexProviderStatus,
   makePendingCodexProvider,
@@ -210,16 +213,38 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
   yield* runtime.auth.controller.subscribe("managed-codex-snapshot").pipe(
     // Disconnect also publishes idle when a saved account has no active sign-in flow.
     Stream.filter((state) => ["idle", "succeeded", "failed", "cancelled"].includes(state.phase)),
-    Stream.runForEach(() => snapshot.refresh.pipe(Effect.asVoid)),
+    // Sign-out closes the scope of an in-flight probe, which fails that refresh
+    // with an interrupt. Keep listening so the sign-out's own idle still refreshes.
+    Stream.runForEach(() => snapshot.refresh.pipe(Effect.ignoreCause({ log: true }))),
     Effect.forkScoped,
   );
   const resolveRuntime = runtime.auth.controller.withAccess!(runtime.resolve);
-  const adapter = yield* makeCodexAdapter(config, {
-    staveMemoryWiring: yield* StaveMemoryWiring,
-    instanceId,
-    resolveRuntime,
-    onManagedConnectionRevoked: runtime.auth.revoke.pipe(Effect.ignore),
-  });
+  // Launch settings resolve per session from the signed-in token. The registry
+  // already wraps openSession in withAccess, so resolve without re-entering it.
+  const staveMemoryWiring = yield* StaveMemoryWiring;
+  const crypto = yield* Crypto.Crypto;
+  const memoryProcessRunner = yield* ProcessRunner.make().pipe(
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+  );
+  const orchestrationAdapter = yield* createCodexAdapterV2(input, {
+    onUsageLimits: (update) => snapshot.applyUsageLimits(update),
+    resolveRuntime: runtime.resolve,
+    resolveExtraMcpServers: makeCodexStaveMemoryMcpResolver({
+      resolve: staveMemoryWiring.resolve,
+      runner: memoryProcessRunner,
+      randomUuid: crypto.randomUUIDv4.pipe(Effect.orDie),
+    }),
+  }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ProviderDriverError({
+          driver: DRIVER,
+          instanceId,
+          detail: "Failed to build Codex orchestration adapter.",
+          cause,
+        }),
+    ),
+  );
   const nativeGeneration = yield* makeCodexTextGeneration(
     config,
     undefined,
@@ -278,7 +303,7 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
     accentColor,
     enabled,
     snapshot,
-    adapter,
+    orchestrationAdapter,
     textGeneration,
     auth: runtime.auth.controller,
     snapshotForCwd: (cwd: string) =>

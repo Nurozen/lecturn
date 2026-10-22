@@ -28,6 +28,10 @@ import {
   deduplicateCandidates,
   completeCoverage,
 } from "./DecisionCandidates.ts";
+import {
+  clearV2Projection,
+  installLegacyProjectionMirror,
+} from "../threadDecisions/V2ProjectionTestFixtures.ts";
 const projectId = ProjectId.make("project");
 const threadId = ThreadId.make("thread");
 const input: CreateDecisionFromWriter = {
@@ -72,6 +76,8 @@ const input: CreateDecisionFromWriter = {
 };
 const fixture = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  yield* installLegacyProjectionMirror(sql);
+  yield* clearV2Projection(sql);
   for (const table of [
     "contextual_lineage",
     "contextual_suppression",

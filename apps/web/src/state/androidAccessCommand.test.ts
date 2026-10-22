@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vite-plus/test";
 import { AsyncResult, AtomRegistry } from "effect/unstable/reactivity";
-import { withAndroidAccess } from "./androidAccessCommand";
+import { withAndroidAccess, withAndroidAccessFor } from "./androidAccessCommand";
 import { requireAndroidFullAccess } from "../lib/androidHostAccess";
 
 vi.mock("../lib/androidHostAccess", () => ({ requireAndroidFullAccess: vi.fn() }));
@@ -43,12 +43,16 @@ it("preserves the original command input and receipt after authorization", async
   }
 });
 
-it("checks the inherited fork mode while leaving its wire input unchanged", async () => {
+it("checks the inherited fork mode against the V2 child thread while leaving its wire input unchanged", async () => {
   const registry = AtomRegistry.make();
   try {
     const run = vi.fn(async () => AsyncResult.success("forked"));
-    const value = { input: { threadId: "child", sourceThreadId: "parent" } };
-    const command = withAndroidAccess({ label: "fork", run }, () => "approval-required");
+    const value = { input: { targetThreadId: "child", sourceThreadId: "parent" } };
+    const command = withAndroidAccessFor(
+      { label: "fork", run },
+      (forked: typeof value) => forked.input.targetThreadId,
+      () => "approval-required",
+    );
     await command.run(registry, value);
     expect(requireAndroidFullAccess).toHaveBeenCalledWith("child", "approval-required");
     expect(run).toHaveBeenCalledExactlyOnceWith(registry, value);

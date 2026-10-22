@@ -4,7 +4,7 @@ import { scopeProject } from "@lecturn/client-runtime/state/shell";
 import type {
   ExternalSessionSummary,
   OrchestrationProjectShell,
-  OrchestrationThreadShell,
+  OrchestrationV2ThreadShell,
 } from "@lecturn/contracts";
 import { LegendList } from "@legendapp/list/react-native";
 import { StackActions, useNavigation } from "@react-navigation/native";
@@ -59,7 +59,7 @@ const SEARCH_PLACEHOLDER = "Find a session";
 const EMPTY_PROJECT_SHELLS = Atom.make<ReadonlyArray<OrchestrationProjectShell>>([]).pipe(
   Atom.withLabel("mobile-import-session:empty-projects"),
 );
-const EMPTY_THREAD_SHELLS = Atom.make<ReadonlyArray<OrchestrationThreadShell>>([]).pipe(
+const EMPTY_THREAD_SHELLS = Atom.make<ReadonlyArray<OrchestrationV2ThreadShell>>([]).pipe(
   Atom.withLabel("mobile-import-session:empty-threads"),
 );
 

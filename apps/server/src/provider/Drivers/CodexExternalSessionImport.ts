@@ -12,9 +12,12 @@ import type * as Scope from "effect/Scope";
 import type * as CodexClient from "effect-codex-app-server/client";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
-import { IMPORT_HISTORY_MAX_MESSAGES } from "../../orchestration/threadImport.ts";
-import { itemDetail, itemTitle, toCanonicalItemType } from "../Layers/CodexAdapter.ts";
-import type { CodexResumeCursor } from "../Layers/CodexSessionRuntime.ts";
+import {
+  IMPORT_HISTORY_MAX_MESSAGES,
+  itemDetail,
+  itemTitle,
+  toCanonicalItemType,
+} from "./ExternalSessionPresentation.ts";
 import type {
   ImportedExternalSession,
   ImportedTranscriptEntry,
@@ -264,7 +267,7 @@ const importCodexExternalThread = Effect.fn("importCodexExternalThread")(functio
   }
   const preview = source.preview?.trim() ?? "";
   return {
-    resumeCursor: { threadId: fork.id } satisfies CodexResumeCursor,
+    nativeThreadId: fork.id,
     title: source.name?.trim() || (preview.split("\n", 1)[0] ?? "").trim(),
     cwd: source.cwd.trim(),
     transcript,

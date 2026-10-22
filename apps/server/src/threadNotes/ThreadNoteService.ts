@@ -12,6 +12,7 @@ import {
 } from "@lecturn/contracts";
 import { Context, DateTime, Effect, Layer, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { v2Messages, v2Threads } from "../threadDecisions/V2ProjectionSources.ts";
 
 const fail = (code: ThreadNoteError["code"], message: string) =>
   new ThreadNoteError({ code, message });
@@ -80,7 +81,7 @@ export const make = Effect.gen(function* () {
       const valid = yield* decodeCreate(input);
       const threads = yield* sql<{
         project_id: string;
-      }>`SELECT project_id FROM projection_threads WHERE thread_id = ${valid.threadId}`;
+      }>`SELECT project_id FROM orchestration_v2_projection_threads WHERE thread_id = ${valid.threadId}`;
       const thread = threads[0];
       if (!thread) return yield* fail("not-found", "The note's thread no longer exists.");
       const at = yield* now;
@@ -121,9 +122,9 @@ export const make = Effect.gen(function* () {
              WHEN t.archived_at IS NOT NULL THEN 'thread-archived'
              ELSE 'ok' END AS anchor_state
       FROM thread_notes n
-      LEFT JOIN projection_threads t ON t.thread_id = n.thread_id
+      LEFT JOIN ${v2Threads(sql)} t ON t.thread_id = n.thread_id
       LEFT JOIN projection_projects p ON p.project_id = n.project_id
-      LEFT JOIN projection_thread_messages m ON m.message_id = n.message_id AND m.thread_id = n.thread_id
+      LEFT JOIN ${v2Messages(sql)} m ON m.message_id = n.message_id AND m.thread_id = n.thread_id
       WHERE ${input.projectId === undefined ? sql`1 = 1` : sql`n.project_id = ${input.projectId}`}
       ORDER BY n.created_at DESC, n.id DESC LIMIT 501`;
       const notes = yield* Effect.forEach(rows.slice(0, 500), (row) =>

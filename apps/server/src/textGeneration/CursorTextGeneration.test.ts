@@ -1,362 +1,515 @@
-// @effect-diagnostics nodeBuiltinImport:off
-import * as NodePath from "node:path";
-import * as NodeOS from "node:os";
-import * as NodeURL from "node:url";
-import * as NodeFS from "node:fs";
-
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import { it } from "@effect/vitest";
-import * as Clock from "effect/Clock";
+import type { RunResult, SendOptions } from "@cursor/sdk";
+import { CursorSettings, ProviderInstanceId, TextGenerationError } from "@lecturn/contracts";
+import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
-import * as Layer from "effect/Layer";
+import * as FileSystem from "effect/FileSystem";
+import * as Fiber from "effect/Fiber";
+import * as TestClock from "effect/testing/TestClock";
 import * as Schema from "effect/Schema";
-import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import { createModelSelection } from "@lecturn/shared/model";
-import { expect } from "vite-plus/test";
+import { beforeEach, vi } from "vite-plus/test";
 
-import { CursorSettings, ProviderInstanceId } from "@lecturn/contracts";
-
-import * as ServerConfig from "../config.ts";
-import * as TextGeneration from "./TextGeneration.ts";
 import { makeCursorTextGeneration } from "./CursorTextGeneration.ts";
-import { execScriptSource, writeFakeCli } from "../testUtils/fakeCli.ts";
+
+const cursorSdkMock = vi.hoisted(() => ({
+  create: vi.fn<(options: unknown) => Promise<unknown>>(),
+  send: vi.fn<(prompt: string, options?: SendOptions) => Promise<unknown>>(),
+  toolStep: false,
+  close: vi.fn(),
+  cancel: vi.fn(async () => {}),
+  prompt: vi.fn<(prompt: string, options: unknown) => Promise<RunResult>>(async () => ({
+    id: "run-cursor-text-generation-test",
+    status: "finished",
+    result:
+      '{"subject":"Add generated commit message","body":"- verify cursor sdk text generation"}',
+  })),
+}));
+
+vi.mock("../provider/cursorSdk.ts", () => ({ Agent: { create: cursorSdkMock.create } }));
+
+let hasCustomPolicy = false;
+const tempPrefixes: Array<string | undefined> = [];
+const fsLayer = FileSystem.layerNoop({
+  exists: () => Effect.succeed(hasCustomPolicy),
+  makeTempDirectoryScoped: (options) => {
+    tempPrefixes.push(options?.prefix);
+    return Effect.succeed("/isolated-text-generation");
+  },
+});
+
 const decodeCursorSettings = Schema.decodeSync(CursorSettings);
+const cursorSettings = decodeCursorSettings({ enabled: true });
 
-const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
-const mockAgentPath = NodePath.join(__dirname, "../../scripts/acp-mock-agent.ts");
-
-const CursorTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
-  prefix: "lecturn-cursor-text-generation-test-",
-}).pipe(Layer.provideMerge(NodeServices.layer));
-
-function makeAcpAgentWrapper(dir: string, env: Record<string, string>): string {
-  return writeFakeCli({
-    directory: NodePath.join(dir, "bin"),
-    name: "agent",
-    env,
-    source: [
-      ...(env.LECTURN_ACP_EXPECT_WORKFLOW === "1"
-        ? [
-            'if (!process.cwd().includes("lecturn-workflow-inference-")) {',
-            '  process.stderr.write("workflow cwd not isolated\\n");',
-            "  process.exit(14);",
-            "}",
-          ]
-        : []),
-      execScriptSource({
-        scriptPath: mockAgentPath,
-        expectedArgs: ["acp"],
-      }),
-    ].join("\n"),
-  });
-}
-
-function withFakeAcpAgent<A, E, R>(
-  env: Record<string, string>,
-  effectFn: (textGeneration: TextGeneration.TextGeneration["Service"]) => Effect.Effect<A, E, R>,
-) {
-  return Effect.gen(function* () {
-    const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "lecturn-cursor-text-acp-"));
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
-        NodeFS.rmSync(tempDir, { recursive: true, force: true });
-      }),
-    );
-    const agentPath = makeAcpAgentWrapper(tempDir, env);
-    const config = decodeCursorSettings({ binaryPath: agentPath });
-    const textGeneration = yield* makeCursorTextGeneration(config);
-    return yield* effectFn(textGeneration);
-  }).pipe(Effect.scoped);
-}
-
-function waitForFileContent(path: string): Effect.Effect<string> {
-  return Effect.gen(function* () {
-    const deadline = (yield* Clock.currentTimeMillis) + 5_000;
-    for (;;) {
-      const result = yield* Effect.exit(Effect.sync(() => NodeFS.readFileSync(path, "utf8")));
-      if (Exit.isSuccess(result)) {
-        return result.value;
+beforeEach(() => {
+  hasCustomPolicy = false;
+  tempPrefixes.length = 0;
+  cursorSdkMock.toolStep = false;
+  cursorSdkMock.create.mockReset();
+  cursorSdkMock.send.mockReset();
+  cursorSdkMock.create.mockImplementation(async (options) => {
+    cursorSdkMock.send.mockImplementation(async (prompt, sendOptions) => {
+      if (cursorSdkMock.toolStep) {
+        await sendOptions?.onStep?.({
+          step: { type: "toolCall", message: { type: "read" } } as never,
+        });
       }
-      {
-        if ((yield* Clock.currentTimeMillis) >= deadline) {
-          return yield* Effect.die(result.cause);
-        }
-      }
-      yield* Effect.sleep(25);
-    }
+      return {
+        status: "running",
+        cancel: cursorSdkMock.cancel,
+        wait: () => cursorSdkMock.prompt(prompt, options),
+      };
+    });
+    return {
+      close: cursorSdkMock.close,
+      [Symbol.asyncDispose]: async () => {
+        cursorSdkMock.close();
+      },
+      send: cursorSdkMock.send,
+    };
   });
-}
+  cursorSdkMock.close.mockClear();
+  cursorSdkMock.cancel.mockClear();
+  cursorSdkMock.prompt.mockReset();
+  cursorSdkMock.prompt.mockResolvedValue({
+    id: "run-cursor-text-generation-test",
+    status: "finished",
+    result:
+      '{"subject":"Add generated commit message","body":"- verify cursor sdk text generation"}',
+  });
+});
 
-it.layer(CursorTextGenerationTestLayer)("CursorTextGeneration", (it) => {
-  for (const [label, output] of [
-    ["malformed JSON", "not JSON"],
-    ["missing stage", JSON.stringify({ summary: "Working", confidence: 0.8 })],
-    ["missing confidence", JSON.stringify({ summary: "Working", stage: "build" })],
-    ["invalid stage", JSON.stringify({ summary: "Working", stage: "completed", confidence: 0.8 })],
-    [
-      "confidence above one",
-      JSON.stringify({ summary: "Working", stage: "build", confidence: 1.1 }),
-    ],
-    [
-      "negative confidence",
-      JSON.stringify({ summary: "Working", stage: "build", confidence: -0.1 }),
-    ],
-  ]) {
-    it.effect(`rejects workflow inference with ${label}`, () =>
-      withFakeAcpAgent({ LECTURN_ACP_PROMPT_RESPONSE_TEXT: output! }, (textGeneration) =>
-        Effect.gen(function* () {
-          const failure = yield* textGeneration
-            .generateWorkflowSummary({
-              cwd: process.cwd(),
-              message:
-                '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
-              modelSelection: {
-                instanceId: ProviderInstanceId.make("cursor"),
-                model: "composer-2",
-              },
-            })
-            .pipe(Effect.flip);
-          expect(failure.operation).toBe("generateWorkflowSummary");
-        }),
-      ),
-    );
-  }
-  it.effect("discards inference when the harness emits tool activity", () =>
-    withFakeAcpAgent(
-      {
-        LECTURN_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS: "1",
-        LECTURN_ACP_PROMPT_RESPONSE_TEXT: '{"summary":"Ready","stage":"accept","confidence":0.8}',
-      },
-      (textGeneration) =>
-        Effect.gen(function* () {
-          const failure = yield* textGeneration
-            .generateWorkflowSummary({
-              cwd: process.cwd(),
-              message:
-                '{"priorSummary":null,"turns":[{"question":"Check work","response":"Ready"}]}',
-              modelSelection: {
-                instanceId: ProviderInstanceId.make("cursor"),
-                model: "composer-2",
-              },
-            })
-            .pipe(Effect.flip);
-          expect(failure.detail).toContain("used a tool");
-        }),
-    ),
-  );
-  it.effect("generates an evidence summary without title truncation", () =>
-    withFakeAcpAgent(
-      {
-        LECTURN_ACP_EXPECT_WORKFLOW: "1",
-        LECTURN_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
-          summary: " API complete.\n CI remains pending. ",
-          stage: "accept",
-          confidence: 0.8,
-        }),
-      },
-      (textGeneration) =>
-        Effect.gen(function* () {
-          const result = yield* textGeneration.generateWorkflowSummary({
-            cwd: process.cwd(),
-            message:
-              '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
-            modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "composer-2" },
-          });
-          expect(result).toEqual({
-            summary: "API complete. CI remains pending.",
-            stage: "accept",
-            confidence: 0.8,
-          });
-        }),
-    ),
+describe("CursorTextGeneration", () => {
+  it.effect("resolves the browser credential for every request after an account change", () =>
+    Effect.gen(function* () {
+      let apiKey = "first-browser-key";
+      const generation = yield* makeCursorTextGeneration(
+        cursorSettings,
+        {},
+        Effect.sync(() => apiKey),
+      );
+      const input = {
+        cwd: process.cwd(),
+        branch: "feature/cursor",
+        stagedSummary: "M file.ts",
+        stagedPatch: "diff",
+        modelSelection: createModelSelection(ProviderInstanceId.make("cursor"), "auto"),
+      };
+      yield* generation.generateCommitMessage(input);
+      expect(cursorSdkMock.create).toHaveBeenLastCalledWith(
+        expect.objectContaining({ apiKey: "first-browser-key" }),
+      );
+      apiKey = "second-browser-key";
+      yield* generation.generateCommitMessage(input);
+      expect(cursorSdkMock.create).toHaveBeenLastCalledWith(
+        expect.objectContaining({ apiKey: "second-browser-key" }),
+      );
+    }).pipe(Effect.provide(fsLayer)),
   );
 
-  it.effect("uses ACP model config options instead of raw CLI model ids", () => {
-    const requestLogDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "lecturn-cursor-text-log-"),
-    );
-    const requestLogPath = NodePath.join(requestLogDir, "requests.ndjson");
+  it.effect("uses the Cursor SDK prompt API with model parameters and API key", () =>
+    Effect.gen(function* () {
+      const textGeneration = yield* makeCursorTextGeneration(cursorSettings, {
+        CURSOR_API_KEY: "test-cursor-key",
+      });
 
-    return withFakeAcpAgent(
-      {
-        LECTURN_ACP_REQUEST_LOG_PATH: requestLogPath,
-        LECTURN_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
-          subject: "Add generated commit message",
-          body: "- verify cursor acp model config path",
+      const generated = yield* textGeneration.generateCommitMessage({
+        cwd: process.cwd(),
+        branch: "feature/cursor-text-generation",
+        stagedSummary: "M apps/server/src/textGeneration/CursorTextGeneration.ts",
+        stagedPatch:
+          "diff --git a/apps/server/src/textGeneration/CursorTextGeneration.ts b/apps/server/src/textGeneration/CursorTextGeneration.ts",
+        modelSelection: createModelSelection(ProviderInstanceId.make("cursor"), "gpt-5.4", [
+          { id: "thinking", value: "high" },
+          { id: "contextWindow", value: "1m" },
+          { id: "fastMode", value: true },
+        ]),
+      });
+
+      expect(generated.subject).toBe("Add generated commit message");
+      expect(generated.body).toBe("- verify cursor sdk text generation");
+
+      expect(cursorSdkMock.prompt).toHaveBeenCalledTimes(1);
+      const [prompt, options] = (
+        cursorSdkMock.prompt.mock.calls as unknown as Array<[string, unknown]>
+      )[0]!;
+      expect(prompt).toContain("Staged patch:");
+      expect(options).toEqual({
+        apiKey: "test-cursor-key",
+        mode: "plan",
+        model: {
+          id: "gpt-5.4",
+          params: [
+            { id: "thinking", value: "high" },
+            { id: "context", value: "1m" },
+            { id: "fast", value: "true" },
+          ],
+        },
+        local: {
+          cwd: "/isolated-text-generation",
+          autoReview: false,
+          sandboxOptions: { enabled: true },
+          settingSources: [],
+          enableAgentRetries: true,
+        },
+      });
+    }).pipe(Effect.provide(fsLayer)),
+  );
+
+  it.effect("continues in the temp directory when the SDK cannot sandbox", () =>
+    Effect.gen(function* () {
+      cursorSdkMock.create.mockImplementationOnce(async () => {
+        throw new Error(
+          "Local SDK sandboxing was requested, but sandboxing is not supported in this environment. Disable local.sandboxOptions.enabled or remove ~/.cursor/sandbox.json to run without sandboxing.",
+        );
+      });
+      const textGeneration = yield* makeCursorTextGeneration(cursorSettings, {
+        CURSOR_API_KEY: "test-cursor-key",
+      });
+
+      const generated = yield* textGeneration.generateCommitMessage({
+        cwd: process.cwd(),
+        branch: "feature/cursor-text-generation",
+        stagedSummary: "M apps/server/src/textGeneration/CursorTextGeneration.ts",
+        stagedPatch: "diff --git a/apps/server/src/textGeneration/CursorTextGeneration.ts",
+        modelSelection: createModelSelection(ProviderInstanceId.make("cursor"), "composer-2"),
+      });
+
+      expect(generated.subject).toBe("Add generated commit message");
+      expect(cursorSdkMock.create).toHaveBeenCalledTimes(2);
+      expect(cursorSdkMock.create.mock.calls[0]?.[0]).toMatchObject({
+        local: { sandboxOptions: { enabled: true } },
+      });
+      expect(cursorSdkMock.create.mock.calls[1]?.[0]).toMatchObject({
+        local: {
+          cwd: "/isolated-text-generation",
+          autoReview: false,
+          sandboxOptions: { enabled: false },
+          settingSources: [],
+          enableAgentRetries: true,
+        },
+      });
+    }).pipe(Effect.provide(fsLayer)),
+  );
+
+  it.effect("does not retry Agent.create for errors other than an unsupported sandbox", () =>
+    Effect.gen(function* () {
+      cursorSdkMock.create.mockImplementationOnce(async () => {
+        throw new Error("Cursor SDK network down");
+      });
+      const textGeneration = yield* makeCursorTextGeneration(cursorSettings, {
+        CURSOR_API_KEY: "test-cursor-key",
+      });
+
+      const error = yield* Effect.flip(
+        textGeneration.generateCommitMessage({
+          cwd: process.cwd(),
+          branch: "feature/cursor-text-generation",
+          stagedSummary: "M README.md",
+          stagedPatch: "diff --git a/README.md b/README.md",
+          modelSelection: createModelSelection(ProviderInstanceId.make("cursor"), "composer-2"),
         }),
-      },
-      (textGeneration) =>
-        Effect.gen(function* () {
-          const generated = yield* textGeneration.generateCommitMessage({
-            cwd: process.cwd(),
-            branch: "feature/cursor-text-generation",
-            stagedSummary: "M apps/server/src/textGeneration/CursorTextGeneration.ts",
-            stagedPatch:
-              "diff --git a/apps/server/src/textGeneration/CursorTextGeneration.ts b/apps/server/src/textGeneration/CursorTextGeneration.ts",
-            modelSelection: {
-              ...createModelSelection(ProviderInstanceId.make("cursor"), "gpt-5.4", [
-                { id: "reasoning", value: "xhigh" },
-                { id: "fastMode", value: true },
-                { id: "contextWindow", value: "1m" },
-              ]),
-            },
-          });
+      );
 
-          expect(generated.subject).toBe("Add generated commit message");
-          expect(generated.body).toBe("- verify cursor acp model config path");
-
-          const requests = NodeFS.readFileSync(requestLogPath, "utf8")
-            .trim()
-            .split("\n")
-            .filter((line) => line.length > 0)
-            .map(
-              (line) => JSON.parse(line) as { method?: string; params?: Record<string, unknown> },
-            );
-
-          expect(
-            requests.find((request) => request.method === "initialize")?.params?.clientCapabilities,
-          ).toMatchObject({
-            _meta: {
-              parameterizedModelPicker: true,
-            },
-          });
-          expect(
-            requests.some(
-              (request) =>
-                request.method === "session/set_config_option" &&
-                request.params?.configId === "model" &&
-                request.params?.value === "gpt-5.4",
-            ),
-          ).toBe(true);
-          expect(
-            requests.some(
-              (request) =>
-                request.method === "session/set_config_option" &&
-                request.params?.configId === "reasoning" &&
-                request.params?.value === "extra-high",
-            ),
-          ).toBe(true);
-          expect(
-            requests.some(
-              (request) =>
-                request.method === "session/set_config_option" &&
-                request.params?.configId === "context" &&
-                request.params?.value === "1m",
-            ),
-          ).toBe(true);
-          expect(
-            requests.some(
-              (request) =>
-                request.method === "session/set_config_option" &&
-                request.params?.configId === "fast" &&
-                request.params?.value === "true",
-            ),
-          ).toBe(true);
-          expect(
-            requests.find((request) => request.method === "session/prompt")?.params?.prompt,
-          ).toEqual(
-            expect.arrayContaining([
-              expect.objectContaining({
-                type: "text",
-                text: expect.stringContaining("Staged patch:"),
-              }),
-            ]),
-          );
-
-          NodeFS.rmSync(requestLogDir, { recursive: true, force: true });
-        }),
-    );
-  });
+      expect(error.detail).toBe("Cursor SDK text generation failed.");
+      expect(cursorSdkMock.create).toHaveBeenCalledTimes(1);
+    }).pipe(Effect.provide(fsLayer)),
+  );
 
   it.effect("accepts json objects with extra assistant text around them", () =>
-    withFakeAcpAgent(
-      {
-        LECTURN_ACP_PROMPT_RESPONSE_TEXT:
+    Effect.gen(function* () {
+      cursorSdkMock.prompt.mockResolvedValueOnce({
+        id: "run-cursor-text-generation-test",
+        status: "finished",
+        result:
           'Sure, here is the JSON:\n```json\n{\n  "subject": "Update README dummy comment with attribution and date",\n  "body": ""\n}\n```\nDone.',
-      },
-      (textGeneration) =>
-        Effect.gen(function* () {
-          const generated = yield* textGeneration.generateCommitMessage({
-            cwd: process.cwd(),
-            branch: "feature/cursor-noisy-json",
-            stagedSummary: "M README.md",
-            stagedPatch: "diff --git a/README.md b/README.md",
-            modelSelection: {
-              instanceId: ProviderInstanceId.make("cursor"),
-              model: "composer-2",
-            },
-          });
+      });
+      const textGeneration = yield* makeCursorTextGeneration(cursorSettings, {
+        CURSOR_API_KEY: "test-cursor-key",
+      });
 
-          expect(generated.subject).toBe("Update README dummy comment with attribution and date");
-          expect(generated.body).toBe("");
-        }),
-    ),
+      const generated = yield* textGeneration.generateCommitMessage({
+        cwd: process.cwd(),
+        branch: "feature/cursor-noisy-json",
+        stagedSummary: "M README.md",
+        stagedPatch: "diff --git a/README.md b/README.md",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("cursor"),
+          model: "composer-2",
+        },
+      });
+
+      expect(generated.subject).toBe("Update README dummy comment with attribution and date");
+      expect(generated.body).toBe("");
+    }).pipe(Effect.provide(fsLayer)),
   );
 
-  it.effect("generates thread titles through Cursor ACP text generation", () =>
-    withFakeAcpAgent(
-      {
-        LECTURN_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
-          title: '"Trim reconnect spinner status after resume."',
-        }),
-      },
-      (textGeneration) =>
-        Effect.gen(function* () {
-          const generated = yield* textGeneration.generateThreadTitle({
+  it.effect("generates thread titles through Cursor SDK text generation", () =>
+    Effect.gen(function* () {
+      cursorSdkMock.prompt.mockResolvedValueOnce({
+        id: "run-cursor-title-generation-test",
+        status: "finished",
+        result: '{"title":"\\"Trim reconnect spinner status after resume.\\""}',
+      });
+      const textGeneration = yield* makeCursorTextGeneration(cursorSettings, {
+        CURSOR_API_KEY: "test-cursor-key",
+      });
+
+      const generated = yield* textGeneration.generateThreadTitle({
+        cwd: process.cwd(),
+        message: "Fix the reconnect spinner after a resumed session.",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("cursor"),
+          model: "composer-2",
+        },
+      });
+
+      expect(generated.title).toBe("Trim reconnect spinner status after resume.");
+    }).pipe(Effect.provide(fsLayer)),
+  );
+
+  for (const status of ["error", "cancelled"] as const) {
+    it.effect(`rejects a ${status} Cursor SDK run that includes valid title JSON`, () =>
+      Effect.gen(function* () {
+        const promptResult = {
+          id: "run-cursor-partial-title-test",
+          status,
+          result: '{"title":"Partial title from a failed run."}',
+        } satisfies RunResult;
+        cursorSdkMock.prompt.mockResolvedValueOnce(promptResult);
+        const generation = yield* makeCursorTextGeneration(cursorSettings, {
+          CURSOR_API_KEY: "test-cursor-key",
+        });
+        const failure = yield* Effect.flip(
+          generation.generateThreadTitle({
             cwd: process.cwd(),
             message: "Fix the reconnect spinner after a resumed session.",
             modelSelection: {
               instanceId: ProviderInstanceId.make("cursor"),
               model: "composer-2",
             },
-          });
+          }),
+        );
+        expect(failure).toBeInstanceOf(TextGenerationError);
+        expect(failure.operation).toBe("generateThreadTitle");
+        expect(failure.detail).toBe(
+          status === "cancelled"
+            ? "Cursor SDK request was cancelled."
+            : "Cursor SDK request finished with an error.",
+        );
+        expect(cursorSdkMock.close).toHaveBeenCalledOnce();
+      }).pipe(Effect.provide(fsLayer)),
+    );
+  }
 
-          expect(generated.title).toBe("Trim reconnect spinner status after resume.");
+  it.effect("fails closed when ambient sandbox policy can expand write access", () =>
+    Effect.gen(function* () {
+      hasCustomPolicy = true;
+      const generation = yield* makeCursorTextGeneration(cursorSettings, { CURSOR_API_KEY: "key" });
+      const failure = yield* Effect.flip(
+        generation.generateThreadTitle({
+          cwd: "/real-workspace",
+          message: "Title",
+          modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "composer-2" },
         }),
-    ),
+      );
+      expect(failure.detail).toContain("custom ~/.cursor/sandbox.json");
+      expect(cursorSdkMock.prompt).not.toHaveBeenCalled();
+    }).pipe(Effect.provide(fsLayer)),
   );
 
-  // Closing the runtime on Windows is taskkill /F, which never lets the mock
-  // agent reach its exit handler, so there is no exit log to assert on.
-  it.effect.skipIf(HostProcessPlatform.defaultValue() === "win32")(
-    "closes the ACP child process after text generation completes",
-    () => {
-      const exitLogDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "lecturn-cursor-text-exit-log-"),
+  it.effect("cancels the native run when text generation times out", () =>
+    Effect.gen(function* () {
+      let started!: () => void;
+      const called = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      cursorSdkMock.prompt.mockImplementationOnce(() => {
+        started();
+        return new Promise(() => {});
+      });
+      const generation = yield* makeCursorTextGeneration(cursorSettings, { CURSOR_API_KEY: "key" });
+      const result = yield* generation
+        .generateThreadTitle({
+          cwd: "/real-workspace",
+          message: "Title",
+          modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "composer-2" },
+        })
+        .pipe(Effect.flip, Effect.forkScoped);
+      yield* Effect.promise(() => called);
+      yield* TestClock.adjust("180 seconds");
+      expect((yield* Fiber.join(result)).detail).toContain("timed out");
+      expect(cursorSdkMock.cancel).toHaveBeenCalledOnce();
+      expect(cursorSdkMock.close).toHaveBeenCalledOnce();
+    }).pipe(Effect.provide(fsLayer), Effect.scoped),
+  );
+
+  for (const phase of ["create", "send"] as const) {
+    it.effect(`times out pending ${phase} and releases its late SDK resource`, () =>
+      Effect.gen(function* () {
+        let started!: () => void;
+        const called = new Promise<void>((resolve) => {
+          started = resolve;
+        });
+        let resolveLate!: (resource: unknown) => void;
+        const pending = new Promise<unknown>((resolve) => {
+          resolveLate = resolve;
+        });
+        const wait = vi.fn();
+        const agent = {
+          close: cursorSdkMock.close,
+          [Symbol.asyncDispose]: async () => {
+            cursorSdkMock.close();
+          },
+          send: async () => {
+            started();
+            return pending;
+          },
+        };
+        cursorSdkMock.create.mockImplementation(async () => {
+          if (phase === "create") {
+            started();
+            return pending;
+          }
+          return agent;
+        });
+        const generation = yield* makeCursorTextGeneration(cursorSettings, {
+          CURSOR_API_KEY: "key",
+        });
+        const result = yield* generation
+          .generateThreadTitle({
+            cwd: "/real-workspace",
+            message: "Title",
+            modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "composer-2" },
+          })
+          .pipe(Effect.flip, Effect.forkScoped);
+        yield* Effect.promise(() => called);
+        yield* TestClock.adjust("180 seconds");
+        expect((yield* Fiber.join(result)).detail).toContain("timed out");
+        let cleanup!: () => void;
+        const cleaned = new Promise<void>((resolve) => {
+          cleanup = resolve;
+        });
+        if (phase === "create") cursorSdkMock.close.mockImplementationOnce(cleanup);
+        else
+          cursorSdkMock.cancel.mockImplementationOnce(async () => {
+            cleanup();
+          });
+        resolveLate(
+          phase === "create" ? agent : { status: "running", cancel: cursorSdkMock.cancel, wait },
+        );
+        yield* Effect.promise(() => cleaned);
+        expect(cursorSdkMock.close).toHaveBeenCalledOnce();
+        expect(wait).not.toHaveBeenCalled();
+        if (phase === "send") expect(cursorSdkMock.cancel).toHaveBeenCalledOnce();
+      }).pipe(Effect.provide(fsLayer), Effect.scoped),
+    );
+  }
+
+  it.effect("requires CURSOR_API_KEY before calling the SDK", () =>
+    Effect.gen(function* () {
+      const textGeneration = yield* makeCursorTextGeneration(cursorSettings, {});
+
+      const error = yield* Effect.flip(
+        textGeneration.generateCommitMessage({
+          cwd: process.cwd(),
+          branch: "feature/cursor-api-key",
+          stagedSummary: "M README.md",
+          stagedPatch: "diff --git a/README.md b/README.md",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("cursor"),
+            model: "composer-2",
+          },
+        }),
       );
-      const exitLogPath = NodePath.join(exitLogDir, "exit.log");
 
-      return withFakeAcpAgent(
-        {
-          LECTURN_ACP_EXIT_LOG_PATH: exitLogPath,
-          LECTURN_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
-            subject: "Close runtime after generation",
-            body: "",
-          }),
-        },
-        (textGeneration) =>
-          Effect.gen(function* () {
-            const generated = yield* textGeneration.generateCommitMessage({
-              cwd: process.cwd(),
-              branch: "feature/cursor-runtime-close",
-              stagedSummary: "M apps/server/src/textGeneration/CursorTextGeneration.ts",
-              stagedPatch:
-                "diff --git a/apps/server/src/textGeneration/CursorTextGeneration.ts b/apps/server/src/textGeneration/CursorTextGeneration.ts",
-              modelSelection: {
-                instanceId: ProviderInstanceId.make("cursor"),
-                model: "composer-2",
-              },
-            });
+      expect(error.detail).toBe("Sign in with Cursor or add CURSOR_API_KEY in provider settings.");
+      expect(cursorSdkMock.prompt).not.toHaveBeenCalled();
+    }).pipe(Effect.provide(fsLayer)),
+  );
+  const workflowInput = {
+    cwd: "/real-workspace",
+    message:
+      '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
+    modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "composer-2" },
+  };
 
-            expect(generated.subject).toBe("Close runtime after generation");
+  for (const [label, output] of [
+    ["malformed JSON", "not JSON"],
+    ["missing stage", '{"summary":"Working","confidence":0.8}'],
+    ["missing confidence", '{"summary":"Working","stage":"build"}'],
+    ["invalid stage", '{"summary":"Working","stage":"completed","confidence":0.8}'],
+    ["confidence above one", '{"summary":"Working","stage":"build","confidence":1.1}'],
+    ["negative confidence", '{"summary":"Working","stage":"build","confidence":-0.1}'],
+  ] as const) {
+    it.effect(`rejects workflow inference with ${label}`, () =>
+      Effect.gen(function* () {
+        cursorSdkMock.prompt.mockResolvedValueOnce({
+          id: "run-cursor-workflow-invalid",
+          status: "finished",
+          result: output,
+        });
+        const generation = yield* makeCursorTextGeneration(cursorSettings, {
+          CURSOR_API_KEY: "key",
+        });
+        const failure = yield* Effect.flip(generation.generateWorkflowSummary(workflowInput));
+        expect(failure.operation).toBe("generateWorkflowSummary");
+      }).pipe(Effect.provide(fsLayer)),
+    );
+  }
 
-            const exitLog = yield* waitForFileContent(exitLogPath);
-            expect(exitLog).toContain("exit:0");
+  it.effect("discards workflow inference when the run uses a tool", () =>
+    Effect.gen(function* () {
+      cursorSdkMock.toolStep = true;
+      cursorSdkMock.prompt.mockResolvedValueOnce({
+        id: "run-cursor-workflow-tool",
+        status: "finished",
+        result: '{"summary":"Ready","stage":"accept","confidence":0.8}',
+      });
+      const generation = yield* makeCursorTextGeneration(cursorSettings, { CURSOR_API_KEY: "key" });
+      const failure = yield* Effect.flip(generation.generateWorkflowSummary(workflowInput));
+      expect(failure.detail).toContain("used a tool");
+    }).pipe(Effect.provide(fsLayer)),
+  );
 
-            NodeFS.rmSync(exitLogDir, { recursive: true, force: true });
-          }),
+  it.effect("generates an isolated workflow summary without title truncation", () =>
+    Effect.gen(function* () {
+      cursorSdkMock.prompt.mockResolvedValueOnce({
+        id: "run-cursor-workflow",
+        status: "finished",
+        result:
+          '{"summary":" API complete.\\n CI remains pending. ","stage":"accept","confidence":0.8}',
+      });
+      const generation = yield* makeCursorTextGeneration(cursorSettings, { CURSOR_API_KEY: "key" });
+      const result = yield* generation.generateWorkflowSummary(workflowInput);
+      expect(result).toEqual({
+        summary: "API complete. CI remains pending.",
+        stage: "accept",
+        confidence: 0.8,
+      });
+      expect(tempPrefixes).toEqual(["lecturn-workflow-inference-"]);
+      expect(cursorSdkMock.create).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          mode: "plan",
+          local: expect.objectContaining({ cwd: "/isolated-text-generation", settingSources: [] }),
+        }),
       );
-    },
+    }).pipe(Effect.provide(fsLayer)),
+  );
+
+  it.effect("names non-inference temp workspaces for Lecturn", () =>
+    Effect.gen(function* () {
+      cursorSdkMock.prompt.mockResolvedValueOnce({
+        id: "run-cursor-title",
+        status: "finished",
+        result: '{"title":"Lecturn title"}',
+      });
+      const generation = yield* makeCursorTextGeneration(cursorSettings, { CURSOR_API_KEY: "key" });
+      yield* generation.generateThreadTitle({
+        cwd: "/real-workspace",
+        message: "Title",
+        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "composer-2" },
+      });
+      expect(tempPrefixes).toEqual(["lecturn-cursor-text-"]);
+    }).pipe(Effect.provide(fsLayer)),
   );
 });

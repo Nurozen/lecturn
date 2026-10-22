@@ -9,8 +9,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { isEntrypoint } from "./entrypoint.ts";
 import { symlinksSupported } from "@lecturn/shared/testing/symlinks";
 
+// Resolved, like Node resolves module URLs: macOS tmpdir is itself a symlink.
 const makeTempDir = () =>
-  NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "lecturn-entrypoint-test-"));
+  NodeFS.realpathSync(
+    NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "lecturn-entrypoint-test-")),
+  );
 
 describe("isEntrypoint", () => {
   it("uses the runtime answer when Node provides one", () => {

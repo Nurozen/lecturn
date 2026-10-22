@@ -7,7 +7,7 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
-import { ModelSelection } from "./orchestration.ts";
+import { ModelSelection } from "./modelSelection.ts";
 import { DecisionFundingChallengeResult, DecisionFundingStatusResult } from "./relayDecisions.ts";
 
 export const DEFAULT_DECISION_TRACKING_DESCRIPTION =

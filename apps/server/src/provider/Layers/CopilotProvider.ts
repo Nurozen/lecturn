@@ -172,7 +172,10 @@ export const resolveCopilotAuth = Effect.fn("resolveCopilotAuth")(function* (
       clientInfo: { name: "lecturn-provider-probe", version: "0.0.0" },
     });
     yield* acp.initialize();
-    yield* acp.request("authenticate", { methodId: COPILOT_AUTH_METHOD_ID });
+    // The negotiated login operation: v1 `authenticate` (Copilot CLI 1.0.x) or v2 `auth/login`.
+    yield* acp.authenticate === undefined
+      ? acp.request("authenticate", { methodId: COPILOT_AUTH_METHOD_ID })
+      : acp.authenticate(COPILOT_AUTH_METHOD_ID);
   }).pipe(Effect.scoped, Effect.timeoutOption(AUTH_PROBE_TIMEOUT_MS), Effect.exit);
 
   if (Exit.isSuccess(handshake) && Option.isSome(handshake.value)) {

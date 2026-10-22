@@ -1,37 +1,56 @@
+/**
+ * Stave space locks, admission and the runtime fence against the real V2
+ * orchestrator and project service: Stave operations hold a space while
+ * thread commands in it are refused, unrelated commands advance, and runtime
+ * starts drain or stay fenced through teardown and reconciliation.
+ */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import {
   CommandId,
-  DEFAULT_PROVIDER_INTERACTION_MODE,
   ProjectId,
-  ProviderDriverKind,
   ProviderInstanceId,
-  type ProviderSession,
+  ProviderSessionId,
   ThreadId,
 } from "@lecturn/contracts";
-import { Deferred, Effect, Fiber, FileSystem, Layer, Option, Path, Stream } from "effect";
-import { ServerConfig } from "../config.ts";
-import { OrchestrationEngineLive } from "../orchestration/Layers/OrchestrationEngine.ts";
-import { OrchestrationProjectionPipelineLive } from "../orchestration/Layers/ProjectionPipeline.ts";
-import { OrchestrationProjectionSnapshotQueryLive } from "../orchestration/Layers/ProjectionSnapshotQuery.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
-import { OrchestrationProjectionPipeline } from "../orchestration/Services/ProjectionPipeline.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import * as ThreadBackgroundLiveness from "../orchestration/ThreadBackgroundLiveness.ts";
-import * as ThreadPlanProgress from "../orchestration/ThreadPlanProgress.ts";
-import { OrchestrationCommandReceiptRepositoryLive } from "../persistence/Layers/OrchestrationCommandReceipts.ts";
-import { OrchestrationEventStoreLive } from "../persistence/Layers/OrchestrationEventStore.ts";
+import { Deferred, Effect, Fiber, FileSystem, Layer, Option, Path, Schema, Stream } from "effect";
+
+import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
+import * as ServerConfig from "../config.ts";
+import * as GitWorkflow from "../git/GitWorkflowService.ts";
+import * as McpSessionRegistryTestkit from "../mcp/McpSessionRegistry.testkit.ts";
+import {
+  LecturnHookRejectedError,
+  LecturnOrchestrationHooks,
+} from "../orchestration-v2/fork/LecturnOrchestrationHooks.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import {
+  LecturnOrchestrationHooksLayerLive,
+  OrchestrationEventInfrastructureLayerLive,
+  OrchestrationV2LayerLive,
+  ProjectServiceLayerLive,
+} from "../orchestration-v2/runtimeLayer.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { StaveLifecycleRepositoryLive } from "../persistence/Layers/StaveLifecycleRepository.ts";
 import { OrchestrationEventStore } from "../persistence/Services/OrchestrationEventStore.ts";
 import { ProcessRunner } from "../processRunner.ts";
+import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 import { RepositoryIdentityResolver } from "../project/RepositoryIdentityResolver.ts";
-import { ProviderService } from "../provider/Services/ProviderService.ts";
+import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstanceRegistry.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as StaveAdmission from "../stave/StaveAdmission.ts";
 import { StaveCli } from "../stave/StaveCli.ts";
 import { StaveConfigReader } from "../stave/StaveConfigReader.ts";
 import * as StaveExecution from "../stave/StaveExecution.ts";
 import { layerWith, StaveOperations } from "../stave/StaveOperations.ts";
+import { StaveOrchestration, type StaveRuntimeSession } from "../stave/StaveOrchestration.ts";
+import * as StaveOrchestrationHooks from "../stave/StaveOrchestrationHooks.ts";
+import * as StaveOrchestrationLive from "../stave/StaveOrchestrationLive.ts";
+import * as StaveProjectShells from "../stave/StaveProjectShells.ts";
 import * as StaveRuntimeFence from "../stave/StaveRuntimeFence.ts";
 import * as StaveSpaceLock from "../stave/StaveSpaceLock.ts";
 import * as StaveWorkspaceReader from "../stave/StaveWorkspaceReader.ts";
@@ -40,36 +59,160 @@ import { TerminalManager } from "../terminal/Manager.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 
 const now = "2026-09-01T00:00:00.000Z";
+const NO_ENRICHMENT = {
+  repositoryIdentity: null,
+  repositoryIdentityResolved: true,
+} as unknown as ProjectEnrichmentService.ProjectEnrichment;
+const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" };
 
-function makeEngineLayer(
-  root: string,
-  pipeline: Layer.Layer<
-    OrchestrationProjectionPipeline,
-    Layer.Error<typeof OrchestrationProjectionPipelineLive>,
-    Layer.Services<typeof OrchestrationProjectionPipelineLive>
-  > = OrchestrationProjectionPipelineLive,
-) {
-  return OrchestrationEngineLive.pipe(
-    Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
-    Layer.provide(pipeline),
-    Layer.provideMerge(ThreadBackgroundLiveness.layer),
+/** The V2 orchestrator and project service with the shared hook registry. */
+const OrchestrationLayer = Layer.mergeAll(
+  OrchestrationV2LayerLive.pipe(Layer.provide(ProjectServiceLayerLive)),
+  ProjectServiceLayerLive,
+  ProjectStore.layer,
+  ProjectionStore.layer,
+).pipe(
+  Layer.provideMerge(LecturnOrchestrationHooksLayerLive),
+  Layer.provide(McpSessionRegistryTestkit.layer),
+  Layer.provide(Layer.mock(CheckpointStore.CheckpointStore)({})),
+  Layer.provide(ServerSettings.layerTest()),
+  Layer.provide(
+    Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
+      getInstance: () => Effect.succeed(undefined),
+      listInstances: Effect.succeed([]),
+      listUnavailable: Effect.succeed([]),
+      streamChanges: Stream.empty,
+      subscribeChanges: Effect.never,
+    }),
+  ),
+  Layer.provide(Layer.mock(GitWorkflow.GitWorkflowService)({ pruneWorktrees: () => Effect.void })),
+  Layer.provide(
+    Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
+      resolveLink: () => Effect.die("unused"),
+    }),
+  ),
+);
+
+const configReaderFor = (root: string, agentWorkDir: string) =>
+  Layer.succeed(StaveConfigReader, {
+    load: Effect.succeed({
+      configPath: `${root}/config.yaml`,
+      exists: true,
+      root,
+      agentWorkDir,
+      bareReposDir: `${root}/bare`,
+      repos: [],
+      source: "fs-fallback" as const,
+    }),
+    invalidate: Effect.void,
+  });
+
+/** Overrides the provider runtime half of StaveOrchestration with fakes. */
+const withRuntimeSessions = (sessions: {
+  readonly list: () => Effect.Effect<ReadonlyArray<StaveRuntimeSession>>;
+  readonly stopUnder: (root: string) => Effect.Effect<void>;
+}) =>
+  Layer.effect(
+    StaveOrchestration,
+    Effect.map(StaveOrchestration, (service) => ({
+      ...service,
+      listSessions: sessions.list,
+      stopSessionsUnder: sessions.stopUnder,
+    })),
+  ).pipe(Layer.provide(StaveOrchestrationLive.layer)) as typeof StaveOrchestrationLive.layer;
+
+function makeStack(input: {
+  readonly root: string;
+  readonly agentWorkDir: string;
+  readonly cli: Layer.Layer<StaveCli>;
+  readonly terminals: Layer.Layer<TerminalManager>;
+  readonly fence?: Layer.Layer<
+    StaveRuntimeFence.StaveRuntimeFence,
+    never,
+    | StaveAdmission.StaveAdmission
+    | StaveProjectShells.StaveProjectShells
+    | FileSystem.FileSystem
+    | Path.Path
+  >;
+  readonly orchestration?: typeof StaveOrchestrationLive.layer;
+}) {
+  const staveOrchestration = input.orchestration ?? StaveOrchestrationLive.layer;
+  return Layer.mergeAll(layerWith({}), StaveOrchestrationHooks.layer).pipe(
+    Layer.provideMerge(staveOrchestration),
+    Layer.provideMerge(OrchestrationLayer),
+    Layer.provideMerge(input.fence ?? StaveRuntimeFence.layerNoop),
+    Layer.provideMerge(StaveProjectShells.layer),
     Layer.provideMerge(StaveAdmission.layer),
-    Layer.provideMerge(StaveSpaceLock.layer),
-    Layer.provideMerge(StaveLifecycleRepositoryLive),
-    Layer.provide(ThreadPlanProgress.layer),
-    Layer.provideMerge(OrchestrationEventStoreLive),
-    Layer.provide(OrchestrationCommandReceiptRepositoryLive),
-    Layer.provideMerge(StaveWorkspaceReader.layer),
-    Layer.provide(
-      Layer.succeed(RepositoryIdentityResolver, { resolve: () => Effect.succeed(null) }),
+    Layer.provideMerge(
+      Layer.mergeAll(
+        ProjectStore.layer,
+        OrchestrationEventInfrastructureLayerLive,
+        Layer.mock(ProjectEnrichmentService.ProjectEnrichmentService)({
+          peek: () => Effect.succeed(NO_ENRICHMENT),
+          getAvailable: () => Effect.succeed(NO_ENRICHMENT),
+          invalidate: () => Effect.void,
+        }),
+        StaveSpaceLock.layer,
+        StaveLifecycleRepositoryLive,
+        StaveWorkspaceReader.layer.pipe(
+          Layer.provide(
+            Layer.succeed(RepositoryIdentityResolver, { resolve: () => Effect.succeed(null) }),
+          ),
+        ),
+        AnalyticsService.layerTest,
+        StaveExecution.layerNoop,
+        configReaderFor(input.root, input.agentWorkDir),
+        input.cli,
+        input.terminals,
+        Layer.mock(ProcessRunner)({}),
+        WorkspacePaths.layer,
+      ),
     ),
-    Layer.provide(SqlitePersistenceMemory),
-    Layer.provideMerge(ServerConfig.layerTest(root, { prefix: "stave-lock-engine-" })),
+    Layer.provideMerge(SqlitePersistenceMemory),
+    Layer.provideMerge(ServerConfig.layerTest(input.root, { prefix: "stave-lock-v2-" })),
   );
 }
 
+const createProject = (projectId: ProjectId, workspaceRoot: string) =>
+  Effect.flatMap(ProjectService.ProjectService, (projects) =>
+    projects.create({
+      commandId: CommandId.make(`create-${projectId}`),
+      projectId,
+      title: projectId,
+      workspaceRoot,
+    }),
+  );
+
+const createThread = (threadId: ThreadId, projectId: ProjectId) =>
+  Effect.flatMap(Orchestrator.OrchestratorV2, (orchestrator) =>
+    orchestrator.dispatch({
+      type: "thread.create",
+      createdBy: "user",
+      creationSource: "web",
+      commandId: CommandId.make(`create-${threadId}`),
+      threadId,
+      projectId,
+      title: "Original",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+    }),
+  );
+
+const isHookRejection = Schema.is(LecturnHookRejectedError);
+const hookRejection = (error: unknown): LecturnHookRejectedError | undefined => {
+  let current: unknown = error;
+  while (typeof current === "object" && current !== null) {
+    if (isHookRejection(current)) return current;
+    current = "cause" in current ? current.cause : undefined;
+  }
+  return undefined;
+};
+
 it.effect(
-  "refuses a contended rename while operations refresh and unrelated commands advance",
+  "refuses a contended space command while operations refresh and unrelated commands advance",
   () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -93,99 +236,61 @@ it.effect(
       const threadId = ThreadId.make("stave-thread");
       const ordinaryProjectId = ProjectId.make("ordinary-project");
       const ordinaryThreadId = ThreadId.make("ordinary-thread");
-      let gateCommit = false;
       let mutationCalls = 0;
-      const pipeline = Layer.effect(
-        OrchestrationProjectionPipeline,
-        Effect.map(OrchestrationProjectionPipeline, (service) => ({
-          ...service,
-          projectEventDeferred: (event) =>
+      const testLayer = makeStack({
+        root,
+        agentWorkDir,
+        cli: Layer.mock(StaveCli)({
+          spaceRetarget: () =>
             Effect.gen(function* () {
-              if (
-                gateCommit &&
-                event.type === "thread.meta-updated" &&
-                event.aggregateId === threadId
-              ) {
-                yield* Deferred.succeed(commitEntered, undefined);
-                yield* Deferred.await(releaseCommit);
-              }
-              return yield* service.projectEventDeferred(event);
+              mutationCalls += 1;
+              yield* Deferred.succeed(cliEntered, undefined);
+              yield* Deferred.await(releaseCli);
+              return {
+                spaceId: "demo",
+                spacePath: space,
+                manifest: { id: "demo", createdAt: now, repos: [], memories: [] },
+                notes: [],
+              };
             }),
-        })),
-      ).pipe(Layer.provide(OrchestrationProjectionPipelineLive));
-      const core = makeEngineLayer(root, pipeline);
-      const testLayer = layerWith({}).pipe(
-        Layer.provideMerge(core),
-        Layer.provide(
-          Layer.mergeAll(
-            AnalyticsService.layerTest,
-            StaveExecution.layerNoop,
-            StaveRuntimeFence.layerNoop,
-            Layer.mock(StaveCli)({
-              spaceRetarget: () =>
-                Effect.gen(function* () {
-                  mutationCalls += 1;
-                  yield* Deferred.succeed(cliEntered, undefined);
-                  yield* Deferred.await(releaseCli);
-                  return {
-                    spaceId: "demo",
-                    spacePath: space,
-                    manifest: { id: "demo", createdAt: now, repos: [], memories: [] },
-                    notes: [],
-                  };
-                }),
-            }),
-            Layer.succeed(StaveConfigReader, {
-              load: Effect.succeed({
-                configPath: path.join(root, "config.yaml"),
-                exists: true,
-                root,
-                agentWorkDir,
-                bareReposDir: path.join(root, "bare"),
-                repos: [],
-                source: "fs-fallback" as const,
-              }),
-              invalidate: Effect.void,
-            }),
-            Layer.mock(ProcessRunner)({}),
-            Layer.mock(ProviderService)({}),
-            Layer.mock(TerminalManager)({}),
-            WorkspacePaths.layer,
-          ),
-        ),
-      );
+        }),
+        terminals: Layer.mock(TerminalManager)({}),
+      });
       yield* Effect.gen(function* () {
-        const engine = yield* OrchestrationEngineService;
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
         const operations = yield* StaveOperations;
         const lock = yield* StaveSpaceLock.StaveSpaceLock;
-        const snapshots = yield* ProjectionSnapshotQuery;
         const events = yield* OrchestrationEventStore;
+        const hooks = yield* LecturnOrchestrationHooks;
         for (const [id, workspaceRoot, thread] of [
           [projectId, space, threadId],
           [ordinaryProjectId, unrelatedRoot, ordinaryThreadId],
         ] as const) {
-          yield* engine.dispatch({
-            type: "project.create",
-            commandId: CommandId.make(`create-${id}`),
-            projectId: id,
-            title: id,
-            workspaceRoot,
-            createdAt: now,
-          });
-          yield* engine.dispatch({
-            type: "thread.create",
-            commandId: CommandId.make(`create-${thread}`),
-            projectId: id,
-            threadId: thread,
-            title: "Original",
-            modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
-            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-            runtimeMode: "full-access",
-            branch: null,
-            worktreePath: null,
-            createdAt: now,
-          });
+          yield* createProject(id, workspaceRoot);
+          yield* createThread(thread, id);
         }
+        // Registered after Stave's contribution, so it runs inside its lock.
+        let gateCommit = false;
+        yield* hooks.register({
+          name: "test-commit-gate",
+          aroundCommand: (admission, commit) =>
+            gateCommit &&
+            admission.scope === "thread" &&
+            admission.command.type === "thread.pin" &&
+            admission.command.threadId === threadId
+              ? Deferred.succeed(commitEntered, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseCommit)),
+                  Effect.andThen(commit),
+                )
+              : commit,
+        });
+        const pin = (id: ThreadId, commandId: string) =>
+          orchestrator.dispatch({
+            type: "thread.pin",
+            commandId: CommandId.make(commandId),
+            threadId: id,
+          });
+
         const mutation = yield* operations
           .run({
             operationId: "retarget-held-root",
@@ -199,48 +304,33 @@ it.effect(
           })
           .pipe(Stream.runCollect, Effect.forkChild);
         yield* Deferred.await(cliEntered);
-        const refused = yield* engine
-          .dispatch({
-            type: "thread.meta.update",
-            commandId: CommandId.make("refused-rename"),
-            threadId,
-            title: "Blocked",
-          })
-          .pipe(Effect.flip);
-        expect(refused._tag).toBe("OrchestrationCommandInvariantError");
-        expect(refused.message).toContain("Retry when it finishes");
-        yield* engine.dispatch({
-          type: "thread.meta.update",
-          commandId: CommandId.make("unrelated-rename"),
-          threadId: ordinaryThreadId,
-          title: "Advanced",
-        });
-        const during = yield* snapshots.getSnapshot();
-        expect(during.threads.find((thread) => thread.id === threadId)?.title).toBe("Original");
-        expect(during.threads.find((thread) => thread.id === ordinaryThreadId)?.title).toBe(
-          "Advanced",
-        );
+        const refused = yield* pin(threadId, "refused-pin").pipe(Effect.flip);
+        expect(hookRejection(refused)?.reason).toContain("Retry when it finishes");
+        yield* pin(ordinaryThreadId, "unrelated-pin");
+        expect((yield* orchestrator.getThreadShell(threadId))?.pinnedAt ?? null).toBeNull();
+        expect((yield* orchestrator.getThreadShell(ordinaryThreadId))?.pinnedAt).not.toBeNull();
         expect(Option.isNone(yield* lock.tryWithSpaceLock(space, Effect.void))).toBe(true);
         yield* Deferred.succeed(releaseCli, undefined);
         const progress = yield* Fiber.join(mutation);
         expect(progress.at(-1)?.kind).toBe("finished");
         expect(mutationCalls).toBe(1);
-        const persisted = yield* events.readAll().pipe(Stream.runCollect);
+        const persisted = yield* events
+          .readApplicationEvents({
+            afterSequence: 0,
+            throughSequence: yield* events.latestApplicationSequence,
+          })
+          .pipe(Stream.runCollect);
         expect(
           persisted.filter(
-            (event) => event.type === "project.refreshed" && event.aggregateId === projectId,
+            (event) =>
+              "aggregateKind" in event &&
+              event.type === "project.refreshed" &&
+              event.aggregateId === projectId,
           ),
         ).toHaveLength(1);
 
         gateCommit = true;
-        const accepted = yield* engine
-          .dispatch({
-            type: "thread.meta.update",
-            commandId: CommandId.make("accepted-rename"),
-            threadId,
-            title: "After operation",
-          })
-          .pipe(Effect.forkChild);
+        const accepted = yield* pin(threadId, "accepted-pin").pipe(Effect.forkChild);
         yield* Deferred.await(commitEntered);
         expect(
           Option.isNone(
@@ -252,9 +342,7 @@ it.effect(
         expect(yield* lock.tryWithSpaceLock(space, Effect.succeed("available"))).toEqual(
           Option.some("available"),
         );
-        expect(
-          (yield* snapshots.getSnapshot()).threads.find((thread) => thread.id === threadId)?.title,
-        ).toBe("After operation");
+        expect((yield* orchestrator.getThreadShell(threadId))?.pinnedAt).not.toBeNull();
       }).pipe(Effect.provide(testLayer));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
@@ -292,9 +380,9 @@ it.effect(
       const releaseReconciliation = yield* Deferred.make<void>();
       const calls: string[] = [];
       const checkedStarts: string[] = [];
-      const sessions: ProviderSession[] = [];
+      const sessions: StaveRuntimeSession[] = [];
       const stopped: ThreadId[] = [];
-      const runtimeLayer = Layer.effect(
+      const fence = Layer.effect(
         StaveRuntimeFence.StaveRuntimeFence,
         Effect.gen(function* () {
           const admission = yield* StaveAdmission.StaveAdmission;
@@ -320,111 +408,80 @@ it.effect(
           });
         }),
       );
-      const testLayer = layerWith({}).pipe(
-        Layer.provideMerge(runtimeLayer),
-        Layer.provideMerge(makeEngineLayer(root)),
-        Layer.provide(
-          Layer.mergeAll(
-            AnalyticsService.layerTest,
-            StaveExecution.layerNoop,
-            Layer.succeed(StaveConfigReader, {
-              load: Effect.succeed({
-                configPath: path.join(root, "config.yaml"),
-                exists: true,
-                root,
-                agentWorkDir,
-                bareReposDir: path.join(root, "bare"),
-                repos: [],
-                source: "fs-fallback" as const,
-              }),
-              invalidate: Effect.void,
+      const testLayer = makeStack({
+        root,
+        agentWorkDir,
+        fence,
+        orchestration: withRuntimeSessions({
+          list: () =>
+            Effect.sync(() => {
+              calls.push("enumerate");
+              expect(sessions.map((session) => session.threadId)).toEqual([pendingThread]);
+              return sessions.slice();
             }),
-            Layer.mock(StaveCli)({
-              spaceArchive: () =>
-                Effect.gen(function* () {
-                  calls.push("archive");
-                  yield* Deferred.succeed(cliEntered, undefined);
-                  yield* Deferred.await(releaseCli);
-                  yield* fs.rename(space, archive).pipe(Effect.orDie);
-                  return { spaceId: "demo", archivedPath: archive, memory: "keep", notes: [] };
-                }),
-              spaceList: (input) =>
-                Effect.gen(function* () {
-                  calls.push("reconcile");
-                  yield* Deferred.succeed(reconciliationEntered, undefined);
-                  yield* Deferred.await(releaseReconciliation);
-                  return input?.archived
-                    ? [
-                        {
-                          id: "demo",
-                          path: archive,
-                          isSaga: false,
-                          repos: [],
-                          archived: true,
-                          logicalId: "demo",
-                          archiveBasename: "demo",
-                          manifestCreatedAt: now,
-                          manifestVersion: 1,
-                          memories: [],
-                        },
-                      ]
-                    : [];
-                }),
+          stopUnder: (cwd) =>
+            Effect.sync(() => {
+              expect(cwd).toBe(space);
+              calls.push("providers.stop");
+              stopped.push(...sessions.map((session) => session.threadId));
+              sessions.length = 0;
             }),
-            Layer.mock(ProcessRunner)({}),
-            Layer.mock(ProviderService)({
-              listSessions: () =>
-                Effect.sync(() => {
-                  calls.push("enumerate");
-                  expect(sessions.map((session) => session.threadId)).toEqual([pendingThread]);
-                  return sessions.slice();
-                }),
-              stopSessionsUnder: (cwd) =>
-                Effect.sync(() => {
-                  expect(cwd).toBe(space);
-                  calls.push("providers.stop");
-                  stopped.push(...sessions.map((session) => session.threadId));
-                  sessions.length = 0;
-                }),
+        }),
+        cli: Layer.mock(StaveCli)({
+          spaceArchive: () =>
+            Effect.gen(function* () {
+              calls.push("archive");
+              yield* Deferred.succeed(cliEntered, undefined);
+              yield* Deferred.await(releaseCli);
+              yield* fs.rename(space, archive).pipe(Effect.orDie);
+              return { spaceId: "demo", archivedPath: archive, memory: "keep", notes: [] };
             }),
-            Layer.mock(TerminalManager)({
-              closeSessionsUnder: () =>
-                Effect.sync(() => {
-                  calls.push("terminals.stop");
-                }),
+          spaceList: (input) =>
+            Effect.gen(function* () {
+              calls.push("reconcile");
+              yield* Deferred.succeed(reconciliationEntered, undefined);
+              yield* Deferred.await(releaseReconciliation);
+              return input?.archived
+                ? [
+                    {
+                      id: "demo",
+                      path: archive,
+                      isSaga: false,
+                      repos: [],
+                      archived: true,
+                      logicalId: "demo",
+                      archiveBasename: "demo",
+                      manifestCreatedAt: now,
+                      manifestVersion: 1,
+                      memories: [],
+                    },
+                  ]
+                : [];
             }),
-            WorkspacePaths.layer,
-          ),
-        ),
-      );
+        }),
+        terminals: Layer.mock(TerminalManager)({
+          closeSessionsUnder: () =>
+            Effect.sync(() => {
+              calls.push("terminals.stop");
+            }),
+        }),
+      });
       yield* Effect.gen(function* () {
-        const engine = yield* OrchestrationEngineService;
         const operations = yield* StaveOperations;
-        const fence = yield* StaveRuntimeFence.StaveRuntimeFence;
+        const runtimeFence = yield* StaveRuntimeFence.StaveRuntimeFence;
         const lock = yield* StaveSpaceLock.StaveSpaceLock;
-        yield* engine.dispatch({
-          type: "project.create",
-          commandId: CommandId.make("runtime-project-create"),
-          projectId,
-          title: "Runtime lifecycle",
-          workspaceRoot: space,
-          createdAt: now,
-        });
-        const pending = yield* fence
+        yield* createProject(projectId, space);
+        const pending = yield* runtimeFence
           .withStart(
             repo,
             Effect.gen(function* () {
               yield* Deferred.succeed(startEntered, undefined);
               yield* Deferred.await(releaseStart);
               sessions.push({
-                provider: ProviderDriverKind.make("codex"),
-                providerInstanceId: ProviderInstanceId.make("codex"),
+                providerSessionId: ProviderSessionId.make("pending-session"),
                 threadId: pendingThread,
                 cwd: repo,
-                status: "ready",
-                runtimeMode: "full-access",
-                createdAt: now,
-                updatedAt: now,
+                active: false,
               });
               calls.push("start.complete");
             }),
@@ -448,7 +505,7 @@ it.effect(
         expect(
           yield* lock.tryWithSpaceLock(space, Effect.succeed("not held while draining")),
         ).toEqual(Option.some("not held while draining"));
-        const refusedWhileDraining = yield* fence
+        const refusedWhileDraining = yield* runtimeFence
           .withStart(repo, Effect.die("must not start while draining"))
           .pipe(Effect.flip);
         expect(refusedWhileDraining._tag).toBe("StaveRuntimeFenced");
@@ -465,18 +522,18 @@ it.effect(
         expect(stopped).toEqual([pendingThread]);
         expect(Option.isNone(yield* lock.tryWithSpaceLock(space, Effect.void))).toBe(true);
         for (const cwd of [repo, path.join(alias, "repo")]) {
-          const refusal = yield* fence
+          const refusal = yield* runtimeFence
             .withStart(cwd, Effect.die("must not start during teardown"))
             .pipe(Effect.flip);
           expect(refusal._tag).toBe("StaveRuntimeFenced");
         }
-        expect(yield* fence.withStart(unrelated, Effect.succeed("unrelated started"))).toBe(
+        expect(yield* runtimeFence.withStart(unrelated, Effect.succeed("unrelated started"))).toBe(
           "unrelated started",
         );
         yield* Deferred.succeed(releaseCli, undefined);
         yield* Deferred.await(reconciliationEntered);
         const admissionCount = checkedStarts.length;
-        const refusedDuringReconciliation = yield* fence
+        const refusedDuringReconciliation = yield* runtimeFence
           .withStart(space, Effect.die("must not start during reconciliation"))
           .pipe(Effect.flip);
         expect(refusedDuringReconciliation.message).toContain("transitioning");
@@ -488,12 +545,12 @@ it.effect(
         expect(yield* lock.tryWithSpaceLock(space, Effect.succeed("released"))).toEqual(
           Option.some("released"),
         );
-        const after = yield* fence
+        const after = yield* runtimeFence
           .withStart(space, Effect.die("archived admission must refuse"))
           .pipe(Effect.flip);
         expect(after.message).toContain("Unarchive");
         expect(checkedStarts).toHaveLength(admissionCount + 1);
-        expect(yield* fence.withStart(unrelated, Effect.succeed("still available"))).toBe(
+        expect(yield* runtimeFence.withStart(unrelated, Effect.succeed("still available"))).toBe(
           "still available",
         );
       }).pipe(Effect.provide(testLayer));
@@ -524,97 +581,70 @@ it.effect(
       const reconciling = yield* Deferred.make<void>();
       const finishReconcile = yield* Deferred.make<void>();
       const stopped: string[] = [];
-      const testLayer = layerWith({}).pipe(
-        Layer.provideMerge(StaveRuntimeFence.layer),
-        Layer.provideMerge(makeEngineLayer(root)),
-        Layer.provide(
-          Layer.mergeAll(
-            AnalyticsService.layerTest,
-            StaveExecution.layerNoop,
-            Layer.succeed(StaveConfigReader, {
-              load: Effect.succeed({
-                configPath: path.join(root, "config.yaml"),
-                exists: true,
-                root,
-                agentWorkDir,
-                bareReposDir: path.join(root, "bare"),
-                repos: [],
-                source: "fs-fallback" as const,
-              }),
-              invalidate: Effect.void,
+      const testLayer = makeStack({
+        root,
+        agentWorkDir,
+        fence: StaveRuntimeFence.layer,
+        orchestration: withRuntimeSessions({
+          list: () => Effect.succeed([]),
+          stopUnder: (cwd) =>
+            Effect.sync(() => {
+              stopped.push(`provider:${cwd}`);
             }),
-            Layer.mock(StaveCli)({
-              spaceRestore: () =>
-                Effect.gen(function* () {
-                  expect(stopped).toEqual([
-                    `provider:${archive}`,
-                    `terminal:${archive}`,
-                    `provider:${live}`,
-                    `terminal:${live}`,
-                  ]);
-                  yield* fs.rename(archive, live).pipe(Effect.orDie);
-                  yield* Deferred.succeed(rebuilding, undefined);
-                  yield* Deferred.await(finishRebuild);
-                  return {
-                    spaceId: "demo",
-                    spacePath: live,
-                    manifest: { id: "demo", createdAt: now, repos: [], memories: [] },
-                    notes: [],
-                  };
-                }),
-              spaceList: (input) =>
-                Effect.gen(function* () {
-                  yield* Deferred.succeed(reconciling, undefined);
-                  yield* Deferred.await(finishReconcile);
-                  return input?.archived
-                    ? []
-                    : [
-                        {
-                          id: "demo",
-                          path: live,
-                          isSaga: false,
-                          repos: [],
-                          archived: false,
-                          logicalId: "demo",
-                          manifestCreatedAt: now,
-                          manifestVersion: 1,
-                          memories: [],
-                        },
-                      ];
-                }),
+        }),
+        cli: Layer.mock(StaveCli)({
+          spaceRestore: () =>
+            Effect.gen(function* () {
+              expect(stopped).toEqual([
+                `provider:${archive}`,
+                `terminal:${archive}`,
+                `provider:${live}`,
+                `terminal:${live}`,
+              ]);
+              yield* fs.rename(archive, live).pipe(Effect.orDie);
+              yield* Deferred.succeed(rebuilding, undefined);
+              yield* Deferred.await(finishRebuild);
+              return {
+                spaceId: "demo",
+                spacePath: live,
+                manifest: { id: "demo", createdAt: now, repos: [], memories: [] },
+                notes: [],
+              };
             }),
-            Layer.mock(ProcessRunner)({}),
-            Layer.mock(ProviderService)({
-              listSessions: () => Effect.succeed([]),
-              stopSessionsUnder: (cwd) =>
-                Effect.sync(() => {
-                  stopped.push(`provider:${cwd}`);
-                }),
+          spaceList: (input) =>
+            Effect.gen(function* () {
+              yield* Deferred.succeed(reconciling, undefined);
+              yield* Deferred.await(finishReconcile);
+              return input?.archived
+                ? []
+                : [
+                    {
+                      id: "demo",
+                      path: live,
+                      isSaga: false,
+                      repos: [],
+                      archived: false,
+                      logicalId: "demo",
+                      manifestCreatedAt: now,
+                      manifestVersion: 1,
+                      memories: [],
+                    },
+                  ];
             }),
-            Layer.mock(TerminalManager)({
-              closeSessionsUnder: (cwd) =>
-                Effect.sync(() => {
-                  stopped.push(`terminal:${cwd}`);
-                }),
+        }),
+        terminals: Layer.mock(TerminalManager)({
+          closeSessionsUnder: (cwd) =>
+            Effect.sync(() => {
+              stopped.push(`terminal:${cwd}`);
             }),
-            WorkspacePaths.layer,
-          ),
-        ),
-      );
+        }),
+      });
       yield* Effect.gen(function* () {
-        const engine = yield* OrchestrationEngineService;
         const operations = yield* StaveOperations;
-        const fence = yield* StaveRuntimeFence.StaveRuntimeFence;
+        const runtimeFence = yield* StaveRuntimeFence.StaveRuntimeFence;
         const locks = yield* StaveSpaceLock.StaveSpaceLock;
-        const snapshots = yield* ProjectionSnapshotQuery;
-        yield* engine.dispatch({
-          type: "project.create",
-          commandId: CommandId.make("restore-original-create"),
-          projectId,
-          title: "Archived",
-          workspaceRoot: archive,
-          createdAt: now,
-        });
+        const projects = yield* ProjectService.ProjectService;
+        yield* createProject(projectId, archive);
         const restoring = yield* operations
           .run({
             operationId: "restore-both-roots",
@@ -639,30 +669,23 @@ it.effect(
           path.join(live, "repo"),
           path.join(alias, "repo"),
         ].entries()) {
-          const admission = yield* engine
-            .dispatch({
-              type: "project.create",
-              commandId: CommandId.make(`racing-import-${index}`),
-              projectId: ProjectId.make(`racing-${index}`),
-              title: "Racing import",
-              workspaceRoot: cwd,
-              createdAt: now,
-            })
-            .pipe(Effect.flip);
-          expect(admission._tag).toBe("OrchestrationCommandInvariantError");
+          const admission = yield* createProject(ProjectId.make(`racing-${index}`), cwd).pipe(
+            Effect.flip,
+          );
+          expect(hookRejection(admission)).toBeDefined();
           expect(
-            (yield* fence
+            (yield* runtimeFence
               .withStart(cwd, Effect.die("provider must not start during rebuild"))
               .pipe(Effect.flip))._tag,
           ).toBe("StaveRuntimeFenced");
         }
         for (const cwd of [archive, live])
           expect(Option.isNone(yield* locks.tryWithSpaceLock(cwd, Effect.void))).toBe(true);
-        expect((yield* snapshots.getShellSnapshot()).projects).toHaveLength(1);
+        expect(yield* projects.listShells()).toHaveLength(1);
         yield* Deferred.succeed(finishRebuild, undefined);
         yield* Deferred.await(reconciling);
         expect(
-          (yield* fence
+          (yield* runtimeFence
             .withStart(live, Effect.die("provider must not start during reconciliation"))
             .pipe(Effect.flip))._tag,
         ).toBe("StaveRuntimeFenced");
@@ -670,12 +693,9 @@ it.effect(
         yield* Deferred.succeed(finishReconcile, undefined);
         expect((yield* Fiber.join(restoring)).at(-1)?.kind).toBe("finished");
         expect(
-          (yield* snapshots.getShellSnapshot()).projects.map((project) => [
-            project.id,
-            project.workspaceRoot,
-          ]),
+          (yield* projects.listShells()).map((project) => [project.id, project.workspaceRoot]),
         ).toEqual([[projectId, live]]);
-        expect(yield* fence.withStart(live, Effect.succeed("provider may start"))).toBe(
+        expect(yield* runtimeFence.withStart(live, Effect.succeed("provider may start"))).toBe(
           "provider may start",
         );
         for (const cwd of [archive, live])

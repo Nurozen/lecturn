@@ -125,6 +125,8 @@ export function limitSidebarCollisionToScope(
  * A zero scaleY marks rows/markers to hide while retaining their measured nodes. */
 export function createSidebarSortingStrategy(input: {
   items: readonly SidebarListItem[];
+  /** Suspend the reorder preview while the thread is dragged out as context. */
+  enabled?: boolean;
   settledOrder: readonly string[];
   /** Time-ordered inbox (Working beta): where the lifted row would land. */
   activeOrder?: readonly string[];
@@ -140,6 +142,10 @@ export function createSidebarSortingStrategy(input: {
    * markers stay zero height at rest, so nothing is reserved until pickup. */
   boundaryLabelHeight?: number;
 }) {
+  if (input.enabled === false) {
+    const suspended: SortingStrategy = () => stationary;
+    return Object.assign(suspended, { measureOverflow: () => 0 });
+  }
   const { items } = input;
   const indices = new Map(items.map((item, index) => [sidebarListItemId(item), index]));
   let previous: Pick<Layout, "rects" | "activeIndex" | "overIndex"> | undefined;

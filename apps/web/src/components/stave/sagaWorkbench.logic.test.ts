@@ -2,8 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   EnvironmentId,
   ProjectId,
-  ThreadId,
-  TurnId,
+  RunId,
   ProviderInstanceId,
   type SagaWorkbenchWorkflow,
 } from "@lecturn/contracts";
@@ -106,18 +105,16 @@ describe("saga agent activity", () => {
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     interactionMode: "default",
-    latestTurn: null,
-    session: null,
+    latestRun: null,
+    runtime: null,
   };
   const running: typeof idle = {
     ...idle,
-    session: {
-      threadId: ThreadId.make("thread-1"),
+    runtime: {
       status: "running",
+      activeRunId: RunId.make("run-1"),
       providerName: "Codex",
       providerInstanceId: ProviderInstanceId.make("codex"),
-      runtimeMode: "full-access",
-      activeTurnId: TurnId.make("turn-1"),
       lastError: null,
       updatedAt: "2026-01-01T00:00:00Z",
     },
@@ -172,11 +169,13 @@ describe("saga agent activity", () => {
     expect(activity.get(idle.projectId)?.kind).toBe("idle");
     expect(activity.get(otherProject)?.kind).toBe("running");
   });
-  it("preserves background monitoring and work without confusing them with completion", () => {
-    expect(sagaThreadActivity({ ...idle, backgroundLiveness: "working" })?.label).toBe("Running");
-    expect(sagaThreadActivity({ ...idle, backgroundLiveness: "monitoring" })?.label).toBe(
-      "Monitoring",
-    );
+  it("keeps outstanding background tasks running without confusing them with completion", () => {
+    expect(
+      sagaThreadActivity({
+        ...idle,
+        pendingBackgroundTasks: [{ kind: "command", taskId: "task-1" }],
+      }),
+    ).toEqual({ kind: "running", label: "Background tasks" });
   });
 });
 

@@ -62,7 +62,7 @@ export const make = Effect.gen(function* () {
       decision_id: C.DecisionId;
       project_id: C.ProjectId;
       revision: number;
-    }>`SELECT q.* FROM decision_relation_queue q JOIN decision_project_settings s ON s.project_id=q.project_id AND s.enabled=1 JOIN thread_decisions d ON d.id=q.decision_id AND d.revision=q.revision JOIN projection_threads t ON t.thread_id=d.thread_id AND t.deleted_at IS NULL JOIN projection_projects p ON p.project_id=q.project_id AND p.deleted_at IS NULL WHERE q.state='queued' ORDER BY q.updated_at,q.decision_id LIMIT 1`;
+    }>`SELECT q.* FROM decision_relation_queue q JOIN decision_project_settings s ON s.project_id=q.project_id AND s.enabled=1 JOIN thread_decisions d ON d.id=q.decision_id AND d.revision=q.revision JOIN orchestration_v2_projection_threads t ON t.thread_id=d.thread_id AND t.deleted_at IS NULL JOIN projection_projects p ON p.project_id=q.project_id AND p.deleted_at IS NULL WHERE q.state='queued' ORDER BY q.updated_at,q.decision_id LIMIT 1`;
     const row = rows[0];
     if (!row) return;
     const funding = yield* cloud.status("decisions");

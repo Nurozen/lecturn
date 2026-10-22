@@ -30,11 +30,7 @@ import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
 } from "@lecturn/client-runtime/state/thread-search";
-import {
-  type EnvironmentId,
-  resolveEnvironmentMachineKind,
-  type SidebarProjectGroupingMode,
-} from "@lecturn/contracts";
+import { type EnvironmentId, type SidebarProjectGroupingMode } from "@lecturn/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useFocusEffect } from "@react-navigation/native";
@@ -61,7 +57,8 @@ import { mobilePreferencesAtom } from "../../state/preferences";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import { usePendingThreadOrder } from "../../state/thread-order";
-import { environmentServerConfigsAtom } from "../../state/server";
+import { environmentServerConfigsAtom, threadListEnvironmentsAtom } from "../../state/server";
+import { createThreadForkSupportAtom, threadForkSupported } from "./threadForkSupport";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { useQueuedThreadKeys } from "../../state/use-thread-outbox";
 import {
@@ -177,6 +174,8 @@ interface HomeScreenProps {
 // container on demand with the dev-only warning one pass ahead of the
 // measured-height pool expansion. The old tallest-card estimate (~92) fired
 // that warning on every ordinary shelf expand, so the average wins.
+const threadForkSupportAtom = createThreadForkSupportAtom(environmentServerConfigsAtom);
+
 const ESTIMATED_THREAD_LIST_V2_ROW_HEIGHT = 72;
 /** Hierarchy groups only supply project/saga structure here (row order comes
     from the v2 partition), so their internal thread order is fixed. */
@@ -255,7 +254,7 @@ function deriveEmptyState(props: {
 
   return {
     title: "No threads yet",
-    detail: "Create a task to start a new coding session in one of your connected projects.",
+    detail: "Create a task to start a new coding runtime in one of your connected projects.",
     loading: false,
   };
 }
@@ -665,89 +664,19 @@ export function HomeScreen(props: HomeScreenProps) {
   );
   // Threads on servers without the settlement capability never classify as
   // settled (the user could neither un-settle nor pin them).
-  const serverConfigs = useAtomValue(environmentServerConfigsAtom);
-  const settlementEnvironmentIds = useMemo(() => {
-    const supported = new Set<EnvironmentId>();
-    for (const [environmentId, config] of serverConfigs) {
-      if (config.environment.capabilities.threadSettlement === true) {
-        supported.add(environmentId);
-      }
-    }
-    return supported;
-  }, [serverConfigs]);
-  const snoozeEnvironmentIds = useMemo(() => {
-    const supported = new Set<EnvironmentId>();
-    for (const [environmentId, config] of serverConfigs) {
-      if (config.environment.capabilities.threadSnooze === true) {
-        supported.add(environmentId);
-      }
-    }
-    return supported;
-  }, [serverConfigs]);
-  const pinningEnvironmentIds = useMemo(() => {
-    const supported = new Set<EnvironmentId>();
-    for (const [environmentId, config] of serverConfigs) {
-      if (config.environment.capabilities.threadPinning === true) {
-        supported.add(environmentId);
-      }
-    }
-    return supported;
-  }, [serverConfigs]);
-  const autoSettleOptOutEnvironmentIds = useMemo(() => {
-    const supported = new Set<EnvironmentId>();
-    for (const [environmentId, config] of serverConfigs) {
-      if (config.environment.capabilities.threadAutoSettleOptOut === true) {
-        supported.add(environmentId);
-      }
-    }
-    return supported;
-  }, [serverConfigs]);
-  const pinReorderEnvironmentIds = useMemo(() => {
-    const supported = new Set<EnvironmentId>();
-    for (const [environmentId, config] of serverConfigs) {
-      if (config.environment.capabilities.threadPinReorder === true) {
-        supported.add(environmentId);
-      }
-    }
-    return supported;
-  }, [serverConfigs]);
-  const activeReorderEnvironmentIds = useMemo(() => {
-    const supported = new Set<EnvironmentId>();
-    for (const [environmentId, config] of serverConfigs) {
-      if (config.environment.capabilities.threadActiveReorder === true) {
-        supported.add(environmentId);
-      }
-    }
-    return supported;
-  }, [serverConfigs]);
-  const titleRegenerationEnvironmentIds = useMemo(() => {
-    const supported = new Set<EnvironmentId>();
-    for (const [environmentId, config] of serverConfigs) {
-      if (config.environment.capabilities.threadTitleRegeneration === true) {
-        supported.add(environmentId);
-      }
-    }
-    return supported;
-  }, [serverConfigs]);
-  const forkingEnvironmentIds = useMemo(() => {
-    const supported = new Set<EnvironmentId>();
-    for (const [environmentId, config] of serverConfigs) {
-      if (config.environment.capabilities.threadForking === true) {
-        supported.add(environmentId);
-      }
-    }
-    return supported;
-  }, [serverConfigs]);
-  const machineByEnvironmentId = useMemo(
-    () =>
-      new Map(
-        [...serverConfigs].map(
-          ([environmentId, config]) =>
-            [environmentId, resolveEnvironmentMachineKind(config)] as const,
-        ),
-      ),
-    [serverConfigs],
-  );
+  const listEnvironments = useAtomValue(threadListEnvironmentsAtom);
+  const {
+    providersByEnvironmentId,
+    machineByEnvironmentId,
+    settlementEnvironmentIds,
+    snoozeEnvironmentIds,
+    pinningEnvironmentIds,
+    autoSettleOptOutEnvironmentIds,
+    pinReorderEnvironmentIds,
+    activeReorderEnvironmentIds,
+    titleRegenerationEnvironmentIds,
+  } = listEnvironments;
+  const forkSupport = useAtomValue(threadForkSupportAtom);
   const moveScopes = useMemo(
     () =>
       threadMoveScopes(
@@ -787,7 +716,7 @@ export function HomeScreen(props: HomeScreenProps) {
   );
   // Reference-stable provider glyphs: a fresh object per render would break
   // the memoized rows' props comparison on every parent render.
-  const resolveProviderInstance = useThreadRowProviderInstanceResolver(serverConfigs);
+  const resolveProviderInstance = useThreadRowProviderInstanceResolver(providersByEnvironmentId);
   // Up/down menu availability for every card, computed once per owning
   // project group per section (see computeScopedThreadMoveAvailability):
   // per-thread planner calls made list construction quadratic, and this list
@@ -799,15 +728,8 @@ export function HomeScreen(props: HomeScreenProps) {
         allThreads: allThreadShells,
         section,
         pendingOrder,
-        reorderableEnvironmentIds: new Set(
-          [...serverConfigs].flatMap(([id, config]) =>
-            (section === "pinned"
-              ? config.environment.capabilities.threadPinReorder
-              : config.environment.capabilities.threadActiveReorder) === true
-              ? [id]
-              : [],
-          ),
-        ),
+        reorderableEnvironmentIds:
+          section === "pinned" ? pinReorderEnvironmentIds : activeReorderEnvironmentIds,
         ordered: getThreadListV2OrderedSection({
           threads: props.threads,
           section,
@@ -820,7 +742,8 @@ export function HomeScreen(props: HomeScreenProps) {
       });
     return new Map([...sectionAvailability("pinned"), ...sectionAvailability("active")]);
   }, [
-    serverConfigs,
+    pinReorderEnvironmentIds,
+    activeReorderEnvironmentIds,
     allThreadShells,
     moveScopes,
     props.threads,
@@ -1040,13 +963,6 @@ export function HomeScreen(props: HomeScreenProps) {
         );
       }
       const thread = item.item.thread;
-      const provider = serverConfigs
-        .get(thread.environmentId)
-        ?.providers.find(
-          (candidate) =>
-            candidate.instanceId ===
-            (thread.session?.providerInstanceId ?? thread.modelSelection.instanceId),
-        );
       return (
         <ThreadListV2Row
           nested
@@ -1066,6 +982,7 @@ export function HomeScreen(props: HomeScreenProps) {
             scopedProjectKey(thread.environmentId, thread.projectId),
           )}
           providerInstance={resolveProviderInstance(thread)}
+          providers={providersByEnvironmentId.get(thread.environmentId)}
           environmentLabel={
             Object.keys(props.savedConnectionsById).length > 1
               ? (props.savedConnectionsById[thread.environmentId]?.environmentLabel ?? null)
@@ -1083,10 +1000,7 @@ export function HomeScreen(props: HomeScreenProps) {
           onDeleteThread={handleDeleteThread}
           onArchiveThread={props.onArchiveThread}
           onForkThread={handleForkThread}
-          forkSupported={
-            forkingEnvironmentIds.has(thread.environmentId) &&
-            provider?.conversationFork === "native"
-          }
+          forkSupported={threadForkSupported(forkSupport, thread)}
           onRenameThread={handleRenameThread}
           onRegenerateThreadTitle={handleRegenerateThreadTitle}
           titleRegenerationSupported={titleRegenerationEnvironmentIds.has(thread.environmentId)}
@@ -1118,7 +1032,7 @@ export function HomeScreen(props: HomeScreenProps) {
     [
       handleDeleteThread,
       handleForkThread,
-      forkingEnvironmentIds,
+      forkSupport,
       activeReorderEnvironmentIds,
       handleMoveThread,
       handlePinThread,
@@ -1134,6 +1048,7 @@ export function HomeScreen(props: HomeScreenProps) {
       handleSetThreadAutoSettle,
       autoSettleOptOutEnvironmentIds,
       pinningEnvironmentIds,
+      autoSettleOptOutEnvironmentIds,
       machineByEnvironmentId,
       pinReorderEnvironmentIds,
       projectByKey,
@@ -1144,9 +1059,9 @@ export function HomeScreen(props: HomeScreenProps) {
       props.onNewThreadOnBranch,
       props.savedConnectionsById,
       resolveProviderInstance,
+      providersByEnvironmentId,
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
-      serverConfigs,
       updateGroupDisplay,
       props.onNewThreadInProject,
       threadSearchMatchByKey,
@@ -1217,7 +1132,8 @@ export function HomeScreen(props: HomeScreenProps) {
       queuedThreadKeys,
       projectByKey,
       projectTitleByProjectKey: v2ProjectTitleByProjectKey,
-      serverConfigs,
+      listEnvironments,
+      forkSupport,
       savedConnectionsById: props.savedConnectionsById,
       searchQuery: props.searchQuery,
       threadSearchMatchByKey,
@@ -1227,7 +1143,8 @@ export function HomeScreen(props: HomeScreenProps) {
       projectByKey,
       props.searchQuery,
       props.savedConnectionsById,
-      serverConfigs,
+      listEnvironments,
+      forkSupport,
       threadSearchMatchByKey,
       v2ProjectTitleByProjectKey,
     ],

@@ -50,7 +50,7 @@ export const linkPreparedEnvironmentForDecisions = Effect.fn(
         }),
     });
     const relay = yield* ManagedRelay.ManagedRelayClient;
-    const registry = yield* EnvironmentRegistry;
+    const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
     const challenge = yield* relay.createEnvironmentLinkChallenge({
       clerkToken: input.clerkToken,
       payload: {

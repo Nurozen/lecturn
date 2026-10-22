@@ -1,4 +1,5 @@
 import {
+  AcpRegistrySettings,
   AntigravitySettings,
   ClaudeSettings,
   CodexSettings,
@@ -6,19 +7,10 @@ import {
   GithubCopilotSettings,
   GrokSettings,
   OpenCodeSettings,
+  PiSettings,
   ProviderDriverKind,
 } from "@lecturn/contracts";
 import type * as Schema from "effect/Schema";
-import {
-  AntigravityIcon,
-  ClaudeAI,
-  CursorIcon,
-  GithubCopilotIcon,
-  GrokIcon,
-  type Icon,
-  OpenAI,
-  OpenCodeIcon,
-} from "../Icons";
 
 type ProviderSettingsSchema = {
   readonly fields: Readonly<Record<string, Schema.Top>>;
@@ -33,8 +25,10 @@ type ProviderSettingsSchema = {
 export interface ProviderClientDefinition {
   readonly value: ProviderDriverKind;
   readonly label: string;
-  readonly icon: Icon;
   readonly settingsSchema: ProviderSettingsSchema;
+  readonly environmentFields?: readonly ProviderEnvironmentFieldDefinition[];
+  /** Whether this driver has a built-in default instance backed by legacy settings. */
+  readonly hasDefaultInstance?: boolean;
   /**
    * Optional short label rendered as a `variant="warning"` badge next to
    * the instance title. Used to flag drivers that still ship under an
@@ -45,51 +39,72 @@ export interface ProviderClientDefinition {
   readonly badgeLabel?: string;
 }
 
-export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
+export interface ProviderEnvironmentFieldDefinition {
+  readonly name: string;
+  readonly label: string;
+  readonly description?: string;
+  readonly placeholder?: string;
+  readonly sensitive?: boolean;
+}
+
+const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
   {
     value: ProviderDriverKind.make("codex"),
     label: "Codex",
-    icon: OpenAI,
     settingsSchema: CodexSettings,
   },
   {
     value: ProviderDriverKind.make("claudeAgent"),
     label: "Claude",
-    icon: ClaudeAI,
     settingsSchema: ClaudeSettings,
   },
   {
     value: ProviderDriverKind.make("cursor"),
     label: "Cursor",
-    icon: CursorIcon,
-    badgeLabel: "Early Access",
     settingsSchema: CursorSettings,
+    environmentFields: [
+      {
+        name: "CURSOR_API_KEY",
+        label: "Cursor API key",
+        description: "Optional. Overrides browser sign-in for this provider.",
+        placeholder: "Paste API key",
+        sensitive: true,
+      },
+    ],
   },
   {
     value: ProviderDriverKind.make("grok"),
     label: "Grok",
-    icon: GrokIcon,
-    badgeLabel: "Early Access",
     settingsSchema: GrokSettings,
   },
   {
     value: ProviderDriverKind.make("githubCopilot"),
     label: "GitHub Copilot",
-    icon: GithubCopilotIcon,
     badgeLabel: "Early Access",
     settingsSchema: GithubCopilotSettings,
   },
   {
     value: ProviderDriverKind.make("opencode"),
     label: "OpenCode",
-    icon: OpenCodeIcon,
     settingsSchema: OpenCodeSettings,
   },
   {
     value: ProviderDriverKind.make("antigravity"),
     label: "Antigravity",
-    icon: AntigravityIcon,
     settingsSchema: AntigravitySettings,
+  },
+  {
+    value: ProviderDriverKind.make("pi"),
+    label: "Pi",
+    badgeLabel: "Early Access",
+    settingsSchema: PiSettings,
+  },
+  {
+    value: ProviderDriverKind.make("acpRegistry"),
+    label: "ACP Registry",
+    badgeLabel: "Early Access",
+    settingsSchema: AcpRegistrySettings,
+    hasDefaultInstance: false,
   },
 ];
 
@@ -99,6 +114,7 @@ const PROVIDER_CLIENT_DEFINITION_BY_VALUE: Partial<
   PROVIDER_CLIENT_DEFINITIONS.map((definition) => [definition.value, definition]),
 );
 
+export const DRIVER_OPTIONS = PROVIDER_CLIENT_DEFINITIONS;
 export const DRIVER_OPTION_BY_VALUE = PROVIDER_CLIENT_DEFINITION_BY_VALUE;
 export type DriverOption = ProviderClientDefinition;
 

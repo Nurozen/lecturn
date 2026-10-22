@@ -1,5 +1,5 @@
 import type { LegendListRef } from "@legendapp/list/react";
-import type { MessageId, TurnId } from "@lecturn/contracts";
+import type { MessageId, RunId } from "@lecturn/contracts";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { TimelineEntry } from "../../session-logic";
 import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
@@ -46,7 +46,7 @@ export function useAssistantCitationTarget({
   viewport: HTMLElement | null;
   historyLoading: boolean;
   loadEarlier: CitationHistoryPage | null;
-  onExpandTurn: (turnId: TurnId) => void;
+  onExpandTurn: (runId: RunId) => void;
   expandedUserMessages: ReadonlySet<MessageId>;
   onExpandUserMessage: (messageId: MessageId) => void;
   onManualNavigation: () => void;
@@ -145,7 +145,7 @@ export function useAssistantCitationTarget({
         onExpandUserMessage(source.message.id);
         return;
       case "expand-turn":
-        if (source.message.turnId) onExpandTurn(source.message.turnId);
+        if (source.message.runId) onExpandTurn(source.message.runId);
         return;
       case "wait":
         return;

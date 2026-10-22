@@ -16,7 +16,7 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
-import { ServerSettingsService } from "../serverSettings.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as BackgroundPolicy from "./BackgroundPolicy.ts";
 import * as HostPowerMonitor from "./HostPowerMonitor.ts";
 
@@ -57,7 +57,7 @@ function makeReport(overrides: Partial<ClientActivityReportInput> = {}): ClientA
 
 function makeLayer(
   hostPower: HostPowerSnapshot,
-  settingsOverrides: Parameters<typeof ServerSettingsService.layerTest>[0] = {},
+  settingsOverrides: Parameters<typeof ServerSettings.layerTest>[0] = {},
 ) {
   const hostLayer = Layer.effect(
     HostPowerMonitor.HostPowerMonitor,
@@ -75,7 +75,7 @@ function makeLayer(
     }),
   );
   return BackgroundPolicy.layer.pipe(
-    Layer.provide(Layer.merge(hostLayer, ServerSettingsService.layerTest(settingsOverrides))),
+    Layer.provide(Layer.merge(hostLayer, ServerSettings.layerTest(settingsOverrides))),
   );
 }
 
@@ -182,7 +182,7 @@ describe("BackgroundPolicy", () => {
         }),
       );
       const layer = BackgroundPolicy.layer.pipe(
-        Layer.provide(Layer.merge(hostLayer, ServerSettingsService.layerTest())),
+        Layer.provide(Layer.merge(hostLayer, ServerSettings.layerTest())),
       );
 
       yield* Effect.gen(function* () {

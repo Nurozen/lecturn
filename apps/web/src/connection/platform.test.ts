@@ -12,7 +12,7 @@ import * as Fiber from "effect/Fiber";
 import * as Stream from "effect/Stream";
 import { AtomRegistry } from "effect/unstable/reactivity";
 
-import { EnvironmentOwnedDataCleanup } from "@lecturn/client-runtime/platform";
+import { Persistence } from "@lecturn/client-runtime/platform";
 import { ThreadId } from "@lecturn/contracts";
 
 import { knownConnectAccountsAtom } from "../cloud/knownAccounts.ts";
@@ -256,7 +256,7 @@ describe("environment removal cleanup", () => {
         useTerminalUiStateStore.getState().setTerminalOpen(ref, true);
       }
 
-      const cleanup = yield* EnvironmentOwnedDataCleanup;
+      const cleanup = yield* Persistence.EnvironmentOwnedDataCleanup;
       yield* cleanup.clear(removed.environmentId);
 
       expect(Object.keys(useComposerDraftStore.getState().draftsByThreadKey)).toEqual([

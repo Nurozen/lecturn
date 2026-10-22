@@ -52,7 +52,7 @@ Terms whose meaning matters across Lecturn. Architecture and lifecycle constrain
 
 #### Stave space
 
-A project whose workspace root carries a `.stave.yaml` manifest (fork only). The root is a directory of repo checkouts rather than a repository, threads always run in the root, and git surfaces target the first `mode: edit` repo. The server derives `project.stave` from the manifest at read time in [ProjectionSnapshotQuery.ts][10]. See [stave-integration.md][28].
+A project whose workspace root carries a `.stave.yaml` manifest (fork only). The root is a directory of repo checkouts rather than a repository, threads always run in the root, and git surfaces target the first `mode: edit` repo. The server derives `project.stave` from the manifest at read time; [StaveProjectShellDecoration.ts][10] attaches it to project shells. See [stave-integration.md][28].
 
 #### Saga
 
@@ -70,23 +70,23 @@ One long Stave mutation (create a space, register a repo, remove a partial space
 
 #### Fork
 
-A new thread that continues an existing thread from a completed point. In [the contracts][1], the server-materialized `thread.fork` command produces `thread.created` plus `thread.forked` on the child aggregate, with lineage stored as `forkedFrom`. History assembly lives in [threadFork.ts][27].
+A new thread that continues an existing thread from a provider-finished run. In [the contracts][1], the `thread.fork` command produces `thread.created` plus a pending fork `context-transfer.created` on the child, with lineage stored as `forkedFrom` (the source run) and the user-facing fork point as `forkOrigin`. Planning lives in [ThreadForkService.ts][27]; the flow is in [thread forking][32].
 
 #### Fork point
 
-The turn boundary a fork continues from: through turn _N_, inclusive. It is anchored by the command's `throughTurnId` and, on the provider side, by the native turn reference recorded per completed turn. See [the contracts][1] and [threadFork.ts][27].
+The run a fork continues from, inclusive. It comes from the command's `sourcePoint` or, when the user forks at a message, from the run that `sourceMessageId` started; `forkOrigin.messageId` records that message (null for a fork at the end). On the provider side, a native fork is cut at that run's provider turn. Run-less history (V1-migrated or imported) is cut at a user message instead: `sourceMessageId` must be a run-less user message, and the cut runs through its turn (its reply, up to the next user message), so forking at a reply sends the user message that started it; `latest_stable` before any stable run takes all of it. See [the contracts][1], [ThreadForkService.ts][27], and [thread forking][32].
 
 #### Inherited history
 
-The messages, activities, proposed plans, and turns copied into a fork through the fork point, keeping their original timestamps. The `ThreadForkHistory` payload in [the contracts][1] is projected into real rows for the child by [projector.ts][4].
+The source thread's turn items through the fork point, shown above a fork marker in the child. A run fork copies nothing: the child's projection reads them from the source by following `forkedFrom` ([ProjectionStore.ts][4]). Two kinds of fork own a copy instead and have `forkedFrom` null with the parent in `forkOrigin`: V1 forks migrated by the legacy importer, and run-less forks, which copy the source's V1-migrated or imported history up to the cut and hand it to the provider as a portable `full_thread_summary` on the child's first turn.
 
 #### Imported thread
 
-A thread created from an [external session](#external-session) by the server-materialized `thread.import` command, which emits `thread.created` plus `thread.imported`. It runs on a native fork of that session cut at import time, so the original is never touched; the copied history belongs to no turn and cannot be reverted or diffed. Origin is stored as `importedFrom` in [the contracts][1], and a fork of an imported thread inherits it so its copy of that history stays protected; the flow is in [thread forking][30].
+A thread created from an [external session](#external-session) by the `thread.import` command, which emits `thread.created`, the forked provider thread, the history rows, and `thread.imported`. It runs on a native fork of that session cut at import time, so the original is never touched; the copied history belongs to no run and cannot be reverted or diffed. Origin is stored as `importedFrom` in [the contracts][1], and a fork of an imported thread inherits it so its copy of that history stays protected. A user message inside imported history is a run-less fork point, and a reply forks at its user message (see [Inherited history](#inherited-history)); the flow is in [thread forking][30].
 
 #### External session
 
-A provider session created outside Lecturn, by a provider CLI or desktop app writing to the same provider home. The read-only `externalSessions.list` RPC lists them per provider instance and hides the sessions Lecturn started itself, including the forks of imports that have not been sent to yet. Shape is in [the external session contracts][29]; per-provider behavior is in the [provider architecture][16] external sessions section.
+A provider session created outside Lecturn, by a provider CLI or desktop app writing to the same provider home. The read-only `externalSessions.list` RPC lists them per provider instance and hides the sessions Lecturn started itself, including the forks that imports bound. Shape is in [the external session contracts][29]; per-provider behavior is in the [provider architecture][16] external sessions section.
 
 ### Notifications
 
@@ -155,12 +155,13 @@ See [Lecturn Connect](lecturn-connect.md#multiple-signed-in-accounts) for the me
 
 See [composer context references](./composer-context-references.md) for the contract and lifecycle.
 
-[1]: ../../packages/contracts/src/orchestration.ts
-[4]: ../../apps/server/src/orchestration/projector.ts
-[10]: ../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts
+[1]: ../../packages/contracts/src/orchestrationV2.ts
+[4]: ../../apps/server/src/orchestration-v2/ProjectionStore.ts
+[10]: ../../apps/server/src/orchestration-v2/fork/StaveProjectShellDecoration.ts
 [16]: ./providers.md
-[27]: ../../apps/server/src/orchestration/threadFork.ts
+[27]: ../../apps/server/src/orchestration-v2/ThreadForkService.ts
 [28]: ./stave-integration.md
 [29]: ../../packages/contracts/src/externalSessions.ts
 [30]: ./thread-forking.md#importing-external-sessions
 [31]: ./pull-request-watches.md#notification-rings
+[32]: ./thread-forking.md

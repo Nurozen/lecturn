@@ -18,7 +18,7 @@ import { useComposerHandleContext } from "../composerHandleContext";
 import { assistantCitationNavigation } from "../lib/assistantCitationNavigation";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { useRightPanelStore } from "../rightPanelStore";
-import { useServerConfigs, useThreadShell, useThreadDetail } from "../state/entities";
+import { useServerConfigs, useThreadProjection, useThreadShell } from "../state/entities";
 import {
   setActiveThreadNote,
   threadNoteScopeKey,
@@ -117,7 +117,7 @@ function SavedNotesPanel({
   scope: "project" | "thread";
 }) {
   const data = useThreadNotes(threadRef);
-  const detail = useThreadDetail(threadRef);
+  const detail = useThreadProjection(threadRef);
   const [filter, setFilter] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [focused, setFocused] = useState(0);
@@ -127,9 +127,10 @@ function SavedNotesPanel({
   const container = useRef<HTMLDivElement>(null);
   const composer = useComposerHandleContext();
   const navigate = useNavigate();
+  const messages = detail?.projection.messages;
   const messageOrder = useMemo(
-    () => new Map((detail?.messages ?? []).map((message, index) => [message.id, index])),
-    [detail?.messages],
+    () => new Map<string, number>((messages ?? []).map((message, index) => [message.id, index])),
+    [messages],
   );
   const groups = useMemo(
     () => groupThreadNotes(data.notes, threadRef.threadId, scope, filter, messageOrder),

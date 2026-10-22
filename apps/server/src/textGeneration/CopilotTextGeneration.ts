@@ -122,18 +122,30 @@ export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(
       });
 
       const promptResult = yield* Effect.gen(function* () {
-        yield* runtime.start();
-        yield* applyCopilotModelSelection({
-          runtime,
-          currentModelId: undefined,
-          requestedModelId: modelSelection.model,
-          mapError: (cause) =>
-            new TextGenerationError({
-              operation,
-              detail: "Failed to set the GitHub Copilot model for text generation.",
-              cause,
-            }),
-        });
+        const started = yield* runtime.start();
+        const modelSelectionError = (cause: EffectAcpErrors.AcpError) =>
+          new TextGenerationError({
+            operation,
+            detail: "Failed to set the GitHub Copilot model for text generation.",
+            cause,
+          });
+        // Copilot CLI (ACP v1) advertises no model state, so the model goes through
+        // session/set_model; an ACP v2 agent selects it through its model option.
+        if (started.initializeResult.protocolVersion === 1) {
+          yield* applyCopilotModelSelection({
+            runtime,
+            currentModelId: undefined,
+            requestedModelId: modelSelection.model,
+            mapError: modelSelectionError,
+          });
+        } else {
+          const configOptions = yield* runtime.getConfigOptions;
+          if (configOptions.some((option) => option.category === "model")) {
+            yield* runtime
+              .setModel(modelSelection.model)
+              .pipe(Effect.mapError(modelSelectionError));
+          }
+        }
 
         return yield* runtime.prompt({
           prompt: [{ type: "text", text: prompt }],

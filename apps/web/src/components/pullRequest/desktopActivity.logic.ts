@@ -29,6 +29,27 @@ import type {
   PullRequestWatchSnapshot,
 } from "@lecturn/contracts";
 
+/** Messages of a subscribed V2 detail for one thread, if any. */
+export function threadDetailMessages(
+  details: readonly (EnvironmentThread | null)[],
+  environmentId: EnvironmentId,
+  threadId: EnvironmentThreadShell["id"],
+) {
+  return details.find(
+    (item) => item?.environmentId === environmentId && item.projection.thread.id === threadId,
+  )?.projection.messages;
+}
+
+function threadRuntimeStatus(thread: Pick<EnvironmentThreadShell, "runtime">) {
+  return thread.runtime?.status ?? null;
+}
+
+function hasBackgroundTasks(
+  thread: Partial<Pick<EnvironmentThreadShell, "pendingBackgroundTasks">>,
+): boolean {
+  return (thread.pendingBackgroundTasks?.length ?? 0) > 0;
+}
+
 export function watchActivityRows(
   values: readonly (readonly [EnvironmentId, PullRequestWatchSnapshot])[],
   threads: readonly EnvironmentThreadShell[] = [],
@@ -97,7 +118,7 @@ export function watchActivityRows(
               .slice(0, 3)
               .map((thread) =>
                 thread.id === recipient?.id
-                  ? `Agent thread: ${thread.title}\n${describeThreadActivity(thread, details.find((item) => item?.environmentId === environmentId && item.id === thread.id)?.messages)}`
+                  ? `Agent thread: ${thread.title}\n${describeThreadActivity(thread, threadDetailMessages(details, environmentId, thread.id))}`
                   : `Associated thread: ${thread.title}`,
               ),
           ]
@@ -176,14 +197,13 @@ export function threadActivityRows(
     | "projectId"
     | "title"
     | "modelSelection"
-    | "session"
+    | "runtime"
     | "archivedAt"
     | "settledOverride"
-    | "backgroundLiveness"
     | "hasPendingApprovals"
     | "hasPendingUserInput"
   > &
-    Partial<Pick<EnvironmentThreadShell, "planProgress" | "latestUserMessageAt">>)[],
+    Partial<Pick<EnvironmentThreadShell, "pendingBackgroundTasks" | "latestUserMessageAt">>)[],
   connected: ReadonlySet<EnvironmentId>,
   interactions: Readonly<Record<string, string>> = {},
 ): DesktopActivityRow[] {
@@ -195,7 +215,7 @@ export function threadActivityRows(
       .sort()
       .at(-1) ?? "";
   // Settled conversations remain in the live shell stream. Exclude them before
-  // choosing recent slots, even if stale session metadata still reports activity.
+  // choosing recent slots, even if stale runtime metadata still reports activity.
   const eligible = threads.filter(
     (thread) => !thread.archivedAt && thread.settledOverride !== "settled",
   );
@@ -214,10 +234,9 @@ export function threadActivityRows(
       (thread) =>
         recent.has(keyOf(thread)) ||
         (connected.has(thread.environmentId) &&
-          (thread.session?.status === "running" ||
-            thread.session?.status === "starting" ||
-            thread.session?.status === "error" ||
-            thread.backgroundLiveness ||
+          (isWorkingRuntime(threadRuntimeStatus(thread)) ||
+            threadRuntimeStatus(thread) === "failed" ||
+            hasBackgroundTasks(thread) ||
             thread.hasPendingApprovals ||
             thread.hasPendingUserInput)),
     )
@@ -239,15 +258,13 @@ export function threadActivityRows(
         ? "Needs approval"
         : thread.hasPendingUserInput
           ? "Needs input"
-          : thread.session?.status === "error"
+          : threadRuntimeStatus(thread) === "failed"
             ? "Agent error"
-            : thread.backgroundLiveness === "monitoring"
-              ? "Monitoring"
-              : thread.session?.status === "running" ||
-                  thread.session?.status === "starting" ||
-                  thread.backgroundLiveness === "working"
-                ? "Working"
-                : thread.session?.status === "interrupted" || thread.session?.status === "stopped"
+            : isWorkingRuntime(threadRuntimeStatus(thread))
+              ? "Working"
+              : hasBackgroundTasks(thread)
+                ? "Working · background tasks"
+                : isStoppedRuntime(threadRuntimeStatus(thread))
                   ? "Stopped"
                   : "Idle",
       actions: [
@@ -255,6 +272,16 @@ export function threadActivityRows(
         { id: "steer", label: "Steer thread" },
       ],
     }));
+}
+
+function isWorkingRuntime(status: ReturnType<typeof threadRuntimeStatus>): boolean {
+  return (
+    status === "preparing" || status === "starting" || status === "running" || status === "waiting"
+  );
+}
+
+function isStoppedRuntime(status: ReturnType<typeof threadRuntimeStatus>): boolean {
+  return status === "interrupted" || status === "cancelled";
 }
 
 /** Keep IPC publication within the shell's bounds as watch history grows. */
@@ -282,7 +309,7 @@ export function activityRowVisualState(
   row: DesktopActivityRow,
   thread?: Pick<
     EnvironmentThreadShell,
-    "hasPendingApprovals" | "hasPendingUserInput" | "session" | "settledOverride"
+    "hasPendingApprovals" | "hasPendingUserInput" | "runtime" | "settledOverride"
   >,
 ) {
   const disconnected = /^(offline|monitor unavailable) · last observed$/i.test(row.status);
@@ -296,7 +323,7 @@ export function activityRowVisualState(
             : thread?.hasPendingUserInput
               ? "needs input"
               : "",
-          thread?.session?.status === "error" ? "error" : "",
+          thread?.runtime?.status === "failed" ? "error" : "",
         ].join(" · ")
       : row.status;
   return activityVisualState({
@@ -321,9 +348,13 @@ export function contextualActivityRows(
     const thread = threads.find(
       (item) => item.environmentId === row.environmentId && item.id === row.threadId,
     );
-    const detail = details.find(
-      (item) => item?.environmentId === row.environmentId && item.id === row.threadId,
-    );
+    const messages = row.threadId
+      ? threadDetailMessages(
+          details,
+          row.environmentId as EnvironmentId,
+          row.threadId as EnvironmentThreadShell["id"],
+        )
+      : undefined;
     const label =
       project?.title ??
       project?.stave?.spaceId ??
@@ -334,16 +365,15 @@ export function contextualActivityRows(
       ...(thread?.latestUserMessageAt ? { userPromptAt: thread.latestUserMessageAt } : {}),
       userSettled: thread?.settledOverride === "settled",
       userStopped:
-        thread?.latestTurn?.state === "interrupted" ||
-        thread?.session?.status === "interrupted" ||
-        thread?.session?.status === "stopped",
+        thread?.latestRun?.status === "interrupted" ||
+        isStoppedRuntime(thread ? threadRuntimeStatus(thread) : null),
       ...(label ? { projectLabel: label.slice(0, 300) } : {}),
       ...(project && label ? { projectIcon: activityProjectIcon(label, project.projectIcon) } : {}),
       projectKind: project?.stave ? (project.stave.isSaga ? "saga" : "space") : "project",
       excerpt: (row.status === "Action failed"
         ? (row.mergeStatus ?? "Action failed")
         : thread
-          ? threadActivityExcerpt(thread, detail?.messages)
+          ? threadActivityExcerpt(thread, messages)
           : row.subtitle
       ).slice(0, 180),
     };

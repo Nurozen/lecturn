@@ -4,8 +4,8 @@
  *
  * The per-provider work lives on `ProviderInstance.listExternalSessions` and
  * `ProviderInstance.importExternalSession`; this module resolves the instance,
- * hands the lister every resume cursor Lecturn owns so it can hide them, and
- * shapes the result for the wire.
+ * hands the lister every provider-native session id Lecturn owns so it can
+ * hide them, and shapes the result for the wire.
  *
  * @module provider/externalSessions
  */
@@ -17,10 +17,9 @@ import {
   type ProviderInstanceId,
 } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProviderInstanceRegistry } from "./Services/ProviderInstanceRegistry.ts";
-import { ProviderSessionDirectory } from "./Services/ProviderSessionDirectory.ts";
 
 const EXTERNAL_SESSION_TEXT_MAX_LENGTH = 200;
 
@@ -31,12 +30,65 @@ function capText(value: string): string {
     : trimmed;
 }
 
+/**
+ * Native ids a legacy (pre-orchestration-v2) resume cursor names: Claude
+ * cursors carry `resume`/`sessionId`, Codex cursors `threadId`. Extra ids are
+ * harmless; the set only hides sessions.
+ */
+export function nativeSessionIdsFromLegacyCursor(cursor: unknown): ReadonlyArray<string> {
+  if (cursor === null || typeof cursor !== "object" || Array.isArray(cursor)) return [];
+  const record = cursor as Record<string, unknown>;
+  return ["resume", "sessionId", "threadId"].flatMap((key) => {
+    const value = record[key];
+    return typeof value === "string" && value.trim().length > 0 ? [value.trim()] : [];
+  });
+}
+
+function parseJson(value: string | null): unknown {
+  if (value === null) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Every provider-native session id Lecturn owns: the native thread refs of
+ * orchestration provider threads (an imported thread binds its fork there),
+ * plus the cursors of legacy provider sessions and not-yet-sent legacy imports
+ * that came over in the copied database. Legacy tables may be absent.
+ */
+const readKnownNativeSessionIds = Effect.fn("readKnownNativeSessionIds")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const nativeRows = yield* sql<{ readonly nativeId: string | null }>`
+    SELECT DISTINCT json_extract(payload_json, '$.nativeThreadRef.nativeId') AS "nativeId"
+    FROM orchestration_v2_projection_provider_threads
+  `;
+  const legacyCursors = yield* sql<{ readonly cursor: string | null }>`
+    SELECT resume_cursor_json AS "cursor"
+    FROM provider_session_runtime
+    WHERE resume_cursor_json IS NOT NULL
+  `.pipe(Effect.orElseSucceed(() => []));
+  const legacyImports = yield* sql<{ readonly cursor: string | null }>`
+    SELECT json_extract(import_source_json, '$.resumeCursor') AS "cursor"
+    FROM projection_threads
+    WHERE import_source_json IS NOT NULL
+  `.pipe(Effect.orElseSucceed(() => []));
+  const ids = new Set<string>();
+  for (const row of nativeRows) {
+    if (typeof row.nativeId === "string" && row.nativeId.length > 0) ids.add(row.nativeId);
+  }
+  for (const row of [...legacyCursors, ...legacyImports]) {
+    for (const id of nativeSessionIdsFromLegacyCursor(parseJson(row.cursor))) ids.add(id);
+  }
+  return ids as ReadonlySet<string>;
+});
+
 export const listExternalSessions = Effect.fn("listExternalSessions")(function* (
   input: ExternalSessionsListInput,
 ) {
   const instances = yield* ProviderInstanceRegistry;
-  const directory = yield* ProviderSessionDirectory;
-  const projections = yield* ProjectionSnapshotQuery;
   const fail = (reason: ExternalSessionsListError["reason"], cause?: unknown) =>
     new ExternalSessionsListError({
       providerInstanceId: input.providerInstanceId,
@@ -53,25 +105,17 @@ export const listExternalSessions = Effect.fn("listExternalSessions")(function* 
     return yield* fail("provider-unsupported");
   }
 
-  const bindings = yield* directory
-    .listBindings()
-    .pipe(Effect.mapError((cause) => fail("unreadable", cause)));
-  // An imported thread has no binding until its first send, so its fork would
-  // otherwise be listed and could be imported again.
-  const importSources = yield* projections
-    .listThreadImportSources()
-    .pipe(Effect.mapError((cause) => fail("unreadable", cause)));
   // Not narrowed to this instance: the session store belongs to the provider
   // home, and instances sharing a home would otherwise list each other's.
-  const knownResumeCursors = [...bindings, ...importSources]
-    .map((owned) => owned.resumeCursor)
-    .filter((resumeCursor) => resumeCursor !== undefined && resumeCursor !== null);
+  const knownNativeSessionIds = yield* readKnownNativeSessionIds().pipe(
+    Effect.mapError((cause) => fail("unreadable", cause)),
+  );
 
   const listed = yield* instance.listExternalSessions({
     cwd: input.cwd,
     searchTerm: input.searchTerm || undefined,
     limit: input.limit,
-    knownResumeCursors,
+    knownNativeSessionIds,
   });
 
   return {

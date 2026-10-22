@@ -222,7 +222,7 @@ describe("listCodexExternalThreads", () => {
     }),
   );
 
-  it.effect("hides threads named by Codex cursors and skips other providers' cursors", () =>
+  it.effect("hides threads whose native ids Lecturn already owns", () =>
     Effect.gen(function* () {
       const { client } = fakeClient([{ data: [thread({ id: "owned" }), thread({ id: "kept" })] }]);
       const result = yield* makeCodexExternalSessionsLister({
@@ -230,12 +230,7 @@ describe("listCodexExternalThreads", () => {
         openClient: Effect.succeed(client),
       })({
         limit: 10,
-        knownResumeCursors: [
-          { threadId: "owned" },
-          { resume: "5f0c1d0e-6f0b-4f7e-9a3e-2b1c4d5e6f70", turnCount: 2 },
-          null,
-          "not-a-cursor",
-        ],
+        knownNativeSessionIds: new Set(["owned", "5f0c1d0e-6f0b-4f7e-9a3e-2b1c4d5e6f70"]),
       });
       expect(result.sessions.map((session) => session.sessionId)).toEqual(["kept"]);
     }),

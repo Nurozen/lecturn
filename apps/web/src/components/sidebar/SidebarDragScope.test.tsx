@@ -11,6 +11,7 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import { SidebarDragBoundary, SidebarDragScope, ScopedSortableThreadRow } from "./SidebarDragScope";
 import { sidebarMarkerId } from "../Sidebar.logic";
+import { makeThreadFixture } from "../../test-fixtures";
 
 const state = vi.hoisted(() => ({
   configs: new Map<string, { environment: { capabilities: Record<string, boolean> } }>(),
@@ -54,34 +55,21 @@ const actions = {
   snoozeThread: vi.fn<Actions["snoozeThread"]>(),
   confirmAndUnpinThread: vi.fn<Actions["confirmAndUnpinThread"]>(),
   setThreadAutoSettle: vi.fn<Actions["setThreadAutoSettle"]>(),
+  markThreadUnread: vi.fn<Actions["markThreadUnread"]>(),
 } satisfies Actions;
 const key = (row: EnvironmentThreadShell) =>
   scopedThreadKey(scopeThreadRef(row.environmentId, row.id));
 function thread(id: string, environmentId: string, pinned = false): EnvironmentThreadShell {
-  return {
+  return makeThreadFixture({
     id: ThreadId.make(id),
     environmentId: EnvironmentId.make(environmentId),
     projectId: ProjectId.make("project"),
     title: id,
     modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    session: null,
-    latestUserMessageAt: null,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    hasActionableProposedPlan: false,
-    pullRequests: [],
     createdAt: "2026-03-09T10:00:00Z",
     updatedAt: "2026-03-09T10:00:00Z",
-    archivedAt: null,
-    settledAt: null,
-    settledOverride: null,
-    latestTurn: null,
-    branch: null,
-    worktreePath: null,
     pinnedAt: pinned ? "2026-03-09T10:00:00Z" : null,
-  };
+  });
 }
 let renderer: ReactTestRenderer;
 beforeEach(() => {

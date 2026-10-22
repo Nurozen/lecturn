@@ -5,7 +5,12 @@ import {
   settlePromise,
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
-import type { MessageId, ScopedThreadRef, TurnId } from "@lecturn/contracts";
+import {
+  forkCommandSource,
+  latestForkPoint,
+  type ThreadForkPoint,
+} from "@lecturn/client-runtime/state/thread-fork-points";
+import type { MessageId, ScopedThreadRef } from "@lecturn/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 
@@ -17,11 +22,7 @@ import {
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { newThreadId } from "../lib/utils";
-import {
-  readEnvironmentProviders,
-  readEnvironmentSupportsForking,
-  readThreadShell,
-} from "../state/entities";
+import { readEnvironmentSupportsForking, readThreadShell } from "../state/entities";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
 
@@ -30,28 +31,26 @@ import { useAtomCommand } from "../state/use-atom-command";
  * command palette, keybinding, /fork). Snapshot read, not a subscription:
  * these surfaces evaluate at open/dispatch time, like the action menu does.
  *
- * `throughTurnId` is the latest completed turn — the only fork point a shell
- * exposes; `blockReason` explains an unavailable action (or null).
+ * `point` is the whole-thread cut a shell exposes: the latest completed run,
+ * or all run-less history (V1 migration, import) of a thread that never ran;
+ * `blockReason` explains an unavailable action (or null).
  */
 export function readForkAtLatestTurn(threadRef: ScopedThreadRef): {
-  throughTurnId: TurnId | null;
+  point: ThreadForkPoint | null;
   blockReason: { title: string; description: string } | null;
 } {
   const shell = readThreadShell(threadRef);
-  const throughTurnId = shell?.latestTurn?.state === "completed" ? shell.latestTurn.turnId : null;
+  const point = latestForkPoint(shell);
   const blockReason = resolveForkDisabledReason({
-    providers: readEnvironmentProviders(threadRef.environmentId),
-    modelSelection: shell?.modelSelection ?? null,
-    sessionProviderInstanceId: shell?.session?.providerInstanceId,
     capability: readEnvironmentSupportsForking(threadRef.environmentId),
-    hasCompletedTurn: throughTurnId !== null,
+    hasCompletedTurn: point !== null,
   });
-  return { throughTurnId, blockReason };
+  return { point, blockReason };
 }
 
 /**
  * The one fork dispatcher every web entry point funnels through: mint the
- * child id, dispatch `thread.fork`, seed the composer draft (user-message
+ * child id, dispatch `thread.fork` cut at `point`, seed the composer draft (user-message
  * forks), wait for the child's shell row, navigate. Failure toasts;
  * no client-side compensation — the server cleans up a failed fork.
  */
@@ -62,7 +61,8 @@ export function useForkThread() {
   const forkThreadFrom = useCallback(
     async (input: {
       threadRef: ScopedThreadRef;
-      throughTurnId: TurnId;
+      point: ThreadForkPoint;
+      /** Anchor user message of a run cut (recorded as the fork origin). */
       sourceMessageId?: MessageId;
       parentTitle: string | null;
       seedPrompt?: string;
@@ -73,13 +73,11 @@ export function useForkThread() {
       const forkResult = await forkThreadCommand({
         environmentId: threadRef.environmentId,
         input: {
-          threadId: childThreadId,
           sourceThreadId: threadRef.threadId,
-          throughTurnId: input.throughTurnId,
-          ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
+          targetThreadId: childThreadId,
+          ...forkCommandSource(input.point, input.sourceMessageId),
           title: buildForkTitle(input.parentTitle),
           workspace: "inherit",
-          createdAt: new Date().toISOString(),
         },
       });
       if (forkResult._tag === "Failure") {
@@ -137,8 +135,8 @@ export function useForkThread() {
         );
         return false;
       }
-      const { throughTurnId, blockReason } = readForkAtLatestTurn(threadRef);
-      if (blockReason !== null || throughTurnId === null) {
+      const { point, blockReason } = readForkAtLatestTurn(threadRef);
+      if (blockReason !== null || point === null) {
         const reason = blockReason ?? {
           title: "Nothing to fork yet",
           description: "Forking becomes available once the thread has a completed turn.",
@@ -154,7 +152,7 @@ export function useForkThread() {
       }
       return await forkThreadFrom({
         threadRef,
-        throughTurnId,
+        point,
         parentTitle: shell.title,
       });
     },

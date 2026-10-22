@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { ProjectId, type OrchestrationProject } from "@lecturn/contracts";
+import { ProjectId, type OrchestrationProjectShell } from "@lecturn/contracts";
 import { Effect, FileSystem, Layer, Option, Path } from "effect";
 import { checkStaveWorktreeRpcOwnership } from "./ws.ts";
 import { StaveWorktreeForbiddenError } from "./stave/StaveAdmission.ts";
@@ -20,7 +20,7 @@ it.effect(
       const alias = path.join(root, "alias");
       yield* fs.makeDirectory(secondary, { recursive: true });
       yield* fs.symlink(secondary, alias);
-      const project: OrchestrationProject = {
+      const project: OrchestrationProjectShell = {
         id: ProjectId.make("stave-owner"),
         title: "Space",
         workspaceRoot: space,
@@ -28,7 +28,6 @@ it.effect(
         scripts: [],
         createdAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:00Z",
-        deletedAt: null,
         stave: {
           spaceId: "space",
           isSaga: false,
@@ -41,7 +40,7 @@ it.effect(
           primaryRepoPath: path.join(space, "primary"),
         },
       };
-      const ordinary: OrchestrationProject = {
+      const ordinary: OrchestrationProjectShell = {
         ...project,
         id: ProjectId.make("ordinary"),
         workspaceRoot: secondary,
@@ -51,14 +50,8 @@ it.effect(
         for (const cwd of [secondary, alias, path.join(secondary, "subdir")]) {
           const result = yield* checkStaveWorktreeRpcOwnership(
             {
-              getShellSnapshot: () =>
-                Effect.succeed({
-                  snapshotSequence: 1,
-                  projects: [ordinary, project],
-                  threads: [],
-                  updatedAt: project.updatedAt,
-                }),
-              getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.some(ordinary)),
+              list: Effect.succeed([ordinary, project]),
+              getActiveByWorkspaceRoot: () => Effect.succeed(Option.some(ordinary)),
             },
             {
               check: (input) => {
@@ -95,7 +88,7 @@ it.effect(
         path.join(space, ".stave.yaml"),
         "version: 2\nid: owner\ncreatedAt: '2026-09-01T00:00:00Z'\nrepos:\n  - name: secondary\n    path: secondary\n    mode: edit\nmemories: []\n",
       );
-      const ordinary: OrchestrationProject = {
+      const ordinary: OrchestrationProjectShell = {
         id: ProjectId.make("only-child"),
         title: "Ordinary child",
         workspaceRoot: repo,
@@ -103,7 +96,6 @@ it.effect(
         scripts: [],
         createdAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:00Z",
-        deletedAt: null,
       };
       const admission = yield* StaveAdmission.StaveAdmission;
       for (const intent of ["pr.prepare", "vcs.createWorktree"] as const) {
@@ -116,14 +108,8 @@ it.effect(
         ]) {
           const result = yield* checkStaveWorktreeRpcOwnership(
             {
-              getShellSnapshot: () =>
-                Effect.succeed({
-                  snapshotSequence: 1,
-                  projects: [ordinary],
-                  threads: [],
-                  updatedAt: ordinary.updatedAt,
-                }),
-              getActiveProjectByWorkspaceRoot: (workspaceRoot) =>
+              list: Effect.succeed([ordinary]),
+              getActiveByWorkspaceRoot: (workspaceRoot: string) =>
                 Effect.succeed(workspaceRoot === repo ? Option.some(ordinary) : Option.none()),
             },
             admission,
@@ -136,14 +122,8 @@ it.effect(
       yield* fs.makeDirectory(unrelated);
       yield* checkStaveWorktreeRpcOwnership(
         {
-          getShellSnapshot: () =>
-            Effect.succeed({
-              snapshotSequence: 0,
-              projects: [],
-              threads: [],
-              updatedAt: ordinary.updatedAt,
-            }),
-          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+          list: Effect.succeed([]),
+          getActiveByWorkspaceRoot: () => Effect.succeed(Option.none()),
         },
         admission,
         { operation: "pr.prepare", intent: "pr.prepare", cwd: unrelated },

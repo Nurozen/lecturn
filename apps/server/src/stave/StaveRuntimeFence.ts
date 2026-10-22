@@ -1,7 +1,7 @@
 /** Keeps runtime starts outside filesystem teardown, including starts already in flight. */
 import { Context, Deferred, Effect, FileSystem, Layer, Option, Path, Schema } from "effect";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { StaveAdmission } from "./StaveAdmission.ts";
+import { StaveProjectShells } from "./StaveProjectShells.ts";
 import { isPathUnder } from "./StaveSpaceLock.ts";
 
 export class StaveRuntimeFenced extends Schema.TaggedError<StaveRuntimeFenced>()(
@@ -118,11 +118,11 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const admission = yield* StaveAdmission;
-    const projection = yield* ProjectionSnapshotQuery;
+    const shells = yield* StaveProjectShells;
     const base = yield* makeWithOptions();
     return yield* makeWithOptions({
       checkStart: Effect.fn("StaveRuntimeFence.checkStart")(function* (cwd) {
-        const snapshot = yield* projection.getShellSnapshot().pipe(
+        const projectShells = yield* shells.list.pipe(
           Effect.mapError(
             () =>
               new StaveRuntimeFenced({
@@ -130,7 +130,7 @@ export const layer = Layer.effect(
               }),
           ),
         );
-        const projects = [...snapshot.projects].sort(
+        const projects = [...projectShells].sort(
           (a, b) =>
             Number(Boolean(b.stave)) - Number(Boolean(a.stave)) ||
             b.workspaceRoot.length - a.workspaceRoot.length,

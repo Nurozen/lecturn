@@ -3,7 +3,7 @@ import { resolveProjectGitTargets } from "@lecturn/client-runtime/state/projectG
 import { useThreadGitSelection } from "./thread-git-selection";
 
 import { resolveThreadGitTarget, selectThreadGitRepository } from "./thread-git-target";
-import { useSelectedThreadDetail } from "./use-thread-detail";
+import { useSelectedThreadWorktreePath } from "./use-thread-detail";
 import { useThreadSelection } from "./use-thread-selection";
 import { resolvePreferredThreadWorktreePath } from "../features/terminal/terminalLaunchContext";
 
@@ -15,7 +15,6 @@ import { resolvePreferredThreadWorktreePath } from "../features/terminal/termina
  */
 export function useSelectedThreadWorktree(repoKey?: string) {
   const { selectedThread, selectedThreadProject } = useThreadSelection();
-  const selectedThreadDetail = useSelectedThreadDetail();
   const { selectedRepoKey, selectRepository } = useThreadGitSelection(
     selectedThread ? JSON.stringify([selectedThread.environmentId, selectedThread.id]) : null,
   );
@@ -29,14 +28,15 @@ export function useSelectedThreadWorktree(repoKey?: string) {
     repoKey !== undefined,
   );
   const pinnedRepositoryMissing = repoKey !== undefined && selectedThreadGitRepository === null;
+  const detailWorktreePath = useSelectedThreadWorktreePath();
 
   const selectedThreadWorktreePath = useMemo(
     () =>
       resolvePreferredThreadWorktreePath({
         threadShellWorktreePath: selectedThread?.worktreePath ?? null,
-        threadDetailWorktreePath: selectedThreadDetail?.worktreePath ?? null,
+        threadDetailWorktreePath: detailWorktreePath,
       }),
-    [selectedThread?.worktreePath, selectedThreadDetail?.worktreePath],
+    [detailWorktreePath, selectedThread?.worktreePath],
   );
   const selectedThreadBranch = selectedThread?.branch ?? null;
   const gitTarget = useMemo(

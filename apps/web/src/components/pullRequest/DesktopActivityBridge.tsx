@@ -37,6 +37,7 @@ import {
   boundedActivitySnapshot,
   threadActivityRows,
   resolveActivityAction,
+  threadDetailMessages,
 } from "./desktopActivity.logic";
 import { useQuickSteer } from "./useQuickSteer";
 import { toastManager } from "../ui/toast";
@@ -112,7 +113,7 @@ function EnabledActivityBridge() {
     () =>
       Atom.make((get) =>
         (JSON.parse(contextRefs) as [EnvironmentId, ThreadId][]).map(([environmentId, threadId]) =>
-          get(environmentThreadDetails.detailAtom({ environmentId, threadId })),
+          get(environmentThreadDetails.threadAtom({ environmentId, threadId })),
         ),
       ),
     [contextRefs],
@@ -138,10 +139,12 @@ function EnabledActivityBridge() {
                 const thread = threads.find(
                   (item) => item.environmentId === row.environmentId && item.id === row.threadId,
                 );
-                const detail = contextDetails.find(
-                  (item) => item?.environmentId === row.environmentId && item.id === row.threadId,
-                );
-                return thread ? describeThreadActivity(thread, detail?.messages) : row.detail;
+                return thread
+                  ? describeThreadActivity(
+                      thread,
+                      threadDetailMessages(contextDetails, thread.environmentId, thread.id),
+                    )
+                  : row.detail;
               })(),
             }
           : {}),

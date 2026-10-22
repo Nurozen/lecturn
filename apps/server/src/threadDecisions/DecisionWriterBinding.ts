@@ -8,6 +8,7 @@ import {
 import { decisionFingerprint } from "@lecturn/shared/decisionEvidence";
 import { Clock, Context, Effect, Layer, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { v2Threads } from "./V2ProjectionSources.ts";
 import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
 import { ProviderWorkAdmission } from "../provider/ProviderWorkAdmission.ts";
 import { DecisionWriterAvailability } from "./DecisionService.ts";
@@ -68,7 +69,7 @@ export const make = Effect.gen(function* () {
       model_selection_json: string;
       cwd: string;
     }>`SELECT t.model_selection_json, COALESCE(t.worktree_path, p.workspace_root) AS cwd
-      FROM projection_threads t JOIN projection_projects p ON p.project_id = t.project_id
+      FROM ${v2Threads(sql)} t JOIN projection_projects p ON p.project_id = t.project_id
       WHERE t.thread_id = ${threadId} AND t.project_id = ${projectId} AND t.deleted_at IS NULL AND p.deleted_at IS NULL AND t.archived_at IS NULL`.pipe(
       Effect.mapError(() =>
         fail("unavailable", "The decision writer configuration could not be read."),
