@@ -1,6 +1,10 @@
 import * as Option from "effect/Option";
-import { shallow } from "zustand/vanilla/shallow";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
+import {
+  isSameForkPoint,
+  resolveMessageForkPoints,
+  type ThreadForkPoint,
+} from "@lecturn/client-runtime/state/thread-fork-points";
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
   type AssetCreateUrlInput,
@@ -60,6 +64,7 @@ import { waitForAtomValue } from "../state/waitForAtomValue";
 import { filterTerminalContextsWithText, type TerminalContextDraft } from "../lib/terminalContext";
 import { stripInlineContextReferences } from "~/lib/composerContextReferences";
 import type { DraftThreadEnvMode } from "../composerDraftStore";
+import { resolveLiveThreadBranchUpdate } from "./GitActionsControl.logic";
 import { formatCalendarDate } from "../timestampFormat";
 import { collapseExpandedComposerCursor, type ComposerSubmissionIntent } from "../composer-logic";
 import type { ReviewCommentContext } from "../reviewCommentContext";
@@ -1060,7 +1065,7 @@ export function deriveLockedProvider(input: {
   if (sessionProvider && isProviderDriverKind(sessionProvider)) {
     return sessionProvider;
   }
-  if (deriveUnsentImportInstanceId(input.thread) !== null) {
+  if (deriveUnsentImportInstanceId(input.thread, input.providers) !== null) {
     return input.thread?.importedFrom?.driverKind ?? null;
   }
   // Preserve the existing lock while an instance is missing from the catalog;
@@ -1084,17 +1089,42 @@ export function deriveLockedProvider(input: {
  * the instance it was imported with, and no Lecturn run exists until that
  * first send, so the picker pins the instance (models within it stay open).
  * A fork of an import starts from its parent's provider thread instead.
+ *
+ * "Continued" is a run or a user message newer than the import (imported
+ * history is stamped at or before `importedAt`): a thread migrated from V1
+ * has no V2 run even when the user already continued it. The pin is dropped
+ * when a loaded provider catalog no longer has the instance, so the picker
+ * always keeps a selectable provider.
  */
 export function deriveUnsentImportInstanceId(
   thread:
-    | Pick<Thread, "importedFrom" | "forkOrigin" | "forkedFrom" | "latestRun">
+    | Pick<
+        Thread,
+        "importedFrom" | "forkOrigin" | "forkedFrom" | "latestRun" | "latestUserMessageAt"
+      >
     | null
     | undefined,
+  providers?: ReadonlyArray<Pick<ServerProvider, "instanceId">>,
 ): ProviderInstanceId | null {
   if (!thread || thread.importedFrom == null || thread.forkOrigin != null || thread.forkedFrom) {
     return null;
   }
-  return thread.latestRun === null ? thread.importedFrom.providerInstanceId : null;
+  if (thread.latestRun !== null) return null;
+  if (
+    thread.latestUserMessageAt !== null &&
+    Date.parse(thread.latestUserMessageAt) > Date.parse(thread.importedFrom.importedAt)
+  ) {
+    return null;
+  }
+  const instanceId = thread.importedFrom.providerInstanceId;
+  if (
+    providers !== undefined &&
+    providers.length > 0 &&
+    !providers.some((provider) => provider.instanceId === instanceId)
+  ) {
+    return null;
+  }
+  return instanceId;
 }
 
 export function getStartedThreadModelChangeBlockReason(input: {
@@ -1172,6 +1202,43 @@ export interface ThreadImportDivider {
 }
 
 /**
+ * Why revert is unavailable on a fork that has no run of its own yet, or null.
+ * A V2 fork has nothing of its own until its first send. A fork migrated from
+ * V1 (`forkOrigin` without V2 `forkedFrom`) may already hold its own turns from
+ * before the update, but those carry no V2 checkpoints, so they cannot be
+ * reverted either.
+ */
+export function resolveForkRevertDisabledReason(
+  thread:
+    | Pick<Thread, "forkOrigin" | "forkedFrom" | "latestRun" | "latestUserMessageAt" | "createdAt">
+    | null
+    | undefined,
+): string | null {
+  if (thread == null || (thread.forkOrigin == null && thread.forkedFrom == null)) return null;
+  if (thread.latestRun !== null) return null;
+  const hasOwnLegacyTurns =
+    thread.forkedFrom == null &&
+    thread.latestUserMessageAt !== null &&
+    Date.parse(thread.latestUserMessageAt) > Date.parse(thread.createdAt);
+  return hasOwnLegacyTurns
+    ? "Turns from before the Lecturn update can't be reverted — revert becomes available after the fork's next turn"
+    : "Send a message first — revert becomes available once the fork has its own turn";
+}
+
+/**
+ * Creation time of a fork migrated from V1, whose fork divider the timeline
+ * places by timestamp: V2 forks carry a synthetic fork item instead, and a
+ * migrated V1 fork has `forkOrigin` but no V2 `forkedFrom`. Null otherwise.
+ */
+export function resolveLegacyForkCreatedAt(
+  thread: Pick<Thread, "forkOrigin" | "forkedFrom" | "createdAt"> | null | undefined,
+): string | null {
+  return thread != null && thread.forkOrigin != null && thread.forkedFrom == null
+    ? thread.createdAt
+    : null;
+}
+
+/**
  * Where an imported session's history ends in a thread's timeline: its first
  * message from Lecturn, or the end of the timeline until one is sent, so the
  * session's trailing tool activity stays above the line. A fork of an import
@@ -1216,6 +1283,28 @@ export function shouldShowImportTruncatedNote(input: {
 /** Resolves once a forked child's shell row exists (or false on timeout). */
 export { waitForThreadShell } from "../state/entities";
 
+/**
+ * Lecturn: the branch a draft should record so the thread it creates carries
+ * the checkout it runs on (sidebar branch label, "New thread on <branch>"), or
+ * undefined when nothing changes. A draft choosing a new worktree's base keeps
+ * its pick, and a Stave space resolves its branch at send.
+ */
+export function resolveDraftBranchSync(input: {
+  draft: {
+    branch: string | null;
+    envMode?: DraftThreadEnvMode;
+    worktreePath: string | null;
+  } | null;
+  isStaveProject: boolean;
+  gitStatus: Parameters<typeof resolveLiveThreadBranchUpdate>[0]["gitStatus"];
+}): string | null | undefined {
+  const { draft } = input;
+  if (draft === null || input.isStaveProject) return undefined;
+  if (draft.envMode === "worktree" && draft.worktreePath === null) return undefined;
+  return resolveLiveThreadBranchUpdate({ threadBranch: draft.branch, gitStatus: input.gitStatus })
+    ?.branch;
+}
+
 /** Child thread title minted at fork time; also sent as the first-turn
     titleSeed so the server's retitle gate accepts a replacement. The
     untitled fallback keeps the "(fork)" suffix so that gate still matches. */
@@ -1225,39 +1314,48 @@ export function buildForkTitle(parentTitle: string | null | undefined): string {
 }
 
 /**
- * Fork points for user-message rows: a user message forks through the run
+ * Fork points for user-message rows: a user message forks through the turn
  * completed just before it, and its text is re-seeded into the child's
- * composer (edit-and-branch). Assistant rows use the upstream per-response
- * fork button instead. Only this thread's own rows qualify: inherited rows
- * and imported history (no run) cannot be cut here. Returns `previous` when
- * unchanged so timeline rows keep their identity across streaming updates.
+ * composer (edit-and-branch). That turn is a completed run or, on a thread
+ * with run-less history (V1 migration, import), a run-less turn. Assistant
+ * rows use the upstream per-response fork button instead. Only this thread's
+ * own rows qualify: inherited rows cannot be cut here, and the first user
+ * message has no turn before it (as on V1). Returns `previous` when unchanged
+ * so timeline rows keep their identity across streaming updates.
  */
-export function buildForkRunIdByUserMessageId(
+export function buildForkPointByUserMessageId(
   input: {
     timelineEntries: ReadonlyArray<TimelineEntry>;
     completedRunIds: ReadonlySet<RunId>;
     activeRunId: RunId | null;
+    runlessHistory: boolean;
   },
-  previous: ReadonlyMap<MessageId, RunId> | null = null,
-): ReadonlyMap<MessageId, RunId> {
-  const byMessageId = new Map<MessageId, RunId>();
-  let lastCompletedRunId: RunId | null = null;
-  for (const entry of input.timelineEntries) {
-    if (entry.kind !== "message") continue;
-    if (entry.projectedItem?.visibility === "inherited") continue;
-    const message = entry.message;
-    if (message.role === "user") {
-      if (lastCompletedRunId !== null) byMessageId.set(message.id, lastCompletedRunId);
-      continue;
-    }
-    if (message.role !== "assistant" || message.streaming) continue;
-    const runId = message.runId;
-    if (runId === null || runId === input.activeRunId || !input.completedRunIds.has(runId)) {
-      continue;
-    }
-    lastCompletedRunId = runId;
+  previous: ReadonlyMap<MessageId, ThreadForkPoint> | null = null,
+): ReadonlyMap<MessageId, ThreadForkPoint> {
+  const { byUserMessage } = resolveMessageForkPoints({
+    messages: input.timelineEntries.flatMap((entry) =>
+      entry.kind === "message"
+        ? [
+            {
+              id: entry.message.id,
+              role: entry.message.role,
+              runId: entry.message.runId,
+              streaming: entry.message.streaming,
+              inherited: entry.projectedItem?.visibility === "inherited",
+            },
+          ]
+        : [],
+    ),
+    completedRunIds: input.completedRunIds,
+    activeRunId: input.activeRunId,
+    runlessHistory: input.runlessHistory,
+  });
+  if (previous === null || previous.size !== byUserMessage.size) return byUserMessage;
+  for (const [messageId, point] of byUserMessage) {
+    const before = previous.get(messageId);
+    if (before === undefined || !isSameForkPoint(before, point)) return byUserMessage;
   }
-  return previous !== null && shallow(previous, byMessageId) ? previous : byMessageId;
+  return previous;
 }
 
 /**

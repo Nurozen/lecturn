@@ -111,6 +111,7 @@ import {
 import {
   forkableSourceRunStatusError,
   isForkableSourceRunStatus,
+  planRunlessThreadFork,
   ThreadForkServiceV2,
 } from "./ThreadForkService.ts";
 import { planThreadDeletion } from "./ThreadDeletion.ts";
@@ -118,6 +119,9 @@ import * as LecturnOrchestrationHooks from "./fork/LecturnOrchestrationHooks.ts"
 import { ExternalSessionImporterV2, planThreadImport } from "./fork/ThreadImport.ts";
 import {
   applyForkDeltas,
+  isDefaultForkTitle,
+  isForkChild,
+  planRunlessForkHistory,
   provisionForkWorktree,
   resolveForkCut,
   shouldGenerateForkChildTitle,
@@ -3312,29 +3316,84 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 ),
               )).messages,
             runs: sourceProjection.runs,
+            runlessHistory: hasRunlessHistory(sourceProjection.thread),
           });
     if (forkCut.type === "rejected") return yield* forkRejection(forkCut.reason);
 
     const sourceRun =
       forkCut.type === "run"
         ? (sourceProjection.runs.find((run) => run.id === forkCut.runId) ?? null)
-        : runForSourcePoint(sourceProjection, command.sourcePoint);
+        : forkCut.type === "runless"
+          ? null
+          : runForSourcePoint(sourceProjection, command.sourcePoint);
+    // Lecturn: run-less history (V1 migration, import) has no run to fork
+    // natively. A cut inside it, or a whole-thread fork before any stable
+    // run, copies that history and carries it as portable context.
+    const runlessCut =
+      forkCut.type === "runless"
+        ? { messageId: forkCut.messageId }
+        : sourceRun === null &&
+            command.sourcePoint.type === "latest_stable" &&
+            hasRunlessHistory(sourceProjection.thread)
+          ? { messageId: undefined }
+          : null;
+    const runlessHistory =
+      runlessCut === null
+        ? undefined
+        : yield* Effect.gen(function* () {
+            const sourceItems = yield* readHandoffItems(command.sourceThreadId, [null]);
+            const referencedMessageIds = Array.from(
+              new Set(
+                sourceItems.flatMap((item) =>
+                  "messageId" in item && item.messageId != null ? [item.messageId] : [],
+                ),
+              ),
+            );
+            const sourceMessages =
+              referencedMessageIds.length === 0
+                ? []
+                : (yield* projectionStore
+                    .getThreadRecords(command.sourceThreadId, ["messages"], {
+                      messageIds: referencedMessageIds,
+                    })
+                    .pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new OrchestratorProjectionError({
+                            threadId: command.sourceThreadId,
+                            cause,
+                          }),
+                      ),
+                    )).messages;
+            return planRunlessForkHistory({
+              targetThreadId: command.targetThreadId,
+              cutMessageId: runlessCut.messageId,
+              sourceItems,
+              sourceMessages,
+            });
+          });
+    if (runlessCut !== null && runlessHistory === undefined) {
+      return yield* forkRejection(
+        runlessCut.messageId === undefined
+          ? `No stable source run was found for fork source ${command.sourcePoint.type}.`
+          : "The message to fork from was not found in the source thread's history.",
+      );
+    }
 
-    if (sourceRun === null) {
+    if (sourceRun === null && runlessHistory === undefined) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
         cause: `No stable source run was found for fork source ${command.sourcePoint.type}.`,
       });
     }
-    if (!isForkableSourceRunStatus(sourceRun.status)) {
+    if (sourceRun !== null && !isForkableSourceRunStatus(sourceRun.status)) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
         cause: forkableSourceRunStatusError(sourceRun),
       });
     }
-    const sourceProviderThread = providerThreadForRun(sourceProjection, sourceRun);
     const now = command.createdAt ?? (yield* DateTime.now);
     const emitEvent = emit(events, command);
     const transferId = yield* mapDispatchError(command)(
@@ -3344,20 +3403,32 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         type: "fork",
       }),
     );
-    const { targetThread, transfer } = yield* threadForkService
-      .plan({
-        sourceProjection,
-        sourceRun,
-        sourceProviderThread,
-        canonicalSourcePoint: contextSourcePointForRun(sourceProjection, sourceRun),
-        transferId,
-        targetThreadId: command.targetThreadId,
-        ...(command.title === undefined ? {} : { title: command.title }),
-        createdBy: command.createdBy,
-        creationSource: command.creationSource,
-        createdAt: now,
-      })
-      .pipe(mapDispatchError(command));
+    const { targetThread, transfer } =
+      sourceRun === null
+        ? planRunlessThreadFork({
+            sourceThread: sourceProjection.thread,
+            lastSourceItemId: runlessHistory!.lastSourceItemId,
+            transferId,
+            targetThreadId: command.targetThreadId,
+            ...(command.title === undefined ? {} : { title: command.title }),
+            createdBy: command.createdBy,
+            creationSource: command.creationSource,
+            createdAt: now,
+          })
+        : yield* threadForkService
+            .plan({
+              sourceProjection,
+              sourceRun,
+              sourceProviderThread: providerThreadForRun(sourceProjection, sourceRun),
+              canonicalSourcePoint: contextSourcePointForRun(sourceProjection, sourceRun),
+              transferId,
+              targetThreadId: command.targetThreadId,
+              ...(command.title === undefined ? {} : { title: command.title }),
+              createdBy: command.createdBy,
+              creationSource: command.creationSource,
+              createdAt: now,
+            })
+            .pipe(mapDispatchError(command));
     let forkWorktree: { readonly branch: string; readonly worktreePath: string } | undefined;
     if (command.workspace === "new-worktree" && command.prepareWorktree !== undefined) {
       if (Option.isNone(gitWorkflow)) {
@@ -3383,10 +3454,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       occurredAt: now,
       payload: forkedThread,
     });
+    for (const message of runlessHistory?.messages ?? []) {
+      yield* emitEvent({
+        type: "message.updated",
+        threadId: command.targetThreadId,
+        occurredAt: message.createdAt,
+        payload: message,
+      });
+    }
+    for (const item of runlessHistory?.turnItems ?? []) {
+      yield* emitEvent({
+        type: "turn-item.updated",
+        threadId: command.targetThreadId,
+        occurredAt: item.updatedAt,
+        payload: item,
+      });
+    }
     yield* emitEvent({
       type: "context-transfer.created",
       threadId: command.targetThreadId,
-      providerInstanceId: sourceRun.providerInstanceId,
+      providerInstanceId: transfer.sourceProviderInstanceId ?? forkedThread.providerInstanceId,
       occurredAt: now,
       payload: transfer,
     });
@@ -4396,23 +4483,33 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const userMessages = projection.messages.filter((message) => message.role === "user");
       const onlyMaintenanceHistory =
         userMessages.length > 0 && userMessages.every(isNativeMaintenanceCommand);
-      // Lecturn: a fork child titles itself on its first new turn.
+      // Lecturn: a fork child titles itself on its first new turn while it
+      // keeps a default fork title; a title the user chose (a rename before
+      // the first send) is never replaced, by a title seed either. Copied
+      // run-less history (a run-less fork) is not a turn of the child.
       const parentThreadId = projection.thread.lineage.parentThreadId;
+      const forkChild = isForkChild(projection.thread);
+      const forkChildTurnUserMessages = userMessages.filter((message) => message.runId !== null);
+      const forkParentTitle =
+        !forkChild || parentThreadId === null || forkChildTurnUserMessages.length > 0
+          ? undefined
+          : (yield* projectionStore
+              .getThreadShell(parentThreadId)
+              .pipe(Effect.orElseSucceed(() => null)))?.title;
       const forkChildTitle =
         command.createdBy === "user" &&
-        projection.thread.forkedFrom !== null &&
-        userMessages.length === 0 &&
-        parentThreadId !== null &&
+        forkChild &&
         shouldGenerateForkChildTitle({
           thread: projection.thread,
-          parentTitle: (yield* projectionStore
-            .getThreadShell(parentThreadId)
-            .pipe(Effect.orElseSucceed(() => null)))?.title,
-          localUserMessageCount: userMessages.length,
+          parentTitle: forkParentTitle,
+          localUserMessageCount: forkChildTurnUserMessages.length,
         });
+      const titleSeedAllowed =
+        !forkChild || isDefaultForkTitle(projection.thread.title, forkParentTitle);
       if (
         !isNativeMaintenanceCommand(command) &&
         ((command.titleSeed !== undefined &&
+          titleSeedAllowed &&
           (yield* projectionStore
             .getMessageCount(command.threadId)
             .pipe(mapDispatchError(command))) === 0) ||
@@ -5328,8 +5425,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
         return;
       }
+      // Lecturn: a run-less fork (no source run) carries its history as the
+      // child's own run-less items; its first turn delivers them portably.
+      const runlessForkTransfer =
+        pendingForkTransfer !== undefined && pendingForkTransfer.sourcePoint.runId === undefined;
       const sourceProjection =
-        pendingForkTransfer === undefined
+        pendingForkTransfer === undefined || runlessForkTransfer
           ? null
           : yield* projectionStore
               .getThreadRecords(pendingForkTransfer.sourceThreadId, [
@@ -5368,7 +5469,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             )?.providerTurnId ??
             undefined);
       if (pendingForkTransfer !== undefined) {
-        if (sourceRun === null || sourceProviderThread === undefined) {
+        if (!runlessForkTransfer && (sourceRun === null || sourceProviderThread === undefined)) {
           return yield* new OrchestratorDispatchError({
             commandId: command.commandId,
             commandType: command.type,
@@ -5433,8 +5534,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             }),
         ),
       );
-      const forkExecution =
-        pendingForkTransfer === undefined || sourceRun === null
+      const forkExecution = runlessForkTransfer
+        ? yield* enforceCommandPolicy(command)(
+            commandPolicy
+              .ensureContextHandoff({
+                commandId: command.commandId,
+                threadId: command.threadId,
+                providerInstanceId: modelSelection.instanceId,
+                capabilities,
+                strategy: "full_thread_summary",
+              })
+              .pipe(Effect.as("portable_context" as const)),
+          )
+        : pendingForkTransfer === undefined || sourceRun === null
           ? null
           : yield* enforceCommandPolicy(command)(
               commandPolicy.decideForkExecution({
@@ -5500,47 +5612,70 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               providerSessionId,
               updatedAt: now,
             };
-      const portableForkItems =
-        !requiresPortableFork || sourceProjection === null || sourceRun === null
-          ? []
-          : yield* readHandoffItems(sourceProjection.thread.id, [
-              ...sourceProjection.runs
-                .filter((run) => run.ordinal <= sourceRun.ordinal)
-                .map((run) => run.id),
-              ...(hasRunlessHistory(sourceProjection.thread) ? [null] : []),
-            ]);
+      const portableForkItems = !requiresPortableFork
+        ? []
+        : runlessForkTransfer
+          ? yield* readHandoffItems(command.threadId, [null])
+          : sourceProjection === null || sourceRun === null
+            ? []
+            : yield* readHandoffItems(sourceProjection.thread.id, [
+                ...sourceProjection.runs
+                  .filter((run) => run.ordinal <= sourceRun.ordinal)
+                  .map((run) => run.id),
+                ...(hasRunlessHistory(sourceProjection.thread) ? [null] : []),
+              ]);
       const portableForkHandoff =
-        !requiresPortableFork ||
-        pendingForkTransfer === undefined ||
-        sourceProjection === null ||
-        sourceRun === null
+        !requiresPortableFork || pendingForkTransfer === undefined
           ? null
-          : yield* contextHandoffService
-              .prepareProviderHandoff({
-                threadId: command.threadId,
-                targetRunId: runId,
-                transferId: pendingForkTransfer.id,
-                fromProviderThreadIds:
-                  sourceProviderThread === undefined ? [] : [sourceProviderThread.id],
-                toProviderThreadId: ensuredProviderThread.id,
-                fromProviderInstanceId: sourceRun.providerInstanceId,
-                toProviderInstanceId: modelSelection.instanceId,
-                coveredRunOrdinals: visibleDeltaRunOrdinals(sourceProjection, portableForkItems),
-                strategy: "full_thread_summary",
-                items: portableForkItems,
-                runs: sourceProjection.runs,
-                createdAt: now,
-              })
-              .pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new OrchestratorDispatchError({
-                      commandId: command.commandId,
-                      commandType: command.type,
-                      cause,
-                    }),
-                ),
-              );
+          : runlessForkTransfer
+            ? yield* contextHandoffService
+                .prepareProviderHandoff({
+                  threadId: command.threadId,
+                  targetRunId: runId,
+                  transferId: pendingForkTransfer.id,
+                  fromProviderThreadIds: [],
+                  toProviderThreadId: ensuredProviderThread.id,
+                  fromProviderInstanceId:
+                    pendingForkTransfer.sourceProviderInstanceId ?? modelSelection.instanceId,
+                  toProviderInstanceId: modelSelection.instanceId,
+                  coveredRunOrdinals: { from: 1, to: 1 },
+                  strategy: "full_thread_summary",
+                  items: portableForkItems,
+                  runs: [],
+                  createdAt: now,
+                })
+                .pipe(mapDispatchError(command))
+            : sourceProjection === null || sourceRun === null
+              ? null
+              : yield* contextHandoffService
+                  .prepareProviderHandoff({
+                    threadId: command.threadId,
+                    targetRunId: runId,
+                    transferId: pendingForkTransfer.id,
+                    fromProviderThreadIds:
+                      sourceProviderThread === undefined ? [] : [sourceProviderThread.id],
+                    toProviderThreadId: ensuredProviderThread.id,
+                    fromProviderInstanceId: sourceRun.providerInstanceId,
+                    toProviderInstanceId: modelSelection.instanceId,
+                    coveredRunOrdinals: visibleDeltaRunOrdinals(
+                      sourceProjection,
+                      portableForkItems,
+                    ),
+                    strategy: "full_thread_summary",
+                    items: portableForkItems,
+                    runs: sourceProjection.runs,
+                    createdAt: now,
+                  })
+                  .pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new OrchestratorDispatchError({
+                          commandId: command.commandId,
+                          commandType: command.type,
+                          cause,
+                        }),
+                    ),
+                  );
       const requiresFullProviderSwitchContext =
         isProviderSwitch && pendingMergeBackTransfer !== undefined;
       const targetLastCompletedRun =
@@ -9408,8 +9543,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             cause: "Continue the limited thread before resuming its queue.",
           });
         }
-        const now = yield* DateTime.now;
         const queued = projection.runs.filter((run) => run.status === "queued");
+        // Lecturn: a settled thread holds its queue; resuming would release
+        // nothing, so say why instead of accepting a no-op.
+        if (projection.thread.settledOverride === "settled" && queued.length > 0) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: "This thread is settled. Unsettle it to resume its queue.",
+          });
+        }
+        const now = yield* DateTime.now;
         for (const run of queued) {
           yield* emit(
             events,
@@ -9657,9 +9801,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     if (command.type === "queue.resume") {
       yield* mapDispatchError(command)(startNextQueuedRun(command.threadId));
     }
-    // Lecturn: unsettling releases a queue the settled thread held. The
-    // unsettle already committed, so a failed promotion is only logged.
-    if (command.type === "thread.unsettle") {
+    // Lecturn: unsettling (or pinning, which un-settles) releases a queue the
+    // settled thread held. The command already committed, so a failed
+    // promotion is only logged.
+    if (command.type === "thread.unsettle" || command.type === "thread.pin") {
       yield* startNextQueuedRun(command.threadId).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("Failed to release the queue of an unsettled thread", {

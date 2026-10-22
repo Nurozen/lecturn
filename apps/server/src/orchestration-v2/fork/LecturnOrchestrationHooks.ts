@@ -43,13 +43,19 @@ import type * as Scope from "effect/Scope";
 
 import type { ProjectCommand } from "../ProjectCommands.ts";
 
-/** A contribution refused the command, turn or session start. `reason` is user-facing. */
+/**
+ * A contribution refused the command, turn or session start. `reason` is
+ * user-facing. For beforeTurnStart, `disposition: "cancelled"` means the user
+ * (or a lifecycle change) withdrew the turn: the run settles as cancelled, not
+ * failed, so it does not hold the thread's queue the way a provider failure does.
+ */
 export class LecturnHookRejectedError extends Schema.TaggedError<LecturnHookRejectedError>()(
   "LecturnHookRejectedError",
   {
     hook: Schema.String,
     contribution: Schema.String,
     reason: Schema.String,
+    disposition: Schema.optional(Schema.Literals(["failed", "cancelled"])),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -77,13 +83,66 @@ export interface LecturnTurnStartInput {
   readonly compaction: boolean;
 }
 
+/**
+ * Not ready to start yet (Contextual: a conflict awaits review). The start
+ * attempt ends without touching the run, which stays "starting", and the
+ * effect worker re-schedules it, so a held turn never occupies a worker slot.
+ */
+export interface LecturnTurnStartDeferral {
+  /** Re-attempt the start after at most this long. */
+  readonly retryAfterMs: number;
+  /** Logged and stored on the outbox row (last_error); not shown to users. */
+  readonly reason: string;
+  /**
+   * Optional early wake: completes when the hold may have cleared. Run in a
+   * detached fiber bounded by `retryAfterMs`; never holds a worker slot.
+   */
+  readonly wake?: Effect.Effect<void>;
+}
+
 export interface LecturnTurnStartDecision {
   /**
    * Provider-only context placed before the user text for this turn. Never
    * persisted as a message. Multiple contributions are joined in order.
    */
   readonly contextPrefix?: string;
+  /**
+   * Hold the turn: later contributions are not called for this attempt and
+   * the whole chain runs again on the next attempt (be idempotent per run id).
+   */
+  readonly defer?: LecturnTurnStartDeferral;
 }
+
+/**
+ * Fixed contribution order (registration timing does not matter: server.ts
+ * builds the registering layers in parallel). First = outermost aroundCommand /
+ * aroundProviderSessionOpen wrapper and first beforeTurnStart. Policy refuses a
+ * turn before Contextual prepares anything; provider work admission claims
+ * foreground last, right before the provider turn (V1 claimed it in
+ * sendTurn), so a held turn never keeps the background decision writer
+ * paused. Unknown names run after these, in registration order.
+ */
+export const LECTURN_HOOK_ORDER: ReadonlyArray<string> = [
+  "team-provider-policy",
+  "stave",
+  "contextual",
+  "provider-work-admission",
+];
+
+const hookRank = (name: string) => {
+  const index = LECTURN_HOOK_ORDER.indexOf(name);
+  return index < 0 ? LECTURN_HOOK_ORDER.length : index;
+};
+
+/** Inserts after every contribution of the same or lower rank (stable). */
+const insertContribution = (
+  all: ReadonlyArray<LecturnOrchestrationHooksContribution>,
+  contribution: LecturnOrchestrationHooksContribution,
+): ReadonlyArray<LecturnOrchestrationHooksContribution> => {
+  const rank = hookRank(contribution.name);
+  const at = all.findIndex((entry) => hookRank(entry.name) > rank);
+  return at < 0 ? [...all, contribution] : [...all.slice(0, at), contribution, ...all.slice(at)];
+};
 
 export interface LecturnProviderSessionOpenInput {
   readonly threadId: ThreadId;
@@ -168,8 +227,11 @@ export interface LecturnOrchestrationHooksContribution {
   ) => Effect.Effect<A, E | LecturnHookRejectedError, R>;
   /**
    * Called once per run start attempt, before the provider session opens and
-   * before the run is marked running. May suspend (Contextual preparation).
-   * A rejection fails the run with the reason as its error item.
+   * before the run is marked running. May do bounded work (Contextual
+   * preparation) but must not wait on a user: return `defer` instead, which
+   * releases the effect worker slot and re-runs the chain later. A rejection
+   * fails the run with the reason as its error item (or cancels it, see
+   * LecturnHookRejectedError.disposition).
    */
   readonly beforeTurnStart?: (
     input: LecturnTurnStartInput,
@@ -333,7 +395,7 @@ const makeShape = (
   return {
     register: (contribution) =>
       Effect.acquireRelease(
-        Ref.updateAndGet(contributions, (all) => [...all, contribution]),
+        Ref.updateAndGet(contributions, (all) => insertContribution(all, contribution)),
         () => Ref.update(contributions, (all) => all.filter((entry) => entry !== contribution)),
       ).pipe(
         Effect.flatMap((all) =>
@@ -354,26 +416,24 @@ const makeShape = (
           commit,
         ),
       ),
+    // Sequential in contribution order; the first deferral ends the attempt.
     beforeTurnStart: (input) =>
       Effect.flatMap(current, (all) =>
-        Effect.forEach(all, (contribution) =>
-          contribution.beforeTurnStart === undefined
-            ? Effect.succeed(undefined)
-            : contribution
-                .beforeTurnStart(input)
-                .pipe(
-                  Effect.map((decision) =>
-                    decision?.contextPrefix === undefined || decision.contextPrefix.trim() === ""
-                      ? undefined
-                      : decision.contextPrefix,
-                  ),
-                ),
-        ),
-      ).pipe(
-        Effect.map((parts) => parts.filter((part): part is string => part !== undefined)),
-        Effect.map((prefixes): LecturnTurnStartDecision =>
-          prefixes.length === 0 ? {} : { contextPrefix: prefixes.join("\n\n") },
-        ),
+        Effect.gen(function* () {
+          const prefixes: Array<string> = [];
+          for (const contribution of all) {
+            if (contribution.beforeTurnStart === undefined) continue;
+            const decision = yield* contribution.beforeTurnStart(input);
+            if (decision?.defer !== undefined) {
+              return { defer: decision.defer } satisfies LecturnTurnStartDecision;
+            }
+            const prefix = decision?.contextPrefix;
+            if (prefix !== undefined && prefix.trim() !== "") prefixes.push(prefix);
+          }
+          return (
+            prefixes.length === 0 ? {} : { contextPrefix: prefixes.join("\n\n") }
+          ) satisfies LecturnTurnStartDecision;
+        }),
       ),
     aroundProviderSessionOpen: <A, E, R>(
       input: LecturnProviderSessionOpenInput,

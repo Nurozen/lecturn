@@ -30,6 +30,7 @@ import * as Stream from "effect/Stream";
 import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as McpProviderSession from "../mcp/McpProviderSession.ts";
+import { makeAgentDeviceEnvironmentResolver } from "../device/AgentDeviceEnvironment.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as EventSink from "./EventSink.ts";
@@ -323,6 +324,9 @@ export const layerWithOptions = (
       const providerEventIngestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
       const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
       const lecturnHooks = yield* LecturnOrchestrationHooks.resolve;
+      // Lecturn: the `agent-device` CLI goes on the provider's PATH at spawn,
+      // so it is resolved here (not from device_open) for device-capable sessions.
+      const resolveAgentDeviceEnvironment = yield* makeAgentDeviceEnvironmentResolver;
       const agentAccessSettings = Effect.fn("ProviderSessionManagerV2.agentAccessSettings")(
         function* (threadId: ThreadId) {
           if (Option.isNone(serverSettings)) return { browser: true, device: false };
@@ -453,10 +457,26 @@ export const layerWithOptions = (
                     resolved.capabilities.has("preview") === browserToolsAvailable &&
                     resolved.capabilities.has("device") === deviceToolsAvailable
                   ) {
+                    if (deviceToolsAvailable && existing.agentDeviceEnvironment === undefined) {
+                      const agentDeviceEnvironment = yield* resolveAgentDeviceEnvironment();
+                      // A racing release may have cleared the slot meanwhile.
+                      if (
+                        agentDeviceEnvironment !== undefined &&
+                        McpProviderSession.readMcpProviderSession(threadId) === existing
+                      ) {
+                        McpProviderSession.setMcpProviderSession({
+                          ...existing,
+                          agentDeviceEnvironment,
+                        });
+                      }
+                    }
                     return { mcpCredentialId: existing.providerSessionId, issued: false };
                   }
                   dropMcpCredentialReservation(threadId, existing.providerSessionId);
                 }
+                const agentDeviceEnvironment = deviceToolsAvailable
+                  ? yield* resolveAgentDeviceEnvironment()
+                  : undefined;
                 yield* mcpSessionRegistry.revokeThread(threadId);
                 const credential = yield* mcpSessionRegistry.issue({
                   threadId,
@@ -464,7 +484,10 @@ export const layerWithOptions = (
                   browserToolsAvailable,
                   capabilities,
                 });
-                McpProviderSession.setMcpProviderSession(credential.config);
+                McpProviderSession.setMcpProviderSession({
+                  ...credential.config,
+                  ...(agentDeviceEnvironment === undefined ? {} : { agentDeviceEnvironment }),
+                });
                 reserveMcpCredential(threadId, credential.config.providerSessionId);
                 return { mcpCredentialId: credential.config.providerSessionId, issued: true };
               }),

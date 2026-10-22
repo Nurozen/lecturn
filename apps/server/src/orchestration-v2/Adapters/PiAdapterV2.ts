@@ -414,7 +414,8 @@ export function makePiAdapterV2(
       }
       const launch = buildPiRpcLaunch({
         launchArgs: resolvedLaunchArgs.args,
-        environment: options.environment,
+        // Lecturn: a device-capable session gets the `agent-device` CLI on PATH.
+        environment: McpProviderSession.withAgentDeviceEnvironment(options.environment, mcpSession),
         mcpSession,
         extensionPath,
         runtimeMode: input.runtimePolicy.runtimeMode,

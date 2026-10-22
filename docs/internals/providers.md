@@ -190,25 +190,30 @@ cannot delete sessions.
 
 ## Adapter capabilities
 
-Each adapter declares a static `ProviderAdapterCapabilities` record, defined in
-[`ProviderAdapter.ts`][adapter] and exposed on the adapter shape as `capabilities`. Server code
-and clients gate per-provider features on it instead of switching on driver kinds:
+Each V2 adapter reports an `OrchestrationV2ProviderCapabilities` record from `getCapabilities()`
+on the [adapter shape][adapter]; the schema is in `packages/contracts/src/orchestrationV2.ts`.
+The orchestrator's command policy gates per-provider behavior on it instead of switching on
+driver kinds. For example, `sessions.supportsModelSwitchInSession` decides whether a model change
+stays in the session, and `threads.canForkThread` / `threads.canForkFromTurn` decide whether a
+fork is native.
 
-- `sessionModelSwitch` — whether the model of an existing session can change in place
-  (`in-session`) or not (`unsupported`).
+Provider snapshots also carry presentation hints for clients:
+
 - `conversationFork` — whether the driver forks a conversation natively (`native`) or not
   (`unsupported`). It is presentation only and mirrors the V2 adapter capability
   `threads.canForkThread`; it never gates the fork action. Every provider can fork.
+- `conversationForkRequiresAnchor` — the native fork needs a provider turn anchor, so clients can
+  hide historical fork points that have none (Claude).
 
-| Driver kind     | `sessionModelSwitch` | `conversationFork` |
-| --------------- | -------------------- | ------------------ |
-| `codex`         | `in-session`         | `native`           |
-| `claudeAgent`   | `in-session`         | `native`           |
-| `cursor`        | `in-session`         | `unsupported`      |
-| `grok`          | `in-session`         | `unsupported`      |
-| `githubCopilot` | `in-session`         | `unsupported`      |
-| `opencode`      | `in-session`         | `native`           |
-| `antigravity`   | `in-session`         | `unsupported`      |
+| Driver kind     | `conversationFork` |
+| --------------- | ------------------ |
+| `codex`         | `native`           |
+| `claudeAgent`   | `native`           |
+| `cursor`        | `unsupported`      |
+| `grok`          | `unsupported`      |
+| `githubCopilot` | `unsupported`      |
+| `opencode`      | `native`           |
+| `antigravity`   | `unsupported`      |
 
 The presentation values live in each provider snapshot (`CodexProvider.ts`, `ClaudeProvider.ts`,
 and so on in `apps/server/src/provider/Layers/`); the fork capability itself lives in each V2
@@ -273,7 +278,7 @@ a lister stopped at its own scan cap.
 | `opencode`      | `unsupported`      | none                                        | none                                                   |
 | `antigravity`   | `unsupported`      | none                                        | none                                                   |
 
-[adapter]: ../../apps/server/src/provider/Services/ProviderAdapter.ts
+[adapter]: ../../apps/server/src/orchestration-v2/ProviderAdapter.ts
 [driver]: ../../apps/server/src/provider/ProviderDriver.ts
 [external-contract]: ../../packages/contracts/src/externalSessions.ts
 [external-sessions]: ../../apps/server/src/provider/externalSessions.ts

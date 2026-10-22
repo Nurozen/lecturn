@@ -1144,12 +1144,14 @@ function deriveThreadFeedRunFolds(
 }
 
 /**
- * Lecturn: the assistant message that ends each run, and each run of imported
- * history: the rows that carry a response's end-of-turn affordances.
+ * Lecturn: the assistant message that ends each run, and each turn of imported
+ * or V1-migrated (`v1History`) run-less history: the rows that carry a
+ * response's end-of-turn affordances.
  */
 export function deriveTerminalAssistantMessageIds(
   feed: ReadonlyArray<ThreadFeedEntry>,
   importedFrom: ThreadImportOrigin | null = null,
+  v1History = false,
 ): ReadonlySet<string> {
   const terminalIdsByKey = new Map<string, string>();
   let importedKey: string | null = null;
@@ -1161,7 +1163,9 @@ export function deriveTerminalAssistantMessageIds(
     }
     const key =
       entry.message.runId ??
-      (isImportedFeedEntry(entry, importedFrom) ? (importedKey ?? `imported:${entry.id}`) : null);
+      (v1History || isImportedFeedEntry(entry, importedFrom)
+        ? (importedKey ?? `imported:${entry.id}`)
+        : null);
     if (key !== null) terminalIdsByKey.set(key, entry.message.id);
   }
   return new Set(terminalIdsByKey.values());

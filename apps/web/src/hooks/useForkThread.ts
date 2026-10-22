@@ -6,10 +6,11 @@ import {
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
 import {
-  forkSourcePointForRun,
-  latestForkableRunId,
+  forkCommandSource,
+  latestForkPoint,
+  type ThreadForkPoint,
 } from "@lecturn/client-runtime/state/thread-fork-points";
-import type { MessageId, RunId, ScopedThreadRef } from "@lecturn/contracts";
+import type { MessageId, ScopedThreadRef } from "@lecturn/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 
@@ -30,25 +31,26 @@ import { useAtomCommand } from "../state/use-atom-command";
  * command palette, keybinding, /fork). Snapshot read, not a subscription:
  * these surfaces evaluate at open/dispatch time, like the action menu does.
  *
- * `runId` is the latest completed run — the only fork point a shell exposes;
+ * `point` is the whole-thread cut a shell exposes: the latest completed run,
+ * or all run-less history (V1 migration, import) of a thread that never ran;
  * `blockReason` explains an unavailable action (or null).
  */
 export function readForkAtLatestTurn(threadRef: ScopedThreadRef): {
-  runId: RunId | null;
+  point: ThreadForkPoint | null;
   blockReason: { title: string; description: string } | null;
 } {
   const shell = readThreadShell(threadRef);
-  const runId = latestForkableRunId(shell);
+  const point = latestForkPoint(shell);
   const blockReason = resolveForkDisabledReason({
     capability: readEnvironmentSupportsForking(threadRef.environmentId),
-    hasCompletedTurn: runId !== null,
+    hasCompletedTurn: point !== null,
   });
-  return { runId, blockReason };
+  return { point, blockReason };
 }
 
 /**
  * The one fork dispatcher every web entry point funnels through: mint the
- * child id, dispatch `thread.fork` cut at a completed run, seed the composer draft (user-message
+ * child id, dispatch `thread.fork` cut at `point`, seed the composer draft (user-message
  * forks), wait for the child's shell row, navigate. Failure toasts;
  * no client-side compensation — the server cleans up a failed fork.
  */
@@ -59,7 +61,8 @@ export function useForkThread() {
   const forkThreadFrom = useCallback(
     async (input: {
       threadRef: ScopedThreadRef;
-      runId: RunId;
+      point: ThreadForkPoint;
+      /** Anchor user message of a run cut (recorded as the fork origin). */
       sourceMessageId?: MessageId;
       parentTitle: string | null;
       seedPrompt?: string;
@@ -72,8 +75,7 @@ export function useForkThread() {
         input: {
           sourceThreadId: threadRef.threadId,
           targetThreadId: childThreadId,
-          sourcePoint: forkSourcePointForRun(input.runId),
-          ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
+          ...forkCommandSource(input.point, input.sourceMessageId),
           title: buildForkTitle(input.parentTitle),
           workspace: "inherit",
         },
@@ -133,8 +135,8 @@ export function useForkThread() {
         );
         return false;
       }
-      const { runId, blockReason } = readForkAtLatestTurn(threadRef);
-      if (blockReason !== null || runId === null) {
+      const { point, blockReason } = readForkAtLatestTurn(threadRef);
+      if (blockReason !== null || point === null) {
         const reason = blockReason ?? {
           title: "Nothing to fork yet",
           description: "Forking becomes available once the thread has a completed turn.",
@@ -150,7 +152,7 @@ export function useForkThread() {
       }
       return await forkThreadFrom({
         threadRef,
-        runId,
+        point,
         parentTitle: shell.title,
       });
     },

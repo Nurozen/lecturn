@@ -6,10 +6,13 @@ import { scopeThreadRef } from "@lecturn/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 import { canSnooze, effectiveSnoozed } from "@lecturn/client-runtime/state/thread-settled";
 import {
-  forkSourcePointForRun,
-  latestForkableRunId,
+  forkCommandSource,
+  hasRunlessForkHistory,
+  latestForkPoint,
+  type ThreadForkPoint,
 } from "@lecturn/client-runtime/state/thread-fork-points";
 import { ThreadId, type ScopedThreadRef } from "@lecturn/contracts";
+import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
 import * as Cause from "effect/Cause";
 import * as Haptics from "expo-haptics";
 import { useCallback, useRef } from "react";
@@ -265,7 +268,70 @@ const FORK_UNAVAILABLE_MESSAGES: Record<ThreadForkUnavailableReason, string> = {
 };
 
 /**
- * Forks a thread through its latest completed run and resolves to the new child
+ * Dispatches the Lecturn fork of `sourceThreadId` at `point` (a run, or
+ * run-less V1-migrated/imported history) and resolves
+ * to the new child thread's ref (null when the fork failed, after alerting).
+ * The child gets Lecturn's "<parent> (fork)" title, which the first-turn
+ * title seed relies on. Every mobile fork surface goes through here: the
+ * thread list rows, the thread screen's header action, and the per-response
+ * fork button.
+ */
+export function useForkThreadAt(): (input: {
+  readonly environmentId: EnvironmentThreadShell["environmentId"];
+  readonly sourceThreadId: ThreadId;
+  readonly point: ThreadForkPoint;
+  readonly parentTitle: string | null;
+}) => Promise<ScopedThreadRef | null> {
+  const forkMutation = useAtomCommand(threadEnvironment.fork, { reportFailure: false });
+  const forkInFlightThreadKeys = useRef(new Set<string>());
+
+  return useCallback(
+    async (input) => {
+      const key = scopedThreadKey(input.environmentId, input.sourceThreadId);
+      if (forkInFlightThreadKeys.current.has(key)) {
+        return null;
+      }
+      forkInFlightThreadKeys.current.add(key);
+      selectionHaptic();
+      try {
+        const childThreadId = ThreadId.make(uuidv4());
+        const parentTitle = input.parentTitle?.trim();
+        const result = await forkMutation({
+          environmentId: input.environmentId,
+          input: {
+            sourceThreadId: input.sourceThreadId,
+            targetThreadId: childThreadId,
+            ...forkCommandSource(input.point),
+            // The untitled fallback keeps the "(fork)" suffix so the
+            // first-turn titleSeed guard still auto-retitles the child.
+            title: parentTitle ? `${parentTitle} (fork)` : "Untitled (fork)",
+            workspace: "inherit",
+            creationSource: "mobile",
+          },
+        });
+        if (result._tag === "Failure") {
+          const error = Cause.squash(result.cause);
+          Alert.alert(
+            "Could not fork thread",
+            staveAdmissionErrorMessage(error) ??
+              (error instanceof Error && error.message.trim().length > 0
+                ? error.message
+                : "The thread could not be forked."),
+          );
+          return null;
+        }
+        return scopeThreadRef(input.environmentId, childThreadId);
+      } finally {
+        forkInFlightThreadKeys.current.delete(key);
+      }
+    },
+    [forkMutation],
+  );
+}
+
+/**
+ * Forks a thread through its latest completed run (or, for a never-run thread
+ * with run-less history, all of that history) and resolves to the new child
  * thread's ref (null when the fork was refused or failed, after alerting).
  * Shared by the thread list rows and the thread screen's header action so
  * every surface applies the same availability gates.
@@ -273,16 +339,11 @@ const FORK_UNAVAILABLE_MESSAGES: Record<ThreadForkUnavailableReason, string> = {
 export function useForkThread(): (
   thread: EnvironmentThreadShell,
 ) => Promise<ScopedThreadRef | null> {
-  const forkMutation = useAtomCommand(threadEnvironment.fork, { reportFailure: false });
+  const forkThreadAt = useForkThreadAt();
   const { connectedEnvironments } = useRemoteConnectionStatus();
-  const forkInFlightThreadKeys = useRef(new Set<string>());
 
   return useCallback(
     async (thread: EnvironmentThreadShell) => {
-      const key = scopedThreadKey(thread.environmentId, thread.id);
-      if (forkInFlightThreadKeys.current.has(key)) {
-        return null;
-      }
       const availability = resolveThreadForkAvailability({
         serverSupportsForking: environmentSupportsThreadForking(thread.environmentId),
         latestRun: thread.latestRun,
@@ -292,9 +353,10 @@ export function useForkThread(): (
             environment.environmentId === thread.environmentId &&
             environment.connectionState === "connected",
         ),
+        runlessHistory: hasRunlessForkHistory(thread),
       });
-      const runId = latestForkableRunId(thread);
-      if (!availability.available || runId === null) {
+      const point = latestForkPoint(thread);
+      if (!availability.available || point === null) {
         Alert.alert(
           "Could not fork thread",
           FORK_UNAVAILABLE_MESSAGES[
@@ -303,39 +365,14 @@ export function useForkThread(): (
         );
         return null;
       }
-
-      forkInFlightThreadKeys.current.add(key);
-      selectionHaptic();
-      try {
-        const childThreadId = ThreadId.make(uuidv4());
-        const result = await forkMutation({
-          environmentId: thread.environmentId,
-          input: {
-            sourceThreadId: thread.id,
-            targetThreadId: childThreadId,
-            sourcePoint: forkSourcePointForRun(runId),
-            // The untitled fallback keeps the "(fork)" suffix so the
-            // first-turn titleSeed guard still auto-retitles the child.
-            title: thread.title.trim() ? `${thread.title.trim()} (fork)` : "Untitled (fork)",
-            workspace: "inherit",
-          },
-        });
-        if (result._tag === "Failure") {
-          const error = Cause.squash(result.cause);
-          Alert.alert(
-            "Could not fork thread",
-            error instanceof Error && error.message.trim().length > 0
-              ? error.message
-              : "The thread could not be forked.",
-          );
-          return null;
-        }
-        return scopeThreadRef(thread.environmentId, childThreadId);
-      } finally {
-        forkInFlightThreadKeys.current.delete(key);
-      }
+      return forkThreadAt({
+        environmentId: thread.environmentId,
+        sourceThreadId: thread.id,
+        point,
+        parentTitle: thread.title,
+      });
     },
-    [connectedEnvironments, forkMutation],
+    [connectedEnvironments, forkThreadAt],
   );
 }
 

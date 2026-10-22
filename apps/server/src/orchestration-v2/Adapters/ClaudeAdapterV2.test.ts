@@ -1026,6 +1026,112 @@ describe("ClaudeAdapterV2 Auto-accept edits", () => {
   );
 });
 
+describe("ClaudeAdapterV2 agent-device environment", () => {
+  const openTurnEnvironment = (input: {
+    readonly name: string;
+    readonly agentDeviceEnvironment?: Readonly<Record<string, string>>;
+  }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "lecturn-claude-device-env-",
+        });
+        const threadId = ThreadId.make(`thread-claude-device-${input.name}`);
+        McpProviderSession.setMcpProviderSession({
+          environmentId: EnvironmentId.make(`environment-claude-device-${input.name}`),
+          threadId,
+          providerSessionId: `mcp-session-claude-device-${input.name}`,
+          providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+          endpoint: "http://127.0.0.1:43123/mcp",
+          authorizationHeader: "Bearer secret-claude-token",
+          browserToolsAvailable: false,
+          ...(input.agentDeviceEnvironment === undefined
+            ? {}
+            : { agentDeviceEnvironment: input.agentDeviceEnvironment }),
+        });
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
+        );
+        let openedOptions: ClaudeAdapterV2.ClaudeAgentSdkQueryOptions | undefined;
+        const adapter = ClaudeAdapterV2.makeClaudeAdapterV2({
+          instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+          settings: DEFAULT_CLAUDE_SETTINGS,
+          environment: { PATH: "/usr/bin" },
+          attachmentsDir,
+          fileSystem,
+          path: yield* Path.Path,
+          idAllocator: yield* IdAllocator.IdAllocatorV2,
+          queryRunner: {
+            allocateSessionId: Effect.succeed(`native-thread-claude-device-${input.name}`),
+            open: (queryInput) =>
+              Effect.sync(() => {
+                openedOptions = queryInput.options;
+                return {
+                  messages: Stream.never,
+                  offer: () => Effect.void,
+                  setModel: () => Effect.void,
+                  interrupt: Effect.void,
+                  close: Effect.void,
+                };
+              }),
+            forkSession: () => Effect.die("unused"),
+            subagentLaunchToolUseId: () => Effect.succeed(null),
+            assertComplete: Effect.void,
+          },
+        });
+        const runtimePolicy = ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: "/workspace",
+        });
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make(`provider-session-claude-device-${input.name}`),
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy,
+        });
+        yield* runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId,
+            providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make(`attempt-claude-device-${input.name}`),
+            text: "List devices.",
+            attachments: [],
+            runtimePolicy,
+          }),
+        );
+        return openedOptions?.env;
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    );
+
+  it.effect("puts the agent-device CLI on the Claude process PATH only for device sessions", () =>
+    Effect.gen(function* () {
+      const deviceEnv = yield* openTurnEnvironment({
+        name: "on",
+        agentDeviceEnvironment: {
+          PATH: "/state/device/bin",
+          PATH_SEPARATOR: ":",
+          AGENT_DEVICE_NO_UPDATE_NOTIFIER: "1",
+        },
+      });
+      assert.equal(deviceEnv?.PATH, "/state/device/bin:/usr/bin");
+      assert.equal(deviceEnv?.AGENT_DEVICE_NO_UPDATE_NOTIFIER, "1");
+      assert.isUndefined(deviceEnv?.PATH_SEPARATOR);
+
+      const plainEnv = yield* openTurnEnvironment({ name: "off" });
+      assert.equal(plainEnv?.PATH, "/usr/bin");
+      assert.isUndefined(plainEnv?.AGENT_DEVICE_NO_UPDATE_NOTIFIER);
+    }),
+  );
+});
+
 describe("ClaudeAdapterV2 approval cancellation", () => {
   it.effect("observes an approval signal that was already aborted", () =>
     Effect.gen(function* () {

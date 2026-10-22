@@ -42,11 +42,14 @@ import {
   ENVIRONMENT_RECONNECT_WARNING_GRACE_MS,
   getAntigravitySendBlockReason,
   getProviderSendBlockReason,
-  buildForkRunIdByUserMessageId,
+  buildForkPointByUserMessageId,
+  resolveDraftBranchSync,
   buildForkTitle,
   buildImportChip,
   deriveUnsentImportInstanceId,
   resolveForkDisabledReason,
+  resolveForkRevertDisabledReason,
+  resolveLegacyForkCreatedAt,
   resolveThreadImportDivider,
   shouldShowImportTruncatedNote,
   resolveBackgroundDraftWorkspaceOptions,
@@ -2258,6 +2261,42 @@ describe("imported thread provider lock", () => {
     expect(lock(thread)).toBe("claudeAgent");
   });
 
+  it("does not pin a migrated import the user already continued", () => {
+    // A thread migrated from V1 has no V2 run even after the user continued it.
+    const continued = makeThread({
+      importedFrom,
+      modelSelection,
+      itemCount: 6,
+      latestRun: null,
+      latestUserMessageAt: "2026-03-29T09:00:00.000Z",
+    });
+    expect(deriveUnsentImportInstanceId(continued)).toBeNull();
+
+    // Imported history alone (stamped at or before the import) keeps the pin.
+    const unsent = makeThread({
+      importedFrom,
+      modelSelection,
+      itemCount: 2,
+      latestRun: null,
+      latestUserMessageAt: "2026-03-28T11:00:00.000Z",
+    });
+    expect(deriveUnsentImportInstanceId(unsent)).toBe(importedFrom.providerInstanceId);
+  });
+
+  it("drops the pin when the provider catalog no longer has the import's instance", () => {
+    const thread = makeThread({ importedFrom, modelSelection, itemCount: 2 });
+    const other = { instanceId: ProviderInstanceId.make("codex") };
+    expect(deriveUnsentImportInstanceId(thread, [other])).toBeNull();
+    expect(
+      deriveUnsentImportInstanceId(thread, [
+        other,
+        { instanceId: importedFrom.providerInstanceId },
+      ]),
+    ).toBe(importedFrom.providerInstanceId);
+    // An unloaded catalog keeps the pin.
+    expect(deriveUnsentImportInstanceId(thread, [])).toBe(importedFrom.providerInstanceId);
+  });
+
   it("does not pin a fork of an import, which starts from its parent's provider thread", () => {
     const thread = makeThread({
       importedFrom,
@@ -2428,7 +2467,53 @@ describe("buildForkTitle", () => {
   });
 });
 
-describe("buildForkRunIdByUserMessageId", () => {
+describe("resolveDraftBranchSync", () => {
+  const gitStatus = {
+    isRepo: true,
+    hasPrimaryRemote: false,
+    isDefaultRef: true,
+    refName: "main",
+    hasWorkingTreeChanges: false,
+    workingTree: { files: [], insertions: 0, deletions: 0 },
+    hasUpstream: false,
+    aheadCount: 0,
+    behindCount: 0,
+    pr: null,
+  } as const;
+  const local = { branch: null, envMode: "local" as const, worktreePath: null };
+
+  it("records the checked-out branch on a local-checkout draft", () => {
+    expect(resolveDraftBranchSync({ draft: local, isStaveProject: false, gitStatus })).toBe("main");
+    expect(
+      resolveDraftBranchSync({
+        draft: { ...local, branch: "main" },
+        isStaveProject: false,
+        gitStatus,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("leaves worktree base picks, Stave spaces and unknown status alone", () => {
+    expect(
+      resolveDraftBranchSync({
+        draft: { ...local, envMode: "worktree" },
+        isStaveProject: false,
+        gitStatus,
+      }),
+    ).toBeUndefined();
+    expect(resolveDraftBranchSync({ draft: local, isStaveProject: true, gitStatus })).toBe(
+      undefined,
+    );
+    expect(
+      resolveDraftBranchSync({ draft: local, isStaveProject: false, gitStatus: null }),
+    ).toBeUndefined();
+    expect(resolveDraftBranchSync({ draft: null, isStaveProject: false, gitStatus })).toBe(
+      undefined,
+    );
+  });
+});
+
+describe("buildForkPointByUserMessageId", () => {
   const run1 = RunId.make("run-1");
   const run2 = RunId.make("run-2");
   const messageEntry = (
@@ -2452,27 +2537,31 @@ describe("buildForkRunIdByUserMessageId", () => {
     runId: run2,
   });
   const entries = [user1, answer1, user2, answer2].map((message) => messageEntry(message));
+  const base = { runlessHistory: false };
 
   it("maps a user message to the run completed before it", () => {
-    const byMessage = buildForkRunIdByUserMessageId({
+    const byMessage = buildForkPointByUserMessageId({
+      ...base,
       timelineEntries: entries,
       completedRunIds: new Set([run1, run2]),
       activeRunId: null,
     });
 
-    expect([...byMessage.entries()]).toEqual([[user2.id, run1]]);
+    expect([...byMessage.entries()]).toEqual([[user2.id, { type: "run", runId: run1 }]]);
   });
 
   it("skips running and incomplete runs", () => {
     expect(
-      buildForkRunIdByUserMessageId({
+      buildForkPointByUserMessageId({
+        ...base,
         timelineEntries: entries,
         completedRunIds: new Set([run1]),
         activeRunId: run1,
       }).size,
     ).toBe(0);
     expect(
-      buildForkRunIdByUserMessageId({
+      buildForkPointByUserMessageId({
+        ...base,
         timelineEntries: entries,
         completedRunIds: new Set(),
         activeRunId: null,
@@ -2480,13 +2569,14 @@ describe("buildForkRunIdByUserMessageId", () => {
     ).toBe(0);
   });
 
-  it("never offers inherited rows or imported history (no run)", () => {
+  it("never offers inherited rows, or run-less history on a native thread", () => {
     const inherited = [user1, answer1].map((message) => messageEntry(message, "inherited"));
     const imported = messageEntry(
       makeChatMessage("imported", "2026-03-28T00:00:00.000Z", { role: "assistant" }),
     );
     expect(
-      buildForkRunIdByUserMessageId({
+      buildForkPointByUserMessageId({
+        ...base,
         timelineEntries: [...inherited, imported, messageEntry(user2)],
         completedRunIds: new Set([run1]),
         activeRunId: null,
@@ -2494,16 +2584,37 @@ describe("buildForkRunIdByUserMessageId", () => {
     ).toBe(0);
   });
 
+  it("cuts V1-migrated or imported history at the run-less turn before a message", () => {
+    const history = [
+      makeChatMessage("old-user-1", "2026-03-28T00:00:00.000Z"),
+      makeChatMessage("old-answer-1", "2026-03-28T00:00:01.000Z", { role: "assistant" }),
+      makeChatMessage("old-user-2", "2026-03-28T00:00:02.000Z"),
+      makeChatMessage("old-answer-2", "2026-03-28T00:00:03.000Z", { role: "assistant" }),
+    ];
+    const byMessage = buildForkPointByUserMessageId({
+      runlessHistory: true,
+      timelineEntries: [...history, user1, answer1, user2].map((message) => messageEntry(message)),
+      completedRunIds: new Set([run1]),
+      activeRunId: null,
+    });
+    expect([...byMessage.entries()]).toEqual([
+      ["old-user-2", { type: "runless", messageId: "old-user-1" }],
+      [user1.id, { type: "runless", messageId: "old-user-2" }],
+      [user2.id, { type: "run", runId: run1 }],
+    ]);
+  });
+
   it("keeps the previous map identity while unchanged", () => {
     const input = {
+      ...base,
       timelineEntries: entries,
       completedRunIds: new Set([run1, run2]),
       activeRunId: null,
     };
-    const first = buildForkRunIdByUserMessageId(input);
-    expect(buildForkRunIdByUserMessageId(input, first)).toBe(first);
+    const first = buildForkPointByUserMessageId(input);
+    expect(buildForkPointByUserMessageId(input, first)).toBe(first);
     expect(
-      buildForkRunIdByUserMessageId({ ...input, completedRunIds: new Set([run2]) }, first),
+      buildForkPointByUserMessageId({ ...input, completedRunIds: new Set([run2]) }, first),
     ).not.toBe(first);
   });
 });
@@ -2525,5 +2636,94 @@ describe("resolveForkDisabledReason", () => {
     expect(resolveForkDisabledReason({ ...base, hasCompletedTurn: false })?.title).toBe(
       "Nothing to fork yet",
     );
+  });
+});
+
+describe("resolveLegacyForkCreatedAt", () => {
+  const createdAt = "2026-01-01T00:00:02.000Z";
+  const forkOrigin = { threadId: ThreadId.make("thread-parent"), messageId: null };
+
+  it("returns the creation time only for a V1-migrated fork (no V2 forkedFrom)", () => {
+    expect(resolveLegacyForkCreatedAt({ forkOrigin, forkedFrom: null, createdAt })).toBe(createdAt);
+    expect(
+      resolveLegacyForkCreatedAt({
+        forkOrigin,
+        forkedFrom: {
+          type: "run",
+          threadId: ThreadId.make("thread-parent"),
+          runId: RunId.make("run-1"),
+        },
+        createdAt,
+      }),
+    ).toBeNull();
+    expect(
+      resolveLegacyForkCreatedAt({ forkOrigin: null, forkedFrom: null, createdAt }),
+    ).toBeNull();
+    expect(resolveLegacyForkCreatedAt(null)).toBeNull();
+  });
+});
+
+describe("resolveForkRevertDisabledReason", () => {
+  const createdAt = "2026-01-01T00:00:00.000Z";
+  const forkOrigin = { threadId: ThreadId.make("thread-parent"), messageId: null };
+  const runFork = {
+    type: "run" as const,
+    threadId: ThreadId.make("thread-parent"),
+    runId: RunId.make("run-1"),
+  };
+
+  it("asks for a first send on an unsent fork", () => {
+    expect(
+      resolveForkRevertDisabledReason({
+        forkOrigin,
+        forkedFrom: runFork,
+        latestRun: null,
+        latestUserMessageAt: null,
+        createdAt,
+      }),
+    ).toMatch(/^Send a message first/);
+  });
+
+  it("names pre-update turns on a V1-migrated fork that already has its own turns", () => {
+    expect(
+      resolveForkRevertDisabledReason({
+        forkOrigin,
+        forkedFrom: null,
+        latestRun: null,
+        latestUserMessageAt: "2026-01-02T00:00:00.000Z",
+        createdAt,
+      }),
+    ).toMatch(/^Turns from before the Lecturn update/);
+    // Only inherited history (older than the child): still unsent.
+    expect(
+      resolveForkRevertDisabledReason({
+        forkOrigin,
+        forkedFrom: null,
+        latestRun: null,
+        latestUserMessageAt: "2025-12-31T00:00:00.000Z",
+        createdAt,
+      }),
+    ).toMatch(/^Send a message first/);
+  });
+
+  it("does not block a fork with a run or an ordinary thread", () => {
+    expect(
+      resolveForkRevertDisabledReason({
+        forkOrigin,
+        forkedFrom: runFork,
+        latestRun: completedTurn,
+        latestUserMessageAt: createdAt,
+        createdAt,
+      }),
+    ).toBeNull();
+    expect(
+      resolveForkRevertDisabledReason({
+        forkOrigin: null,
+        forkedFrom: null,
+        latestRun: null,
+        latestUserMessageAt: null,
+        createdAt,
+      }),
+    ).toBeNull();
   });
 });

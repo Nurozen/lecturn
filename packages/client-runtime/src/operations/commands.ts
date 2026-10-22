@@ -37,6 +37,7 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 
 import { getInitialServerConfig, request } from "../rpc/client.ts";
+import { resolveRevertTargetCheckpoint } from "../state/threadCheckpoints.ts";
 
 interface CommandMetadata {
   readonly commandId?: CommandId;
@@ -945,11 +946,9 @@ export const revertThreadCheckpoint = Effect.fn("EnvironmentCommands.revertThrea
       projection.checkpoints.find(
         (candidate) => candidate.id === input.checkpointId && candidate.scopeId === input.scopeId,
       ) ??
-      projection.checkpoints.findLast((candidate) =>
-        input.turnCount === 0
-          ? candidate.ordinalWithinScope === 0 && candidate.appRunOrdinal === null
-          : candidate.appRunOrdinal === input.turnCount,
-      );
+      (input.turnCount === undefined
+        ? undefined
+        : resolveRevertTargetCheckpoint(projection.checkpoints, input.turnCount));
     if (checkpoint === undefined || checkpoint.status !== "ready") {
       const target =
         input.checkpointId === undefined

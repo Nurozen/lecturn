@@ -16,6 +16,7 @@ import {
   type ModelSelection,
   NodeId,
   type OrchestrationV2Run,
+  type OrchestrationV2ThreadProjection,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -23,6 +24,7 @@ import {
   RunAttemptId,
   RunId,
   ThreadId,
+  TurnItemId,
 } from "@lecturn/contracts";
 import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
@@ -310,6 +312,124 @@ const writeProviderThread = (threadId: ThreadId) =>
     return providerThreadId;
   });
 
+/** A thread migrated from V1: run-less messages and turn items, historyOrigin v1_import. */
+const writeLegacyThread = (input: {
+  readonly threadId: ThreadId;
+  readonly projectId: ProjectId;
+  readonly texts: ReadonlyArray<readonly ["user" | "assistant", string]>;
+}) =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const eventSink = yield* EventSink.EventSinkV2;
+    yield* createThread(input.threadId, input.projectId);
+    const thread = (yield* orchestrator.getThreadProjection(input.threadId)).thread;
+    const at = DateTime.makeUnsafe(t(1));
+    yield* eventSink.write({
+      events: [
+        {
+          id: EventId.make(`${input.threadId}:legacy`),
+          type: "thread.metadata-updated",
+          threadId: input.threadId,
+          occurredAt: at,
+          payload: { ...thread, historyOrigin: "v1_import" },
+        },
+        ...input.texts.flatMap(([role, text], index) => {
+          const messageId = MessageId.make(`${input.threadId}:legacy-message:${index}`);
+          const common = {
+            id: TurnItemId.make(`${input.threadId}:legacy-item:${index}`),
+            threadId: input.threadId,
+            runId: null,
+            nodeId: null,
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: index + 1,
+            status: "completed" as const,
+            title: null,
+            startedAt: at,
+            completedAt: at,
+            updatedAt: at,
+          };
+          return [
+            {
+              id: EventId.make(`${input.threadId}:legacy-message:${index}`),
+              type: "message.updated" as const,
+              threadId: input.threadId,
+              occurredAt: at,
+              payload: {
+                createdBy: role === "user" ? ("user" as const) : ("agent" as const),
+                creationSource: "server" as const,
+                id: messageId,
+                threadId: input.threadId,
+                runId: null,
+                nodeId: null,
+                role,
+                text,
+                attachments: [],
+                streaming: false,
+                createdAt: at,
+                updatedAt: at,
+              },
+            },
+            {
+              id: EventId.make(`${input.threadId}:legacy-item:${index}`),
+              type: "turn-item.updated" as const,
+              threadId: input.threadId,
+              occurredAt: at,
+              payload:
+                role === "user"
+                  ? {
+                      ...common,
+                      createdBy: "user" as const,
+                      creationSource: "server" as const,
+                      type: "user_message" as const,
+                      messageId,
+                      inputIntent: "turn_start" as const,
+                      text,
+                      attachments: [],
+                    }
+                  : {
+                      ...common,
+                      type: "assistant_message" as const,
+                      messageId,
+                      text,
+                      streaming: false,
+                    },
+            },
+          ];
+        }),
+      ],
+    });
+    return input.texts.map((_, index) =>
+      MessageId.make(`${input.threadId}:legacy-message:${index}`),
+    );
+  });
+
+const sendMessage = (threadId: ThreadId, text: string, titleSeed?: string) =>
+  Effect.flatMap(Orchestrator.OrchestratorV2, (orchestrator) =>
+    orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make(`${threadId}:send:${text}`),
+      threadId,
+      messageId: MessageId.make(`${threadId}:send:${text}`),
+      text,
+      attachments: [],
+      modelSelection,
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+      ...(titleSeed === undefined ? {} : { titleSeed }),
+    }),
+  );
+
+const transcriptText = (projection: Pick<OrchestrationV2ThreadProjection, "visibleTurnItems">) =>
+  projection.visibleTurnItems.flatMap((row) =>
+    row.item.type === "user_message" || row.item.type === "assistant_message"
+      ? [row.item.text]
+      : [],
+  );
+
 it.layer(TestLayer)("Lecturn fork behavior on the V2 orchestrator", (it) => {
   it.effect("imports an external session as run-less history on a native fork", () =>
     Effect.gen(function* () {
@@ -519,69 +639,272 @@ it.layer(TestLayer)("Lecturn fork behavior on the V2 orchestrator", (it) => {
     }),
   );
 
-  it.effect("holds the queue of a settled thread until it is unsettled", () =>
+  it.effect("forks V1-migrated history at a user message via portable context", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
-      const eventSink = yield* EventSink.EventSinkV2;
-      const projectId = ProjectId.make("project:settled-queue");
-      const threadId = ThreadId.make("thread:settled-queue");
-      yield* createThread(threadId, projectId);
-      const providerThreadId = yield* writeProviderThread(threadId);
-      const active = yield* writeRun({ threadId, ordinal: 1, status: "running", providerThreadId });
-      const queued = yield* writeRun({
-        threadId,
-        ordinal: 2,
-        status: "queued",
-        providerThreadId,
-        withExecution: true,
-      });
-      const thread = (yield* orchestrator.getThreadProjection(threadId)).thread;
-      const now = yield* DateTime.now;
-      // Settled while work was queued (e.g. an automatic wake queued after settling).
-      yield* eventSink.write({
-        events: [
-          {
-            id: EventId.make(`${threadId}:settled`),
-            type: "thread.settled",
-            threadId,
-            occurredAt: now,
-            payload: { ...thread, settledOverride: "settled", settledAt: now },
-          },
-        ],
-      });
-      const activeRun = (yield* orchestrator.getThreadProjection(threadId)).runs.find(
-        (run) => run.id === active.runId,
-      )!;
-      yield* eventSink.write({
-        events: [
-          {
-            id: EventId.make(`${threadId}:active-completed`),
-            type: "run.updated",
-            threadId,
-            runId: active.runId,
-            occurredAt: now,
-            payload: { ...activeRun, status: "completed", completedAt: now },
-          },
+      const projectId = ProjectId.make("project:legacy-fork");
+      yield* seedProject(projectId, "/repo/legacy-fork");
+      const sourceThreadId = ThreadId.make("thread:legacy-fork-source");
+      const targetThreadId = ThreadId.make("thread:legacy-fork-child");
+      const messageIds = yield* writeLegacyThread({
+        threadId: sourceThreadId,
+        projectId,
+        texts: [
+          ["user", "LEGACY_QUESTION_1"],
+          ["assistant", "LEGACY_ANSWER_1"],
+          ["user", "LEGACY_QUESTION_2"],
+          ["assistant", "LEGACY_ANSWER_2"],
         ],
       });
       yield* orchestrator.dispatch({
-        type: "queue.resume",
-        commandId: CommandId.make(`${threadId}:resume`),
-        threadId,
+        type: "thread.fork",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("legacy-fork:cut"),
+        sourceThreadId,
+        targetThreadId,
+        sourcePoint: { type: "latest_stable" },
+        sourceMessageId: messageIds[0]!,
       });
-      const held = yield* orchestrator.getThreadProjection(threadId);
-      assert.equal(held.runs.find((run) => run.id === queued.runId)?.status, "queued");
+      const child = yield* orchestrator.getThreadProjection(targetThreadId);
+      assert.isNull(child.thread.forkedFrom);
+      assert.equal(child.thread.lineage.relationshipToParent, "fork");
+      assert.deepEqual(child.thread.forkOrigin, {
+        threadId: sourceThreadId,
+        messageId: messageIds[0]!,
+      });
+      assert.deepEqual(transcriptText(child), ["LEGACY_QUESTION_1", "LEGACY_ANSWER_1"]);
+      assert.deepEqual(
+        child.messages.map((message) => [message.text, message.runId]),
+        [
+          ["LEGACY_QUESTION_1", null],
+          ["LEGACY_ANSWER_1", null],
+        ],
+      );
+      const transfer = child.contextTransfers.find((candidate) => candidate.type === "fork");
+      assert.equal(transfer?.status, "pending");
+      assert.isUndefined(transfer?.sourcePoint.runId);
 
-      yield* orchestrator.dispatch({
-        type: "thread.unsettle",
-        commandId: CommandId.make(`${threadId}:unsettle`),
-        threadId,
-        reason: "user",
-      });
-      const released = yield* orchestrator.getThreadProjection(threadId);
-      assert.notEqual(released.runs.find((run) => run.id === queued.runId)?.status, "queued");
+      // The child's first turn receives the copied history as portable context.
+      yield* sendMessage(targetThreadId, "continue");
+      const continued = yield* orchestrator.getThreadProjection(targetThreadId);
+      const consumed = continued.contextTransfers.find((candidate) => candidate.type === "fork");
+      assert.equal(consumed?.status, "consumed");
+      assert.equal(consumed?.resolution?.strategy, "portable_context");
+      const handoff = continued.contextHandoffs[0]!;
+      assert.equal(continued.runs[0]?.contextHandoffId, handoff.id);
+      const context = `${handoff.summaryText}\n${handoff.history?.messages.map((message) => message.text).join("\n") ?? ""}`;
+      assert.include(context, "LEGACY_QUESTION_1");
+      assert.include(context, "LEGACY_ANSWER_1");
+      assert.notInclude(context, "LEGACY_QUESTION_2");
+      // The source keeps its history untouched.
+      assert.lengthOf((yield* orchestrator.getThreadProjection(sourceThreadId)).messages, 4);
     }),
   );
+
+  it.effect("forks a whole thread whose only history is run-less", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projectId = ProjectId.make("project:runless-whole");
+      yield* seedProject(projectId, "/repo/runless-whole");
+      const legacyThreadId = ThreadId.make("thread:runless-whole-legacy");
+      yield* writeLegacyThread({
+        threadId: legacyThreadId,
+        projectId,
+        texts: [
+          ["user", "WHOLE_QUESTION"],
+          ["assistant", "WHOLE_ANSWER"],
+        ],
+      });
+      const importedThreadId = ThreadId.make("thread:runless-whole-imported");
+      nextTranscript = [
+        { kind: "message", role: "user", text: "IMPORTED_Q", createdAt: t(1) },
+        { kind: "message", role: "assistant", text: "IMPORTED_A", createdAt: t(2) },
+      ];
+      yield* orchestrator.dispatch({
+        ...importCommand(importedThreadId, projectId),
+        commandId: CommandId.make("runless-whole:import"),
+        sessionId: "external-whole",
+      });
+      for (const [sourceThreadId, expected] of [
+        [legacyThreadId, ["WHOLE_QUESTION", "WHOLE_ANSWER"]],
+        [importedThreadId, ["IMPORTED_Q", "IMPORTED_A"]],
+      ] as const) {
+        const targetThreadId = ThreadId.make(`${sourceThreadId}:child`);
+        yield* orchestrator.dispatch({
+          type: "thread.fork",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`${sourceThreadId}:fork-whole`),
+          sourceThreadId,
+          targetThreadId,
+          sourcePoint: { type: "latest_stable" },
+        });
+        const child = yield* orchestrator.getThreadProjection(targetThreadId);
+        assert.deepEqual(transcriptText(child), [...expected]);
+        assert.deepEqual(child.thread.forkOrigin, { threadId: sourceThreadId, messageId: null });
+        yield* sendMessage(targetThreadId, "go on");
+        const continued = yield* orchestrator.getThreadProjection(targetThreadId);
+        assert.equal(
+          continued.contextTransfers.find((candidate) => candidate.type === "fork")?.resolution
+            ?.strategy,
+          "portable_context",
+        );
+        assert.include(continued.contextHandoffs[0]?.summaryText ?? "", expected[1]);
+      }
+      // An imported anchor cuts the import too.
+      const imported = yield* orchestrator.getThreadProjection(importedThreadId);
+      const importedQuestion = imported.messages.find((message) => message.text === "IMPORTED_Q")!;
+      const cutChildId = ThreadId.make("thread:runless-whole-imported:cut");
+      yield* orchestrator.dispatch({
+        type: "thread.fork",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runless-whole:imported-cut"),
+        sourceThreadId: importedThreadId,
+        targetThreadId: cutChildId,
+        sourcePoint: { type: "latest_stable" },
+        sourceMessageId: importedQuestion.id,
+      });
+      const cutChild = yield* orchestrator.getThreadProjection(cutChildId);
+      assert.deepEqual(transcriptText(cutChild), ["IMPORTED_Q", "IMPORTED_A"]);
+      assert.deepEqual(cutChild.thread.importedFrom, imported.thread.importedFrom);
+    }),
+  );
+
+  it.effect("keeps a fork child's rename through its first send", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projectId = ProjectId.make("project:fork-title");
+      yield* seedProject(projectId, "/repo/fork-title");
+      const sourceThreadId = ThreadId.make("thread:fork-title-source");
+      yield* createThread(sourceThreadId, projectId);
+      const providerThreadId = yield* writeProviderThread(sourceThreadId);
+      const run = yield* writeRun({
+        threadId: sourceThreadId,
+        ordinal: 1,
+        status: "completed",
+        providerThreadId,
+      });
+      const fork = (targetThreadId: ThreadId) =>
+        orchestrator.dispatch({
+          type: "thread.fork",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`${targetThreadId}:fork`),
+          sourceThreadId,
+          targetThreadId,
+          sourcePoint: { type: "run", runId: run.runId },
+          title: "Source (fork)",
+        });
+      const renamedId = ThreadId.make("thread:fork-title-renamed");
+      yield* fork(renamedId);
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("fork-title:rename"),
+        threadId: renamedId,
+        title: "My own name",
+      });
+      yield* sendMessage(renamedId, "first message", "first message");
+      const renamed = yield* orchestrator.getThreadProjection(renamedId);
+      assert.equal(renamed.thread.title, "My own name");
+      assert.isUndefined(renamed.thread.titleRegeneration ?? undefined);
+
+      // A child that still has the client's default "(fork)" title takes the seed.
+      const defaultId = ThreadId.make("thread:fork-title-default");
+      yield* fork(defaultId);
+      yield* sendMessage(defaultId, "seeded message", "seeded message");
+      assert.equal(
+        (yield* orchestrator.getThreadProjection(defaultId)).thread.title,
+        "seeded message",
+      );
+    }),
+  );
+
+  for (const release of ["thread.unsettle", "thread.pin"] as const) {
+    it.effect(`holds the queue of a settled thread until ${release} releases it`, () =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const eventSink = yield* EventSink.EventSinkV2;
+        const projectId = ProjectId.make(`project:settled-queue:${release}`);
+        const threadId = ThreadId.make(`thread:settled-queue:${release}`);
+        yield* createThread(threadId, projectId);
+        const providerThreadId = yield* writeProviderThread(threadId);
+        const active = yield* writeRun({
+          threadId,
+          ordinal: 1,
+          status: "running",
+          providerThreadId,
+        });
+        const queued = yield* writeRun({
+          threadId,
+          ordinal: 2,
+          status: "queued",
+          providerThreadId,
+          withExecution: true,
+        });
+        const thread = (yield* orchestrator.getThreadProjection(threadId)).thread;
+        const now = yield* DateTime.now;
+        // Settled while work was queued (e.g. an automatic wake queued after settling).
+        yield* eventSink.write({
+          events: [
+            {
+              id: EventId.make(`${threadId}:settled`),
+              type: "thread.settled",
+              threadId,
+              occurredAt: now,
+              payload: { ...thread, settledOverride: "settled", settledAt: now },
+            },
+          ],
+        });
+        const activeRun = (yield* orchestrator.getThreadProjection(threadId)).runs.find(
+          (run) => run.id === active.runId,
+        )!;
+        yield* eventSink.write({
+          events: [
+            {
+              id: EventId.make(`${threadId}:active-completed`),
+              type: "run.updated",
+              threadId,
+              runId: active.runId,
+              occurredAt: now,
+              payload: { ...activeRun, status: "completed", completedAt: now },
+            },
+          ],
+        });
+        // Resuming a settled thread's queue says why it cannot run.
+        const resume = yield* Effect.flip(
+          orchestrator.dispatch({
+            type: "queue.resume",
+            commandId: CommandId.make(`${threadId}:resume`),
+            threadId,
+          }),
+        );
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        assert.include(JSON.stringify(resume), "Unsettle it to resume its queue");
+        const held = yield* orchestrator.getThreadProjection(threadId);
+        assert.equal(held.runs.find((run) => run.id === queued.runId)?.status, "queued");
+
+        yield* orchestrator.dispatch(
+          release === "thread.unsettle"
+            ? {
+                type: "thread.unsettle",
+                commandId: CommandId.make(`${threadId}:release`),
+                threadId,
+                reason: "user",
+              }
+            : {
+                type: "thread.pin",
+                commandId: CommandId.make(`${threadId}:release`),
+                threadId,
+              },
+        );
+        const released = yield* orchestrator.getThreadProjection(threadId);
+        assert.notEqual(released.thread.settledOverride, "settled");
+        assert.notEqual(released.runs.find((run) => run.id === queued.runId)?.status, "queued");
+      }),
+    );
+  }
 
   it.effect("lets a fork contribution reject a command without recording a receipt", () =>
     Effect.gen(function* () {

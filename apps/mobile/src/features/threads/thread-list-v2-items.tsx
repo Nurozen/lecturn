@@ -39,6 +39,7 @@ import { useSwipeRowDormant } from "../home/swipe-row-activation";
 import { ThreadSwipeable } from "../home/thread-swipe-actions";
 import { ActiveThreadBorder } from "./ActiveThreadBorder";
 import { buildThreadForkMenuItems } from "./thread-fork-menu";
+import { latestForkPoint } from "@lecturn/client-runtime/state/thread-fork-points";
 import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regeneration-menu";
 import {
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
@@ -701,9 +702,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       buildThreadForkMenuItems({
         supported: props.forkSupported,
         inFlight: false,
-        canForkNow: thread.latestRun?.status === "completed",
+        canForkNow: latestForkPoint(thread) !== null,
       }),
-    [props.forkSupported, thread.latestRun],
+    [props.forkSupported, thread],
   );
   const snoozableCardMenuActions = useMemo<MenuAction[]>(
     () => [

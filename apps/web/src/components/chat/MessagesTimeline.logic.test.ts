@@ -4834,7 +4834,7 @@ describe("Lecturn timeline rows", () => {
     );
   });
 
-  it("projects fork run ids onto user message rows only", () => {
+  it("projects fork points onto user message rows only", () => {
     const run1 = RunId.make("run-1");
     const rows = deriveMessagesTimelineRows({
       ...baseInput,
@@ -4843,12 +4843,17 @@ describe("Lecturn timeline rows", () => {
         message("answer-1", "assistant", 1, run1),
         message("user-2", "user", 2),
       ],
-      forkRunIdByUserMessageId: new Map([[MessageId.make("user-2"), run1]]),
+      forkPointByUserMessageId: new Map([
+        [MessageId.make("user-2"), { type: "run" as const, runId: run1 }],
+      ]),
     });
     const byId = new Map(rows.map((row) => [row.id, row]));
-    expect(byId.get("user-2-entry")).toMatchObject({ kind: "message", forkRunId: run1 });
-    expect(byId.get("user-1-entry")).not.toHaveProperty("forkRunId");
-    expect(byId.get("answer-1-entry")).not.toHaveProperty("forkRunId");
+    expect(byId.get("user-2-entry")).toMatchObject({
+      kind: "message",
+      forkPoint: { type: "run", runId: run1 },
+    });
+    expect(byId.get("user-1-entry")).not.toHaveProperty("forkPoint");
+    expect(byId.get("answer-1-entry")).not.toHaveProperty("forkPoint");
   });
 
   it("draws V2's synthetic fork marker as the fork divider", () => {
@@ -4875,6 +4880,48 @@ describe("Lecturn timeline rows", () => {
     });
     expect(rows.map((row) => row.kind)).toEqual(["message", "message", "fork-divider", "message"]);
     expect(rows[2]).toMatchObject({ id: "fork-marker", kind: "fork-divider" });
+  });
+
+  it("places a V1-migrated fork's divider by the child's creation time", () => {
+    const inherited = [
+      message("inherited-user", "user", 0),
+      message("inherited-answer", "assistant", 1),
+    ];
+    const sentRows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [...inherited, message("child-user", "user", 3)],
+      legacyForkCreatedAt: at(2),
+    });
+    expect(sentRows.map((row) => row.id)).toEqual([
+      "inherited-user-entry",
+      "inherited-answer-entry",
+      "legacy-fork-divider-row",
+      "child-user-entry",
+    ]);
+
+    // Before the child's first send the divider closes the inherited history.
+    const unsentRows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: inherited,
+      legacyForkCreatedAt: at(2),
+    });
+    expect(unsentRows.at(-1)).toMatchObject({
+      kind: "fork-divider",
+      id: "legacy-fork-divider-row",
+    });
+
+    // Nothing inherited (or not a migrated fork): no divider.
+    const ownRows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [message("child-user", "user", 3)],
+      legacyForkCreatedAt: at(2),
+    });
+    expect(ownRows.some((row) => row.kind === "fork-divider")).toBe(false);
+    expect(
+      deriveMessagesTimelineRows({ ...baseInput, timelineEntries: inherited }).some(
+        (row) => row.kind === "fork-divider",
+      ),
+    ).toBe(false);
   });
 
   it("keeps an import's trailing tool activity above its divider", () => {

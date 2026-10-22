@@ -1174,6 +1174,7 @@ const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
               threadTitle={props.selectedThread.title}
               latestRun={props.activityRun}
               importedFrom={props.selectedThread.importedFrom ?? null}
+              historyOrigin={props.selectedThread.historyOrigin}
               activeWorkStartedAt={props.activeWorkStartedAt}
               runlessWorkActive={props.runlessWorkActive ?? false}
               listRef={listRef}

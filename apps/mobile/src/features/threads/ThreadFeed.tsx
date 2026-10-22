@@ -13,6 +13,11 @@ import { scopeThreadRef } from "@lecturn/client-runtime/environment";
 import { resolveUserMessagePresentation } from "@lecturn/client-runtime/user-message";
 import { canForkProjectedAssistantItem } from "@lecturn/client-runtime/state/thread-workflows";
 import {
+  resolveMessageForkPoints,
+  type ThreadForkPoint,
+} from "@lecturn/client-runtime/state/thread-fork-points";
+import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
+import {
   type OrchestrationMessageContext,
   ThreadId,
   type ChatAttachment,
@@ -153,7 +158,6 @@ import {
   deriveThreadWorkLogSizing,
   type LayoutVariant,
 } from "../../lib/layout";
-import { uuidv4 } from "../../lib/uuid";
 import {
   resolveMarkdownFontSizes,
   resolveNativeMarkdownTypography,
@@ -210,8 +214,8 @@ import { useThreadSelection } from "../../state/use-thread-selection";
 import { composerDocumentAttachmentRecord } from "../../lib/composerContext";
 import * as Option from "effect/Option";
 import { appAtomRegistry } from "../../state/atom-registry";
-import { environmentThreadShells, threadEnvironment } from "../../state/threads";
-import { useAtomCommand } from "../../state/use-atom-command";
+import { environmentThreadShells } from "../../state/threads";
+import { useForkThreadAt } from "../home/useThreadListActions";
 import { useEnvironmentServerConfig } from "../../state/entities";
 import { useV2ItemSupport } from "../../state/v2-item-support";
 import {
@@ -296,6 +300,8 @@ export interface ThreadFeedProps {
   readonly latestRun: ThreadFeedLatestRun | null;
   /** Lecturn: set when the thread was created from a session made outside Lecturn. */
   readonly importedFrom?: ThreadImportOrigin | null;
+  /** "v1_import" when the thread's early history came from a V1 migration (run-less). */
+  readonly historyOrigin?: EnvironmentThreadShell["historyOrigin"];
   readonly activeWorkStartedAt: string | null;
   readonly runlessWorkActive?: boolean;
   readonly listRef: RefObject<LegendListRef | null>;
@@ -325,10 +331,15 @@ async function waitForThreadShell(
   });
 }
 
+const EMPTY_RUN_IDS: ReadonlySet<RunId> = new Set();
+const EMPTY_RUNLESS_FORK_POINTS: ReadonlyMap<MessageId, ThreadForkPoint> = new Map();
+
 function AssistantForkButton(props: {
   readonly environmentId: EnvironmentId;
   readonly iconColor: ColorValue;
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
+  /** Lecturn: set on a reply of run-less (V1-migrated or imported) history. */
+  readonly runlessForkPoint: ThreadForkPoint | null;
   readonly sourceTitle: string;
 }) {
   const support = useV2ItemSupport({
@@ -336,21 +347,27 @@ function AssistantForkButton(props: {
     sourceThreadId: props.projectedItem.sourceThreadId,
     sourceItemId: props.projectedItem.sourceItemId,
   });
-  const forkFromRun = useAtomCommand(threadEnvironment.forkFromRun, "fork from response");
+  const forkThreadAt = useForkThreadAt();
   const navigation = useNavigation();
   const [busy, setBusy] = useState(false);
   const forkingEnabled =
     useEnvironmentServerConfig(props.environmentId)?.environment.capabilities.threadForking ===
     true;
+  const runId = props.projectedItem.item.runId;
+  // Run-less history has no provider turn: the server copies it into the child
+  // as portable context, so no provider capability applies.
+  const point: ThreadForkPoint | null =
+    props.runlessForkPoint ?? (runId === null ? null : { type: "run", runId });
   const canFork =
     forkingEnabled &&
-    canForkProjectedAssistantItem({
-      projectedItem: props.projectedItem,
-      capabilities: support.providerSession?.capabilities,
-    });
-  const runId = props.projectedItem.item.runId;
+    point !== null &&
+    (point.type === "runless" ||
+      canForkProjectedAssistantItem({
+        projectedItem: props.projectedItem,
+        capabilities: support.providerSession?.capabilities,
+      }));
 
-  if (!canFork || runId === null) return null;
+  if (!canFork || point === null) return null;
 
   return (
     <Pressable
@@ -358,22 +375,16 @@ function AssistantForkButton(props: {
       accessibilityLabel="Fork from this response"
       disabled={busy}
       onPress={() => {
-        const targetThreadId = ThreadId.make(uuidv4());
         setBusy(true);
-        void Haptics.selectionAsync();
-        void forkFromRun({
+        void forkThreadAt({
           environmentId: props.environmentId,
-          input: {
-            sourceThreadId: props.projectedItem.sourceThreadId,
-            targetThreadId,
-            runId,
-            title: `${props.sourceTitle} fork`,
-            creationSource: "mobile",
-          },
+          sourceThreadId: props.projectedItem.sourceThreadId,
+          point,
+          parentTitle: props.sourceTitle,
         })
-          .then(async (result) => {
-            if (result._tag !== "Success") return;
-            const targetThreadReady = await waitForThreadShell(props.environmentId, targetThreadId);
+          .then(async (child) => {
+            if (child === null) return;
+            const targetThreadReady = await waitForThreadShell(props.environmentId, child.threadId);
             if (!targetThreadReady) {
               Alert.alert(
                 "Fork created",
@@ -383,7 +394,7 @@ function AssistantForkButton(props: {
             }
             navigation.navigate("Thread", {
               environmentId: props.environmentId,
-              threadId: targetThreadId,
+              threadId: child.threadId,
             });
           })
           .finally(() => setBusy(false));
@@ -1522,6 +1533,8 @@ function renderFeedEntry(
     readonly workRowSizing: ReturnType<typeof deriveThreadWorkLogSizing>;
     readonly workGroupScrollPositions: Map<string, ThreadWorkGroupScrollPosition>;
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
+    /** Lecturn: run-less replies (V1-migrated or imported history) -> their fork cut. */
+    readonly runlessForkPoints: ReadonlyMap<MessageId, ThreadForkPoint>;
     readonly unsettledTurnId: RunId | null;
     readonly failedRunIds: ReadonlySet<RunId>;
     readonly onCopyWorkRow: (rowId: string, value: string) => void;
@@ -1938,6 +1951,7 @@ function renderFeedEntry(
                 environmentId={props.environmentId}
                 iconColor={iconSubtleColor}
                 projectedItem={message.projectedItem}
+                runlessForkPoint={props.runlessForkPoints.get(message.id) ?? null}
                 sourceTitle={props.threadTitle}
               />
             ) : null}
@@ -2742,9 +2756,36 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     () => failedFeedRunIds(props.feed, props.latestRun),
     [props.feed, props.latestRun],
   );
+  const v1History = props.historyOrigin === "v1_import";
   const terminalAssistantMessageIds = useMemo(
-    () => deriveTerminalAssistantMessageIds(props.feed, props.importedFrom ?? null),
-    [props.feed, props.importedFrom],
+    () => deriveTerminalAssistantMessageIds(props.feed, props.importedFrom ?? null, v1History),
+    [props.feed, props.importedFrom, v1History],
+  );
+  // Lecturn: a reply of run-less history forks through its turn.
+  const runlessHistory = v1History || props.importedFrom != null;
+  const runlessForkPoints = useMemo(
+    () =>
+      runlessHistory
+        ? resolveMessageForkPoints({
+            messages: props.feed.flatMap((entry) =>
+              entry.type === "message"
+                ? [
+                    {
+                      id: entry.message.id,
+                      role: entry.message.role,
+                      runId: entry.message.runId,
+                      streaming: entry.message.streaming,
+                      inherited: entry.message.visibility === "inherited",
+                    },
+                  ]
+                : [],
+            ),
+            completedRunIds: EMPTY_RUN_IDS,
+            activeRunId: null,
+            runlessHistory,
+          }).byRunlessReply
+        : EMPTY_RUNLESS_FORK_POINTS,
+    [props.feed, runlessHistory],
   );
   // Shares the header slot with "Load earlier", so the note only appears once
   // the oldest page is loaded and never adds a row to the list.
@@ -3002,6 +3043,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             workRowSizing,
             workGroupScrollPositions,
             terminalAssistantMessageIds,
+            runlessForkPoints,
             unsettledTurnId,
             failedRunIds,
             onCopyWorkRow,
@@ -3048,6 +3090,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       workRowSizing,
       workGroupScrollPositions,
       terminalAssistantMessageIds,
+      runlessForkPoints,
       unsettledTurnId,
       failedRunIds,
       iconSubtleColor,

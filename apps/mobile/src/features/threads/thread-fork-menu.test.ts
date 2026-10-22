@@ -53,6 +53,29 @@ describe("resolveThreadForkAvailability", () => {
       resolveThreadForkAvailability({ ...forkableInput, latestRun: { status: "failed" } }),
     ).toEqual({ available: false, reason: "no-completed-turn" });
   });
+
+  it("allows a never-run thread with V1-migrated or imported history (whole-thread fork)", () => {
+    expect(
+      resolveThreadForkAvailability({ ...forkableInput, latestRun: null, runlessHistory: true }),
+    ).toEqual({ available: true });
+    // The availability gate still applies before the run-less history does.
+    expect(
+      resolveThreadForkAvailability({
+        ...forkableInput,
+        latestRun: null,
+        runlessHistory: true,
+        serverSupportsForking: false,
+      }),
+    ).toEqual({ available: false, reason: "server-unsupported" });
+    expect(
+      resolveThreadForkAvailability({
+        ...forkableInput,
+        latestRun: null,
+        runlessHistory: true,
+        runtimeStatus: "starting",
+      }),
+    ).toEqual({ available: false, reason: "turn-in-progress" });
+  });
 });
 
 describe("buildThreadForkMenuItems", () => {

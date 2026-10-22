@@ -731,6 +731,8 @@ describe("AcpAdapterV2", () => {
         endpoint: "http://127.0.0.1:43123/mcp",
         authorizationHeader: "Bearer self-contained-mcp-bridge-token",
         browserToolsAvailable: false,
+        // Lecturn: flavors (Antigravity, Copilot, Grok, registry) spawn with this.
+        agentDeviceEnvironment: { PATH: "/state/device/bin", AGENT_DEVICE_NO_UPDATE_NOTIFIER: "1" },
       });
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
@@ -777,6 +779,10 @@ describe("AcpAdapterV2", () => {
       assert.deepEqual(mcpServer.args, ["acp-mcp-bridge"]);
       assert.equal(runtimeInput?.processEnvironment?.LECTURN_ACP_MCP_NODE, process.execPath);
       assert.equal(runtimeInput?.processEnvironment?.LECTURN_ACP_MCP_ENTRYPOINT, undefined);
+      assert.deepEqual(runtimeInput?.agentDeviceEnvironment, {
+        PATH: "/state/device/bin",
+        AGENT_DEVICE_NO_UPDATE_NOTIFIER: "1",
+      });
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 

@@ -44,10 +44,12 @@ export const layer = TurnHooks.layer.pipe(Layer.provideMerge(coordinated));
 
 /**
  * Registers the Lecturn turn hooks owned by this area on the V2 runtime's hook
- * registry, in order: Contextual first (preparation and conflict holds happen
- * before the provider is claimed), then provider work admission (foreground
- * claim right before the provider turn). Also recovers uncertain Contextual
- * dispatches and starts the compaction tail.
+ * registry. The registry orders contributions by name (LECTURN_HOOK_ORDER):
+ * team provider policy and Stave run first, then Contextual (preparation; a
+ * conflict review defers the start without holding an effect slot), then
+ * provider work admission (foreground claim right before the provider turn,
+ * never during a hold). Also recovers uncertain Contextual dispatches and
+ * starts the compaction tail.
  *
  * Requires: LecturnOrchestrationHooks (the instance OrchestrationV2 outputs),
  * ProviderWorkAdmission (the instance decisions use), ContextualTurnHooks

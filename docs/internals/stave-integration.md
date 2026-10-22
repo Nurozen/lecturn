@@ -62,24 +62,25 @@ with the on-disk schema in `apps/server/src/stave/staveManifest.ts`.
 
 Contracts: `packages/contracts/src/stave.ts` (`StaveProjectInfo`, `StaveProjectNotice`) and the
 `stave`/`notice` fields on `OrchestrationProject` and `OrchestrationProjectShell` in
-`packages/contracts/src/orchestration.ts`. Both fields are `Schema.optional(Schema.NullOr(...))`
+`packages/contracts/src/orchestrationProject.ts`. Both fields are `Schema.optional(Schema.NullOr(...))`
 so payloads from pre-Stave servers still decode; `null` means "not a Stave space". `state` and
 `notice.kind` use `ForwardCompatibleOptional`, so a newer server's unknown literal decodes as
 absent rather than failing the row.
 
-- **Read-time, not stored.** Nothing about a space is written to the projection tables. The
-  fields are derived when a project row is read, in
-  `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts`.
-- **One base mapper.** `mapProjectRowBase` maps the stored columns; `mapProjectShellRow` is the
-  single place `repositoryIdentity`, `stave`, and `notice` are attached, and `mapProjectRow`
-  adds `deletedAt` on top. Lifecycle notices (`archive_scheduled`, `refused`,
-  `pending_cleanup`) are derived from the lifecycle repository. The only producer
-  that uses `mapProjectRowBase` directly is `getCommandReadModel`, the decider's view, which
-  skips derived fields.
-- **Outside the SQL transaction, batched.** `resolveDerivedFieldsForRoot` runs the identity
-  resolver and the Stave reader together for one root; `resolveProjectDerivedFieldsForProjects`
-  resolves once per unique `workspaceRoot` (concurrency 4) and keys the result back by project
-  id, after the row query has returned. Deleted rows are skipped unless `includeDeleted` is set.
+- **Read-time, not stored.** Nothing about a space is written to the projection tables. The V2
+  project read model (`ProjectStoreV2`, `projection_projects`) knows nothing about Stave; the
+  fields are attached when shells are read, by `decorate` in
+  `apps/server/src/stave/StaveProjectShells.ts`.
+- **One decoration point.** `orchestration-v2/fork/StaveProjectShellDecoration.ts` resolves the
+  optional `StaveProjectShells` service once at construction and is the only place V2 project
+  reads (`ProjectService` shells, snapshots, and the shell stream) pick it up. Without Stave
+  wired, shells pass through unchanged. `decorate` loads the manifest once per unique
+  `workspaceRoot` through the cached reader (enriched with saga display membership when
+  available) and derives the lifecycle notice (`archive_scheduled`, `refused`,
+  `pending_cleanup`) from `stave_project_lifecycle`.
+- **Outside the SQL transaction.** Decoration runs after the row query has returned and never
+  inside a projection write; a failed manifest read decorates as `null` rather than failing the
+  read.
 - **`RepositoryIdentityResolver` returns `null` for space roots**
   (`apps/server/src/project/RepositoryIdentityResolver.ts`): before consulting git it checks for
   `.stave.yaml` at the cwd. A space root must never take its primary repo's (or an ancestor
@@ -98,20 +99,20 @@ Server consumers of the derived fields in Phase 1:
 
 ## `project.refresh` / `project.refreshed`
 
-Defined in `packages/contracts/src/orchestration.ts`. `project.refresh` is a member of
-`InternalOrchestrationCommand`, so it is server-only: the WebSocket and HTTP dispatch RPCs decode
-`ClientOrchestrationCommand` and cannot carry it.
+`project.refresh` is a server-internal V2 project command (`ProjectRefreshCommand` in
+`apps/server/src/orchestration-v2/ProjectCommands.ts`); no client RPC can carry it. Stave
+issues it through `ProjectService.refresh` (`StaveOrchestrationLive.ts`).
 
-- **What it does.** `apps/server/src/orchestration/decider.ts` requires a live (non-deleted)
-  project and emits `project.refreshed` with `{ projectId }` on the project aggregate
-  (`commandToAggregateRef` in `Layers/OrchestrationEngine.ts` classifies it as `project`).
-- **What it does not do.** The event carries no state. `projector.ts` returns the read model
-  unchanged and `Layers/ProjectionPipeline.ts` writes nothing; the stored row is re-read as-is.
-- **How it reaches clients.** `toShellStreamEvent` in `apps/server/src/ws.ts` handles
-  `project.refreshed` alongside `project.created`/`project.meta-updated` via
-  `projectUpsertOrRemove`, so shell subscribers receive a project upsert whose `stave`/`notice`
-  were freshly derived (after an `invalidate`, from disk). This is the mechanism for pushing
-  derived-state changes without a projection write.
+- **What it does.** The project decider requires a live (non-deleted) project and emits
+  `project.refreshed` with `{ projectId }` on the project aggregate.
+- **What it does not do.** The event carries no state. `ProjectStoreV2` writes nothing for it and
+  the lifecycle sweep does not wake on it (a refresh is the sweep's own output); the stored row
+  is re-read as-is.
+- **How it reaches clients.** The V2 shell stream in `apps/server/src/ws.ts` maps every project
+  event except `project.deleted` to a project upsert read through `ProjectService.getShell`,
+  which decorates it. Subscribers therefore receive `stave`/`notice` freshly derived (after an
+  `invalidate`, from disk). This is the mechanism for pushing derived-state changes without a
+  projection write.
 - `afterMutation` in [`StaveOperations`](#staveoperations) invalidates the reader after
   every space mutation and dispatches `project.refresh` for active projects with a
   `server:stave:refresh:<uuid>` command id. Lifecycle reconciliation also refreshes projects
@@ -134,22 +135,24 @@ root.
 
 Where it is invoked:
 
-| Path                          | File                                              | Intent(s)                                                  | Error surface                                                                |
-| ----------------------------- | ------------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Normalizer (WS, HTTP, mobile) | `apps/server/src/orchestration/Normalizer.ts`     | `thread.create`, `thread.meta.update`, `thread.turn.start` | `OrchestrationDispatchCommandError` with the refusal as `cause`              |
-| Fork materialization          | `apps/server/src/ws.ts` (`dispatchThreadFork`)    | `thread.fork`                                              | `OrchestrationDispatchCommandError` with the refusal as `cause`              |
-| Git RPCs                      | `apps/server/src/ws.ts` (`admitStaveWorktreeRpc`) | `vcs.createWorktree`, `pr.prepare`                         | `GitCommandError` with `detail` = refusal message and the refusal as `cause` |
+| Path                     | File                                               | Intent(s)                                                                                                                               | Error surface                                                                 |
+| ------------------------ | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| V2 orchestrator commands | `apps/server/src/stave/StaveOrchestrationHooks.ts` | `thread.create` (also for `thread.import`), `thread.meta.update`, `thread.turn.start`, `thread.fork`, `thread.unsettle`, pin, unarchive | `LecturnHookRejectedError` with the refusal as `cause`, on the dispatch error |
+| Git RPCs                 | `apps/server/src/ws.ts` (`admitStaveWorktreeRpc`)  | `vcs.createWorktree`, `pr.prepare`                                                                                                      | `GitCommandError` with `detail` = refusal message and the refusal as `cause`  |
 
 Details per path:
 
-- **Normalizer.** `describeWorktreeIntent` identifies relevant thread activity and worktree
-  requests. `enforceStaveWorktreeRule` resolves the owning project, or bootstrap project cwd,
-  before attachments are claimed. Unknown projects/threads are left to the decider. The engine
-  repeats admission under the canonical-root lock immediately before commit. On the HTTP
-  transport, normalization failures use the existing `invalid_command` envelope.
-- **Fork.** Forks skip the normalizer and the materialized command inherits the source's
-  `worktreePath` (`threadFork.ts`), so `dispatchThreadFork` checks `thread.fork` with that path:
-  a Stave-owned source that still runs in a worktree cannot be forked.
+- **Orchestrator hooks.** Stave contributes an `aroundCommand` hook to the V2 hook registry
+  (`orchestration-v2/fork/LecturnOrchestrationHooks.ts`). `describeStaveThreadIntent` maps a
+  command to its intent and owning project or thread, and `StaveAdmission` decides under the
+  space lock, immediately before commit, for every transport (WS, HTTP, mobile). Unknown
+  projects/threads are left to the orchestrator. The same registry carries the project
+  create/move workspace locks and the runtime fence around provider session open. Commands a
+  Stave operation issues while it already holds the locks carry `StaveReconciliation` and pass
+  straight through.
+- **Fork.** A fork that inherits the workspace is checked against the source thread's
+  `worktreePath`, so a Stave-owned source that still runs in a worktree cannot be forked; a
+  `new-worktree` fork is checked as a worktree request.
 - **Git RPCs.** `ws.gitPreparePullRequestThread` and `ws.vcsCreateWorktree` carry only a cwd, so
   the owning project is resolved by exact root first, then by Stave primary-repo path.
   Generic PR preparation is refused in both worktree and local modes for those projects.
@@ -653,12 +656,10 @@ Rules built on them:
 - **Admission test layer** (`apps/server/src/stave/StaveAdmission.test.ts`): `StaveAdmission.layer`
   over a `Layer.mock` reader that knows one space root and records every `load` call, so tests
   assert both the refusal shape and that non-worktree intents never read the manifest.
-  `Normalizer.stave.test.ts` uses the same shape with mocked project/thread shells.
-- **Real manifests in `server.test.ts`**: `makeStaveRoot` writes a minimal
-  `version: 1\nid: ...` manifest into a scoped temp dir and runs the live layers, covering fork
-  refusal and the `vcs.createWorktree`/PR-preparation RPCs.
+  `StaveOrchestrationHooks.test.ts` covers the V2 hook: commit-time admission, refusals while an
+  operation holds the space, the runtime fence, and new-worktree launches.
 - Tests whose roots are never spaces provide `StaveWorkspaceReader.layerNoop` and
-  `StaveAdmission.layerNoop` (see the Normalizer attachment/fork tests).
+  `StaveAdmission.layerNoop`.
 - **Binary candidates** (`apps/server/src/stave/StaveBinary.test.ts`): executables are written
   into a scoped temp dir and `make({ bundledBaseDir })` is pointed at it, so every candidate
   source (settings, env, bootstrap, bundled, PATH) is exercised against real files; the version

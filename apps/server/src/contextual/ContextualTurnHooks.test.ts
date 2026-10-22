@@ -1,10 +1,11 @@
 import { assert, it } from "@effect/vitest";
 import * as C from "@lecturn/contracts";
-import { Effect, Exit, Fiber, Result, Schema } from "effect";
+import { Effect, Fiber, Result, Schema } from "effect";
 import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import type {
+  LecturnTurnStartDecision,
   LecturnTurnStartInput,
   LecturnRunTerminalNotice,
 } from "../orchestration-v2/fork/LecturnOrchestrationHooks.ts";
@@ -13,9 +14,11 @@ import { renderContextualEvidence } from "../provider/ContextualDispatch.ts";
 import {
   clearV2Projection,
   insertV2Message,
+  insertV2Run,
   insertV2Thread,
 } from "../threadDecisions/V2ProjectionTestFixtures.ts";
 import { ContextualLifecycle, make as makeLifecycle } from "./ContextualLifecycle.ts";
+import { ContextualNotifications, make as makeNotifications } from "./ContextualNotifications.ts";
 import { ContextualRepository } from "./ContextualRepository.ts";
 import { ContextualService } from "./ContextualService.ts";
 import { ContextualSettings, make as makeSettings } from "./ContextualSettings.ts";
@@ -140,7 +143,9 @@ const terminal = (
   reconciled,
 });
 
-const harness = (options: { initialState?: C.ContextualPreparationState } = {}) =>
+const harness = (
+  options: { initialState?: C.ContextualPreparationState; notifications?: boolean } = {},
+) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* clearV2Projection(sql);
@@ -241,7 +246,11 @@ const harness = (options: { initialState?: C.ContextualPreparationState } = {}) 
       repository as unknown as Parameters<typeof makeCoordinator>[1],
       queue,
     );
+    const notifications = options.notifications ? yield* makeNotifications : undefined;
     const hooks = yield* make.pipe(
+      notifications === undefined
+        ? (effect) => effect
+        : Effect.provideService(ContextualNotifications, notifications),
       Effect.provideService(ContextualTurnQueue, queue),
       Effect.provideService(ContextualTurnCoordinator, coordinator),
       Effect.provideService(ContextualLifecycle, lifecycle),
@@ -275,18 +284,15 @@ const harness = (options: { initialState?: C.ContextualPreparationState } = {}) 
       stateFor,
       queueState,
       providerTurn,
+      notifications,
+      /** A deferred run stays "starting" in the V2 projection between attempts. */
+      startingRun: (runId: string, ordinal: number) =>
+        insertV2Run(sql, { runId, threadId, ordinal, status: "starting" }),
     };
   });
 
-/** A held turn re-checks on a timer; drive the test clock until the hold resolves. */
-const settle = <A, E>(fiber: Fiber.Fiber<A, E>) =>
-  Effect.gen(function* () {
-    for (let step = 0; step < 100 && fiber.pollUnsafe() === undefined; step++) {
-      yield* TestClock.adjust("2 seconds");
-      yield* Effect.yieldNow;
-    }
-    return yield* Fiber.join(fiber);
-  });
+const deferralOf = (decision: LecturnTurnStartDecision | void) =>
+  decision && "defer" in decision ? decision.defer : undefined;
 
 it.layer(SqlitePersistenceMemory)("Contextual V2 turn hooks", (it) => {
   it.effect("does nothing for threads without Contextual intent", () =>
@@ -356,64 +362,95 @@ it.layer(SqlitePersistenceMemory)("Contextual V2 turn hooks", (it) => {
     }),
   );
 
-  it.effect("holds a turn for conflict review and refuses it when the user cancels", () =>
-    Effect.gen(function* () {
-      const f = yield* harness({ initialState: "awaiting-conflict-review" });
-      const fiber = yield* f.hooks
-        .beforeTurnStart(turnInput("run-4", "message-4"))
-        .pipe(Effect.result, Effect.forkChild);
-      while ((yield* f.queueState("run-4")) !== "held") yield* Effect.yieldNow;
-      // The conflict resolution "cancel-turn" cancels the preparation.
-      const held = f.preparations.get("prep-message-4")!;
-      f.preparations.set(held.id, { ...held, state: "canceled", revision: held.revision + 1 });
-      const result = yield* settle(fiber);
-      assert.isTrue(Result.isFailure(result));
-      if (Result.isFailure(result)) {
-        assert.instanceOf(result.failure, LecturnHookRejectedError);
-        assert.equal(result.failure.contribution, "contextual");
-      }
-      assert.equal(yield* f.queueState("run-4"), "canceled");
-    }),
+  it.effect(
+    "defers a held turn without a hold limit and cancels (not fails) it when the user cancels",
+    () =>
+      Effect.gen(function* () {
+        const f = yield* harness({ initialState: "awaiting-conflict-review" });
+        yield* f.startingRun("run-4", 4);
+        const first = yield* f.hooks.beforeTurnStart(turnInput("run-4", "message-4"));
+        assert.isDefined(deferralOf(first));
+        assert.equal(yield* f.queueState("run-4"), "held");
+        // No fail-open: a long review keeps deferring (the run holds no effect slot).
+        yield* TestClock.adjust("2 hours");
+        assert.isDefined(
+          deferralOf(yield* f.hooks.beforeTurnStart(turnInput("run-4", "message-4"))),
+        );
+        assert.equal(f.prepareCalls.length, 1);
+        // The conflict resolution "cancel-turn" cancels the preparation.
+        const held = f.preparations.get("prep-message-4")!;
+        f.preparations.set(held.id, { ...held, state: "canceled", revision: held.revision + 1 });
+        const result = yield* f.hooks
+          .beforeTurnStart(turnInput("run-4", "message-4"))
+          .pipe(Effect.result);
+        assert.isTrue(Result.isFailure(result));
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, LecturnHookRejectedError);
+          assert.equal(result.failure.contribution, "contextual");
+          assert.equal(result.failure.disposition, "cancelled");
+        }
+        assert.equal(yield* f.queueState("run-4"), "canceled");
+        // A later attempt of the canceled run stays canceled; it is never sent without context.
+        const again = yield* f.hooks
+          .beforeTurnStart(turnInput("run-4", "message-4"))
+          .pipe(Effect.result);
+        assert.isTrue(Result.isFailure(again));
+      }),
   );
 
-  it.effect("a held turn resumes and sends once the conflict is resolved", () =>
+  it.effect("a deferred turn sends on the next attempt once the conflict is resolved", () =>
     Effect.gen(function* () {
       const f = yield* harness({ initialState: "awaiting-conflict-review" });
-      const fiber = yield* f.hooks
-        .beforeTurnStart(turnInput("run-5", "message-5"))
-        .pipe(Effect.forkChild);
-      while ((yield* f.queueState("run-5")) !== "held") yield* Effect.yieldNow;
+      yield* f.startingRun("run-5", 5);
+      assert.isDefined(deferralOf(yield* f.hooks.beforeTurnStart(turnInput("run-5", "message-5"))));
+      assert.equal(yield* f.queueState("run-5"), "held");
       const held = f.preparations.get("prep-message-5")!;
       f.preparations.set(held.id, { ...held, state: "prepared", revision: held.revision + 1 });
-      const decision = yield* settle(fiber);
+      const decision = yield* f.hooks.beforeTurnStart(turnInput("run-5", "message-5"));
       assert.include(
-        decision && "contextPrefix" in decision ? decision.contextPrefix : "",
+        decision && "contextPrefix" in decision ? (decision.contextPrefix ?? "") : "",
         "Use SQLite",
       );
       assert.equal(yield* f.queueState("run-5"), "dispatching");
+      // The re-attempt resumed the preparation by id instead of preparing again.
+      assert.equal(f.prepareCalls.length, 1);
     }),
   );
 
-  it.effect("interrupting a held run (run.interrupt) cancels its preparation, never sends", () =>
+  it.effect("a deferral wakes on the next Contextual change", () =>
     Effect.gen(function* () {
-      const f = yield* harness({ initialState: "awaiting-conflict-review" });
-      const fiber = yield* f.hooks
-        .beforeTurnStart(turnInput("run-6", "message-6"))
-        .pipe(Effect.forkChild);
-      while ((yield* f.queueState("run-6")) !== "held") yield* Effect.yieldNow;
-      const exit = yield* Fiber.interrupt(fiber).pipe(Effect.andThen(Fiber.await(fiber)));
-      assert.isTrue(Exit.hasInterrupts(exit));
-      // The orchestrator then settles the run; the terminal notice cancels the queued turn.
-      yield* f.sql`INSERT INTO contextual_preparations(id,thread_id,project_id,submission_id,message_id,state,revision,preparation_json,created_at,updated_at)
-        VALUES ('prep-message-6',${threadId},${projectId},'submission','message-6','evaluating',0,${encodePreparation({ ...f.preparations.get("prep-message-6")!, state: "evaluating" })},${now},${now})`;
-      yield* f.hooks.onRunTerminal(terminal("run-6", "interrupted"));
-      assert.equal(yield* f.queueState("run-6"), "canceled");
-      const rows = yield* f.sql<{
-        state: string;
-      }>`SELECT state FROM contextual_preparations WHERE id='prep-message-6'`;
-      assert.equal(rows[0]?.state, "canceled");
-      assert.equal(f.receipts.length, 0);
+      const f = yield* harness({ initialState: "awaiting-conflict-review", notifications: true });
+      const deferral = deferralOf(yield* f.hooks.beforeTurnStart(turnInput("run-8", "message-8")));
+      assert.isDefined(deferral?.wake);
+      const woke = yield* Effect.forkChild(deferral!.wake!);
+      yield* Effect.yieldNow;
+      assert.isUndefined(woke.pollUnsafe());
+      yield* f.notifications!.publish;
+      yield* Fiber.join(woke);
     }),
+  );
+
+  it.effect(
+    "interrupting a deferred run (run.interrupt) cancels its preparation, never sends",
+    () =>
+      Effect.gen(function* () {
+        const f = yield* harness({ initialState: "awaiting-conflict-review" });
+        assert.isDefined(
+          deferralOf(yield* f.hooks.beforeTurnStart(turnInput("run-6", "message-6"))),
+        );
+        assert.equal(yield* f.queueState("run-6"), "held");
+        // run.interrupt cancels the pending start effect and settles the run; the
+        // terminal notice cancels the queued turn.
+        yield* f.sql`INSERT INTO contextual_preparations(id,thread_id,project_id,submission_id,message_id,state,revision,preparation_json,created_at,updated_at)
+        VALUES ('prep-message-6',${threadId},${projectId},'submission','message-6','evaluating',0,${encodePreparation({ ...f.preparations.get("prep-message-6")!, state: "evaluating" })},${now},${now})`;
+        yield* f.hooks.onRunTerminal(terminal("run-6", "interrupted"));
+        assert.equal(yield* f.queueState("run-6"), "canceled");
+        const rows = yield* f.sql<{
+          state: string;
+        }>`SELECT state FROM contextual_preparations WHERE id='prep-message-6'`;
+        assert.equal(rows[0]?.state, "canceled");
+        assert.equal(f.receipts.length, 0);
+      }),
   );
 
   it.effect("compaction runs never receive optional context", () =>

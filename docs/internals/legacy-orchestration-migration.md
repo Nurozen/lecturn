@@ -47,17 +47,20 @@ running half-upgraded. See `packages/client-runtime/src/connection/compatibility
 rows at or below the recorded maximum are skipped without checking names. A database that ran a
 local or fork migration under an id this build later assigns to a different migration therefore
 never receives this build's migration at that id. `runMigrations` logs each recorded id whose name
-differs from the manifest so the skipped schema change is diagnosable. There is no safe id range
-for a fork inside this ledger: any id at or below a future upstream id masks it forever, so fork
-schema changes belong in a separate migration table or outside the migrator entirely.
+differs from the manifest so the skipped schema change is diagnosable. Upstream's guidance is that
+a fork has no safe id range in this ledger, because any id at or below a future upstream id masks
+that upstream migration forever. Lecturn instead keeps its own ids and renumbers upstream
+migrations above them, as described next.
 
 ## Lecturn ledger and fork data
 
 Lecturn's ledger already uses ids 1-69, so upstream migrations are remapped above the fork maximum:
 upstream `055_OrchestrationV2` runs as id 70 and `056_RemoveRedundantProjectionIndexes` as id 71
 (the files keep their upstream names). Later upstream migrations keep being remapped the same way.
-The divergence warning stays on, with a known-divergence map for the upstream names that Lecturn
-ledgers hold at 48-54. `reconcileV2PreviewMigration` only acts on V2 preview ledgers at 53/54, which
+Ids 48-54 were published by both products under different names. Whichever side's migrations a
+database ran there, the additive compatibility migrations 64-69 replay both sides' changes, so it
+ends with both schemas. The divergence warning stays on, and a known-divergence
+map in `Migrations.ts` accepts those upstream names at 48-54 as expected history. `reconcileV2PreviewMigration` only acts on V2 preview ledgers at 53/54, which
 no Lecturn database has, so it is inert on Lecturn ledgers.
 
 The `statev2.sqlite` copy is a whole-database snapshot, so fork-owned tables (`thread_notes`,

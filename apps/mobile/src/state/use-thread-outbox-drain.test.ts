@@ -1,4 +1,5 @@
 import { acknowledgedThreadMessagesAtom } from "./acknowledged-thread-messages";
+import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 import {
   CommandId,
   ComposerContextId,
@@ -171,6 +172,7 @@ import {
   recoverEditedCreationAfterDelivery,
   removeAcknowledgedExistingThreadMessage,
   restoreRejectedQueuedMessage,
+  turnTitleSeedForQueuedMessage,
   useThreadOutboxDrain,
 } from "./use-thread-outbox-drain";
 
@@ -1098,5 +1100,53 @@ describe("thread outbox recovery rollback", () => {
     );
     expect(remainingMessages()).toEqual([]);
     expect(harness.setPendingConnectionError).toHaveBeenCalledWith("too large");
+  });
+});
+
+describe("thread outbox turn title seed", () => {
+  const shell = (input: {
+    readonly id: string;
+    readonly title: string;
+    readonly forkOf?: string;
+  }): EnvironmentThreadShell =>
+    ({
+      environmentId: EnvironmentId.make("environment-1"),
+      id: ThreadId.make(input.id),
+      title: input.title,
+      forkedFrom: null,
+      forkOrigin:
+        input.forkOf === undefined
+          ? null
+          : { threadId: ThreadId.make(input.forkOf), messageId: null },
+    }) as unknown as EnvironmentThreadShell;
+  const parent = shell({ id: "thread-parent", title: "Plan" });
+
+  it("seeds an ordinary thread from the message", () => {
+    expect(
+      turnTitleSeedForQueuedMessage(
+        [shell({ id: "thread-1", title: "New thread" })],
+        queuedMessage({ messageId: "m1", text: "Fix the build" }),
+      ),
+    ).toBe("Fix the build");
+  });
+
+  it("seeds a fork child that keeps its default title with that title", () => {
+    for (const title of ["Plan (fork)", "Plan fork"]) {
+      expect(
+        turnTitleSeedForQueuedMessage(
+          [parent, shell({ id: "thread-1", title, forkOf: "thread-parent" })],
+          queuedMessage({ messageId: "m1", text: "Fix the build" }),
+        ),
+      ).toBe(title);
+    }
+  });
+
+  it("sends no seed for a fork child the user renamed", () => {
+    expect(
+      turnTitleSeedForQueuedMessage(
+        [parent, shell({ id: "thread-1", title: "Spoon fork", forkOf: "thread-parent" })],
+        queuedMessage({ messageId: "m1", text: "Fix the build" }),
+      ),
+    ).toBeUndefined();
   });
 });

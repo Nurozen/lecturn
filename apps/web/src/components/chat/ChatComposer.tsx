@@ -2085,7 +2085,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [providerStatuses, settings],
   );
   const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
-  const unsentImportInstanceId = deriveUnsentImportInstanceId(activeThread);
+  const unsentImportInstanceId = deriveUnsentImportInstanceId(activeThread, providerStatuses);
   const {
     selectedProviderEntry,
     requestedDriverKind,

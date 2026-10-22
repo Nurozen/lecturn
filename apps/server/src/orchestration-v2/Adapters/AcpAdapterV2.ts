@@ -138,6 +138,11 @@ export interface AcpAdapterV2RuntimeInput {
   readonly acpMcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
   /** Scoped credentials for terminal fallback when an ACP agent drops `mcpServers`. */
   readonly processEnvironment?: NodeJS.ProcessEnv;
+  /**
+   * Lecturn: puts the `agent-device` CLI on the agent's PATH. Flavors apply it
+   * to their spawn environment with `withAgentDeviceEnvironment`.
+   */
+  readonly agentDeviceEnvironment?: Readonly<Record<string, string>>;
   readonly resumeSessionId?: string;
   readonly interruptPromptOnCancel?: boolean;
   readonly clientCapabilities: EffectAcpSchema.InitializeRequest["clientCapabilities"];
@@ -695,6 +700,7 @@ interface AcpMcpContext {
   readonly servers: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly acpServers: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly processEnvironment?: NodeJS.ProcessEnv;
+  readonly agentDeviceEnvironment?: Readonly<Record<string, string>>;
   readonly endpoint?: string;
   readonly authorization?: string;
 }
@@ -738,6 +744,9 @@ function acpMcpContext(
       LECTURN_ACP_MCP_NODE: self.command,
       ...(self.entrypoint === undefined ? {} : { LECTURN_ACP_MCP_ENTRYPOINT: self.entrypoint }),
     },
+    ...(session.agentDeviceEnvironment === undefined
+      ? {}
+      : { agentDeviceEnvironment: session.agentDeviceEnvironment }),
   };
 }
 
@@ -2067,6 +2076,9 @@ export function makeAcpAdapterV2(
             ...(mcpContext.processEnvironment === undefined
               ? {}
               : { processEnvironment: mcpContext.processEnvironment }),
+            ...(mcpContext.agentDeviceEnvironment === undefined
+              ? {}
+              : { agentDeviceEnvironment: mcpContext.agentDeviceEnvironment }),
             ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
             interruptPromptOnCancel: flavor.interruptPromptOnCancel ?? false,
             clientCapabilities: {

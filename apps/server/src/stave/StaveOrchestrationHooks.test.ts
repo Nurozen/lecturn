@@ -2,10 +2,12 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   CommandId,
+  NodeId,
   type OrchestrationV2ServerCommand,
   ProjectId,
   ProviderInstanceId,
   ProviderSessionId,
+  RunId,
   ThreadId,
 } from "@lecturn/contracts";
 import { Effect, FileSystem, Layer, Option, Path, Ref, Result } from "effect";
@@ -62,6 +64,30 @@ const threadCreate = (worktreePath: string | null): OrchestrationV2ServerCommand
   branch: null,
   worktreePath,
 });
+
+const delegatedTaskRequest: OrchestrationV2ServerCommand = {
+  type: "delegated_task.request",
+  createdBy: "agent",
+  creationSource: "mcp",
+  commandId: CommandId.make("delegate"),
+  parentThreadId: THREAD,
+  parentRunId: RunId.make("parent-run"),
+  parentNodeId: NodeId.make("parent-node"),
+  task: "Investigate",
+  modelSelection,
+  runtimeMode: "full-access",
+  interactionMode: "default",
+};
+
+const mergeBack: OrchestrationV2ServerCommand = {
+  type: "thread.merge_back",
+  createdBy: "user",
+  creationSource: "web",
+  commandId: CommandId.make("merge-back"),
+  sourceThreadId: ThreadId.make("fork-child"),
+  targetThreadId: THREAD,
+  sourcePoint: { type: "latest_stable" },
+};
 
 interface Harness {
   readonly rows: Ref.Ref<ReadonlyArray<ProjectRow>>;
@@ -200,6 +226,44 @@ it.layer(NodeServices.layer)("StaveOrchestrationHooks", (it) => {
         }),
       ),
     );
+
+  it.effect(
+    "admits V2 thread-creating commands (delegated task, merge-back) like create/fork",
+    () =>
+      withHarness([projectRow(PROJECT, "/spaces/v2")], (harness, hooks) =>
+        Effect.gen(function* () {
+          const commands: ReadonlyArray<OrchestrationV2ServerCommand> = [
+            delegatedTaskRequest,
+            mergeBack,
+          ];
+          for (const command of commands) {
+            yield* hooks.aroundCommand({ scope: "thread", command }, Effect.void);
+          }
+          yield* Ref.set(harness.transitioning, true);
+          for (const command of commands) {
+            const committed = yield* Ref.make(false);
+            const refused = yield* hooks
+              .aroundCommand({ scope: "thread", command }, Ref.set(committed, true))
+              .pipe(Effect.flip);
+            assert.include(refused.message, "Space is transitioning");
+            assert.isFalse(yield* Ref.get(committed));
+          }
+          assert.deepEqual(
+            (yield* Ref.get(harness.calls)).map((call) => [
+              call.projectRoot,
+              call.intent,
+              call.worktreePath,
+            ]),
+            [
+              ["/spaces/v2", "thread.create", null],
+              ["/spaces/v2", "thread.fork", null],
+              ["/spaces/v2", "thread.create", null],
+              ["/spaces/v2", "thread.fork", null],
+            ],
+          );
+        }),
+      ),
+  );
 
   it.effect("refuses a thread command while a Stave operation holds the space", () =>
     withHarness([projectRow(PROJECT, "/spaces/busy")], (_harness, hooks) =>
@@ -414,6 +478,14 @@ it("maps V2 thread commands to the V1 admission intents", () => {
     }),
     null,
   );
+  assert.deepEqual(describeStaveThreadIntent(delegatedTaskRequest), {
+    intent: "thread.create",
+    threadId: THREAD,
+  });
+  assert.deepEqual(describeStaveThreadIntent(mergeBack), {
+    intent: "thread.fork",
+    threadId: THREAD,
+  });
   assert.deepEqual(
     describeStaveThreadIntent({
       type: "thread.settle",

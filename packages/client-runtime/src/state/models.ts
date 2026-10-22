@@ -103,6 +103,8 @@ export interface EnvironmentThreadShell {
   readonly forkOrigin?: ThreadForkOrigin | null;
   /** Lecturn: external provider session this thread was imported from. */
   readonly importedFrom?: ThreadImportOrigin | null;
+  /** "v1_import" when the thread's early history came from a V1 migration (run-less). */
+  readonly historyOrigin?: OrchestrationV2ThreadShell["historyOrigin"];
   readonly activeProviderThreadId: OrchestrationV2ThreadShell["activeProviderThreadId"];
   readonly latestRun: ThreadRunSummary | null;
   readonly runtime: ThreadRuntimeSummary | null;
@@ -240,6 +242,7 @@ export function presentThreadShell(
     forkedFrom: thread.forkedFrom,
     forkOrigin: thread.forkOrigin ?? null,
     importedFrom: thread.importedFrom ?? null,
+    ...(thread.historyOrigin === undefined ? {} : { historyOrigin: thread.historyOrigin }),
     activeProviderThreadId: thread.activeProviderThreadId,
     latestRun,
     runtime: shellRuntime(thread),

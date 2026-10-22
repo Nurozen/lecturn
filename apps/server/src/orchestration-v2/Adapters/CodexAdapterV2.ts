@@ -1593,7 +1593,11 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
           providerSessionId: input.providerSessionId,
           runtimePolicy: input.runtimePolicy,
           settings: resolvedRuntime?.config ?? adapterOptions.settings,
-          environment: resolvedRuntime?.environment ?? adapterOptions.environment,
+          // Lecturn: the opening thread's device CLI goes on the app-server PATH.
+          environment: McpProviderSession.withAgentDeviceEnvironment(
+            resolvedRuntime?.environment ?? adapterOptions.environment,
+            McpProviderSession.readMcpProviderSession(input.threadId),
+          ),
         });
         const extraMcpServers =
           adapterOptions.resolveExtraMcpServers === undefined || input.runtimePolicy.cwd == null

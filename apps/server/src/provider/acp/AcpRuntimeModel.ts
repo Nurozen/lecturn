@@ -1107,6 +1107,12 @@ const LECTURN_MCP_TITLE_SUFFIX_CALL =
  */
 const LECTURN_MCP_BARE_TITLE_CALL = /^(?<tool>[A-Za-z0-9_]+)(?::\s|$)/;
 
+const LECTURN_MCP_TITLE_PATTERNS = [
+  LECTURN_MCP_TITLE_CALL,
+  LECTURN_MCP_TITLE_SUFFIX_CALL,
+  LECTURN_MCP_BARE_TITLE_CALL,
+] as const;
+
 /**
  * Best-effort recovery of MCP identity from a generic ACP tool call.
  *
@@ -1179,12 +1185,13 @@ export function extractMcpToolCallIdentity(
   ].filter((value): value is string => typeof value === "string");
   for (const candidate of candidates) {
     const trimmed = candidate.trim();
-    const match =
-      LECTURN_MCP_TITLE_CALL.exec(trimmed) ??
-      LECTURN_MCP_TITLE_SUFFIX_CALL.exec(trimmed) ??
-      LECTURN_MCP_BARE_TITLE_CALL.exec(trimmed);
-    const candidateTool = match?.groups?.tool;
-    if (candidateTool !== undefined && LECTURN_MCP_TOOL_NAMES.has(candidateTool)) {
+    // The server id "lecturn" is also the tool-name prefix ("lecturn_<x>"), so
+    // a prefix pattern can match a bare or tool-first name while capturing an
+    // unknown tool; take the first pattern whose capture is a known tool.
+    const candidateTool = LECTURN_MCP_TITLE_PATTERNS.map(
+      (pattern) => pattern.exec(trimmed)?.groups?.tool,
+    ).find((tool) => tool !== undefined && LECTURN_MCP_TOOL_NAMES.has(tool));
+    if (candidateTool !== undefined) {
       return { server: "lecturn", tool: candidateTool };
     }
   }

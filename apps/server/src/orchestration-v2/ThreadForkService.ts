@@ -9,6 +9,7 @@ import {
   OrchestrationV2Run,
   OrchestrationV2ThreadProjection,
   ThreadId,
+  TurnItemId,
 } from "@lecturn/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -51,6 +52,68 @@ export function forkableSourceRunStatusError(
   run: Pick<OrchestrationV2Run, "id" | "status">,
 ): string {
   return `Fork source run ${run.id} is ${run.status}; in-progress and rolled-back runs cannot be forked.`;
+}
+
+/**
+ * Lecturn: fork of run-less history (a V1 migration transcript or an imported
+ * session). There is no run or native turn to fork from, so the child is not
+ * `forkedFrom` a run: it carries its own copy of the history (written by the
+ * caller) and a pending fork transfer anchored at the last carried item, which
+ * its first turn resolves as portable context.
+ */
+export function planRunlessThreadFork(input: {
+  readonly sourceThread: OrchestrationV2AppThread;
+  readonly lastSourceItemId: TurnItemId;
+  readonly transferId: ContextTransferId;
+  readonly targetThreadId: ThreadId;
+  readonly title?: string;
+  readonly createdBy: OrchestrationV2Actor;
+  readonly creationSource: OrchestrationV2CreationSource;
+  readonly createdAt: DateTime.Utc;
+}): ThreadForkPlanV2 {
+  const source = input.sourceThread;
+  const targetThread: OrchestrationV2AppThread = {
+    ...source,
+    createdBy: input.createdBy,
+    creationSource: input.creationSource,
+    id: input.targetThreadId,
+    title: input.title ?? `${source.title} fork`,
+    activeProviderThreadId: null,
+    lineage: {
+      parentThreadId: source.id,
+      relationshipToParent: "fork",
+      rootThreadId: source.lineage.rootThreadId,
+    },
+    forkedFrom: null,
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    snoozedUntil: null,
+    snoozedAt: null,
+    lastVisitedAt: null,
+    deletedAt: null,
+  };
+  const transfer: OrchestrationV2ContextTransfer = {
+    id: input.transferId,
+    type: "fork",
+    sourceThreadId: source.id,
+    targetThreadId: input.targetThreadId,
+    sourcePoint: { threadId: source.id, turnItemId: input.lastSourceItemId },
+    basePoint: null,
+    sourceProviderInstanceId: source.providerInstanceId,
+    targetProviderInstanceId: null,
+    targetRunId: null,
+    status: "pending",
+    resolution: null,
+    createdBy: input.createdBy,
+    error: null,
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+    consumedAt: null,
+  };
+  return { targetThread, transfer };
 }
 
 export interface ThreadForkServiceV2Shape {

@@ -1,4 +1,4 @@
-import { CommandId } from "@lecturn/contracts";
+import { CommandId, type RunId, type ThreadId } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -66,11 +66,16 @@ export interface OrchestrationEffectExecutorV2Shape {
   /**
    * Runs one claimed effect. `willRetry` is true when the worker will retry a
    * failure, so a step can fail and try again instead of settling the run.
+   * A deferral (Lecturn: a held provider-turn.start) ends the claim without
+   * spending an attempt; the worker re-schedules the row.
    */
   readonly execute: (
     effect: EffectOutbox.OrchestrationEffectV2,
     options?: { readonly willRetry: boolean },
-  ) => Effect.Effect<void, OrchestrationEffectExecutionError>;
+  ) => Effect.Effect<
+    void | EffectOutbox.OrchestrationEffectDeferral,
+    OrchestrationEffectExecutionError
+  >;
 }
 
 export class OrchestrationEffectExecutorV2 extends Context.Service<
@@ -104,6 +109,34 @@ export const executorLayer: Layer.Layer<
       yield* ThreadTitleRegenerationService.ThreadTitleRegenerationService;
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const settings = yield* ServerSettings.ServerSettingsService;
+    // A restart has already interrupted and detached the old turn, so it cannot
+    // be re-run from the top. A fork hook defers only a turn that has not been
+    // dispatched yet (Contextual returns the bound packet for a restarted run),
+    // so waiting in place here is a never-expected fallback, not a hold path.
+    const startRestartedTurn = (input: {
+      readonly threadId: ThreadId;
+      readonly runId: RunId;
+      readonly willRetry: boolean;
+    }): Effect.Effect<void, ProviderTurnStartService.ProviderTurnStartError> =>
+      providerTurnStart.start(input).pipe(
+        Effect.flatMap((outcome) =>
+          EffectOutbox.isOrchestrationEffectDeferral(outcome)
+            ? Effect.logWarning("Restarted provider turn deferred by a fork hook; waiting", {
+                threadId: input.threadId,
+                runId: input.runId,
+                reason: outcome.reason,
+              }).pipe(
+                Effect.andThen(
+                  Effect.raceFirst(
+                    outcome.wake ?? Effect.never,
+                    Effect.sleep(Duration.millis(Math.max(1, outcome.delayMs))),
+                  ),
+                ),
+                Effect.andThen(Effect.suspend(() => startRestartedTurn(input))),
+              )
+            : Effect.void,
+        ),
+      );
     return OrchestrationEffectExecutorV2.of({
       execute: (effect, options) => {
         const willRetry = options?.willRetry ?? false;
@@ -309,7 +342,7 @@ export const executorLayer: Layer.Layer<
                       : Effect.void,
                 ),
                 Effect.andThen(
-                  providerTurnStart.start({
+                  startRestartedTurn({
                     threadId: effect.threadId,
                     runId: effect.request.runId,
                     willRetry,
@@ -643,12 +676,56 @@ export const layerWithOptions = (
 
           const execution = executor
             .execute(effect, { willRetry: effect.attemptCount < maxAttempts })
-            .pipe(Effect.as("executed" as const));
+            .pipe(
+              Effect.map((outcome) =>
+                EffectOutbox.isOrchestrationEffectDeferral(outcome)
+                  ? outcome
+                  : ("executed" as const),
+              ),
+            );
           const exit = yield* Effect.exit(Effect.raceFirst(execution, cancellation)).pipe(
             Effect.ensuring(outbox.clearCancellation(effect.id)),
           );
           if (Exit.isSuccess(exit) && exit.value === "cancelled") {
             return true;
+          }
+          if (Exit.isSuccess(exit) && EffectOutbox.isOrchestrationEffectDeferral(exit.value)) {
+            const deferral = exit.value;
+            const delayMs = Math.max(1, deferral.delayMs);
+            return yield* Effect.gen(function* () {
+              // Nothing external started, so a failed deferral may requeue.
+              const deferred = yield* outbox.defer({
+                effectId: effect.id,
+                workerId,
+                reason: deferral.reason,
+                delayMs,
+              });
+              if (!deferred) {
+                if (yield* wasCancelled(effect.id)) return true;
+                return yield* new OrchestrationEffectWorkerError({
+                  operation: "defer",
+                  effectId: effect.id,
+                  cause: "The worker no longer owns the effect lease.",
+                });
+              }
+              if (deferral.wake !== undefined) {
+                // Bounded by the deferral delay; holds no worker slot.
+                yield* Effect.raceFirst(
+                  deferral.wake.pipe(Effect.as(true)),
+                  Effect.sleep(Duration.millis(delayMs)).pipe(Effect.as(false)),
+                ).pipe(
+                  Effect.flatMap((woke) => (woke ? outbox.expedite(effect.id) : Effect.void)),
+                  Effect.catchCause((cause) =>
+                    Effect.logDebug("Deferred effect wake failed", {
+                      effectId: effect.id,
+                      cause: Cause.pretty(cause),
+                    }),
+                  ),
+                  Effect.forkDetach,
+                );
+              }
+              return true;
+            }).pipe(Effect.onError((cause) => requeueClaim(effect, cause)));
           }
           if (Exit.isSuccess(exit)) {
             return yield* Effect.gen(function* () {

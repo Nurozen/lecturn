@@ -49,6 +49,10 @@ import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 import * as LecturnOrchestrationHooks from "./fork/LecturnOrchestrationHooks.ts";
 import {
+  makeOrchestrationEffectDeferral,
+  type OrchestrationEffectDeferral,
+} from "./EffectOutbox.ts";
+import {
   isRestartNoteContinuation,
   pendingRestartCancelledBackgroundWork,
   restartCancelledBackgroundWorkNote,
@@ -69,12 +73,17 @@ export interface ProviderTurnStartServiceV2Shape {
    * Starts the run's provider turn. When `willRetry` is true, a session open
    * failure is returned so the caller can retry. Otherwise the run is settled
    * as failed.
+   *
+   * Lecturn: returns an OrchestrationEffectDeferral (and leaves the run
+   * "starting") when a fork hook holds the turn, e.g. a Contextual conflict
+   * awaiting review. The caller re-attempts the start later; it must not wait
+   * in place, so a held turn never occupies an effect worker slot.
    */
   readonly start: (input: {
     readonly threadId: ThreadId;
     readonly runId: RunId;
     readonly willRetry?: boolean;
-  }) => Effect.Effect<void, ProviderTurnStartError>;
+  }) => Effect.Effect<void | OrchestrationEffectDeferral, ProviderTurnStartError>;
 }
 
 export class ProviderTurnStartServiceV2 extends Context.Service<
@@ -286,7 +295,7 @@ export const layer: Layer.Layer<
       const settleRunBeforeStart = Effect.fn("orchestrationV2.providerTurnStart.settleBeforeStart")(
         function* (input: {
           readonly signal: string;
-          readonly status: "completed" | "failed";
+          readonly status: "completed" | "failed" | "cancelled";
           readonly now: DateTime.Utc;
           /** Omitted when the run never started, so `startedAt` stays as projected. */
           readonly startedAt?: DateTime.Utc;
@@ -300,6 +309,10 @@ export const layer: Layer.Layer<
             | Pick<
                 Extract<OrchestrationV2TurnItem, { type: "command_execution" }>,
                 "type" | "title" | "input" | "output" | "exitCode"
+              >
+            | Pick<
+                Extract<OrchestrationV2TurnItem, { type: "system_notice" }>,
+                "type" | "title" | "message"
               >;
           /** Emitted after the run events when the provider thread should go idle. */
           readonly providerThreadUpdate?: OrchestrationV2ProviderThread;
@@ -493,8 +506,10 @@ export const layer: Layer.Layer<
           }
         }
       }
-      // Lecturn fork hooks (Contextual preparation, team provider policy):
-      // a rejection fails the run before it reaches the provider.
+      // Lecturn fork hooks (team provider policy, Contextual preparation,
+      // provider work admission): a rejection fails (or, for a withdrawn turn,
+      // cancels) the run before it reaches the provider; a deferral ends this
+      // attempt with the run still "starting" so the worker re-schedules it.
       const forkTurnStart = yield* Effect.result(
         lecturnHooks.beforeTurnStart({
           thread: projection.thread,
@@ -505,22 +520,39 @@ export const layer: Layer.Layer<
         }),
       );
       if (forkTurnStart._tag === "Failure") {
+        // A withdrawn turn is not a provider failure: settling it as failed
+        // would hold the rest of the thread's queue (startNextQueuedRun).
+        const cancelled = forkTurnStart.failure.disposition === "cancelled";
         yield* settleRunBeforeStart({
           signal: "lecturn-turn-start-rejected",
-          status: "failed",
+          status: cancelled ? "cancelled" : "failed",
           now: yield* DateTime.now,
           providerInstanceId: run.providerInstanceId,
           itemProviderThreadId: providerThread.id,
-          item: {
-            type: "error",
-            title: "Turn was not started",
-            failure: makeProviderFailure({
-              class: "permission_error",
-              message: forkTurnStart.failure.reason,
-            }),
-          },
+          item: cancelled
+            ? {
+                type: "system_notice",
+                title: "Turn was canceled",
+                message: forkTurnStart.failure.reason,
+              }
+            : {
+                type: "error",
+                title: "Turn was not started",
+                failure: makeProviderFailure({
+                  class: "permission_error",
+                  message: forkTurnStart.failure.reason,
+                }),
+              },
         });
         return;
+      }
+      if (forkTurnStart.success.defer !== undefined) {
+        const { retryAfterMs, reason, wake } = forkTurnStart.success.defer;
+        return makeOrchestrationEffectDeferral({
+          delayMs: retryAfterMs,
+          reason,
+          ...(wake === undefined ? {} : { wake }),
+        });
       }
       const forkContextPrefix =
         message.attachments.length === 0 && message.text.trim().toLowerCase() === "/compact"

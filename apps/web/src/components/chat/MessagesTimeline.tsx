@@ -36,6 +36,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { environmentThreadDetails } from "../../state/threads";
 import { resolveUserMessagePresentation } from "@lecturn/client-runtime/user-message";
 import { Link } from "@tanstack/react-router";
+import type { ThreadForkPoint } from "@lecturn/client-runtime/state/thread-fork-points";
 import { canForkProjectedAssistantItem } from "@lecturn/client-runtime/state/thread-workflows";
 import { notificationChildThreadId } from "@lecturn/client-runtime/state/thread-execution";
 import { replaceComposerContextReferences } from "@lecturn/shared/composerContextReferences";
@@ -53,7 +54,7 @@ import {
 
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
-const EMPTY_FORK_RUN_IDS: ReadonlyMap<MessageId, RunId> = new Map();
+const EMPTY_FORK_POINTS: ReadonlyMap<MessageId, ThreadForkPoint> = new Map();
 const NOOP_FORK_FROM_MESSAGE = (_messageId: MessageId) => {};
 
 import { resolveChatListAnchoredEndSpace } from "@lecturn/shared/chatList";
@@ -478,8 +479,8 @@ interface MessagesTimelineProps {
     readonly checkpointId: string;
     readonly scopeId: string;
   }) => void;
-  /** Lecturn: user messages that fork through the run completed before them. */
-  forkRunIdByUserMessageId?: ReadonlyMap<MessageId, RunId>;
+  /** Lecturn: user messages that fork through the turn completed before them. */
+  forkPointByUserMessageId?: ReadonlyMap<MessageId, ThreadForkPoint>;
   /** Lecturn: forks from a user message (edit-and-branch). */
   onForkFromMessage?: (messageId: MessageId) => void;
   /** Lecturn: the environment advertises `threadForking` (per-response fork). */
@@ -488,6 +489,8 @@ interface MessagesTimelineProps {
   revertDisabledReason?: string | null;
   /** Identity-stable: a new object rebuilds the timeline rows. */
   importDivider?: { label: string; beforeMessageId: MessageId | null } | null;
+  /** Lecturn: creation time of a V1-migrated fork (no synthetic fork item). */
+  legacyForkCreatedAt?: string | null;
   /** The import left earlier history out and the oldest page is on screen. */
   importHistoryTruncated?: boolean;
   supportsConversationRollback: boolean;
@@ -563,12 +566,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   parentThreadLink = null,
   onForkFromRun,
   onRollbackCheckpoint,
-  forkRunIdByUserMessageId = EMPTY_FORK_RUN_IDS,
+  forkPointByUserMessageId = EMPTY_FORK_POINTS,
   onForkFromMessage = NOOP_FORK_FROM_MESSAGE,
   forkFromRunEnabled = true,
   forkWarning = null,
   revertDisabledReason = null,
   importDivider = null,
+  legacyForkCreatedAt = null,
   importHistoryTruncated = false,
   supportsConversationRollback,
   onRevertToTurnCount,
@@ -966,8 +970,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         isWorking,
         runlessWorkActive,
         activeTurnStartedAt,
-        forkRunIdByUserMessageId,
+        forkPointByUserMessageId,
         importDivider,
+        legacyForkCreatedAt,
         turnDiffSummaries,
         supportsConversationRollback,
         worktreeSetup,
@@ -991,8 +996,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     isWorking,
     runlessWorkActive,
     activeTurnStartedAt,
-    forkRunIdByUserMessageId,
+    forkPointByUserMessageId,
     importDivider,
+    legacyForkCreatedAt,
     turnDiffSummaries,
     supportsConversationRollback,
     worktreeSetup,
@@ -2559,7 +2565,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             </TooltipPopup>
           </Tooltip>
           <div className="flex items-center gap-0.5">
-            {row.forkRunId !== undefined && <ForkFromMessageButton messageId={row.message.id} />}
+            {row.forkPoint !== undefined && <ForkFromMessageButton messageId={row.message.id} />}
             {typeof revertTurnCount === "number" && (
               <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
             )}
@@ -2695,8 +2701,8 @@ function RevertUserMessageButton({
   );
 }
 
-// Callers gate on the row's forkRunId presence, so this only renders on
-// forkable user rows; the parent maps messageId back to its run on click.
+// Callers gate on the row's forkPoint presence, so this only renders on
+// forkable user rows; the parent maps messageId back to its cut on click.
 function ForkFromMessageButton({ messageId }: { messageId: MessageId }) {
   const ctx = use(TimelineRowCtx);
   const activity = use(TimelineRowActivityCtx);

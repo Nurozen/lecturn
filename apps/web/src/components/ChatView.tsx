@@ -1,5 +1,12 @@
 import { resolveThreadPullRequestRef } from "@lecturn/client-runtime/state/threadPullRequests";
-import { forkableRunIdsByUserMessage } from "@lecturn/client-runtime/state/thread-fork-points";
+import {
+  forkParentThreadId,
+  forkableRunIdsByUserMessage,
+  hasRunlessForkHistory,
+  resolveTurnTitleSeed,
+  type ThreadForkPoint,
+} from "@lecturn/client-runtime/state/thread-fork-points";
+import { resolveRevertTargetCheckpoint } from "@lecturn/client-runtime/state/thread-checkpoints";
 import { accountByEnvironmentIdAtom } from "../cloud/connectAccounts";
 import {
   canAutomaticallyRetargetDraft,
@@ -534,6 +541,8 @@ import {
   cloneComposerImageForRetry,
   deriveLockedProvider,
   deriveUnsentImportInstanceId,
+  resolveForkRevertDisabledReason,
+  resolveLegacyForkCreatedAt,
   resolveThreadImportDivider,
   shouldShowImportTruncatedNote,
   readFileAsDataUrl,
@@ -552,7 +561,8 @@ import {
   revokeUserMessagePreviewUrls,
   startNewThreadForProject,
   codexArtifactTemplatePromptToAppend,
-  buildForkRunIdByUserMessageId,
+  buildForkPointByUserMessageId,
+  resolveDraftBranchSync,
   resolveForkDisabledReason,
   waitForStartedServerThread,
   shouldRefocusComposerOnWindowFocus,
@@ -711,7 +721,7 @@ const DevicePanel = lazy(() =>
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const EMPTY_ENVIRONMENT_IDS: readonly EnvironmentId[] = [];
-const EMPTY_FORK_RUN_IDS: ReadonlyMap<MessageId, RunId> = new Map();
+const EMPTY_FORK_POINTS: ReadonlyMap<MessageId, ThreadForkPoint> = new Map();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
   "textarea",
@@ -2926,7 +2936,7 @@ export default function ChatView(props: ChatViewProps) {
     threadProvider,
     providers: providerStatuses,
   });
-  const unsentImportInstanceId = deriveUnsentImportInstanceId(activeThread);
+  const unsentImportInstanceId = deriveUnsentImportInstanceId(activeThread, providerStatuses);
   const modelPickerLockedProvider = supportsProviderSwitchingViaHandoff ? null : lockedProvider;
   const pullRequestsCapabilityKnown = serverConfig !== null;
   const notesAvailable =
@@ -3985,32 +3995,36 @@ export default function ChatView(props: ChatViewProps) {
       capability: environmentSupportsForking,
       hasCompletedTurn: true,
     }) !== null;
-  // Lecturn: user-message forks cut at the run completed before the message.
+  // Lecturn: user-message forks cut at the turn completed before the message
+  // (a run, or a run-less turn of V1-migrated or imported history).
   const serverProjectionRuns = serverProjection?.runs;
+  const runlessForkHistory = hasRunlessForkHistory(activeThread);
   const completedForkRunIds = useMemo(
     () => new Set(forkableRunIdsByUserMessage(serverProjectionRuns ?? []).values()),
     [serverProjectionRuns],
   );
-  const lastForkRunIdsRef = useRef<ReadonlyMap<MessageId, RunId> | null>(null);
-  const forkRunIdByUserMessageId = useMemo(() => {
+  const lastForkPointsRef = useRef<ReadonlyMap<MessageId, ThreadForkPoint> | null>(null);
+  const forkPointByUserMessageId = useMemo(() => {
     if (forkUnavailable || !isServerThread) {
-      return EMPTY_FORK_RUN_IDS;
+      return EMPTY_FORK_POINTS;
     }
-    const next = buildForkRunIdByUserMessageId(
+    const next = buildForkPointByUserMessageId(
       {
         timelineEntries,
         completedRunIds: completedForkRunIds,
         activeRunId: activeRuntime?.activeRunId ?? null,
+        runlessHistory: runlessForkHistory,
       },
-      lastForkRunIdsRef.current,
+      lastForkPointsRef.current,
     );
-    lastForkRunIdsRef.current = next;
+    lastForkPointsRef.current = next;
     return next;
   }, [
     activeRuntime?.activeRunId,
     completedForkRunIds,
     forkUnavailable,
     isServerThread,
+    runlessForkHistory,
     timelineEntries,
   ]);
   // Rebuilt only when its content changes: the timeline derives rows from it.
@@ -4024,6 +4038,7 @@ export default function ChatView(props: ChatViewProps) {
         : { label: importDividerLabel, beforeMessageId: importDividerBeforeMessageId },
     [importDividerBeforeMessageId, importDividerLabel],
   );
+  const legacyForkCreatedAt = resolveLegacyForkCreatedAt(activeThread);
   const importHistoryTruncated = shouldShowImportTruncatedNote({
     importedFrom: activeThread?.importedFrom,
     hasOlderTurns: serverThreadHistory.hasMoreHistory,
@@ -4031,16 +4046,12 @@ export default function ChatView(props: ChatViewProps) {
   });
   const forkWarning =
     activeRuntime?.status === "running" ? "Shares files with an agent that is still working" : null;
-  // An unsent fork has no run of its own yet, so revert has nothing to act on
-  // until the child's first send. A Stave space never records checkpoints (its
-  // root is not a repo), so revert stays blocked there with the reason surfaced
-  // in the button tooltip.
+  // A fork with no run of its own yet has nothing to revert. A Stave space
+  // never records checkpoints (its root is not a repo), so revert stays blocked
+  // there with the reason surfaced in the button tooltip.
   const revertDisabledReason =
-    activeThread != null &&
-    (activeThread.forkOrigin != null || activeThread.forkedFrom != null) &&
-    activeThread.latestRun === null
-      ? "Send a message first — revert becomes available once the fork has its own turn"
-      : resolveCheckpointsUnavailableReason(activeProject);
+    resolveForkRevertDisabledReason(activeThread) ??
+    resolveCheckpointsUnavailableReason(activeProject);
   const captureDraftHeroComposerRect = draftHeroTransition.captureComposerRect;
   const { turnDiffSummaries } = useTurnDiffSummaries(serverProjection);
 
@@ -4097,6 +4108,29 @@ export default function ChatView(props: ChatViewProps) {
           input: { cwd: gitStatusCwd },
         }),
   );
+  // Lecturn: a draft follows the branch checked out where it will run, so the
+  // thread it creates records it (sidebar branch label, "New thread on
+  // <branch>"). GitActionsControl did this while it sat in the header; since
+  // the Git actions moved into the Thread details popover it only mounts there.
+  const draftBranchSyncTarget = routeKind === "draft" ? draftId : null;
+  const draftBranchUpdateValue =
+    draftBranchSyncTarget === null
+      ? undefined
+      : resolveDraftBranchSync({
+          draft: draftThread,
+          isStaveProject: Boolean(activeProject?.stave),
+          gitStatus: gitStatusQuery.data ?? null,
+        });
+  useEffect(() => {
+    if (draftBranchSyncTarget === null || draftBranchUpdateValue === undefined) return;
+    const draft = useComposerDraftStore.getState().getDraftSession(draftBranchSyncTarget);
+    if (!draft || draft.branch === draftBranchUpdateValue) return;
+    setDraftThreadContext(draftBranchSyncTarget, {
+      branch: draftBranchUpdateValue,
+      worktreePath: draft.worktreePath,
+      environmentSelection: draft.environmentSelection ?? (draft.branch ? "manual" : "auto"),
+    });
+  }, [draftBranchSyncTarget, draftBranchUpdateValue, setDraftThreadContext]);
   useWorkspaceMutationRefresh({
     enabled: gitStatusCwd !== null,
     mutationId: workspaceMutationId,
@@ -7966,17 +8000,18 @@ export default function ChatView(props: ChatViewProps) {
         // target checkpoint cannot restore. Those have no git object behind
         // them, so the loss is permanent and has to be named before the user
         // picks "Revert files too". The preview targets the same checkpoint the
-        // rollback restores (the one recorded after `turnCount` runs).
-        const targetCheckpoint = turnDiffSummaries.find(
-          (summary) => summary.checkpointTurnCount === turnCount,
-        );
-        if (!targetCheckpoint?.checkpointId || !targetCheckpoint.scopeId) return;
+        // rollback restores (turn count 0 is the pre-run baseline).
+        const targetCheckpoint =
+          serverProjection === null
+            ? undefined
+            : resolveRevertTargetCheckpoint(serverProjection.checkpoints, turnCount);
+        if (!targetCheckpoint) return;
         void previewCheckpointRevert({
           environmentId,
           input: {
             threadId: activeThread.id,
             scopeId: targetCheckpoint.scopeId,
-            checkpointId: targetCheckpoint.checkpointId,
+            checkpointId: targetCheckpoint.id,
           },
         }).then((preview) => {
           if (preview._tag !== "Success") return;
@@ -8171,7 +8206,7 @@ export default function ChatView(props: ChatViewProps) {
       const sourceThreadRef = scopeThreadRef(environmentId, input.sourceThreadId);
       await forkThreadFrom({
         threadRef: sourceThreadRef,
-        runId: input.runId,
+        point: { type: "run", runId: input.runId },
         parentTitle:
           input.sourceThreadId === activeThread.id
             ? activeThread.title
@@ -8795,8 +8830,8 @@ export default function ChatView(props: ChatViewProps) {
     if (standaloneSlashCommand === "fork" && isServerThread && activeThreadRef) {
       // Clear the composer only when the fork will actually dispatch — a
       // blocked fork just toasts, and clearing first would drop typed text.
-      const { runId, blockReason } = readForkAtLatestTurn(activeThreadRef);
-      if (blockReason === null && runId !== null) {
+      const { point, blockReason } = readForkAtLatestTurn(activeThreadRef);
+      if (blockReason === null && point !== null) {
         promptRef.current = "";
         clearComposerDraftContent(composerDraftTarget);
         composerRef.current?.resetCursorState();
@@ -9424,16 +9459,20 @@ export default function ChatView(props: ChatViewProps) {
       }
     }
     const title = truncate(titleSeed);
-    // A fork's first send passes the child's minted "<parent> (fork)" title
-    // as the seed so the server's auto-retitle gate accepts a replacement; a
-    // user rename (which drops the suffix) keeps the title untouched.
-    // Inherited history is not the child's own: it has no run until this send.
-    const isFirstPostForkSend =
-      isServerThread &&
-      (activeThread.forkOrigin != null || activeThread.forkedFrom != null) &&
-      activeThread.title.trim().endsWith("(fork)") &&
-      activeThread.latestRun === null;
-    const turnTitleSeed = isFirstPostForkSend ? activeThread.title.trim() : title;
+    // A fork child sends its minted default title as the seed so the server's
+    // auto-retitle gate replaces it; a fork child the user renamed sends no
+    // seed, so the first send keeps the user's title.
+    const forkParentId = isServerThread ? forkParentThreadId(activeThread) : null;
+    const turnTitleSeed = isServerThread
+      ? resolveTurnTitleSeed({
+          thread: activeThread,
+          parentTitle:
+            forkParentId === null
+              ? null
+              : readThreadShell(scopeThreadRef(environmentId, forkParentId))?.title,
+          messageTitleSeed: title,
+        })
+      : title;
     const threadCreateModelSelection = createModelSelection(
       ctxSelectedModelSelection.instanceId,
       ctxSelectedModel || activeProjectDefaultModelSelection?.model || DEFAULT_MODEL,
@@ -9554,7 +9593,7 @@ export default function ChatView(props: ChatViewProps) {
             })(),
           },
           modelSelection: ctxSelectedModelSelection,
-          titleSeed: turnTitleSeed,
+          ...(turnTitleSeed === undefined ? {} : { titleSeed: turnTitleSeed }),
           runtimeMode,
           interactionMode: sendInteractionMode,
           dispatchMode,
@@ -10522,18 +10561,21 @@ export default function ChatView(props: ChatViewProps) {
   const onRevertTimelineTurn = useCallback((targetTurnCount: number, messageId: MessageId) => {
     void onRevertToTurnCountRef.current(targetTurnCount, messageId);
   }, []);
-  // Lecturn edit-and-branch: a user message forks through the run completed
+  // Lecturn edit-and-branch: a user message forks through the turn completed
   // before it, and its text is re-seeded into the child's composer.
-  const forkFromMessage = async (messageId: MessageId, runId: RunId) => {
+  const forkFromMessage = async (messageId: MessageId, point: ThreadForkPoint) => {
     if (!activeThread || !activeThreadRef || !isServerThread) {
       return;
     }
     const message = timelineMessages.find((candidate) => candidate.id === messageId);
     const seedPrompt = message?.role === "user" && message.text.trim() ? message.text : undefined;
-    const anchorMessageId = serverProjection?.runs.find((run) => run.id === runId)?.userMessageId;
+    const anchorMessageId =
+      point.type === "run"
+        ? serverProjection?.runs.find((run) => run.id === point.runId)?.userMessageId
+        : undefined;
     await forkThreadFrom({
       threadRef: activeThreadRef,
-      runId,
+      point,
       ...(anchorMessageId ? { sourceMessageId: anchorMessageId } : {}),
       parentTitle: activeThread.title,
       ...(seedPrompt !== undefined ? { seedPrompt } : {}),
@@ -10541,16 +10583,16 @@ export default function ChatView(props: ChatViewProps) {
   };
   // Same ref-at-call-time pattern as the revert handler: the callback handed
   // to the timeline stays identity-stable across renders.
-  const forkRunIdByUserMessageIdRef = useRef(forkRunIdByUserMessageId);
-  forkRunIdByUserMessageIdRef.current = forkRunIdByUserMessageId;
+  const forkPointByUserMessageIdRef = useRef(forkPointByUserMessageId);
+  forkPointByUserMessageIdRef.current = forkPointByUserMessageId;
   const forkFromMessageRef = useRef(forkFromMessage);
   forkFromMessageRef.current = forkFromMessage;
   const onForkFromMessage = useCallback((messageId: MessageId) => {
-    const runId = forkRunIdByUserMessageIdRef.current.get(messageId);
-    if (runId === undefined) {
+    const point = forkPointByUserMessageIdRef.current.get(messageId);
+    if (point === undefined) {
       return;
     }
-    void forkFromMessageRef.current(messageId, runId);
+    void forkFromMessageRef.current(messageId, point);
   }, []);
 
   const pendingSidebarFileDrops = useSidebarPendingFileDropStore((state) => state.pending);
@@ -11103,14 +11145,15 @@ export default function ChatView(props: ChatViewProps) {
                   routeThreadKey={displayedTimelineKey}
                   displayThreadKey={displayedTimelineKey}
                   onOpenTurnDiff={paintOnlyDisplayedTimeline ? noopHeldTurnDiff : onOpenTurnDiff}
-                  forkRunIdByUserMessageId={
-                    paintOnlyDisplayedTimeline ? EMPTY_FORK_RUN_IDS : forkRunIdByUserMessageId
+                  forkPointByUserMessageId={
+                    paintOnlyDisplayedTimeline ? EMPTY_FORK_POINTS : forkPointByUserMessageId
                   }
                   onForkFromMessage={paintOnlyDisplayedTimeline ? noopHeldFork : onForkFromMessage}
                   forkFromRunEnabled={environmentSupportsForking}
                   forkWarning={paintOnlyDisplayedTimeline ? null : forkWarning}
                   revertDisabledReason={paintOnlyDisplayedTimeline ? null : revertDisabledReason}
                   importDivider={paintOnlyDisplayedTimeline ? null : importDivider}
+                  legacyForkCreatedAt={paintOnlyDisplayedTimeline ? null : legacyForkCreatedAt}
                   importHistoryTruncated={!paintOnlyDisplayedTimeline && importHistoryTruncated}
                   onOpenThread={onOpenRelatedThread}
                   parentThreadLink={paintOnlyDisplayedTimeline ? null : parentThreadLink}

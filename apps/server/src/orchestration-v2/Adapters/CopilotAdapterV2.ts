@@ -35,6 +35,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as EffectAcpErrors from "effect-acp/errors";
 
 import * as ServerConfig from "../../config.ts";
+import { withAgentDeviceEnvironment } from "../../mcp/McpProviderSession.ts";
 import { makeAcpNativeLoggerFactory } from "../../provider/acp/AcpNativeLogging.ts";
 import type * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
 import {
@@ -144,14 +145,16 @@ export function makeCopilotAcpAdapterFlavor(options: CopilotAdapterV2Options): A
     planFromFinalAssistantMessage: true,
     makeRuntime:
       options.makeRuntime ??
-      (({ runtimePolicy, processEnvironment, ...input }) =>
+      (({ runtimePolicy, processEnvironment, agentDeviceEnvironment, ...input }) =>
         makeCopilotAcpRuntime({
           ...input,
           copilotSettings: options.settings,
-          environment:
+          environment: withAgentDeviceEnvironment(
             processEnvironment === undefined
               ? options.environment
               : { ...options.environment, ...processEnvironment },
+            { agentDeviceEnvironment },
+          ),
           childProcessSpawner: options.childProcessSpawner,
           runtimeMode: runtimePolicy.runtimeMode,
           cancelBehavior: "wait-for-prompt",

@@ -2454,6 +2454,11 @@ describe("imported thread history (Lecturn)", () => {
     // Without the origin the imported rows belong to no run and carry no
     // end-of-turn affordances.
     expect([...deriveTerminalAssistantMessageIds(feed)]).toEqual(["new-assistant"]);
+    // V1-migrated history is run-less too: each of its turns ends the same way.
+    expect([...deriveTerminalAssistantMessageIds(feed, null, true)]).toEqual([
+      "imported-assistant-last",
+      "new-assistant",
+    ]);
   });
 
   it("marks the end of imported history when no new work exists yet", () => {

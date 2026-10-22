@@ -2,6 +2,7 @@ import * as NetAddress from "effect/unstable/net/NetAddress";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
+  DeviceHostUnavailableError,
   EnvironmentId,
   type ModelSelection,
   type OrchestrationV2AppThread,
@@ -31,6 +32,8 @@ import { TestClock } from "effect/testing";
 import { HttpServer } from "effect/unstable/http";
 
 import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
+import * as ServerConfig from "../config.ts";
+import * as DeviceService from "../device/DeviceService.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as McpProviderSession from "../mcp/McpProviderSession.ts";
@@ -364,6 +367,8 @@ function makeTestLayer(input: {
   readonly beforeUnload?: Effect.Effect<void>;
   readonly serverSettingsLayer?: ReturnType<typeof ServerSettings.layerTest>;
   readonly projectServiceLayer?: Layer.Layer<ProjectService.ProjectService>;
+  /** Lecturn: device automation and server paths for the agent-device PATH shim. */
+  readonly deviceLayer?: Layer.Layer<DeviceService.DeviceService | ServerConfig.ServerConfig>;
   /** Lecturn: report the instance's enabled flag through registry metadata. */
   readonly instanceEnabled?: boolean;
 }) {
@@ -429,6 +434,7 @@ function makeTestLayer(input: {
           TestStoresLayer,
           ...(input.serverSettingsLayer === undefined ? [] : [input.serverSettingsLayer]),
           ...(input.projectServiceLayer === undefined ? [] : [input.projectServiceLayer]),
+          ...(input.deviceLayer === undefined ? [] : [input.deviceLayer]),
         ),
       ),
     ),
@@ -478,6 +484,7 @@ function runBrowserAccessScenario(input: {
   readonly deviceOverride?: boolean;
   readonly createThread?: boolean;
   readonly projectExists?: boolean;
+  readonly deviceLayer?: Layer.Layer<DeviceService.DeviceService | ServerConfig.ServerConfig>;
 }) {
   return Effect.gen(function* () {
     const state = yield* Ref.make(emptyState);
@@ -519,6 +526,7 @@ function runBrowserAccessScenario(input: {
           idleTimeoutMs: 1_000,
           mcpConfigs,
           projectServiceLayer,
+          ...(input.deviceLayer === undefined ? {} : { deviceLayer: input.deviceLayer }),
           serverSettingsLayer: ServerSettings.layerTest({
             enableAgentBrowserAccess: input.enableAgentBrowserAccess,
             projectSettingsOverrides: {
@@ -3150,6 +3158,63 @@ it.effect(
       });
       assert.isFalse(denied?.capabilities?.has("device"));
     }),
+);
+
+/** Device automation whose CLI resolves to `agentCli`, with server paths under `stateRoot`. */
+const agentDeviceTestLayer = (
+  agentCli: DeviceService.DeviceService["Service"]["agentCli"],
+  stateRoot: string,
+) =>
+  Layer.mergeAll(
+    Layer.mock(DeviceService.DeviceService)({ agentCli }),
+    ServerConfig.layerTest(process.cwd(), stateRoot),
+  ).pipe(Layer.provide(NodeServices.layer), Layer.orDie);
+
+it.effect(
+  "ProviderSessionManagerV2 puts the agent-device CLI on PATH only for device sessions",
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const stateRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "lecturn-provider-session-device-",
+      });
+      const deviceLayer = agentDeviceTestLayer(Effect.succeed("/agent-device/cli"), stateRoot);
+      const enabled = yield* runBrowserAccessScenario({
+        enableAgentBrowserAccess: false,
+        projectOverride: false,
+        deviceOverride: true,
+        deviceLayer,
+      });
+      assert.isTrue(enabled?.capabilities?.has("device"));
+      const shimDir = enabled?.agentDeviceEnvironment?.PATH;
+      assert.isDefined(shimDir);
+      assert.isTrue(shimDir!.endsWith("device/bin") || shimDir!.endsWith("device\\bin"));
+      assert.equal(enabled?.agentDeviceEnvironment?.AGENT_DEVICE_NO_UPDATE_NOTIFIER, "1");
+      const env = McpProviderSession.withAgentDeviceEnvironment({ PATH: "/usr/bin" }, enabled);
+      assert.isTrue(env.PATH?.startsWith(shimDir!));
+      assert.isTrue(env.PATH?.endsWith("/usr/bin"));
+
+      const denied = yield* runBrowserAccessScenario({
+        enableAgentBrowserAccess: false,
+        projectOverride: false,
+        deviceOverride: false,
+        deviceLayer,
+      });
+      assert.isFalse(denied?.capabilities?.has("device"));
+      assert.isUndefined(denied?.agentDeviceEnvironment);
+
+      const cliUnavailable = yield* runBrowserAccessScenario({
+        enableAgentBrowserAccess: false,
+        projectOverride: false,
+        deviceOverride: true,
+        deviceLayer: agentDeviceTestLayer(
+          Effect.fail(new DeviceHostUnavailableError({ hostId: "local", reason: "unsupported" })),
+          stateRoot,
+        ),
+      });
+      assert.isTrue(cliUnavailable?.capabilities?.has("device"));
+      assert.isUndefined(cliUnavailable?.agentDeviceEnvironment);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
 const openFreshSession = (threadId: ThreadId) =>

@@ -1611,6 +1611,86 @@ function makeCodexReplayTranscript(input: {
   };
 }
 
+describe("CodexAdapterV2 agent-device environment", () => {
+  const openSessionEnvironment = (input: {
+    readonly name: string;
+    readonly agentDeviceEnvironment?: Readonly<Record<string, string>>;
+  }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const threadId = ThreadId.make(`thread-codex-device-${input.name}`);
+        const providerSessionId = ProviderSessionId.make(
+          `provider-session-codex-device-${input.name}`,
+        );
+        McpProviderSession.setMcpProviderSession({
+          environmentId: EnvironmentId.make(`environment-codex-device-${input.name}`),
+          threadId,
+          providerSessionId: `mcp-session-codex-device-${input.name}`,
+          providerInstanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
+          endpoint: "http://127.0.0.1:43123/mcp",
+          authorizationHeader: "Bearer secret-codex-token",
+          browserToolsAvailable: false,
+          ...(input.agentDeviceEnvironment === undefined
+            ? {}
+            : { agentDeviceEnvironment: input.agentDeviceEnvironment }),
+        });
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
+        );
+        let spawnEnvironment: NodeJS.ProcessEnv | undefined;
+        const adapter = CodexAdapterV2.makeCodexAdapterV2({
+          instanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
+          settings: DEFAULT_CODEX_SETTINGS,
+          environment: { PATH: "/usr/bin" },
+          clientFactory: {
+            open: (openInput) => {
+              spawnEnvironment = openInput.environment;
+              return Effect.fail(
+                new ProviderAdapterOpenSessionError({
+                  driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+                  providerSessionId: openInput.providerSessionId,
+                  cause: "captured",
+                }),
+              );
+            },
+          },
+          fileSystem: yield* FileSystem.FileSystem,
+          idAllocator: yield* IdAllocator.IdAllocatorV2,
+          serverConfig: yield* makeReplayServerConfig(`device-${input.name}`).pipe(Effect.orDie),
+        });
+        yield* adapter
+          .openSession({
+            threadId,
+            providerSessionId,
+            modelSelection: CODEX_TEST_MODEL_SELECTION,
+            runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+          })
+          .pipe(Effect.exit);
+        return spawnEnvironment;
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    );
+
+  it.effect("puts the agent-device CLI on the app-server PATH only for device sessions", () =>
+    Effect.gen(function* () {
+      const deviceEnv = yield* openSessionEnvironment({
+        name: "on",
+        agentDeviceEnvironment: {
+          PATH: "/state/device/bin",
+          PATH_SEPARATOR: ":",
+          AGENT_DEVICE_NO_UPDATE_NOTIFIER: "1",
+        },
+      });
+      assert.equal(deviceEnv?.PATH, "/state/device/bin:/usr/bin");
+      assert.equal(deviceEnv?.AGENT_DEVICE_NO_UPDATE_NOTIFIER, "1");
+      assert.isUndefined(deviceEnv?.PATH_SEPARATOR);
+
+      const plainEnv = yield* openSessionEnvironment({ name: "off" });
+      assert.equal(plainEnv?.PATH, "/usr/bin");
+      assert.isUndefined(plainEnv?.AGENT_DEVICE_NO_UPDATE_NOTIFIER);
+    }),
+  );
+});
+
 describe("CodexAdapterV2 post-settle continuation", () => {
   const awaitUntil = (predicate: () => boolean, label: string): Effect.Effect<void> =>
     Effect.gen(function* () {

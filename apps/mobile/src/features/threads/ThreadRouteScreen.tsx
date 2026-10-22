@@ -58,6 +58,7 @@ import { useThreadShells } from "../../state/entities";
 import { useForkThread } from "../home/useThreadListActions";
 import { GitActionProgressOverlay } from "./GitActionProgressOverlay";
 import { resolveThreadForkAvailability } from "./thread-fork-menu";
+import { hasRunlessForkHistory } from "@lecturn/client-runtime/state/thread-fork-points";
 import {
   buildTerminalMenuSessions,
   nextOpenTerminalId,
@@ -952,6 +953,7 @@ function ThreadRouteContent(
       latestRun: selectedThread.latestRun,
       runtimeStatus: selectedThread.runtime?.status ?? null,
       connected: routeConnectionState === "connected",
+      runlessHistory: hasRunlessForkHistory(selectedThread),
     }).available;
   const handleForkCurrentThread = useCallback(async () => {
     if (selectedThread === null) {

@@ -156,6 +156,30 @@ export interface PendingOrchestrationEffectV2 {
   readonly availableAt?: DateTime.Utc;
 }
 
+/**
+ * Lecturn: an executor outcome meaning "not yet" (a fork hook holds the turn).
+ * The worker returns the row to pending after `delayMs` without counting the
+ * claim as an attempt, so a held effect never occupies a worker slot. `wake`
+ * may make the row due earlier (raced against `delayMs` in a detached fiber).
+ */
+export interface OrchestrationEffectDeferral {
+  readonly _tag: "OrchestrationEffectDeferral";
+  readonly delayMs: number;
+  readonly reason: string;
+  readonly wake?: Effect.Effect<void>;
+}
+
+export const makeOrchestrationEffectDeferral = (
+  input: Omit<OrchestrationEffectDeferral, "_tag">,
+): OrchestrationEffectDeferral => ({ _tag: "OrchestrationEffectDeferral", ...input });
+
+export const isOrchestrationEffectDeferral = (
+  value: unknown,
+): value is OrchestrationEffectDeferral =>
+  typeof value === "object" &&
+  value !== null &&
+  (value as { readonly _tag?: unknown })._tag === "OrchestrationEffectDeferral";
+
 export class EffectOutboxError extends Schema.TaggedError<EffectOutboxError>()(
   "EffectOutboxError",
   {
@@ -217,6 +241,18 @@ export interface EffectOutboxV2Shape {
     readonly workerId: string;
     readonly error: string;
   }) => Effect.Effect<boolean, EffectOutboxError>;
+  /**
+   * Lecturn: return a claimed row to pending after `delayMs` without spending
+   * an attempt (the claim's attempt_count increment is undone).
+   */
+  readonly defer: (input: {
+    readonly effectId: string;
+    readonly workerId: string;
+    readonly reason: string;
+    readonly delayMs: number;
+  }) => Effect.Effect<boolean, EffectOutboxError>;
+  /** Lecturn: make a deferred pending row due now (a held turn's wake). */
+  readonly expedite: (effectId: string) => Effect.Effect<boolean, EffectOutboxError>;
 }
 
 export class EffectOutboxV2 extends Context.Service<EffectOutboxV2, EffectOutboxV2Shape>()(
@@ -610,6 +646,57 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
           return rows.length === 1;
         }).pipe(
           Effect.mapError((cause) => new EffectOutboxError({ operation: "fail", effectId, cause })),
+        ),
+      defer: ({ effectId, workerId, reason, delayMs }) =>
+        Effect.gen(function* () {
+          const now = yield* DateTime.now;
+          const nowIso = DateTime.formatIso(now);
+          const availableAt = DateTime.formatIso(
+            DateTime.add(now, { milliseconds: Math.max(0, delayMs) }),
+          );
+          const rows = yield* sql<{ readonly effect_id: string }>`
+            UPDATE orchestration_v2_effect_outbox
+            SET
+              status = 'pending',
+              attempt_count = MAX(0, attempt_count - 1),
+              available_at = ${availableAt},
+              lease_owner = NULL,
+              lease_expires_at = NULL,
+              updated_at = ${nowIso},
+              last_error = ${reason}
+            WHERE effect_id = ${effectId}
+              AND status = 'running'
+              AND lease_owner = ${workerId}
+            RETURNING effect_id
+          `;
+          if (rows.length === 1) {
+            cancellationSignals.delete(effectId);
+            // The thread's other effects were waiting on this running row.
+            yield* notifyAvailable();
+          }
+          return rows.length === 1;
+        }).pipe(
+          Effect.mapError(
+            (cause) => new EffectOutboxError({ operation: "defer", effectId, cause }),
+          ),
+        ),
+      expedite: (effectId) =>
+        Effect.gen(function* () {
+          const now = DateTime.formatIso(yield* DateTime.now);
+          const rows = yield* sql<{ readonly effect_id: string }>`
+            UPDATE orchestration_v2_effect_outbox
+            SET available_at = ${now}, updated_at = ${now}
+            WHERE effect_id = ${effectId}
+              AND status = 'pending'
+              AND available_at > ${now}
+            RETURNING effect_id
+          `;
+          if (rows.length === 1) yield* notifyAvailable();
+          return rows.length === 1;
+        }).pipe(
+          Effect.mapError(
+            (cause) => new EffectOutboxError({ operation: "expedite", effectId, cause }),
+          ),
         ),
     };
 

@@ -15,6 +15,7 @@ import * as Scope from "effect/Scope";
 
 import {
   layer,
+  LECTURN_HOOK_ORDER,
   LecturnHookRejectedError,
   LecturnOrchestrationHooks,
   type LecturnThreadLifecycleNotice,
@@ -137,6 +138,67 @@ describe("LecturnOrchestrationHooks", () => {
       });
       const rejected = yield* Effect.flip(hooks.beforeTurnStart(turnInput));
       assert.equal(rejected.reason, "Provider 'codex' is disabled by your organization.");
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
+
+  it.effect("orders contributions by name regardless of registration timing", () =>
+    Effect.gen(function* () {
+      const hooks = yield* LecturnOrchestrationHooks;
+      const calls: Array<string> = [];
+      // Registered in the reverse of the fixed order, with an unknown name first.
+      for (const name of [
+        "relay",
+        "provider-work-admission",
+        "contextual",
+        "stave",
+        "team-provider-policy",
+      ]) {
+        yield* hooks.register({
+          name,
+          beforeTurnStart: () => Effect.sync(() => void calls.push(name)),
+        });
+      }
+      yield* hooks.beforeTurnStart(turnInput);
+      assert.deepEqual(calls, [...LECTURN_HOOK_ORDER, "relay"]);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
+
+  it.effect("a deferral ends the chain for this attempt and drops earlier prefixes", () =>
+    Effect.gen(function* () {
+      const hooks = yield* LecturnOrchestrationHooks;
+      const calls: Array<string> = [];
+      let hold = true;
+      yield* hooks.register({
+        name: "team-provider-policy",
+        beforeTurnStart: () =>
+          Effect.sync(() => {
+            calls.push("policy");
+            return { contextPrefix: "P" };
+          }),
+      });
+      yield* hooks.register({
+        name: "provider-work-admission",
+        beforeTurnStart: () => Effect.sync(() => void calls.push("admission")),
+      });
+      yield* hooks.register({
+        name: "contextual",
+        beforeTurnStart: () =>
+          Effect.sync(() => {
+            calls.push("contextual");
+            return hold
+              ? { defer: { retryAfterMs: 5_000, reason: "awaiting review" } }
+              : { contextPrefix: "C" };
+          }),
+      });
+      assert.deepEqual(yield* hooks.beforeTurnStart(turnInput), {
+        defer: { retryAfterMs: 5_000, reason: "awaiting review" },
+      });
+      // Admission (after Contextual) never claims foreground while the turn is held.
+      assert.deepEqual(calls, ["policy", "contextual"]);
+      hold = false;
+      calls.length = 0;
+      assert.deepEqual(yield* hooks.beforeTurnStart(turnInput), { contextPrefix: "P\n\nC" });
+      assert.deepEqual(calls, ["policy", "contextual", "admission"]);
     }).pipe(Effect.scoped, Effect.provide(layer)),
   );
 

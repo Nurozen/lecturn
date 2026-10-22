@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off - Verifies the CLI's digested source paths exist on disk.
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 import { describe, expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 import * as OpenApi from "effect/unstable/httpapi/OpenApi";
@@ -8,6 +11,7 @@ import { ContextualRpcs } from "../packages/contracts/src/contextualRpc.ts";
 import * as Extensions from "../packages/contracts/src/extensions.ts";
 import * as Helper from "../packages/contracts/src/extensionsHelper.ts";
 import {
+  CONTRACT_SOURCE_FILES,
   contractConformanceFixtures,
   generateExtensionContractCatalog,
   generateExtensionContractCatalogCli,
@@ -124,6 +128,13 @@ describe("extension contract catalog", () => {
       "packages/contracts/src/contextual.test.ts",
     );
     expect(artifacts["conformance.json"]).toContain("utf16-not-byte-coordinates");
+  });
+  it("digests only contract source files that exist in the repository", () => {
+    const root = NodePath.resolve(import.meta.dirname, "..");
+    const missing = CONTRACT_SOURCE_FILES.filter(
+      (file) => !NodeFS.existsSync(NodePath.resolve(root, file)),
+    );
+    expect(missing).toEqual([]);
   });
   it("requires an explicit output directory before touching the filesystem", async () => {
     await expect(generateExtensionContractCatalogCli([])).rejects.toThrow("--out-dir");

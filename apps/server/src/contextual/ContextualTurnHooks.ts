@@ -2,10 +2,12 @@
  * Contextual on the V2 orchestrator: a Lecturn orchestration-hook contribution.
  *
  * - beforeTurnStart (runtime only, once per start attempt): admit the run,
- *   prepare or resume its cited-context packet, hold while a conflict awaits
- *   review, bind the packet to the dispatch and return it as provider-only
- *   context placed before the user text. Every V2 adapter receives it in the
- *   turn input, so no adapter-level dispatch hook is needed.
+ *   prepare or resume its cited-context packet, defer the start while a
+ *   conflict awaits review (no effect slot is held; re-attempted on the next
+ *   Contextual change or a short poll), bind the packet to the dispatch and
+ *   return it as provider-only context placed before the user text. Every V2
+ *   adapter receives it in the turn input, so no adapter-level dispatch hook
+ *   is needed. A canceled turn settles the run as cancelled, not failed.
  * - onRunTerminal: record the delivery receipt from the orchestrator's own
  *   provider-turn record (accepted / rejected / unknown) and finish the run's
  *   admission row; a run interrupted before dispatch cancels its preparation;
@@ -28,13 +30,14 @@ import {
   type ThreadId,
   TurnId,
 } from "@lecturn/contracts";
-import { Cause, Clock, Context, DateTime, Effect, Layer, Option, Schema, Stream } from "effect";
+import { Cause, Context, DateTime, Effect, Layer, Option, Schema, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   LecturnHookRejectedError,
   type LecturnOrchestrationHooksContribution,
   type LecturnRunTerminalNotice,
   type LecturnThreadLifecycleNotice,
+  type LecturnTurnStartDecision,
   type LecturnTurnStartInput,
 } from "../orchestration-v2/fork/LecturnOrchestrationHooks.ts";
 import { OrchestrationEventStore } from "../persistence/Services/OrchestrationEventStore.ts";
@@ -50,20 +53,17 @@ import {
   contextualNow,
   initializeContextualThread,
 } from "./ContextualSettings.ts";
-import {
-  ContextualTurnCoordinator,
-  type ContextualTurnDecision,
-} from "./ContextualTurnCoordinator.ts";
+import { ContextualTurnCoordinator } from "./ContextualTurnCoordinator.ts";
 import { ContextualTurnQueue, type ContextualQueuedTurn } from "./ContextualTurnQueue.ts";
 
-/** A held turn re-checks its preparation at least this often. */
-const HOLD_POLL = "2 seconds";
 /**
- * A conflict review holds the run's start effect (and one orchestrator effect
- * slot). Past this bound the turn is sent without optional context, the same
- * fail-open rule V1 applied to an unavailable preparation.
+ * A held turn (conflict awaiting review) defers its start: the run stays
+ * "starting" and holds no orchestrator effect slot. The start is re-attempted
+ * on any Contextual change (resolution publishes) or after this interval.
+ * There is no hold limit: like V1, the turn waits until the user reviews,
+ * cancels the turn, or stops the run.
  */
-const CONTEXTUAL_HOLD_LIMIT_MS = 30 * 60_000;
+const HOLD_RETRY_MS = 5_000;
 const RECENT_CONTEXT_MESSAGES = 12;
 const isRejected = Schema.is(LecturnHookRejectedError);
 
@@ -73,11 +73,13 @@ interface InFlightRun {
   readonly prefix: string | undefined;
 }
 
-const reject = (reason: string, cause?: unknown) =>
+/** Every Contextual refusal withdraws the turn; it is cancelled, never failed. */
+const cancelTurn = (cause?: unknown) =>
   new LecturnHookRejectedError({
     hook: "beforeTurnStart",
     contribution: "contextual",
-    reason,
+    reason: "The turn was canceled before it started.",
+    disposition: "cancelled",
     ...(cause === undefined ? {} : { cause }),
   });
 
@@ -107,25 +109,30 @@ export const make = Effect.gen(function* () {
       .join("\n\n");
   });
 
-  /** Wakes on any Contextual change (conflict resolution publishes) or the poll. */
-  const awaitChange = Option.match(notifications, {
-    onNone: () => Effect.sleep(HOLD_POLL),
-    onSome: (shared) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const subscription = yield* shared.subscribe;
-          yield* Stream.fromSubscription(subscription).pipe(
-            Stream.take(1),
-            Stream.runDrain,
-            Effect.timeoutOption(HOLD_POLL),
-          );
-        }),
-      ),
+  /** Completes on the next Contextual change (conflict resolution publishes). */
+  const nextChange = Option.map(notifications, (shared) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const subscription = yield* shared.subscribe;
+        yield* Stream.fromSubscription(subscription).pipe(Stream.take(1), Stream.runDrain);
+      }),
+    ),
+  );
+  const hold = (runId: RunId): LecturnTurnStartDecision => ({
+    defer: {
+      retryAfterMs: HOLD_RETRY_MS,
+      reason: `Contextual conflict awaits review (run ${runId}).`,
+      ...(Option.isSome(nextChange) ? { wake: nextChange.value } : {}),
+    },
   });
 
+  /**
+   * One pass per start attempt: prepare (or resume) the run's packet, defer
+   * while a conflict awaits review, then bind it to this dispatch.
+   */
   const decide = Effect.fn("Contextual.decideTurn")(function* (
     input: LecturnTurnStartInput,
-    initial: ContextualQueuedTurn,
+    queued: ContextualQueuedTurn,
   ) {
     const { thread, run, message } = input;
     const task = {
@@ -134,57 +141,36 @@ export const make = Effect.gen(function* () {
       messageId: message.id,
       providerInstanceId: run.providerInstanceId,
       newestMessage: message.text,
-      recentContext: yield* recentContext(thread.id, message.id),
+      // Only a first preparation reads the task; re-attempts resume by id.
+      recentContext:
+        queued.preparationId === null ? yield* recentContext(thread.id, message.id) : "",
     };
-    const holdUntil = (yield* Clock.currentTimeMillis) + CONTEXTUAL_HOLD_LIMIT_MS;
-    let queued = initial;
-    while (true) {
-      const prepared = yield* coordinator.prepare(queued, task);
-      const timedOut = prepared.action === "hold" && (yield* Clock.currentTimeMillis) >= holdUntil;
-      if (timedOut)
-        yield* Effect.logWarning("Contextual conflict review timed out; sending without context", {
-          threadId: thread.id,
-          runId: run.id,
-        });
-      const decision: ContextualTurnDecision = timedOut
-        ? { action: "send", preparation: null, packet: null }
-        : prepared;
-      if (decision.action !== "send") {
-        if (decision.action === "hold") {
-          yield* awaitChange;
-          const next = yield* queue.get(run.id);
-          if (next === null) return yield* reject("The turn was canceled before it started.");
-          queued = next;
-          continue;
-        }
-        yield* queue.finish(run.id, "canceled");
-        return yield* reject("The turn was canceled before it started.");
-      }
-      const current = yield* queue.get(run.id);
-      if (current === null) return yield* reject("The turn was canceled before it started.");
-      const begun = yield* Effect.result(coordinator.begin(current, decision));
-      if (begun._tag === "Success") return begun.success;
-      // A hold or cancel committed while the packet was being prepared fences the dispatch.
-      const latest = yield* queue.get(run.id);
-      if (latest === null) return yield* reject("The turn was canceled before it started.");
-      queued = latest;
-      if (
-        decision.preparation !== null &&
-        (yield* repository.get(decision.preparation.id).pipe(
-          Effect.map((preparation) => preparation.state === "awaiting-conflict-review"),
-          Effect.orElseSucceed(() => false),
-        ))
-      ) {
-        yield* awaitChange;
-        continue;
-      }
-      yield* lifecycle.cancelQueuedTurns({
-        threadId: thread.id,
-        runId: run.id,
-        at: yield* contextualNow,
-      });
-      return yield* reject("The turn was canceled before it started.", begun.failure);
+    const decision = yield* coordinator.prepare(queued, task);
+    if (decision.action !== "send") {
+      if (decision.action === "hold") return hold(run.id);
+      yield* queue.finish(run.id, "canceled");
+      return yield* cancelTurn();
     }
+    const current = yield* queue.get(run.id);
+    if (current === null) return yield* cancelTurn();
+    const begun = yield* Effect.result(coordinator.begin(current, decision));
+    if (begun._tag === "Success") return { send: begun.success };
+    // A hold or cancel committed while the packet was being prepared fences the dispatch.
+    if ((yield* queue.get(run.id)) === null) return yield* cancelTurn();
+    if (
+      decision.preparation !== null &&
+      (yield* repository.get(decision.preparation.id).pipe(
+        Effect.map((preparation) => preparation.state === "awaiting-conflict-review"),
+        Effect.orElseSucceed(() => false),
+      ))
+    )
+      return hold(run.id);
+    yield* lifecycle.cancelQueuedTurns({
+      threadId: thread.id,
+      runId: run.id,
+      at: yield* contextualNow,
+    });
+    return yield* cancelTurn(begun.failure);
   });
 
   const beforeTurnStart = (input: LecturnTurnStartInput) =>
@@ -194,6 +180,11 @@ export const make = Effect.gen(function* () {
       // Retries of one run reuse the dispatch bound by the first attempt.
       const cached = inFlight.get(run.id);
       if (cached) return cached.prefix === undefined ? {} : { contextPrefix: cached.prefix };
+      // A deferred run whose row was canceled meanwhile (stop, delete, cancel) stays canceled.
+      const prior = yield* sql<{
+        state: string;
+      }>`SELECT state FROM contextual_turn_queue WHERE event_id=${run.id}`;
+      if (prior[0]?.state === "canceled") return yield* cancelTurn();
       const intent =
         yield* sql`SELECT 1 FROM contextual_thread_settings WHERE thread_id=${thread.id} AND enabled=1
         UNION ALL SELECT 1 FROM contextual_turn_queue WHERE event_id=${run.id} AND state NOT IN ('done','canceled','unknown') LIMIT 1`;
@@ -212,7 +203,9 @@ export const make = Effect.gen(function* () {
         inFlight.set(run.id, { threadId: thread.id, evidence: undefined, prefix: undefined });
         return;
       }
-      const evidence = yield* decide(input, queued);
+      const decided = yield* decide(input, queued);
+      if (!("send" in decided)) return decided;
+      const evidence = decided.send;
       const prefix =
         evidence === undefined
           ? undefined

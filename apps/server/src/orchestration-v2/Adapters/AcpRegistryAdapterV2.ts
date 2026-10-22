@@ -22,6 +22,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as EffectAcpErrors from "effect-acp/errors";
 
 import * as ServerConfig from "../../config.ts";
+import { withAgentDeviceEnvironment } from "../../mcp/McpProviderSession.ts";
 import {
   normalizeAcpRegistryCommands,
   normalizeAcpRegistryLiveConfiguration,
@@ -146,7 +147,7 @@ function makeAcpRegistryRuntime(options: AcpRegistryAdapterV2Options) {
     Crypto.Crypto | Scope.Scope
   > =>
     Effect.gen(function* () {
-      const { processEnvironment, ...runtimeInput } = input;
+      const { processEnvironment, agentDeviceEnvironment, ...runtimeInput } = input;
       const resolved = yield* options.resolver
         .resolve(options.settings, input.cwd, options.environment)
         .pipe(
@@ -162,11 +163,14 @@ function makeAcpRegistryRuntime(options: AcpRegistryAdapterV2Options) {
         AcpSessionRuntime.layer({
           ...runtimeInput,
           spawn:
-            processEnvironment === undefined
+            processEnvironment === undefined && agentDeviceEnvironment === undefined
               ? resolved.spawn
               : {
                   ...resolved.spawn,
-                  env: { ...resolved.spawn.env, ...processEnvironment },
+                  env: withAgentDeviceEnvironment(
+                    { ...resolved.spawn.env, ...processEnvironment },
+                    { agentDeviceEnvironment },
+                  ),
                 },
           ...(options.settings.authMethodId ? { authMethodId: options.settings.authMethodId } : {}),
         }).pipe(

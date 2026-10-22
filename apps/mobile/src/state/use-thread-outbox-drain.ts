@@ -9,6 +9,10 @@ import {
 import type { AtomCommandResult } from "@lecturn/client-runtime/state/runtime";
 import { deriveThreadTitleSeed } from "@lecturn/client-runtime/operations";
 import {
+  forkParentThreadId,
+  resolveTurnTitleSeed,
+} from "@lecturn/client-runtime/state/thread-fork-points";
+import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -182,9 +186,31 @@ function finishDispatchingQueuedMessage(queuedMessageId: MessageId): void {
   appAtomRegistry.set(dispatchingQueuedMessageIdAtom, current === queuedMessageId ? null : current);
 }
 
+/** The `titleSeed` for a queued message's turn (see resolveTurnTitleSeed). */
+export function turnTitleSeedForQueuedMessage(
+  threads: ReadonlyArray<EnvironmentThreadShell>,
+  message: Pick<QueuedThreadMessage, "environmentId" | "threadId" | "text" | "attachments">,
+): string | undefined {
+  const messageTitleSeed = deriveThreadTitleSeed({
+    text: message.text,
+    attachments: message.attachments,
+  });
+  const thread = findThread(threads, message);
+  if (thread === undefined) return messageTitleSeed;
+  const parentId = forkParentThreadId(thread);
+  return resolveTurnTitleSeed({
+    thread,
+    parentTitle:
+      parentId === null
+        ? null
+        : findThread(threads, { environmentId: message.environmentId, threadId: parentId })?.title,
+    messageTitleSeed,
+  });
+}
+
 function findThread(
   threads: ReadonlyArray<EnvironmentThreadShell>,
-  message: QueuedThreadMessage,
+  message: Pick<QueuedThreadMessage, "environmentId" | "threadId">,
 ): EnvironmentThreadShell | undefined {
   return threads.find(
     (candidate) =>
@@ -862,6 +888,13 @@ export function useThreadOutboxDrain(): void {
         settings,
         currentConfig.providers,
       );
+      // A fork child sends its minted default title as the seed so the server
+      // swaps in a generated title after the first turn; a fork child the user
+      // renamed sends no seed so the rename stands.
+      const turnTitleSeed = turnTitleSeedForQueuedMessage(
+        appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
+        queuedMessage,
+      );
       const deliveryResult = await startTurn({
         environmentId: queuedMessage.environmentId,
         input: {
@@ -883,10 +916,7 @@ export function useThreadOutboxDrain(): void {
             attachments: prepared.attachments,
           },
           modelSelection: sendSettings.modelSelection,
-          titleSeed: deriveThreadTitleSeed({
-            text: queuedMessage.text,
-            attachments: queuedMessage.attachments,
-          }),
+          ...(turnTitleSeed === undefined ? {} : { titleSeed: turnTitleSeed }),
           runtimeMode: sendSettings.runtimeMode,
           interactionMode: sendSettings.interactionMode,
           createdAt: queuedMessage.createdAt,

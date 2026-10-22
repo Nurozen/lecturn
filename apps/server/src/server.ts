@@ -673,6 +673,9 @@ const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
 // Lecturn fork contributions to the V2 hook registry. Provided onto the one
 // OrchestrationV2ProductionLayerLive so they register on the registry the
 // orchestrator resolves; their other services come from outer layers.
+// mergeAll builds these in parallel, so call order is not registration order:
+// the registry fixes it by name (LECTURN_HOOK_ORDER: team-provider-policy,
+// stave, contextual, provider-work-admission).
 const LecturnOrchestrationHookRegistrationsLive = Layer.mergeAll(
   StaveOrchestrationHooks.layer,
   ContextualLayers.hooksLayer,

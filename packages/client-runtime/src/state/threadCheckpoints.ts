@@ -25,6 +25,24 @@ export interface ThreadCheckpointSummary {
   readonly completedAt: string;
 }
 
+/**
+ * Resolves the checkpoint a rollback to `turnCount` restores. Turn count 0 is
+ * the thread baseline (captured before the first run, so it has no run
+ * ordinal); any other count is the latest checkpoint recorded for that run
+ * ordinal. The revert preview and the rollback command share this rule so the
+ * preview names exactly the files the rollback will delete.
+ */
+export function resolveRevertTargetCheckpoint(
+  checkpoints: OrchestrationV2ThreadProjection["checkpoints"],
+  turnCount: number,
+): OrchestrationV2ThreadProjection["checkpoints"][number] | undefined {
+  return checkpoints.findLast((candidate) =>
+    turnCount === 0
+      ? candidate.ordinalWithinScope === 0 && candidate.appRunOrdinal === null
+      : candidate.appRunOrdinal === turnCount,
+  );
+}
+
 /** Derives the checkpoint/diff rows needed by review UIs from native V2 entities. */
 export function deriveThreadCheckpointSummaries(
   projection: OrchestrationV2ThreadProjection,

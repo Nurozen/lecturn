@@ -23,7 +23,8 @@ const IN_PROGRESS_RUN_STATUSES: ReadonlySet<ThreadRuntimeSummary["status"]> = ne
  * Whether a fork-at-latest-run can dispatch right now. Forking needs a live
  * connection (cached capabilities lie while offline), a server that advertises
  * the capability, and a completed latest run to cut the history at — a running
- * or never-run thread has no fork point. The provider does not gate: V2 forks
+ * thread has no fork point, and a never-run thread has one only when it holds
+ * run-less history (V1 migration, import) to fork whole. The provider does not gate: V2 forks
  * natively when it can and otherwise carries the transcript as portable
  * context (presentation `conversationFork` only describes the native path).
  */
@@ -32,6 +33,8 @@ export function resolveThreadForkAvailability(input: {
   readonly latestRun: Pick<ThreadRunSummary, "status"> | null;
   readonly runtimeStatus: ThreadRuntimeSummary["status"] | null;
   readonly connected: boolean;
+  /** The thread holds run-less history (`hasRunlessForkHistory`). */
+  readonly runlessHistory?: boolean;
 }): ThreadForkAvailability {
   if (!input.connected) {
     return { available: false, reason: "disconnected" };
@@ -44,6 +47,9 @@ export function resolveThreadForkAvailability(input: {
     (input.runtimeStatus !== null && IN_PROGRESS_RUN_STATUSES.has(input.runtimeStatus))
   ) {
     return { available: false, reason: "turn-in-progress" };
+  }
+  if (input.latestRun === null && input.runlessHistory === true) {
+    return { available: true };
   }
   if (input.latestRun === null || input.latestRun.status !== "completed") {
     return { available: false, reason: "no-completed-turn" };

@@ -10,8 +10,8 @@
  *   project roots and enclosing `.stave.yaml` roots are workspace-locked for
  *   the commit, so a Stave operation never races a project claiming its tree;
  * - thread intents in a space (create, worktree binding, turn start, fork,
- *   import, unsettle, pin, unarchive): `StaveAdmission` decides under the
- *   space lock;
+ *   import, delegated task, merge-back, unsettle, pin, unarchive):
+ *   `StaveAdmission` decides under the space lock;
  * - provider session open: `StaveRuntimeFence.withStart` keeps new runtimes
  *   out of a space while a teardown holds its fence, and teardown waits for
  *   starts already in flight.
@@ -89,6 +89,14 @@ export function describeStaveThreadIntent(
       return command.workspace === "new-worktree"
         ? { intent: "thread.fork", threadId: command.sourceThreadId, prepareWorktree: true }
         : { intent: "thread.fork", threadId: command.sourceThreadId };
+    case "delegated_task.request":
+      // A delegated task creates a child thread in the parent's project and
+      // workspace, so it answers to the creation rule for that workspace.
+      return { intent: "thread.create", threadId: command.parentThreadId };
+    case "thread.merge_back":
+      // Merge-back moves a fork's context into its parent, which runs the
+      // next turn: the fork rule applies to the receiving thread.
+      return { intent: "thread.fork", threadId: command.targetThreadId };
     case "thread.unsettle":
       return { intent: "thread.unsettle", threadId: command.threadId };
     case "thread.pin":

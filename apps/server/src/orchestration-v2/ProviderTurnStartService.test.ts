@@ -35,6 +35,7 @@ import { ProviderAdapterEventStreamError } from "./ProviderAdapter.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import * as ProviderTurnStart from "./ProviderTurnStartService.ts";
 import * as LecturnOrchestrationHooks from "./fork/LecturnOrchestrationHooks.ts";
+import { isOrchestrationEffectDeferral } from "./EffectOutbox.ts";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 
@@ -515,7 +516,10 @@ function makeLocalCommandHarness(input: {
     attemptId,
     projection: () => projection,
     start: Effect.gen(function* () {
-      yield* (yield* ProviderTurnStart.ProviderTurnStartServiceV2).start({ threadId, runId });
+      return yield* (yield* ProviderTurnStart.ProviderTurnStartServiceV2).start({
+        threadId,
+        runId,
+      });
     }).pipe(Effect.provide(layer)),
     startWithRetry: Effect.gen(function* () {
       yield* (yield* ProviderTurnStart.ProviderTurnStartServiceV2).start({
@@ -846,6 +850,80 @@ effectIt.effect(
             class: "permission_error",
             message: "Provider 'codex' is disabled by your organization.",
           },
+        },
+      ]);
+    }),
+);
+
+effectIt.effect(
+  "ends the attempt without starting or settling the run when a fork hook defers (Lecturn)",
+  () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const harness = makeLocalCommandHarness({
+        text: "Continue",
+        promptCommandHandled: false,
+        hooks: {
+          ...LecturnOrchestrationHooks.noop,
+          beforeTurnStart: () =>
+            Effect.sync(() => {
+              calls += 1;
+              return {
+                defer: { retryAfterMs: 5_000, reason: "Contextual conflict awaits review" },
+              };
+            }),
+        },
+      });
+
+      const outcome = yield* harness.start;
+
+      expect(isOrchestrationEffectDeferral(outcome)).toBe(true);
+      expect(isOrchestrationEffectDeferral(outcome) ? outcome.delayMs : undefined).toBe(5_000);
+      expect(calls).toBe(1);
+      expect(harness.open).not.toHaveBeenCalled();
+      expect(harness.startRootRun).not.toHaveBeenCalled();
+      const projection = harness.projection();
+      // The run stays in its pre-start state so the re-attempt can start it.
+      expect(projection.runs.at(-1)).toMatchObject({ status: "starting" });
+      expect(projection.turnItems).toEqual([]);
+    }),
+);
+
+effectIt.effect(
+  "cancels (does not fail) the run when a fork hook withdraws the turn (Lecturn)",
+  () =>
+    Effect.gen(function* () {
+      const harness = makeLocalCommandHarness({
+        text: "Continue",
+        promptCommandHandled: false,
+        hooks: {
+          ...LecturnOrchestrationHooks.noop,
+          beforeTurnStart: () =>
+            Effect.fail(
+              new LecturnOrchestrationHooks.LecturnHookRejectedError({
+                hook: "beforeTurnStart",
+                contribution: "contextual",
+                reason: "The turn was canceled before it started.",
+                disposition: "cancelled",
+              }),
+            ),
+        },
+      });
+
+      yield* harness.start;
+
+      expect(harness.open).not.toHaveBeenCalled();
+      const projection = harness.projection();
+      // A cancelled run is not a provider failure, so it never holds the thread's queue.
+      expect(projection.runs.at(-1)).toMatchObject({ status: "cancelled" });
+      expect(projection.attempts[0]?.status).toBe("cancelled");
+      expect(projection.nodes[0]?.status).toBe("cancelled");
+      expect(projection.turnItems).toMatchObject([
+        {
+          type: "system_notice",
+          status: "cancelled",
+          title: "Turn was canceled",
+          message: "The turn was canceled before it started.",
         },
       ]);
     }),

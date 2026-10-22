@@ -1470,9 +1470,6 @@ describe("extractMcpToolCallIdentity", () => {
   it("recovers Lecturn identity across the registry agents' naming conventions", () => {
     // One representative per surveyed convention (2026-08 registry builds):
     // droid triple underscore, Copilot hyphen, Amp mangled server + detail
-    // tail, cline args tail, Auggie tool-first suffix.
-    // One representative per surveyed convention (2026-08 registry builds):
-    // droid triple underscore, Copilot hyphen, Amp mangled server + detail
     // tail, cline args tail, Auggie tool-first suffix, fast-agent slash,
     // Kimi bare name with args tail.
     for (const title of [
@@ -1495,6 +1492,27 @@ describe("extractMcpToolCallIdentity", () => {
         server: "lecturn",
         tool: "delegate_task",
       });
+    }
+  });
+
+  it("recovers lecturn_-prefixed tools whose names collide with the server prefix", () => {
+    // Tool names share the "lecturn" server prefix, so the prefix pattern also
+    // matches bare and tool-first forms while capturing an unknown tool.
+    for (const [title, tool] of [
+      ["lecturn_thread_read", "lecturn_thread_read"], // glm-acp-agent bare
+      ['lecturn_thread_send: {"a":1}', "lecturn_thread_send"], // Kimi bare + args
+      ["lecturn_thread_read_lecturn", "lecturn_thread_read"], // Auggie tool-first
+      ["lecturn___lecturn_thread_read", "lecturn_thread_read"], // droid
+      ["mcp__lecturn__lecturn_thread_send", "lecturn_thread_send"], // claude-acp
+    ] as const) {
+      const toolCall = toolCallFromUpdate({
+        sessionUpdate: "tool_call",
+        toolCallId: "prefixed-1",
+        kind: "other",
+        title,
+        status: "pending",
+      });
+      expect(extractMcpToolCallIdentity(toolCall), title).toEqual({ server: "lecturn", tool });
     }
   });
 

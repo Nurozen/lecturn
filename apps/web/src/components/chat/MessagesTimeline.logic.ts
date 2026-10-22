@@ -43,6 +43,10 @@ import {
 } from "@lecturn/contracts";
 import type { ThreadRunSummary } from "@lecturn/client-runtime/state/shell";
 import {
+  isSameForkPoint,
+  type ThreadForkPoint,
+} from "@lecturn/client-runtime/state/thread-fork-points";
+import {
   resolveLecturnMcpToolDefinition,
   resolveLecturnMcpToolPresentation,
   type LecturnMcpToolPresentation,
@@ -571,8 +575,8 @@ type MessagesTimelineRowContent =
       assistantCopyStreaming: boolean;
       assistantTurnDiffSummary?: TurnDiffSummary | undefined;
       revertTurnCount?: number | undefined;
-      /** Lecturn: the run a user-message fork cuts at (fork before this message). */
-      forkRunId?: RunId | undefined;
+      /** Lecturn: where a user-message fork cuts (the turn before this message). */
+      forkPoint?: ThreadForkPoint | undefined;
     }
   | {
       kind: "assistant-meta";
@@ -1218,10 +1222,17 @@ export function deriveMessagesTimelineRows(input: {
   liveAgentTaskIds?: ReadonlySet<string> | undefined;
   /** Live bootstrap progress. Renders a stage card under the first user message. */
   worktreeSetup?: WorktreeSetupSnapshot | null;
-  /** Lecturn: user messages that can fork through the run before them. */
-  forkRunIdByUserMessageId?: ReadonlyMap<MessageId, RunId>;
+  /** Lecturn: user messages that can fork through the turn before them. */
+  forkPointByUserMessageId?: ReadonlyMap<MessageId, ThreadForkPoint>;
   /** Lecturn: drawn above `beforeMessageId`, or after the last entry when that is null. */
   importDivider?: { label: string; beforeMessageId: MessageId | null } | null;
+  /**
+   * Lecturn: creation time of a fork migrated from V1. Such a fork has no
+   * synthetic fork item, but its inherited rows keep their parent-side
+   * timestamps, so the fork divider goes before the first entry created after
+   * the child (or after the last entry while the child has none of its own).
+   */
+  legacyForkCreatedAt?: string | null;
 }): MessagesTimelineRow[] {
   const timelineEntries = withoutSubagentDelegationRows(
     settleSupersededReasoning(input.timelineEntries),
@@ -1395,10 +1406,30 @@ export function deriveMessagesTimelineRows(input: {
       }
     : null;
 
+  const legacyForkCreatedAt = input.legacyForkCreatedAt ?? null;
+  const legacyForkTime =
+    legacyForkCreatedAt === null ? Number.NaN : Date.parse(legacyForkCreatedAt);
+  const legacyForkDividerRow: MessagesTimelineRow = {
+    kind: "fork-divider",
+    id: "legacy-fork-divider-row",
+    createdAt: legacyForkCreatedAt,
+  };
+  // "pending" once an inherited (pre-fork) entry was seen.
+  let legacyForkDivider: "none" | "pending" | "placed" = "none";
+
   for (let index = 0; index < timelineEntries.length; index += 1) {
     const timelineEntry = timelineEntries[index];
     if (!timelineEntry) {
       continue;
+    }
+
+    if (!Number.isNaN(legacyForkTime) && legacyForkDivider !== "placed") {
+      if (Date.parse(timelineEntry.createdAt) <= legacyForkTime) {
+        legacyForkDivider = "pending";
+      } else if (legacyForkDivider === "pending") {
+        nextRows.push(legacyForkDividerRow);
+        legacyForkDivider = "placed";
+      }
     }
 
     // Ahead of the turn fold and working rows that open the first new turn.
@@ -1716,10 +1747,14 @@ export function deriveMessagesTimelineRows(input: {
           ? revertTurnCountByUserMessageId.get(timelineEntry.message.id)
           : undefined,
       ...(timelineEntry.message.role === "user" &&
-      input.forkRunIdByUserMessageId?.has(timelineEntry.message.id)
-        ? { forkRunId: input.forkRunIdByUserMessageId.get(timelineEntry.message.id) }
+      input.forkPointByUserMessageId?.has(timelineEntry.message.id)
+        ? { forkPoint: input.forkPointByUserMessageId.get(timelineEntry.message.id) }
         : {}),
     });
+  }
+
+  if (legacyForkDivider === "pending") {
+    nextRows.push(legacyForkDividerRow);
   }
 
   if (importDividerRow !== null && input.importDivider?.beforeMessageId == null) {
@@ -2095,7 +2130,10 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.assistantCopyStreaming === bm.assistantCopyStreaming &&
         a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
         a.revertTurnCount === bm.revertTurnCount &&
-        a.forkRunId === bm.forkRunId
+        (a.forkPoint === bm.forkPoint ||
+          (a.forkPoint !== undefined &&
+            bm.forkPoint !== undefined &&
+            isSameForkPoint(a.forkPoint, bm.forkPoint)))
       );
     }
   }
