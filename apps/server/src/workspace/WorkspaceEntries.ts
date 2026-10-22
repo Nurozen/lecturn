@@ -23,7 +23,7 @@ import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import { isExplicitRelativePath, isWindowsAbsolutePath } from "@lecturn/shared/path";
 import { normalizeSearchQuery } from "@lecturn/shared/searchRanking";
 
-import { expandHomePathWith } from "../pathExpansion.ts";
+import { expandHomePathWith } from "@lecturn/provider-core/server/pathExpansion";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
 import * as WorkspaceSearchIndex from "./WorkspaceSearchIndex.ts";

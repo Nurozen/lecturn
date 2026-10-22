@@ -27,7 +27,7 @@
 - [Outside agents (MCP)](./user/outside-agents.md)
 - [Running in the background](./user/background-service.md)
 - [Updating Lecturn](./user/updating.md)
-- Provider guides: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [GitHub Copilot](./user/providers-copilot.md) · [Antigravity](./user/providers-antigravity.md) · [Pi](./user/providers-pi.md)
+- Provider guides: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [GitHub Copilot](./user/providers-copilot.md) · [Antigravity](./user/providers-antigravity.md) · [Pi](./user/providers-pi.md) · [Muse Code](./user/providers-muse.md)
 
 ---
 
@@ -46,6 +46,7 @@ source alone does not explain. Most code changes do not need an internal documen
 - [Providers](./internals/providers.md)
 - [Thread notes](./internals/thread-notes.md)
 - [Thread forking](./internals/thread-forking.md)
+- [Adding a provider](./internals/adding-a-provider.md)
 - [Pull request file revisions](./internals/pull-request-file-revisions.md)
 - [Model classification](./internals/model-manifest.md)
 - [Remote environments](./internals/remote.md)

@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { expandHomePath } from "../pathExpansion.ts";
+import { expandHomePath } from "@lecturn/provider-core/server/pathExpansion";
 import type { ProcessRunner } from "../processRunner.ts";
 import { codexExecLaunchArgs } from "./codexLaunchArgs.ts";
 

@@ -14,7 +14,7 @@ import { ChildProcessSpawner } from "effect/process";
 import { decodeJsonResult } from "@lecturn/shared/schemaJson";
 import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
-import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
+import { collectUint8StreamText } from "@lecturn/provider-core/server/collectStreamText";
 import type { SourceControlProviderContext } from "./SourceControlProvider.ts";
 
 const encodeApiBody = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));

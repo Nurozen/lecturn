@@ -1,4 +1,4 @@
-import { DRIVER_OPTIONS } from "../settings/providerDriverMeta";
+import { providerClients } from "../settings/providerDriverMeta";
 import { useAuth } from "@clerk/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { selectTeam, type TeamDetail, type TeamSeatPreview } from "@lecturn/client-runtime/relay";
@@ -428,7 +428,7 @@ function HostedTeamsAccount({
                         setProviders(
                           event.target.checked
                             ? null
-                            : DRIVER_OPTIONS.map((provider) => provider.value),
+                            : providerClients.definitions.map((provider) => provider.driverKind),
                         )
                       }
                     />
@@ -436,19 +436,19 @@ function HostedTeamsAccount({
                   </label>
                   {providers !== null && (
                     <div className="grid grid-cols-2 gap-2">
-                      {DRIVER_OPTIONS.map((provider) => (
+                      {providerClients.definitions.map((provider) => (
                         <label
-                          key={provider.value}
+                          key={provider.driverKind}
                           className="flex min-h-9 items-center gap-2 text-sm"
                         >
                           <input
                             type="checkbox"
-                            checked={providers.includes(provider.value)}
+                            checked={providers.includes(provider.driverKind)}
                             onChange={(event) =>
                               setProviders(
                                 event.target.checked
-                                  ? [...providers, provider.value]
-                                  : providers.filter((value) => value !== provider.value),
+                                  ? [...providers, provider.driverKind]
+                                  : providers.filter((value) => value !== provider.driverKind),
                               )
                             }
                           />

@@ -7,6 +7,8 @@ import {
   CommandId,
   MessageId,
   ProjectId,
+  ProviderDriverKind,
+  ProviderInstanceId,
   ThreadId,
   type OrchestrationV2ThreadProjection,
 } from "@lecturn/contracts";
@@ -61,8 +63,11 @@ const layerVcsDriverRegistry = VcsDriverRegistry.layer.pipe(
 const layerCheckpointStore = CheckpointStore.layer.pipe(Layer.provide(layerVcsDriverRegistry));
 
 const layerServerSettings = ServerSettings.layerTest({
-  providers: {
-    cursor: { enabled: true },
+  providerInstances: {
+    [ProviderInstanceId.make("cursor")]: {
+      driver: ProviderDriverKind.make("cursor"),
+      enabled: true,
+    },
   },
 });
 const layerBackgroundPolicy = BackgroundPolicy.layer.pipe(

@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { resolveSpawnCommand } from "@lecturn/shared/shell";
-import { privateTextGenerationError } from "./TextGenerationUtils.ts";
+import { privateTextGenerationError } from "@lecturn/provider-core/server/textGenerationUtils";
 
 const ConfigSnapshot = Schema.Struct({
   config: Schema.Struct({

@@ -442,7 +442,8 @@ function RightPanelEmptyState(props: {
       const action = surfaceShortcutActionForKey(shortcutActionsRef.current, event);
       if (!action) return;
       if (document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)) return;
-      const target = event.target;
+      // The composed path starts at the real target, which may sit inside a shadow root.
+      const target = event.composedPath()[0] ?? event.target;
       if (target instanceof Element && surfaceShortcutTargetsTypingContext(target)) return;
       event.preventDefault();
       event.stopPropagation();
@@ -510,7 +511,7 @@ function RightPanelEmptyState(props: {
       aria-label="Open a surface"
       data-surface-launcher-keys={availableActions.map((action) => action.shortcut).join("")}
       className={cn(
-        "lecturn-panel-launcher flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 outline-none",
+        "lecturn-panel-launcher scrollbar-gutter-both flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 outline-none",
         // The panel topbar sits above this container; matching bottom padding
         // keeps the list centered against the full panel, not the leftover.
         "pb-(--workspace-topbar-height)",

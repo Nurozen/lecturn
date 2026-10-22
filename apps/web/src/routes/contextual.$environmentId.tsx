@@ -25,7 +25,7 @@ function ContextualSettingsPage() {
           <SidebarTrigger />
           <h1 className="truncate text-sm font-medium">Contextual sources</h1>
         </WorkspacePageHeader>
-        <div className="overflow-auto p-4 sm:p-6">
+        <div className="scrollbar-gutter-both overflow-auto p-4 sm:p-6">
           <div className="mx-auto max-w-3xl">
             <ContextualHostSettings environmentId={environmentId} />
           </div>

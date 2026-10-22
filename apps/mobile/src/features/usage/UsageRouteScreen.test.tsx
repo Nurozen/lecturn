@@ -15,6 +15,7 @@ const ui = vi.hoisted(() => ({
 }));
 
 vi.mock("react-native", () => ({
+  ActivityIndicator: () => null,
   Platform: { OS: "android" },
   View: ({ children }: { children: ReactNode }) => children,
   ScrollView: ({
@@ -48,6 +49,7 @@ vi.mock("react-native", () => ({
 }));
 vi.mock("react-native-reanimated", () => {
   const transition = {
+    delay: () => transition,
     duration: () => transition,
     reduceMotion: () => transition,
     easing: () => transition,
@@ -58,6 +60,10 @@ vi.mock("react-native-reanimated", () => {
     LinearTransition: transition,
     ReduceMotion: { System: "system" },
     Easing: { cubic: () => 0, out: () => undefined },
+    useSharedValue: (value: number) => ({ get: () => value, set: () => {} }),
+    useAnimatedStyle: (style: () => object) => style(),
+    withDelay: (_delay: number, value: unknown) => value,
+    withTiming: (value: unknown) => value,
   };
 });
 vi.mock("@react-navigation/native", () => ({

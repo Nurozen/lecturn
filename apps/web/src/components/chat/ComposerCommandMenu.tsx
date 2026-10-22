@@ -1,5 +1,5 @@
+import { formatProviderSkillDisplayName } from "@lecturn/shared/inlineSkills";
 import {
-  formatProviderSkillDisplayName,
   resolveProviderSkillSourceKind,
   type ProviderSkillSourceKind,
 } from "@lecturn/client-runtime/providerSkills";

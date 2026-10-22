@@ -9,6 +9,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 import type { ThreadId } from "@lecturn/contracts";
+import type { EventNdjsonLogger } from "@lecturn/provider-core/server/ProviderEventLoggers";
 import { RotatingFileSink } from "@lecturn/shared/logging";
 import { errorTag } from "@lecturn/shared/observability";
 import * as Clock from "effect/Clock";
@@ -63,11 +64,7 @@ const transientAcpUpdates = new Set(["agent_message_chunk", "agent_thought_chunk
 
 export type EventNdjsonStream = "native" | "canonical" | "orchestration";
 
-export interface EventNdjsonLogger {
-  readonly filePath: string;
-  readonly write: (event: unknown, threadId: ThreadId | null) => Effect.Effect<void>;
-  readonly close: () => Effect.Effect<void>;
-}
+export type { EventNdjsonLogger };
 
 export interface EventNdjsonLogStore {
   readonly filePath: string;

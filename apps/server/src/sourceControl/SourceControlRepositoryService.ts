@@ -21,7 +21,7 @@ import {
 } from "@lecturn/contracts";
 
 import * as ServerConfig from "../config.ts";
-import { expandHomePathWith } from "../pathExpansion.ts";
+import { expandHomePathWith } from "@lecturn/provider-core/server/pathExpansion";
 import {
   parseGitCloneProgressLine,
   type GitCloneProgressLine,

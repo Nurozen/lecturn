@@ -9,7 +9,7 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
 import * as OpenCodeRuntime from "./opencodeRuntime.ts";
-import { parseGenericCliVersion } from "./providerSnapshot.ts";
+import { parseGenericCliVersion } from "@lecturn/provider-core/server/snapshotProbe";
 
 export interface ProbedOpenCode {
   readonly generation: "v1" | "v2";

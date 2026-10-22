@@ -24,7 +24,7 @@ import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import { fromLenientJson } from "@lecturn/shared/schemaJson";
 import { parse as parseYamlDocument } from "yaml";
 
-import { expandHomePath } from "../../pathExpansion.ts";
+import { expandHomePath } from "@lecturn/provider-core/server/pathExpansion";
 
 type ClaudeSkillScope = "user" | "project";
 

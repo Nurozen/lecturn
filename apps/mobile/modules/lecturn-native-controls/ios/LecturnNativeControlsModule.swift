@@ -11,6 +11,17 @@ public final class LecturnNativeControlsModule: Module {
   private var filePresentation: LecturnNativeFilePresentation?
 
   public func definition() -> ModuleDefinition {
+    Constants {
+      if #available(iOS 26.0, *) {
+        return ["supportsWorkspaceColumns": NSClassFromString("RNSSplitHostComponentView") != nil]
+      }
+      return ["supportsWorkspaceColumns": false]
+    }
+    View(LecturnLayoutMetricsView.self) {
+      ViewName("LayoutMetrics")
+      Events("onMetricsChange")
+    }
+
     AsyncFunction("presentVideo") { (url: URL, title: String, sourceIdentifier: String, identifier: String, promise: Promise) in
       try self.presentVideo(
         url: url,
@@ -41,6 +52,15 @@ public final class LecturnNativeControlsModule: Module {
         view.sources = self.presentationSources
         view.identifier = identifier
       }
+    }
+
+    View(LecturnFrostedCutoutView.self) {
+      ViewName("FrostedCutout")
+      Prop("cutoutTop") { (view: LecturnFrostedCutoutView, value: Double) in view.cutoutTop = CGFloat(value) }
+      Prop("cutoutWidth") { (view: LecturnFrostedCutoutView, value: Double) in view.cutoutWidth = CGFloat(value) }
+      Prop("cutoutHeight") { (view: LecturnFrostedCutoutView, value: Double) in view.cutoutHeight = CGFloat(value) }
+      Prop("cutoutRadius") { (view: LecturnFrostedCutoutView, value: Double) in view.cutoutRadius = CGFloat(value) }
+      Prop("appearance") { (view: LecturnFrostedCutoutView, value: String) in view.appearance = value }
     }
 
     View(LecturnContextSheetSizeView.self) {

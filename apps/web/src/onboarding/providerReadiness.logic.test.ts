@@ -228,11 +228,12 @@ describe("resolveOnboardingProviderLoginCommand", () => {
         readyCodex,
         {
           ...DEFAULT_SERVER_SETTINGS,
-          providers: {
-            ...DEFAULT_SERVER_SETTINGS.providers,
-            codex: {
-              ...DEFAULT_SERVER_SETTINGS.providers.codex,
-              binaryPath: "C:\\Program Files\\Codex & Tools\\codex.exe",
+          providerInstances: {
+            [ProviderInstanceId.make("codex")]: {
+              driver: ProviderDriverKind.make("codex"),
+              config: {
+                binaryPath: "C:\\Program Files\\Codex & Tools\\codex.exe",
+              },
             },
           },
         },
@@ -253,11 +254,12 @@ describe("resolveOnboardingProviderLoginCommand", () => {
         provider,
         {
           ...DEFAULT_SERVER_SETTINGS,
-          providers: {
-            ...DEFAULT_SERVER_SETTINGS.providers,
-            claudeAgent: {
-              ...DEFAULT_SERVER_SETTINGS.providers.claudeAgent,
-              binaryPath: "/opt/Claude Tools/$current/claude",
+          providerInstances: {
+            [ProviderInstanceId.make("claude")]: {
+              driver: ProviderDriverKind.make("claudeAgent"),
+              config: {
+                binaryPath: "/opt/Claude Tools/$current/claude",
+              },
             },
           },
         },
@@ -278,11 +280,12 @@ describe("resolveOnboardingProviderLoginCommand", () => {
         readyCodex,
         {
           ...DEFAULT_SERVER_SETTINGS,
-          providers: {
-            ...DEFAULT_SERVER_SETTINGS.providers,
-            codex: {
-              ...DEFAULT_SERVER_SETTINGS.providers.codex,
-              binaryPath,
+          providerInstances: {
+            [ProviderInstanceId.make("codex")]: {
+              driver: ProviderDriverKind.make("codex"),
+              config: {
+                binaryPath,
+              },
             },
           },
         },
@@ -297,11 +300,12 @@ describe("resolveOnboardingProviderLoginCommand", () => {
         readyCodex,
         {
           ...DEFAULT_SERVER_SETTINGS,
-          providers: {
-            ...DEFAULT_SERVER_SETTINGS.providers,
-            codex: {
-              ...DEFAULT_SERVER_SETTINGS.providers.codex,
-              binaryPath: "/opt/codex\\work/codex",
+          providerInstances: {
+            [ProviderInstanceId.make("codex")]: {
+              driver: ProviderDriverKind.make("codex"),
+              config: {
+                binaryPath: "/opt/codex\\work/codex",
+              },
             },
           },
         },
@@ -316,11 +320,12 @@ describe("resolveOnboardingProviderLoginCommand", () => {
         readyCodex,
         {
           ...DEFAULT_SERVER_SETTINGS,
-          providers: {
-            ...DEFAULT_SERVER_SETTINGS.providers,
-            codex: {
-              ...DEFAULT_SERVER_SETTINGS.providers.codex,
-              binaryPath: "C:\\Tools\\codex.exe",
+          providerInstances: {
+            [ProviderInstanceId.make("codex")]: {
+              driver: ProviderDriverKind.make("codex"),
+              config: {
+                binaryPath: "C:\\Tools\\codex.exe",
+              },
             },
           },
         },
@@ -335,11 +340,12 @@ describe("resolveOnboardingProviderLoginCommand", () => {
         readyCodex,
         {
           ...DEFAULT_SERVER_SETTINGS,
-          providers: {
-            ...DEFAULT_SERVER_SETTINGS.providers,
-            codex: {
-              ...DEFAULT_SERVER_SETTINGS.providers.codex,
-              binaryPath: "/opt/Codex Tools/codex",
+          providerInstances: {
+            [ProviderInstanceId.make("codex")]: {
+              driver: ProviderDriverKind.make("codex"),
+              config: {
+                binaryPath: "/opt/Codex Tools/codex",
+              },
             },
           },
         },

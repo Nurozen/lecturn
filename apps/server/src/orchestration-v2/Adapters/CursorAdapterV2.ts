@@ -44,8 +44,8 @@ import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
-import { mcpToolPresentation } from "../../provider/McpToolPresentation.ts";
-import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { mcpToolPresentation } from "@lecturn/provider-core/server/mcpToolPresentation";
+import * as McpProviderSession from "@lecturn/provider-core/server/mcpSession";
 import {
   currentStaveMemoryResolver,
   staveMemoryCursorMcpServers,
@@ -58,22 +58,22 @@ import {
   hasCursorSkillMention,
   rewriteCursorSkillMentions,
 } from "../../provider/Drivers/CursorSkills.ts";
-import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
-import { lecturnOrchestrationPromptForFirstRun } from "../../provider/LecturnOrchestrationInstructions.ts";
-import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
-import * as IdAllocator from "../IdAllocator.ts";
-import { makeProviderFailure } from "../ProviderFailure.ts";
-import { turnScopedSelectionTransition } from "../ProviderSelectionTransition.ts";
+import { mergeProviderInstanceEnvironment } from "@lecturn/provider-core/server/instanceEnvironment";
+import { lecturnOrchestrationPromptForFirstRun } from "@lecturn/provider-core/server/orchestrationInstructions";
+import { buildRuntimeInstructions } from "@lecturn/provider-core/server/runtimeInstructions";
+import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
+import { makeProviderFailure } from "@lecturn/provider-core/server/failure";
+import { turnScopedSelectionTransition } from "@lecturn/provider-core/server/selectionTransition";
 import {
   isProviderNativeImageAttachment,
   providerMessageTextWithAttachmentPaths,
-} from "../AttachmentPrompt.ts";
-import * as ProviderAdapter from "../ProviderAdapter.ts";
+} from "@lecturn/provider-core/server/attachmentPrompt";
+import * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
   type ProviderAdapterDriverCreateInput,
-} from "../ProviderAdapterDriver.ts";
+} from "@lecturn/provider-core/server/adapterDriver";
 import {
   makeSubagentChildThread,
   makeSubagentConversationArtifacts,
@@ -2153,7 +2153,8 @@ export function makeCursorAdapterV2(
                   ? rawText
                   : rewriteCursorSkillMentions(rawText, cursorSkillNames),
               attachments: turnInput.message.attachments,
-              attachmentsDir: serverConfig.attachmentsDir,
+              resolveAttachmentPath: (attachment) =>
+                resolveAttachmentPath({ attachmentsDir: serverConfig.attachmentsDir, attachment }),
             }),
             runOrdinal: turnInput.runOrdinal,
             hasLecturnMcp: cursorMcpServers(turnInput.threadId) !== undefined,

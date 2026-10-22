@@ -1,5 +1,5 @@
 import type { MarkdownNode } from "react-native-nitro-markdown/headless";
-import { isMarkdownFileLinkLabel } from "@lecturn/client-runtime/markdown-links";
+import { isMarkdownFileLinkLabel } from "@lecturn/shared/markdownLinks";
 import { collectComposerInlineTokens } from "@lecturn/shared/composerInlineTokens";
 import { imageMimeType } from "@lecturn/shared/image";
 import { isWindowsAbsolutePath } from "@lecturn/shared/path";

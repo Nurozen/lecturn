@@ -18,21 +18,3 @@ export function reconcileOnboardingComputers(
     ? selectedIds
     : next;
 }
-
-export function areOnboardingComputersReady(
-  selectedIds: ReadonlySet<EnvironmentId>,
-  environments: ReadonlyArray<{
-    readonly environmentId: EnvironmentId;
-    readonly connection: { readonly phase: string };
-  }>,
-): boolean {
-  return (
-    selectedIds.size > 0 &&
-    [...selectedIds].every((id) =>
-      environments.some(
-        (environment) =>
-          environment.environmentId === id && environment.connection.phase === "connected",
-      ),
-    )
-  );
-}

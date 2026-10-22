@@ -35,7 +35,7 @@ import { ChildProcessSpawner } from "effect/process";
 import * as EffectAcpErrors from "effect-acp/errors";
 
 import * as ServerConfig from "../../config.ts";
-import { withAgentDeviceEnvironment } from "../../mcp/McpProviderSession.ts";
+import { withAgentDeviceEnvironment } from "@lecturn/provider-core/server/mcpSession";
 import { makeAcpNativeLoggerFactory } from "../../provider/acp/AcpNativeLogging.ts";
 import type * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
 import {
@@ -50,19 +50,19 @@ import {
   withCopilotCancelledStreamDiscard,
 } from "../../provider/acp/CopilotAcpSupport.ts";
 import * as ProviderEventLoggers from "../../provider/ProviderEventLoggers.ts";
-import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
+import { mergeProviderInstanceEnvironment } from "@lecturn/provider-core/server/instanceEnvironment";
 import {
   currentStaveMemoryResolver,
   staveMemoryAcpExtraMcpServers,
 } from "../../provider/StaveMemoryMcp.ts";
-import * as IdAllocator from "../IdAllocator.ts";
-import * as ProviderContinuationRequests from "../ProviderContinuationRequests.ts";
+import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
+import * as ProviderContinuationRequests from "@lecturn/provider-core/server/continuationRequests";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
   type ProviderAdapterDriverCreateInput,
-} from "../ProviderAdapterDriver.ts";
-import { makeProviderFailure } from "../ProviderFailure.ts";
+} from "@lecturn/provider-core/server/adapterDriver";
+import { makeProviderFailure } from "@lecturn/provider-core/server/failure";
 import {
   AcpProviderCapabilitiesV2,
   makeAcpAdapterV2,

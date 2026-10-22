@@ -48,10 +48,10 @@ import {
   ProviderAdapterProtocolError,
   type ProviderAdapterV2Event,
   type ProviderAdapterV2Shape,
-} from "../ProviderAdapter.ts";
+} from "@lecturn/provider-core/server/ProviderAdapter";
 import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
 import * as ProviderReplayHarness from "../testkit/ProviderReplayHarness.ts";
-import { checkpointWorkspace } from "../testkit/ReplayFixtureWorkspace.ts";
+import { checkpointWorkspace } from "@lecturn/provider-testing/replayWorkspace";
 
 const PROJECT_ID = "project:cutover";
 const ACTIVE_THREAD = "thread:cutover:active";

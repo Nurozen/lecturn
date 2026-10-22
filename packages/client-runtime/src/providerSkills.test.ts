@@ -4,11 +4,11 @@ import {
   ProviderInstanceId,
   type ServerProvider,
 } from "@lecturn/contracts";
+import { formatProviderSkillDisplayName } from "@lecturn/shared/inlineSkills";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   dedupeProviderSkillsByName,
-  formatProviderSkillDisplayName,
   getProviderSlashCommandsForSlashMenu,
   getProviderSkillsForSlashMenu,
   hasCompleteProviderWorkspaceSnapshot,

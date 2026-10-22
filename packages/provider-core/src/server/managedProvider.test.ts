@@ -1,0 +1,1056 @@
+import { describe, it, assert } from "@effect/vitest";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProvider,
+} from "@lecturn/contracts";
+import { createModelCapabilities } from "@lecturn/shared/model";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
+import * as PubSub from "effect/PubSub";
+import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
+import { TestClock } from "effect/testing";
+
+import * as ProviderHost from "./ProviderHost.ts";
+import { makeManagedServerProvider } from "./managedProvider.ts";
+
+const emptyCapabilities = createModelCapabilities({ optionDescriptors: [] });
+const fastModeCapabilities = createModelCapabilities({
+  optionDescriptors: [
+    {
+      id: "fastMode",
+      label: "Fast Mode",
+      type: "boolean",
+    },
+  ],
+});
+
+interface TestSettings {
+  readonly enabled: boolean;
+}
+
+const maintenanceCapabilities = {
+  provider: ProviderDriverKind.make("codex"),
+  packageName: "@openai/codex",
+  update: {
+    command: "npm install -g @openai/codex@latest",
+
+    executable: "npm",
+
+    args: ["install", "-g", "@openai/codex@latest"],
+
+    lockKey: "npm-global",
+  },
+} as const;
+
+const initialSnapshot: ServerProvider = {
+  instanceId: ProviderInstanceId.make("codex"),
+  driver: ProviderDriverKind.make("codex"),
+  enabled: true,
+  installed: true,
+  version: null,
+  status: "warning",
+  auth: { status: "unknown" },
+  checkedAt: "2026-04-10T00:00:00.000Z",
+  message: "Checking provider availability...",
+  models: [],
+  slashCommands: [],
+  skills: [],
+};
+
+const refreshedSnapshot: ServerProvider = {
+  instanceId: ProviderInstanceId.make("codex"),
+  driver: ProviderDriverKind.make("codex"),
+  enabled: true,
+  installed: true,
+  version: "1.0.0",
+  status: "ready",
+  auth: { status: "authenticated" },
+  checkedAt: "2026-04-10T00:00:01.000Z",
+  models: [],
+  slashCommands: [],
+  skills: [],
+};
+
+const enrichedSnapshot: ServerProvider = {
+  ...refreshedSnapshot,
+  checkedAt: "2026-04-10T00:00:02.000Z",
+  models: [
+    {
+      slug: "composer-2",
+      name: "Composer 2",
+      isCustom: false,
+      capabilities: fastModeCapabilities,
+    },
+  ],
+};
+
+const refreshedSnapshotSecond: ServerProvider = {
+  ...refreshedSnapshot,
+  checkedAt: "2026-04-10T00:00:03.000Z",
+  message: "Refreshed provider availability again.",
+};
+
+const probeTimedOutSnapshot: ServerProvider = {
+  ...refreshedSnapshot,
+  status: "error",
+  discovery: { status: "timed-out", phase: "provider" },
+};
+
+/** A host whose settings never change and whose background demand is fixed. */
+function layerProviderHost(input: {
+  readonly runBackgroundWork: boolean;
+  readonly settings?: Pick<ProviderHost.ProviderHostShape, "settings">["settings"];
+}) {
+  return Layer.succeed(
+    ProviderHost.ProviderHost,
+    ProviderHost.ProviderHost.of({
+      paths: {
+        cwd: process.cwd(),
+        baseDir: "/lecturn",
+        stateDir: "/lecturn/userdata",
+        providerStatusCacheDir: "/lecturn/caches",
+      },
+      settings: input.settings ?? {
+        get: Effect.succeed(DEFAULT_SERVER_SETTINGS),
+        changes: Stream.empty,
+        subscribe: Effect.succeed(Stream.empty),
+      },
+      shouldRunBackgroundWork: () => Effect.succeed(input.runBackgroundWork),
+      resolveAttachmentPath: () => null,
+      shellEnvironment: {
+        status: () => "ready",
+        await: () => Effect.succeed({ status: "ready" }),
+      },
+    }),
+  );
+}
+
+const layerAlwaysRunTest = layerProviderHost({ runBackgroundWork: true });
+const layerNeverRunTest = layerProviderHost({ runBackgroundWork: false });
+
+const enrichedSnapshotSecond: ServerProvider = {
+  ...refreshedSnapshotSecond,
+  checkedAt: "2026-04-10T00:00:04.000Z",
+  models: [
+    {
+      slug: "gpt-5.4",
+      name: "GPT-5.4",
+      isCustom: false,
+      capabilities: emptyCapabilities,
+    },
+  ],
+};
+
+describe("makeManagedServerProvider", () => {
+  it.effect(
+    "completes signed-out detection without hiding auth errors or automatically retrying",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const calls = yield* Ref.make(0);
+          const signedOut: ServerProvider = {
+            ...refreshedSnapshot,
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            driver: ProviderDriverKind.make("claudeAgent"),
+            status: "error",
+            auth: { status: "unauthenticated" },
+            message: "Claude Code is not signed in. Run `claude auth login` and try again.",
+          };
+          const nextProbe = yield* Ref.make(signedOut);
+          const provider = yield* makeManagedServerProvider<TestSettings>({
+            resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+            getSettings: Effect.succeed({ enabled: true }),
+            streamSettings: Stream.empty,
+            haveSettingsChanged: () => false,
+            initialSnapshot: () => Effect.succeed({ ...signedOut, installed: false }),
+            discovery: { waitForShell: false, refreshEnvironment: () => {} },
+            checkProvider: Ref.update(calls, (count) => count + 1).pipe(
+              Effect.andThen(Ref.get(nextProbe)),
+            ),
+            refreshOnInterval: false,
+          });
+          const [snapshot] = Array.from(
+            yield* provider.streamChanges.pipe(
+              Stream.filter((snapshot) => snapshot.discovery?.status !== "detecting"),
+              Stream.take(1),
+              Stream.runCollect,
+            ),
+          );
+          assert.strictEqual(snapshot?.discovery?.status, "ready");
+          assert.strictEqual(snapshot?.installed, true);
+          assert.strictEqual(snapshot?.status, "error");
+          assert.strictEqual(snapshot?.auth.status, "unauthenticated");
+          assert.strictEqual(snapshot?.message, signedOut.message);
+          yield* TestClock.adjust("2 minutes");
+          assert.strictEqual(yield* Ref.get(calls), 1);
+          for (const [probe, expected] of [
+            [{ ...signedOut, auth: { status: "unknown" } }, "error"],
+            [{ ...signedOut, installed: false }, "error"],
+            [{ ...signedOut, discovery: { status: "timed-out", phase: "provider" } }, "timed-out"],
+          ] as const) {
+            yield* Ref.set(nextProbe, probe);
+            assert.strictEqual((yield* provider.refresh).discovery?.status, expected);
+          }
+        }),
+      ).pipe(Effect.provide(Layer.mergeAll(layerAlwaysRunTest, TestClock.layer()))),
+  );
+
+  it.effect("resolves the update method after discovery loads the shell environment", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const homebrewCapabilities = {
+          ...maintenanceCapabilities,
+          update: {
+            command: "brew upgrade codex",
+            executable: "brew",
+            args: ["upgrade", "codex"],
+            lockKey: "homebrew",
+          },
+        };
+        let shellLoaded = false;
+        const rederivedWith = yield* Deferred.make<string | undefined>();
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: (options) =>
+            Effect.gen(function* () {
+              const capabilities = shellLoaded ? homebrewCapabilities : maintenanceCapabilities;
+              if (options?.fresh) {
+                yield* Deferred.succeed(rederivedWith, capabilities.update?.executable);
+              }
+              return capabilities;
+            }),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: () => false,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          discovery: {
+            waitForShell: false,
+            refreshEnvironment: () => {
+              shellLoaded = true;
+            },
+          },
+          checkProvider: Effect.succeed(refreshedSnapshot),
+          refreshOnInterval: false,
+        });
+        assert.equal(yield* Deferred.await(rederivedWith), "brew");
+        assert.equal((yield* provider.resolveMaintenance()).update?.executable, "brew");
+      }),
+    ).pipe(Effect.provide(layerAlwaysRunTest)),
+  );
+
+  it.effect("publishes the detected snapshot before the update method is re-derived", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const homebrewCapabilities = {
+          ...maintenanceCapabilities,
+          update: {
+            command: "brew upgrade codex",
+            executable: "brew",
+            args: ["upgrade", "codex"],
+            lockKey: "homebrew",
+          },
+        };
+        const rederiveStarted = yield* Deferred.make<void>();
+        const finishRederive = yield* Deferred.make<void>();
+        const rederived = yield* Ref.make(false);
+        const enrichedWith = yield* Deferred.make<string | undefined>();
+        const resolveMaintenance = (options?: { readonly fresh?: boolean }) =>
+          Effect.gen(function* () {
+            if (options?.fresh) {
+              yield* Deferred.succeed(rederiveStarted, undefined);
+              yield* Deferred.await(finishRederive);
+              yield* Ref.set(rederived, true);
+            }
+            return (yield* Ref.get(rederived)) ? homebrewCapabilities : maintenanceCapabilities;
+          });
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: () => false,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          discovery: { waitForShell: false, refreshEnvironment: () => {} },
+          checkProvider: Effect.succeed(refreshedSnapshot),
+          enrichSnapshot: () =>
+            resolveMaintenance().pipe(
+              Effect.flatMap((capabilities) =>
+                Deferred.succeed(enrichedWith, capabilities.update?.executable),
+              ),
+              Effect.asVoid,
+            ),
+          refreshOnInterval: false,
+        });
+
+        yield* Deferred.await(rederiveStarted);
+        assert.equal((yield* provider.getSnapshot).discovery?.status, "ready");
+        // A refresh holds the same lock as detection, so it only returns once
+        // detection has let go of it.
+        const refreshed = yield* provider.refresh;
+        assert.equal(refreshed.discovery?.status, "ready");
+        assert.isFalse(yield* Deferred.isDone(enrichedWith));
+
+        yield* Deferred.succeed(finishRederive, undefined);
+        assert.equal(yield* Deferred.await(enrichedWith), "brew");
+      }),
+    ).pipe(Effect.provide(layerAlwaysRunTest)),
+  );
+
+  it.effect("keeps an already detected provider usable during a later health refresh", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const refreshStarted = yield* Deferred.make<void>();
+        const finishRefresh = yield* Deferred.make<void>();
+        const checks = yield* Ref.make(0);
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: () => false,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          discovery: { waitForShell: false, refreshEnvironment: () => {} },
+          checkProvider: Effect.gen(function* () {
+            if ((yield* Ref.updateAndGet(checks, (count) => count + 1)) > 1) {
+              yield* Deferred.succeed(refreshStarted, undefined);
+              yield* Deferred.await(finishRefresh);
+            }
+            return refreshedSnapshot;
+          }),
+          refreshOnInterval: false,
+        });
+        yield* Effect.yieldNow;
+        assert.equal((yield* provider.getSnapshot).discovery?.status, "ready");
+        const refresh = yield* provider.refresh.pipe(Effect.forkChild);
+        yield* Deferred.await(refreshStarted);
+        assert.equal((yield* provider.getSnapshot).discovery?.status, "ready");
+        yield* Deferred.succeed(finishRefresh, undefined);
+        yield* Fiber.join(refresh);
+      }),
+    ).pipe(Effect.provide(layerAlwaysRunTest)),
+  );
+
+  it.effect("reports a timed out background discovery and recovers on retry", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const shouldHang = yield* Ref.make(true);
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: () => false,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          discovery: { waitForShell: false, refreshEnvironment: () => {} },
+          checkProvider: Effect.gen(function* () {
+            yield* Deferred.succeed(started, undefined);
+            if (yield* Ref.get(shouldHang)) return yield* Effect.never;
+            return refreshedSnapshot;
+          }),
+          refreshOnInterval: false,
+        });
+        assert.equal((yield* provider.getSnapshot).discovery?.status, "detecting");
+        const timedOut = yield* provider.streamChanges.pipe(
+          Stream.filter((snapshot) => snapshot.discovery?.status === "timed-out"),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* Deferred.await(started);
+        yield* TestClock.adjust("15 seconds");
+        const [failure] = yield* Fiber.join(timedOut);
+        assert.equal(failure?.status, "warning");
+        assert.match(failure?.message ?? "", /Retry.*Settings/);
+        yield* Ref.set(shouldHang, false);
+        const recovered = yield* provider.refresh;
+        assert.equal(recovered.discovery?.status, "ready");
+        assert.equal(recovered.installed, true);
+      }),
+    ).pipe(Effect.provide(layerAlwaysRunTest)),
+  );
+
+  it.effect("retries a timed out detection on its own until the provider is found", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const checks = yield* Ref.make(0);
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: () => false,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          discovery: { waitForShell: false, refreshEnvironment: () => {} },
+          // The probe itself reports running out of time (a busy host), twice.
+          checkProvider: Ref.updateAndGet(checks, (count) => count + 1).pipe(
+            Effect.map((count) => (count <= 2 ? probeTimedOutSnapshot : refreshedSnapshot)),
+          ),
+          refreshOnInterval: false,
+        });
+        const recovered = yield* provider.streamChanges.pipe(
+          Stream.filter((snapshot) => snapshot.discovery?.status === "ready"),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* Effect.yieldNow;
+        const firstFailure = yield* provider.getSnapshot;
+        assert.equal(firstFailure.discovery?.status, "timed-out");
+        assert.equal(firstFailure.installed, true);
+
+        yield* TestClock.adjust("5 seconds");
+        assert.equal((yield* provider.getSnapshot).discovery?.status, "timed-out");
+        yield* TestClock.adjust("10 seconds");
+        const [ready] = yield* Fiber.join(recovered);
+        assert.equal(ready?.discovery?.status, "ready");
+        assert.equal(yield* Ref.get(checks), 3);
+
+        yield* TestClock.adjust("5 minutes");
+        assert.equal(yield* Ref.get(checks), 3);
+      }),
+    ).pipe(Effect.provide(layerAlwaysRunTest)),
+  );
+
+  it.effect(
+    "runs the initial provider check in the background and streams the refreshed snapshot",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const checkCalls = yield* Ref.make(0);
+          const releaseCheck = yield* Deferred.make<void>();
+          const provider = yield* makeManagedServerProvider<TestSettings>({
+            resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+            getSettings: Effect.succeed({ enabled: true }),
+            streamSettings: Stream.empty,
+            haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+            initialSnapshot: () => Effect.succeed(initialSnapshot),
+            checkProvider: Ref.update(checkCalls, (count) => count + 1).pipe(
+              Effect.flatMap(() => Deferred.await(releaseCheck)),
+              Effect.as(refreshedSnapshot),
+            ),
+            refreshInterval: "1 hour",
+          });
+
+          const initial = yield* provider.getSnapshot;
+          assert.deepStrictEqual(initial, initialSnapshot);
+
+          const updatesFiber = yield* Stream.take(provider.streamChanges, 1).pipe(
+            Stream.runCollect,
+            Effect.forkChild,
+          );
+          yield* Effect.yieldNow;
+          assert.strictEqual(yield* Ref.get(checkCalls), 1);
+
+          yield* Deferred.succeed(releaseCheck, undefined);
+
+          const updates = Array.from(yield* Fiber.join(updatesFiber));
+          const latest = yield* provider.getSnapshot;
+
+          assert.deepStrictEqual(updates, [refreshedSnapshot]);
+          assert.deepStrictEqual(latest, refreshedSnapshot);
+          assert.strictEqual(yield* Ref.get(checkCalls), 1);
+        }),
+      ).pipe(Effect.provide(layerAlwaysRunTest)),
+  );
+
+  it.effect("skips periodic provider refreshes without foreground provider-status demand", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const checkCalls = yield* Ref.make(0);
+        const initialCheckDone = yield* Deferred.make<void>();
+        yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
+            Effect.tap((count) =>
+              count === 1
+                ? Deferred.succeed(initialCheckDone, undefined).pipe(Effect.ignore)
+                : Effect.void,
+            ),
+            Effect.as(refreshedSnapshot),
+          ),
+          refreshInterval: "1 second",
+        });
+
+        yield* Deferred.await(initialCheckDone);
+        yield* TestClock.adjust("1 second");
+        yield* Effect.yieldNow;
+
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+      }),
+    ).pipe(Effect.provide(Layer.mergeAll(layerNeverRunTest, TestClock.layer()))),
+  );
+
+  it.effect("disables periodic provider refreshes when the explicit interval is zero", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const checkCalls = yield* Ref.make(0);
+        const initialCheckDone = yield* Deferred.make<void>();
+        yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
+            Effect.tap(() => Deferred.succeed(initialCheckDone, undefined).pipe(Effect.ignore)),
+            Effect.as(refreshedSnapshot),
+          ),
+          refreshInterval: 0,
+        });
+
+        yield* Deferred.await(initialCheckDone);
+        yield* TestClock.adjust("5 minutes");
+        yield* Effect.yieldNow;
+
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+      }),
+    ).pipe(Effect.provide(Layer.mergeAll(layerAlwaysRunTest, TestClock.layer()))),
+  );
+
+  it.effect("keeps manual refresh when interval refresh is disabled", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const checkCalls = yield* Ref.make(0);
+        const initialCheckDone = yield* Deferred.make<void>();
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
+            Effect.tap((count) =>
+              count === 1
+                ? Deferred.succeed(initialCheckDone, undefined).pipe(Effect.ignore)
+                : Effect.void,
+            ),
+            Effect.as(refreshedSnapshot),
+          ),
+          refreshInterval: "1 second",
+          refreshOnInterval: false,
+        });
+
+        yield* Deferred.await(initialCheckDone);
+        yield* TestClock.adjust("5 minutes");
+        yield* Effect.yieldNow;
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+
+        yield* provider.refresh;
+        assert.strictEqual(yield* Ref.get(checkCalls), 2);
+      }),
+    ).pipe(Effect.provide(Layer.mergeAll(layerAlwaysRunTest, TestClock.layer()))),
+  );
+
+  it.effect("wakes a sleeping provider refresh loop when its interval changes", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const initialServerSettings = {
+          ...DEFAULT_SERVER_SETTINGS,
+          providerHealthRefreshInterval: Duration.hours(1),
+        };
+        const serverSettingsRef = yield* Ref.make(initialServerSettings);
+        const serverSettingsChanges = yield* PubSub.unbounded<typeof initialServerSettings>();
+        const hostSettings: ProviderHost.ProviderHostShape["settings"] = {
+          get: Ref.get(serverSettingsRef),
+          changes: Stream.empty,
+          subscribe: PubSub.subscribe(serverSettingsChanges).pipe(
+            Effect.map((subscription) => Stream.fromSubscription(subscription)),
+          ),
+        };
+        const checkCalls = yield* Ref.make(0);
+        const initialCheckDone = yield* Deferred.make<void>();
+        const periodicCheckDone = yield* Deferred.make<void>();
+
+        yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
+            Effect.tap((count) =>
+              count === 1
+                ? Deferred.succeed(initialCheckDone, undefined).pipe(Effect.ignore)
+                : Deferred.succeed(periodicCheckDone, undefined).pipe(Effect.ignore),
+            ),
+            Effect.as(refreshedSnapshot),
+          ),
+        }).pipe(
+          Effect.provide(layerProviderHost({ runBackgroundWork: true, settings: hostSettings })),
+        );
+
+        yield* Deferred.await(initialCheckDone);
+        const nextServerSettings = {
+          ...initialServerSettings,
+          providerHealthRefreshInterval: Duration.seconds(1),
+        };
+        yield* Ref.set(serverSettingsRef, nextServerSettings);
+        yield* PubSub.publish(serverSettingsChanges, nextServerSettings);
+        yield* Effect.yieldNow;
+
+        yield* TestClock.adjust("999 millis");
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+        // Periodic checks add up to 10% jitter to the interval.
+        yield* TestClock.adjust("101 millis");
+        yield* Deferred.await(periodicCheckDone);
+        assert.strictEqual(yield* Ref.get(checkCalls), 2);
+      }),
+    ).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("reruns the provider check when streamed settings change", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const settingsRef = yield* Ref.make<TestSettings>({ enabled: true });
+        const settingsChanges = yield* PubSub.unbounded<TestSettings>();
+        const checkCalls = yield* Ref.make(0);
+        const releaseInitialCheck = yield* Deferred.make<void>();
+        const releaseSettingsCheck = yield* Deferred.make<void>();
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Ref.get(settingsRef),
+          streamSettings: Stream.fromPubSub(settingsChanges),
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === 1
+                ? Deferred.await(releaseInitialCheck).pipe(Effect.as(refreshedSnapshot))
+                : Deferred.await(releaseSettingsCheck).pipe(Effect.as(refreshedSnapshotSecond)),
+            ),
+          ),
+          refreshInterval: "1 hour",
+        });
+
+        const updatesFiber = yield* Stream.take(provider.streamChanges, 2).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* Effect.yieldNow;
+
+        yield* Deferred.succeed(releaseInitialCheck, undefined);
+        yield* Ref.set(settingsRef, { enabled: false });
+        yield* PubSub.publish(settingsChanges, { enabled: false });
+        yield* Deferred.succeed(releaseSettingsCheck, undefined);
+
+        const updates = Array.from(yield* Fiber.join(updatesFiber));
+        const latest = yield* provider.getSnapshot;
+
+        assert.deepStrictEqual(updates, [refreshedSnapshot, refreshedSnapshotSecond]);
+        assert.deepStrictEqual(latest, refreshedSnapshotSecond);
+        assert.strictEqual(yield* Ref.get(checkCalls), 2);
+      }),
+    ).pipe(Effect.provide(layerAlwaysRunTest)),
+  );
+
+  it.effect("can update settings and disable periodic checks without probing again", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const settingsChanges = yield* PubSub.unbounded<TestSettings>();
+        const checkCalls = yield* Ref.make(0);
+        const initialCheckDone = yield* Deferred.make<void>();
+        const enrichmentCalls = yield* Ref.make(0);
+        yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.fromPubSub(settingsChanges),
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          checkProviderOnSettingsChange: () => false,
+          refreshOnInterval: false,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
+            Effect.tap(() => Deferred.succeed(initialCheckDone, undefined).pipe(Effect.ignore)),
+            Effect.as(refreshedSnapshot),
+          ),
+          enrichSnapshot: () => Ref.update(enrichmentCalls, (count) => count + 1),
+          refreshInterval: "1 second",
+        });
+
+        yield* Deferred.await(initialCheckDone);
+        yield* PubSub.publish(settingsChanges, { enabled: false });
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust("1 second");
+        yield* Effect.yieldNow;
+
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+        assert.strictEqual(yield* Ref.get(enrichmentCalls), 2);
+      }),
+    ).pipe(Effect.provide(Layer.mergeAll(layerAlwaysRunTest, TestClock.layer()))),
+  );
+
+  it.effect("streams supplemental snapshot updates after the base provider check completes", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const releaseEnrichment = yield* Deferred.make<void>();
+        const releaseCheck = yield* Deferred.make<void>();
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Deferred.await(releaseCheck).pipe(Effect.as(refreshedSnapshot)),
+          enrichSnapshot: ({ publishSnapshot }) =>
+            Deferred.await(releaseEnrichment).pipe(
+              Effect.flatMap(() => publishSnapshot(enrichedSnapshot)),
+            ),
+          refreshInterval: "1 hour",
+        });
+
+        const updatesFiber = yield* Stream.take(provider.streamChanges, 2).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* Effect.yieldNow;
+
+        yield* Deferred.succeed(releaseCheck, undefined);
+
+        yield* Deferred.succeed(releaseEnrichment, undefined);
+
+        const updates = Array.from(yield* Fiber.join(updatesFiber));
+        const latest = yield* provider.getSnapshot;
+
+        assert.deepStrictEqual(updates, [refreshedSnapshot, enrichedSnapshot]);
+        assert.deepStrictEqual(latest, enrichedSnapshot);
+      }),
+    ).pipe(Effect.provide(layerAlwaysRunTest)),
+  );
+
+  it.effect("ignores stale enrichment callbacks after a newer refresh advances generation", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const publishCallbacks: Array<(snapshot: ServerProvider) => Effect.Effect<void>> = [];
+        const refreshCount = yield* Ref.make(0);
+        const firstCallbackReady = yield* Deferred.make<void>();
+        const secondCallbackReady = yield* Deferred.make<void>();
+        const allowFirstRefresh = yield* Deferred.make<void>();
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.updateAndGet(refreshCount, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === 1
+                ? Deferred.await(allowFirstRefresh).pipe(Effect.as(refreshedSnapshot))
+                : Effect.succeed(refreshedSnapshotSecond),
+            ),
+          ),
+          enrichSnapshot: ({ publishSnapshot }) =>
+            Effect.gen(function* () {
+              publishCallbacks.push(publishSnapshot);
+              if (publishCallbacks.length === 1) {
+                yield* Deferred.succeed(firstCallbackReady, undefined).pipe(Effect.ignore);
+              } else if (publishCallbacks.length === 2) {
+                yield* Deferred.succeed(secondCallbackReady, undefined).pipe(Effect.ignore);
+              }
+            }),
+          refreshInterval: "1 hour",
+        });
+
+        const updatesFiber = yield* Stream.take(provider.streamChanges, 3).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* Effect.yieldNow;
+
+        yield* Deferred.succeed(allowFirstRefresh, undefined);
+        yield* Deferred.await(firstCallbackReady);
+
+        yield* provider.refresh;
+        yield* Deferred.await(secondCallbackReady);
+
+        yield* publishCallbacks[0]!(enrichedSnapshot);
+        yield* publishCallbacks[1]!(enrichedSnapshotSecond);
+
+        const updates = Array.from(yield* Fiber.join(updatesFiber));
+        const latest = yield* provider.getSnapshot;
+
+        assert.deepStrictEqual(updates, [
+          refreshedSnapshot,
+          refreshedSnapshotSecond,
+          enrichedSnapshotSecond,
+        ]);
+        assert.deepStrictEqual(latest, enrichedSnapshotSecond);
+      }),
+    ).pipe(Effect.provide(layerAlwaysRunTest)),
+  );
+
+  it.effect("applies runtime usage updates onto the published snapshot", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Effect.succeed({
+            ...refreshedSnapshot,
+            usageLimits: {
+              checkedAt: "2026-04-10T00:00:01.000Z",
+              windows: [
+                { id: "five_hour", kind: "session", label: "Session", usedPercent: 10 },
+                {
+                  id: "seven_day",
+                  kind: "weekly",
+                  label: "Weekly",
+                  usedPercent: 20,
+                  resetsAt: "2026-04-17T00:00:00.000Z",
+                },
+              ],
+            },
+          } satisfies ServerProvider),
+          refreshInterval: "1 hour",
+        });
+        yield* Stream.take(provider.streamChanges, 1).pipe(Stream.runDrain);
+
+        const updatesFiber = yield* Stream.take(provider.streamChanges, 1).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* Effect.yieldNow;
+
+        // Percent-only weekly update: keeps the probe's reset time.
+        yield* provider.applyUsageLimits({
+          checkedAt: "2026-04-10T00:05:00.000Z",
+          windows: [{ id: "seven_day", kind: "weekly", label: "Weekly", usedPercent: 25 }],
+        });
+        // No windows: nothing to merge, nothing published.
+        yield* provider.applyUsageLimits({ checkedAt: "2026-04-10T00:06:00.000Z", windows: [] });
+
+        const [update] = Array.from(yield* Fiber.join(updatesFiber));
+        assert.deepStrictEqual(update?.usageLimits, {
+          checkedAt: "2026-04-10T00:05:00.000Z",
+          windows: [
+            { id: "five_hour", kind: "session", label: "Session", usedPercent: 10 },
+            {
+              id: "seven_day",
+              kind: "weekly",
+              label: "Weekly",
+              usedPercent: 25,
+              resetsAt: "2026-04-17T00:00:00.000Z",
+            },
+          ],
+        });
+        assert.deepStrictEqual(yield* provider.getSnapshot, update);
+      }),
+    ).pipe(Effect.provide(layerAlwaysRunTest)),
+  );
+
+  it.effect("keeps live usage windows across a failed probe and a stale enrichment", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const releaseEnrichment = yield* Deferred.make<void>();
+        const refreshCount = yield* Ref.make(0);
+        const probedLimits = {
+          checkedAt: "2026-04-10T00:00:01.000Z",
+          windows: [{ id: "primary", kind: "session", label: "Session", usedPercent: 10 }],
+        } as const;
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.updateAndGet(refreshCount, (count) => count + 1).pipe(
+            Effect.map((count) =>
+              count === 1
+                ? { ...refreshedSnapshot, usageLimits: probedLimits }
+                : {
+                    ...refreshedSnapshotSecond,
+                    usageLimits: {
+                      checkedAt: "2026-04-10T00:00:03.000Z",
+                      windows: [],
+                      unavailable: { reason: "probeFailed" },
+                    },
+                  },
+            ),
+          ),
+          enrichSnapshot: ({ snapshot, publishSnapshot }) =>
+            Deferred.await(releaseEnrichment).pipe(
+              Effect.flatMap(() =>
+                publishSnapshot({
+                  ...enrichedSnapshot,
+                  ...snapshot,
+                  models: enrichedSnapshot.models,
+                }),
+              ),
+            ),
+          refreshInterval: "1 hour",
+        });
+        yield* Stream.take(provider.streamChanges, 1).pipe(Stream.runDrain);
+
+        const liveWindow = {
+          id: "primary",
+          kind: "session",
+          label: "Session",
+          usedPercent: 60,
+        } as const;
+        yield* provider.applyUsageLimits({
+          checkedAt: "2026-04-10T00:00:02.000Z",
+          windows: [liveWindow],
+        });
+
+        // Enrichment computed from the pre-update snapshot lands afterwards.
+        yield* Deferred.succeed(releaseEnrichment, undefined);
+        const enriched = yield* Stream.take(provider.streamChanges, 1).pipe(
+          Stream.runCollect,
+          Effect.map((chunk) => Array.from(chunk)[0]!),
+        );
+        assert.deepStrictEqual(enriched.models, enrichedSnapshot.models);
+        assert.deepStrictEqual(enriched.usageLimits?.windows, [liveWindow]);
+
+        // A probe that could not read usage keeps the last good windows.
+        const refreshed = yield* provider.refresh;
+        assert.strictEqual(refreshed.message, refreshedSnapshotSecond.message);
+        assert.deepStrictEqual(refreshed.usageLimits?.windows, [liveWindow]);
+      }),
+    ).pipe(Effect.provide(layerAlwaysRunTest)),
+  );
+
+  describe("routine health check timeouts", () => {
+    const selfTimedOutSnapshot: ServerProvider = {
+      ...refreshedSnapshot,
+      status: "error",
+      message: "Timed out while checking provider status.",
+      discovery: {
+        status: "timed-out",
+        phase: "provider",
+        message: "Timed out while checking provider status.",
+      },
+    };
+
+    // Call 0 is the startup check; later calls follow `later` by call index.
+    const makeScriptedProvider = (input: {
+      readonly later: (call: number) => Effect.Effect<ServerProvider>;
+      readonly refreshOnInterval?: boolean;
+      readonly detectionTimeout?: Duration.Input;
+    }) =>
+      Effect.gen(function* () {
+        const started = yield* Queue.unbounded<number>();
+        const calls = yield* Ref.make(0);
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: () => false,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          discovery: { waitForShell: false, refreshEnvironment: () => {} },
+          checkProvider: Ref.getAndUpdate(calls, (count) => count + 1).pipe(
+            Effect.tap((call) => Queue.offer(started, call)),
+            Effect.flatMap((call) =>
+              call === 0 ? Effect.succeed(refreshedSnapshot) : input.later(call),
+            ),
+          ),
+          refreshInterval: "1 second",
+          ...(input.refreshOnInterval === false ? { refreshOnInterval: false } : {}),
+          ...(input.detectionTimeout ? { detectionTimeout: input.detectionTimeout } : {}),
+        });
+        const firstWithDiscovery = (status: NonNullable<ServerProvider["discovery"]>["status"]) =>
+          provider.streamChanges.pipe(
+            Stream.filter((snapshot) => snapshot.discovery?.status === status),
+            Stream.take(1),
+            Stream.runCollect,
+            Effect.map((chunk) => Array.from(chunk)[0]),
+            Effect.forkChild,
+          );
+        return { provider, started, firstWithDiscovery };
+      });
+
+    it.effect("keeps a ready provider through one routine timeout and demotes it on the next", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { provider, started, firstWithDiscovery } = yield* makeScriptedProvider({
+            later: (call) => (call === 1 ? Effect.never : Effect.succeed(selfTimedOutSnapshot)),
+          });
+          const timedOut = yield* firstWithDiscovery("timed-out");
+          assert.strictEqual(yield* Queue.take(started), 0);
+
+          // Interval jitter stays under 10% of the 1 second interval.
+          yield* TestClock.adjust("1100 millis");
+          assert.strictEqual(yield* Queue.take(started), 1);
+          assert.equal((yield* provider.getSnapshot).discovery?.status, "ready");
+          yield* TestClock.adjust("15 seconds");
+          assert.equal((yield* provider.getSnapshot).discovery?.status, "ready");
+
+          yield* TestClock.adjust("1100 millis");
+          assert.strictEqual(yield* Queue.take(started), 2);
+          // The first published timeout is the second probe's, not the absorbed one.
+          const demoted = yield* Fiber.join(timedOut);
+          assert.equal(demoted?.discovery?.message, "Timed out while checking provider status.");
+          assert.equal((yield* provider.getSnapshot).discovery?.status, "timed-out");
+        }),
+      ).pipe(Effect.provide(Layer.mergeAll(layerAlwaysRunTest, TestClock.layer()))),
+    );
+
+    it.effect("publishes a timeout from a user retry immediately", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { provider, started } = yield* makeScriptedProvider({
+            later: () => Effect.never,
+            refreshOnInterval: false,
+          });
+          assert.strictEqual(yield* Queue.take(started), 0);
+          const retry = yield* provider.refresh.pipe(Effect.forkChild);
+          assert.strictEqual(yield* Queue.take(started), 1);
+          assert.equal((yield* provider.getSnapshot).discovery?.status, "ready");
+          yield* TestClock.adjust("15 seconds");
+          const result = yield* Fiber.join(retry);
+          assert.equal(result.discovery?.status, "timed-out");
+          assert.equal((yield* provider.getSnapshot).discovery?.status, "timed-out");
+        }),
+      ).pipe(Effect.provide(Layer.mergeAll(layerAlwaysRunTest, TestClock.layer()))),
+    );
+
+    it.effect("publishes a missing executable from a routine check immediately", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { started, firstWithDiscovery } = yield* makeScriptedProvider({
+            later: () =>
+              Effect.succeed({
+                ...refreshedSnapshot,
+                installed: false,
+                status: "error",
+                message: "Codex CLI (`codex`) was not found on PATH.",
+              }),
+          });
+          const failed = yield* firstWithDiscovery("error");
+          assert.strictEqual(yield* Queue.take(started), 0);
+          yield* TestClock.adjust("1100 millis");
+          assert.strictEqual(yield* Queue.take(started), 1);
+          const failure = yield* Fiber.join(failed);
+          assert.equal(failure?.installed, false);
+          assert.equal(failure?.discovery?.message, "Codex CLI (`codex`) was not found on PATH.");
+        }),
+      ).pipe(Effect.provide(Layer.mergeAll(layerAlwaysRunTest, TestClock.layer()))),
+    );
+
+    it.effect("waits for a driver's longer detection timeout", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { provider, started } = yield* makeScriptedProvider({
+            later: () => Effect.never,
+            refreshOnInterval: false,
+            detectionTimeout: "27 seconds",
+          });
+          assert.strictEqual(yield* Queue.take(started), 0);
+          const retry = yield* provider.refresh.pipe(Effect.forkChild);
+          assert.strictEqual(yield* Queue.take(started), 1);
+          yield* TestClock.adjust("15 seconds");
+          assert.equal((yield* provider.getSnapshot).discovery?.status, "ready");
+          yield* TestClock.adjust("12 seconds");
+          assert.equal((yield* Fiber.join(retry)).discovery?.status, "timed-out");
+        }),
+      ).pipe(Effect.provide(Layer.mergeAll(layerAlwaysRunTest, TestClock.layer()))),
+    );
+  });
+});

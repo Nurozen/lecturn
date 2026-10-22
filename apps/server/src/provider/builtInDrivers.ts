@@ -28,8 +28,9 @@ import { CursorDriver, type CursorDriverEnv } from "./Drivers/CursorDriver.ts";
 import { GrokDriver, type GrokDriverEnv } from "./Drivers/GrokDriver.ts";
 import { CopilotDriver, type CopilotDriverEnv } from "./Drivers/CopilotDriver.ts";
 import { OpenCodeDriver, type OpenCodeDriverEnv } from "./Drivers/OpenCodeDriver.ts";
-import { PiDriver, type PiDriverEnv } from "./Drivers/PiDriver.ts";
-import type { AnyProviderDriver } from "./ProviderDriver.ts";
+import { MuseDriver, type MuseDriverEnv } from "@lecturn/provider-muse/server";
+import { PiDriver, type PiDriverEnv } from "@lecturn/provider-pi/server";
+import type { AnyProviderDriver } from "@lecturn/provider-core/server/driver";
 
 /**
  * Union of infrastructure services required to construct any built-in
@@ -45,7 +46,8 @@ export type BuiltInDriversEnv =
   | GrokDriverEnv
   | CopilotDriverEnv
   | OpenCodeDriverEnv
-  | PiDriverEnv;
+  | PiDriverEnv
+  | MuseDriverEnv;
 
 /**
  * Ordered list of built-in drivers. Order matters only for tie-breaking in
@@ -61,5 +63,6 @@ export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv
   OpenCodeDriver,
   AntigravityDriver,
   PiDriver,
+  MuseDriver,
   AcpRegistryDriver,
 ];

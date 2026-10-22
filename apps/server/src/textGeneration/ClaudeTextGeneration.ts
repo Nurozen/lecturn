@@ -17,8 +17,11 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { type ClaudeSettings, TextGenerationError } from "@lecturn/contracts";
 import { resolveSpawnCommand } from "@lecturn/shared/shell";
 
-import * as TextGenerationOperations from "./TextGenerationOperations.ts";
-import { normalizeCliError, toJsonSchemaObject } from "./TextGenerationUtils.ts";
+import * as TextGenerationOperations from "@lecturn/provider-core/server/textGenerationOperations";
+import {
+  normalizeCliError,
+  toJsonSchemaObject,
+} from "@lecturn/provider-core/server/textGenerationUtils";
 import {
   getModelSelectionStringOptionValue,
   getProviderOptionDescriptors,

@@ -1,4 +1,4 @@
-import { fileBasename } from "@lecturn/client-runtime/markdown-links";
+import { fileBasename } from "@lecturn/shared/path";
 import type { ThreadId } from "@lecturn/contracts";
 import { resolveMarkdownLinkPresentation } from "@lecturn/mobile-markdown-text/links";
 import type { MarkdownFileContextMenu } from "@lecturn/mobile-markdown-text/types";

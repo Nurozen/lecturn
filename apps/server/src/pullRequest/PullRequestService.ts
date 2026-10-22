@@ -83,7 +83,7 @@ import {
   isSshRemoteUrl,
 } from "@lecturn/shared/sourceControl";
 
-import { AllowGitHubReserve } from "../sourceControl/GitHubCli.ts";
+import { AllowGitHubReserve } from "../sourceControl/GitHubApi.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";

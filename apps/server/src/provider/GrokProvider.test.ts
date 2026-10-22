@@ -18,7 +18,7 @@ import {
   grokSlashCommandsFromInitialize,
   parseGrokModelsCliOutput,
 } from "./GrokProvider.ts";
-import { execScriptSource, writeFakeCli } from "../testUtils/fakeCli.ts";
+import { execScriptSource, writeFakeCli } from "@lecturn/provider-testing/fakeCli";
 import { grokUsageResponseToLimits, readGrokAccount } from "./grokUsageLimits.ts";
 
 const decodeGrokSettings = Schema.decodeSync(GrokSettings);

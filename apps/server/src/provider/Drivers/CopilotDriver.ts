@@ -12,13 +12,11 @@ import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
-import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import * as ServerConfig from "../../config.ts";
 import {
   CopilotAdapterV2Driver,
   type CopilotAdapterV2DriverEnv,
 } from "../../orchestration-v2/Adapters/CopilotAdapterV2.ts";
-import * as ServerSettings from "../../serverSettings.ts";
 import { StaveMemoryWiring } from "../../stave/StaveMemoryWiring.ts";
 import { makeCopilotTextGeneration } from "../../textGeneration/CopilotTextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
@@ -29,13 +27,14 @@ import {
   enrichCopilotSnapshot,
 } from "../CopilotProvider.ts";
 import * as ProviderEventLoggers from "../ProviderEventLoggers.ts";
-import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
+import { makeManagedServerProvider } from "@lecturn/provider-core/server/managedProvider";
+import { ProviderHost } from "@lecturn/provider-core/server/ProviderHost";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
   type ProviderInstance,
-} from "../ProviderDriver.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+} from "@lecturn/provider-core/server/driver";
+import { mergeProviderInstanceEnvironment } from "@lecturn/provider-core/server/instanceEnvironment";
 import {
   isNodePackageManagerCommandPath,
   makeCachedProviderMaintenanceResolution,
@@ -43,13 +42,13 @@ import {
   type ProviderMaintenanceCapabilitiesResolver,
   resolvePackageManagedProviderMaintenance,
   resolveProviderMaintenanceCapabilitiesEffect,
-} from "../providerMaintenance.ts";
+} from "@lecturn/provider-core/server/maintenanceResolver";
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
-} from "../providerUpdateSettings.ts";
-import { withInstanceIdentity } from "./instanceIdentity.ts";
+} from "@lecturn/provider-core/server/snapshotSettings";
+import { withInstanceIdentity } from "@lecturn/provider-core/server/instanceIdentity";
 
 const decodeCopilotSettings = Schema.decodeSync(GithubCopilotSettings);
 
@@ -93,15 +92,14 @@ export const COPILOT_UPDATE_RESOLVER: ProviderMaintenanceCapabilitiesResolver = 
 export type CopilotDriverEnv =
   | StaveMemoryWiring
   | CopilotAdapterV2DriverEnv
-  | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
   | HttpClient.HttpClient
   | Path.Path
   | ProviderEventLoggers.ProviderEventLoggers
-  | ServerConfig.ServerConfig
-  | ServerSettings.ServerSettingsService;
+  | ProviderHost
+  | ServerConfig.ServerConfig;
 
 export const CopilotDriver: ProviderDriver<GithubCopilotSettings, CopilotDriverEnv> = {
   driverKind: DRIVER_KIND,
@@ -118,7 +116,7 @@ export const CopilotDriver: ProviderDriver<GithubCopilotSettings, CopilotDriverE
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
-      const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const host = yield* ProviderHost;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -173,7 +171,7 @@ export const CopilotDriver: ProviderDriver<GithubCopilotSettings, CopilotDriverE
         Effect.provideService(Path.Path, path),
       );
 
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
+      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, host.settings);
       const snapshot = yield* makeManagedServerProvider<
         ProviderSnapshotSettings<GithubCopilotSettings>
       >({

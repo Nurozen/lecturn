@@ -1,5 +1,5 @@
 import { StaveMemoryWiring } from "../../stave/StaveMemoryWiring.ts";
-import { withAgentDeviceEnvironment } from "../../mcp/McpProviderSession.ts";
+import { withAgentDeviceEnvironment } from "@lecturn/provider-core/server/mcpSession";
 import { AntigravitySettings, ProviderDriverKind, ProviderSetupError } from "@lecturn/contracts";
 import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import { resolveSelfInvocation } from "@lecturn/shared/nodeRuntime";
@@ -19,9 +19,8 @@ import * as Stream from "effect/Stream";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import type { AcpError } from "effect-acp/errors";
 
-import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
+import { ProviderHost } from "@lecturn/provider-core/server/ProviderHost";
 import * as ServerConfig from "../../config.ts";
-import * as ServerSettings from "../../serverSettings.ts";
 import {
   isAntigravityTextGenerationAvailable,
   makeAntigravityTextGeneration,
@@ -43,13 +42,13 @@ import {
   type AntigravityAcpRuntimeInput,
 } from "../acp/AntigravityAcpSupport.ts";
 import type { AcpSessionRuntime, AcpSessionRuntimeStartResult } from "../acp/AcpSessionRuntime.ts";
-import type { ServerProviderDraft } from "../providerSnapshot.ts";
+import type { ServerProviderDraft } from "@lecturn/provider-core/server/snapshotProbe";
 import {
   removeAntigravityRuntimeTempDirs,
   removeAntigravitySessionFiles,
 } from "../acp/AntigravitySessionFiles.ts";
-import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
-import * as ProviderContinuationRequests from "../../orchestration-v2/ProviderContinuationRequests.ts";
+import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
+import * as ProviderContinuationRequests from "@lecturn/provider-core/server/continuationRequests";
 import { makeAntigravityAdapterV2 } from "../../orchestration-v2/Adapters/AntigravityAdapterV2.ts";
 import { staveMemoryAcpExtraMcpServers } from "../StaveMemoryMcp.ts";
 import { makeAcpNativeLoggerFactory } from "../acp/AcpNativeLogging.ts";
@@ -61,9 +60,9 @@ import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
   type ProviderInstance,
-} from "../ProviderDriver.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
-import { withInstanceIdentity } from "./instanceIdentity.ts";
+} from "@lecturn/provider-core/server/driver";
+import { mergeProviderInstanceEnvironment } from "@lecturn/provider-core/server/instanceEnvironment";
+import { withInstanceIdentity } from "@lecturn/provider-core/server/instanceIdentity";
 import { discoverAntigravitySkills, resolveAntigravityUserHome } from "./AntigravitySkills.ts";
 
 const DRIVER = ProviderDriverKind.make("antigravity");
@@ -73,7 +72,7 @@ const isNodeRuntimeUnavailableError = Schema.is(NodeRuntimeUnavailableError);
 export type AntigravityDriverEnv =
   | StaveMemoryWiring
   | AntigravityInstallation.AntigravityInstallation
-  | BackgroundPolicy.BackgroundPolicy
+  | ProviderHost
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
@@ -81,8 +80,7 @@ export type AntigravityDriverEnv =
   | ModelManifest.ModelManifest
   | Path.Path
   | ProviderEventLoggers.ProviderEventLoggers
-  | ServerConfig.ServerConfig
-  | ServerSettings.ServerSettingsService;
+  | ServerConfig.ServerConfig;
 
 /** Each instance owns its Google profile. Executable releases are shared by the environment. */
 export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityDriverEnv> = {

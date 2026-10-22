@@ -91,12 +91,12 @@ describe("nativeMarkdownTextRuns", () => {
         children: [
           {
             type: "link",
-            href: "lecturn-thread://v1/env/thread-1",
+            href: "lecturn-thread://v1/thread-1",
             children: [{ type: "text", content: "Fix the build" }],
           },
         ],
       }),
-    ).toEqual([{ text: "Fix the build", href: "lecturn-thread://v1/env/thread-1" }]);
+    ).toEqual([{ text: "Fix the build", href: "lecturn-thread://v1/thread-1" }]);
   });
 
   it("preserves the destination of a link with a code-formatted label", () => {

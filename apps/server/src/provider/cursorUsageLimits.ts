@@ -13,7 +13,7 @@ import {
   clampPercent,
   makeUnavailableUsageLimits,
   makeUsageLimits,
-} from "./providerUsageLimits.ts";
+} from "@lecturn/provider-core/server/usageLimits";
 import { readMacCursorAccessToken } from "./cursorKeychainToken.ts";
 
 const CursorCredentials = Schema.Struct({ accessToken: Schema.optional(Schema.String) });

@@ -17,7 +17,10 @@ import {
   extractAssistantTextBlocks,
   titleForTool,
 } from "./ExternalSessionPresentation.ts";
-import type { ImportedTranscriptEntry, ProviderInstance } from "../ProviderDriver.ts";
+import type {
+  ImportedTranscriptEntry,
+  ProviderInstance,
+} from "@lecturn/provider-core/server/driver";
 import { ClaudeSessionNotFound, forkClaudeSession } from "./ClaudeSessionFork.ts";
 
 const TOOL_DETAIL_MAX_LENGTH = 200;

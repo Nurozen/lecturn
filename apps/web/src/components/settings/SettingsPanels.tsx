@@ -60,6 +60,7 @@ import {
   NIGHTLY_MOBILE_BETA_AVAILABLE,
   NightlyMobileBetaRow,
 } from "../NightlyMobileBeta";
+import { CliCommandSettingsRow } from "./CliCommandSettingsRow";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
@@ -516,6 +517,7 @@ function AboutVersionSection() {
         />
       ) : null}
       {showNightlyMobileBeta ? <NightlyMobileBetaRow /> : null}
+      {hasDesktopBridge ? <CliCommandSettingsRow /> : null}
     </>
   );
 }

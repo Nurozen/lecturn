@@ -13,13 +13,13 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
-import type { ProviderInstance } from "../provider/ProviderDriver.ts";
+import type { ProviderInstance } from "@lecturn/provider-core/server/driver";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import {
   ProviderAdapterDriverCreateError,
   type AnyProviderAdapterDriver,
-} from "./ProviderAdapterDriver.ts";
-import * as ProviderAdapter from "./ProviderAdapter.ts";
+} from "@lecturn/provider-core/server/adapterDriver";
+import * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
 
 const isProviderSetupError = Schema.is(ProviderSetupError);
 

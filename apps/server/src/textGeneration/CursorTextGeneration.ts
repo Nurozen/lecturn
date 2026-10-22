@@ -13,7 +13,7 @@ import {
   TextGenerationError,
 } from "@lecturn/contracts";
 
-import * as TextGenerationOperations from "./TextGenerationOperations.ts";
+import * as TextGenerationOperations from "@lecturn/provider-core/server/textGenerationOperations";
 import { cursorSdkModelSelection } from "../provider/cursorSdkModel.ts";
 import type { CursorAuth } from "../provider/CursorAuth.ts";
 

@@ -20,12 +20,12 @@ import {
   buildThreadTitlePrompt,
   buildWorkflowSummaryPrompt,
   normalizeWorkflowSummary,
-} from "./TextGenerationPrompts.ts";
+} from "@lecturn/provider-core/server/textGenerationPrompts";
 import {
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
-} from "./TextGenerationUtils.ts";
+} from "@lecturn/provider-core/server/textGenerationUtils";
 import {
   applyCopilotModelSelection,
   COPILOT_TEXT_GENERATION_SPAWN_ARGS,

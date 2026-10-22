@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-import * as McpProviderSession from "../mcp/McpProviderSession.ts";
+import * as McpProviderSession from "@lecturn/provider-core/server/mcpSession";
 import { codexThreadRuntimeParams } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import { cursorMcpServers } from "../orchestration-v2/Adapters/CursorAdapterV2.ts";
 import type * as ProcessRunner from "../processRunner.ts";

@@ -70,6 +70,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
+import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
 import { paginate, type OpenCode2StreamEvent } from "../../provider/opencode2/OpenCode2Client.ts";
 import * as OpenCode2Server from "../../provider/opencode2/OpenCode2Server.ts";
@@ -77,31 +78,34 @@ import {
   parseOpenCodeModelSlug,
   type OpenCodeRuntimeError,
 } from "../../provider/opencodeRuntime.ts";
-import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import * as McpProviderSession from "@lecturn/provider-core/server/mcpSession";
 import {
   configuredStaveMemory,
   currentStaveMemoryResolver,
   STAVE_MEMORY_MCP_SERVER_NAME,
 } from "../../provider/StaveMemoryMcp.ts";
-import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
-import { lecturnOrchestrationSystemPrompt } from "../../provider/LecturnOrchestrationInstructions.ts";
+import { buildRuntimeInstructions } from "@lecturn/provider-core/server/runtimeInstructions";
+import { lecturnOrchestrationSystemPrompt } from "@lecturn/provider-core/server/orchestrationInstructions";
 import { SKILL_MENTION_PATTERN } from "@lecturn/shared/composerInlineTokens";
 import * as KeyedLock from "@lecturn/shared/KeyedLock";
 import { getModelSelectionStringOptionValue, modelSelectionsEqual } from "@lecturn/shared/model";
 import { causeErrorTag } from "@lecturn/shared/observability";
 
-import { providerMessageTextWithAttachmentPaths } from "../AttachmentPrompt.ts";
-import * as IdAllocator from "../IdAllocator.ts";
-import { backgroundWorkNotification, type BackgroundWorkReport } from "../Notification.ts";
-import * as ProviderContinuationRequests from "../ProviderContinuationRequests.ts";
-import { makeProviderFailure } from "../ProviderFailure.ts";
+import { providerMessageTextWithAttachmentPaths } from "@lecturn/provider-core/server/attachmentPrompt";
+import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
+import {
+  backgroundWorkNotification,
+  type BackgroundWorkReport,
+} from "@lecturn/provider-core/server/notification";
+import * as ProviderContinuationRequests from "@lecturn/provider-core/server/continuationRequests";
+import { makeProviderFailure } from "@lecturn/provider-core/server/failure";
 import {
   makeSubagentChildThread,
   makeSubagentConversationArtifacts,
   subagentThreadTitle,
 } from "../SubagentProjection.ts";
-import * as ProviderAdapter from "../ProviderAdapter.ts";
-import { turnScopedSelectionTransition } from "../ProviderSelectionTransition.ts";
+import * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
+import { turnScopedSelectionTransition } from "@lecturn/provider-core/server/selectionTransition";
 import { OPENCODE_PROVIDER, openCodePermissionRequestKind } from "./OpenCodeAdapterV2.ts";
 import { openCodeToolTurnItem } from "./OpenCodeToolItems.ts";
 
@@ -3227,7 +3231,8 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       providerMessageTextWithAttachmentPaths({
         text: turnInput.message.text,
         attachments: turnInput.message.attachments,
-        attachmentsDir: serverConfig.attachmentsDir,
+        resolveAttachmentPath: (attachment) =>
+          resolveAttachmentPath({ attachmentsDir: serverConfig.attachmentsDir, attachment }),
       }).trim();
 
     const removeMcp = (mcp: { readonly name: string; readonly directory: string }) =>
@@ -3958,7 +3963,11 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
               text: providerMessageTextWithAttachmentPaths({
                 text: steerInput.message.text,
                 attachments: steerInput.message.attachments,
-                attachmentsDir: serverConfig.attachmentsDir,
+                resolveAttachmentPath: (attachment) =>
+                  resolveAttachmentPath({
+                    attachmentsDir: serverConfig.attachmentsDir,
+                    attachment,
+                  }),
               }).trim(),
               delivery: "steer",
             })

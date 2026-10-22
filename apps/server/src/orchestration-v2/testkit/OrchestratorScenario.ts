@@ -23,7 +23,7 @@ import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 
 import * as Orchestrator from "../Orchestrator.ts";
-import type { ProviderReplayGate } from "./ProviderReplayGate.testkit.ts";
+import type { ProviderReplayGate } from "@lecturn/provider-testing/replayGate";
 
 export type OrchestratorV2ScenarioStep =
   | {

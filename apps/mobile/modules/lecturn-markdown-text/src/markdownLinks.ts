@@ -1,10 +1,10 @@
+import { fileBasename } from "@lecturn/shared/path";
+import { formatFilePathPosition } from "@lecturn/shared/fileLinks";
 import {
-  fileBasename,
-  formatFilePathPosition,
   inlineCodeFilePathCandidate,
   normalizeMarkdownLinkDestination,
   parseMarkdownFileLink,
-} from "@lecturn/client-runtime/markdown-links";
+} from "@lecturn/shared/markdownLinks";
 import { parseThreadLinkHref } from "@lecturn/shared/threadLinks";
 import { videoMimeType } from "@lecturn/shared/video";
 

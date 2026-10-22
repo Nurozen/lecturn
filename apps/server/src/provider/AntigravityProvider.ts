@@ -19,16 +19,16 @@ import type * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/compat";
 
 import type { AcpSessionRuntimeStartResult } from "./acp/AcpSessionRuntime.ts";
-import { makeManagedServerProvider } from "./makeManagedServerProvider.ts";
+import { makeManagedServerProvider } from "@lecturn/provider-core/server/managedProvider";
 import {
   makeManualOnlyProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilities,
-} from "./providerMaintenance.ts";
+} from "@lecturn/provider-core/server/maintenanceResolver";
 import {
   buildServerProvider,
   isCommandMissingCause,
   type ServerProviderDraft,
-} from "./providerSnapshot.ts";
+} from "@lecturn/provider-core/server/snapshotProbe";
 
 export const ANTIGRAVITY_PRESENTATION = {
   displayName: "Antigravity",

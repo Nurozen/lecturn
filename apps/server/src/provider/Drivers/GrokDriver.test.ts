@@ -16,9 +16,10 @@ import * as StaveMemoryWiring from "../../stave/StaveMemoryWiring.ts";
 import * as ProviderEventLoggers from "../ProviderEventLoggers.ts";
 import { GrokDriver } from "./GrokDriver.ts";
 
-import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
+import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
+import * as ProviderHostLive from "../ProviderHostLive.ts";
 
-const layerTest = ServerConfig.layerTest(process.cwd(), {
+const layerDeps = ServerConfig.layerTest(process.cwd(), {
   prefix: "lecturn-grok-driver-update-",
 }).pipe(
   Layer.provideMerge(NodeServices.layer),
@@ -43,6 +44,7 @@ const layerTest = ServerConfig.layerTest(process.cwd(), {
     ),
   ),
 );
+const layerTest = ProviderHostLive.layer.pipe(Layer.provideMerge(layerDeps));
 
 const noSpawner = ChildProcessSpawner.make(() =>
   Effect.die("Disabled Grok must not spawn a process"),

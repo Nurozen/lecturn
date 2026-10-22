@@ -44,11 +44,11 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
-import * as IdAllocator from "./IdAllocator.ts";
+import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
 import type * as Orchestrator from "./Orchestrator.ts";
-import { makeProviderFailure } from "./ProviderFailure.ts";
+import { makeProviderFailure } from "@lecturn/provider-core/server/failure";
 import * as LecturnOrchestrationHooks from "./fork/LecturnOrchestrationHooks.ts";
-import { randomUuidV4 } from "./RandomUuid.ts";
+import { randomUuidV4 } from "@lecturn/provider-core/server/randomUuid";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 
 export type ThreadLaunchWorkspaceStrategy =

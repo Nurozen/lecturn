@@ -173,6 +173,7 @@ export default defineConfig({
       "lecturn/no-unscoped-has": "error",
       "lecturn/namespace-node-imports": "error",
       "lecturn/prefer-catch-tags": "error",
+      "lecturn/require-centered-scroll-gutter": "error",
       "lecturn/require-suppression-reason": "error",
     },
     overrides: [

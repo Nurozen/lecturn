@@ -36,11 +36,11 @@ import type * as EffectAcpSchema from "effect-acp/compat";
 import * as ServerConfig from "../../config.ts";
 import type * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
 import * as AcpSessionRuntimeModule from "../../provider/acp/AcpSessionRuntime.ts";
-import * as IdAllocator from "../IdAllocator.ts";
+import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
 import {
   ProviderAdapterV2RuntimePolicy,
   type ProviderAdapterV2TurnInput,
-} from "../ProviderAdapter.ts";
+} from "@lecturn/provider-core/server/ProviderAdapter";
 import {
   COPILOT_CANCELLED_STREAM_GRACE,
   withCopilotCancelledStreamDiscard,

@@ -8,7 +8,7 @@ import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import { ChildProcessSpawner } from "effect/process";
 
-import type { ProviderMaintenanceResolutionContext } from "../providerMaintenance.ts";
+import type { ProviderMaintenanceResolutionContext } from "@lecturn/provider-core/server/maintenanceResolver";
 import { COPILOT_UPDATE_RESOLVER } from "./CopilotDriver.ts";
 
 const noSpawn = ChildProcessSpawner.make(() =>

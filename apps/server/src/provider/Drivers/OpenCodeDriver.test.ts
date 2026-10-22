@@ -16,11 +16,11 @@ import { ChildProcessSpawner } from "effect/process";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import * as ServerConfig from "../../config.ts";
-import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
+import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as StaveMemoryWiring from "../../stave/StaveMemoryWiring.ts";
 import * as ProviderEventLoggers from "../ProviderEventLoggers.ts";
-import * as ProviderMaintenance from "../providerMaintenance.ts";
+import * as ProviderMaintenance from "@lecturn/provider-core/server/maintenanceResolver";
 import * as OpenCodeRuntime from "../opencodeRuntime.ts";
 import {
   OPENCODE_2_RESPONSES,
@@ -28,6 +28,7 @@ import {
   replayOpenCodeServer,
 } from "../testFixtures/opencodeProbeResponses.ts";
 import { OpenCodeDriver, openCodeUpdateFor } from "./OpenCodeDriver.ts";
+import * as ProviderHostLive from "../ProviderHostLive.ts";
 
 const serverStarts: Array<string> = [];
 const reachedServer = (operation: string) =>
@@ -48,7 +49,7 @@ const openCode2Runtime = {
   connectToOpenCodeServer: () => reachedServer("connect"),
 } as unknown as OpenCodeRuntime.OpenCodeRuntimeShape;
 
-const layer = Layer.mergeAll(
+const layerDeps = Layer.mergeAll(
   ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-opencode-driver-" }),
   IdAllocator.layer,
   ServerSettings.layerTest(),
@@ -60,6 +61,7 @@ const layer = Layer.mergeAll(
   ),
   Layer.succeed(OpenCodeRuntime.OpenCodeRuntime, openCode2Runtime),
 ).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = ProviderHostLive.layer.pipe(Layer.provideMerge(layerDeps));
 
 const create = (config: Partial<OpenCodeSettings>, http: HttpClient.HttpClient) =>
   OpenCodeDriver.create({
@@ -213,7 +215,7 @@ const changingRuntime = {
   startOpenCodeServerProcess: () => reachedServer("start"),
   connectToOpenCodeServer: () => reachedServer("connect"),
 } as unknown as OpenCodeRuntime.OpenCodeRuntimeShape;
-const layerUpdate = Layer.mergeAll(
+const layerUpdateDeps = Layer.mergeAll(
   ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-opencode-driver-update-" }),
   IdAllocator.layer,
   ServerSettings.layerTest(),
@@ -225,6 +227,7 @@ const layerUpdate = Layer.mergeAll(
   ),
   Layer.succeed(OpenCodeRuntime.OpenCodeRuntime, changingRuntime),
 ).pipe(Layer.provideMerge(NodeServices.layer));
+const layerUpdate = ProviderHostLive.layer.pipe(Layer.provideMerge(layerUpdateDeps));
 
 it.layer(layerUpdate)("OpenCodeDriver updates", (it) => {
   it.effect("never runs the binary for a disabled instance's update check", () =>

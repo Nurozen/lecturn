@@ -20,7 +20,7 @@ import {
   buildServerProvider,
   providerModelsFromSettings,
   type ServerProviderDraft,
-} from "./providerSnapshot.ts";
+} from "@lecturn/provider-core/server/snapshotProbe";
 import * as CursorSdkCatalog from "./CursorSdkCatalog.ts";
 
 export const CURSOR_PRESENTATION = {

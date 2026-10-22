@@ -1,10 +1,9 @@
 import {
   fileBasename,
-  formatFilePathPosition,
-  splitFilePathPosition,
   stripSlashPrefixedWindowsDrive,
-} from "@lecturn/client-runtime/markdown-links";
-import { isWindowsAbsolutePath } from "@lecturn/shared/path";
+  isWindowsAbsolutePath,
+} from "@lecturn/shared/path";
+import { formatFilePathPosition, splitFilePathPosition } from "@lecturn/shared/fileLinks";
 
 function normalizePathSeparators(path: string): string {
   return path.replaceAll("\\", "/");
