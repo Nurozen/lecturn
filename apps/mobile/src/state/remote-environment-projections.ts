@@ -53,9 +53,17 @@ export function createRemoteEnvironmentProjectionAtoms(input: {
           : new URL(socketUrl).origin;
       const authorization = prepared?.httpAuthorization ?? null;
       // Credentials follow the route in use, which may not be the preferred one.
-      const relayAccountId = relayRouteTarget(presentation.entry)?.accountId;
+      // A direct route learned through Lecturn Connect authorizes with DPoP as
+      // the account the prepared connection names, not with a bearer token.
+      const learnedConnectRoute =
+        prepared !== null &&
+        prepared.target._tag !== "RelayConnectionTarget" &&
+        authorization?._tag === "Dpop";
+      const relayAccountId = learnedConnectRoute
+        ? prepared.accountId
+        : relayRouteTarget(presentation.entry)?.accountId;
       const relayManaged = prepared
-        ? prepared.target._tag === "RelayConnectionTarget"
+        ? prepared.target._tag === "RelayConnectionTarget" || learnedConnectRoute
         : presentation.entry.target._tag === "RelayConnectionTarget";
 
       previousEntry = presentation.entry;

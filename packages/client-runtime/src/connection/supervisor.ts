@@ -557,42 +557,50 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     }
   });
 
-  // Signals that end a connected lease whatever its health: "reset" ends it
-  // and restarts the retry ladder, "end" ends it, undefined keeps it.
-  const isRelayLease = (lease: ConnectionDriver.EnvironmentConnectionLease) =>
-    lease.prepared.target._tag === "RelayConnectionTarget";
+  // A session over Lecturn Connect, or over a route learned through it, holds
+  // a Connect account's credential; a paired direct or SSH session does not.
+  const holdsConnectCredential = (lease: ConnectionDriver.EnvironmentConnectionLease) =>
+    lease.prepared.target._tag === "RelayConnectionTarget" ||
+    lease.prepared.httpAuthorization?._tag === "Dpop";
+
+  // The live lease as consumers see it. A retag stamps the latest owner here
+  // rather than on the lease, so later retags compare against that owner.
+  const livePrepared = Effect.fnUntraced(function* (
+    lease: ConnectionDriver.EnvironmentConnectionLease,
+  ) {
+    const live = yield* SubscriptionRef.get(session);
+    const current = yield* SubscriptionRef.get(prepared);
+    return Option.isSome(live) && live.value === lease.session && Option.isSome(current)
+      ? current.value
+      : lease.prepared;
+  });
 
   // True when the live lease has to be replaced for the retagged relay route.
   const retargetLease = Effect.fnUntraced(function* (
     lease: ConnectionDriver.EnvironmentConnectionLease,
   ) {
-    const leased = lease.prepared.target;
     const next = currentRelayTarget();
-    if (next === undefined) return false;
-    if (leased._tag !== "RelayConnectionTarget") {
-      // A route learned through Lecturn Connect authorizes as the relay
-      // route's account; other direct and SSH sessions hold no relay credential.
-      if (lease.prepared.httpAuthorization?._tag !== "Dpop") return false;
-      const accountId = lease.prepared.accountId;
-      if (accountId !== undefined && accountId !== next.accountId) return true;
-      if (accountId === undefined && next.accountId !== undefined) {
-        yield* SubscriptionRef.set(
-          prepared,
-          Option.some({ ...lease.prepared, accountId: next.accountId }),
-        );
-      }
-      return false;
-    }
-    if (leased.accountId !== undefined && leased.accountId !== next.accountId) {
-      // Opened as an account that no longer owns the environment.
+    if (next === undefined || !holdsConnectCredential(lease)) return false;
+    const live = yield* livePrepared(lease);
+    // A route learned through Lecturn Connect authorizes as the relay route's account.
+    const owner =
+      live.target._tag === "RelayConnectionTarget" ? live.target.accountId : live.accountId;
+    if (owner !== undefined && owner !== next.accountId) {
+      // Opened as, or since stamped with, an account that no longer owns the environment.
       return true;
     }
     // The live lease stays. HTTP requests renew its credential as the
-    // target's owner, so they have to see the retagged target.
-    yield* SubscriptionRef.set(prepared, Option.some({ ...lease.prepared, target: next }));
+    // target's owner, so they have to see the retagged owner.
+    if (live.target._tag === "RelayConnectionTarget") {
+      yield* SubscriptionRef.set(prepared, Option.some({ ...live, target: next }));
+    } else if (next.accountId !== undefined) {
+      yield* SubscriptionRef.set(prepared, Option.some({ ...live, accountId: next.accountId }));
+    }
     return false;
   });
 
+  // Signals that end a connected lease whatever its health: "reset" ends it
+  // and restarts the retry ladder, "end" ends it, undefined keeps it.
   const connectedLeaseEnd = Effect.fnUntraced(function* (
     next: SupervisorSignal,
     lease: ConnectionDriver.EnvironmentConnectionLease,
@@ -618,8 +626,10 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
       // out, so a long background resume replaces the session at once.
       return "reset" as const;
     }
-    // Only a session over Lecturn Connect holds the old account's credential.
-    if (next.reason === "credentials-changed" && isRelayLease(lease)) {
+    // Only a session holding a Lecturn Connect credential holds the old
+    // account's token. The wakeup filter only passes changes for the relay
+    // route's account, which a retag keeps equal to the live lease's owner.
+    if (next.reason === "credentials-changed" && holdsConnectCredential(lease)) {
       yield* logManagedRelayAccountChange;
       return "end" as const;
     }

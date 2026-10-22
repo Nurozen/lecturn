@@ -38,7 +38,13 @@ import {
 import * as RpcSession from "../rpc/session.ts";
 import * as EnvironmentSupervisor from "./supervisor.ts";
 import * as ConnectionWakeups from "./wakeups.ts";
-import { connectionRouteId, entryWithRoutes, isLearned, mergeLearnedRoutes } from "./routes.ts";
+import {
+  connectionRouteId,
+  entryWithRoutes,
+  isLearned,
+  mergeLearnedRoutes,
+  relayRouteTarget,
+} from "./routes.ts";
 import { NETWORK_BLOCKING_HINT } from "../errors/network.ts";
 
 const TARGET = new PrimaryConnectionTarget({
@@ -111,6 +117,51 @@ function preparedFor(target: ConnectionTarget): PreparedConnection {
   return { ...PREPARED_CONNECTION, target };
 }
 
+// Lecturn Connect with a LAN address the server reported, learned ahead of it.
+function learnedLanEntry(accountId: string | undefined, label = RELAY_TARGET.label) {
+  const relay = new RelayConnectionTarget({
+    ...RELAY_TARGET,
+    label,
+    ...(accountId === undefined ? {} : { accountId }),
+  });
+  const relayEntry: ConnectionCatalogEntry = {
+    target: relay,
+    profile: Option.none(),
+    enabled: true,
+  };
+  return entryWithRoutes(
+    relayEntry,
+    mergeLearnedRoutes({
+      entry: relayEntry,
+      activeRoute: { target: relay, profile: Option.none() },
+      reported: [{ httpBaseUrl: "http://192.168.1.10:3773/" }],
+      allowInsecure: true,
+    })!,
+  );
+}
+
+// Like the resolver: a learned route authorizes with DPoP as the relay route's
+// account, else as the only signed-in account. `sockets` records the account
+// each session's credential belongs to.
+function preparedOverLearnedRoute(
+  sockets: Array<string>,
+  target: ConnectionTarget,
+  entry: ConnectionCatalogEntry,
+  onlyAccountId = "account-a",
+): PreparedConnection {
+  const accountId = relayRouteTarget(entry)?.accountId;
+  sockets.push(accountId ?? onlyAccountId);
+  return {
+    ...preparedFor(target),
+    httpAuthorization: {
+      _tag: "Dpop" as const,
+      accessToken: `dpop-access-token-${accountId ?? onlyAccountId}`,
+      expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+    },
+    ...(accountId === undefined ? {} : { accountId }),
+  };
+}
+
 function transient(message = "Connection failed.") {
   return new ConnectionTransientError({
     reason: "transport",
@@ -160,6 +211,7 @@ const makeHarness = Effect.fn("TestConnectionHarness.make")(function* (options?:
   readonly prepare?: (
     attempt: number,
     target: ConnectionTarget,
+    entry: ConnectionCatalogEntry,
   ) => Effect.Effect<PreparedConnection, ConnectionAttemptError>;
   readonly ready?: (attempt: number) => Effect.Effect<void, ConnectionAttemptError>;
   readonly probe?: (attempt: number) => Effect.Effect<void, ConnectionAttemptError>;
@@ -188,10 +240,13 @@ const makeHarness = Effect.fn("TestConnectionHarness.make")(function* (options?:
     changes: SubscriptionRef.changes(networkStatus),
   });
 
-  const prepare = Effect.fn("TestConnectionDriver.prepare")(function* (target: ConnectionTarget) {
+  const prepare = Effect.fn("TestConnectionDriver.prepare")(function* (
+    target: ConnectionTarget,
+    entry: ConnectionCatalogEntry,
+  ) {
     const attempt = yield* Ref.updateAndGet(prepareCount, (count) => count + 1);
     if (options?.prepare) {
-      return yield* options.prepare(attempt, target);
+      return yield* options.prepare(attempt, target, entry);
     }
     return PREPARED_CONNECTION;
   });
@@ -201,9 +256,10 @@ const makeHarness = Effect.fn("TestConnectionHarness.make")(function* (options?:
 
   const connectRoute = Effect.fn("TestConnectionDriver.connectRoute")(function* (
     target: ConnectionTarget,
+    entry: ConnectionCatalogEntry,
     reportProgress: (progress: ConnectionDriver.ConnectionDriverProgress) => Effect.Effect<void>,
   ) {
-    const prepared = yield* prepare(target);
+    const prepared = yield* prepare(target, entry);
     yield* reportProgress({ stage: "opening", prepared });
 
     const attempt = yield* Ref.updateAndGet(sessionCount, (count) => count + 1);
@@ -235,7 +291,7 @@ const makeHarness = Effect.fn("TestConnectionHarness.make")(function* (options?:
   ) {
     yield* reportProgress({ stage: "preparing" });
     return yield* ConnectionDriver.connectOverRoutes(entry, checkRoute, (route) =>
-      connectRoute(route.target, reportProgress),
+      connectRoute(route.target, entry, reportProgress),
     );
   });
 
@@ -734,75 +790,105 @@ describe("EnvironmentSupervisor", () => {
   );
 
   it.effect(
-    "replaces a learned Lecturn Connect session when another account owns the relay route",
+    "replaces a learned Lecturn Connect session once when the relay route moves to another account",
     () =>
       Effect.gen(function* () {
-        // The server reported a LAN address, learned ahead of Lecturn Connect.
-        const learnedEntry = (accountId: string | undefined) => {
-          const relay = new RelayConnectionTarget({
-            ...RELAY_TARGET,
-            ...(accountId === undefined ? {} : { accountId }),
-          });
-          const relayEntry: ConnectionCatalogEntry = {
-            target: relay,
-            profile: Option.none(),
-            enabled: true,
-          };
-          return entryWithRoutes(
-            relayEntry,
-            mergeLearnedRoutes({
-              entry: relayEntry,
-              activeRoute: { target: relay, profile: Option.none() },
-              reported: [{ httpBaseUrl: "http://192.168.1.10:3773/" }],
-              allowInsecure: true,
-            })!,
-          );
-        };
-        let owner: string | undefined;
+        const sockets: Array<string> = [];
         const harness = yield* makeHarness({
-          prepare: (_attempt, target) =>
-            Effect.succeed({
-              ...preparedFor(target),
-              httpAuthorization: {
-                _tag: "Dpop" as const,
-                accessToken: "dpop-access-token",
-                expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
-              },
-              ...(owner === undefined ? {} : { accountId: owner }),
-            }),
+          prepare: (_attempt, target, entry) =>
+            Effect.sync(() => preparedOverLearnedRoute(sockets, target, entry)),
         });
-        const supervisor = yield* EnvironmentSupervisor.make(learnedEntry(undefined), {
+        // A cold start before the listing tags the owner: authorized as the only account.
+        const supervisor = yield* EnvironmentSupervisor.make(learnedLanEntry(undefined), {
           initiallyDesired: true,
         }).pipe(Effect.provide(harness.dependencies));
         yield* awaitState(supervisor.state, (state) => state.phase === "connected");
         expect(supervisor.target._tag).toBe("BearerConnectionTarget");
 
-        // Tagging the owner keeps the session and stamps its account for HTTP renewal.
-        yield* supervisor.retarget(learnedEntry("account-a"));
+        // Tagging the account the session already holds keeps it and stamps
+        // the account for HTTP renewal.
+        yield* supervisor.retarget(learnedLanEntry("account-a"));
         yield* TestClock.adjust("1 minute");
         expect(yield* Ref.get(harness.sessionCount)).toBe(1);
         expect(Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).accountId).toBe(
           "account-a",
         );
 
-        // A session opened as an account that no longer owns the environment is replaced.
-        owner = "account-a";
-        yield* supervisor.disconnect;
-        yield* supervisor.connect;
+        // Relinked to account B on the same live session: replaced once, as B.
+        yield* supervisor.retarget(learnedLanEntry("account-b"));
         yield* awaitState(
           supervisor.state,
           (state) => state.phase === "connected" && state.generation === 2,
         );
-        owner = "account-b";
-        yield* supervisor.retarget(learnedEntry("account-b"));
-        yield* awaitState(
-          supervisor.state,
-          (state) => state.phase === "connected" && state.generation === 3,
-        );
+        yield* TestClock.adjust("1 minute");
+        expect(yield* Ref.get(harness.sessionCount)).toBe(2);
+        expect(yield* Ref.get(harness.releaseCount)).toBe(1);
+        expect(sockets).toEqual(["account-a", "account-b"]);
+        // HTTP renewal and the socket authorize as the same account.
         expect(Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).accountId).toBe(
-          "account-b",
+          sockets.at(-1),
         );
       }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("keeps a learned Lecturn Connect session retagged with its own account", () =>
+    Effect.gen(function* () {
+      const sockets: Array<string> = [];
+      const harness = yield* makeHarness({
+        prepare: (_attempt, target, entry) =>
+          Effect.sync(() => preparedOverLearnedRoute(sockets, target, entry)),
+      });
+      const supervisor = yield* EnvironmentSupervisor.make(learnedLanEntry("account-a"), {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+
+      // A different entry (renamed) owned by the same account.
+      yield* supervisor.retarget(learnedLanEntry("account-a", "Renamed environment"));
+      yield* TestClock.adjust("1 minute");
+
+      expect(yield* Ref.get(harness.sessionCount)).toBe(1);
+      expect(yield* Ref.get(harness.releaseCount)).toBe(0);
+      expect(sockets).toEqual(["account-a"]);
+      expect(Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).accountId).toBe(
+        "account-a",
+      );
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("replaces a relay session once when retagged from untagged to A to B", () =>
+    Effect.gen(function* () {
+      const targets: Array<ConnectionTarget> = [];
+      const harness = yield* makeHarness({
+        prepare: (_attempt, target) =>
+          Effect.sync(() => {
+            targets.push(target);
+            return preparedFor(target);
+          }),
+      });
+      const supervisor = yield* EnvironmentSupervisor.make(RELAY_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+
+      yield* supervisor.retarget(RETAGGED_RELAY_ENTRY);
+      yield* TestClock.adjust("1 minute");
+      expect(yield* Ref.get(harness.sessionCount)).toBe(1);
+
+      const relinked = new RelayConnectionTarget({ ...RELAY_TARGET, accountId: "account-b" });
+      yield* supervisor.retarget({ ...RELAY_ENTRY, target: relinked });
+      yield* awaitState(
+        supervisor.state,
+        (state) => state.phase === "connected" && state.generation === 2,
+      );
+      yield* TestClock.adjust("1 minute");
+
+      expect(targets).toEqual([RELAY_TARGET, relinked]);
+      expect(yield* Ref.get(harness.sessionCount)).toBe(2);
+      expect(Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).target).toBe(
+        relinked,
+      );
+    }).pipe(Effect.provide(TestClock.layer())),
   );
 
   it.effect("uses the retagged target for the reconnect after a live session closes", () =>
@@ -2402,6 +2488,46 @@ describe("EnvironmentSupervisor routes", () => {
         phase: "connected",
         generation: 1,
       });
+    }),
+  );
+
+  it.effect("ends a learned Lecturn Connect session only when its own account signs out", () =>
+    Effect.gen(function* () {
+      const sockets: Array<string> = [];
+      const probedLease = yield* Deferred.make<number>();
+      const harness = yield* makeHarness({
+        prepare: (_attempt, target, entry) =>
+          Effect.sync(() => preparedOverLearnedRoute(sockets, target, entry)),
+        probe: (attempt) => Deferred.succeed(probedLease, attempt).pipe(Effect.asVoid),
+      });
+      const supervisor = yield* EnvironmentSupervisor.make(learnedLanEntry("account-a"), {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+
+      // Wakeups arrive in order: the probe landing on the first lease shows
+      // that account B signing out ended nothing.
+      yield* harness.wake(
+        ConnectionWakeups.accountCredentialsChanged({
+          added: new Set(),
+          removed: new Set(["account-b"]),
+        }),
+      );
+      yield* harness.wake("application-active-probe");
+      expect(yield* Deferred.await(probedLease)).toBe(1);
+      expect(yield* Ref.get(harness.releaseCount)).toBe(0);
+
+      yield* harness.wake(
+        ConnectionWakeups.accountCredentialsChanged({
+          added: new Set(),
+          removed: new Set(["account-a"]),
+        }),
+      );
+      yield* awaitState(
+        supervisor.state,
+        (state) => state.phase === "connected" && state.generation === 2,
+      );
+      expect(yield* Ref.get(harness.releaseCount)).toBe(1);
     }),
   );
 

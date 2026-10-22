@@ -2,7 +2,11 @@ import type {
   EnvironmentPresentation,
   PreparedConnection,
 } from "@lecturn/client-runtime/connection";
-import { PrimaryConnectionTarget } from "@lecturn/client-runtime/connection";
+import {
+  BearerConnectionTarget,
+  PrimaryConnectionTarget,
+  RelayConnectionTarget,
+} from "@lecturn/client-runtime/connection";
 import type { ServerConfig } from "@lecturn/contracts";
 import { EnvironmentId } from "@lecturn/contracts";
 import { describe, expect, it } from "@effect/vitest";
@@ -49,6 +53,49 @@ function prepared(
     target: target(environmentId, endpoint),
   };
 }
+
+const LAN = new BearerConnectionTarget({
+  environmentId: ENVIRONMENT_ID,
+  label: "Desk",
+  connectionId: "lan",
+});
+const RELAY_B = new RelayConnectionTarget({
+  environmentId: ENVIRONMENT_ID,
+  label: "Desk",
+  accountId: "account-b",
+});
+
+// LAN route first, the account-b Lecturn Connect route behind it.
+function multiRoutePresentation(): EnvironmentPresentation {
+  return {
+    entry: {
+      target: LAN,
+      profile: Option.none(),
+      alternateRoutes: [{ target: RELAY_B, profile: Option.none() }],
+      enabled: true,
+    },
+    connection: { phase: "connected", error: null, traceId: null },
+    serverConfig: null,
+  };
+}
+
+function preparedOver(
+  routeTarget: PreparedConnection["target"],
+  httpAuthorization: PreparedConnection["httpAuthorization"],
+  accountId?: string,
+): PreparedConnection {
+  return {
+    environmentId: ENVIRONMENT_ID,
+    label: "Desk",
+    httpBaseUrl: "https://desk.example.test",
+    socketUrl: "wss://desk.example.test/ws",
+    httpAuthorization,
+    target: routeTarget,
+    ...(accountId === undefined ? {} : { accountId }),
+  };
+}
+
+const DPOP = { _tag: "Dpop", accessToken: "dpop-token", expiresAtEpochMs: 1 } as const;
 
 function makeHarness() {
   const presentationAtoms = Atom.family((environmentId: EnvironmentId) =>
@@ -157,5 +204,53 @@ describe("remote environment projections", () => {
       harness.registry.get(harness.projections.savedConnectionAtom(ENVIRONMENT_ID)),
     ).toBeNull();
     expect(harness.registry.get(harness.projections.runtimeStateAtom(ENVIRONMENT_ID))).toBeNull();
+  });
+
+  describe("multiple routes", () => {
+    function savedOver(prepared: PreparedConnection) {
+      const harness = makeHarness();
+      harness.registry.set(harness.presentationAtom(ENVIRONMENT_ID), multiRoutePresentation());
+      harness.registry.set(harness.preparedConnectionAtom(ENVIRONMENT_ID), Option.some(prepared));
+      return harness.registry.get(harness.projections.savedConnectionAtom(ENVIRONMENT_ID));
+    }
+
+    it("treats a route learned through Lecturn Connect as Connect-authorized for its account", () => {
+      const saved = savedOver(preparedOver(LAN, DPOP, "account-b"));
+
+      expect(saved).toMatchObject({
+        httpBaseUrl: "https://desk.example.test",
+        bearerToken: null,
+        authenticationMethod: "dpop",
+        relayManaged: true,
+        accountId: "account-b",
+        dpopAccessToken: "dpop-token",
+      });
+    });
+
+    it("names only the account the learned route was authorized as", () => {
+      const saved = savedOver(preparedOver(LAN, DPOP));
+
+      expect(saved).toMatchObject({ authenticationMethod: "dpop", relayManaged: true });
+      expect(saved).not.toHaveProperty("accountId");
+    });
+
+    it("keeps a bearer route in front of a relay route a bearer connection", () => {
+      const saved = savedOver(preparedOver(LAN, { _tag: "Bearer", token: "lan-token" }));
+
+      expect(saved).toMatchObject({ bearerToken: "lan-token", authenticationMethod: "bearer" });
+      expect(saved).not.toHaveProperty("relayManaged");
+      expect(saved).not.toHaveProperty("accountId");
+    });
+
+    it("keeps the relay route's account when connected over Lecturn Connect", () => {
+      const saved = savedOver(preparedOver(RELAY_B, DPOP));
+
+      expect(saved).toMatchObject({
+        authenticationMethod: "dpop",
+        relayManaged: true,
+        accountId: "account-b",
+        dpopAccessToken: "dpop-token",
+      });
+    });
   });
 });
