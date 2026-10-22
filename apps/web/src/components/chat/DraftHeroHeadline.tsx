@@ -4,12 +4,13 @@ import { composerDraftHasUserContent, useComposerDraftStore } from "~/composerDr
 import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@lecturn/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { isScratchProject } from "@lecturn/client-runtime/state/projects";
-import { FolderPlusIcon } from "lucide-react";
+import { FolderPlusIcon, MessageSquareDashedIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { shortcutLabelForCommand } from "~/keybindings";
+import { projectIconColorClassName } from "~/projectIconColors";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useScratchProject } from "~/hooks/useScratchProject";
@@ -43,8 +44,9 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
 import { resolveProjectSettings } from "@lecturn/shared/projectSettings";
 
-// Picker value for the "Add project" row; real entries are keyed by logical
-// project key.
+// Picker values for the "No project" and "Add project" rows; real entries are
+// keyed by logical project key.
+const NO_PROJECT_VALUE = "no-project";
 const ADD_PROJECT_VALUE = "add-project";
 
 interface PickerItem {
@@ -154,8 +156,8 @@ export function DraftHeroHeadline({
   const hasResolvedProject = activeProjectTitle !== null;
   const canChooseProject = projectPickerEntries.length > 0;
   const shouldShowProjectMenu = canChooseProject;
-  // The project that hosts threads without a project is not a row: the line
-  // under the headline is the way into it.
+  // The project that hosts threads without a project appears once, as the
+  // "No project" item, not as a project row.
   const menuEntries = useMemo(
     () =>
       projectPickerEntries.filter(
@@ -180,14 +182,16 @@ export function DraftHeroHeadline({
     activeProject !== null && isScratchProject(activeProject, scratchWorkspaceRoot);
 
   // {value, label} items let Base UI drive the combobox selection while the
-  // popup search filters the same collection. "Add project" is an action, not
-  // a project, so it only trails the unfiltered list.
+  // popup search filters the same collection. "No project" leads whenever
+  // threads can skip a project. "Add project" is an action, not a project, so
+  // it only trails the unfiltered list.
   const pickerItems = useMemo<readonly PickerItem[]>(
     () => [
+      ...(scratchWorkspaceRoot === null ? [] : [{ value: NO_PROJECT_VALUE, label: "No project" }]),
       ...menuEntries.map(({ group }) => ({ value: group.projectKey, label: group.displayName })),
       { value: ADD_PROJECT_VALUE, label: "Add project" },
     ],
-    [menuEntries],
+    [menuEntries, scratchWorkspaceRoot],
   );
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
@@ -201,7 +205,8 @@ export function DraftHeroHeadline({
         pickerFilter.contains(item, query, (candidate) => candidate.label),
     );
   }, [pickerFilter, pickerItems, pickerQuery]);
-  const selectedPickerItem = pickerItems.find((item) => item.value === activeProjectKey) ?? null;
+  const selectedPickerValue = isScratchDraft ? NO_PROJECT_VALUE : activeProjectKey;
+  const selectedPickerItem = pickerItems.find((item) => item.value === selectedPickerValue) ?? null;
 
   // The picker can change the draft's target while the no-project home is
   // still being opened; a stale continuation must not retarget it again.
@@ -288,6 +293,10 @@ export function DraftHeroHeadline({
           openAddProject();
           return;
         }
+        if (item.value === NO_PROJECT_VALUE) {
+          void startScratch();
+          return;
+        }
         const entry = projectEntryByKey.get(item.value);
         if (!entry || item.value === activeProjectKey) {
           return;
@@ -330,7 +339,15 @@ export function DraftHeroHeadline({
             const entry = projectEntryByKey.get(item.value);
             return (
               <ComboboxItem key={item.value} hideIndicator value={item}>
-                {item.value === ADD_PROJECT_VALUE ? (
+                {item.value === NO_PROJECT_VALUE ? (
+                  // Boxed like ProjectFavicon so the label lines up with project rows.
+                  <span
+                    aria-hidden="true"
+                    className={`inline-flex size-4 shrink-0 ${projectIconColorClassName("gray")}`}
+                  >
+                    <MessageSquareDashedIcon className="size-full" />
+                  </span>
+                ) : item.value === ADD_PROJECT_VALUE ? (
                   <FolderPlusIcon className="size-4 shrink-0" />
                 ) : entry ? (
                   <ProjectFavicon project={entry.group} className="size-4 shrink-0" />
