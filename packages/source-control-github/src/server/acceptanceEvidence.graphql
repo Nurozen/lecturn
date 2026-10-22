@@ -1,0 +1,27 @@
+# Lecturn: the pull requests opened from one head branch, newest first, for acceptance evidence.
+# Closed rows are read too, so a caller can tell a closed candidate from a missing one.
+query AcceptanceCandidates($owner: String!, $name: String!, $head: String!) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(
+      headRefName: $head
+      states: [OPEN, CLOSED, MERGED]
+      first: 100
+      orderBy: { field: CREATED_AT, direction: DESC }
+    ) {
+      totalCount
+      nodes {
+        number
+        url
+        headRefName
+        headRefOid
+        headRepository {
+          name
+        }
+        headRepositoryOwner {
+          login
+        }
+        state
+      }
+    }
+  }
+}

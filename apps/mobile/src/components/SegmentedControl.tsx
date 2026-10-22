@@ -10,11 +10,11 @@ import Animated, {
 import { AppText as Text } from "./AppText";
 import { GlassCard } from "./GlassCard";
 import { cn } from "../lib/cn";
-import { MaterialSegmentedControl } from "./MaterialSegmentedControl";
 import type { SegmentedControlProps } from "./SegmentedControl.types";
 
 export type { SegmentedControlProps } from "./SegmentedControl.types";
 
+/** Lecturn keeps its glass segmented pill on iOS; Android uses SegmentedControl.android. */
 export function SegmentedControl<Value extends number | string>(
   props: SegmentedControlProps<Value>,
 ) {
@@ -42,9 +42,6 @@ export function SegmentedControl<Value extends number | string>(
       },
     ],
   }));
-  if (Platform.OS === "android") {
-    return <MaterialSegmentedControl {...props} />;
-  }
   return (
     <GlassCard
       radius={28}

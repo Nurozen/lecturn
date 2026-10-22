@@ -7,9 +7,9 @@ import { useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 import { AppText as Text } from "../../components/AppText";
 import { EmptyState } from "../../components/EmptyState";
-import { ControlPillMenu } from "../../components/ControlPillMenu";
-import { MaterialButton } from "../../components/MaterialButton";
-import { MaterialIconButton } from "../../components/MaterialIconButton";
+import { Menu } from "../../components/Menu";
+import { Button } from "../../components/Button";
+import { IconButton } from "../../components/IconButton";
 import { SymbolView } from "../../components/AppSymbol";
 import { PierreEntryIcon } from "../../components/PierreEntryIcon";
 import { composerPullRequests } from "../../state/pull-requests";
@@ -125,7 +125,7 @@ export function usePullRequestFilesContent(props: {
                 <SymbolView
                   name="checkmark.circle.fill"
                   size={18}
-                  tintColorClassName="accent-success-foreground"
+                  tintColorClassName="accent-adaptive-emerald-600-400"
                 />
               ) : null}
               <SymbolView name="chevron.right" size={12} tintColorClassName="accent-icon-muted" />
@@ -215,7 +215,7 @@ export function usePullRequestFilesContent(props: {
                 deletions={parsed.deletions}
                 compact
               />
-              <ControlPillMenu
+              <Menu
                 title="Review files"
                 actions={[
                   {
@@ -228,13 +228,13 @@ export function usePullRequestFilesContent(props: {
                 onPressAction={filter.toggle}
               >
                 <View pointerEvents="none">
-                  <MaterialIconButton
+                  <IconButton
                     icon="line.3.horizontal.decrease"
                     accessibilityLabel="Filter review files"
                     selected={filter.hideTestFiles}
                   />
                 </View>
-              </ControlPillMenu>
+              </Menu>
             </View>
             {parsed.files.length === 0 && filter.hiddenCount > 0 ? (
               <EmptyState
@@ -242,13 +242,7 @@ export function usePullRequestFilesContent(props: {
                   result.nextCursor ? "No non-test files loaded yet" : "Only test files changed"
                 }
                 detail="Test files are hidden from this review."
-                action={
-                  <MaterialButton
-                    label="Show test files"
-                    tone="contrast"
-                    onPress={filter.showAll}
-                  />
-                }
+                action={<Button label="Show test files" tone="contrast" onPress={filter.showAll} />}
                 variant="plain"
               />
             ) : null}

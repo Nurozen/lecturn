@@ -222,7 +222,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv, Path.Pat
           resolveExtraMcpServers: makeCodexStaveMemoryMcpResolver({
             resolve: staveMemoryWiring.resolve,
             runner: memoryProcessRunner,
-            randomUuid: crypto.randomUUIDv4.pipe(Effect.orDie),
+            randomUuid: crypto.randomUUIDv4().pipe(Effect.orDie),
           }),
         },
       ).pipe(

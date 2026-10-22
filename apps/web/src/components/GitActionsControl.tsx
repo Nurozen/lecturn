@@ -21,15 +21,7 @@ import type {
 } from "@lecturn/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import * as Option from "effect/Option";
-import {
-  type MouseEvent,
-  useCallback,
-  useEffect,
-  useEffectEvent,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   CheckIcon,
@@ -1065,7 +1057,6 @@ export default function GitActionsControl({
   );
   const vcsActionState = useAtomValue(vcsActionManager.stateAtom(sourceControlScope));
   const visibleInlineSuccess = inlineSuccess?.scopeKey === successScopeKey ? inlineSuccess : null;
-  let runGitActionWithToast: (input: RunGitActionWithToastInput) => Promise<void>;
 
   useEffect(() => {
     if (!inlineSuccess) return;
@@ -1262,8 +1253,10 @@ export default function GitActionsControl({
     };
   }, [activeEnvironmentId, gitCwd, refreshVcsStatus]);
 
-  runGitActionWithToast = useEffectEvent(
-    async ({
+  // React 19.2 leaves useEffectEvent stale inside the memoized details panel.
+  // Bind each render's actions to its checkout and thread, including retained toast actions.
+  const runGitActionWithToast = useCallback(
+    async function runGitActionWithToast({
       action,
       commitMessage,
       onConfirmed,
@@ -1271,7 +1264,7 @@ export default function GitActionsControl({
       statusOverride,
       featureBranch = false,
       filePaths,
-    }: RunGitActionWithToastInput) => {
+    }: RunGitActionWithToastInput) {
       if (
         activeEnvironmentId === null ||
         !readEnvironmentScope(activeEnvironmentId, AuthSourceControlWriteScope) ||
@@ -1419,6 +1412,20 @@ export default function GitActionsControl({
         });
       }
     },
+    [
+      activeDraftThread,
+      activeEnvironmentId,
+      activeServerThread,
+      gitStatusForActions,
+      isDefaultRef,
+      isLocalDraftThread,
+      isPanel,
+      openPrLink,
+      runImmediateGitAction,
+      successScopeKey,
+      syncThreadBranchAfterGitAction,
+      threadToastData,
+    ],
   );
 
   const continuePendingDefaultBranchAction = () => {

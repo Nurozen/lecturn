@@ -14,8 +14,8 @@ import { useAppearancePreferences } from "../features/settings/appearance/Appear
 import { AndroidScreenHeader } from "./AndroidScreenHeader";
 import { ScreenHeaderButton } from "./ScreenHeaderButton.android";
 import { SymbolView } from "./AppSymbol";
-import { ControlPillMenu } from "./ControlPill";
-import { MaterialSearchField } from "./MaterialSearchField";
+import { Menu } from "./Menu";
+import { SearchField } from "./SearchField";
 import { androidHeaderMenuActions, findHeaderMenuAction } from "./headerMenu.android";
 import type { ScreenHeaderProps } from "./ScreenHeader.types";
 import { useAndroidControlSizing } from "./useAndroidControlSizing";
@@ -43,7 +43,7 @@ export function ScreenHeader(props: ScreenHeaderProps) {
     return () => subscription.remove();
   }, [closeSearch, searching, search?.mode]);
   const menuView = props.menus?.map((menu) => (
-    <ControlPillMenu
+    <Menu
       key={menu.title}
       actions={androidHeaderMenuActions(menu.items)}
       isAnchoredToRight
@@ -70,7 +70,7 @@ export function ScreenHeader(props: ScreenHeaderProps) {
       ) : (
         <ScreenHeaderButton accessibilityLabel={menu.title} icon={menu.icon} />
       )}
-    </ControlPillMenu>
+    </Menu>
   ));
   const options = (
     <NativeStackScreenOptions
@@ -208,7 +208,7 @@ export function ScreenHeader(props: ScreenHeaderProps) {
                   icon="arrow.left"
                   onPress={closeSearch}
                 />
-                <MaterialSearchField
+                <SearchField
                   inputRef={inputRef}
                   accessibilityLabel={search.placeholder}
                   clearAccessibilityLabel={search.clearAccessibilityLabel ?? "Clear search"}

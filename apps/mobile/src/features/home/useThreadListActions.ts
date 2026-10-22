@@ -16,10 +16,10 @@ import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
 import * as Cause from "effect/Cause";
 import * as Haptics from "expo-haptics";
 import { useCallback, useRef } from "react";
-import { Alert, Platform } from "react-native";
+import { Alert } from "react-native";
 
 import { withThreadDismissal } from "./thread-dismissal";
-import { showConfirmDialog, showTextInputDialog } from "../../components/ConfirmDialogHost";
+import * as Dialog from "../../components/Dialog";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { uuidv4 } from "../../lib/uuid";
 import { refreshArchivedThreadsForEnvironment } from "../archive/useArchivedThreadSnapshots";
@@ -241,20 +241,7 @@ function useConfirmDeleteThread(
       if (!checkThreadOperationPermission(thread, actionFailureTitle("delete"))) return;
       const title = "Delete thread?";
       const message = `“${thread.title}” will be permanently deleted, including its terminal history.`;
-      if (process.env.EXPO_OS === "ios") {
-        Alert.alert(title, message, [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: () => {
-              void executeAction("delete", thread);
-            },
-          },
-        ]);
-        return;
-      }
-      showConfirmDialog({
+      Dialog.confirm({
         title,
         message,
         confirmText: "Delete",
@@ -457,7 +444,9 @@ export function useThreadListActions(): {
         if (!canSnooze(thread, { now: new Date().toISOString() })) {
           Alert.alert(
             "Could not snooze thread",
-            thread.hasPendingApprovals || thread.hasPendingUserInput
+            thread.hasPendingApprovals ||
+              thread.hasPendingUserInput ||
+              thread.pendingSubagentRequest != null
               ? "This thread is waiting on you. Respond to the pending request before snoozing it."
               : "This thread is still starting a turn. Try again once it's running.",
           );
@@ -707,17 +696,7 @@ export function useThreadListActions(): {
         });
       };
 
-      if (Platform.OS === "ios") {
-        Alert.prompt(
-          "Rename thread",
-          undefined,
-          (title) => commit(title ?? ""),
-          "plain-text",
-          thread.title,
-        );
-        return;
-      }
-      showTextInputDialog({
+      Dialog.prompt({
         title: "Rename thread",
         initialValue: thread.title,
         confirmText: "Rename",

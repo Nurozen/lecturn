@@ -55,8 +55,8 @@ import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
 import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { AndroidAnchoredMenu } from "../../components/AndroidAnchoredMenu";
-import { MaterialButton } from "../../components/MaterialButton";
-import { MaterialIconButton } from "../../components/MaterialIconButton";
+import { Button } from "../../components/Button";
+import { IconButton } from "../../components/IconButton";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { ThemedSwitch } from "../../components/ThemedSwitch";
 import { cn } from "../../lib/cn";
@@ -1149,7 +1149,7 @@ function ThreadSettingsMainContent(props: {
                   value={session.searchQuery}
                 />
                 {session.searchQuery.length > 0 ? (
-                  <MaterialIconButton
+                  <IconButton
                     accessibilityLabel="Clear model search"
                     icon="xmark"
                     onPress={() => session.setSearchQuery("")}
@@ -1373,7 +1373,7 @@ function ThreadSettingsModelsScreen() {
                 }}
               >
                 {(open) => (
-                  <MaterialIconButton
+                  <IconButton
                     accessibilityLabel="Filter models"
                     icon="line.3.horizontal.decrease"
                     selected={hasCustomCatalogFilter}
@@ -1383,7 +1383,7 @@ function ThreadSettingsModelsScreen() {
                 )}
               </AndroidAnchoredMenu>
               {session.pendingModel ? (
-                <MaterialButton label="Save" tone="text" onPress={commitAndClose} />
+                <Button label="Save" tone="text" onPress={commitAndClose} />
               ) : null}
             </View>
           }

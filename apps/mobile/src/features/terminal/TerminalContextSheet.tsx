@@ -10,8 +10,8 @@ import { Alert, Platform, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { REVIEW_MONO_FONT_FAMILY } from "../review/reviewDiffRendering";
 import { AppText as Text } from "../../components/AppText";
-import { AppSheet } from "../../components/AppSheet";
-import { MaterialButton } from "../../components/MaterialButton";
+import { Sheet } from "../../components/Sheet";
+import { Button } from "../../components/Button";
 import { uuidv4 } from "../../lib/uuid";
 import { insertComposerDraftContext } from "../../state/use-composer-drafts";
 
@@ -56,7 +56,7 @@ export function TerminalContextSheet(props: {
     props.onAttach();
   };
   return (
-    <AppSheet title="Terminal output" onClose={props.onClose}>
+    <Sheet title="Terminal output" onClose={props.onClose}>
       <ScrollView
         className="flex-1"
         contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
@@ -112,7 +112,7 @@ export function TerminalContextSheet(props: {
             Select fewer lines to fit the context limit.
           </Text>
         ) : null}
-        <MaterialButton
+        <Button
           label="Attach selected output"
           tone="primary"
           fullWidth
@@ -120,6 +120,6 @@ export function TerminalContextSheet(props: {
           onPress={attach}
         />
       </View>
-    </AppSheet>
+    </Sheet>
   );
 }

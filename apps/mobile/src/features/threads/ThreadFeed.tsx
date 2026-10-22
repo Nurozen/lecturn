@@ -4,7 +4,7 @@ import { ThreadMarkdownVideo, ThreadMediaVisibleContext } from "./ThreadMarkdown
 import { useMarkdownImageSource } from "../../native/useMarkdownImageSource";
 import { enrichedContextLinkPresentation } from "../../lib/enrichedLinkPresentation";
 import { ThreadContextDivider } from "./thread-context-divider";
-import { ThreadHandoffRow } from "./thread-handoff-row";
+import { ThreadHandoffDivider, ThreadHandoffRow } from "./thread-handoff-row";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { AppActivityIndicator } from "../../components/AppActivityIndicator";
 import {
@@ -16,6 +16,7 @@ import * as Haptics from "expo-haptics";
 import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { useViewabilityAmount, type LegendListRef } from "@legendapp/list/react-native";
 import { scopeThreadRef } from "@lecturn/client-runtime/environment";
+import type { HandoffEndpoints } from "@lecturn/client-runtime/handoff";
 import { resolveUserMessagePresentation } from "@lecturn/client-runtime/user-message";
 import { canForkProjectedAssistantItem } from "@lecturn/client-runtime/state/thread-workflows";
 import {
@@ -38,6 +39,7 @@ import {
 import { renderAssistantCitationsAsText } from "@lecturn/shared/assistantCitations";
 import { encodeComposerContextFragment } from "@lecturn/shared/composerContextClipboard";
 import { parseThreadLinkHref } from "@lecturn/shared/threadLinks";
+import { PROMPT_LINK_MAX_PROMPT_LENGTH } from "@lecturn/shared/promptLinks";
 import {
   parseComposerContextHref,
   collectComposerContextReferences,
@@ -60,7 +62,7 @@ import {
 } from "@lecturn/client-runtime/markdown-images";
 import { resolveViewedImageAsset } from "@lecturn/client-runtime/work-log/presentation";
 import {
-  renderCodexFileCitationsAsMarkdown,
+  renderCodexInlineDirectivesAsMarkdown,
   splitCodexArtifactTemplateMarkdown,
 } from "@lecturn/shared/codexMarkdownDirectives";
 import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from "@lecturn/shared/chatList";
@@ -100,7 +102,10 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { Image as ExpoImage } from "expo-image";
+import { useResolveClassNames } from "uniwind";
 import { useFilePreviewGallery, FilePreviewGallery } from "../../components/FilePreviewGallery";
+import { assetImageSource } from "../../lib/assetImageSource";
 import { composerImageGallery } from "../../lib/composerImageGallery";
 import { messageImageGallery } from "./messageImageGallery";
 import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
@@ -152,6 +157,8 @@ import {
   type MediaVideoPreviewSource,
 } from "../../lib/videoPreviewSource";
 import { CopyTextButton } from "../../components/CopyTextButton";
+import { Menu } from "../../components/Menu";
+import { copyPromptLink } from "../prompt-links/prompt-link-actions";
 import { parseReviewCommentMessageSegments } from "../review/reviewCommentSelection";
 import type { ReviewDiffTheme } from "../review/shikiReviewHighlighter";
 import {
@@ -307,6 +314,7 @@ export interface ThreadFeedProps {
   readonly threadTitle: string;
   readonly workspaceRoot?: string | null;
   readonly feed: ReadonlyArray<ThreadFeedEntry>;
+  readonly pendingHandoff?: HandoffEndpoints | null;
   readonly contentPresentation: ThreadContentPresentation;
   readonly agentLabel: string;
   readonly latestRun: ThreadFeedLatestRun | null;
@@ -351,6 +359,45 @@ async function waitForThreadShell(
 
 const EMPTY_RUN_IDS: ReadonlySet<RunId> = new Set();
 const EMPTY_RUNLESS_FORK_POINTS: ReadonlyMap<MessageId, ThreadForkPoint> = new Map();
+
+const USER_MESSAGE_COPY_MENU_ACTIONS = [
+  { id: "copy-prompt-link", title: "Copy prompt link", image: "link" },
+];
+
+/**
+ * The copy button under a sent user message. Long-press copies a link that opens a new task
+ * with this prompt, unless the prompt is longer than a link can carry.
+ */
+function UserMessageCopyButton(props: {
+  readonly text: string;
+  readonly onCopy: (() => Promise<void>) | undefined;
+  readonly tintColor: ColorValue;
+}) {
+  const button = (
+    <CopyTextButton
+      accessibilityLabel="Copy message"
+      text={props.text}
+      onCopy={props.onCopy}
+      tintColor={props.tintColor}
+      buttonSize={28}
+      iconSize={13}
+    />
+  );
+  // A link carries plain text, so context chips become their labels.
+  const linkText = replaceComposerContextReferences(props.text, (reference) => reference.label);
+  if (linkText.length > PROMPT_LINK_MAX_PROMPT_LENGTH) return button;
+  return (
+    <Menu
+      actions={USER_MESSAGE_COPY_MENU_ACTIONS}
+      onPressAction={({ nativeEvent }) => {
+        if (nativeEvent.event === "copy-prompt-link") void copyPromptLink(linkText);
+      }}
+      shouldOpenOnLongPress
+    >
+      {button}
+    </Menu>
+  );
+}
 
 function AssistantForkButton(props: {
   readonly environmentId: EnvironmentId;
@@ -455,6 +502,7 @@ function MessageAttachmentImage(props: {
   const uri = useAssetUrl(props.environmentId, resource);
   const refreshAssetUrl = useRefreshAssetUrl(props.environmentId, resource);
   const retriedImage = useRef(false);
+  const imageStyle = useResolveClassNames(props.className);
 
   if (uri === null) {
     return (
@@ -488,10 +536,11 @@ function MessageAttachmentImage(props: {
           )
         }
       >
-        <Image
-          source={{ uri }}
-          className={props.className}
-          resizeMode="cover"
+        <ExpoImage
+          source={assetImageSource(props.environmentId, resource, uri)}
+          cachePolicy="memory-disk"
+          style={imageStyle}
+          contentFit="cover"
           onLoad={() => {
             retriedImage.current = false;
           }}
@@ -828,7 +877,7 @@ const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
     }
     if (segment.markdown.trim().length === 0) return null;
 
-    const markdown = renderCodexFileCitationsAsMarkdown(segment.markdown);
+    const markdown = renderCodexInlineDirectivesAsMarkdown(segment.markdown);
     return (
       <SelectableMarkdownText
         key={`markdown:${segment.sourceOffset}`}
@@ -1329,10 +1378,12 @@ function renderFeedEntry(
           />
           <View className="mt-1 flex-row items-center justify-end gap-1 pr-0.5">
             {intentBadge ? (
-              <View
-                accessible
-                accessibilityRole="text"
+              <Pressable
+                accessibilityRole="button"
                 accessibilityLabel={intentBadge.accessibilityLabel}
+                accessibilityHint="Explains this message's badge"
+                hitSlop={8}
+                onPress={() => Alert.alert("Message history", intentBadge.explanation)}
                 className={cn(
                   "rounded-full border px-1.5 py-0.5",
                   intentBadge.tone === "queued"
@@ -1350,7 +1401,7 @@ function renderFeedEntry(
                 >
                   {intentBadge.label}
                 </Text>
-              </View>
+              </Pressable>
             ) : null}
             <Text className="font-lecturn-medium text-xs tabular-nums text-foreground-secondary">
               {entry.pendingMessage && !entry.acknowledged ? "Pending" : timestampLabel}
@@ -1375,8 +1426,7 @@ function renderFeedEntry(
               </Pressable>
             ) : null}
             {presentation.text.trim().length > 0 ? (
-              <CopyTextButton
-                accessibilityLabel="Copy message"
+              <UserMessageCopyButton
                 text={presentation.text}
                 onCopy={
                   message.context
@@ -1389,8 +1439,6 @@ function renderFeedEntry(
                     : undefined
                 }
                 tintColor={iconSubtleColor}
-                buttonSize={28}
-                iconSize={13}
               />
             ) : null}
           </View>
@@ -2866,6 +2914,16 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
                 ) : null}
               </>
             }
+            ListFooterComponent={
+              props.pendingHandoff ? (
+                <ThreadHandoffDivider
+                  environmentId={props.environmentId}
+                  endpoints={props.pendingHandoff}
+                  iconColor={iconSubtleColor}
+                  label="Context handoff pending"
+                />
+              ) : null
+            }
             contentContainerStyle={{
               paddingTop: 12,
               paddingLeft: contentHorizontalPadding + contentLeftInset,
@@ -2912,7 +2970,7 @@ function ThreadFeedLoadEarlierControl(props: ThreadFeedHistoryControls) {
           accessibilityLabel="Load earlier activity"
           disabled={props.loading}
           onPress={props.onLoadEarlier}
-          className="min-h-9 flex-row items-center justify-center gap-2 rounded-full border border-border/60 bg-surface/80 px-4 py-2 disabled:opacity-50"
+          className="min-h-9 flex-row items-center justify-center gap-2 rounded-full border border-border/60 bg-card/80 px-4 py-2 disabled:opacity-50"
         >
           {props.loading ? (
             <AppActivityIndicator size="small" color={accentColor} />

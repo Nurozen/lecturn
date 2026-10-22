@@ -1,7 +1,7 @@
 # Building the mobile Screens dependency
 
 The mobile v5 stack uses a committed tarball from the
-[react-native-screens fork maintained upstream](https://github.com/juliusmarminge/react-native-screens/tree/t3-v5.0.0-t3.25).
+[react-native-screens fork maintained upstream](https://github.com/juliusmarminge/react-native-screens/tree/t3-v5.0.0-t3.27).
 The fork owns the integration changes; the app does not patch this package.
 Each archive includes compiled JavaScript, declarations, native source and
 `t3-fork.json` recording its version, source commit and upstream base.
@@ -10,7 +10,7 @@ To reproduce an archive, use Node 24 and the repository's pinned Yarn from a
 clean fork checkout at the source commit recorded in its `t3-fork.json`:
 
 ```sh
-git clone --branch t3-v5.0.0-t3.25 https://github.com/juliusmarminge/react-native-screens.git /tmp/screens-fork
+git clone --branch t3-v5.0.0-t3.27 https://github.com/juliusmarminge/react-native-screens.git /tmp/screens-fork
 yarn --cwd /tmp/screens-fork pack:t3 /absolute/path/to/lecturn/apps/mobile/deps
 ```
 

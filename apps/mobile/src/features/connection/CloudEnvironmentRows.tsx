@@ -3,7 +3,6 @@ import { AppActivityIndicator } from "../../components/AppActivityIndicator";
 import { ConnectionTraceId } from "./ConnectionTraceId";
 import { SymbolView } from "../../components/AppSymbol";
 import {
-  connectionStatusText,
   relayRouteTarget,
   type EnvironmentConnectionPhase,
 } from "@lecturn/client-runtime/connection";
@@ -30,6 +29,7 @@ import { useConnectAccounts } from "../cloud/knownAccounts";
 import { accountTintColor } from "@lecturn/shared/accountTint";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { ConnectionStatusDot } from "./ConnectionStatusDot";
+import { environmentStatusText } from "./environmentStatusText";
 import { type RelayEnvironmentView, useConnectionController } from "./useConnectionController";
 
 interface CloudEnvironmentRowsProps {
@@ -361,7 +361,7 @@ function CloudEnvironmentRowShell(props: {
   const shouldPulse = isRetrying;
   const statusText =
     props.statusText ??
-    connectionStatusText({
+    environmentStatusText({
       phase: props.connectionState,
       error: props.connectionError,
       traceId: props.connectionErrorTraceId,

@@ -98,6 +98,9 @@ import Migration0075 from "./Migrations/060_ThreadSnapshotWindowIndexes.ts";
 // Upstream published this as 61, which Lecturn's ledger already used
 // (ContextualObservations), so it runs here as 76.
 import Migration0076 from "./Migrations/061_PullRequestReviewGuides.ts";
+// Upstream published this as 62, which Lecturn's ledger already used
+// (ContextualInvalidations), so it runs here as 77.
+import Migration0077 from "./Migrations/062_ThreadFailureLookupIndex.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -117,6 +120,18 @@ const ScheduledTaskWebhooksCompatibility = Effect.gen(function* () {
   const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(scheduled_tasks)`;
   if (columns.some((column) => column.name === "webhook_token")) return;
   yield* Migration0072;
+});
+
+// Upstream 62 creates its index without IF NOT EXISTS. A database that already
+// ran it under upstream's id keeps that index, so only create it when missing.
+const ThreadFailureLookupIndexCompatibility = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const indexes = yield* sql`
+    SELECT name FROM sqlite_master
+    WHERE type = 'index' AND name = 'orchestration_v2_projection_turn_items_failed_error_idx'
+  `;
+  if (indexes.length > 0) return;
+  yield* Migration0077;
 });
 
 /**
@@ -213,6 +228,8 @@ export const migrationEntries = [
   // Upstream 61. Idempotent, so a database that already ran it under
   // upstream's id is safe to run again here.
   [76, "PullRequestReviewGuides", Migration0076],
+  // Upstream 62.
+  [77, "ThreadFailureLookupIndex", ThreadFailureLookupIndexCompatibility],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -225,6 +242,49 @@ const makeMigrationLoader = (throughId?: number) =>
         .map(([id, name, migration]) => [`${id}_${name}`, migration]),
     ),
   );
+
+// V2's schema migrations start at 70 in Lecturn's ledger (upstream publishes
+// them from 55, which Lecturn's ledger already used for its own migrations).
+const FIRST_V2_MIGRATION_ID = 70;
+
+/**
+ * Fail before migrating when the migrator would skip one of V2's own
+ * migrations. It skips every id up to the highest recorded one, whatever name
+ * was recorded, so a database that took a V2 id for another migration would
+ * start without V2's schema and fail on first use. Earlier ids keep the
+ * warning below: databases with a site-local migration there still work.
+ */
+const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(function* (
+  throughId?: number,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  const tables = yield* sql`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'
+  `;
+  if (tables.length === 0) return;
+  const recorded = yield* sql<{
+    readonly migration_id: number;
+    readonly name: string;
+  }>`SELECT migration_id, name FROM effect_sql_migrations`;
+  const latestRecordedId = Math.max(0, ...recorded.map((row) => row.migration_id));
+  const recordedNames = new Map(recorded.map((row) => [row.migration_id, row.name]));
+  const skipped = migrationEntries.flatMap(([id, name]) => {
+    if (
+      id < FIRST_V2_MIGRATION_ID ||
+      id > latestRecordedId ||
+      (throughId !== undefined && id > throughId)
+    )
+      return [];
+    const recordedName = recordedNames.get(id);
+    if (recordedName === name) return [];
+    return [`${id}_${name} (recorded: ${recordedName ?? "nothing"})`];
+  });
+  if (skipped.length === 0) return;
+  return yield* new Migrator.MigrationError({
+    kind: "BadState",
+    message: `This database's migration history would skip required schema migrations: ${skipped.join(", ")}. The migrator skips every id up to the highest recorded id (${latestRecordedId}), regardless of name. It was probably written by a different build. Start the build that wrote it, or report this migration history so an upgrade path can be added.`,
+  });
+});
 
 /**
  * Migrator run function - no schema dumping needed
@@ -267,10 +327,12 @@ export interface RunMigrationsOptions {
 export const runMigrations = Effect.fn("runMigrations")(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {}) {
-  const previewMigrations =
-    toMigrationInclusive === undefined || toMigrationInclusive >= 70
-      ? yield* reconcileV2PreviewMigration()
-      : [];
+  const includesV2 =
+    toMigrationInclusive === undefined || toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
+  const previewMigrations = includesV2 ? yield* reconcileV2PreviewMigration() : [];
+  if (includesV2) {
+    yield* assertV2MigrationsCanRun(toMigrationInclusive);
+  }
   const executedMigrations = [
     ...previewMigrations,
     ...(yield* run({ loader: makeMigrationLoader(toMigrationInclusive) })),

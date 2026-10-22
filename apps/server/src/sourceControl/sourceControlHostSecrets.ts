@@ -7,12 +7,10 @@
  *
  * @module sourceControl/sourceControlHostSecrets
  */
+import { secretSettingsFields } from "@lecturn/contracts";
 import * as AzureDevOps from "@lecturn/source-control-azure-devops/client/definition";
 import * as Bitbucket from "@lecturn/source-control-bitbucket/client/definition";
-import {
-  secretSourceControlHostSettingsFields,
-  type SourceControlClientDefinition,
-} from "@lecturn/source-control-core/client/definition";
+import type { SourceControlClientDefinition } from "@lecturn/source-control-core/client/definition";
 import * as Forgejo from "@lecturn/source-control-forgejo/client/definition";
 import * as GitCafe from "@lecturn/source-control-gitcafe/client/definition";
 import * as GitHub from "@lecturn/source-control-github/client/definition";
@@ -33,9 +31,7 @@ export const SOURCE_CONTROL_HOST_SECRET_FIELDS: ReadonlyMap<
   ReadonlyArray<string>
 > = new Map(
   definitions.flatMap((definition) => {
-    const fields = definition.settings
-      ? secretSourceControlHostSettingsFields(definition.settings)
-      : [];
+    const fields = definition.settings ? secretSettingsFields(definition.settings) : [];
     return fields.length > 0 ? [[definition.kind, fields] as const] : [];
   }),
 );

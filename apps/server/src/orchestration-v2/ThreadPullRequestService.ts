@@ -12,6 +12,7 @@ import {
 } from "@lecturn/contracts";
 import { normalizeProjectPathForComparison } from "@lecturn/shared/path";
 import { makeDrainableWorker } from "@lecturn/shared/DrainableWorker";
+import * as NodeSqliteClient from "@lecturn/shared/nodeSqliteClient";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -212,10 +213,18 @@ export const make = Effect.gen(function* () {
     projects: ReadonlyArray<OrchestrationProjectShell>,
   ) =>
     threadId === null
-      ? orchestrator.getShellSnapshot({
-          location: "active",
-          unsettledOnly: !(backfill || pendingBackfill.size > 0 || hasUnownedStaveSpace(projects)),
-        })
+      ? orchestrator
+          .getShellSnapshot({
+            location: "active",
+            unsettledOnly: !(
+              backfill ||
+              pendingBackfill.size > 0 ||
+              hasUnownedStaveSpace(projects)
+            ),
+          })
+          // Reads every active thread once a minute: run it off the event loop. Writes keep
+          // landing during the read, and the snapshot's sequence guards the sync against them.
+          .pipe(NodeSqliteClient.readOnly)
       : Effect.gen(function* () {
           // Read the sequence first. The thread is then at least this new, so a
           // sync guarded by the sequence is rejected rather than missing a change.
@@ -400,8 +409,9 @@ export const make = Effect.gen(function* () {
 
           if (branch !== null && cwd !== null) {
             // Summary reads can outlast a remote edit. The second PR read shares
-            // GitManager's provider cache while verifying its remote context.
-            const current = yield* git.branchPullRequest({ cwd, branch });
+            // GitManager's provider cache while verifying its remote context, and
+            // rereads the branch's git state rather than trusting the cached one.
+            const current = yield* git.branchPullRequest({ cwd, branch }, { freshGitState: true });
             const currentIdentity = yield* repositoryIdentities.resolve(
               PullRequestService.pullRequestCwd(project),
               { refresh: true },
@@ -450,7 +460,7 @@ export const make = Effect.gen(function* () {
                 if (!projectWorkspaceMatchesSnapshot(currentProject, project.workspaceRoot)) {
                   return failBackfill([thread]);
                 }
-                const uuid = yield* crypto.randomUUIDv4;
+                const uuid = yield* crypto.randomUUIDv4();
                 yield* orchestrator.dispatch({
                   type: "thread.pull-request.sync",
                   commandId: CommandId.make(`server:thread-pull-request:${thread.id}:${uuid}`),

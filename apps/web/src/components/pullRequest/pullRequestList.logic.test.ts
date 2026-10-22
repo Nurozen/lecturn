@@ -9,6 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   pullRequestHostActions,
+  largestPullRequestReadCount,
   pullRequestQuickActions,
   filterPullRequestsByInvolvement,
   findScopedProject,
@@ -1908,5 +1909,26 @@ describe("pull request quick actions", () => {
       "close",
       "ready",
     ]);
+  });
+});
+
+describe("refresh page size", () => {
+  const twoPagesAcrossFourRepositories = (provider: "github" | "gitlab") =>
+    ["a", "b", "c", "d"].flatMap((name) =>
+      Array.from({ length: 198 }, (_, index) =>
+        entry({
+          number: index + 1,
+          provider: SourceControlProviderKind.make(provider),
+          repository: `nurozen/${name}`,
+        }),
+      ),
+    );
+
+  it("asks each repository for its own rows where repositories are read one at a time", () => {
+    expect(largestPullRequestReadCount(twoPagesAcrossFourRepositories("gitlab"))).toBe(198);
+  });
+
+  it("asks for the whole host where one search reads every repository", () => {
+    expect(largestPullRequestReadCount(twoPagesAcrossFourRepositories("github"))).toBe(792);
   });
 });

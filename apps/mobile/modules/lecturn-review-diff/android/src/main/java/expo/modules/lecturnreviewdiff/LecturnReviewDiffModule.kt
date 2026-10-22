@@ -4,6 +4,8 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 class LecturnReviewDiffModule : Module() {
+  // One declaration per native view prop; splitting the definition would only scatter them.
+  @Suppress("LongMethod")
   override fun definition() = ModuleDefinition {
     Name("LecturnReviewDiffSurface")
 
@@ -43,6 +45,9 @@ class LecturnReviewDiffModule : Module() {
       }
       Prop("contentWidth") { view: LecturnReviewDiffView, contentWidth: Double ->
         view.setContentWidth(contentWidth.toFloat())
+      }
+      Prop("contentInsetBottom") { view: LecturnReviewDiffView, value: Double ->
+        view.setContentInsetBottom(value.toFloat())
       }
       Prop("scrollEnabled") { view: LecturnReviewDiffView, enabled: Boolean ->
         view.setScrollEnabled(enabled)

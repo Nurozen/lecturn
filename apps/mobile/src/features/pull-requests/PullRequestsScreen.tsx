@@ -2,7 +2,7 @@ import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
 import { useNavigation } from "@react-navigation/native";
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ProjectId } from "@lecturn/contracts";
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from "@effect/atom-react";
 import {
   ActivityIndicator,
   Keyboard,
@@ -26,7 +26,8 @@ import { useProjects } from "../../state/entities";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { PullRequestListRow } from "./PullRequestListRow";
 import { PullRequestListFilters } from "./PullRequestListFilters";
-import { pullRequestListControlsAtom, usePullRequestList } from "./usePullRequestList";
+import { usePullRequestList } from "./usePullRequestList";
+import { usePullRequestListControls } from "./usePullRequestListControls";
 import { usePullRequestListActions } from "./usePullRequestListActions";
 import {
   filterPullRequestList,
@@ -35,14 +36,16 @@ import {
   scopedPullRequestListKey as pullRequestKey,
   type EnvironmentPullRequestListEntry,
   PR_LIST_PAGE_SIZE,
+  withoutScratchProjectScope,
 } from "./pullRequestList";
 import { useDebouncedValue } from "../../state/queries";
 import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
+import { useAndroidWorkspaceSelection } from "../workspace/useAndroidWorkspaceSelection";
 
 function PullRequestScrollView(props: ScrollViewProps) {
   const insets = useSafeAreaInsets();
   return (
-    <ScrollViewMarker>
+    <ScrollViewMarker style={{ flex: 1 }}>
       <ScrollView
         {...props}
         // Stay transparent: the screen draws ArcaneBackdrop once behind the list,
@@ -56,7 +59,12 @@ function PullRequestScrollView(props: ScrollViewProps) {
   );
 }
 
-export function PullRequestsScreen() {
+export function PullRequestsScreen(
+  props: {
+    readonly sidebar?: boolean;
+    readonly selectedPullRequestKey?: string | null;
+  } = {},
+) {
   const navigation = useNavigation();
   const primaryColumn = use(NativePrimaryColumnContext);
   const workspace = useWorkspaceTabs()!;
@@ -78,27 +86,34 @@ export function PullRequestsScreen() {
   const debouncedQuery = useDebouncedValue(tab.query.trim(), 180);
   // Dismissal must restore the cached unfiltered list before restoring its offset.
   const query = tab.searchMode === "resting" ? "" : debouncedQuery;
-  const selectedEnvironmentId = workspace.pullRequestEnvironmentId;
+  const listControls = usePullRequestListControls();
+  const selectedEnvironmentId = listControls.environmentId;
   const environmentId = environments.some((item) => item.environmentId === selectedEnvironmentId)
     ? selectedEnvironmentId
     : null;
+  const selectAndroidWorkspace = useAndroidWorkspaceSelection();
   const selectPullRequest = useCallback(
     (item: EnvironmentPullRequestListEntry) => {
       Keyboard.dismiss();
-      navigation.navigate("PullRequest", {
+      const params = {
         environmentId: String(item.environmentId),
         projectId: String(item.projectId),
         repository: item.repository,
         number: item.number,
         host: item.host,
         initialSummary: item,
-      });
+      };
+      if (Platform.OS === "android") selectAndroidWorkspace({ name: "PullRequest", params });
+      else navigation.navigate("PullRequest", params);
     },
-    [navigation],
+    [navigation, selectAndroidWorkspace],
   );
-  const controlsAtom = pullRequestListControlsAtom(environmentId ?? "");
-  const controls = useAtomValue(controlsAtom);
-  const setControls = useAtomSet(controlsAtom);
+  const allProjects = useProjects();
+  const savedControls = listControls.controlsFor(environmentId);
+  const controls = useMemo(
+    () => withoutScratchProjectScope(savedControls, allProjects),
+    [allProjects, savedControls],
+  );
   const targets = useMemo(
     () =>
       environments
@@ -136,7 +151,9 @@ export function PullRequestsScreen() {
     connectedTargets.map((target) => target.environmentId),
     result.updateEntry,
   );
-  const selectedKey = primaryColumn?.selectedPullRequestKey;
+  const sidebar = props.sidebar === true || primaryColumn !== null;
+  const selectedKey = props.selectedPullRequestKey ?? primaryColumn?.selectedPullRequestKey;
+  const connectedKey = connectedTargets.map((target) => target.environmentId).join("\n");
   const entries = useMemo(
     () =>
       filterPullRequestList(
@@ -145,8 +162,9 @@ export function PullRequestsScreen() {
         result.data?.viewers ?? {},
         query,
         result.data.localSearchHosts,
+        new Set(connectedKey.split("\n")),
       ),
-    [result.entries, controls, query, result.data],
+    [result.entries, controls, query, result.data, connectedKey],
   );
   const facets = useMemo(() => pullRequestListFacets(result.entries), [result.entries]);
   const [knownFacets, setKnownFacets] = useState({ environmentId, source: facets, ...facets });
@@ -168,8 +186,9 @@ export function PullRequestsScreen() {
       ].sort(),
     }));
   }
-  const projects = useProjects().filter(
-    (project) => environmentId === null || project.environmentId === environmentId,
+  const projects = allProjects.filter(
+    (project) =>
+      !project.isScratch && (environmentId === null || project.environmentId === environmentId),
   );
   const renderPullRequest = useCallback(
     ({ item }: { readonly item: EnvironmentPullRequestListEntry }) => (
@@ -180,9 +199,10 @@ export function PullRequestsScreen() {
         onAction={select}
         busy={busyKey === pullRequestKey(item)}
         selected={selectedKey === pullRequestKey(item)}
+        sidebar={sidebar}
       />
     ),
-    [selectPullRequest, selectedKey, actions, select, busyKey],
+    [selectPullRequest, selectedKey, actions, select, busyKey, sidebar],
   );
   const previousSearchMode = useRef(tab.searchMode);
   useEffect(() => {
@@ -200,12 +220,12 @@ export function PullRequestsScreen() {
     : -1;
 
   return (
-    <View className={primaryColumn ? "flex-1 bg-drawer" : "flex-1 bg-screen"}>
+    <View className={sidebar ? "flex-1 bg-drawer" : "flex-1 bg-screen"}>
       <ArcaneBackdrop emphasis="sidebar" />
       <LegendList
         ref={listRef}
         data={entries}
-        extraData={`${primaryColumn?.selectedPullRequestKey}:${busyKey}`}
+        extraData={`${selectedKey}:${busyKey}`}
         keyExtractor={pullRequestKey}
         itemsAreEqual={pullRequestListRowsAreEqual}
         // Default-size rows measure about 78pt with one title line and 98pt with two.
@@ -271,10 +291,10 @@ export function PullRequestsScreen() {
                 label: item.environmentLabel,
               }))}
               environmentId={environmentId}
-              onEnvironmentChange={workspace.setPullRequestEnvironmentId}
+              onEnvironmentChange={listControls.setEnvironmentId}
               value={controls}
               onChange={(next) => {
-                setControls(next);
+                listControls.setControls(environmentId, next);
                 void listRef.current?.scrollToOffset({
                   offset: Platform.OS === "ios" ? -insets.top : 0,
                   animated: false,

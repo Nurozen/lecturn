@@ -3,10 +3,14 @@ import {
   BUILT_IN_THEME_IDS,
   BUILT_IN_THEMES,
   LECTURN_CHAT_THEME,
+  MOBILE_THEME_IDS as SHARED_MOBILE_THEME_IDS,
   getThemeColorsForAppearance,
 } from "@lecturn/shared/themePalettes";
 import { LECTURN_MOBILE_THEME_VARIABLES } from "./lecturnMobilePalette";
-import { readDefaultMobileThemeVariables } from "./mobileTheme.test-support";
+import {
+  readDefaultMobileThemeVariables,
+  readGeneratedMobileThemeVariables,
+} from "./mobileTheme.test-support";
 import { getMobileThemeRuntimeVariables } from "./mobileThemeVariables";
 
 import {
@@ -108,10 +112,7 @@ describe("mobile themes", () => {
       );
       expect(variables["--color-card"]).toBe(themeColorToNativeColor(colors.surface));
       expect(variables["--color-composer-surface"]).toBe(
-        themeColorWithAlpha(
-          themeColorToNativeColor(colors.surface),
-          appearance === "dark" ? 0.9 : 0.94,
-        ),
+        themeColorWithAlpha(variables["--color-grouped-card"], appearance === "dark" ? 0.9 : 0.94),
       );
       expect(variables["--color-thread-selected"]).toBe(
         themeColorToNativeColor(colors.sidebarRowActive),
@@ -188,6 +189,53 @@ describe("mobile themes", () => {
     expect(variables["--color-screen"]).toMatch(/^#/);
   });
 
+  it.each(SHARED_MOBILE_THEME_IDS)("separates %s filled groups from their sheets", (themeId) => {
+    for (const appearance of ["light", "dark"] as const) {
+      const generated = readGeneratedMobileThemeVariables(
+        themeId === DEFAULT_MOBILE_THEME_ID ? appearance : `${themeId}-${appearance}`,
+      );
+      expect(generated).toEqual(getMobileThemeVariables(themeId, appearance));
+      for (const platform of ["ios", "android"]) {
+        const variables = getMobileThemeRuntimeVariables(themeId, appearance, platform);
+        const sheet = variables["--color-sheet-solid"];
+        const group = variables["--color-grouped-card"];
+        expect(
+          contrastRatio(group, sheet),
+          `${platform} ${appearance}: grouped surface on sheet`,
+        ).toBeGreaterThanOrEqual(1.025);
+        for (const role of [
+          "--color-foreground",
+          "--color-foreground-secondary",
+          "--color-foreground-muted",
+          "--color-placeholder",
+          "--color-primary-text",
+        ] as const) {
+          expect(
+            contrastRatio(variables[role], group),
+            `${platform} ${appearance}: ${role} on grouped surface`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+        if (platform === "android") {
+          const header = flattenThemeColor(variables["--color-header"], sheet);
+          for (const role of ["--color-header-foreground", "--color-foreground-muted"] as const) {
+            expect(
+              contrastRatio(variables[role], header),
+              `${appearance}: ${role} on Android header`,
+            ).toBeGreaterThanOrEqual(4.5);
+          }
+        }
+        expect(
+          // Lecturn's dark secondary is a translucent glass fill; judge it over the sheet.
+          contrastRatio(
+            variables["--color-foreground-muted"],
+            flattenThemeColor(variables["--color-secondary"], sheet),
+          ),
+          `${platform} ${appearance}: muted label on secondary surface`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
   it.each(["light", "dark"] as const)(
     "keeps default %s navigation chrome labels readable",
     (appearance) => {
@@ -225,6 +273,66 @@ describe("mobile themes", () => {
             contrastRatio(runtime[role], chrome),
             `${platform} ${appearance}: ${role}`,
           ).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    },
+  );
+
+  it("keeps Lecturn Chat light grouped cards distinct from the sheet", () => {
+    const variables = getMobileThemeVariables("lecturn-chat", "light");
+    const group = variables["--color-grouped-card"];
+    expect(contrastRatio(group, variables["--color-sheet-solid"])).toBeGreaterThanOrEqual(1.1);
+    for (const role of ["--color-foreground", "--color-foreground-muted"] as const) {
+      expect(contrastRatio(variables[role], group)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it.each(SHARED_MOBILE_THEME_IDS)("keeps %s prominent actions readable and themed", (themeId) => {
+    for (const appearance of ["light", "dark"] as const) {
+      const variables = getMobileThemeVariables(themeId, appearance);
+      const fill = variables["--color-prominent-action"];
+      expect(
+        contrastRatio(variables["--color-prominent-action-foreground"], fill),
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(fill).toBe(
+        variables[
+          themeId === "lecturn-chat" && appearance === "dark"
+            ? "--color-primary-foreground"
+            : themeId === DEFAULT_MOBILE_THEME_ID || themeId === "lecturn-chat"
+              ? "--color-foreground"
+              : "--color-primary"
+        ],
+      );
+    }
+  });
+
+  it.each(["grove", "ocean", "ember", "iris"] as const)(
+    "keeps %s grouped cards and floating controls visibly tinted",
+    (themeId) => {
+      const saturation = (hex: string) => {
+        const channels = hex
+          .slice(1)
+          .match(/.{2}/g)!
+          .map((value) => parseInt(value, 16));
+        return (Math.max(...channels) - Math.min(...channels)) / Math.max(...channels);
+      };
+      for (const appearance of ["light", "dark"] as const) {
+        const variables = getMobileThemeVariables(themeId, appearance);
+        const sheet = variables["--color-sheet-solid"];
+        const group = variables["--color-grouped-card"];
+        expect(contrastRatio(group, sheet)).toBeGreaterThanOrEqual(1.06);
+        for (const role of ["--color-composer-surface", "--color-glass-fallback"] as const) {
+          const surface = flattenThemeColor(variables[role], sheet);
+          expect(contrastRatio(surface, sheet)).toBeGreaterThanOrEqual(1.06);
+          expect(contrastRatio(variables["--color-placeholder"], surface)).toBeGreaterThanOrEqual(
+            4.5,
+          );
+          if (appearance === "dark") {
+            expect(saturation(surface)).toBeGreaterThanOrEqual(saturation(sheet));
+          }
+        }
+        if (appearance === "dark") {
+          expect(saturation(group)).toBeGreaterThanOrEqual(saturation(sheet));
         }
       }
     },

@@ -4,6 +4,7 @@ import {
   makeTraceSink,
   type SignalExport,
 } from "@lecturn/shared/observability";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as SharedObservability from "@lecturn/shared/observability";
 import * as OtelEnvironment from "@lecturn/shared/otelEnvironment";
 import {
@@ -625,12 +626,16 @@ const layerTelemetry = Layer.unwrap(
   Effect.gen(function* () {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const endpoints = yield* resolveOtlpEndpoints;
+    // `host.name` keeps machines apart on a shared collector; one set in
+    // `OTEL_RESOURCE_ATTRIBUTES` wins, since explicit attributes override it.
     const resource = {
       serviceName: "lecturn-desktop",
+      serviceVersion: environment.appVersion,
       attributes: {
         "service.namespace": "lecturn",
         "service.runtime": "desktop",
         "service.mode": environment.isDevelopment ? "development" : "packaged",
+        "host.name": endpoints.resourceAttributes["host.name"] || (yield* HostProcess.Hostname),
       },
     };
 

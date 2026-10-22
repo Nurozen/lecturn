@@ -46,11 +46,13 @@ running half-upgraded. See `packages/client-runtime/src/connection/compatibility
 `effect_sql_migrations` records `migration_id` and `name`, but the migrator compares ids only:
 rows at or below the recorded maximum are skipped without checking names. A database that ran a
 local or fork migration under an id this build later assigns to a different migration therefore
-never receives this build's migration at that id. `runMigrations` logs each recorded id whose name
-differs from the manifest so the skipped schema change is diagnosable. Upstream's guidance is that
-a fork has no safe id range in this ledger, because any id at or below a future upstream id masks
-that upstream migration forever. Lecturn instead keeps its own ids and renumbers upstream
-migrations above them, as described next.
+never receives this build's migration at that id. After repairing supported V2 preview ledgers,
+[`runMigrations`](../../apps/server/src/persistence/Migrations.ts) rejects history that would skip a
+requested V2 migration (Lecturn id 70 and later) without its expected name. Earlier name clashes
+remain warnings for compatibility with site-local migrations. Upstream's guidance is that a fork
+has no safe id range in this ledger, because any id at or below a future upstream id masks that
+upstream migration forever. Lecturn instead keeps its own ids and renumbers upstream migrations
+above them, as described next.
 
 ## Lecturn ledger and fork data
 

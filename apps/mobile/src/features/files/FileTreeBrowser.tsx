@@ -54,6 +54,7 @@ const FileTreeRow = memo(function FileTreeRow(props: {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={node.path}
+      accessibilityState={{ selected: props.selected }}
       onPressIn={() => {
         if (node.kind === "file") {
           props.onPreviewFile?.(node.path);
@@ -68,7 +69,7 @@ const FileTreeRow = memo(function FileTreeRow(props: {
       }}
       className={cn(
         "mx-2 min-h-[42px] flex-row items-center gap-2 rounded-[12px] px-2 active:bg-subtle",
-        props.selected && "bg-subtle-strong",
+        props.selected && "bg-thread-selected",
       )}
       style={{ paddingLeft: 8 + depth * 18 }}
     >
@@ -87,7 +88,7 @@ const FileTreeRow = memo(function FileTreeRow(props: {
         className={cn(
           "min-w-0 flex-1 text-sm leading-normal",
           props.selected
-            ? "font-lecturn-bold text-foreground"
+            ? "font-lecturn-bold text-thread-selected-foreground"
             : node.ignored
               ? "font-lecturn-medium text-foreground-tertiary"
               : "font-lecturn-medium text-foreground-secondary",

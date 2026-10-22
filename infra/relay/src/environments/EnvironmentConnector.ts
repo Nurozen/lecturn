@@ -458,7 +458,7 @@ const make = Effect.gen(function* () {
       yield* managedAccess.check(input.userId, "managedConnect", undefined, input.environmentId);
       const now = yield* DateTime.now;
       const expiresAt = DateTime.add(now, { minutes: 2 });
-      const nonce = yield* crypto.randomUUIDv4.pipe(
+      const nonce = yield* crypto.randomUUIDv4().pipe(
         Effect.mapError(
           (cause) =>
             new EnvironmentMintRequestFailed({
@@ -472,7 +472,7 @@ const make = Effect.gen(function* () {
         iss: relayIssuer,
         aud: `lecturn-env:${link.environmentId}`,
         sub: input.userId,
-        jti: yield* crypto.randomUUIDv4.pipe(
+        jti: yield* crypto.randomUUIDv4().pipe(
           Effect.mapError(
             (cause) =>
               new EnvironmentMintRequestFailed({
@@ -616,7 +616,7 @@ const make = Effect.gen(function* () {
       yield* managedAccess.check(input.userId, "managedConnect", undefined, input.environmentId);
       const now = yield* DateTime.now;
       const expiresAt = DateTime.add(now, { minutes: 2 });
-      const nonce = yield* crypto.randomUUIDv4.pipe(
+      const nonce = yield* crypto.randomUUIDv4().pipe(
         Effect.mapError(
           (cause) =>
             new EnvironmentMintRequestFailed({
@@ -630,7 +630,7 @@ const make = Effect.gen(function* () {
         iss: relayIssuer,
         aud: `lecturn-env:${link.environmentId}`,
         sub: input.userId,
-        jti: yield* crypto.randomUUIDv4.pipe(
+        jti: yield* crypto.randomUUIDv4().pipe(
           Effect.mapError(
             (cause) =>
               new EnvironmentMintRequestFailed({
