@@ -24,6 +24,11 @@ const { newThread, prepareThread, refresh, Wrapper, Trigger } = vi.hoisted(() =>
     </>
   ),
 }));
+vi.mock("~/state/session", async (original) => ({
+  ...(await original<typeof import("~/state/session")>()),
+  useEnvironmentScope: () => true,
+  readEnvironmentScope: () => true,
+}));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => [] }));
 // Lecturn: the panel sits in an AccountSurface, a Connect-account decoration that reads its own
 // atoms; a plain wrapper keeps the panel's behavior under test without them.
@@ -46,7 +51,7 @@ vi.mock("~/hooks/useSettings", () => ({
 vi.mock("~/hooks/useLiveRefresh", () => ({ useLiveRefresh: () => {} }));
 vi.mock("~/hooks/useHandleNewThread", () => ({ useNewThreadHandler: () => newThread }));
 vi.mock("~/lib/sourceControlActions", () => ({
-  usePreparePullRequestThreadAction: () => ({ run: prepareThread }),
+  usePreparePullRequestThreadAction: () => ({ run: prepareThread, isAllowed: true, error: null }),
 }));
 vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => vi.fn() }));
 vi.mock("~/state/pullRequests", async (importOriginal) => ({

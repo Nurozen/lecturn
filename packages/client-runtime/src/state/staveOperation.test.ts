@@ -193,7 +193,7 @@ describe("runStaveOperation", () => {
       const calls: FakeClientCalls = { run: [], observe: [] };
       const seen: StaveOperationState["status"][] = [];
       const outcome = yield* runStaveOperation({
-        client: fakeClient(
+        transport: fakeClient(
           { run: Stream.fromIterable([phaseStarted(0, "verify"), finished(1)]) },
           calls,
         ),
@@ -220,7 +220,7 @@ describe("runStaveOperation", () => {
       Effect.gen(function* () {
         const calls: FakeClientCalls = { run: [], observe: [] };
         const outcome = yield* runStaveOperation({
-          client: fakeClient(
+          transport: fakeClient(
             {
               run: Stream.fromIterable([
                 phaseStarted(0, "create space"),
@@ -262,7 +262,7 @@ describe("runStaveOperation", () => {
     Effect.gen(function* () {
       const calls: FakeClientCalls = { run: [], observe: [] };
       const outcome = yield* runStaveOperation({
-        client: fakeClient(
+        transport: fakeClient(
           {
             run: Stream.concat(
               Stream.fromIterable([phaseStarted(0, "pre-flight")]),
@@ -300,7 +300,7 @@ describe("runStaveOperation", () => {
         ]) {
           const calls: FakeClientCalls = { run: [], observe: [] };
           const outcome = yield* runStaveOperation({
-            client: fakeClient({ run: Stream.fail(failure) }, calls),
+            transport: fakeClient({ run: Stream.fail(failure) }, calls),
             environmentId,
             operationId,
             operation,
@@ -317,7 +317,7 @@ describe("runStaveOperation", () => {
     Effect.gen(function* () {
       const calls: FakeClientCalls = { run: [], observe: [] };
       const outcome = yield* runStaveOperation({
-        client: fakeClient(
+        transport: fakeClient(
           {
             run: Stream.fromIterable([phaseStarted(0, "create space")]),
             observe: Stream.fail(
@@ -343,7 +343,7 @@ describe("runStaveOperation", () => {
     Effect.gen(function* () {
       const calls: FakeClientCalls = { run: [], observe: [] };
       const outcome = yield* runStaveOperation({
-        client: fakeClient(
+        transport: fakeClient(
           {
             run: Stream.fail(
               new StaveOperationRejectedError({

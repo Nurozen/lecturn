@@ -20,6 +20,7 @@ const harness = vi.hoisted(() => ({
   sendCommand: vi.fn(async () => {
     throw new Error("Acknowledged retries must not send another server command");
   }),
+  canOperate: true,
   manager: null as unknown as ReturnType<
     typeof import("./thread-outbox-manager").createThreadOutboxManager
   >,
@@ -114,6 +115,11 @@ vi.mock("./threads", () => ({
 
 vi.mock("./use-atom-command", () => ({
   useAtomCommand: () => harness.sendCommand,
+}));
+
+vi.mock("./session", () => ({
+  readEnvironmentScope: () => harness.canOperate,
+  useEnvironmentsWithScope: () => new Set(),
 }));
 
 vi.mock("./use-thread-outbox", async () => {
@@ -233,6 +239,7 @@ beforeEach(() => {
   harness.sendCommand.mockClear();
   appAtomRegistry.set(dispatchingQueuedMessageIdAtom, null);
   appAtomRegistry.set(acknowledgedThreadMessagesAtom, []);
+  harness.canOperate = true;
   harness.draftFile.setDocument({ schemaVersion: 1, drafts: {} });
 });
 
@@ -292,6 +299,27 @@ describe("thread outbox attachment preparation", () => {
     await expect(preparing).resolves.toEqual({ status: "abandoned" });
     expect(remainingMessages()).toEqual([edited]);
     expect(harness.removePersistedFile).not.toHaveBeenCalled();
+  });
+
+  it("keeps a denied message queued without starting its attachment upload", async () => {
+    const message = queuedMessage({
+      messageId: "denied-queued-message",
+      text: "Keep this queued",
+      fileUri: "file:///documents/keep.pdf",
+    });
+    await harness.manager.enqueue(message);
+    harness.prepareTurnAttachments.mockResolvedValueOnce({
+      status: "ready",
+      attachments: [],
+      draftAttachments: message.attachments,
+      pendingAttachmentIds: [],
+    });
+    harness.canOperate = false;
+    await expect(prepareQueuedMessageAttachments(message)).resolves.toEqual({
+      status: "abandoned",
+    });
+    expect(harness.prepareTurnAttachments).not.toHaveBeenCalled();
+    expect(remainingMessages()).toEqual([message]);
   });
 
   it("abandons reused uploads when an editor saves changed text during verification", async () => {

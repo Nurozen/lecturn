@@ -7,6 +7,8 @@ import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { scopedThreadKey, scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 import {
+  AuthOrchestrationOperateScope,
+  AuthSourceControlWriteScope,
   type EnvironmentId,
   type PullRequestAction,
   type PullRequestMergeMethod,
@@ -73,6 +75,7 @@ import type { ReviewCommentContext } from "~/reviewCommentContext";
 import { useProjects, useServerConfigs } from "~/state/entities";
 import { useEnvironments } from "~/state/environments";
 import { useEnvironmentQuery } from "~/state/query";
+import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { useLiveRefresh } from "~/hooks/useLiveRefresh";
 import {
   pullRequestEnvironment,
@@ -588,6 +591,7 @@ export function PullRequestDetailPanel({
   // Which handoff is preparing, keyed so a per-finding button can say "Preparing..." on itself
   // alone. One at a time whatever the key: they all check the same pull request out.
   const [handoff, setHandoff] = useState<string | null>(null);
+  const canWriteSourceControl = useEnvironmentScope(environmentId, AuthSourceControlWriteScope);
   const detailQuery = useEnvironmentQuery(
     pullRequestEnvironment.detail({ environmentId, input: reference }),
   );
@@ -708,6 +712,25 @@ export function PullRequestDetailPanel({
         ? null
         : {
             ...coreDetail,
+            capabilities: canWriteSourceControl
+              ? coreDetail.capabilities
+              : {
+                  ...coreDetail.capabilities,
+                  reactions: false,
+                  edit: { changeRequest: false, comment: false },
+                },
+            viewerPermissions: canWriteSourceControl
+              ? coreDetail.viewerPermissions
+              : {
+                  ...coreDetail.viewerPermissions,
+                  actions: [],
+                  comment: false,
+                  resolve: false,
+                  verdicts: [],
+                  requestReviewers: false,
+                  updateMethods: [],
+                  labels: false,
+                },
             author: activity?.author ?? coreDetail.author,
             reviewers: activity?.reviewers ?? coreDetail.reviewers,
             comments: activity?.comments ?? [],
@@ -717,7 +740,7 @@ export function PullRequestDetailPanel({
             commits: activity?.commits ?? [],
             reactions: activity?.reactions ?? [],
           },
-    [activity, coreDetail],
+    [activity, canWriteSourceControl, coreDetail],
   );
   const handoffSummary = detail ?? sharedSummary;
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -893,8 +916,12 @@ export function PullRequestDetailPanel({
     appliedForcedToken.current = forcedRefreshToken;
     void refreshFromHost();
   }, [forcedRefreshToken, refreshFromHost]);
-  const runAction = useAtomCommand(pullRequestEnvironment.runAction, { reportFailure: false });
-  const postComment = useAtomCommand(pullRequestEnvironment.comment, { reportFailure: false });
+  const runAction = useAtomCommand(pullRequestEnvironment.runAction, {
+    reportFailure: false,
+  });
+  const postComment = useAtomCommand(pullRequestEnvironment.comment, {
+    reportFailure: false,
+  });
   // Which action is in flight, not merely that one is: every control here is disabled while any
   // of them runs, but only the button that was pressed may say what it is doing.
   const [pendingAction, setPendingAction] = useState<PullRequestAction | null>(null);
@@ -976,6 +1003,7 @@ export function PullRequestDetailPanel({
   const canPrepareCheckout = !isStaveProject(actingProject);
   const checkoutRoot =
     acting?.workspaceRoot ?? detail?.workspaceRoot ?? project?.workspaceRoot ?? null;
+  const canOperateThread = useEnvironmentScope(actingEnvironmentId, AuthOrchestrationOperateScope);
   const prepareThread = usePreparePullRequestThreadAction({
     environmentId: actingEnvironmentId,
     cwd: checkoutRoot,
@@ -1037,13 +1065,13 @@ export function PullRequestDetailPanel({
     method?: PullRequestMergeMethod,
     updateMethod?: PullRequestUpdateMethod,
   ) => {
-    if (pendingAction !== null) return false;
+    if (!canWriteSourceControl || pendingAction !== null) return false;
     setPendingAction(action);
     return finishAction(action, method, updateMethod);
   };
 
   const performCommentAction = async (body: string, action: "close" | "reopen") => {
-    if (pendingAction !== null) return { commentPosted: false };
+    if (!canWriteSourceControl || pendingAction !== null) return { commentPosted: false };
     setPendingAction(action);
     const commentResult = await postComment({
       environmentId,
@@ -1063,7 +1091,7 @@ export function PullRequestDetailPanel({
 
   const saveTitle = async (next: string) => {
     const title = next.trim();
-    if (detail === null || titleSaving) return;
+    if (!canWriteSourceControl || detail === null || titleSaving) return;
     if (title.length === 0 || title === detail.title) {
       setTitleScope(null);
       return;
@@ -1094,6 +1122,8 @@ export function PullRequestDetailPanel({
   };
 
   const attachTarget = composerDraftTarget ?? null;
+  const canPrepareWorktree = prepareThread.isAllowed && canOperateThread;
+  const canFixFindings = attachTarget !== null || canPrepareWorktree;
   const handoffLabels = pullRequestHandoffLabels(attachTarget !== null);
 
   const writeTaskToComposer = (target: ScopedThreadRef | DraftId, task: ThreadTask) => {
@@ -1231,6 +1261,18 @@ export function PullRequestDetailPanel({
       return;
     }
     if (checkoutRoot === null) return;
+    if (
+      !prepareThread.isAllowed ||
+      !readEnvironmentScope(actingEnvironmentId, AuthSourceControlWriteScope)
+    ) {
+      return;
+    }
+    if (
+      mode === "worktree" &&
+      !readEnvironmentScope(actingEnvironmentId, AuthOrchestrationOperateScope)
+    ) {
+      return;
+    }
     setHandoff(kind);
     // The menu closes on the press and takes its "Preparing..." label with it, so this is the
     // only thing answering for the checkout. It carries no timeout of its own: a loading toast
@@ -1602,7 +1644,7 @@ export function PullRequestDetailPanel({
           <TooltipPopup>Check out this pull request</TooltipPopup>
         </Tooltip>
         <MenuPopup align="end" side="bottom">
-          <MenuItem onClick={() => startCheckout("worktree")}>
+          <MenuItem disabled={!canPrepareWorktree} onClick={() => startCheckout("worktree")}>
             <GitBranchIcon className="mt-1 size-3.5 shrink-0 self-start" />
             <span className="flex min-w-0 flex-col">
               <span>In a separate worktree</span>
@@ -1611,7 +1653,7 @@ export function PullRequestDetailPanel({
               </span>
             </span>
           </MenuItem>
-          <MenuItem onClick={() => startCheckout("local")}>
+          <MenuItem disabled={!prepareThread.isAllowed} onClick={() => startCheckout("local")}>
             <FolderGit2Icon className="mt-1 size-3.5 shrink-0 self-start" />
             <span className="flex min-w-0 flex-col">
               <span>In this repository</span>
@@ -2100,7 +2142,10 @@ export function PullRequestDetailPanel({
                       </span>
                     </span>
                   </MenuItem>
-                  <MenuItem disabled={handoff !== null} onClick={startFixFindings}>
+                  <MenuItem
+                    disabled={handoff !== null || !canFixFindings}
+                    onClick={startFixFindings}
+                  >
                     <HammerIcon className="size-3.5" />
                     {handoff === "findings" ? "Preparing..." : handoffLabels.fixFindings}
                   </MenuItem>
@@ -2467,7 +2512,9 @@ export function PullRequestDetailPanel({
                       <Button
                         size="xs"
                         variant="outline"
-                        disabled={titleSaving || titleDraft.trim().length === 0}
+                        disabled={
+                          !canWriteSourceControl || titleSaving || titleDraft.trim().length === 0
+                        }
                         onClick={() => void saveTitle(titleDraft)}
                       >
                         {titleSaving ? "Saving..." : "Save"}
@@ -2790,7 +2837,7 @@ export function PullRequestDetailPanel({
                   pendingFinding={handoff}
                   fixFindingLabel={handoffLabels.fixFinding}
                   fixCheckLabel={handoffLabels.fixCheck}
-                  onFixFinding={startFixFinding}
+                  {...(canFixFindings ? { onFixFinding: startFixFinding } : {})}
                   onRefresh={refreshDetail}
                   onRefreshChecks={refreshFromHost}
                 />
@@ -2830,7 +2877,7 @@ export function PullRequestDetailPanel({
                     onSelectedCommitChange={selectCodeCommit}
                     pendingFinding={handoff}
                     fixFindingLabel={handoffLabels.fixFinding}
-                    onFixFinding={startFixFinding}
+                    {...(canFixFindings ? { onFixFinding: startFixFinding } : {})}
                     onRefresh={refreshDetail}
                     refreshToken={codeRefreshToken}
                   />

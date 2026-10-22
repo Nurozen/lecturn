@@ -32,6 +32,7 @@ import {
 } from "@lecturn/contracts";
 import { renderAssistantCitationsAsText } from "@lecturn/shared/assistantCitations";
 import { encodeComposerContextFragment } from "@lecturn/shared/composerContextClipboard";
+import { parseThreadLinkHref } from "@lecturn/shared/threadLinks";
 import {
   parseComposerContextHref,
   collectComposerContextReferences,
@@ -1282,16 +1283,20 @@ function useMarkdownStyles(
           );
         }
         const linkHref = presentation.href;
+        // A thread link opens the thread in the app, through the feed's link handler.
+        const isThreadLink = parseThreadLinkHref(href) !== null;
         return (
           <MarkdownLinkLabelContext.Provider value="other">
             <NativeText
               className="underline"
               onPress={
-                linkHref
-                  ? () => {
-                      void tryOpenExternalUrl(linkHref, "markdown-link");
-                    }
-                  : undefined
+                isThreadLink
+                  ? () => onLinkPress(href)
+                  : linkHref
+                    ? () => {
+                        void tryOpenExternalUrl(linkHref, "markdown-link");
+                      }
+                    : undefined
               }
               style={{ color: markdownLinkColor }}
             >
@@ -2353,6 +2358,14 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     : themeColorWithAlpha(theme["--color-user-bubble"], 0.9);
   const onMarkdownLinkPress = useCallback(
     (href: string) => {
+      const threadLink = parseThreadLinkHref(href);
+      if (threadLink) {
+        navigation.navigate("Thread", {
+          environmentId: String(threadLink.environmentId),
+          threadId: String(threadLink.threadId),
+        });
+        return;
+      }
       const presentation = resolveMarkdownLinkPresentation(href);
       if (presentation.kind === "file") {
         const relativePath = resolveWorkspaceRelativeFilePath(

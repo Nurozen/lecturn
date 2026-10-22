@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.cloudgatherer.lecturn</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Lecturn</name>
+  <summary>Desktop GUI for coding agents</summary>
+  <developer id="net.cloudgatherer">
+    <name>Cloud Gatherer Labs LLC</name>
+  </developer>
+  <description>
+    <p>
+      Lecturn is a desktop app for coding agents. Work with your existing agent
+      subscriptions, review code changes, and run commands in your projects.
+    </p>
+    <p>
+      Connect from desktop, web, or mobile to continue working remotely.
+    </p>
+  </description>
+  <launchable type="desktop-id">lecturn.desktop</launchable>
+  <icon type="stock">lecturn</icon>
+  <provides>
+    <binary>lecturn</binary>
+  </provides>
+  <categories>
+    <category>Development</category>
+  </categories>
+  <url type="homepage">https://lecturn.cloudgatherer.net</url>
+  <url type="bugtracker">https://github.com/Nurozen/lecturn/issues</url>
+  <url type="vcs-browser">https://github.com/Nurozen/lecturn</url>
+</component>

@@ -347,7 +347,7 @@ const consumeStaveOperationStream = <R>(
   });
 
 export interface RunStaveOperationInput<E, R> {
-  readonly client: StaveOperationClient<E, R>;
+  readonly transport: StaveOperationClient<E, R>;
   readonly environmentId: EnvironmentId;
   readonly operationId: string;
   readonly operation: StaveOperation;
@@ -359,11 +359,11 @@ export interface RunStaveOperationInput<E, R> {
 }
 
 function observeFrom<E, R>(
-  client: StaveOperationClient<E, R>,
+  transport: StaveOperationClient<E, R>,
   environmentId: EnvironmentId,
 ): (state: StaveOperationState) => Stream.Stream<StaveProgressEvent, E, R> {
   return (state) =>
-    client.observeOperation(environmentId, {
+    transport.observeOperation(environmentId, {
       operationId: state.operationId,
       ...(state.lastSequence === null ? {} : { afterSequence: state.lastSequence }),
     });
@@ -379,7 +379,7 @@ export function runStaveOperation<E, R>(
 ): Effect.Effect<StaveOperationOutcome<R>, never, R> {
   const state = input.initialState ?? initialStaveOperationState(input.operationId);
   return consumeStaveOperationStream(
-    input.client.runOperation(input.environmentId, {
+    input.transport.runOperation(input.environmentId, {
       operationId: input.operationId,
       operation: input.operation,
       ...(input.afterSequence === undefined ? {} : { afterSequence: input.afterSequence }),
@@ -388,13 +388,13 @@ export function runStaveOperation<E, R>(
       state,
       starting: input.initialState === undefined && input.afterSequence === undefined,
       onState: input.onState,
-      observe: observeFrom(input.client, input.environmentId),
+      observe: observeFrom(input.transport, input.environmentId),
     },
   );
 }
 
 export interface ReattachStaveOperationInput<E, R> {
-  readonly client: StaveOperationClient<E, R>;
+  readonly transport: StaveOperationClient<E, R>;
   readonly environmentId: EnvironmentId;
   /** The retained state; its `lastSequence` is the resume cursor. */
   readonly state: StaveOperationState;
@@ -405,7 +405,7 @@ export interface ReattachStaveOperationInput<E, R> {
 function reattachStaveOperation<E, R>(
   input: ReattachStaveOperationInput<E, R>,
 ): Effect.Effect<StaveOperationOutcome<R>, never, R> {
-  const observe = observeFrom(input.client, input.environmentId);
+  const observe = observeFrom(input.transport, input.environmentId);
   if (isStaveOperationTerminal(input.state.status)) {
     const outcome: StaveOperationOutcome<R> = {
       state: input.state,
@@ -449,7 +449,7 @@ export function createStaveOperationManager<R, E>(
     ),
   );
 
-  const client: StaveOperationClient<unknown, EnvironmentRegistry> = {
+  const transport: StaveOperationClient<unknown, EnvironmentRegistry> = {
     runOperation: (environmentId, input) =>
       runStreamInEnvironment(environmentId, runStream(WS_METHODS.staveRunOperation, input)),
     observeOperation: (environmentId, input) =>
@@ -472,7 +472,7 @@ export function createStaveOperationManager<R, E>(
       const afterSequence =
         input.afterSequence ?? (resuming ? (existing.lastSequence ?? undefined) : undefined);
       return runStaveOperation({
-        client,
+        transport,
         environmentId: input.environmentId,
         operationId: input.operationId,
         operation: input.operation,
@@ -495,7 +495,7 @@ export function createStaveOperationManager<R, E>(
     execute: (input, registry) => {
       const atom = stateAtom(input.operationId);
       return reattachStaveOperation({
-        client,
+        transport,
         environmentId: input.environmentId,
         state: registry.get(atom),
         onState: (state) => registry.set(atom, state),

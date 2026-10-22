@@ -167,7 +167,9 @@ export default defineConfig({
       "lecturn/no-inline-schema-compile": "warn",
       "lecturn/no-manual-effect-runtime-in-tests": "error",
       "lecturn/no-native-title-tooltip": "error",
+      "lecturn/no-raw-mcp-registration": "error",
       "lecturn/no-test-in-loop": "error",
+      "lecturn/no-rpc-permission-bypass": ["error", { allowRawClientAccess: true }],
       "lecturn/no-unscoped-has": "error",
       "lecturn/namespace-node-imports": "error",
       "lecturn/prefer-catch-tags": "error",
@@ -175,9 +177,67 @@ export default defineConfig({
     },
     overrides: [
       {
+        files: ["packages/client-runtime/src/state/**", "apps/{web,mobile,desktop}/src/**"],
+        rules: { "lecturn/no-rpc-permission-bypass": ["error", { allowRawClientAccess: false }] },
+      },
+      {
+        // Only shared command boundaries install the session-backed permission guard.
+        files: [
+          "packages/client-runtime/src/state/runtime.ts",
+          "packages/client-runtime/src/state/vcsAction.ts",
+        ],
+        rules: {
+          "lecturn/no-rpc-permission-bypass": [
+            "error",
+            { allowGuardInstallation: true, allowRawClientAccess: false },
+          ],
+        },
+      },
+      {
+        // These clients are session metadata, device streams, and an Expo update adapter.
+        files: [
+          "apps/web/src/components/settings/ConnectionsSettings.tsx",
+          "apps/mobile/src/features/updates/app-updates.ts",
+          "apps/web/src/components/device/DevicePhoneViewport.tsx",
+          "apps/web/src/components/device/DeviceDuoViewport.tsx",
+        ],
+        rules: { "lecturn/no-rpc-permission-bypass": ["error", { allowRawClientAccess: true }] },
+      },
+      {
+        // Clerk's multi-account `clerk.client` sessions and the Android chat widget publisher.
+        files: [
+          "apps/web/src/cloud/{accountAppearance,accountTokens,withActiveAccount}.ts",
+          "apps/web/src/cloud/managedAuth.tsx",
+          "apps/web/src/components/clerk/useConnectSignOut.{logic.ts,tsx}",
+          "apps/web/src/hooks/useAndroidChatBridge.ts",
+          "apps/mobile/src/features/cloud/{accountTokenReaders,mobileAccountSignOut}.ts",
+          "apps/mobile/src/features/cloud/MultiAccountCloudAuthBridge.tsx",
+          "apps/mobile/src/features/settings/mobileAccountProfile.logic.ts",
+        ],
+        rules: { "lecturn/no-rpc-permission-bypass": ["error", { allowRawClientAccess: true }] },
+      },
+      {
+        // Incompatible hosts cannot open a normal session; their updater uses a dedicated socket.
+        files: ["packages/client-runtime/src/connection/outdatedHostUpdate.ts"],
+        rules: { "lecturn/no-rpc-permission-bypass": "off" },
+      },
+      {
+        // RPC implementation and transport test fixtures need the raw client.
+        files: [
+          "packages/client-runtime/src/rpc/**",
+          "**/*.{test,spec}.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+        ],
+        rules: { "lecturn/no-rpc-permission-bypass": "off" },
+      },
+      {
         // The one place that reads the host platform to seed the injected references.
         files: ["packages/shared/src/hostProcess.ts"],
         rules: { "lecturn/no-global-process-runtime": "off" },
+      },
+      {
+        // The registration helpers that only accept handlers built by McpToolAccess.
+        files: ["apps/server/src/mcp/McpHttpServer.ts"],
+        rules: { "lecturn/no-raw-mcp-registration": "off" },
       },
       {
         files: ["apps/web/src/**"],

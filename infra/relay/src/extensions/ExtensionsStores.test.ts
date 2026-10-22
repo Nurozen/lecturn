@@ -6,6 +6,7 @@ import { makeDecisionsService } from "../decisions/DecisionsService.ts";
 import { parseDecisionsConfig } from "../decisions/DecisionsConfig.ts";
 import { makeExtensionsService, ExtensionsService } from "./ExtensionsService.ts";
 import { parseExtensionsConfig } from "./ExtensionsConfig.ts";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no synchronous UUID for these plain fixture helpers.
 import * as NodeCrypto from "node:crypto";
 import * as NodeCryptoLayer from "@effect/platform-node/NodeCrypto";
 import * as PgClient from "@effect/sql-pg/PgClient";

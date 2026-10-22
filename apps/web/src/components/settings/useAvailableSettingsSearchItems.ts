@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useAtomValue } from "@effect/atom-react";
-import { AuthAccessWriteScope } from "@lecturn/contracts";
+import { AuthEnvironmentMaintainScope } from "@lecturn/contracts";
 
 import { knownConnectAccountsAtom } from "~/cloud/knownAccounts";
 import { usePrimaryCloudLinkState } from "~/cloud/primaryCloudLinkState";
@@ -8,10 +8,10 @@ import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { isElectron } from "~/env";
 import { isLocalEnvironmentDisabled } from "~/localEnvironment";
 import { desktopWslStateAtom } from "~/state/desktopWslState";
-import { useEnvironments } from "~/state/environments";
+import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { useEnvironmentQuery } from "~/state/query";
-import { usePrimarySessionState } from "~/environments/primary";
 import { primaryServerConfigAtom } from "~/state/server";
+import { useEnvironmentScope } from "~/state/session";
 import { isWslSettingsRowVisible } from "./ConnectionsSettings.logic";
 import { isProviderSettingsEnvironmentAvailable } from "./ProviderSettingsPanel.logic";
 import type { SettingsScopeSearch } from "./settingsScope";
@@ -22,24 +22,20 @@ import {
 
 export function useAvailableSettingsSearchItems(scopeSearch: SettingsScopeSearch = {}) {
   const { environments } = useEnvironments();
-  const primarySessionState = usePrimarySessionState();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   // Stave settings live on the primary server, so its rows follow that config.
   const primaryServerConfig = useAtomValue(primaryServerConfigAtom);
   const hasConnectAccountMenu = useAtomValue(knownConnectAccountsAtom).accountIds.length > 0;
   const localEnvironmentDisabled = isLocalEnvironmentDisabled();
+  const canMaintain = useEnvironmentScope(primaryEnvironmentId, AuthEnvironmentMaintainScope);
+  const canManageLocalBackend = !localEnvironmentDisabled && canMaintain;
   const desktopWsl = useEnvironmentQuery(
-    isElectron && !localEnvironmentDisabled ? desktopWslStateAtom : null,
+    isElectron && canManageLocalBackend ? desktopWslStateAtom : null,
   );
   const cloudLinkState = usePrimaryCloudLinkState().data;
   // Same fallback as the Relay publishing row: older servers imply a tunnel from `linked`.
   const managedTunnelActive =
     cloudLinkState?.managedTunnelActive ?? cloudLinkState?.linked ?? false;
-  const canManageLocalBackend =
-    !localEnvironmentDisabled &&
-    (isElectron ||
-      ((primarySessionState.data?.authenticated &&
-        primarySessionState.data.scopes?.includes(AuthAccessWriteScope)) ??
-        false));
 
   return useMemo(
     () =>

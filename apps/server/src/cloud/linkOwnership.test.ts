@@ -1,4 +1,5 @@
 import { setDeviceRelayConflict } from "./DeviceRelayReservation.ts";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no ed25519 key generation.
 import * as NodeCrypto from "node:crypto";
 import { expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";

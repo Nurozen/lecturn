@@ -9,7 +9,10 @@ import "vite-plus/test/config";
 import { defineConfig, type Connect, type Plugin } from "vite-plus";
 import pkg from "./package.json" with { type: "json" };
 
-import { DEV_PROXIED_PATH_PREFIXES } from "@lecturn/shared/devProxy";
+import {
+  DEV_PROXIED_ORIGIN_PRESERVING_PREFIXES,
+  DEV_PROXIED_PATH_PREFIXES,
+} from "@lecturn/shared/devProxy";
 
 import {
   assertAndroidHostPublicConfig,
@@ -195,7 +198,7 @@ export default defineConfig(({ command }) => {
         "@clerk/clerk-js",
         "@clerk/react/internal",
         "@pierre/diffs",
-        "@pierre/diffs/editor",
+        "@pierre/diffs/edit",
         "@pierre/diffs/react",
         "@pierre/diffs/worker/worker.js",
         "effect/Array",
@@ -257,7 +260,7 @@ export default defineConfig(({ command }) => {
                 prefix,
                 {
                   target: devProxyTarget,
-                  changeOrigin: true,
+                  changeOrigin: !DEV_PROXIED_ORIGIN_PRESERVING_PREFIXES.has(prefix),
                   ...(prefix === "/ws" || prefix === "/api" ? { ws: true } : {}),
                 },
               ]),

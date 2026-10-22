@@ -1,3 +1,4 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- synchronous ids, lease tokens and HMAC signing inside SQL row helpers.
 import * as NodeCrypto from "node:crypto";
 import {
   DecisionEvidence,

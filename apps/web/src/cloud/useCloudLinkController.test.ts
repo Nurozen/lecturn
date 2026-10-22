@@ -79,7 +79,9 @@ vi.mock("./linkEnvironmentAtoms", () => ({
   unlinkPrimaryEnvironment: "unlink",
   updatePrimaryEnvironmentPreferences: "preferences",
 }));
+vi.mock("../state/session", () => ({ readEnvironmentScope: () => true }));
 vi.mock("./primaryCloudLinkState", () => ({
+  readCachedPrimaryCloudLinkState: () => mocks.state,
   usePrimaryCloudLinkState: () => ({
     data: mocks.state,
     target: { environmentId: "desktop" },

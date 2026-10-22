@@ -1,3 +1,5 @@
+import { resolveFilesystemReadAccess } from "@lecturn/client-runtime/state/filesystem";
+import { environmentSession } from "../../state/session";
 import { useCallback, useEffect, useMemo } from "react";
 import * as DateTime from "effect/DateTime";
 
@@ -10,6 +12,7 @@ import type { EnvironmentId, ThreadId } from "@lecturn/contracts";
 
 import { useCheckpointDiff } from "../../state/queries";
 import { useEnvironmentQuery } from "../../state/query";
+import { useEnvironmentPresentation } from "../../state/presentation";
 import { reviewEnvironment } from "../../state/review";
 import { useSelectedThreadProjection } from "../../state/use-thread-detail";
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
@@ -38,13 +41,24 @@ export function useReviewSections(input: {
 }) {
   const { environmentId, reviewCache, threadId } = input;
   const enabled = input.enabled ?? true;
+  const fileAccessSession = useEnvironmentQuery(
+    environmentId === undefined ? null : environmentSession.sessionStateAtom(environmentId),
+  );
+  const fileEnvironment = useEnvironmentPresentation(environmentId ?? null);
+  const fileAccess = resolveFilesystemReadAccess({
+    isCatalogReady: fileEnvironment.isReady,
+    connection: fileEnvironment.presentation?.connection ?? null,
+    session: fileAccessSession.data,
+    sessionError: fileAccessSession.error,
+  });
+  const { canReadFiles } = fileAccess;
   const selectedThread = useSelectedThreadProjection();
   const { selectedThreadProject } = useThreadSelection();
   const { selectedThreadGitCwd, selectedThreadGitRepository } = useSelectedThreadWorktree(
     input.repoKey,
   );
   const diffPreview = useEnvironmentQuery(
-    enabled && environmentId !== undefined && selectedThreadGitCwd !== null
+    canReadFiles && enabled && environmentId !== undefined && selectedThreadGitCwd !== null
       ? reviewEnvironment.diffPreview({
           environmentId,
           input: { cwd: selectedThreadGitCwd },
@@ -80,37 +94,46 @@ export function useReviewSections(input: {
       ) as Record<string, ThreadCheckpointSummary>,
     [readyCheckpoints],
   );
-  const reviewSections = useMemo(
-    () =>
-      buildReviewSectionItems({
-        checkpoints: readyCheckpoints,
-        gitSections: diffPreview.data?.sources ?? reviewCache.gitSections,
-        turnDiffById: reviewCache.turnDiffById,
-        loadingTurnIds,
-        loadingGitSections: diffPreview.isPending,
-        ...(!checkpointsAvailable && selectedThreadGitRepository
-          ? { gitCwd: selectedThreadGitRepository.cwd }
-          : {}),
-      }).map((section) =>
-        checkpointsAvailable || !selectedThreadGitRepository
-          ? section
-          : {
-              ...section,
-              title: `${selectedThreadGitRepository.repoName} / ${section.title}`,
-              subtitle: `${selectedThreadGitRepository.cwd}${section.subtitle ? ` · ${section.subtitle}` : ""}`,
-            },
-      ),
-    [
-      diffPreview.isPending,
-      checkpointsAvailable,
-      selectedThreadGitRepository,
-      diffPreview.data?.sources,
+  const reviewSections = useMemo(() => {
+    const sections = buildReviewSectionItems({
+      checkpoints: readyCheckpoints,
+      gitSections:
+        canReadFiles || fileAccess.isPending
+          ? (diffPreview.data?.sources ?? reviewCache.gitSections)
+          : [],
+      turnDiffById: reviewCache.turnDiffById,
       loadingTurnIds,
-      readyCheckpoints,
-      reviewCache.gitSections,
-      reviewCache.turnDiffById,
-    ],
-  );
+      loadingGitSections: fileAccess.isPending || diffPreview.isPending,
+      ...(!checkpointsAvailable && selectedThreadGitRepository
+        ? { gitCwd: selectedThreadGitRepository.cwd }
+        : {}),
+    }).map((section) =>
+      checkpointsAvailable || !selectedThreadGitRepository
+        ? section
+        : {
+            ...section,
+            title: `${selectedThreadGitRepository.repoName} / ${section.title}`,
+            subtitle: `${selectedThreadGitRepository.cwd}${section.subtitle ? ` · ${section.subtitle}` : ""}`,
+          },
+    );
+    // Keep the selected section while its grant loads, without displaying cached host files.
+    return fileAccess.isPending
+      ? sections.map((section) =>
+          section.kind === "turn" ? section : { ...section, diff: null, isLoading: true },
+        )
+      : sections;
+  }, [
+    canReadFiles,
+    checkpointsAvailable,
+    diffPreview.data?.sources,
+    diffPreview.isPending,
+    fileAccess.isPending,
+    loadingTurnIds,
+    readyCheckpoints,
+    reviewCache.gitSections,
+    reviewCache.turnDiffById,
+    selectedThreadGitRepository,
+  ]);
   const selectedSection = useMemo(
     () =>
       reviewSections.find((section) => section.id === reviewCache.selectedSectionId) ??
@@ -204,10 +227,16 @@ export function useReviewSections(input: {
   );
 
   return {
-    error: diffPreview.error ?? activeTurnDiff.error ?? reviewCache.asyncState.error,
+    error:
+      diffPreview.error ??
+      activeTurnDiff.error ??
+      reviewCache.asyncState.error ??
+      (selectedSection === null && !fileAccess.isPending && !canReadFiles
+        ? (fileAccess.error ?? "This connection cannot read local diffs.")
+        : null),
     isSelectedSectionPending:
       selectedSection?.kind === "turn" ? activeTurnDiff.isPending : diffPreview.isPending,
-    loadingGitDiffs: diffPreview.isPending,
+    loadingGitDiffs: fileAccess.isPending || diffPreview.isPending,
     diffPreviewRevision: diffPreview.data
       ? DateTime.formatIso(diffPreview.data.generatedAt)
       : undefined,

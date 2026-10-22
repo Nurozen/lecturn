@@ -1,4 +1,5 @@
 import { DecisionsService } from "../decisions/DecisionsService.ts";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no synchronous UUID for these plain fixture helpers.
 import * as NodeCrypto from "node:crypto";
 import { describe, expect, it } from "@effect/vitest";
 import * as PgClient from "@effect/sql-pg/PgClient";

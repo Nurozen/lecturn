@@ -1,16 +1,16 @@
 import { hasPhoneConnectAccount } from "../../lib/androidHostAccess";
 import { PhoneConnectAccountSection } from "../cloud/PhoneConnectAccount";
 import { useAtomValue } from "@effect/atom-react";
-import { AuthAdministrativeScopes, AuthRelayWriteScope } from "@lecturn/contracts";
+import { AuthRelayReadScope, AuthRelayWriteScope } from "@lecturn/contracts";
 import * as Option from "effect/Option";
 import { Link } from "@tanstack/react-router";
 
 import { connectAccountProfilesAtom } from "~/cloud/connectAccounts";
 import { usePrimaryCloudLinkState } from "~/cloud/primaryCloudLinkState";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
-import { usePrimarySessionState } from "~/environments/primary";
 import { usePrimaryEnvironment } from "~/state/environments";
 import { relayEnvironmentDiscovery } from "~/state/relay";
+import { useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "../ui/button";
 import { CloudLinkRow } from "./ConnectionsSettings";
@@ -20,17 +20,14 @@ import { relayHealthStatus } from "./RelaySettings.logic";
 function ConfiguredRelaySettings() {
   const primary = usePrimaryEnvironment();
   const link = usePrimaryCloudLinkState();
-  const session = usePrimarySessionState();
   const profiles = useAtomValue(connectAccountProfilesAtom);
   const accounts = useAtomValue(relayEnvironmentDiscovery.accountStatesValueAtom);
   const refreshDiscovery = useAtomCommand(relayEnvironmentDiscovery.refresh, {
     reportFailure: false,
   });
-  const scopes = window.desktopBridge
-    ? AuthAdministrativeScopes
-    : session.data?.authenticated
-      ? session.data.scopes
-      : undefined;
+  const primaryEnvironmentId = primary?.environmentId ?? null;
+  const canReadRelay = useEnvironmentScope(primaryEnvironmentId, AuthRelayReadScope);
+  const canManageRelay = useEnvironmentScope(primaryEnvironmentId, AuthRelayWriteScope);
   const ownerId = link.data?.cloudUserId;
   const owner = ownerId ? profiles.get(ownerId) : undefined;
   const accountState = ownerId ? accounts.get(ownerId) : undefined;
@@ -112,7 +109,7 @@ function ConfiguredRelaySettings() {
           relay belongs to one account. Switching accounts does not move its projects. Unlink it
           before publishing to another account.
         </p>
-        <CloudLinkRow canManageRelay={scopes?.includes(AuthRelayWriteScope) ?? false} />
+        <CloudLinkRow canReadRelay={canReadRelay} canManageRelay={canManageRelay} />
       </SettingsSection>
     </>
   );

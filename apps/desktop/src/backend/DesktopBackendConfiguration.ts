@@ -106,6 +106,7 @@ const WSL_FORWARDED_ENV_NAMES = [
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
   "LECTURN_STAVE",
+  "LECTURN_TELEMETRY_ENABLED",
   // Otherwise the WSL server keeps exporting to endpoints from the bootstrap.
   "LECTURN_OTEL_SDK_DISABLED",
   "OTEL_SDK_DISABLED",
@@ -640,6 +641,8 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       desktopTelemetryFd: 4,
       desktopTelemetryControlFd: 5,
       ...(input.extensions ? { extensions: input.extensions } : {}),
+      desktopBrowserFd: 6,
+      desktopBrowserControlFd: 7,
       ...Option.match(input.resourceMonitorPath, {
         onNone: () => ({}),
         onSome: (resourceMonitorPath) => ({ resourceMonitorPath }),

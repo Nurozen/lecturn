@@ -28,12 +28,12 @@ import { StaveMemoryWiring, noop as noopMemoryWiring } from "./StaveMemoryWiring
  *
  * `StaveRpcRuntime` holds the server-lifetime pieces (last failure, the
  * space-status cache); `makeStaveRpcHandlers` builds one handler record per
- * connection around the auth/tracing wrappers `ws.ts` already uses.
+ * connection. `RpcInstrumentation` traces them and `RpcScopeAuthorization` checks their scopes in the
+ * group middleware, so the handlers carry no wrappers of their own.
  *
  * @module staveRpcHandlers
  */
 import {
-  type EnvironmentAuthorizationError,
   type StaveDryRunInput,
   type StaveLastFailure,
   type StaveListSpacesInput,
@@ -517,25 +517,7 @@ export const runtimeLayer = Layer.effect(StaveRpcRuntime, makeRuntime());
 
 // ── Per-connection handlers ───────────────────────────────────
 
-/** The auth + tracing closures `makeWsRpcLayer` wraps every unary handler in. */
-export interface StaveRpcWrappers {
-  readonly observeRpcEffect: <A, E, R>(
-    method: string,
-    effect: Effect.Effect<A, E, R>,
-    traceAttributes?: Readonly<Record<string, unknown>>,
-  ) => Effect.Effect<A, E | EnvironmentAuthorizationError, R>;
-  readonly observeRpcStream: <A, E, R>(
-    method: string,
-    stream: Stream.Stream<A, E, R>,
-    traceAttributes?: Readonly<Record<string, unknown>>,
-  ) => Stream.Stream<A, E | EnvironmentAuthorizationError, R>;
-}
-
-const TRACE_ATTRIBUTES = { "rpc.aggregate": "stave" } as const;
-
-export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* (
-  wrappers: StaveRpcWrappers,
-) {
+export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* () {
   const config = yield* ServerConfig;
   const serverSettings = yield* ServerSettingsService;
   const binary = yield* StaveBinary;
@@ -741,41 +723,18 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
     );
 
   return {
-    [WS_METHODS.staveGetStatus]: (_input: Record<string, never>) =>
-      wrappers.observeRpcEffect(WS_METHODS.staveGetStatus, getStatus, TRACE_ATTRIBUTES),
+    [WS_METHODS.staveGetStatus]: (_input: Record<string, never>) => getStatus,
     [WS_METHODS.staveSpaceStatus]: (input: { readonly workspaceRoot: string }) =>
-      wrappers.observeRpcEffect(
-        WS_METHODS.staveSpaceStatus,
-        spaceStatus(input.workspaceRoot),
-        TRACE_ATTRIBUTES,
-      ),
+      spaceStatus(input.workspaceRoot),
     [WS_METHODS.staveSagaStatus]: (input: { readonly sagaRoot: string }) =>
-      wrappers.observeRpcEffect(
-        WS_METHODS.staveSagaStatus,
-        requireEnabled.pipe(Effect.andThen(runtime.sagaStatus(input.sagaRoot))),
-        TRACE_ATTRIBUTES,
-      ),
-    [WS_METHODS.staveListRepos]: (_input: Record<string, never>) =>
-      wrappers.observeRpcEffect(WS_METHODS.staveListRepos, listRepos, TRACE_ATTRIBUTES),
-    [WS_METHODS.staveListSpaces]: (input: StaveListSpacesInput) =>
-      wrappers.observeRpcEffect(WS_METHODS.staveListSpaces, listSpaces(input), TRACE_ATTRIBUTES),
-    [WS_METHODS.staveListSagas]: (_input: Record<string, never>) =>
-      wrappers.observeRpcEffect(WS_METHODS.staveListSagas, listSagas, TRACE_ATTRIBUTES),
-    [WS_METHODS.staveMemoryProviders]: (_input: Record<string, never>) =>
-      wrappers.observeRpcEffect(WS_METHODS.staveMemoryProviders, memoryProviders, TRACE_ATTRIBUTES),
-    [WS_METHODS.staveDryRun]: (input: StaveDryRunInput) =>
-      wrappers.observeRpcEffect(WS_METHODS.staveDryRun, dryRun(input), TRACE_ATTRIBUTES),
-    [WS_METHODS.staveRunOperation]: (input: StaveRunOperationInput) =>
-      wrappers.observeRpcStream(
-        WS_METHODS.staveRunOperation,
-        runOperation(input),
-        TRACE_ATTRIBUTES,
-      ),
+      requireEnabled.pipe(Effect.andThen(runtime.sagaStatus(input.sagaRoot))),
+    [WS_METHODS.staveListRepos]: (_input: Record<string, never>) => listRepos,
+    [WS_METHODS.staveListSpaces]: (input: StaveListSpacesInput) => listSpaces(input),
+    [WS_METHODS.staveListSagas]: (_input: Record<string, never>) => listSagas,
+    [WS_METHODS.staveMemoryProviders]: (_input: Record<string, never>) => memoryProviders,
+    [WS_METHODS.staveDryRun]: (input: StaveDryRunInput) => dryRun(input),
+    [WS_METHODS.staveRunOperation]: (input: StaveRunOperationInput) => runOperation(input),
     [WS_METHODS.staveObserveOperation]: (input: StaveObserveOperationInput) =>
-      wrappers.observeRpcStream(
-        WS_METHODS.staveObserveOperation,
-        observeOperation(input),
-        TRACE_ATTRIBUTES,
-      ),
+      observeOperation(input),
   };
 });

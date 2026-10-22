@@ -25,6 +25,7 @@ import type {
   VcsStatusRemoteResult,
   VcsStatusResult,
   VcsStatusStreamEvent,
+  VcsStatusSubscriptionInput,
 } from "@lecturn/contracts";
 import { mergeGitStatusParts } from "@lecturn/shared/git";
 import * as KeyedLock from "@lecturn/shared/KeyedLock";
@@ -263,7 +264,7 @@ export class VcsStatusBroadcaster extends Context.Service<
       cwd: string,
     ) => Effect.Effect<VcsStatusRemoteResult | null, GitManagerServiceError>;
     readonly streamStatus: (
-      input: VcsStatusInput,
+      input: VcsStatusSubscriptionInput,
       options?: StreamStatusOptions,
     ) => Stream.Stream<VcsStatusStreamEvent, GitManagerServiceError>;
   }
@@ -770,15 +771,19 @@ export const make = Effect.gen(function* () {
         const initialLocal = yield* getOrLoadLocalStatus(cwd);
         const cachedStatus = yield* getCachedStatus(cwd);
         const initialRemote = cachedStatus?.remote?.value ?? null;
-        yield* retainRemotePoller(
-          cwd,
-          input.cwd,
-          options?.automaticRemoteRefreshInterval ??
-            Effect.succeed(DEFAULT_VCS_STATUS_REFRESH_INTERVAL),
-          cachedStatus?.remote === null || cachedStatus?.remote === undefined,
-        );
-
-        const release = releaseRemotePoller(cwd, input.cwd).pipe(Effect.ignore, Effect.asVoid);
+        if (input.includeRemote !== false) {
+          yield* retainRemotePoller(
+            cwd,
+            input.cwd,
+            options?.automaticRemoteRefreshInterval ??
+              Effect.succeed(DEFAULT_VCS_STATUS_REFRESH_INTERVAL),
+            cachedStatus?.remote === null || cachedStatus?.remote === undefined,
+          );
+        }
+        const release =
+          input.includeRemote === false
+            ? Effect.void
+            : releaseRemotePoller(cwd, input.cwd).pipe(Effect.ignore, Effect.asVoid);
 
         return Stream.concat(
           Stream.make({

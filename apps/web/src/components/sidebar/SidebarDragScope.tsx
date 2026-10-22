@@ -22,7 +22,7 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@lecturn/client-runtime/state/runtime";
-import type { ScopedThreadRef } from "@lecturn/contracts";
+import { AuthOrchestrationOperateScope, type ScopedThreadRef } from "@lecturn/contracts";
 import {
   createContext,
   useCallback,
@@ -36,6 +36,7 @@ import {
 } from "react";
 import type { useThreadActions } from "../../hooks/useThreadActions";
 import { environmentServerConfigsAtom } from "../../state/server";
+import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { cn } from "../../lib/utils";
 import { accountByEnvironmentIdAtom } from "../../cloud/connectAccounts";
 import { knownConnectAccountsAtom } from "../../cloud/knownAccounts";
@@ -175,10 +176,15 @@ export function SidebarDragScope(props: {
   const configs = useAtomValue(environmentServerConfigsAtom);
   const accounts = useAtomValue(accountByEnvironmentIdAtom);
   const known = useAtomValue(knownConnectAccountsAtom);
+  // A drop writes every reassigned row, so a row is only movable when its account is signed in
+  // and its connection may change threads. Checked again before each write.
   const canAccess = useCallback(
     (thread: EnvironmentThreadShell) => {
       const account = accounts.get(thread.environmentId);
-      return !account || !known.needsSignIn.includes(account);
+      return (
+        (!account || !known.needsSignIn.includes(account)) &&
+        readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope)
+      );
     },
     [accounts, known],
   );
@@ -718,11 +724,17 @@ export function ScopedSortableThreadRow(props: {
 }) {
   const scope = useContext(DragScope);
   const key = keyOf(props.thread);
+  // Subscribes the row to its grant so a scope change re-enables or blocks pickup immediately.
+  const canOperateThread = useEnvironmentScope(
+    props.thread.environmentId,
+    AuthOrchestrationOperateScope,
+  );
   const sortable = useSortable({
     id: key,
     disabled: {
       draggable:
         props.dragDisabled === true ||
+        !canOperateThread ||
         !scope?.enabledKeys.has(key) ||
         !scope.draggableKeys.has(key),
       droppable: !scope?.enabledKeys.has(key),

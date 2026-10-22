@@ -12,6 +12,7 @@ const query = vi.hoisted(() => ({
 vi.mock("./terminal", () => ({
   terminalEnvironment: { attach: () => "attach", metadata: () => "metadata" },
 }));
+vi.mock("./session", () => ({ useEnvironmentScope: () => true }));
 vi.mock("./query", () => ({
   useEnvironmentQuery: (kind: string) =>
     kind === "attach" ? query.attach : { data: null, error: null },

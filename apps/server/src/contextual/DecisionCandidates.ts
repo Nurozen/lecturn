@@ -1,3 +1,4 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- synchronous sha256 fingerprints; Effect Crypto digest is async.
 import * as NodeCrypto from "node:crypto";
 import {
   ContextualDecisionCandidate,

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vite-plus/test";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no HMAC for signing this webhook fixture.
 import * as NodeCrypto from "node:crypto";
 import { createTeamStripeClient, InvalidTeamWebhookError } from "./TeamStripeClient.ts";
 import { STRIPE_API_VERSION } from "../billing/StripeClient.ts";

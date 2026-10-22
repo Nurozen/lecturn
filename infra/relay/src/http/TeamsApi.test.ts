@@ -2,6 +2,7 @@ import { EnvironmentCredentials } from "../environments/EnvironmentCredentials.t
 import { EnvironmentLinks } from "../environments/EnvironmentLinks.ts";
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no HMAC for signing this webhook fixture.
 import * as NodeCrypto from "node:crypto";
 import { createClerkClient, verifyToken } from "@clerk/backend";
 import { Effect, Layer, Option, Redacted } from "effect";

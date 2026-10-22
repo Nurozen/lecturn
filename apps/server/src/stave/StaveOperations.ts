@@ -78,6 +78,7 @@ import { TerminalManager } from "../terminal/Manager.ts";
 import { WorkspacePaths } from "../workspace/WorkspacePaths.ts";
 import { isPathUnder, StaveSpaceLock } from "./StaveSpaceLock.ts";
 import * as Stream from "effect/Stream";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- synchronous sha256 keys and randomUUID ids inside pure helpers.
 import * as NodeCrypto from "node:crypto";
 
 import { StaveOrchestration } from "./StaveOrchestration.ts";
