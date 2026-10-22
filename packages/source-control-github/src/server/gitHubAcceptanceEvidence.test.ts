@@ -2,7 +2,8 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
-import { GitHubApi, type GitHubRestResponse } from "./GitHubApi.ts";
+import { GitHubRest, type GitHubRestResponse } from "./GitHubRest.ts";
+import type { AcceptanceCandidates } from "./acceptanceEvidence.graphql.ts";
 import {
   evaluateGitHubRequiredChecks,
   listGitHubAcceptanceCandidates,
@@ -53,23 +54,44 @@ const restResponse = (value: unknown, truncated = false): GitHubRestResponse => 
   truncated,
   invalidUtf8: false,
 });
-const graphqlCandidates = (nodes: ReadonlyArray<unknown>) =>
-  JSON.stringify({
-    data: { repository: { pullRequests: { totalCount: nodes.length, nodes } } },
-  });
+const graphqlCandidates = (
+  nodes: ReadonlyArray<{
+    readonly number: number;
+    readonly url: string;
+    readonly headRefName: string;
+    readonly headRefOid: string;
+    readonly headRepository: { readonly name: string } | null;
+    readonly headRepositoryOwner: { readonly login: string } | null;
+    readonly state: string;
+  }>,
+) =>
+  ({
+    repository: {
+      pullRequests: {
+        totalCount: nodes.length,
+        nodes: nodes.map((node) => ({
+          ...node,
+          headRepositoryOwner:
+            node.headRepositoryOwner === null
+              ? null
+              : { __typename: "User", login: node.headRepositoryOwner.login },
+        })),
+      },
+    },
+  }) as unknown as AcceptanceCandidates.Result;
 const readFixture = Effect.fn("readFixture")(function* (
   values: ReadonlyArray<unknown>,
   truncated = false,
 ) {
   const calls: Array<{ readonly host: string; readonly path: string }> = [];
   const program = Effect.gen(function* () {
-    const api = yield* GitHubApi;
+    const api = yield* GitHubRest;
     const evidence = yield* readGitHubAcceptanceEvidence(api, input);
     return { evidence, calls };
   });
   return yield* program.pipe(
     Effect.provide(
-      Layer.mock(GitHubApi)({
+      Layer.mock(GitHubRest)({
         rest: (request) => {
           const value = values[calls.length];
           calls.push({ host: request.host, path: request.path });
@@ -186,11 +208,11 @@ describe("GitHub revision-bound acceptance evidence", () => {
         [`repos/acme/app/commits/${head}/statuses?per_page=100&page=1`]: [],
       };
       const evidence = yield* Effect.gen(function* () {
-        const api = yield* GitHubApi;
+        const api = yield* GitHubRest;
         return yield* readGitHubAcceptanceEvidence(api, input);
       }).pipe(
         Effect.provide(
-          Layer.mock(GitHubApi)({
+          Layer.mock(GitHubRest)({
             rest: (request) => {
               paths.push(request.path);
               const response = restResponse(pages[request.path]);
@@ -265,8 +287,27 @@ describe("GitHub revision-bound acceptance evidence", () => {
     "keeps verified fork deliveries while rejecting other forks with the same branch and head",
     () =>
       Effect.gen(function* () {
-        const api = yield* GitHubApi;
-        const result = yield* listGitHubAcceptanceCandidates(api, {
+        const readCandidates = () =>
+          Effect.succeed(
+            graphqlCandidates(
+              [
+                { number: 21, owner: "alice", state: "OPEN", revision: head },
+                { number: 22, owner: "alice", state: "MERGED", revision: head },
+                { number: 23, owner: "alice", state: "MERGED", revision: base },
+                { number: 24, owner: "bob", state: "OPEN", revision: head },
+                { number: 25, owner: "acme", state: "OPEN", revision: head },
+              ].map((row) => ({
+                number: row.number,
+                url: `https://${input.host}/acme/app/pull/${row.number}`,
+                headRefName: "feature/fix",
+                headRefOid: row.revision,
+                headRepository: { name: "app" },
+                headRepositoryOwner: { login: row.owner },
+                state: row.state,
+              })),
+            ),
+          );
+        const result = yield* listGitHubAcceptanceCandidates(readCandidates, {
           ...input,
           branch: "feature/fix",
           headRevision: head,
@@ -275,7 +316,7 @@ describe("GitHub revision-bound acceptance evidence", () => {
         });
         expect(result.items.map((item) => item.number)).toEqual([21, 22]);
         expect(result.truncated).toBe(false);
-        const crossHost = yield* listGitHubAcceptanceCandidates(api, {
+        const crossHost = yield* listGitHubAcceptanceCandidates(readCandidates, {
           ...input,
           branch: "feature/fix",
           headRevision: head,
@@ -283,110 +324,89 @@ describe("GitHub revision-bound acceptance evidence", () => {
           sourceRepository: "alice/app",
         }).pipe(Effect.result);
         expect(Result.isFailure(crossHost)).toBe(true);
-      }).pipe(
-        Effect.provide(
-          Layer.mock(GitHubApi)({
-            graphql: () =>
-              Effect.succeed(
-                graphqlCandidates(
-                  [
-                    { number: 21, owner: "alice", state: "OPEN", revision: head },
-                    { number: 22, owner: "alice", state: "MERGED", revision: head },
-                    { number: 23, owner: "alice", state: "MERGED", revision: base },
-                    { number: 24, owner: "bob", state: "OPEN", revision: head },
-                    { number: 25, owner: "acme", state: "OPEN", revision: head },
-                  ].map((row) => ({
-                    number: row.number,
-                    url: `https://${input.host}/acme/app/pull/${row.number}`,
-                    headRefName: "feature/fix",
-                    headRefOid: row.revision,
-                    headRepository: { name: "app" },
-                    headRepositoryOwner: { login: row.owner },
-                    state: row.state,
-                  })),
-                ),
-              ),
-          }),
-        ),
-      ),
+        const unverifiable = yield* listGitHubAcceptanceCandidates(
+          () => Effect.succeed({ repository: null }),
+          {
+            ...input,
+            branch: "feature/fix",
+            headRevision: head,
+            sourceHost: input.host,
+            sourceRepository: "alice/app",
+          },
+        ).pipe(Effect.result);
+        expect(Result.isFailure(unverifiable)).toBe(true);
+      }),
   );
 
   it.effect(
     "discovers exact source repo and branch, retaining current merged PRs and excluding old deliveries or fork namesakes",
     () =>
       Effect.gen(function* () {
-        let request: { readonly host: string; readonly variables?: unknown } | undefined;
-        const result = yield* Effect.gen(function* () {
-          const api = yield* GitHubApi;
-          return yield* listGitHubAcceptanceCandidates(api, {
+        let request: AcceptanceCandidates.Variables | undefined;
+        const result = yield* listGitHubAcceptanceCandidates(
+          (variables) => {
+            request = variables;
+            return Effect.succeed(
+              graphqlCandidates([
+                {
+                  number: 7,
+                  url: "https://github.example.com/acme/app/pull/7",
+                  headRefOid: head,
+                  headRepository: { name: "app" },
+                  headRepositoryOwner: { login: "acme" },
+                  headRefName: "feature/fix",
+                  state: "MERGED",
+                },
+                {
+                  number: 8,
+                  url: "https://github.example.com/acme/app/pull/8",
+                  headRefOid: head,
+                  headRepository: { name: "app" },
+                  headRepositoryOwner: { login: "acme" },
+                  headRefName: "other",
+                  state: "OPEN",
+                },
+                {
+                  number: 10,
+                  url: "https://github.example.com/acme/app/pull/10",
+                  headRefName: "feature/fix",
+                  state: "MERGED",
+                  headRefOid: "c".repeat(40),
+                  headRepository: { name: "app" },
+                  headRepositoryOwner: { login: "acme" },
+                },
+                {
+                  number: 11,
+                  url: "https://github.example.com/acme/app/pull/11",
+                  headRefName: "feature/fix",
+                  state: "OPEN",
+                  headRefOid: head,
+                  headRepository: { name: "app" },
+                  headRepositoryOwner: { login: "other-fork" },
+                },
+                {
+                  number: 9,
+                  url: "https://github.example.com/acme/app/pull/9",
+                  headRefOid: head,
+                  headRepository: { name: "app" },
+                  headRepositoryOwner: { login: "acme" },
+                  headRefName: "feature/fix",
+                  state: "CLOSED",
+                },
+              ]),
+            );
+          },
+          {
             ...input,
             branch: "feature/fix",
             headRevision: head,
             sourceHost: input.host,
             sourceRepository: input.repository,
-          });
-        }).pipe(
-          Effect.provide(
-            Layer.mock(GitHubApi)({
-              graphql: (input) => {
-                request = input;
-                return Effect.succeed(
-                  graphqlCandidates([
-                    {
-                      number: 7,
-                      url: "https://github.example.com/acme/app/pull/7",
-                      headRefOid: head,
-                      headRepository: { name: "app" },
-                      headRepositoryOwner: { login: "acme" },
-                      headRefName: "feature/fix",
-                      state: "MERGED",
-                    },
-                    {
-                      number: 8,
-                      url: "https://github.example.com/acme/app/pull/8",
-                      headRefOid: head,
-                      headRepository: { name: "app" },
-                      headRepositoryOwner: { login: "acme" },
-                      headRefName: "other",
-                      state: "OPEN",
-                    },
-                    {
-                      number: 10,
-                      url: "https://github.example.com/acme/app/pull/10",
-                      headRefName: "feature/fix",
-                      state: "MERGED",
-                      headRefOid: "c".repeat(40),
-                      headRepository: { name: "app" },
-                      headRepositoryOwner: { login: "acme" },
-                    },
-                    {
-                      number: 11,
-                      url: "https://github.example.com/acme/app/pull/11",
-                      headRefName: "feature/fix",
-                      state: "OPEN",
-                      headRefOid: head,
-                      headRepository: { name: "app" },
-                      headRepositoryOwner: { login: "other-fork" },
-                    },
-                    {
-                      number: 9,
-                      url: "https://github.example.com/acme/app/pull/9",
-                      headRefOid: head,
-                      headRepository: { name: "app" },
-                      headRepositoryOwner: { login: "acme" },
-                      headRefName: "feature/fix",
-                      state: "CLOSED",
-                    },
-                  ]),
-                );
-              },
-            }),
-          ),
+          },
         );
         expect(result.items.map((item) => item.number)).toEqual([7]);
         expect(result.truncated).toBe(false);
-        expect(request?.host).toBe("github.example.com");
-        expect(request?.variables).toEqual({ owner: "acme", name: "app", head: "feature/fix" });
+        expect(request).toEqual({ owner: "acme", name: "app", head: "feature/fix" });
       }),
   );
 });

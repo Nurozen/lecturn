@@ -35,8 +35,8 @@ import { EmptyState } from "../../components/EmptyState";
 import { GlassSurface } from "../../components/GlassSurface";
 import { LoadingScreen } from "../../components/LoadingScreen";
 import { MaterialScreenContent } from "../../components/MaterialScreenContent";
-import { MaterialButton } from "../../components/MaterialButton";
-import { MaterialIconButton } from "../../components/MaterialIconButton";
+import { Button } from "../../components/Button";
+import { IconButton } from "../../components/IconButton";
 import { environmentCatalog } from "../../connection/catalog";
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { terminalEnvironment } from "../../state/terminal";
@@ -1296,14 +1296,14 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
               {Platform.OS === "android" && !keyboardState.isVisible ? (
                 <View className="min-h-14 flex-row items-center gap-2 bg-card-alt px-2">
                   {selectedThread && hasNativeTerminalSurface() ? (
-                    <MaterialButton
+                    <Button
                       label="Attach output"
                       tone="text"
                       onPress={() => setCaptureRequest((value) => value + 1)}
                     />
                   ) : null}
                   <View className="flex-1" />
-                  <MaterialIconButton
+                  <IconButton
                     accessibilityLabel="Show keyboard"
                     disabled={!canOperateTerminal}
                     icon="keyboard"

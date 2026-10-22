@@ -1,4 +1,10 @@
-import { EnvironmentId, AuthRelayReadScope, AuthRelayWriteScope } from "@lecturn/contracts";
+import {
+  EnvironmentId,
+  AuthRelayReadScope,
+  AuthRelayWriteScope,
+  type EnvironmentCloudLinkStateResult,
+} from "@lecturn/contracts";
+import type { RelayManagedEndpointProviderKind } from "@lecturn/contracts/relay";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { serverEnvironment } from "../state/server";
 import { threadDecisionEnvironment } from "../state/threadDecisions";
@@ -38,6 +44,26 @@ export interface CloudLinkDesiredState {
   readonly unlink?: boolean;
   /** Omit to leave the webhook-hold setting as it is. */
   readonly holdWebhooksWhileOffline?: boolean;
+}
+
+/**
+ * Whether the link has a working managed tunnel. The local tunnel config can
+ * outlive a relay link that drifted to publish-only, and clients then get
+ * `endpoint_provider_not_managed`. So when relay discovery has this
+ * environment's record, it must also say managed. Older environment servers
+ * predate managedTunnelActive; for them a link always implies a tunnel. A link
+ * the relay rejected (usually after a Deregister) gives no access at all.
+ */
+function isManagedTunnelActive(
+  linkState: EnvironmentCloudLinkStateResult,
+  relayProviderKind: RelayManagedEndpointProviderKind | undefined,
+) {
+  const localManagedTunnel = linkState.managedTunnelActive ?? linkState.linked;
+  return (
+    linkState.linkRevoked !== true &&
+    localManagedTunnel &&
+    (relayProviderKind === undefined || relayProviderKind === "cloudflare_tunnel")
+  );
 }
 
 /**
@@ -95,6 +121,11 @@ export function useCloudLinkController(
   }, [userId]);
   const [subscriptionRequiredFor, setSubscriptionRequiredFor] = useState<string | null>(null);
   const subscriptionRequired = Boolean(userId && subscriptionRequiredFor === userId);
+  const relayEnvironments = useAtomValue(relayEnvironmentDiscovery.stateValueAtom).environments;
+  const primaryEnvironmentId = primaryCloudLinkState.target?.environmentId;
+  const relayProviderKind = primaryEnvironmentId
+    ? relayEnvironments.get(primaryEnvironmentId)?.environment.endpoint.providerKind
+    : undefined;
   const [operationError, setOperationError] = useState<string | null>(null);
 
   const reportUpdateFailure = (cause: unknown) => {
@@ -127,13 +158,17 @@ export function useCloudLinkController(
     });
   };
 
-  // Older environment servers predate the managedTunnelActive field; for them a
-  // link always implies a managed tunnel, so fall back to `linked`.
-  const managedTunnelActive =
-    primaryCloudLinkState.data?.managedTunnelActive ?? primaryCloudLinkState.data?.linked ?? false;
+  const linkData = primaryCloudLinkState.data;
+  // A revoked link reads as off; turning it on links again.
+  const linkRevoked = linkData?.linkRevoked ?? false;
+  const managedTunnelActive = linkData ? isManagedTunnelActive(linkData, relayProviderKind) : false;
+  // Local state says managed but the relay holds a publish-only link. Turning
+  // Lecturn Connect on relinks as managed, which repairs it.
+  const managedTunnelOutOfSync =
+    linkData !== null && !managedTunnelActive && isManagedTunnelActive(linkData, undefined);
   const publishAgentActivity = primaryCloudLinkState.data?.publishAgentActivity ?? false;
   const holdWebhooksWhileOffline = primaryCloudLinkState.data?.holdWebhooksWhileOffline ?? false;
-  const linked = primaryCloudLinkState.data?.linked ?? false;
+  const linked = !linkRevoked && (primaryCloudLinkState.data?.linked ?? false);
 
   const { onSelectAccount } = options;
   const publishAccount = describePublishAccount({
@@ -316,9 +351,10 @@ export function useCloudLinkController(
         (!linked && selectedTeam(userId) !== organizationId)
       )
         return false;
-      const currentManagedTunnel = currentLinkState.managedTunnelActive ?? currentLinkState.linked;
+      const currentManagedTunnel = isManagedTunnelActive(currentLinkState, relayProviderKind);
       if (
         !currentLinkState.linked ||
+        currentLinkState.linkRevoked === true ||
         currentManagedTunnel !== desired.managedTunnel ||
         currentLinkState.deviceRelayConflict
       ) {
@@ -372,7 +408,9 @@ export function useCloudLinkController(
     isSignedIn,
     linkState: primaryCloudLinkState,
     linked,
+    linkRevoked,
     managedTunnelActive,
+    managedTunnelOutOfSync,
     publishAgentActivity,
     holdWebhooksWhileOffline,
     operationError,

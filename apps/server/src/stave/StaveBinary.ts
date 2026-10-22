@@ -254,7 +254,7 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
       Effect.provideService(CommandResolutionCache, new Map()),
     ),
   ).pipe(
-    Effect.option,
+    Effect.map(Option.fromNullOr),
     Effect.provideService(FileSystem.FileSystem, fileSystem),
     Effect.provideService(Path.Path, path),
     Effect.provideService(HostProcess.Platform, platform),

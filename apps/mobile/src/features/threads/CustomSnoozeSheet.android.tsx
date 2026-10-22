@@ -1,4 +1,4 @@
-import { MaterialSegmentedButtons } from "../../components/MaterialSegmentedButtons.android";
+import { SegmentedControl } from "../../components/SegmentedControl.android";
 import {
   BasicAlertDialog,
   Column,
@@ -143,7 +143,7 @@ export function CustomSnoozeSheet(props: Props) {
                 modifiers={[fillMaxWidth(), padding(24, 24, 24, 16)]}
               >
                 <Text style={titleTypography}>Custom snooze</Text>
-                <MaterialSegmentedButtons
+                <SegmentedControl.Content
                   options={modes}
                   selected={mode}
                   onSelect={(value) => {
@@ -152,7 +152,7 @@ export function CustomSnoozeSheet(props: Props) {
                   }}
                 />
                 {mode === "date" ? (
-                  <MaterialSegmentedButtons
+                  <SegmentedControl.Content
                     options={[
                       {
                         value: "date",
@@ -226,7 +226,7 @@ export function CustomSnoozeSheet(props: Props) {
                       <Text style={titleTypography}>+</Text>
                     </FilledTonalIconButton>
                   </Row>
-                  <MaterialSegmentedButtons options={units} selected={unit} onSelect={setUnit} />
+                  <SegmentedControl.Content options={units} selected={unit} onSelect={setUnit} />
                 </Column>
               )}
               <Column

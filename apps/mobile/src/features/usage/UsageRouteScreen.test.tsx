@@ -71,6 +71,10 @@ vi.mock("@react-navigation/native", () => ({
   useNavigation: () => ({ setOptions() {}, goBack() {} }),
   useRoute: () => ({ params: undefined }),
 }));
+// ScreenScrollView registers its scroll view with react-native-screens on iOS.
+vi.mock("react-native-screens", () => ({
+  ScrollViewMarker: ({ children }: { children: ReactNode }) => children,
+}));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
 vi.mock("../../components/GlassCard", () => ({
   GlassCard: ({ children }: { children: ReactNode }) => children,
@@ -86,8 +90,8 @@ vi.mock("../../components/AndroidScreenHeader", () => ({
 }));
 vi.mock("../../native/StackHeader", () => ({ NativeStackScreenOptions: () => null }));
 vi.mock("../../components/AppSymbol", () => ({ SymbolView: () => null }));
-vi.mock("../../components/ControlPill", () => ({
-  ControlPillMenu: ({
+vi.mock("../../components/Menu", () => ({
+  Menu: ({
     children,
     onPressAction,
   }: {

@@ -243,7 +243,7 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
     resolveExtraMcpServers: makeCodexStaveMemoryMcpResolver({
       resolve: staveMemoryWiring.resolve,
       runner: memoryProcessRunner,
-      randomUuid: crypto.randomUUIDv4.pipe(Effect.orDie),
+      randomUuid: crypto.randomUUIDv4().pipe(Effect.orDie),
     }),
   }).pipe(
     Effect.mapError(

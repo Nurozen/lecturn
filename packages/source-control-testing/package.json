@@ -9,7 +9,7 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc-rs --noEmit"
   },
   "dependencies": {
     "@lecturn/contracts": "workspace:*",

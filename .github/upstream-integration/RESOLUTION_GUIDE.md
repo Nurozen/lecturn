@@ -98,6 +98,12 @@ The upstream must differ from this fork; neither tool defaults to self-mirroring
 Versions diverge on purpose. The fork releases independently, so keep the
 fork's version number on conflict, never upstream's.
 
+The release stage is fork-owned too. Upstream #20032 renamed its product
+stage from Alpha to Beta; Lecturn keeps `Lecturn (Alpha)` on desktop and web,
+and mobile production builds show no stage badge. The `"Beta"` literal that
+upstream added to the desktop stage type in `packages/contracts` is harmless
+because the fork never emits it.
+
 ## Fork features and where they collide
 
 **Thread forking** is the largest fork-only surface (~130 files). Fork-only
@@ -293,6 +299,56 @@ from upstream's side.
   `app.t3.context-fragment`, `data-t3-context-fragment` and `t3-context:` are
   shared wire formats with contracts and the composer editor; keep them.
   Vendored third-party tarballs keep upstream file names (`*-t3.N.tgz`).
+
+**Upstream changes taken in a Lecturn shape (sync to upstream 791feeb0).**
+
+- **Mobile shared controls.** Upstream's shared `List*` rows, `Menu`, dialog
+  and sheet APIs are adopted. The `Settings*` row components wrap them: Android
+  uses upstream's Material rows; iOS keeps the glass icon disc (now in
+  `ListRowLayout`), the `ArcaneControlHighlight` press, `GlassCard` sections and
+  glass-accent choice rows. The iOS `SegmentedControl` keeps the fork's glass
+  pill (Android uses upstream's native control). The default `lecturn` theme
+  keeps its hand-tuned surfaces; built-in themes take upstream's grouped-card
+  and prominent-action tuning under the `lecturn-chat` id.
+- **Native controls.** Upstream additions to `t3-native-controls` live in
+  `apps/mobile/modules/lecturn-native-controls` as
+  `LecturnWorkspaceNavigation*`, `LecturnMenuDismissTouchGate*` and
+  `lecturn_*` drawables; `t3-review-diff` changes go to `lecturn-review-diff`.
+- **GitHub on GraphQL.** The fork's revision-pinned REST merge and
+  agent-credit removal run on upstream's `GitHubRest` and generated GraphQL
+  client. Merge acceptance evidence uses the fork-owned
+  `packages/source-control-github/src/server/acceptanceEvidence.graphql`
+  (regenerate with graphqlgen).
+- **Migrations.** Upstream migration 62 (`ThreadFailureLookupIndex`) runs as
+  fork id 77 and skips when the index already exists. `FIRST_V2_MIGRATION_ID`
+  stays 70.
+- **CloudLink.** The fork's all-or-nothing relay config install stays; upstream's
+  revoked-link handling and write order are ported into it, and a part-way
+  failure restores the previous link.
+- **Connections settings.** Upstream's revoked and out-of-sync copy lives in the
+  always-shown Lecturn Connect row; there is no separate web-only revoked row.
+- **Waiting status (#19617).** The dot-dashed waiting icon is taken on web
+  sidebar rows and mobile thread lists. The web sidebar row keeps the fork's
+  shape with no working or waiting duration timer (removed when rows gained PR
+  and agent activity), so upstream's waiting `WorkingDuration` is not ported.
+- **Links.** Prompt links use the `lecturn` schemes and
+  `lecturn.cloudgatherer.net`; the app-link check excludes `lecturn-thread:`.
+  HTML render bridge messages use `lecturn/notifications/*`. The hosted
+  "Get Lecturn" link points at `Nurozen/lecturn` releases. Upstream's Android
+  button in the nightly mobile beta row (APK release QR) is not taken: the fork
+  publishes no `android-nightly` release yet (`mobile-android-apk.yml` is
+  inactive without Play credentials), so the row stays iOS-only until it does.
+- **Provider details.** Codex background text generation skips upstream's
+  `codex mcp list` probe because the fork's isolation already disables every
+  MCP server. Fork turn-hold results pass through upstream's turn-start
+  wrapper unchanged.
+- **Contributor policy.** `CONTRIBUTING.md` rules are the Lecturn maintainer's
+  call. Upstream's rule to close PRs written by named models (#19286) is not
+  taken; adopt it only on an explicit maintainer decision.
+- **Workflows.** `release-desktop.yml` and `cursor-hygiene-webhook.yml` stay
+  deleted on the fork; upstream fixes to them (for example the Windows ARM
+  PowerShell pin, #18573) are not ported while fork Windows arm64 builds are
+  off.
 
 ## Recurring mechanical conflicts
 

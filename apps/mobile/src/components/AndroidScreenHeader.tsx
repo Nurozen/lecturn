@@ -4,8 +4,9 @@ import { ActivityIndicator, View } from "react-native";
 import type { AppSymbolName } from "./AppSymbol";
 import { AppText as Text } from "./AppText";
 import { cn } from "../lib/cn";
-import { MaterialIconButton } from "./MaterialIconButton";
+import { IconButton } from "./IconButton";
 import { AndroidAnchoredMenu } from "./AndroidAnchoredMenu";
+import { splitAndroidHeaderActions } from "./headerMenu.android";
 import { useScaledTextRole } from "../features/settings/appearance/useScaledTextRole";
 import { useMaterialToolbarLayout } from "./useMaterialToolbarLayout";
 
@@ -16,6 +17,8 @@ export interface AndroidHeaderAction {
   readonly disabled?: boolean;
   readonly loading?: boolean;
   readonly selected?: boolean;
+  readonly destructive?: boolean;
+  readonly overflowOnly?: boolean;
 }
 
 export function AndroidHeaderIconButton(props: {
@@ -25,7 +28,7 @@ export function AndroidHeaderIconButton(props: {
   readonly disabled?: boolean;
   readonly selected?: boolean;
 }) {
-  return <MaterialIconButton {...props} tintColorClassName="accent-header-foreground" />;
+  return <IconButton {...props} tintColorClassName="accent-header-foreground" />;
 }
 
 export function AndroidScreenHeader(props: {
@@ -45,10 +48,10 @@ export function AndroidScreenHeader(props: {
     props.embedded,
   );
   const [headerWidth, setHeaderWidth] = useState(0);
-  const actions = props.actions ?? [];
-  const directCount = actions.length > 2 ? (headerWidth >= 600 ? 3 : 1) : actions.length;
-  const visibleActions = actions.slice(0, directCount);
-  const overflowActions = actions.slice(directCount);
+  const { visibleActions, overflowActions } = splitAndroidHeaderActions(
+    props.actions ?? [],
+    headerWidth >= 600,
+  );
 
   return (
     <View
@@ -61,7 +64,7 @@ export function AndroidScreenHeader(props: {
     >
       <View style={{ minHeight: materialToolbarHeight }} className="flex-row items-center gap-1">
         {props.onBack ? (
-          <MaterialIconButton
+          <IconButton
             accessibilityLabel="Navigate up"
             icon="arrow.left"
             tintColorClassName="accent-header-foreground"
@@ -115,6 +118,7 @@ export function AndroidScreenHeader(props: {
               title: action.accessibilityLabel,
               attributes: {
                 disabled: Boolean(action.disabled),
+                destructive: action.destructive,
                 state: action.selected ? "on" : undefined,
               },
             }))}
@@ -123,7 +127,7 @@ export function AndroidScreenHeader(props: {
             }
           >
             {(open) => (
-              <MaterialIconButton
+              <IconButton
                 accessibilityLabel="More actions"
                 icon="ellipsis"
                 tintColorClassName="accent-header-foreground"

@@ -829,6 +829,16 @@ describe("CursorAdapterV2", () => {
     assert.deepEqual(
       cursorRuntimeAgentPolicy({
         ...base,
+        runtimeMode: "auto",
+      }),
+      {
+        autoReview: true,
+        sandboxEnabled: true,
+      },
+    );
+    assert.deepEqual(
+      cursorRuntimeAgentPolicy({
+        ...base,
         runtimeMode: "approval-required",
       }),
       {

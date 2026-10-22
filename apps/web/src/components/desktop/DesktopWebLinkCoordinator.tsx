@@ -1,6 +1,7 @@
 import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
 import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 import type { EnvironmentId, ScopedThreadRef } from "@lecturn/contracts";
+import { promptLinkAppPath } from "@lecturn/shared/promptLinks";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
 
@@ -45,9 +46,11 @@ function threadShowingBrowser(
 }
 
 /**
- * Opens each web link or HTML file the OS hands Lecturn as the default browser
- * (macOS). With a browser panel on screen the page opens as a new tab there;
- * otherwise it starts a thread without a project, its browser panel maximized.
+ * Opens each link the OS hands Lecturn. Prompt and thread links, by `lecturn://`
+ * or as hosted-app pages, open in the app. Other web links and HTML files arrive
+ * because Lecturn is the default browser (macOS): with a browser panel on screen
+ * the page opens as a new tab there; otherwise it starts a thread without a
+ * project, its browser panel maximized.
  */
 export function DesktopWebLinkCoordinator() {
   const router = useRouter();
@@ -93,6 +96,11 @@ export function DesktopWebLinkCoordinator() {
   };
 
   const openLink = useEffectEvent(async (url: string) => {
+    const appPath = promptLinkAppPath(url);
+    if (appPath !== null) {
+      await router.navigate({ href: appPath });
+      return;
+    }
     const isFile = url.startsWith("file:");
     const routeParams = router.state.matches.at(-1)?.params ?? {};
     const threadRef =

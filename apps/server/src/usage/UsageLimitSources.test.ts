@@ -1,5 +1,6 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  ServerConfigStreamEvent,
   UsageLimitSourceId,
   type UsageLimitSourceConfig,
 } from "@lecturn/contracts";
@@ -12,7 +13,7 @@ import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
 import { BackgroundPolicy } from "../background/BackgroundPolicy.ts";
-import { ServerSettingsService } from "../serverSettings.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { make } from "./UsageLimitSources.ts";
 
 const sourceId = UsageLimitSourceId.make("hub");
@@ -91,7 +92,7 @@ function fixture() {
     make.pipe(
       Effect.provide(
         Layer.mergeAll(
-          Layer.mock(ServerSettingsService)({
+          Layer.mock(ServerSettings.ServerSettingsService)({
             getSettings: Effect.succeed({ ...DEFAULT_SERVER_SETTINGS, usageLimitSources: sources }),
             streamChanges: Stream.empty,
           }),
@@ -161,3 +162,77 @@ describe("usage source reset credits", () => {
       }).pipe(Effect.scoped),
   );
 });
+
+const encodeConfigEvent = Schema.encodeSync(ServerConfigStreamEvent);
+
+it.effect("keeps malformed source URLs encodable for config subscribers", () =>
+  Effect.gen(function* () {
+    const sources = yield* make;
+    yield* sources.refresh;
+    const snapshots = yield* sources.current;
+    expect(snapshots.map((source) => source.label)).toEqual([
+      "local-hub",
+      "opaque-hub",
+      "Named hub",
+      "hub.test:8317",
+      "Usage limit source",
+    ]);
+    expect(() =>
+      encodeConfigEvent({
+        version: 1,
+        type: "usageLimitSourcesUpdated",
+        payload: { sources: snapshots },
+      }),
+    ).not.toThrow();
+    expect(snapshots.every((source) => source.error === "No management key configured.")).toBe(
+      true,
+    );
+  }).pipe(
+    Effect.provide([
+      ServerSettings.layerTest({
+        usageLimitSources: {
+          [UsageLimitSourceId.make("local-hub")]: {
+            kind: "cliproxy",
+            url: "localhost:8317",
+            managementKey: "",
+            enabled: true,
+          },
+          [UsageLimitSourceId.make("opaque-hub")]: {
+            kind: "cliproxy",
+            url: "file:///tmp/hub",
+            managementKey: "",
+            enabled: true,
+          },
+          [UsageLimitSourceId.make("named-hub")]: {
+            kind: "cliproxy",
+            url: "localhost:8317",
+            label: "Named hub",
+            managementKey: "",
+            enabled: true,
+          },
+          [UsageLimitSourceId.make("valid-hub")]: {
+            kind: "cliproxy",
+            url: "https://hub.test:8317",
+            managementKey: "",
+            enabled: true,
+          },
+          [UsageLimitSourceId.make(" ")]: {
+            kind: "cliproxy",
+            url: "localhost:8317",
+            managementKey: "",
+            enabled: true,
+          },
+        },
+      }),
+      Layer.mock(BackgroundPolicy)({
+        shouldRunScopeWork: () => Effect.succeed(false),
+      }),
+      Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make(() => Effect.die("Unexpected network request")),
+      ),
+      NodeCrypto.layer,
+    ]),
+    Effect.scoped,
+  ),
+);

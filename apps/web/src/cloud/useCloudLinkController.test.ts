@@ -52,8 +52,12 @@ vi.mock("@clerk/react", () => ({
   }),
 }));
 vi.mock("@effect/atom-react", () => ({
-  useAtomValue: (atom: "known" | "profiles") =>
-    atom === "known" ? mocks.known : new Map([["account-a", { email: "a@example.com" }]]),
+  useAtomValue: (atom: "known" | "profiles" | "relay-discovery") =>
+    atom === "known"
+      ? mocks.known
+      : atom === "relay-discovery"
+        ? { environments: new Map() }
+        : new Map([["account-a", { email: "a@example.com" }]]),
 }));
 vi.mock("./knownAccounts", () => ({ knownConnectAccountsAtom: "known" }));
 vi.mock("../connection/catalog", () => ({ environmentCatalog: {} }));
@@ -70,7 +74,9 @@ vi.mock("@lecturn/client-runtime/relay", () => ({
   createTeamsClient: () => ({ list: mocks.teamList }),
 }));
 vi.mock("../components/ui/toast", () => ({ toastManager: { add: vi.fn() } }));
-vi.mock("../state/relay", () => ({ relayEnvironmentDiscovery: { refresh: "refresh" } }));
+vi.mock("../state/relay", () => ({
+  relayEnvironmentDiscovery: { refresh: "refresh", stateValueAtom: "relay-discovery" },
+}));
 vi.mock("../state/use-atom-command", () => ({
   useAtomCommand: (key: "link" | "unlink" | "preferences" | "refresh" | "funding") => mocks[key],
 }));

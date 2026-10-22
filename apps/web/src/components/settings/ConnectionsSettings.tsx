@@ -1834,7 +1834,9 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
   const {
     isSignedIn,
     linkState: primaryCloudLinkState,
+    linkRevoked,
     managedTunnelActive,
+    managedTunnelOutOfSync,
     publishAgentActivity,
     holdWebhooksWhileOffline,
     operationError,
@@ -1954,9 +1956,13 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
       <SettingsRow
         title={searchableSetting("lecturn-connect").title}
         description={
-          managedTunnelActive
-            ? "This environment is available to your other devices through Lecturn Connect."
-            : "Make this environment available to your other devices through Lecturn Connect."
+          linkRevoked
+            ? "This environment was removed from Lecturn Connect. Turn it on to link it again."
+            : managedTunnelActive
+              ? "This environment is available to your other devices through Lecturn Connect."
+              : managedTunnelOutOfSync
+                ? "Lecturn Connect is out of sync. This environment is linked only to publish agent activity, so other devices cannot connect. Turn Lecturn Connect on to repair it."
+                : "Make this environment available to your other devices through Lecturn Connect."
         }
         status={
           operationError ??

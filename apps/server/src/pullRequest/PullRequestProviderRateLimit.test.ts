@@ -3,7 +3,7 @@ import { assert, it } from "@effect/vitest";
 
 import * as AzureDevOpsCli from "@lecturn/source-control-azure-devops/server/AzureDevOpsCli";
 import * as BitbucketApi from "@lecturn/source-control-bitbucket/server/BitbucketApi";
-import * as GitHubApi from "@lecturn/source-control-github/server/GitHubApi";
+import * as GitHubRequestPolicy from "@lecturn/source-control-github/server/GitHubRequestPolicy";
 import * as SourceControlRateLimit from "@lecturn/source-control-core/server/SourceControlRateLimit";
 import * as GitLabCli from "@lecturn/source-control-gitlab/server/GitLabCli";
 import { azureDevOpsProviderFailure } from "@lecturn/source-control-azure-devops/server/AzureDevOpsPullRequestProvider";
@@ -16,7 +16,7 @@ const cause = new Error("redacted provider failure");
 it("classifies rate limits from every pull-request provider", () => {
   assert.deepStrictEqual(
     gitHubProviderFailure(
-      new GitHubApi.GitHubApiRateLimitError({ host: "github.com", operation: "execute" }),
+      new GitHubRequestPolicy.GitHubApiRateLimitError({ host: "github.com", operation: "execute" }),
     ),
     { reason: "rate-limited" },
   );

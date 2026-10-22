@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
-  type EnvironmentId,
+  EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
@@ -1138,6 +1138,7 @@ describe("getProviderUpdateRunToastView", () => {
     providerDriver: string,
     result: Parameters<typeof getProviderUpdateRunToastView>[0][number]["result"],
   ) => ({
+    environmentId: EnvironmentId.make(machineLabel),
     machineLabel,
     driver: driver(providerDriver),
     instanceId: instanceId(providerDriver),

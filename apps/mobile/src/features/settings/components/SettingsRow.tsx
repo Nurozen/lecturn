@@ -1,18 +1,16 @@
-import { MaterialListRow } from "../../../components/MaterialListRow";
 import { useNavigation } from "@react-navigation/native";
 import { useState, type ComponentProps } from "react";
-import { ArcaneControlHighlight } from "../../../components/ArcaneControlHighlight";
-import { Platform, Pressable, View } from "react-native";
+import { Platform, Pressable } from "react-native";
 
 import { SymbolView } from "../../../components/AppSymbol";
-import { AppText as Text } from "../../../components/AppText";
+import { ArcaneControlHighlight } from "../../../components/ArcaneControlHighlight";
+import { ListRow } from "../../../components/ListRow";
+import { ListRowLayout } from "../../../components/ListRowLayout";
 import type { SettingsLegalDocumentTarget, SettingsSheetTarget } from "./settings-sheet-targets";
-
-type SymbolName = ComponentProps<typeof SymbolView>["name"];
 
 export function SettingsRow(props: {
   readonly disabled?: boolean;
-  readonly icon: SymbolName;
+  readonly icon: ComponentProps<typeof ListRow>["icon"];
   readonly label: string;
   readonly value?: string;
   readonly valuePosition?: "below" | "trailing";
@@ -24,84 +22,9 @@ export function SettingsRow(props: {
   const [pressed, setPressed] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  if (Platform.OS === "android") {
-    return (
-      <MaterialListRow
-        className="bg-grouped-card"
-        title={props.label}
-        subtitle={props.valuePosition === "trailing" ? undefined : props.value}
-        accessibilityLabel={[props.label, props.value].filter(Boolean).join(", ")}
-        trailing={
-          props.valuePosition === "trailing" && props.value ? (
-            <View className="flex-row items-center gap-3">
-              <Text className="text-sm text-foreground-muted">{props.value}</Text>
-              <SymbolView name="chevron.right" size={16} tintColorClassName="accent-chevron" />
-            </View>
-          ) : undefined
-        }
-        disabled={props.disabled}
-        leading={
-          <SymbolView
-            name={props.icon}
-            size={24}
-            tintColorClassName="accent-icon"
-            type="monochrome"
-            weight="regular"
-          />
-        }
-        onPress={() => {
-          if (props.target)
-            navigation.navigate("SettingsSheet", {
-              screen: "SettingsContent",
-              params: { screen: props.target },
-            });
-          else if (props.fullScreenTarget) navigation.navigate(props.fullScreenTarget);
-          else props.onPress?.();
-        }}
-      />
-    );
-  }
-  const content = (
-    <View
-      className={
-        props.disabled
-          ? "min-h-14 flex-row items-center gap-3 px-4 py-3 opacity-[0.45]"
-          : "min-h-14 flex-row items-center gap-3 px-4 py-3"
-      }
-    >
-      <View className="h-8 w-8 items-center justify-center rounded-full border border-border-subtle bg-glass-surface">
-        <SymbolView
-          name={props.icon}
-          size={18}
-          tintColorClassName={"accent-primary"}
-          type="monochrome"
-          weight="regular"
-        />
-      </View>
-      <Text className="shrink text-base text-foreground" numberOfLines={1}>
-        {props.label}
-      </Text>
-      <View className="min-w-0 flex-1 items-end">
-        {props.value ? (
-          <Text
-            className="max-w-[180px] text-right text-base text-foreground-muted"
-            ellipsizeMode="middle"
-            numberOfLines={1}
-          >
-            {props.value}
-          </Text>
-        ) : null}
-      </View>
-      <SymbolView
-        name="chevron.right"
-        size={16}
-        tintColorClassName="accent-chevron"
-        type="monochrome"
-        weight="semibold"
-      />
-    </View>
-  );
-
+  const valueBelow =
+    props.valuePosition === "below" ||
+    (props.valuePosition === undefined && Platform.OS === "android");
   const handlePress = () => {
     if (props.target) {
       navigation.navigate("SettingsSheet", {
@@ -114,11 +37,24 @@ export function SettingsRow(props: {
       props.onPress?.();
     }
   };
+  const content = {
+    icon: props.icon,
+    label: props.label,
+    description: valueBelow ? props.value : undefined,
+    detail: valueBelow ? undefined : props.value,
+    disabled: props.disabled,
+  };
 
+  if (Platform.OS === "android") {
+    return <ListRow {...content} onPress={handlePress} />;
+  }
+
+  // iOS keeps Lecturn's arcane press highlight over the shared row geometry.
   return (
     <Pressable
-      accessibilityLabel={props.label}
+      accessibilityLabel={[props.label, props.value].filter(Boolean).join(", ")}
       accessibilityRole="button"
+      accessibilityState={{ disabled: Boolean(props.disabled) }}
       disabled={props.disabled}
       onPress={handlePress}
       onPressIn={() => setPressed(true)}
@@ -132,7 +68,18 @@ export function SettingsRow(props: {
         active={!props.disabled && (pressed || hovered || focused)}
         radius={12}
       />
-      {content}
+      <ListRowLayout
+        {...content}
+        accessory={
+          <SymbolView
+            name="chevron.right"
+            size={16}
+            tintColorClassName="accent-chevron"
+            type="monochrome"
+            weight="semibold"
+          />
+        }
+      />
     </Pressable>
   );
 }

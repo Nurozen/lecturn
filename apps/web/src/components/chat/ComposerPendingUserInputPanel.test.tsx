@@ -1,9 +1,14 @@
-import { RuntimeRequestId } from "@lecturn/contracts";
+import { EnvironmentId, RuntimeRequestId, ThreadId } from "@lecturn/contracts";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+vi.mock("../ChatMarkdown", () => ({ default: ({ text }: { text: string }) => <p>{text}</p> }));
+
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
+
 import type { PendingUserInput } from "../../session-logic";
+
+const threadRef = { environmentId: EnvironmentId.make("env"), threadId: ThreadId.make("thread") };
 
 const prompt: PendingUserInput = {
   requestId: RuntimeRequestId.make("request-1"),
@@ -31,6 +36,8 @@ function panel(responding = false, pendingUserInputs: PendingUserInput[] = [prom
   return (
     <ComposerPendingUserInputPanel
       pendingUserInputs={pendingUserInputs}
+      cwd="/repo"
+      threadRef={threadRef}
       respondingRequestIds={responding ? [prompt.requestId] : []}
       answers={{}}
       questionIndex={0}

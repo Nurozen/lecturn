@@ -1,6 +1,8 @@
 import type { ThreadId } from "@lecturn/contracts";
-import { formatComposerContextReference } from "@lecturn/shared/composerContextReferences";
-import { toKindScopedComposerContextId } from "./composerContextReferences";
+import {
+  formatComposerContextReference,
+  toKindScopedComposerContextId,
+} from "@lecturn/shared/composerContextReferences";
 
 export interface TerminalContextSelection {
   terminalId: string;

@@ -75,6 +75,25 @@ it.layer(NodeServices.layer)("lecturn-sqlite-state", (it) => {
     }),
   );
 
+  it.effect("enables checkpoint_fullfsync on its direct connection", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-sqlite-state-fsync-" });
+      yield* createFixtureDatabase(baseDir);
+
+      const result = yield* runSqliteState({
+        operation: "query",
+        baseDir,
+        sql: "PRAGMA checkpoint_fullfsync",
+      });
+
+      assert.equal(result.operation, "query");
+      if (result.operation === "query") {
+        assert.deepStrictEqual(result.rows, [{ checkpoint_fullfsync: 1 }]);
+      }
+    }),
+  );
+
   it.effect.skipIf(!symlinksSupported)(
     "backs up isolated state before writes and refuses the shared home",
     () =>

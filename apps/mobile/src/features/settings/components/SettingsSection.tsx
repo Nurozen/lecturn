@@ -4,11 +4,13 @@ import { Platform, View } from "react-native";
 
 import { AppText as Text } from "../../../components/AppText";
 
+/** Upstream's `ListSection` API on Lecturn's glass card. */
 export function SettingsSection(props: {
   readonly title?: string;
   readonly titleIcon?: ReactNode;
   readonly trailing?: ReactNode;
   readonly children: ReactNode;
+  readonly footer?: string;
 }) {
   return (
     <View className="gap-2">
@@ -38,6 +40,9 @@ export function SettingsSection(props: {
       <GlassCard radius={Platform.OS === "android" ? 28 : 24} className="overflow-hidden">
         {props.children}
       </GlassCard>
+      {props.footer ? (
+        <Text className="px-4 text-sm text-foreground-muted">{props.footer}</Text>
+      ) : null}
     </View>
   );
 }

@@ -183,9 +183,11 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
     ): Effect.fn.Return<DecisionFundingChallengeResult, DecisionEvaluationError> {
       if (!Number.isSafeInteger(ttl) || ttl < 1 || ttl > 3600)
         return yield* decisionError("unavailable", "Decisions funding is unavailable");
-      const id = yield* crypto.randomUUIDv4.pipe(
-        Effect.mapError(() => decisionError("unavailable", "Decisions funding is unavailable")),
-      );
+      const id = yield* crypto
+        .randomUUIDv4()
+        .pipe(
+          Effect.mapError(() => decisionError("unavailable", "Decisions funding is unavailable")),
+        );
       const expires = (yield* nowSeconds) + ttl;
       const generation = yield* transaction(
         Effect.gen(function* () {

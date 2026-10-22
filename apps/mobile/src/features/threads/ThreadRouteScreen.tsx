@@ -98,7 +98,12 @@ import {
   type ThreadInspectorMode,
 } from "./thread-inspector-content-stack";
 import { threadRouteIsHydrating } from "./thread-route-hydration";
+import { useThreadPromptLink } from "../prompt-links/useThreadPromptLink";
 import { ThreadHeader, type NativeHeaderItem } from "./ThreadHeader";
+import {
+  useAndroidWorkspaceBack,
+  useWorkspaceListNavigation,
+} from "../workspace/useAndroidWorkspaceNavigation";
 
 interface ThreadInspectorSelection {
   readonly routeThreadIdentity: string | null;
@@ -126,7 +131,7 @@ function ThreadPane(props: { readonly children: ReactNode }) {
 }
 
 function ThreadRouteFallbackLayout(props: { readonly children: ReactNode }) {
-  const navigation = useNavigation();
+  const returnToList = useWorkspaceListNavigation("threads");
   const { layout } = useAdaptiveWorkspaceLayout();
   const { themeVariables } = useAppearancePreferences();
   if (Platform.OS !== "android") return props.children;
@@ -136,14 +141,7 @@ function ThreadRouteFallbackLayout(props: { readonly children: ReactNode }) {
       <ScreenHeader
         title="Thread"
         options={{ contentStyle: { backgroundColor: themeVariables["--color-header"] } }}
-        onBack={
-          layout.usesSplitView
-            ? undefined
-            : () => {
-                if (navigation.canGoBack()) navigation.goBack();
-                else navigation.dispatch(StackActions.replace("Home"));
-              }
-        }
+        onBack={layout.usesSplitView ? undefined : returnToList}
         hideBottomBorder
       />
       <ThreadPane>{props.children}</ThreadPane>
@@ -167,6 +165,8 @@ type ThreadRouteScreenRouteProps = StaticScreenProps<{
   readonly accountId?: string;
   readonly environmentId: string;
   readonly threadId: string;
+  /** A prompt link's draft text. See useThreadPromptLink. */
+  readonly prompt?: string | string[];
 }>;
 
 interface ThreadRouteScreenProps extends ThreadRouteScreenRouteProps {
@@ -203,6 +203,7 @@ function ThreadUnavailableScreen(props: {
 }
 
 export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
+  useAndroidWorkspaceBack("threads");
   return <AccountScopedThreadRouteScreen {...props} />;
 }
 function AccountScopedThreadRouteScreen(props: ThreadRouteScreenProps) {
@@ -279,6 +280,7 @@ function ConnectedThreadRouteScreen(props: ThreadRouteScreenProps) {
       ? null
       : scopedThreadKey(selectedThread.environmentId, selectedThread.id);
   const selectedThreadDetailState = useSelectedThreadDetailState();
+  useThreadPromptLink(params, routeThreadKey);
 
   if (environmentId === null || threadIdRaw === null) {
     return <OpeningThreadLoadingScreen />;
@@ -339,6 +341,7 @@ function ThreadRouteContent(
   const {
     selectedThread,
     selectedThreadCreation,
+    selectedThreadDetailRef,
     selectedThreadProject,
     selectedEnvironmentConnection,
   } = useThreadSelection();
@@ -1179,6 +1182,7 @@ function ThreadRouteContent(
         <ThreadDetailScreen
           canOperateThread={canOperateThread}
           selectedThread={selectedThreadWithDraftSettings ?? selectedThread}
+          selectedThreadDetailRef={selectedThreadDetailRef}
           contentPresentation={contentPresentation}
           screenTone={connectionTone(routeConnectionState)}
           connectionError={routeConnectionError}
@@ -1186,6 +1190,7 @@ function ThreadRouteContent(
           feedbackSubmissions={composer.feedbackSubmissions}
           onDismissFeedback={composer.dismissFeedback}
           selectedThreadFeed={composer.selectedThreadFeed}
+          pendingHandoff={composer.pendingHandoff}
           activityRun={composer.selectedThreadActivityRun}
           activeWorkStartedAt={
             creationState?.kind === "preparing" ||

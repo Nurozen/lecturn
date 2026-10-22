@@ -20,7 +20,7 @@ import { Alert, Platform, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { cn } from "../../lib/cn";
 import { MaterialScreenContent } from "../../components/MaterialScreenContent";
-import { MaterialButton } from "../../components/MaterialButton";
+import { Button } from "../../components/Button";
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
 import { AppText as Text } from "../../components/AppText";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
@@ -31,12 +31,19 @@ import { useRemoteConnectionStatus } from "../../state/use-remote-environment-re
 import type { WorkspaceState } from "../../state/workspaceModel";
 import { useWorkspaceState } from "../../state/workspace";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
+import { usePromptLinkResolver } from "../prompt-links/usePromptLinkResolver";
 import { useIncomingShare } from "../sharing/IncomingShareProvider";
 import { useNewTaskFlow } from "./new-task-flow-provider";
 import { filterProjectScopes, getProjectScopeSelectionTarget } from "./new-task-project-selection";
 
 type NewTaskRouteParams = {
   readonly incomingShareId?: string | string[];
+  // A `lecturn://new?…` prompt link. See usePromptLinkResolver.
+  readonly prompt?: string | string[];
+  readonly repo?: string | string[];
+  readonly pr?: string | string[];
+  readonly provider?: string | string[];
+  readonly model?: string | string[];
 };
 
 function deriveProjectEmptyState(catalogState: WorkspaceState): {
@@ -144,6 +151,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const { getShare, releaseShareReservation } = useIncomingShare();
+  usePromptLinkResolver(route.params);
   const routeShareId = Array.isArray(route.params?.incomingShareId)
     ? route.params.incomingShareId[0]
     : route.params?.incomingShareId;
@@ -380,7 +388,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
               </Text>
               {Platform.OS === "android" ? (
                 <>
-                  <MaterialButton
+                  <Button
                     label={catalogState.hasReadyEnvironment ? "Add new project" : "Add environment"}
                     tone="primary"
                     onPress={() =>
@@ -390,7 +398,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                     }
                   />
                   {canStartScratch ? (
-                    <MaterialButton
+                    <Button
                       label="Start without a project"
                       tone="secondary"
                       onPress={() => void startScratch()}

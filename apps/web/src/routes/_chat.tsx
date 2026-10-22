@@ -7,6 +7,7 @@ import { useEffect, useMemo } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { ThreadRouteView } from "../components/ThreadRouteView";
+import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { openCommandPalette } from "../commandPaletteBus";
@@ -241,6 +242,9 @@ function ChatRouteLayout() {
     <>
       <ChatRouteGlobalShortcuts />
       <DesktopActivityBridge />
+      {threadTarget?.kind === "server" ? (
+        <ThreadLinkPrompt threadRef={threadTarget.threadRef} />
+      ) : null}
       {threadTarget ? <ThreadRouteView target={threadTarget} /> : <Outlet />}
     </>
   );

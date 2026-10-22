@@ -16,7 +16,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SymbolView } from "../../components/AppSymbol";
 import { AppActivityIndicator } from "../../components/AppActivityIndicator";
 import { AppText } from "../../components/AppText";
-import { ControlPill, ControlPillMenu } from "../../components/ControlPill";
+import { ControlPill } from "../../components/ControlPill";
+import { Menu } from "../../components/Menu";
 import { GlassSurface } from "../../components/GlassSurface";
 import {
   androidHeaderMenuActions,
@@ -348,7 +349,7 @@ function DevicePreviewScreen({
 
 function DeviceOptionsMenu({ items }: { readonly items: ReadonlyArray<ScreenHeaderMenuItem> }) {
   return (
-    <ControlPillMenu
+    <Menu
       actions={androidHeaderMenuActions(items)}
       isAnchoredToRight
       title="Device options"
@@ -364,7 +365,7 @@ function DeviceOptionsMenu({ items }: { readonly items: ReadonlyArray<ScreenHead
       >
         <SymbolView name="ellipsis" size={18} tintColorClassName="accent-icon" />
       </Pressable>
-    </ControlPillMenu>
+    </Menu>
   );
 }
 

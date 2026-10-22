@@ -1072,9 +1072,9 @@ export const layerClientApi = HttpApiBuilder.group(
           const { userId } = yield* RelayClientPrincipal;
           const now = yield* DateTime.now;
           const expiresAt = DateTime.add(now, { minutes: 5 });
-          const jti = yield* crypto.randomUUIDv4.pipe(
-            Effect.catch(() => relayInternalErrorResponse("internal_error")),
-          );
+          const jti = yield* crypto
+            .randomUUIDv4()
+            .pipe(Effect.catch(() => relayInternalErrorResponse("internal_error")));
           const challenge = yield* relayTokens
             .issueLinkChallenge({
               userId,
@@ -1170,9 +1170,9 @@ export const layerTokenApi = HttpApiBuilder.group(
         );
         const now = yield* DateTime.now;
         const expiresAt = DateTime.addDuration(now, RelayTokens.RELAY_DPOP_ACCESS_TOKEN_TTL);
-        const jti = yield* crypto.randomUUIDv4.pipe(
-          Effect.catch(() => relayInternalErrorResponse("internal_error")),
-        );
+        const jti = yield* crypto
+          .randomUUIDv4()
+          .pipe(Effect.catch(() => relayInternalErrorResponse("internal_error")));
         return {
           access_token: yield* relayTokens
             .issueDpopAccessToken({

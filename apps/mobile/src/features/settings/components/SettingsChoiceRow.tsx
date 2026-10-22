@@ -1,27 +1,30 @@
-import { Pressable, View } from "react-native";
+import type { ComponentProps } from "react";
+import { Platform, Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../../components/AppText";
 import { SymbolView } from "../../../components/AppSymbol";
+import { ListChoiceRow } from "../../../components/ListChoiceRow";
 import { themeColorWithAlpha } from "../../../lib/mobileTheme";
 import { useGlassPalette } from "../../../lib/useGlassPalette";
 
-export function SettingsChoiceRow(props: {
-  readonly label: string;
-  readonly description: string;
-  readonly selected: boolean;
-  readonly separated: boolean;
-  readonly disabled: boolean;
-  readonly onPress: () => void;
-}) {
+/** Android takes the shared Material choice row; iOS keeps Lecturn's glass accent. */
+export function SettingsChoiceRow(props: ComponentProps<typeof ListChoiceRow>) {
+  if (Platform.OS === "android") return <ListChoiceRow {...props} />;
+  return <GlassChoiceRow {...props} />;
+}
+
+function GlassChoiceRow(props: ComponentProps<typeof ListChoiceRow>) {
   const glass = useGlassPalette();
   return (
     <Pressable
       accessibilityRole="radio"
-      accessibilityState={{ checked: props.selected, disabled: props.disabled }}
+      accessibilityLabel={props.label}
+      accessibilityHint={props.description}
+      accessibilityState={{ checked: props.selected, disabled: Boolean(props.disabled) }}
       className={
         props.separated
-          ? "flex-row items-center gap-4 border-t border-border-subtle p-4"
-          : "flex-row items-center gap-4 p-4"
+          ? "min-h-14 flex-row items-center gap-3 border-t border-border-subtle px-4 py-3"
+          : "min-h-14 flex-row items-center gap-3 px-4 py-3"
       }
       style={({ pressed }) => ({
         backgroundColor: pressed
@@ -34,17 +37,21 @@ export function SettingsChoiceRow(props: {
     >
       <View className="min-w-0 flex-1 gap-1">
         <Text className="text-base text-foreground">{props.label}</Text>
-        <Text className="text-sm leading-normal text-foreground-muted">{props.description}</Text>
+        {props.description ? (
+          <Text className="text-sm leading-normal text-foreground-muted">{props.description}</Text>
+        ) : null}
       </View>
-      {props.selected ? (
-        <SymbolView
-          name="checkmark"
-          size={18}
-          tintColor={glass.accent}
-          type="monochrome"
-          weight="semibold"
-        />
-      ) : null}
+      <View className="size-6 items-center justify-center">
+        {props.selected ? (
+          <SymbolView
+            name="checkmark"
+            size={18}
+            tintColor={glass.accent}
+            type="monochrome"
+            weight="semibold"
+          />
+        ) : null}
+      </View>
     </Pressable>
   );
 }

@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import type { GitHubApi } from "./GitHubApi.ts";
+import type { AcceptanceCandidates } from "./acceptanceEvidence.graphql.ts";
+import type { GitHubRest } from "./GitHubRest.ts";
 import type {
   ProviderAcceptanceEvidence,
   ProviderRepositoryRef,
@@ -71,49 +72,7 @@ const StatusPage = Schema.Array(
 );
 
 const decodeRuleChecks = Schema.decodeUnknownEffect(RuleChecks);
-const decodeCandidates = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(
-    Schema.Struct({
-      data: Schema.Struct({
-        repository: Schema.Struct({
-          pullRequests: Schema.Struct({
-            totalCount: Schema.Number,
-            nodes: Schema.Array(
-              Schema.Struct({
-                number: Schema.Number,
-                url: Schema.String,
-                headRefName: Schema.String,
-                headRefOid: Revision,
-                headRepository: Schema.NullOr(Schema.Struct({ name: Schema.String })),
-                headRepositoryOwner: Schema.NullOr(Schema.Struct({ login: Schema.String })),
-                state: Schema.String,
-              }),
-            ),
-          }),
-        }),
-      }),
-    }),
-  ),
-);
-
-/** Every pull request with this head branch name, from any fork, as `gh pr list --head` lists them. */
-const ACCEPTANCE_CANDIDATES_GRAPHQL_QUERY = `
-query AcceptanceCandidates($owner: String!, $name: String!, $head: String!) {
-  repository(owner: $owner, name: $name) {
-    pullRequests(headRefName: $head, states: [OPEN, CLOSED, MERGED], first: 100, orderBy: { field: CREATED_AT, direction: DESC }) {
-      totalCount
-      nodes {
-        number
-        url
-        headRefName
-        headRefOid
-        headRepository { name }
-        headRepositoryOwner { login }
-        state
-      }
-    }
-  }
-}`;
+const isRevision = Schema.is(Revision);
 
 const MAX_ACCEPTANCE_PAGES = 100;
 
@@ -166,7 +125,7 @@ export function evaluateGitHubRequiredChecks(
  * Workflow rules and merge queues need provider-specific proof that this boundary cannot supply.
  */
 export const readGitHubAcceptanceEvidence = Effect.fn("readGitHubAcceptanceEvidence")(function* (
-  api: GitHubApi["Service"],
+  api: Pick<GitHubRest["Service"], "rest">,
   input: ProviderRepositoryRef & { readonly number: number },
 ) {
   const fetch = Effect.fn("readGitHubAcceptanceEvidence.api")(function* <S extends Schema.Top>(
@@ -324,9 +283,15 @@ export const readGitHubAcceptanceEvidence = Effect.fn("readGitHubAcceptanceEvide
   );
 });
 
+/**
+ * Every pull request with this head branch name, from any fork, as `gh pr list --head` lists them.
+ * `readCandidates` runs the generated `AcceptanceCandidates` query against the target host.
+ */
 export const listGitHubAcceptanceCandidates = Effect.fn("listGitHubAcceptanceCandidates")(
-  function* (
-    api: GitHubApi["Service"],
+  function* <E>(
+    readCandidates: (
+      variables: AcceptanceCandidates.Variables,
+    ) => Effect.Effect<AcceptanceCandidates.Result, E>,
     input: ProviderRepositoryRef & {
       readonly branch: string;
       readonly headRevision: string | null;
@@ -339,14 +304,18 @@ export const listGitHubAcceptanceCandidates = Effect.fn("listGitHubAcceptanceCan
         message: "The pull request source and target hosts do not match.",
       });
     const [owner = "", name = ""] = input.repository.split("/");
-    const raw = yield* api.graphql({
-      host: input.host,
-      operation: "listAcceptanceCandidates",
-      query: ACCEPTANCE_CANDIDATES_GRAPHQL_QUERY,
-      variables: { owner, name, head: input.branch },
-    });
-    const listed = (yield* decodeCandidates(raw)).data.repository.pullRequests;
-    const rows = listed.nodes;
+    const listed = (yield* readCandidates({ owner, name, head: input.branch })).repository
+      ?.pullRequests;
+    // A missing repository, a missing row, or a head that is not a revision cannot be verified.
+    if (
+      listed === undefined ||
+      listed.nodes === null ||
+      listed.nodes.some((row) => row === null || !isRevision(row.headRefOid))
+    )
+      return yield* new GitHubAcceptanceReadError({
+        message: "GitHub did not return a verifiable pull request list for the source branch.",
+      });
+    const rows = listed.nodes.flatMap((row) => (row === null ? [] : [row]));
     const candidates = rows.filter(
       (row) =>
         row.headRefName === input.branch &&

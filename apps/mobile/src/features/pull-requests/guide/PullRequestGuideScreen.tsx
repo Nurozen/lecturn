@@ -14,8 +14,8 @@ import { SymbolView } from "../../../components/AppSymbol";
 import { GuideOutline } from "./GuideOutline";
 import { AppText as Text } from "../../../components/AppText";
 import { ScreenScrollView } from "../../../components/ScreenScrollView";
-import { ControlPillMenu } from "../../../components/ControlPillMenu";
-import { MaterialIconButton } from "../../../components/MaterialIconButton";
+import { Menu } from "../../../components/Menu";
+import { IconButton } from "../../../components/IconButton";
 import { useAppearancePreferences } from "../../settings/appearance/AppearancePreferencesProvider";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../../native/StackHeader";
 import { PullRequestCardGroup, PullRequestCardRow } from "../PullRequestControls";
@@ -144,7 +144,7 @@ export function PullRequestGuideStopScreen({ route }: StaticScreenProps<GuideSto
           title={`Stop ${route.params.position + 1}`}
           onBack={() => navigation.goBack()}
           trailing={
-            <ControlPillMenu
+            <Menu
               actions={[
                 {
                   id: "word-wrap",
@@ -156,9 +156,9 @@ export function PullRequestGuideStopScreen({ route }: StaticScreenProps<GuideSto
               onPressAction={() => setCodeWordBreak(!appearance.codeWordBreak)}
             >
               <View pointerEvents="none">
-                <MaterialIconButton icon="ellipsis" accessibilityLabel="Guide options" />
+                <IconButton icon="ellipsis" accessibilityLabel="Guide options" />
               </View>
-            </ControlPillMenu>
+            </Menu>
           }
         />
       ) : null}

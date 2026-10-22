@@ -7,6 +7,7 @@ import {
   onboardingProjectKey,
   resolveOnboardingLandingProject,
   resolveOnboardingProjectId,
+  splitOnboardingProjectPath,
 } from "./projectImport.logic";
 
 const now = Date.parse("2026-08-22T12:00:00.000Z");
@@ -347,5 +348,43 @@ describe("projects on multiple computers", () => {
     const first = { ...candidate("/code/app"), environmentId: "first" };
     const second = { ...candidate("/code/app"), environmentId: "second" };
     expect(partitionOnboardingProjects([first, second], now).recent).toEqual([first, second]);
+  });
+});
+
+describe("splitOnboardingProjectPath", () => {
+  it("keeps sibling checkouts that share a prefix distinguishable by name", () => {
+    const left = splitOnboardingProjectPath("/Users/me/Projects/clients/acme/lecturn");
+    const right = splitOnboardingProjectPath("/Users/me/Projects/clients/acme/lecturn-worktree");
+    expect(left).toEqual({ name: "lecturn", parent: "/Users/me/Projects/clients/acme/" });
+    expect(right).toEqual({ name: "lecturn-worktree", parent: "/Users/me/Projects/clients/acme/" });
+    expect(left.name).not.toBe(right.name);
+  });
+
+  it("splits Windows paths and ignores a trailing separator", () => {
+    expect(splitOnboardingProjectPath("C:\\Users\\me\\lecturn\\")).toEqual({
+      name: "lecturn",
+      parent: "C:\\Users\\me\\",
+    });
+  });
+
+  it("keeps a root or bare name whole", () => {
+    expect(splitOnboardingProjectPath("/")).toEqual({ name: "/", parent: "" });
+    expect(splitOnboardingProjectPath("/lecturn")).toEqual({ name: "lecturn", parent: "/" });
+    expect(splitOnboardingProjectPath("lecturn")).toEqual({ name: "lecturn", parent: "" });
+    expect(splitOnboardingProjectPath("lecturn/")).toEqual({ name: "lecturn", parent: "" });
+  });
+
+  it.each(["C:\\", "C:/", "\\\\server\\share", "\\\\server\\share\\", "//server/share/"])(
+    "keeps the filesystem root %s whole",
+    (path) => {
+      expect(splitOnboardingProjectPath(path)).toEqual({ name: path, parent: "" });
+    },
+  );
+
+  it("splits a folder below a network share", () => {
+    expect(splitOnboardingProjectPath("\\\\server\\share\\project\\")).toEqual({
+      name: "project",
+      parent: "\\\\server\\share\\",
+    });
   });
 });

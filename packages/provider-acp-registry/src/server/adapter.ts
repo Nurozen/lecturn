@@ -9,6 +9,7 @@ import {
   makeCopilotSubagentRouting,
 } from "./copilotAcp.ts";
 import { defaultInstanceIdForDriver, ProviderDriverKind } from "@lecturn/contracts";
+import { readCustomModelEntries } from "@lecturn/shared/model";
 import { AcpRegistrySettings } from "../settings.ts";
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import { resolveSelfInvocation, type SelfInvocation } from "@lecturn/shared/nodeRuntime";
@@ -172,6 +173,9 @@ function makeAcpRegistryRuntime(
                   ),
                 },
           ...(options.settings.authMethodId ? { authMethodId: options.settings.authMethodId } : {}),
+          customModels: readCustomModelEntries(options.settings.customModels).map(
+            (entry) => entry.slug,
+          ),
         }),
       );
       return yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(

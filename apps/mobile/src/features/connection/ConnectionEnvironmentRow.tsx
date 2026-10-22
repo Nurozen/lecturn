@@ -1,6 +1,5 @@
 import { ConnectionTraceId } from "./ConnectionTraceId";
 import { SymbolView } from "../../components/AppSymbol";
-import { connectionStatusText } from "@lecturn/client-runtime/connection";
 import type { AtomCommandResult } from "@lecturn/client-runtime/state/runtime";
 import { type EnvironmentId, resolveEnvironmentMachineKind } from "@lecturn/contracts";
 import { useAtomValue } from "@effect/atom-react";
@@ -12,20 +11,21 @@ import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanim
 
 import { AppText as Text } from "../../components/AppText";
 import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
-import { MaterialButton } from "../../components/MaterialButton";
-import { MaterialIconButton } from "../../components/MaterialIconButton";
+import { Button } from "../../components/Button";
+import { IconButton } from "../../components/IconButton";
 import { ThemedSwitch } from "../../components/ThemedSwitch";
 import { cn } from "../../lib/cn";
 import type { ConnectedEnvironmentSummary } from "../../state/remote-runtime-types";
 import { serverEnvironment } from "../../state/server";
 import { ConnectionFormField } from "./ConnectionFormField";
 import { ConnectionStatusDot } from "./ConnectionStatusDot";
+import { environmentStatusText } from "./environmentStatusText";
 
 function connectionStatusLabel(environment: ConnectedEnvironmentSummary): string | null {
   if (!environment.isEnabled && environment.connectionState !== "unsupported") {
     return "Off";
   }
-  return connectionStatusText({
+  return environmentStatusText({
     phase: environment.connectionState,
     error: environment.connectionError,
     traceId: environment.connectionErrorTraceId,
@@ -185,7 +185,7 @@ export function ConnectionEnvironmentRow(props: {
             <View className="flex-row items-center justify-end gap-2">
               {props.environment.isRelayManaged ? null : (
                 <View className="flex-1">
-                  <MaterialButton
+                  <Button
                     label="Save"
                     tone="primary"
                     fullWidth
@@ -195,14 +195,14 @@ export function ConnectionEnvironmentRow(props: {
                   />
                 </View>
               )}
-              <MaterialIconButton
+              <IconButton
                 accessibilityLabel="Reconnect environment"
                 icon="arrow.clockwise"
                 variant="tonal"
                 disabled={!enabled}
                 onPress={() => props.onReconnect(props.environment.environmentId)}
               />
-              <MaterialIconButton
+              <IconButton
                 accessibilityLabel="Remove environment"
                 icon="trash"
                 variant="danger"
