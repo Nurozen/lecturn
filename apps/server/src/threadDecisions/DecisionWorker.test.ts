@@ -17,7 +17,7 @@ import {
   type ServerProvider,
 } from "@lecturn/contracts";
 import { Deferred, Effect, Layer, DateTime, PubSub, Ref, Schema, Stream } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { ServerSettingsService } from "../serverSettings.ts";

@@ -42,7 +42,7 @@ import {
 import type { EnvironmentId, ProjectId, StaveOperation } from "@lecturn/contracts";
 import { CommonActions, useNavigation } from "@react-navigation/native";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Alert, Pressable, View } from "react-native";
 

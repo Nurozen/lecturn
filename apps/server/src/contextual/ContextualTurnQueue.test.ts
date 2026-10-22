@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { MessageId, RunId, ThreadId } from "@lecturn/contracts";
 import { Effect, Result } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { clearV2Projection, insertV2Run } from "../threadDecisions/V2ProjectionTestFixtures.ts";
 import { make } from "./ContextualTurnQueue.ts";

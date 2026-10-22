@@ -1,6 +1,6 @@
 import * as C from "@lecturn/contracts";
 import { Context, Effect, Layer, Option, Schema, Semaphore } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { BackgroundPolicy } from "../background/BackgroundPolicy.ts";
 import { DecisionRepository } from "./DecisionRepository.ts";
 import { ContextualGroups } from "../contextual/ContextualGroups.ts";

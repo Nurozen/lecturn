@@ -15,7 +15,7 @@ import {
   type ThreadId,
 } from "@lecturn/contracts";
 import { Context, DateTime, Effect, Layer, Option, Schema, Semaphore, type Scope } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { ProjectionStoreV2 } from "../orchestration-v2/ProjectionStore.ts";
 import { ProjectService } from "../project/ProjectService.ts";
 import { PullRequestWatchProvider } from "./PullRequestWatchProvider.ts";

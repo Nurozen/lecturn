@@ -1,5 +1,6 @@
 import { ExtensionsService } from "../extensions/ExtensionsService.ts";
-import { Context, Crypto, Effect, Encoding, Layer, Option, Schema } from "effect";
+import { Context, Crypto, Effect, Layer, Option, Schema } from "effect";
+import * as Hex from "effect/encoding/Hex";
 import {
   DecisionEvaluationRequest,
   type DecisionEvaluationError,
@@ -75,7 +76,7 @@ export const makeDecisionsService = (config: DecisionsConfig, approvalOrigin: st
     ) {
       const { explicitRetry: _retry, ...content } = request;
       return yield* crypto.digest("SHA-256", new TextEncoder().encode(encodeRequest(content))).pipe(
-        Effect.map(Encoding.encodeHex),
+        Effect.map(Hex.encode),
         Effect.mapError(() => decisionError("unavailable", "Decision evaluation is unavailable")),
       );
     }, Effect.withTracerEnabled(false));

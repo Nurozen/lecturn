@@ -1,6 +1,6 @@
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 import { EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
-import type { Atom } from "effect/unstable/reactivity";
+import type { Atom } from "effect/reactivity";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { createPendingThreadOrder } from "../features/threads/threadOrder";
@@ -15,19 +15,19 @@ import { environmentThreadShells } from "./threads";
 import { queuedThreadKeysAtom } from "./use-thread-outbox";
 
 vi.mock("./atom-registry", async () => {
-  const { AtomRegistry } = await import("effect/unstable/reactivity");
+  const { AtomRegistry } = await import("effect/reactivity");
   return { appAtomRegistry: AtomRegistry.make() };
 });
 vi.mock("./threads", async () => {
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   return { environmentThreadShells: { threadShellsAtom: Atom.make([]).pipe(Atom.keepAlive) } };
 });
 vi.mock("./projects", async () => {
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   return { environmentProjects: { projectsAtom: Atom.make([]).pipe(Atom.keepAlive) } };
 });
 vi.mock("./server", async () => {
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   return {
     environmentServerConfigsAtom: Atom.make(
       new Map([["env", { environment: { capabilities: { threadSettlement: true } } }]]),
@@ -35,7 +35,7 @@ vi.mock("./server", async () => {
   };
 });
 vi.mock("./use-thread-outbox", async () => {
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   return { queuedThreadKeysAtom: Atom.make(new Set<string>()).pipe(Atom.keepAlive) };
 });
 

@@ -19,7 +19,7 @@ import {
 } from "@lecturn/client-runtime/state/stave";
 import { createStaveOperationManager } from "@lecturn/client-runtime/state/stave-operation";
 import { EnvironmentId, type ProjectId, WS_METHODS } from "@lecturn/contracts";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useEffect, useMemo } from "react";
 import { AppState } from "react-native";
 

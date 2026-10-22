@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { createPullRequestWatchEnvironmentAtoms } from "@lecturn/client-runtime/state/pullRequestWatch";
 import type { EnvironmentId, PullRequestWatchSnapshot } from "@lecturn/contracts";
 import * as Option from "effect/Option";
-import { Atom, AsyncResult } from "effect/unstable/reactivity";
+import { Atom, AsyncResult } from "effect/reactivity";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { formatEnvironmentQueryError } from "./query";
 

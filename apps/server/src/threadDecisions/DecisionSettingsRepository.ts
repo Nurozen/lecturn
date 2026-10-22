@@ -7,7 +7,7 @@ import {
   type ThreadDecisionSettingsInput,
 } from "@lecturn/contracts";
 import { Context, DateTime, Effect, Layer, Schema } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { bumpDecisionRevision, requireDecisionProject } from "./DecisionRevisions.ts";
 
 const isThreadDecisionError = Schema.is(ThreadDecisionError);

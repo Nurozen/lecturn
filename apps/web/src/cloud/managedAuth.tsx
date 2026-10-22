@@ -8,7 +8,7 @@ import {
 } from "@lecturn/client-runtime/relay";
 import type { EnvironmentId } from "@lecturn/contracts";
 import { reportAtomCommandResult, settlePromise } from "@lecturn/client-runtime/state/runtime";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ConnectAccountCommandsHost } from "../components/clerk/ConnectAccountCommandsHost";

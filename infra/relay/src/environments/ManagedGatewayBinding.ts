@@ -2,9 +2,9 @@ import * as Alchemy from "alchemy";
 import type { HttpEffect } from "alchemy/Http";
 import * as Cloudflare from "alchemy/Cloudflare";
 import { Effect, Redacted } from "effect";
-import * as HttpBody from "effect/unstable/http/HttpBody";
-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import * as HttpBody from "effect/http/HttpBody";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { RelayDeploymentConfig } from "../zone.ts";
 import { createManagedGateway, type GatewaySnapshot } from "../billing/ManagedGateway.ts";
 

@@ -7,7 +7,7 @@ import {
 } from "@lecturn/contracts";
 import { canonicalDecisionText, resolveDecisionSource } from "@lecturn/shared/decisionEvidence";
 import { Effect, Schema } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { requireDecisionProject } from "./DecisionRevisions.ts";
 import { v2Messages } from "./V2ProjectionSources.ts";
 

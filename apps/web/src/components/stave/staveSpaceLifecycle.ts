@@ -2,7 +2,7 @@ import { environmentSupportsStave } from "@lecturn/client-runtime/state/stave";
 import type { EnvironmentId, StaveOperation, StaveProjectInfo } from "@lecturn/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import * as Option from "effect/Option";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useCallback } from "react";
 
 import { appAtomRegistry } from "../../rpc/atomRegistry";

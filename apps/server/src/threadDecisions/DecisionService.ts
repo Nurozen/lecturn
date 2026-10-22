@@ -16,7 +16,7 @@ import {
   DecisionJobState,
 } from "@lecturn/contracts";
 import { Context, Effect, Layer, PubSub, Schedule, Schema, Stream } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { DecisionRepository } from "./DecisionRepository.ts";
 import { DecisionSettingsRepository } from "./DecisionSettingsRepository.ts";
 import { DecisionJobRepository, countDecisionUnscannedMessages } from "./DecisionJobRepository.ts";

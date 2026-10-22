@@ -41,8 +41,8 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
-import { AtomRegistry } from "effect/unstable/reactivity";
-import { FetchHttpClient } from "effect/unstable/http";
+import { AtomRegistry } from "effect/reactivity";
+import { FetchHttpClient } from "effect/http";
 
 import { APP_VERSION } from "../branding";
 import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";

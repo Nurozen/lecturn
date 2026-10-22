@@ -7,7 +7,7 @@ import {
 } from "@lecturn/client-runtime/state/item-support";
 import type { EnvironmentId, ThreadId, TurnItemId } from "@lecturn/contracts";
 import { scopeThreadRef } from "@lecturn/client-runtime/environment";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 import { environmentThreadDetails } from "./threads";
 

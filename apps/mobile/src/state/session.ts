@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { createEnvironmentSessionAtoms } from "@lecturn/client-runtime/state/session";
 import type { EnvironmentId } from "@lecturn/contracts";
 import * as Option from "effect/Option";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 

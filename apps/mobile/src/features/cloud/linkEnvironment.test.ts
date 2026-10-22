@@ -6,7 +6,7 @@ import { EnvironmentId } from "@lecturn/contracts";
 import { RelayMobileClientId } from "@lecturn/contracts/relay";
 import { ManagedRelay } from "@lecturn/client-runtime/relay";
 import { remoteHttpClientLayer } from "@lecturn/client-runtime/rpc";
-import { HttpClient } from "effect/unstable/http";
+import { HttpClient } from "effect/http";
 
 import * as MobileStorage from "../../persistence/mobile-storage";
 

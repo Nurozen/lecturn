@@ -22,7 +22,7 @@ import {
 } from "@lecturn/contracts";
 import { resolvePreviewViewport } from "@lecturn/shared/previewViewport";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useShallow } from "zustand/react/shallow";
 
 import {

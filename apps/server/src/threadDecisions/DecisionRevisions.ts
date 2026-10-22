@@ -1,6 +1,6 @@
 import { ThreadDecisionError, type ProjectId } from "@lecturn/contracts";
 import { Effect } from "effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import type * as SqlClient from "effect/sql/SqlClient";
 
 export const requireDecisionProject = Effect.fn("Decisions.requireProject")(function* (
   sql: SqlClient.SqlClient,

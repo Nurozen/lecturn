@@ -1,7 +1,7 @@
 import type { AtomCommand } from "@lecturn/client-runtime/state/runtime";
 import type { RuntimeMode } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
-import { AsyncResult, type AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, type AtomRegistry } from "effect/reactivity";
 import { requireAndroidFullAccess } from "../lib/androidHostAccess";
 
 /** Shared web command boundary covers composer, quick steer and project/new sends. */

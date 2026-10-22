@@ -15,7 +15,7 @@ import {
   type SourceControlRepositoryCloneUrls,
   type SourceControlRepositoryVisibility,
 } from "@lecturn/contracts";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { sanitizeBranchFragment } from "@lecturn/shared/git";
 import {
   detectSourceControlProviderFromRemoteUrl,

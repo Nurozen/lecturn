@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { EnvironmentId, type DecisionFundingStatusResult } from "@lecturn/contracts";
 import { Effect, Option, Result, Stream } from "effect";
-import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import { RELAY_URL_SECRET, RELAY_ENVIRONMENT_CREDENTIAL_SECRET } from "../cloud/config.ts";

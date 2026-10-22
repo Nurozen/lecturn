@@ -1,5 +1,6 @@
 import { RelayDb } from "../db.ts";
-import { Clock, Context, Crypto, DateTime, Effect, Encoding, Exit, Layer, Schema } from "effect";
+import { Clock, Context, Crypto, DateTime, Effect, Exit, Layer, Schema } from "effect";
+import * as Hex from "effect/encoding/Hex";
 import {
   ContextualEvaluationRequest,
   ContextualJudgment,
@@ -118,7 +119,7 @@ export const makeExtensionsService = (
     const fingerprint = Effect.fn("Extensions.fingerprint")(function* (request: unknown) {
       return yield* crypto
         .digest("SHA-256", new TextEncoder().encode(extensionCanonicalJson(request)))
-        .pipe(Effect.map(Encoding.encodeHex), Effect.mapError(invalid));
+        .pipe(Effect.map(Hex.encode), Effect.mapError(invalid));
     });
     const status = Effect.fn("Extensions.status")(function* (
       payerId: string,

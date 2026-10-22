@@ -73,8 +73,7 @@ vi.mock("react", async (importOriginal) => ({
 }));
 
 vi.mock("@effect/atom-react", () => ({
-  useAtomValue: <A>(atom: import("effect/unstable/reactivity/Atom").Atom<A>) =>
-    appAtomRegistry.get(atom),
+  useAtomValue: <A>(atom: import("effect/reactivity/Atom").Atom<A>) => appAtomRegistry.get(atom),
 }));
 
 vi.mock("react-native", () => ({ Alert: { alert: vi.fn() } }));
@@ -105,7 +104,7 @@ vi.mock("./entities", () => ({
 }));
 
 vi.mock("./server", async () => {
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   return { serverEnvironment: { configValueAtom: Atom.family(() => Atom.make(null)) } };
 });
 
@@ -118,7 +117,7 @@ vi.mock("./use-atom-command", () => ({
 }));
 
 vi.mock("./use-thread-outbox", async () => {
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   return {
     dispatchingQueuedMessageIdAtom: Atom.make<MessageId | null>(null).pipe(Atom.keepAlive),
     editingQueuedMessageIdsAtom: Atom.make<Record<string, boolean>>({}).pipe(Atom.keepAlive),

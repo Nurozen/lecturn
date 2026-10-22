@@ -1,6 +1,6 @@
 import { ContextualPacket, type ContextualDeliveryReceipt } from "@lecturn/contracts";
 import { Context, Deferred, Effect, Layer, Schema, Semaphore, Stream } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
 import { ContextualSummaryOutput } from "../textGeneration/TextGenerationPrompts.ts";

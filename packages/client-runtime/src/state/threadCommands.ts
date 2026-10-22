@@ -2,7 +2,7 @@ import type { ThreadId } from "@lecturn/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import {
   ORCHESTRATION_V2_WS_METHODS,
   WS_METHODS,

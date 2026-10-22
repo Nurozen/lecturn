@@ -271,8 +271,10 @@ describe("applyForkDeltas", () => {
 });
 
 describe("provisionForkWorktree", () => {
-  const fakeGit = (calls: Array<string>, remote: boolean) =>
+  const fakeGit = (calls: Array<string>, remote: boolean, blockedNamespace = false) =>
     ({
+      hasCommit: (input: { readonly refName: string }) =>
+        Effect.succeed(blockedNamespace && input.refName === "refs/heads/lecturn"),
       remoteExists: () => Effect.sync(() => (calls.push("remoteExists"), remote)),
       fetchRemote: () => Effect.sync(() => void calls.push("fetchRemote")),
       remoteBranchExists: () => Effect.sync(() => (calls.push("remoteBranchExists"), true)),
@@ -297,6 +299,19 @@ describe("provisionForkWorktree", () => {
       });
       assert.deepEqual(created, { branch: "lecturn/deadbeef", worktreePath: "/worktrees/new" });
       assert.deepEqual(calls, ["create:main:lecturn/deadbeef"]);
+    }),
+  );
+
+  it.effect("falls back to lecturn-<hash> when a plain lecturn branch blocks lecturn/*", () =>
+    Effect.gen(function* () {
+      const calls: Array<string> = [];
+      const created = yield* provisionForkWorktree({
+        git: fakeGit(calls, false, true),
+        prepareWorktree: { projectCwd: "/repo", baseBranch: "main" },
+        mintId: () => "deadbeef",
+      });
+      assert.deepEqual(created, { branch: "lecturn-deadbeef", worktreePath: "/worktrees/new" });
+      assert.deepEqual(calls, ["create:main:lecturn-deadbeef"]);
     }),
   );
 

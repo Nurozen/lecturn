@@ -8,7 +8,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import { STAVE_PLATFORM_KEYS, staveAssetName } from "@lecturn/shared/stave";

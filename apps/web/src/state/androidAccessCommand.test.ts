@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vite-plus/test";
-import { AsyncResult, AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, AtomRegistry } from "effect/reactivity";
 import { withAndroidAccess, withAndroidAccessFor } from "./androidAccessCommand";
 import { requireAndroidFullAccess } from "../lib/androidHostAccess";
 

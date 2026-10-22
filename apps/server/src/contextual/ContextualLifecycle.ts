@@ -14,7 +14,7 @@ import {
   type ThreadId,
 } from "@lecturn/contracts";
 import { Context, Effect, Layer, Schema } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { v2Messages } from "../threadDecisions/V2ProjectionSources.ts";
 import { appendContextualEvent, contextualBoundary } from "./ContextualSettings.ts";
 

@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { ProjectId, ThreadId, type ApplicationStoredEvent } from "@lecturn/contracts";
 import { Effect, Fiber, PubSub, Result, Stream } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import {
   OrchestrationEventStore,

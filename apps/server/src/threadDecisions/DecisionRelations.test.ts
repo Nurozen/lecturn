@@ -10,7 +10,7 @@ import {
   ThreadId,
   ProviderInstanceId,
 } from "@lecturn/contracts";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { decisionSourceHash } from "@lecturn/shared/decisionEvidence";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";

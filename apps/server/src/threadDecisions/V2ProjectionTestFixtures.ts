@@ -11,7 +11,7 @@ import {
 } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import type * as SqlClient from "effect/sql/SqlClient";
 
 export const clearV2Projection = (sql: SqlClient.SqlClient) =>
   Effect.gen(function* () {

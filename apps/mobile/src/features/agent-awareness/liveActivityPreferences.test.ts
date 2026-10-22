@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import type { EnvironmentId } from "@lecturn/contracts";
 import { ManagedRelay } from "@lecturn/client-runtime/relay";
 import * as Layer from "effect/Layer";
-import { HttpClient } from "effect/unstable/http";
+import { HttpClient } from "effect/http";
 
 import type { SavedRemoteConnection } from "../../lib/connection";
 import * as MobileStorage from "../../persistence/mobile-storage";

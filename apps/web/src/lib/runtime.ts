@@ -1,7 +1,7 @@
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import type * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Socket from "effect/unstable/socket/Socket";
+import * as Socket from "effect/socket/Socket";
 
 import { makeWebRemoteHttpClientLayer } from "./remoteHttpLayer";
 import { makeRelayClientTracingLayer } from "@lecturn/shared/relayTracing";

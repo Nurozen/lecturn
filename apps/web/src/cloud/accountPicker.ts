@@ -1,6 +1,6 @@
 import type { EnvironmentId } from "@lecturn/contracts";
 import * as Schema from "effect/Schema";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 import { getLocalStorageItem, setLocalStorageItem } from "../hooks/useLocalStorage";
 import type { ConnectAccountProfiles } from "./connectAccounts";

@@ -15,7 +15,7 @@ import {
   sanitizeFeatureBranchName,
 } from "@lecturn/shared/git";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 
 import { useBranches } from "../state/queries";
 import { threadEnvironment } from "../state/threads";

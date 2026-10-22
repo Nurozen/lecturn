@@ -1,6 +1,6 @@
 import { expect, it } from "vite-plus/test";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
-import * as HttpBody from "effect/unstable/http/HttpBody";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import * as HttpBody from "effect/http/HttpBody";
 import { gatewayHttpResponse, mutableGatewayBindingResponse } from "./ManagedGatewayBinding.ts";
 
 it("allows response middleware headers without mutating the origin response", async () => {

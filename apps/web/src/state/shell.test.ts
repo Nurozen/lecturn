@@ -6,7 +6,7 @@ import type { EnvironmentCatalogState } from "@lecturn/client-runtime/state/conn
 import type { EnvironmentShellState } from "@lecturn/client-runtime/state/shell";
 import { EnvironmentId } from "@lecturn/contracts";
 import * as Option from "effect/Option";
-import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createAllEnvironmentProjectSnapshotsReadyAtom } from "./shell";

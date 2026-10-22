@@ -3,7 +3,7 @@ import { vi } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { TeamPolicy, TeamPolicyLive, assertProviderPolicy } from "./TeamPolicy.ts";
 import {

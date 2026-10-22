@@ -2,7 +2,7 @@ import { EnvironmentId, WS_METHODS, type HostResourcesSnapshot } from "@lecturn/
 import { expect, it } from "@effect/vitest";
 import { Clock, Deferred, Effect, Layer, Option, Stream, SubscriptionRef } from "effect";
 import * as TestClock from "effect/testing/TestClock";
-import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
 
 import {
   AVAILABLE_CONNECTION_STATE,

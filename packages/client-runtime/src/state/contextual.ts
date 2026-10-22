@@ -1,4 +1,4 @@
-import { HttpClient, FetchHttpClient } from "effect/unstable/http";
+import { HttpClient, FetchHttpClient } from "effect/http";
 import {
   ContextualError,
   type ContextualCaptureStatusResult,
@@ -13,7 +13,7 @@ import { environmentEndpointUrl } from "../environment/endpoint.ts";
 import { buildEnvironmentAuthHeaders } from "./environmentHttpAuth.ts";
 import { WS_METHODS, type EnvironmentId, type ContextualEffectiveState } from "@lecturn/contracts";
 import { Effect, Option, Stream, SubscriptionRef } from "effect";
-import { AsyncResult, Atom, type AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
   createAtomCommandScheduler,

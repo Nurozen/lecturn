@@ -19,7 +19,7 @@ import {
 import { needsCursorKeychainAccess, refreshUsage } from "@lecturn/client-runtime/state/usage";
 import { mergeUsage, type EnvironmentUsage, type MergedUsage } from "@lecturn/shared/usageMerge";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useCallback, useMemo } from "react";
 
 import { appAtomRegistry } from "./atom-registry";

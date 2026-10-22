@@ -8,7 +8,7 @@ import {
   ContextualError,
 } from "@lecturn/contracts";
 import { Context, Effect, Layer, Schema } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { ExtensionsRuntime } from "../extensions/ExtensionsRuntime.ts";
 import { contextualBoundary, contextualNow, appendContextualEvent } from "./ContextualSettings.ts";
 import { fingerprint } from "./DecisionCandidates.ts";

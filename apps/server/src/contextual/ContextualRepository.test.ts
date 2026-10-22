@@ -10,7 +10,7 @@ import {
   TurnId,
 } from "@lecturn/contracts";
 import { Effect, Result } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { make } from "./ContextualRepository.ts";
 import { make as makeSettings } from "./ContextualSettings.ts";

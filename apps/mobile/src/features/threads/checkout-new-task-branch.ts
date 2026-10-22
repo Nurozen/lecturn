@@ -12,7 +12,7 @@ import type {
   VcsSwitchRefResult,
 } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 
 import { shouldCheckoutNewTaskBranch } from "./new-task-context-presentation";
 

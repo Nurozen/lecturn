@@ -2,7 +2,7 @@ import { ContextualDraftControl } from "../contextual/ContextualDraftControl";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { useAtomValue } from "@effect/atom-react";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { clampFileAttachmentUploadBytes } from "@lecturn/client-runtime/state/attachments";
 import {
   nextPastedTextFileName,

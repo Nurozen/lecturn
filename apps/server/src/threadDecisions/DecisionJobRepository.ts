@@ -29,7 +29,7 @@ import {
   Stream,
   type Scope,
 } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import {
   bumpDecisionRevision,
   readDecisionRevision,
@@ -955,7 +955,7 @@ export const make = Effect.gen(function* () {
     input: ThreadDecisionScanInput,
   ): Effect.fn.Return<
     ThreadDecisionScanResult,
-    ThreadDecisionError | import("effect/unstable/sql/SqlError").SqlError | Schema.SchemaError
+    ThreadDecisionError | import("effect/sql/SqlError").SqlError | Schema.SchemaError
   > {
     yield* requireDecisionProject(sql, input.projectId);
     if (input.operation === "retry") {

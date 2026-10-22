@@ -26,7 +26,12 @@ import {
   type ThreadId,
   TurnItemId,
 } from "@lecturn/contracts";
-import { buildTemporaryWorktreeBranchName } from "@lecturn/shared/git";
+import {
+  buildTemporaryWorktreeBranchName,
+  flattenTemporaryWorktreeBranchName,
+  isTemporaryWorktreeBranch,
+  WORKTREE_BRANCH_PREFIX,
+} from "@lecturn/shared/git";
 import * as Effect from "effect/Effect";
 
 import type * as GitWorkflow from "../../git/GitWorkflowService.ts";
@@ -214,10 +219,21 @@ export const provisionForkWorktree = Effect.fn("ThreadForkDeltas.provisionForkWo
         })).commitSha;
       }
     }
+    let newRefName = prepareWorktree.branch ?? buildTemporaryWorktreeBranchName(input.mintId);
+    // A plain `lecturn` branch makes every `lecturn/<hash>` ref impossible.
+    if (
+      isTemporaryWorktreeBranch(newRefName) &&
+      (yield* git.hasCommit({
+        cwd: prepareWorktree.projectCwd,
+        refName: `refs/heads/${WORKTREE_BRANCH_PREFIX}`,
+      }))
+    ) {
+      newRefName = flattenTemporaryWorktreeBranchName(newRefName);
+    }
     const created = yield* git.createWorktree({
       cwd: prepareWorktree.projectCwd,
       refName: startRef,
-      newRefName: prepareWorktree.branch ?? buildTemporaryWorktreeBranchName(input.mintId),
+      newRefName,
       baseRefName: prepareWorktree.baseBranch,
       path: null,
     });

@@ -10,7 +10,7 @@ import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit
 import { threadSearchMatchKey } from "@lecturn/client-runtime/state/thread-search";
 import type { ContextMenuItem, EnvironmentId, ThreadId } from "@lecturn/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@lecturn/contracts/settings";
-import type { AsyncResult } from "effect/unstable/reactivity";
+import type { AsyncResult } from "effect/reactivity";
 import { planPinnedReorder } from "@lecturn/client-runtime/state/thread-sort";
 import {
   effectiveSnoozed,

@@ -5,7 +5,7 @@ import {
 import { fetchRemoteEnvironmentDescriptor } from "@lecturn/client-runtime/environment";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import { Headers, HttpClient } from "effect/unstable/http";
+import { Headers, HttpClient } from "effect/http";
 import { afterEach, describe, expect, vi } from "vite-plus/test";
 import { makeWebRemoteHttpClientLayer } from "./remoteHttpLayer";
 

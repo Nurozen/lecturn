@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { ContextualSourcePolicy, ProjectId, ThreadId } from "@lecturn/contracts";
 import { Effect, Result, Schema } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { initializeContextualThread, make } from "./ContextualSettings.ts";
 import {

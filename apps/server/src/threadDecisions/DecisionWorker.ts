@@ -24,7 +24,7 @@ import {
   type DecisionTextSpan,
 } from "@lecturn/shared/decisionEvidence";
 import { Context, Effect, Layer, Ref, Schema, Semaphore, Stream, type Scope } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { BackgroundPolicy } from "../background/BackgroundPolicy.ts";
 import { ProviderWorkAdmission } from "../provider/ProviderWorkAdmission.ts";
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";

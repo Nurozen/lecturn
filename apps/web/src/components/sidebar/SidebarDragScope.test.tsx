@@ -6,7 +6,7 @@ import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@lecturn
 import type { ComponentProps, ReactNode } from "react";
 import { Cause } from "effect";
 import type { SidebarLists } from "./sidebarDragScope.logic";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import { SidebarDragBoundary, SidebarDragScope, ScopedSortableThreadRow } from "./SidebarDragScope";

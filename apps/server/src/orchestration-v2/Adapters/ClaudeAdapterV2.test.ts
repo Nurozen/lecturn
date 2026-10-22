@@ -43,7 +43,7 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import { Tool } from "effect/unstable/ai";
+import { Tool } from "effect/ai";
 import { formatClaudeResumeCompactionQuestion } from "@lecturn/shared/claudeCompaction";
 import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import { SpawnExecutableResolution } from "@lecturn/shared/shell";

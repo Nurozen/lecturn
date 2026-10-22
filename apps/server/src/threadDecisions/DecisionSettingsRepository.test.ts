@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { DEFAULT_DECISION_TRACKING_DESCRIPTION, ProjectId, ThreadId } from "@lecturn/contracts";
 import { Effect, Result } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { make } from "./DecisionSettingsRepository.ts";
 import { clearV2Projection, installLegacyProjectionMirror } from "./V2ProjectionTestFixtures.ts";

@@ -10,7 +10,7 @@ import {
   type ThreadId,
 } from "@lecturn/contracts";
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 const decodeIds = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.String)));
 const encodeIds = Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.String)));

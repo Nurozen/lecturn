@@ -25,7 +25,7 @@ import * as Path from "effect/Path";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";

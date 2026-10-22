@@ -20,7 +20,7 @@ import * as Deferred from "effect/Deferred";
 import * as StaveRuntimeFence from "../stave/StaveRuntimeFence.ts";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Base64Url from "effect/encoding/Base64Url";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -35,7 +35,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import { expect } from "vite-plus/test";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -203,7 +203,7 @@ function restartInput(overrides: Partial<TerminalRestartInput> = {}): TerminalRe
 
 const historyLogPath = (logsDir: string, threadId = "thread-1") =>
   Effect.service(Path.Path).pipe(
-    Effect.map(({ join }) => join(logsDir, `terminal_${Encoding.encodeBase64Url(threadId)}.log`)),
+    Effect.map(({ join }) => join(logsDir, `terminal_${Base64Url.encode(threadId)}.log`)),
   );
 
 const multiTerminalHistoryLogPath = (
@@ -213,12 +213,12 @@ const multiTerminalHistoryLogPath = (
 ) =>
   Effect.service(Path.Path).pipe(
     Effect.map(({ join }) => {
-      const threadPart = `terminal_${Encoding.encodeBase64Url(threadId)}`;
+      const threadPart = `terminal_${Base64Url.encode(threadId)}`;
       return join(
         logsDir,
         terminalId === DEFAULT_TERMINAL_ID
           ? `${threadPart}.log`
-          : `${threadPart}_${Encoding.encodeBase64Url(terminalId)}.log`,
+          : `${threadPart}_${Base64Url.encode(terminalId)}.log`,
       );
     }),
   );

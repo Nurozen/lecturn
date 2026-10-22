@@ -1,7 +1,7 @@
 import * as FileSystem from "effect/FileSystem";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
-import { HttpClient } from "effect/unstable/http";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import { HttpClient } from "effect/http";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { makeDecisionsService } from "../decisions/DecisionsService.ts";
 import { parseDecisionsConfig } from "../decisions/DecisionsConfig.ts";
 import { makeExtensionsService, ExtensionsService } from "./ExtensionsService.ts";

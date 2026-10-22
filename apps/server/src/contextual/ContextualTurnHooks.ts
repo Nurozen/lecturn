@@ -31,7 +31,7 @@ import {
   TurnId,
 } from "@lecturn/contracts";
 import { Cause, Context, DateTime, Effect, Layer, Option, Schema, Stream } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import {
   LecturnHookRejectedError,
   type LecturnOrchestrationHooksContribution,

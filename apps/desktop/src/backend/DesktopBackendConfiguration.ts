@@ -6,7 +6,7 @@ import { parsePersistedServerObservabilitySettings } from "@lecturn/shared/serve
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Hex from "effect/encoding/Hex";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -923,7 +923,7 @@ export const make = Effect.gen(function* () {
       onNone: () =>
         crypto.randomBytes(24).pipe(
           Effect.map((bytes) => {
-            const token = Encoding.encodeHex(bytes);
+            const token = Hex.encode(bytes);
             return [token, Option.some(token)] as const;
           }),
         ),
