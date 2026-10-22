@@ -14,7 +14,7 @@ import type {
   ServerConfig,
 } from "@lecturn/contracts";
 import { environmentSupportsStave } from "@lecturn/client-runtime/state/stave";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 import { listedProjects, listedThreadShells } from "./listed-entities";
 import { environmentProjects } from "./projects";

@@ -1,7 +1,7 @@
 import { useProfileStableAccountId } from "../../cloud/useProfileStableAccountId";
 import { useConnectAccountAuth } from "../../cloud/useConnectAccountAuth";
 import { useAtomValue } from "@effect/atom-react";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useMemo, useState, type ReactNode } from "react";
 
 import {

@@ -1,7 +1,7 @@
 import { RegistryContext } from "@effect/atom-react";
 import { EnvironmentId, type HostResourcesSnapshot } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
-import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import { useEffect } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -66,7 +66,9 @@ describe("automatic environment selection", () => {
       failed: true,
       environmentId: null,
     });
-    await fixture.update(AsyncResult.waiting(AsyncResult.failure(Cause.die("offline"))));
+    await fixture.update(
+      AsyncResult.waiting(AsyncResult.failure<HostResourcesSnapshot>(Cause.die("offline"))),
+    );
     expect(fixture.selection()).toMatchObject({
       pending: true,
       failed: false,

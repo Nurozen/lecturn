@@ -11,7 +11,7 @@ import {
 } from "@lecturn/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer, Option, Stream, SubscriptionRef, Schema } from "effect";
-import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import {
   AVAILABLE_CONNECTION_STATE,
   PrimaryConnectionTarget,

@@ -8,7 +8,7 @@ import type {
 } from "@lecturn/contracts";
 import { LegendList } from "@legendapp/list/react-native";
 import { StackActions, useNavigation } from "@react-navigation/native";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import * as Haptics from "expo-haptics";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, TextInput, View } from "react-native";

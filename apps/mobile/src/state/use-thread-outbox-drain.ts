@@ -21,7 +21,7 @@ import {
 } from "@lecturn/contracts";
 import { buildTemporaryWorktreeBranchName } from "@lecturn/shared/git";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert } from "react-native";
 

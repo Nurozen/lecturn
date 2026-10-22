@@ -9,7 +9,7 @@ import {
   DecisionId,
 } from "@lecturn/contracts";
 import { Context, Effect, Layer } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { v2Messages } from "../threadDecisions/V2ProjectionSources.ts";
 import { DecisionRepository } from "../threadDecisions/DecisionRepository.ts";
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";

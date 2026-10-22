@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import * as C from "@lecturn/contracts";
 import { Effect, Result } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { DecisionRepository } from "../threadDecisions/DecisionRepository.ts";
 import { ExtensionsRuntime } from "../extensions/ExtensionsRuntime.ts";

@@ -6,7 +6,7 @@ import {
   pullRequestDetailToVcsStatus,
 } from "@lecturn/client-runtime/state/pull-requests";
 import type { OrchestrationProjectShell } from "@lecturn/contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useCallback, useEffect, useMemo } from "react";
 
 import { connectionAtomRuntime } from "../connection/runtime";

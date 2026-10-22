@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Data, Effect } from "effect";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { makeManagedGatewayHttpClient } from "./ManagedGatewayHttpClient.ts";
 
 class GatewayUnavailable extends Data.TaggedError("GatewayUnavailable") {}

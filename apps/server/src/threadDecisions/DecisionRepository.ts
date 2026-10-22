@@ -29,7 +29,7 @@ import {
   DECISION_CANONICAL_VERSION,
 } from "@lecturn/shared/decisionEvidence";
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { v2Messages } from "./V2ProjectionSources.ts";
 import {
   requireDecisionProject,
@@ -697,7 +697,7 @@ export const make = Effect.gen(function* () {
   ): Effect.fn.Return<
     ThreadDecisionExportResult,
     | ThreadDecisionError
-    | import("effect/unstable/sql/SqlError").SqlError
+    | import("effect/sql/SqlError").SqlError
     | import("effect/Schema").SchemaError
   > {
     if ((yield* revision(input.projectId)) !== input.expectedProjectRevision)

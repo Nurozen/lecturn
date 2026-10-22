@@ -1,5 +1,5 @@
 import type { EnvironmentId, ServerConfig } from "@lecturn/contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 /** Environments whose server advertises `threadForking`. */
 export type ThreadForkSupport = ReadonlySet<EnvironmentId>;

@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { describe, expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
-import * as OpenApi from "effect/unstable/httpapi/OpenApi";
+import * as OpenApi from "effect/http-api/OpenApi";
 import { RelayApi } from "../packages/contracts/src/relay.ts";
 import { WsRpcGroup } from "../packages/contracts/src/rpc.ts";
 import * as Contextual from "../packages/contracts/src/contextual.ts";

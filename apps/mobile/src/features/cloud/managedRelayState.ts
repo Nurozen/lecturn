@@ -12,7 +12,7 @@ import {
 } from "@lecturn/client-runtime/state/runtime";
 import type { EnvironmentId } from "@lecturn/contracts";
 import type { RelayClientEnvironmentRecord } from "@lecturn/contracts/relay";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useCallback, useEffect } from "react";
 
 import { runtimeContextLayer } from "../../lib/runtime";

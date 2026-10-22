@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import { Effect, Result } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import {
   MessageId,
   ProjectId,

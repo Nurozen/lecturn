@@ -22,7 +22,7 @@ import {
   HttpClientResponse,
   HttpServerRequest,
   type HttpClientRequest,
-} from "effect/unstable/http";
+} from "effect/http";
 
 import {
   DESKTOP_UPDATE_RESTART_MARKER_FILE,

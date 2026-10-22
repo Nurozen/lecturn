@@ -7,7 +7,7 @@ import { accountOwnerTarget } from "@lecturn/client-runtime/connection";
 import { relayAccountByEnvironmentId } from "@lecturn/client-runtime/relay";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, type AtomRegistry } from "effect/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
 import { getLocalStorageItem, setLocalStorageItem } from "../hooks/useLocalStorage";

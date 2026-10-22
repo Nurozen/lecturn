@@ -1,7 +1,7 @@
 import * as NodeCrypto from "node:crypto";
 import * as C from "@lecturn/contracts";
 import { Context, Effect, Layer, Schema } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { DecisionRepository } from "../threadDecisions/DecisionRepository.ts";
 import { ExtensionsRuntime } from "../extensions/ExtensionsRuntime.ts";
 import {

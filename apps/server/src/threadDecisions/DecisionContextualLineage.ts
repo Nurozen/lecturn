@@ -8,7 +8,7 @@ import {
 } from "@lecturn/contracts";
 import { decisionFingerprint } from "@lecturn/shared/decisionEvidence";
 import { Effect, Schema } from "effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import type * as SqlClient from "effect/sql/SqlClient";
 const decodePacket = Schema.decodeUnknownEffect(Schema.fromJsonString(ContextualPacket));
 const decodePolicy = Schema.decodeUnknownEffect(Schema.fromJsonString(ContextualSourcePolicy));
 const decodeIds = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.String)));

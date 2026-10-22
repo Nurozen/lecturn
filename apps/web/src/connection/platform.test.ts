@@ -10,7 +10,7 @@ import { vi } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Stream from "effect/Stream";
-import { AtomRegistry } from "effect/unstable/reactivity";
+import { AtomRegistry } from "effect/reactivity";
 
 import { Persistence } from "@lecturn/client-runtime/platform";
 import { ThreadId } from "@lecturn/contracts";

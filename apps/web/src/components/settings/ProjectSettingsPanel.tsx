@@ -11,7 +11,7 @@ import {
   type AtomCommandResult,
 } from "@lecturn/client-runtime/state/runtime";
 import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { type EnvironmentId, type ProjectIconOverride } from "@lecturn/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import * as Cause from "effect/Cause";

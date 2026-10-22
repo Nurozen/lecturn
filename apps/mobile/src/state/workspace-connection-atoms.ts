@@ -2,7 +2,7 @@ import type { EnvironmentPresentation, NetworkStatus } from "@lecturn/client-run
 import type { EnvironmentCatalogState } from "@lecturn/client-runtime/state/connections";
 import type { EnvironmentId } from "@lecturn/contracts";
 import { createEnvironmentSummaryAtoms } from "@lecturn/client-runtime/state/presentation";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 import { projectWorkspaceConnectionState } from "./workspaceModel";
 

@@ -1,10 +1,10 @@
 import { RelayApi } from "@lecturn/contracts/relay";
 import { createClerkClient } from "@clerk/backend";
 import { Effect, Option, Redacted, Schema } from "effect";
-import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
-import * as HttpIncomingMessage from "effect/unstable/http/HttpIncomingMessage";
+import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage";
 import * as ByteSize from "effect/ByteSize";
 import * as Contracts from "@lecturn/contracts";
 import { RelayConfiguration } from "../Config.ts";

@@ -13,7 +13,7 @@ import {
 } from "@lecturn/client-runtime/state/attachments";
 import { create } from "zustand";
 import * as Option from "effect/Option";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 
 import {
   DraftId,

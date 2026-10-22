@@ -1,5 +1,5 @@
 import { sha256 } from "@noble/hashes/sha2";
-import { Encoding } from "effect";
+import * as Hex from "effect/encoding/Hex";
 
 export const DECISION_CANONICAL_VERSION = "1";
 
@@ -21,7 +21,7 @@ export function canonicalDecisionText(source: string) {
 }
 
 export function decisionFingerprint(parts: ReadonlyArray<unknown>): string {
-  return Encoding.encodeHex(sha256(new TextEncoder().encode(JSON.stringify(parts))));
+  return Hex.encode(sha256(new TextEncoder().encode(JSON.stringify(parts))));
 }
 
 export function decisionSourceHash(text: string): string {

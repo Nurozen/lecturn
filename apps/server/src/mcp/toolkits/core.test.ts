@@ -11,7 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { McpAttachmentInput } from "./attachment/input.ts";
-import { McpSchema, McpServer, Tool } from "effect/unstable/ai";
+import { McpSchema, McpServer, Tool } from "effect/ai";
 
 import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
 import * as ProviderAdapterRegistry from "../../orchestration-v2/ProviderAdapterRegistry.ts";
@@ -38,6 +38,13 @@ import {
   resolveLecturnMcpToolPresentation,
   resolveLecturnMcpToolSummaryAction,
 } from "@lecturn/shared/lecturnMcpToolPresentation";
+
+// Effect returns a declared tool failure as `isError` with its encoded payload
+// as JSON text, never as `structuredContent`.
+const declaredFailure = (result: McpSchema.CallToolResult) => {
+  const text = result.content[0];
+  return result.isError === true && text?.type === "text" ? JSON.parse(text.text) : undefined;
+};
 
 const decodeMcpAttachmentInput = Schema.decodeUnknownEffect(McpAttachmentInput);
 
@@ -118,7 +125,7 @@ it.effect("checks capability before accessing services through the production re
         }),
         Effect.provideService(McpSchema.McpServerClient, client),
       );
-    expect(result.structuredContent).toMatchObject({ code: "capability_denied" });
+    expect(declaredFailure(result)).toMatchObject({ code: "capability_denied" });
   }).pipe(
     Effect.provide(
       McpHttpServer.ThreadToolkitRegistrationLive.pipe(
@@ -139,7 +146,7 @@ it.effect("returns a bounded public failure without serializing storage causes",
         Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
         Effect.provideService(McpSchema.McpServerClient, client),
       );
-    expect(result.structuredContent).toEqual({
+    expect(declaredFailure(result)).toEqual({
       _tag: "OrchestratorMcpFailure",
       code: "orchestration_error",
       message: "The operation could not be completed.",
@@ -247,7 +254,7 @@ it.effect("a client caller targets any thread within its ceiling and cannot act 
       { action: "pin" },
       clientScope("auto"),
     );
-    expect(untargeted.structuredContent).toMatchObject({ code: "target_required" });
+    expect(declaredFailure(untargeted)).toMatchObject({ code: "target_required" });
 
     const pinned = yield* call(
       "lecturn_thread_organize",
@@ -262,7 +269,7 @@ it.effect("a client caller targets any thread within its ceiling and cannot act 
       { action: "pin", threadId: "other-project-thread" },
       clientScope("approval-required"),
     );
-    expect(aboveCeiling.structuredContent).toMatchObject({
+    expect(declaredFailure(aboveCeiling)).toMatchObject({
       code: "runtime_mode_escalation_denied",
     });
 
@@ -271,7 +278,7 @@ it.effect("a client caller targets any thread within its ceiling and cannot act 
       { sourcePoint: { type: "latest_stable" } },
       clientScope("auto"),
     );
-    expect(forked.structuredContent).toMatchObject({ code: "target_required" });
+    expect(declaredFailure(forked)).toMatchObject({ code: "target_required" });
   }).pipe(
     Effect.provide(
       McpHttpServer.ThreadToolkitRegistrationLive.pipe(
@@ -318,7 +325,7 @@ it.effect("refuses act-as-caller tools to a client caller", () =>
         ),
         Effect.provideService(McpSchema.McpServerClient, client),
       );
-    expect(result.structuredContent).toMatchObject({ code: "thread_credential_required" });
+    expect(declaredFailure(result)).toMatchObject({ code: "thread_credential_required" });
   }).pipe(
     Effect.provide(
       McpHttpServer.OrchestratorToolkitRegistrationLive.pipe(
@@ -348,9 +355,9 @@ it.effect("a caller cannot rewrite a scheduled task that runs above its own mode
       scheduledTaskId: "task-full-access",
       prompt: "Run something else",
     });
-    expect(update.structuredContent).toMatchObject({ code: "runtime_mode_escalation_denied" });
+    expect(declaredFailure(update)).toMatchObject({ code: "runtime_mode_escalation_denied" });
     const remove = yield* call("delete_scheduled_task", { scheduledTaskId: "task-full-access" });
-    expect(remove.structuredContent).toMatchObject({ code: "runtime_mode_escalation_denied" });
+    expect(declaredFailure(remove)).toMatchObject({ code: "runtime_mode_escalation_denied" });
     const allowed = yield* call("update_scheduled_task", {
       scheduledTaskId: "task-auto",
       enabled: false,
@@ -420,7 +427,7 @@ it.effect("a caller cannot interrupt a thread that runs above its own modes", ()
         Effect.provideService(McpInvocationContext.McpInvocationContext, clientScope("auto")),
         Effect.provideService(McpSchema.McpServerClient, client),
       );
-    expect(result.structuredContent).toMatchObject({ code: "runtime_mode_escalation_denied" });
+    expect(declaredFailure(result)).toMatchObject({ code: "runtime_mode_escalation_denied" });
   }).pipe(
     Effect.provide(
       McpHttpServer.OrchestratorToolkitRegistrationLive.pipe(

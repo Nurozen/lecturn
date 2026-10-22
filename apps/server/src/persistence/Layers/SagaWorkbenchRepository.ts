@@ -4,7 +4,7 @@ import {
   SagaWorkbenchWorkflow,
 } from "@lecturn/contracts";
 import { Effect, Layer, Schema } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import {
   emptyWorkflow,
   SagaWorkbenchRepository,

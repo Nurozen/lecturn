@@ -5,7 +5,7 @@ import {
   environmentSupportsStave,
   staveFeatureAvailable,
 } from "@lecturn/client-runtime/state/stave";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import * as Option from "effect/Option";
 import { useEffect, useMemo } from "react";
 import { useClientSettings } from "../../hooks/useSettings";

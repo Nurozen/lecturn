@@ -3,7 +3,7 @@ import { assert, it } from "@effect/vitest";
 import * as C from "@lecturn/contracts";
 import { Deferred, Effect, Fiber, Layer, Queue, Result, Schema, Stream } from "effect";
 import { ContextualNotifications, make as makeNotifications } from "./ContextualNotifications.ts";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { ExtensionsRuntime } from "../extensions/ExtensionsRuntime.ts";
 import { ExtensionsCloudClient } from "../extensions/ExtensionsCloudClient.ts";

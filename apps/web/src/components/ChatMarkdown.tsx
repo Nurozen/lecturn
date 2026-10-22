@@ -53,7 +53,7 @@ import { inlineCodeFilePathCandidate } from "@lecturn/client-runtime/markdown-li
 import { mediaFileReference, mediaUrlReference } from "@lecturn/client-runtime/media-reference";
 import { mediaKindFromPath, mediaMimeTypeFromExtension } from "@lecturn/shared/filePreview";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import React, {
   Children,
   Suspense,

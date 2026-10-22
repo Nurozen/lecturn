@@ -6,7 +6,7 @@ import {
   type ServerProvider,
 } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
-import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
 
 import { createThreadForkSupportAtom, threadForkSupported } from "./threadForkSupport";
 

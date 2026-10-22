@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { DEFAULT_DECISION_TRACKING_DESCRIPTION, ProjectId, ThreadId } from "@lecturn/contracts";
 import { Effect, Result } from "effect";
 import * as TestClock from "effect/testing/TestClock";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { DecisionSettingsRepository, make as makeSettings } from "./DecisionSettingsRepository.ts";
 import {

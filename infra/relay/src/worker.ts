@@ -24,7 +24,7 @@ import {
   ManagedGatewayHttpClient,
   makeManagedGatewayHttpClient,
 } from "./environments/ManagedGatewayHttpClient.ts";
-import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClient from "effect/http/HttpClient";
 import * as Alchemy from "alchemy";
 import * as Cloudflare from "alchemy/Cloudflare";
 import * as Drizzle from "alchemy/Drizzle/Postgres";
@@ -58,13 +58,13 @@ import { makeBillingOperations, clerkIdentityLookup } from "./billing/BillingOpe
 import { makeManagedSuspensions } from "./billing/ManagedSuspensions.ts";
 import { bindManagedSuspensionProvider } from "./environments/ManagedSuspensionBinding.ts";
 import { billingRoutes } from "./http/BillingApi.ts";
-import * as Etag from "effect/unstable/http/Etag";
-import * as HttpPlatform from "effect/unstable/http/HttpPlatform";
-import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
-import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
-import * as HttpApiScalar from "effect/unstable/httpapi/HttpApiScalar";
+import * as Etag from "effect/http/Etag";
+import * as HttpPlatform from "effect/http/HttpPlatform";
+import * as HttpRouter from "effect/http/HttpRouter";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
+import * as HttpApiScalar from "effect/http-api/HttpApiScalar";
 
 import { RelayApi } from "@lecturn/contracts/relay";
 

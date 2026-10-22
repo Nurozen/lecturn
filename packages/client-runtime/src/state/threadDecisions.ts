@@ -15,7 +15,7 @@ import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
-import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
   createAtomCommandScheduler,
@@ -150,11 +150,14 @@ export function createThreadDecisionEnvironmentAtoms<R, E>(
     tag: WS_METHODS.threadDecisionsSubscribe,
     transform: (stream) =>
       stream.pipe(
-        Stream.scan(new Map<ProjectId, number>(), (previous, event) => {
-          const next = new Map(previous);
-          next.set(event.projectId, event.revision);
-          return next;
-        }),
+        Stream.scan(
+          () => new Map<ProjectId, number>(),
+          (previous, event) => {
+            const next = new Map(previous);
+            next.set(event.projectId, event.revision);
+            return next;
+          },
+        ),
       ),
   });
   const manualRefresh = Atom.family((key: string) =>

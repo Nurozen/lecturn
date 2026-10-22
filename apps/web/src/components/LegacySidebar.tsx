@@ -20,7 +20,7 @@ import { openStaveWizard } from "../staveWizard";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { serverEnvironment } from "../state/server";
 import { staveStatus } from "../state/stave";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import * as Option from "effect/Option";
 import {
   environmentSupportsStave,

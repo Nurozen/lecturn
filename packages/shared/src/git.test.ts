@@ -4,13 +4,14 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import * as ChildProcess from "effect/unstable/process/ChildProcess";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ChildProcess from "effect/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import {
   applyGitStatusStreamEvent,
   formatGeneratedBranchName,
   buildTemporaryWorktreeBranchName,
+  flattenTemporaryWorktreeBranchName,
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
   parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
@@ -267,6 +268,19 @@ describe("isTemporaryWorktreeBranch", () => {
     expect(
       isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/f4ae4e0e-f971-4d48-c4f2-9cf0aa54ab12`),
     ).toBe(false);
+  });
+
+  it("matches the flat fallback used when a plain lecturn branch exists", () => {
+    const flat = flattenTemporaryWorktreeBranchName(`${WORKTREE_BRANCH_PREFIX}/deadbeef`);
+    expect(flat).toBe(`${WORKTREE_BRANCH_PREFIX}-deadbeef`);
+    expect(isTemporaryWorktreeBranch(flat)).toBe(true);
+    expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}-deadbeef-extra`)).toBe(false);
+    expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}-feature`)).toBe(false);
+    expect(
+      flattenTemporaryWorktreeBranchName(
+        `${WORKTREE_BRANCH_PREFIX}/f4ae4e0e-f971-4d48-b4f2-9cf0aa54ab12`,
+      ),
+    ).toBe(`${WORKTREE_BRANCH_PREFIX}-f4ae4e0e`);
   });
 
   it("rejects non-temporary refName names", () => {

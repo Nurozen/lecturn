@@ -7,7 +7,7 @@ import {
 } from "@lecturn/client-runtime/state/assets";
 import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 import type { AssetResource, EnvironmentId } from "@lecturn/contracts";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useCallback, useMemo } from "react";
 
 import { assetEnvironment } from "~/state/assets";

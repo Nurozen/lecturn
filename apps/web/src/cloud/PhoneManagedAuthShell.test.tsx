@@ -46,11 +46,11 @@ vi.mock("./phoneConnectAccount", async (original) => {
   };
 });
 vi.mock("../rpc/atomRegistry", async () => {
-  const { AtomRegistry } = await import("effect/unstable/reactivity");
+  const { AtomRegistry } = await import("effect/reactivity");
   return { appAtomRegistry: AtomRegistry.make() };
 });
 vi.mock("./connectAccounts", async () => {
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   return { connectAccountProfilesAtom: Atom.make(new Map()) };
 });
 vi.mock("../connection/catalog", () => ({ environmentCatalog: { removeRelayEnvironments: {} } }));

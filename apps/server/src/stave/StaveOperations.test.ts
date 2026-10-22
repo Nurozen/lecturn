@@ -37,7 +37,7 @@ import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 
 import * as ServerConfig from "../config.ts";
 import { StaveOrchestration, type StaveOrchestrationCommand } from "./StaveOrchestration.ts";

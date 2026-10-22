@@ -10,7 +10,7 @@
  *
  * Both fragments keep the V1 column names their callers already use.
  */
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import type * as SqlClient from "effect/sql/SqlClient";
 
 /** One row per app thread: thread_id, project_id, title, archived_at, deleted_at, created_at, updated_at, model_selection_json. */
 const V2_THREADS_SQL = `(SELECT thread_id, project_id, title, archived_at, deleted_at, created_at, updated_at,

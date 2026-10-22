@@ -1,6 +1,6 @@
 import { managedRelaySessionsAtom } from "@lecturn/client-runtime/relay";
 import { RegistryContext } from "@effect/atom-react";
-import { Atom, AsyncResult } from "effect/unstable/reactivity";
+import { Atom, AsyncResult } from "effect/reactivity";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";

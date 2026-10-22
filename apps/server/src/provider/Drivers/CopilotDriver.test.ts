@@ -6,7 +6,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import * as Effect from "effect/Effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 
 import type { ProviderMaintenanceResolutionContext } from "../providerMaintenance.ts";
 import { COPILOT_UPDATE_RESOLVER } from "./CopilotDriver.ts";

@@ -7,7 +7,7 @@ import type {
 } from "@lecturn/contracts";
 import type { AtomCommandResult } from "@lecturn/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 
 import {
   browserDefaultOpenProfileId,

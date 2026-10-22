@@ -1,4 +1,4 @@
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import type { ReactNode } from "react";
 
 import type { CommandPaletteActionItem } from "../CommandPalette.logic";

@@ -12,7 +12,7 @@ import { scopedThreadKey } from "@lecturn/client-runtime/environment";
 import { resolveThreadRouteRef } from "../../threadRoutes";
 import { describeThreadActivity } from "@lecturn/client-runtime/state/activityContext";
 import { useAtomValue } from "@effect/atom-react";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { environmentThreadDetails } from "../../state/threads";
 import { environmentShell } from "../../state/shell";
 import { useThreadShells, useProjects } from "../../state/entities";

@@ -6,7 +6,7 @@ import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as DateTime from "effect/DateTime";
 import * as TestClock from "effect/testing/TestClock";
-import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
 
 import { PrimaryConnectionTarget } from "../connection/model.ts";
 import type { EnvironmentShellState } from "./shell.ts";

@@ -4,7 +4,7 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import * as Option from "effect/Option";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { chatGptModels } from "../CodexChatGptModels.ts";
@@ -23,7 +23,7 @@ import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment
 import { type ProviderDriverCreateInput, type ProviderInstance } from "../ProviderDriver.ts";
 import { codexContinuationIdentity } from "./CodexHomeLayout.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
-import { HttpClient } from "effect/unstable/http";
+import { HttpClient } from "effect/http";
 const DRIVER = ProviderDriverKind.make("codex");
 
 export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(function* (

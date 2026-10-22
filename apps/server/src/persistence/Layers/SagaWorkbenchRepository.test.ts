@@ -1,7 +1,7 @@
 import { ProjectId, type SagaWorkbenchIdentity } from "@lecturn/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer, Result } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { SqlitePersistenceMemory } from "./Sqlite.ts";
 import { layer, make } from "./SagaWorkbenchRepository.ts";
 import { emptyWorkflow, SagaWorkbenchRepository } from "../Services/SagaWorkbenchRepository.ts";

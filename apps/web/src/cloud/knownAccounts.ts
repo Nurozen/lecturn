@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, type AtomRegistry } from "effect/reactivity";
 
 import { getLocalStorageItem, setLocalStorageItem } from "../hooks/useLocalStorage";
 

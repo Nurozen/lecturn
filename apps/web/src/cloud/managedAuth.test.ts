@@ -5,7 +5,7 @@ import {
   managedRelaySessionsAtom,
 } from "@lecturn/client-runtime/relay";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -114,12 +114,12 @@ vi.mock("./publicConfig", () => ({
 
 // Authentication lifecycle tests have no local publishing host.
 vi.mock("./primaryCloudLinkState", async () => {
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   return { primaryCloudPublisherAtom: Atom.make(null) };
 });
 
 vi.mock("../connection/catalog", async () => {
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   return {
     environmentCatalog: {
       removeRelayEnvironments: {},

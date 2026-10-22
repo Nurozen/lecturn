@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { EnvironmentId, ProjectId, type DecisionFundingStatusResult } from "@lecturn/contracts";
 import { Effect, Stream } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as Repository from "./DecisionRepository.ts";
 import * as Settings from "./DecisionSettingsRepository.ts";

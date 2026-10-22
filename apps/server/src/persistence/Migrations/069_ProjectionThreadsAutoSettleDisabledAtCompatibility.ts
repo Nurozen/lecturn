@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import AutoSettleDisabledAt from "./054_ProjectionThreadsAutoSettleDisabledAt.ts";
 import ThreadNotes from "./054_ThreadNotes.ts";

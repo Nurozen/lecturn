@@ -2,8 +2,8 @@ import { assert, describe, it } from "@effect/vitest";
 import * as NodeSqliteClient from "@lecturn/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as Migrator from "effect/unstable/sql/Migrator";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Migrator from "effect/sql/Migrator";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { runMigrations } from "./Migrations.ts";
 import BranchPullRequest from "./Migrations/048_ProjectionThreadBranchPullRequest.ts";

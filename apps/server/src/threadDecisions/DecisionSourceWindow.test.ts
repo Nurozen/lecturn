@@ -8,7 +8,7 @@ import {
 } from "@lecturn/contracts";
 import { decisionSourceHash } from "@lecturn/shared/decisionEvidence";
 import { Effect, Result } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { decisionSourceWindow } from "./DecisionSourceWindow.ts";
 import { clearV2Projection, installLegacyProjectionMirror } from "./V2ProjectionTestFixtures.ts";

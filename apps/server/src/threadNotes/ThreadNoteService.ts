@@ -11,7 +11,7 @@ import {
   type ThreadNoteListResult,
 } from "@lecturn/contracts";
 import { Context, DateTime, Effect, Layer, Schema } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { v2Messages, v2Threads } from "../threadDecisions/V2ProjectionSources.ts";
 
 const fail = (code: ThreadNoteError["code"], message: string) =>

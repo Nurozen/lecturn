@@ -165,7 +165,7 @@ vi.mock("../../state/sourceControl", () => ({
   },
 }));
 vi.mock("../../state/server", async () => {
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   const config = Atom.make(null);
   return { serverEnvironment: { configValueAtom: () => config } };
 });
@@ -179,7 +179,7 @@ vi.mock("../../state/use-thread-outbox", async () => {
   };
 });
 vi.mock("../../state/composer-attachment-uploads", async () => {
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   return {
     composerAttachmentUploadsAtom: Atom.make({}),
     composerAttachmentUploadBlockReason: () => null,

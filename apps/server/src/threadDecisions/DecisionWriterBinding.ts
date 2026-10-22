@@ -7,7 +7,7 @@ import {
 } from "@lecturn/contracts";
 import { decisionFingerprint } from "@lecturn/shared/decisionEvidence";
 import { Clock, Context, Effect, Layer, Schema } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { v2Threads } from "./V2ProjectionSources.ts";
 import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
 import { ProviderWorkAdmission } from "../provider/ProviderWorkAdmission.ts";

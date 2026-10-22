@@ -16,7 +16,7 @@ import {
 } from "@lecturn/contracts";
 import { needsCursorKeychainAccess, refreshUsage } from "@lecturn/client-runtime/state/usage";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useCallback, useMemo } from "react";
 
 import { mergeUsage, type EnvironmentUsage, type MergedUsage } from "@lecturn/shared/usageMerge";

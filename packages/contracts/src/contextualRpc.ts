@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import * as Rpc from "effect/unstable/rpc/Rpc";
+import * as Rpc from "effect/rpc/Rpc";
 import * as C from "./contextual.ts";
 import * as H from "./extensionsHelper.ts";
 import * as E from "./extensions.ts";

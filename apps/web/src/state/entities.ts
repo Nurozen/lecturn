@@ -15,7 +15,7 @@ import type {
   OrchestrationV2ProjectedTurnItem,
   ServerProvider,
 } from "@lecturn/contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentProjects } from "./projects";
 import { environmentServerConfigsAtom } from "./server";

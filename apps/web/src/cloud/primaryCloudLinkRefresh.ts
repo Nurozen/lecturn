@@ -1,6 +1,6 @@
 import type { SupervisorConnectionState } from "@lecturn/client-runtime/connection";
 import * as Option from "effect/Option";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 /** Re-read link ownership once the host is ready, never on intermediate retry states. */
 export function connectedGenerationSignal(

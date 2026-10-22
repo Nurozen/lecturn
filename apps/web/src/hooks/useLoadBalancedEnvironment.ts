@@ -1,7 +1,7 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { chooseLoadBalancedEnvironment } from "@lecturn/client-runtime/load-balancing";
 import type { EnvironmentId } from "@lecturn/contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useCallback, useContext, useMemo } from "react";
 
 import { serverEnvironment } from "../state/server";

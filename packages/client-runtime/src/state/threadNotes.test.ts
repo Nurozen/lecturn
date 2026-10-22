@@ -9,7 +9,7 @@ import {
 } from "@lecturn/contracts";
 import { expect, it } from "@effect/vitest";
 import { Effect, Layer, Option, Stream, SubscriptionRef, Deferred, Fiber } from "effect";
-import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import {
   AVAILABLE_CONNECTION_STATE,
   PrimaryConnectionTarget,

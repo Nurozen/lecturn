@@ -2,7 +2,7 @@ import { TestClock } from "effect/testing";
 import { assert, it } from "@effect/vitest";
 import { EnvironmentId, ExtensionFundingStatusResult } from "@lecturn/contracts";
 import { Effect, Fiber, Option, Result, Schema } from "effect";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse } from "effect/http";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import { RELAY_URL_SECRET, RELAY_ENVIRONMENT_CREDENTIAL_SECRET } from "../cloud/config.ts";
