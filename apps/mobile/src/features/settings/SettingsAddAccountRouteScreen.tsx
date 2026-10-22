@@ -1,14 +1,15 @@
+import * as Dialog from "../../components/ui/Dialog";
 import { useClerk } from "@clerk/expo";
-import { AuthView } from "@clerk/expo/native";
+import { AuthView } from "@clerk/expo/native-components";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useEffect, useRef, useState } from "react";
-import { Alert, View } from "react-native";
+import { View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useConnectAccounts } from "../cloud/knownAccounts";
 import { signOutMobileConnectAccount } from "../cloud/mobileAccountSignOut";
 import { useAddConnectAccountGate } from "../cloud/useAddConnectAccountGate";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
-import { AppText } from "../../components/AppText";
+import { AppText } from "../../components/ui/AppText";
 
 export function SettingsAddAccountRouteScreen(props: StaticScreenProps<{ accountId?: string }>) {
   const navigation = useNavigation();
@@ -63,7 +64,7 @@ export function SettingsAddAccountAuthContent({
       void signOutMobileConnectAccount(clerk, added.accountId).catch((error) =>
         console.error("Could not reject unexpected account", error),
       );
-      Alert.alert("Account not added", "Sign in with the account you selected.");
+      Dialog.alert("Account not added", "Sign in with the account you selected.");
     }
     navigation.dispatch(StackActions.popTo("SettingsContent"));
   }, [accounts, clerk, expectedAccountId, entry, navigation]);

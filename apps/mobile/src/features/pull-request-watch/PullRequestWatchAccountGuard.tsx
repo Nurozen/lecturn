@@ -3,7 +3,7 @@ import { accountOwnerTarget } from "@lecturn/client-runtime/connection";
 import { useNavigation } from "@react-navigation/native";
 import { useEffect, type ReactNode } from "react";
 import { View } from "react-native";
-import { EmptyState } from "../../components/EmptyState";
+import { EmptyState } from "../../components/ui/EmptyState";
 import { LoadingScreen } from "../../components/LoadingScreen";
 import { environmentCatalog } from "../../connection/catalog";
 import { connectAccountsReadyAtom, useConnectAccounts } from "../cloud/knownAccounts";

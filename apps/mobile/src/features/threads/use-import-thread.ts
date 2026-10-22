@@ -17,7 +17,7 @@ import {
   type ScopedThreadRef,
 } from "@lecturn/contracts";
 import { useCallback, useMemo, useRef } from "react";
-import { Alert } from "react-native";
+import * as Dialog from "../../components/ui/Dialog";
 
 import { buildModelOptions, resolveDefaultableModelSelection } from "../../lib/modelOptions";
 import { uuidv4 } from "../../lib/uuid";
@@ -179,7 +179,7 @@ export function useImportThread(): (input: ImportThreadInput) => Promise<ScopedT
     async (input) => {
       const attempt = await importThread(input);
       if (attempt.ok) return attempt.value;
-      if (attempt.message !== null) Alert.alert(ALERT_TITLE, attempt.message);
+      if (attempt.message !== null) Dialog.alert(ALERT_TITLE, attempt.message);
       return null;
     },
     [importThread],

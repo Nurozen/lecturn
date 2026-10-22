@@ -1,3 +1,4 @@
+import * as Dialog from "../../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
 import { environmentCatalog } from "../../connection/catalog";
 import { connectAccountsReadyAtom, useConnectAccounts } from "../cloud/knownAccounts";
@@ -9,8 +10,8 @@ import { buildProjectThreadStartTurnInput } from "../../lib/projectThreadStartTu
 import { useWorktreeSetup } from "./use-worktree-setup";
 import { worktreeSetupAgentStarted } from "@lecturn/client-runtime/worktree-setup";
 import { accountOwnerTarget } from "@lecturn/client-runtime/connection";
-import type { ScreenHeaderAction } from "../../components/ScreenHeader.types";
-import { ScreenHeader } from "../../components/ScreenHeader";
+import type { AppBarAction } from "../../components/ui/AppBar.types";
+import { AppBar } from "../../components/ui/AppBar";
 import {
   StackActions,
   useFocusEffect,
@@ -33,7 +34,7 @@ import {
   projectScriptRuntimeEnv,
   resolveProjectScripts,
 } from "@lecturn/shared/projectScripts";
-import { Alert, Platform, ScrollView, View } from "react-native";
+import { Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConnectionsReady } from "../../state/workspace";
 import { useEnvironmentShellReadiness } from "../../state/shell";
@@ -43,7 +44,7 @@ import { recoverFailedThreadDraft } from "../../state/recover-failed-thread-draf
 import { useEnvironmentQuery } from "../../state/query";
 import { dismissGitActionResult, useGitActionProgress } from "../../state/use-vcs-action-state";
 import { vcsEnvironment } from "../../state/vcs";
-import { EmptyState } from "../../components/EmptyState";
+import { EmptyState } from "../../components/ui/EmptyState";
 import { LoadingScreen } from "../../components/LoadingScreen";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { buildThreadImportLabel } from "../../lib/threadActivity";
@@ -138,7 +139,7 @@ function ThreadRouteFallbackLayout(props: { readonly children: ReactNode }) {
 
   return (
     <>
-      <ScreenHeader
+      <AppBar
         title="Thread"
         options={{ contentStyle: { backgroundColor: themeVariables["--color-header"] } }}
         onBack={layout.usesSplitView ? undefined : returnToList}
@@ -1005,7 +1006,7 @@ function ThreadRouteContent(
   );
   // Android surfaces fork as an in-flow header action; iOS gets it inside the
   // thread actions menu appended to the shared header's right items.
-  const forkHeaderAction = useMemo<ScreenHeaderAction | null>(
+  const forkHeaderAction = useMemo<AppBarAction | null>(
     () =>
       forkSupported
         ? {
@@ -1029,7 +1030,7 @@ function ThreadRouteContent(
     try {
       await recoverFailedThreadDraft(creation);
     } catch (error) {
-      Alert.alert(
+      Dialog.alert(
         "Could not restore draft",
         error instanceof Error ? error.message : String(error),
       );

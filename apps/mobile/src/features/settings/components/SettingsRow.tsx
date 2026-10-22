@@ -2,10 +2,10 @@ import { useNavigation } from "@react-navigation/native";
 import { useState, type ComponentProps } from "react";
 import { Platform, Pressable } from "react-native";
 
-import { SymbolView } from "../../../components/AppSymbol";
+import { SymbolView } from "../../../components/ui/AppSymbol";
 import { ArcaneControlHighlight } from "../../../components/ArcaneControlHighlight";
-import { ListRow } from "../../../components/ListRow";
-import { ListRowLayout } from "../../../components/ListRowLayout";
+import { ListRow } from "../../../components/ui/ListRow";
+import { ListRowLayout } from "../../../components/ui/ListRowLayout";
 import type { SettingsLegalDocumentTarget, SettingsSheetTarget } from "./settings-sheet-targets";
 
 export function SettingsRow(props: {

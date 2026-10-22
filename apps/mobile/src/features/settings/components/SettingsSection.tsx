@@ -2,7 +2,7 @@ import { GlassCard } from "../../../components/GlassCard";
 import type { ReactNode } from "react";
 import { Platform, View } from "react-native";
 
-import { AppText as Text } from "../../../components/AppText";
+import { AppText as Text } from "../../../components/ui/AppText";
 
 /** Upstream's `ListSection` API on Lecturn's glass card. */
 export function SettingsSection(props: {

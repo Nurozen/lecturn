@@ -1,3 +1,4 @@
+import * as Dialog from "../../components/ui/Dialog";
 import { ContextualThreadControl } from "../contextual/ContextualControls";
 import type { ComposerTextPaste } from "../../native/LecturnComposerEditor.types";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
@@ -34,7 +35,7 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { Alert, Keyboard, Platform, Pressable, View, type ViewStyle } from "react-native";
+import { Keyboard, Platform, Pressable, View, type ViewStyle } from "react-native";
 import { composerImageGallery } from "../../lib/composerImageGallery";
 import { filePreviewGallery } from "../../lib/filePreviewGallery";
 import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
@@ -68,17 +69,17 @@ import type { ComposerDocumentAttachment } from "../../lib/composerContext";
 import { useProject, useThreadShells } from "../../state/entities";
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 
-import { AppText as Text } from "../../components/AppText";
-import { ComposerAttachmentButton } from "../../components/ComposerAttachmentButton";
+import { AppText as Text } from "../../components/ui/AppText";
+import { ComposerAttachmentButton } from "./ComposerAttachmentButton";
 import {
   ComposerAttachmentStrip,
   ComposerAttachmentThumbnail,
 } from "../../components/ComposerAttachmentStrip";
 import { VideoPreviewModal, type VideoPreviewSource } from "../../components/VideoPreviewModal";
-import { GlassSurface } from "../../components/GlassSurface";
+import { GlassSurface } from "../../components/ui/GlassSurface";
 import { GlassCard } from "../../components/GlassCard";
 import { useGlassPalette } from "../../lib/useGlassPalette";
-import { SymbolView } from "../../components/AppSymbol";
+import { SymbolView } from "../../components/ui/AppSymbol";
 import { RUNTIME_MODE_CHOICES } from "./thread-settings-options";
 import { ComposerEditor, type ComposerEditorHandle } from "../../components/ComposerEditor";
 import { fileRoutePathSegments } from "../files/filePath";
@@ -100,7 +101,7 @@ import {
   providerOptionValueLabels,
   resolveProviderOptionDescriptors,
 } from "../../lib/providerOptions";
-import { Menu } from "../../components/Menu";
+import { Menu } from "../../components/ui/Menu";
 import type { ActiveTurnComposerAction } from "@lecturn/client-runtime/state/composer-dispatch";
 import type { FollowUpBehavior } from "../../lib/followUpBehavior";
 import {
@@ -498,7 +499,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     );
     onShowUsageLimits(report);
     if (!report) {
-      Alert.alert("Usage limits unavailable", "This provider does not currently report limits.");
+      Dialog.alert("Usage limits unavailable", "This provider does not currently report limits.");
     }
     return report !== null;
   }, [currentModelSelection.instanceId, onShowUsageLimits, props.serverConfig]);
@@ -1019,7 +1020,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                     } else if (!wouldExceedInputLimit) {
                       insertPaste();
                     } else {
-                      Alert.alert(
+                      Dialog.alert(
                         wouldExceedInputLimit
                           ? "Pasted text is too large for this message"
                           : "Could not attach pasted text",

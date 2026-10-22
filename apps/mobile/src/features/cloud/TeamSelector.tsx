@@ -9,7 +9,7 @@ import {
 import type { RelayTeamOrganization } from "@lecturn/contracts";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Pressable, View } from "react-native";
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 import { resolveCloudPublicConfig } from "./publicConfig";
 
 import { useConnectAccounts } from "./knownAccounts";

@@ -22,6 +22,7 @@ import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopCliShim from "../app/DesktopCliShim.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopServerExposure from "./DesktopServerExposure.ts";
+import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopWslEnvironment from "../wsl/DesktopWslEnvironment.ts";
 import * as DesktopWslServerTree from "../wsl/DesktopWslServerTree.ts";
@@ -620,6 +621,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       readonly resourceMonitorPath: Option.Option<string>;
       readonly stavePath: Option.Option<string>;
       readonly cliPath: Option.Option<string>;
+      readonly shellEnvironmentPrepared: boolean | undefined;
     },
   ): Effect.fn.Return<
     DesktopBackendManager.DesktopBackendStartConfig,
@@ -638,12 +640,16 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       host: backendExposure.bindHost,
       desktopBootstrapToken: input.bootstrapToken,
       desktopBootstrapSecret: input.bootstrapSecret,
-      // Off macOS, DesktopApp installs the shell environment into process.env
-      // before any backend starts, and this child extends it (extendEnv below).
-      // On macOS DesktopApp loads it in the background so a slow .zprofile does
-      // not hide the window, so the backend must run its own login-shell probe.
-      // WSL gets a different environment, so its bootstrap never sets this.
-      ...(environment.platform === "darwin" ? {} : { shellEnvironmentPrepared: true }),
+      // DesktopApp installs the shell environment into process.env before any
+      // backend starts off macOS, and this child extends it (extendEnv below).
+      // A failed Windows probe reports false and leaves server hydration
+      // enabled for another attempt. On macOS DesktopApp loads it in the
+      // background so a slow .zprofile does not hide the window, so the backend
+      // must run its own login-shell probe. WSL gets a different environment,
+      // so its bootstrap never sets this.
+      ...(input.shellEnvironmentPrepared === undefined
+        ? {}
+        : { shellEnvironmentPrepared: input.shellEnvironmentPrepared }),
       tailscaleServeEnabled: backendExposure.tailscaleServeEnabled,
       tailscaleServePort: backendExposure.tailscaleServePort,
       desktopTelemetryFd: 4,
@@ -925,6 +931,7 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const shellEnvironment = yield* DesktopShellEnvironment.DesktopShellEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
   const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
   const wslEnvironment = yield* DesktopWslEnvironment.DesktopWslEnvironment;
@@ -1015,12 +1022,17 @@ export const make = Effect.gen(function* () {
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
     );
+    // macOS loads the shell environment in the background (DesktopApp), so
+    // awaiting it here would hold the backend behind a slow login shell.
+    const shellEnvironmentPrepared =
+      environment.platform === "darwin" ? undefined : yield* shellEnvironment.installIntoProcess;
     return yield* resolvePrimaryStartConfig({
       ...shared,
       resourceMonitorPath,
       stavePath,
       extensions,
       cliPath,
+      shellEnvironmentPrepared,
     }).pipe(
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
       Effect.provideService(DesktopServerExposure.DesktopServerExposure, serverExposure),

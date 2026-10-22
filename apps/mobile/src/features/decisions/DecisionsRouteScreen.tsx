@@ -1,3 +1,4 @@
+import * as Dialog from "../../components/ui/Dialog";
 import { DecisionRelationSuggestions } from "../contextual/DecisionRelationSuggestions";
 import { DecisionGroupPanel } from "../contextual/DecisionGroupPanel";
 import { useAtomValue } from "@effect/atom-react";
@@ -17,8 +18,8 @@ import {
   assembleDecisionJsonExport,
 } from "@lecturn/client-runtime/state/threadDecisions";
 import { useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, Share, View } from "react-native";
-import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
+import { Modal, Pressable, ScrollView, Share, View } from "react-native";
+import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { threadDecisionEnvironment as decisions } from "../../state/thread-decisions";
@@ -113,7 +114,7 @@ function DecisionsScreen(params: DecisionsRouteParams) {
         },
       });
       if (result._tag !== "Success")
-        Alert.alert("Could not update decision", "Refresh the list and try again.");
+        Dialog.alert("Could not update decision", "Refresh the list and try again.");
     } finally {
       setBusy(false);
     }
@@ -135,7 +136,7 @@ function DecisionsScreen(params: DecisionsRouteParams) {
           },
         });
         if (result._tag !== "Success") {
-          Alert.alert(
+          Dialog.alert(
             "Export changed",
             "Refresh and export again so the file contains one consistent version.",
           );

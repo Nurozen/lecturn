@@ -1,3 +1,4 @@
+import * as Dialog from "../../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
 import { filterStaveRepoRows } from "@lecturn/client-runtime/stave-repo-filter";
 import {
@@ -44,13 +45,13 @@ import { CommonActions, useNavigation } from "@react-navigation/native";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, Alert, Pressable, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
 
-import { SymbolView } from "../../components/AppSymbol";
-import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
-import { ErrorBanner } from "../../components/ErrorBanner";
+import { SymbolView } from "../../components/ui/AppSymbol";
+import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
+import { ErrorBanner } from "../../components/ui/ErrorBanner";
 import { GlassCard } from "../../components/GlassCard";
-import { ThemedSwitch } from "../../components/ThemedSwitch";
+import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { cn } from "../../lib/cn";
 import { uuidv4 } from "../../lib/uuid";
 import { useProjects } from "../../state/entities";
@@ -616,7 +617,7 @@ function ExistingSpaceRow(props: {
 }
 
 function confirmDeleteArchive(entry: ExistingStaveSpace, onConfirm: () => void) {
-  Alert.alert(
+  Dialog.alert(
     `Delete ${entry.spaceId} permanently?`,
     [
       `Stave restores its worktrees briefly, then destroys the ${entry.isSaga ? "saga" : "space"}: its spec and notes are removed, committed branches survive, and owned memory is kept.`,

@@ -1,9 +1,9 @@
 import { useAuth, useClerk } from "@clerk/expo";
-import { type UserProfileCustomPage, UserProfileView } from "@clerk/expo/native";
+import { type UserProfileCustomPage, UserProfileView } from "@clerk/expo/native-components";
 import { StackActions, useNavigation } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
 import { View } from "react-native";
-import { EmptyState } from "../../components/EmptyState";
+import { EmptyState } from "../../components/ui/EmptyState";
 import { LoadingScreen } from "../../components/LoadingScreen";
 import {
   mobileProfileOwnerMatches,

@@ -33,14 +33,14 @@ vi.mock("expo-web-browser", () => ({ openBrowserAsync: vi.fn() }));
 vi.mock("expo-crypto", () => ({ randomUUID: vi.fn() }));
 vi.mock("expo-file-system", () => ({ File: vi.fn(), Paths: {} }));
 vi.mock("expo-sharing", () => ({ shareAsync: vi.fn() }));
-vi.mock("../../components/AppText", () => ({
+vi.mock("../../components/ui/AppText", () => ({
   AppText: ({ children }: { children: ReactNode }) => {
     mocks.text.push([children].flat(Infinity).join(""));
     return null;
   },
   AppTextInput: () => null,
 }));
-vi.mock("../../components/ThemedSwitch", () => ({ ThemedSwitch: () => null }));
+vi.mock("../../components/ui/ThemedSwitch", () => ({ ThemedSwitch: () => null }));
 vi.mock("./ContextualControls", () => ({ ContextualButton: () => null }));
 vi.mock("../../state/contextual", () => ({
   contextualEnvironment: { fundingStatus: () => "funding", funding: {} },

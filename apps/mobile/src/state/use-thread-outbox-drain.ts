@@ -1,5 +1,6 @@
 import { contextualBootstrap } from "../lib/contextualDraft";
 import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
+import * as Dialog from "../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
 import {
   threadRuntimeIsActive,
@@ -24,7 +25,6 @@ import { buildTemporaryWorktreeBranchName } from "@lecturn/shared/git";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert } from "react-native";
 
 import { createDebugLogger } from "../lib/debugLog";
 import { scopedThreadKey } from "../lib/scopedEntities";
@@ -777,7 +777,7 @@ export function useThreadOutboxDrain(): void {
     let mounted = true;
     const load = async () => {
       if ((await threadOutboxManager.load()) || !mounted) return;
-      Alert.alert(
+      Dialog.alert(
         "Some queued messages could not be loaded",
         "Unreadable records and attachment files are still saved. Other messages can still be sent.",
         [

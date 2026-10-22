@@ -1,4 +1,4 @@
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 import { GlassCard } from "../../components/GlassCard";
 import { cn } from "../../lib/cn";
 import type { ComponentProps, ReactNode } from "react";

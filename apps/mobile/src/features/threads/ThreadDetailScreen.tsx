@@ -1,3 +1,4 @@
+import * as Dialog from "../../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
 import { useChildThreadInputs, useThreadReportedModelSelection } from "../../state/entities";
 import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
@@ -14,8 +15,8 @@ import {
 } from "../../lib/providerOptions";
 import { RUNTIME_MODE_CHOICES } from "./thread-settings-options";
 import { ActiveThreadBorder } from "./ActiveThreadBorder";
-import { AppText as Text } from "../../components/AppText";
-import { SymbolView } from "../../components/AppSymbol";
+import { AppText as Text } from "../../components/ui/AppText";
+import { SymbolView } from "../../components/ui/AppSymbol";
 import { useThreadListActions } from "../home/useThreadListActions";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { type EnvironmentConnectionPhase } from "@lecturn/client-runtime/connection";
@@ -77,7 +78,6 @@ import {
   useState,
 } from "react";
 import {
-  Alert,
   AppState,
   Pressable,
   Keyboard,
@@ -1154,7 +1154,7 @@ const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
         composerEditorRef.current?.focus();
       }
     } catch (error) {
-      Alert.alert(
+      Dialog.alert(
         "Could not edit message",
         error instanceof Error ? error.message : "Please try again.",
       );

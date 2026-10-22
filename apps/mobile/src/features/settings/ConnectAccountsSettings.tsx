@@ -1,9 +1,10 @@
+import * as Dialog from "../../components/ui/Dialog";
 import { useClerk } from "@clerk/expo";
 import { useNavigation } from "@react-navigation/native";
 import { useState } from "react";
-import { Alert, Pressable, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { accountTintColor } from "@lecturn/shared/accountTint";
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 import { useConnectAccounts } from "../cloud/knownAccounts";
 import { useAddConnectAccountGate } from "../cloud/useAddConnectAccountGate";
 import { signOutMobileConnectAccount } from "../cloud/mobileAccountSignOut";
@@ -29,13 +30,13 @@ export function ConnectAccountsSettings({
       await selectMobileProfileAccount(clerk, accountId);
       navigation.navigate("SettingsSheet", { screen: "SettingsAuth", params: { accountId } });
     } catch (error) {
-      Alert.alert("Could not open account", error instanceof Error ? error.message : "Try again.");
+      Dialog.alert("Could not open account", error instanceof Error ? error.message : "Try again.");
     } finally {
       setBusy(null);
     }
   };
   const signOut = (accountId: string, label: string) =>
-    Alert.alert(
+    Dialog.alert(
       `Sign out of ${label}?`,
       "This account's connected environments will be removed from this device. Other accounts remain signed in.",
       [
@@ -49,13 +50,13 @@ export function ConnectAccountsSettings({
               .then(
                 ({ unregisterFailed }) => {
                   if (unregisterFailed)
-                    Alert.alert(
+                    Dialog.alert(
                       "Signed out",
                       "This device could not unregister while offline. Push registration will be corrected the next time it connects.",
                     );
                 },
                 (error: unknown) =>
-                  Alert.alert(
+                  Dialog.alert(
                     "Could not sign out",
                     error instanceof Error ? error.message : "Try again.",
                   ),

@@ -7,12 +7,12 @@ import type { MenuAction } from "@react-native-menu/menu";
 import type { EnvironmentId } from "@lecturn/contracts";
 import type { RelayClientEnvironmentRecord } from "@lecturn/contracts/relay";
 import { type ReactNode, useRef, useState } from "react";
-import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 
-import { AppActivityIndicator } from "../../components/AppActivityIndicator";
-import { SymbolView } from "../../components/AppSymbol";
-import * as Dialog from "../../components/Dialog";
-import { Menu } from "../../components/Menu";
+import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
+import { SymbolView } from "../../components/ui/AppSymbol";
+import * as Dialog from "../../components/ui/Dialog";
+import { Menu } from "../../components/ui/Menu";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
@@ -97,7 +97,7 @@ export function LecturnConnectProfilePage(props: { readonly accountId?: string }
       traceId,
       cause,
     });
-    Alert.alert(
+    Dialog.alert(
       "Could not deregister server",
       traceId ? `${message}\n\nTrace ID: ${traceId}` : message,
       traceId

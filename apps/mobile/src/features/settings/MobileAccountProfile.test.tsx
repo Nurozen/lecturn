@@ -14,7 +14,7 @@ vi.mock("@clerk/expo", () => ({
   useClerk: () => clerk,
   useAuth: () => ({ isLoaded: true, userId: state.userId }),
 }));
-vi.mock("@clerk/expo/native", () => ({
+vi.mock("@clerk/expo/native-components", () => ({
   UserProfileView: () => {
     useEffect(() => {
       state.profileMounted = true;
@@ -30,7 +30,7 @@ vi.mock("@react-navigation/native", () => ({
   StackActions: { popTo: () => ({}) },
 }));
 vi.mock("react-native", () => ({ View: (props: { children: ReactNode }) => props.children }));
-vi.mock("../../components/EmptyState", () => ({ EmptyState: () => null }));
+vi.mock("../../components/ui/EmptyState", () => ({ EmptyState: () => null }));
 vi.mock("../../components/LoadingScreen", () => ({ LoadingScreen: () => null }));
 let root: Root;
 async function render() {

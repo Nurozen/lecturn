@@ -79,18 +79,18 @@ vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ b
 vi.mock("../../components/GlassCard", () => ({
   GlassCard: ({ children }: { children: ReactNode }) => children,
 }));
-vi.mock("../../components/AppText", () => ({
+vi.mock("../../components/ui/AppText", () => ({
   AppText: ({ children }: { children: ReactNode }) => {
     ui.text.push([children].flat().join(""));
     return null;
   },
 }));
-vi.mock("../../components/AndroidScreenHeader", () => ({
+vi.mock("../../components/ui/AndroidScreenHeader", () => ({
   AndroidScreenHeader: ({ trailing }: { trailing: ReactNode }) => trailing,
 }));
 vi.mock("../../native/StackHeader", () => ({ NativeStackScreenOptions: () => null }));
-vi.mock("../../components/AppSymbol", () => ({ SymbolView: () => null }));
-vi.mock("../../components/Menu", () => ({
+vi.mock("../../components/ui/AppSymbol", () => ({ SymbolView: () => null }));
+vi.mock("../../components/ui/Menu", () => ({
   Menu: ({
     children,
     onPressAction,
@@ -104,7 +104,7 @@ vi.mock("../../components/Menu", () => ({
 }));
 // Android routes SegmentedControl to the native Material control; keep plain
 // pressable segments so tests can switch tabs by label.
-vi.mock("../../components/SegmentedControl", () => ({
+vi.mock("../../components/ui/SegmentedControl", () => ({
   SegmentedControl: ({
     options,
     onSelect,

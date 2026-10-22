@@ -350,6 +350,45 @@ from upstream's side.
   PowerShell pin, #18573) are not ported while fork Windows arm64 builds are
   off.
 
+**Upstream changes taken in a Lecturn shape (sync to upstream ba358222).**
+
+- **Mobile design system.** Upstream's `ui/` component layout (#20043), app
+  bar/toolbar/FAB APIs, text-role tokens and `Dialog.alert` presenter are
+  adopted; fork-only screens use `Dialog.alert` too. `GlassSurface` keeps the
+  fork's radius 28 continuous curve and glass palette (not `MOBILE_SHAPE.glass`
+  32). `SegmentedControl`: iOS keeps the fork glass pill
+  (`ui/SegmentedControl.tsx`); Android takes upstream's shared capsule
+  (`ui/SegmentedControl.android.tsx`, #20116). Upstream `font-t3-*` utility
+  classes map to `font-lecturn-*`.
+- **Expo patches.** The fork's `expo-modules-core` (permission registry lock)
+  and `expo-notifications` (pending-response delivery) patches move to the
+  versions upstream's Expo resolves (58.0.19 / 58.1.4 at this sync), pinned by
+  overrides. On each Expo bump, diff the patched files across versions and
+  drop a patch only when upstream ships the fix. `expo-widgets` uses upstream's
+  patch plus the fork hunks (Live Activity `accountId`/`getAccountId`, ended
+  activity dismissal); rebase those hunks onto upstream's next patch.
+- **Mobile release versions.** EAS keeps one production profile and the
+  literal `version` in `app.config.ts` (read by `fingerprint.config.js`);
+  upstream's TestFlight/store version split (#20060) and its
+  `T3CODE_MOBILE_VERSION` env are not taken. Upstream's v2 preview channel
+  removal (#20084) has nothing to remove on the fork.
+- **Android APK release.** `mirror-play-apk.cjs` and `mobile-android-apk.yml`
+  follow upstream's beta model with Lecturn names and stay inactive without
+  the Play secret; `release.yml` attaches no APKs. `NightlyMobileBeta.tsx` stays
+  (upstream deleted it in #20092) with the Android row off, as before.
+- **CI.** Upstream's change-based job skipping, caches and typecheck inside
+  Build are taken. The fork keeps its runners, 3 server shards, a 15-minute
+  typecheck wait in Build, `Check` without the macOS native lint, and a
+  fork-only `Mobile Native Changes` job (a required status check on `main`)
+  that reports `changes.outputs.mobile_native`, gates the macOS lint and is in
+  `Check`'s needs.
+- **Versions and doctor.** Upstream's v0.1.0 release prep is not taken (fork
+  stays on its own versions). `t3 doctor` is `lecturn doctor`; the CLI path
+  env is `LECTURN_CLI_PATH`.
+- **Codex replay fixtures.** New Codex replay transcripts are re-recorded with
+  the fork's `lecturn_desktop` client name, originator and user agent, as the
+  replay matches on them.
+
 ## Recurring mechanical conflicts
 
 **Published migration identities are persistent data.** The fork's

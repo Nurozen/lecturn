@@ -7,7 +7,7 @@ import type {
 import { View } from "react-native";
 
 import { GlassCard } from "../../components/GlassCard";
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 import type { PendingApproval } from "../../lib/threadActivity";
 
 export interface PendingApprovalCardProps {

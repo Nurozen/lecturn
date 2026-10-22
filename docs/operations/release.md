@@ -255,14 +255,18 @@ release boundaries.
 
 ## Android APK mirror
 
-`.github/workflows/mobile-android-apk.yml` can check Google Play hourly and publish the newest
-build on the `v2` closed testing track of `com.cloudgatherer.lecturn` to the rolling
-`android-nightly` prerelease as a universal APK that Play generates and signs, so no signing key
-lives in GitHub. It is inactive in Lecturn: the job skips itself until the
-`GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` secret holds a Play service account key with the "Release to
-production, exclude devices, and use Play App Signing" permission, and `apps/mobile/eas.json` does
-not yet submit builds to a `v2` track. Play distribution stays off until it is established for
-Lecturn.
+`.github/workflows/mobile-android-apk.yml` can check the Google Play Alpha closed-testing
+track of `com.cloudgatherer.lecturn` hourly. A new beta gets an `android-beta-<build-number>`
+prerelease and updates the `android-beta` download page; both contain only the beta APK.
+Unchanged checks publish nothing, and interrupted draft uploads resume on the next check. The
+APK is the universal APK Play generates and signs from the uploaded bundle, so no signing key
+lives in GitHub.
+
+It is inactive in Lecturn: the job skips itself until the `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`
+secret holds a Play service account key with the "Release to production, exclude devices, and
+use Play App Signing" permission, and no build is promoted to Alpha yet. Lecturn's release
+workflow does not attach internal-testing APKs to Nightly releases. Play distribution stays off
+until it is established for Lecturn.
 
 ## Nightly builds
 

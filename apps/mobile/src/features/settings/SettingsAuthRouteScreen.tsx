@@ -1,4 +1,4 @@
-import type { UserProfileCustomPage } from "@clerk/expo/native";
+import type { UserProfileCustomPage } from "@clerk/expo/native-components";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useLayoutEffect, useMemo } from "react";
 

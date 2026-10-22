@@ -9,8 +9,8 @@ import Animated, {
 } from "react-native-reanimated";
 import { useGlassPalette } from "../../lib/useGlassPalette";
 import { themeColorWithAlpha } from "../../lib/mobileTheme";
-import { AppText } from "../../components/AppText";
-import { SymbolView } from "../../components/AppSymbol";
+import { AppText } from "../../components/ui/AppText";
+import { SymbolView } from "../../components/ui/AppSymbol";
 import type { HomeAccountHeaderListItem } from "./homeListItems";
 
 export function AccountSectionHeader({

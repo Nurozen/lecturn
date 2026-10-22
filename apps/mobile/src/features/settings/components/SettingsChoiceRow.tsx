@@ -1,9 +1,9 @@
 import type { ComponentProps } from "react";
 import { Platform, Pressable, View } from "react-native";
 
-import { AppText as Text } from "../../../components/AppText";
-import { SymbolView } from "../../../components/AppSymbol";
-import { ListChoiceRow } from "../../../components/ListChoiceRow";
+import { AppText as Text } from "../../../components/ui/AppText";
+import { SymbolView } from "../../../components/ui/AppSymbol";
+import { ListChoiceRow } from "../../../components/ui/ListChoiceRow";
 import { themeColorWithAlpha } from "../../../lib/mobileTheme";
 import { useGlassPalette } from "../../../lib/useGlassPalette";
 

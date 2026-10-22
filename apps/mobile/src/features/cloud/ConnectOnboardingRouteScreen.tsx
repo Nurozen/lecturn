@@ -1,6 +1,7 @@
-import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
+import { Toolbar } from "../../components/ui/Toolbar";
+import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
+
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
-import { NativeHeaderToolbar } from "../../native/StackHeader";
 import { useAuth } from "@clerk/expo";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
@@ -8,8 +9,8 @@ import { Platform, Pressable, RefreshControl, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { reportAtomCommandResult, settlePromise } from "@lecturn/client-runtime/state/runtime";
-import { AndroidSheetHeader } from "../../components/AndroidScreenHeader";
-import { AppText as Text } from "../../components/AppText";
+import { AndroidSheetHeader } from "../../components/ui/AndroidScreenHeader";
+import { AppText as Text } from "../../components/ui/AppText";
 import { useRemoteConnections } from "../../state/use-remote-environment-registry";
 import { CloudEnvironmentRows } from "../connection/CloudEnvironmentRows";
 import { splitEnvironmentSections } from "../connection/environmentSections";
@@ -110,9 +111,9 @@ function ConfiguredConnectOnboardingRouteScreen(props: { readonly accountId?: st
           ]}
         />
       ) : (
-        <NativeHeaderToolbar placement="right">
-          <NativeHeaderToolbar.Button icon="xmark" onPress={handleClose} separateBackground />
-        </NativeHeaderToolbar>
+        <Toolbar placement="right">
+          <Toolbar.Button icon="xmark" onPress={handleClose} separateBackground />
+        </Toolbar>
       )}
       <ScrollView
         nestedScrollEnabled

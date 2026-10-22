@@ -1,3 +1,4 @@
+import * as Dialog from "../../components/ui/Dialog";
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
@@ -7,8 +8,8 @@ import {
 import { useNavigation } from "@react-navigation/native";
 import * as Cause from "effect/Cause";
 import { useRef, useState } from "react";
-import { Alert, Pressable } from "react-native";
-import { AppText as Text } from "../../components/AppText";
+import { Pressable } from "react-native";
+import { AppText as Text } from "../../components/ui/AppText";
 import { uuidv4 } from "../../lib/uuid";
 import { pullRequestWatchEnvironment } from "../../state/pull-request-watch";
 import { useEnvironmentQuery } from "../../state/query";
@@ -51,7 +52,7 @@ export function WatchPullRequestButton(props: {
         });
       else {
         const failure = Cause.squash(result.cause);
-        Alert.alert(
+        Dialog.alert(
           "Could not watch pull request",
           failure instanceof Error ? failure.message : "The request failed.",
         );

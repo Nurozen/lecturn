@@ -1,3 +1,4 @@
+import * as Dialog from "../../components/ui/Dialog";
 import {
   contextualCollectionPresentation,
   fundingSupersedesChallenge,
@@ -18,14 +19,14 @@ import {
 import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, AppState, View } from "react-native";
+import { AppState, View } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 import { randomUUID } from "expo-crypto";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
-import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
-import { ThemedSwitch } from "../../components/ThemedSwitch";
+import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
+import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { contextualEnvironment as contextual } from "../../state/contextual";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -363,7 +364,7 @@ function Archive({ environmentId }: { environmentId: EnvironmentId }) {
     }
   }
   function confirmForget(selection: ContextualDataSelection, label: string) {
-    Alert.alert(
+    Dialog.alert(
       `Forget ${label}?`,
       "Stored content and derived data will be purged and suppressed against recapture. Linked Decisions will not automatically resupply forgotten evidence; saved notes remain. Evidence already sent to an agent cannot be retracted.",
       [
@@ -895,7 +896,7 @@ function Funding({
               label={`Revoke ${name} access…`}
               disabled={busy}
               onPress={() =>
-                Alert.alert(
+                Dialog.alert(
                   `Revoke ${name} access?`,
                   `This stops ${name} from using this membership on this host. Other approved features keep their access; stored data remains available.`,
                   [

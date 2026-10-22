@@ -1,9 +1,9 @@
 import { GlassCard } from "../../../components/GlassCard";
-import { SymbolView } from "../../../components/AppSymbol";
+import { SymbolView } from "../../../components/ui/AppSymbol";
 import type { ComponentProps, ReactNode } from "react";
 import { Platform, Pressable, View } from "react-native";
-import { AppText as Text } from "../../../components/AppText";
-import { Button } from "../../../components/Button";
+import { AppText as Text } from "../../../components/ui/AppText";
+import { Button } from "../../../components/ui/Button";
 import { cn } from "../../../lib/cn";
 
 /* ─── Shared sheet components ──────────────────────────────────────── */
