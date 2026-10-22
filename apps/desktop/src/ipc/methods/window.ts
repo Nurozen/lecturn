@@ -15,7 +15,7 @@ import {
   type DesktopEnvironmentBootstrap,
   type PickedThemeFile,
 } from "@lecturn/contracts";
-import { WORKSPACE_IMAGE_PREVIEW_EXTENSIONS } from "@lecturn/shared/filePreview";
+import { PROJECT_FAVICON_EXTENSIONS } from "@lecturn/shared/projectFavicon";
 import { resolveEditorCommand } from "@lecturn/shared/editor";
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as FileSystem from "effect/FileSystem";
@@ -314,7 +314,7 @@ export const pickProjectFavicon = DesktopIpc.makeIpcMethod({
       filters: [
         {
           name: "Images",
-          extensions: WORKSPACE_IMAGE_PREVIEW_EXTENSIONS.map((extension) => extension.slice(1)),
+          extensions: PROJECT_FAVICON_EXTENSIONS.map((extension) => extension.slice(1)),
         },
       ],
     });

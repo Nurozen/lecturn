@@ -1,6 +1,10 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import { ProjectId, type OrchestrationProjectShell } from "@lecturn/contracts";
+import {
+  ProjectId,
+  SourceControlProviderKind,
+  type OrchestrationProjectShell,
+} from "@lecturn/contracts";
 import { Effect, Layer, Ref } from "effect";
 
 import { GitManager } from "../git/GitManager.ts";
@@ -145,7 +149,7 @@ it.layer(NodeServices.layer)("StaveSettlement.spacePullRequest", (it) => {
               summary: (input) =>
                 Effect.succeed({
                   ...input,
-                  provider: "github" as const,
+                  provider: SourceControlProviderKind.make("github"),
                   title: "Linked",
                   url: "https://github.com/owner/repository/pull/42",
                   state: "open" as const,

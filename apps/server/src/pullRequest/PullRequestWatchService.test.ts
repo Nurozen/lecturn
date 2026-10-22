@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { Effect, Layer, Path, Result } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
+  SourceControlProviderKind,
   ProjectId,
   ThreadId,
   PullRequestWatchError,
@@ -23,7 +24,7 @@ const projectId = ProjectId.make("watch-project");
 const head = "a".repeat(40);
 const reference = { projectId, repository: "owner/repo", host: "github.com", number: 1 };
 const initial: PullRequestWatchObservation = {
-  provider: "github",
+  provider: SourceControlProviderKind.make("github"),
   title: "Watched PR",
   url: "https://github.com/owner/repo/pull/1",
   state: "open",

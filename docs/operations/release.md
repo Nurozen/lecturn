@@ -253,6 +253,17 @@ When deploying a hosted client, verify that its exact `lecturn@<version>` is ava
 See [Lecturn release configuration](./lecturn-release.md#release-configuration) for the fork's
 release boundaries.
 
+## Android APK mirror
+
+`.github/workflows/mobile-android-apk.yml` can check Google Play hourly and publish the newest
+build on the `v2` closed testing track of `com.cloudgatherer.lecturn` to the rolling
+`android-nightly` prerelease as a universal APK that Play generates and signs, so no signing key
+lives in GitHub. It is inactive in Lecturn: the job skips itself until the
+`GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` secret holds a Play service account key with the "Release to
+production, exclude devices, and use Play App Signing" permission, and `apps/mobile/eas.json` does
+not yet submit builds to a `v2` track. Play distribution stays off until it is established for
+Lecturn.
+
 ## Nightly builds
 
 - Workflow: `.github/workflows/release.yml`

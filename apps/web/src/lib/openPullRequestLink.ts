@@ -1,19 +1,11 @@
-import type {
-  EnvironmentId,
-  PullRequestRef,
-  RepositoryIdentity,
-  ScopedThreadRef,
-} from "@lecturn/contracts";
+import type { EnvironmentId, PullRequestRef, ScopedThreadRef } from "@lecturn/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { type MouseEvent, useCallback, useMemo } from "react";
 
-import { pullRequestHostOf, type SourceControlProviderKind } from "@lecturn/contracts";
+import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
 import { parseChangeRequestUrl, type ChangeRequestLink } from "@lecturn/shared/changeRequestUrl";
-import {
-  canonicalRepositoryKey,
-  sourceControlRepositorySelector,
-} from "@lecturn/shared/sourceControl";
+import { sourceControlRepositorySelector } from "@lecturn/shared/sourceControl";
 
 import { useOpenLink } from "../browser/useOpenLink";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
@@ -34,38 +26,10 @@ export {
   changeRequestRepositoryUrl,
 } from "@lecturn/shared/changeRequestUrl";
 
-function resolvedForgejoRepository(identity: RepositoryIdentity): URL | null {
-  if (identity.provider !== "forgejo" || !identity.webUrl) return null;
-  try {
-    const url = new URL(identity.webUrl);
-    return url.protocol === "http:" || url.protocol === "https:" ? url : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Keep Forgejo servers on different HTTP ports separate when selecting a project. */
-function matchesChangeRequestAuthority(
-  identity: RepositoryIdentity,
-  link: ChangeRequestLink,
-): boolean {
-  if (link.authority === undefined) return true;
-  try {
-    const remote = new URL(identity.locator.remoteUrl);
-    if (remote.protocol === "http:" || remote.protocol === "https:") {
-      return remote.host.toLowerCase() === link.authority;
-    }
-  } catch {
-    // SSH remotes do not specify the server's HTTP port; tea resolves the configured login.
-  }
-  return true;
-}
-
 /** The host the panel and the page read the change request on; a Forgejo port stays on it. */
 function changeRequestLinkHost(link: ChangeRequestLink): string {
   return link.authority ?? link.host.toLowerCase();
 }
-
 /**
  * The project a link belongs to, or nothing. Matched the way the server matches: the repository
  * identity is the full path below the host where one was recorded — which is what nested GitLab
@@ -86,28 +50,17 @@ export function findChangeRequestTarget(
     // Every editable checkout a project holds: a Stave workspace has one per repository.
     const matches = resolveProjectGitTargets({ project }).flatMap((target) => {
       const identity = target.repositoryIdentity;
-      if (!identity?.provider || !matchesChangeRequestAuthority(identity, link)) return [];
-      const kind = identity.provider as SourceControlProviderKind;
+      if (
+        !identity?.provider ||
+        !sourceControlClients.get(identity.provider).isChangeRequestInRepository(identity, link)
+      ) {
+        return [];
+      }
       const repository =
         identity.displayName ??
         (identity.owner && identity.name ? `${identity.owner}/${identity.name}` : null);
-      const host = link.host.toLowerCase();
-      const web = resolvedForgejoRepository(identity);
-      // Azure remotes come in three spellings; their canonical keys are what agree.
-      const matched = web
-        ? web.host.toLowerCase() === (link.authority ?? link.host).toLowerCase() &&
-          web.pathname.replace(/^\/+|\/+$/g, "").toLowerCase() === link.repository.toLowerCase()
-        : kind === "azure-devops"
-          ? canonicalRepositoryKey(identity.canonicalKey.toLowerCase()) ===
-            canonicalRepositoryKey(`${link.host}/${link.repository}`.toLowerCase())
-          : repository?.toLowerCase() === link.repository.toLowerCase() &&
-            (pullRequestHostOf(identity, kind) === host ||
-              pullRequestHostOf(identity, kind) === link.authority);
-      const selector =
-        sourceControlRepositorySelector(identity) ?? repository ?? (web ? link.repository : null);
-      return matched && selector
-        ? [{ project, repository: selector, host: changeRequestLinkHost(link) }]
-        : [];
+      const selector = sourceControlRepositorySelector(identity) ?? repository ?? link.repository;
+      return [{ project, repository: selector, host: changeRequestLinkHost(link) }];
     });
     // Multiple checkouts of the same remote cannot identify the intended checkout.
     if (matches.length === 1) return matches[0];
@@ -188,38 +141,14 @@ function findChangeRequestHostTarget(
 ): ChangeRequestTarget | undefined {
   const own = findChangeRequestTarget(projects, link);
   if (own !== undefined) return own;
-  // Azure CLI reads use the checkout's organization and project, not host-wide credentials.
-  if (
-    canonicalRepositoryKey(`${link.host}/${link.repository}`.toLowerCase()).startsWith(
-      "dev.azure.com/",
-    )
-  )
-    return undefined;
-  const host = link.host.toLowerCase();
+  // Each host's definition decides whether a checkout lends its credentials host-wide; Azure's
+  // reads stay scoped to the checkout's organization and project.
   const project = projects.find((candidate) =>
     resolveProjectGitTargets({ project: candidate }).some((target) => {
       const identity = target.repositoryIdentity;
-      if (identity == null) return false;
-      const web = resolvedForgejoRepository(identity);
-      if (web) {
-        // A Forgejo served below a path prefix only lends credentials to repositories under it.
-        const mount = web.pathname
-          .replace(/^\/+|\/+$/g, "")
-          .split("/")
-          .slice(0, -2)
-          .join("/");
-        return (
-          web.host.toLowerCase() === (link.authority ?? link.host).toLowerCase() &&
-          (!mount || link.repository.toLowerCase().startsWith(`${mount.toLowerCase()}/`))
-        );
-      }
-      const kind = identity.provider as SourceControlProviderKind | undefined;
       return (
-        kind !== undefined &&
-        kind !== "azure-devops" &&
-        matchesChangeRequestAuthority(identity, link) &&
-        (pullRequestHostOf(identity, kind) === host ||
-          pullRequestHostOf(identity, kind) === link.authority)
+        identity?.provider !== undefined &&
+        sourceControlClients.get(identity.provider).canReadChangeRequestOnHost(identity, link)
       );
     }),
   );

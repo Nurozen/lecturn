@@ -5,6 +5,7 @@
 import {
   ProjectId,
   ProviderInstanceId,
+  SourceControlProviderKind,
   ThreadId,
   type OrchestrationProjectShell,
   type OrchestrationV2ServerCommand,
@@ -97,7 +98,7 @@ function branchPullRequest(number = 42): GitBranchPullRequest {
 function summary(input: PullRequestRef, state: PullRequestSummary["state"]): PullRequestSummary {
   return {
     ...input,
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     title: "Pull request",
     url: reference(input.number).url,
     state,

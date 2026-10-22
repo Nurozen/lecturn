@@ -4,6 +4,7 @@ import { Deferred, Duration, Effect, FileSystem, Layer, Option, Path, Stream } f
 import * as PlatformError from "effect/PlatformError";
 import * as TestClock from "effect/testing/TestClock";
 import {
+  SourceControlProviderKind,
   ProjectId,
   type OrchestrationProjectShell,
   type VcsStatusLocalResult,
@@ -394,7 +395,11 @@ it.layer(NodeServices.layer)("VcsAutoPullPolicy ownership cache", (it) => {
 
 const localStatus: VcsStatusLocalResult = {
   isRepo: true,
-  sourceControlProvider: { kind: "github", name: "GitHub", baseUrl: "https://github.com" },
+  sourceControlProvider: {
+    kind: SourceControlProviderKind.make("github"),
+    name: "GitHub",
+    baseUrl: "https://github.com",
+  },
   hasPrimaryRemote: true,
   isDefaultRef: true,
   refName: "main",

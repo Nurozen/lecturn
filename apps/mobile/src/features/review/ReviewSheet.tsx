@@ -1,6 +1,8 @@
 import { GlassSurface } from "../../components/GlassSurface";
 import type { EnvironmentId, ThreadId } from "@lecturn/contracts";
+import { formatDiffCount } from "@lecturn/client-runtime/diff-count";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import { AppActivityIndicator } from "../../components/AppActivityIndicator";
 import { nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import type { ScreenHeaderMenuItem } from "../../components/ScreenHeader.types";
@@ -19,7 +21,6 @@ import {
   useState,
 } from "react";
 import {
-  ActivityIndicator,
   FlatList,
   Platform,
   Pressable,
@@ -296,10 +297,10 @@ const ReviewFileNavigatorRow = memo(function ReviewFileNavigatorRow(props: {
       </Text>
       <View className="mt-1 flex-row gap-2">
         <Text className="text-2xs font-lecturn-bold text-adaptive-emerald-700-300">
-          +{file.additions}
+          +{formatDiffCount(file.additions)}
         </Text>
         <Text className="text-2xs font-lecturn-bold text-adaptive-rose-700-300">
-          -{file.deletions}
+          -{formatDiffCount(file.deletions)}
         </Text>
       </View>
     </Pressable>
@@ -880,7 +881,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
                     Platform.OS !== "android" && "border-b border-border bg-card",
                   )}
                 >
-                  <ActivityIndicator size="small" />
+                  <AppActivityIndicator size="small" />
                   <Text className="text-xs text-foreground-muted">Loading diff…</Text>
                 </View>
               ) : parsedDiff.kind === "empty" ? (

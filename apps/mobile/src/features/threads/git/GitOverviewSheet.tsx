@@ -2,6 +2,8 @@ import { GlassCard } from "../../../components/GlassCard";
 import { useMobileSagaIndex } from "../../../state/stave";
 import { resolveRepositoryScope } from "@lecturn/client-runtime/state/repositoryScope";
 import { useProjects } from "../../../state/entities";
+import { useOpenPullRequest } from "../../../native/useOpenPullRequest";
+import { tryOpenExternalUrl } from "../../../lib/openExternalUrl";
 import {
   type GitActionRequestInput,
   buildMenuItems,
@@ -43,7 +45,6 @@ import {
   NativeStackScreenOptions,
   nativeHeaderScrollEdgeEffects,
 } from "../../../native/StackHeader";
-import { tryOpenExternalUrl } from "../../../lib/openExternalUrl";
 import { useEnvironmentQuery } from "../../../state/query";
 import { useThreadSelection } from "../../../state/use-thread-selection";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
@@ -200,6 +201,7 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const presentation = props.presentation ?? "sheet";
+  const openPullRequest = useOpenPullRequest({ replace: presentation === "sheet" });
   const isInspector = presentation === "inspector";
   const environmentId = EnvironmentId.make(props.route.params.environmentId);
   const threadId = ThreadId.make(props.route.params.threadId);
@@ -295,10 +297,10 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
       Alert.alert("No open PR", "This branch does not have an open pull request.");
       return;
     }
-    if (!(await tryOpenExternalUrl(prUrl, "pull-request"))) {
+    if (!(await openPullRequest(prUrl))) {
       Alert.alert("Unable to open PR", "The pull request could not be opened.");
     }
-  }, [gitStatus.data]);
+  }, [gitStatus.data, openPullRequest]);
 
   const runActionWithPrompt = useCallback(
     async (input: GitActionRequestInput) => {
@@ -409,21 +411,22 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
 
   const behindCount = gitStatus.data?.behindCount ?? 0;
 
-  // Deterministic pull-to-refresh state. Tying RefreshControl to the query's
+  // Deterministic refresh state. Tying RefreshControl to the query's
   // isPending flag left the spinner stuck (the status query reports pending
   // during quiet background refreshes too).
-  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
-  const handlePullRefresh = useCallback(async () => {
-    setIsPullRefreshing(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
     try {
       await gitActions.refreshSelectedThreadGitStatus();
     } finally {
-      setIsPullRefreshing(false);
+      setIsRefreshing(false);
     }
   }, [gitActions]);
 
   const content = (
     <ScrollView
+      nestedScrollEnabled
       alwaysBounceVertical
       className="flex-1 android:bg-sheet-solid ios:bg-screen"
       contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
@@ -435,7 +438,9 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
         gap: Platform.OS === "android" ? 8 : 14,
       }}
       refreshControl={
-        <RefreshControl refreshing={isPullRefreshing} onRefresh={() => void handlePullRefresh()} />
+        Platform.OS === "ios" || isInspector ? (
+          <RefreshControl refreshing={isRefreshing} onRefresh={() => void handleRefresh()} />
+        ) : undefined
       }
     >
       {!worktreesSupported ? (
@@ -569,7 +574,7 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
                     title={`#${link.number} ${link.snapshot?.title ?? "Pull request"}`}
                     subtitle={`${link.repository} · ${link.snapshot === null ? "Status pending" : link.snapshot.isDraft && link.snapshot.state === "open" ? "Draft" : link.snapshot.state}${link.watch === undefined ? "" : " · Watching"}`}
                     onPress={() => {
-                      void tryOpenExternalUrl(link.url, "pull-request").then((opened) => {
+                      void openPullRequest(link.url).then((opened) => {
                         if (!opened)
                           Alert.alert("Unable to open PR", "The pull request could not be opened.");
                       });
@@ -667,11 +672,11 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
         {
           id: "refresh",
           title: "Refresh repository status",
-          attributes: { disabled: busy || isPullRefreshing },
+          attributes: { disabled: busy || isRefreshing },
         },
       ]}
       onPressAction={({ nativeEvent }) => {
-        if (nativeEvent.event === "refresh") void handlePullRefresh();
+        if (nativeEvent.event === "refresh") void handleRefresh();
       }}
     >
       {(open) => (

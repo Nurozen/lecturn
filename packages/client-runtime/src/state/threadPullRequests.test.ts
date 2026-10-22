@@ -1,4 +1,10 @@
-import { EnvironmentId, ProjectId, ThreadId, type PullRequestWatch } from "@lecturn/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  SourceControlProviderKind,
+  ThreadId,
+  type PullRequestWatch,
+} from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   resolveThreadPullRequestRef,
@@ -40,7 +46,7 @@ const watch = (number: number, patch: Partial<PullRequestWatch> = {}): PullReque
   managerStatus: "unassigned",
   authorization: null,
   observation: {
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     title: `Change ${number}`,
     url: `https://github.com/acme/app/pull/${number}`,
     state: "open",

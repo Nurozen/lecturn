@@ -5,6 +5,14 @@ public class LecturnReviewDiffModule: Module {
     Name("LecturnReviewDiffSurface")
 
     View(LecturnReviewDiffView.self) {
+      Prop("contentInsetTop") { (view: LecturnReviewDiffView, value: Double) in
+        view.setContentInsetTop(CGFloat(value))
+      }
+
+      Prop("contentInsetBottom") { (view: LecturnReviewDiffView, value: Double) in
+        view.setContentInsetBottom(CGFloat(value))
+      }
+
       Prop("tokensResetKey") { (view: LecturnReviewDiffView, tokensResetKey: String) in
         view.setTokensResetKey(tokensResetKey)
       }
@@ -49,16 +57,20 @@ public class LecturnReviewDiffModule: Module {
         view.setContentWidth(CGFloat(contentWidth))
       }
 
-      Prop("contentInsetTop") { (view: LecturnReviewDiffView, inset: Double) in
-        view.setContentInsetTop(CGFloat(inset))
-      }
-
-      Prop("contentInsetBottom") { (view: LecturnReviewDiffView, inset: Double) in
-        view.setContentInsetBottom(CGFloat(inset))
-      }
-
       Prop("initialRowIndex") { (view: LecturnReviewDiffView, initialRowIndex: Double) in
         view.setInitialRowIndex(initialRowIndex)
+      }
+
+      Prop("scrollEnabled") { (view: LecturnReviewDiffView, enabled: Bool) in
+        view.setScrollEnabled(enabled)
+      }
+
+      Prop("bounces") { (view: LecturnReviewDiffView, bounces: Bool) in
+        view.setBounces(bounces)
+      }
+
+      Prop("refreshEnabled") { (view: LecturnReviewDiffView, enabled: Bool) in
+        view.setRefreshEnabled(enabled)
       }
 
       Prop("refreshing") { (view: LecturnReviewDiffView, refreshing: Bool) in

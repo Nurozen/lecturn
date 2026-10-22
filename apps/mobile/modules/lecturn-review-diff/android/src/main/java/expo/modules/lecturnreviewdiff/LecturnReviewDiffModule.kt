@@ -44,6 +44,9 @@ class LecturnReviewDiffModule : Module() {
       Prop("contentWidth") { view: LecturnReviewDiffView, contentWidth: Double ->
         view.setContentWidth(contentWidth.toFloat())
       }
+      Prop("scrollEnabled") { view: LecturnReviewDiffView, enabled: Boolean ->
+        view.setScrollEnabled(enabled)
+      }
       Prop("initialRowIndex") { view: LecturnReviewDiffView, initialRowIndex: Double ->
         view.setInitialRowIndex(initialRowIndex)
       }

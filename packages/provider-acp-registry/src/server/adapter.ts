@@ -3,6 +3,11 @@ import {
   normalizeDevinToolCall,
   extractDevinSubagentUpdate,
 } from "./devinAcp.ts";
+import {
+  copilotClientCapabilitiesMeta,
+  extractCopilotSubagentUpdate,
+  makeCopilotSubagentRouting,
+} from "./copilotAcp.ts";
 import { defaultInstanceIdForDriver, ProviderDriverKind } from "@lecturn/contracts";
 import { AcpRegistrySettings } from "../settings.ts";
 import * as HostProcess from "@lecturn/shared/HostProcess";
@@ -74,7 +79,7 @@ export interface AcpRegistryAdapterV2Options {
 // Agent-specific behavior does not belong here: an agent that needs it gets a
 // dedicated driver (as Grok and Antigravity have). The few exceptions below
 // predate that rule and are small presentation hooks, not permission or tool
-// behavior.
+// behavior. Copilot's subagent routing was approved later on the same terms.
 //
 // Agents changing this file: do NOT add another `agentId === "..."` branch,
 // agent table, or agent-specific hook without explicit approval from the
@@ -186,11 +191,17 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
   const startupKey =
     options.settings.source === "local" ? `local:${options.instanceId}` : registryAgentId;
   const isDevin = registryAgentId === "devin";
+  // Local installs launch the `copilot` binary directly with no registry id.
+  const isCopilot =
+    registryAgentId === "github-copilot-cli" ||
+    (options.settings.source === "local" &&
+      /^copilot(\.exe|\.cmd)?$/i.test(options.settings.commandPath.split(/[\\/]/).pop() ?? ""));
+  const copilotRouting = isCopilot ? makeCopilotSubagentRouting() : undefined;
   const flavor: AcpAdapterV2Flavor = {
     driver: ACP_REGISTRY_PROVIDER,
     capabilities: AcpProviderCapabilitiesV2,
     promptFailure: (cause) => acpRegistryPromptFailure(registryAgentId, cause),
-    // Per-agent exceptions (Mistral Vibe, Devin): see the note above
+    // Per-agent exceptions (Mistral Vibe, Devin, Copilot): see the note above
     // registerMistralVibeAcpExtensions before adding any more.
     ...(registryAgentId === "mistral-vibe"
       ? { registerExtensions: registerMistralVibeAcpExtensions }
@@ -206,6 +217,14 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
           extractSubagentUpdate: extractDevinSubagentUpdate,
         }
       : {}),
+    ...(copilotRouting === undefined
+      ? {}
+      : {
+          clientCapabilitiesMeta: copilotClientCapabilitiesMeta,
+          registerExtensions: copilotRouting.registerExtensions,
+          normalizeSessionUpdate: copilotRouting.normalizeSessionUpdate,
+          extractSubagentUpdate: extractCopilotSubagentUpdate,
+        }),
     makeRuntime: options.makeRuntime ?? makeAcpRegistryRuntime(options, catalog),
     ...(runtimeCoordinator === undefined
       ? {}

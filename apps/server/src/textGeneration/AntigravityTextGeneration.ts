@@ -306,11 +306,12 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       ),
   );
 
+  const runner = TextGenerationOperations.withoutInvestigation("Antigravity", runAntigravityJson);
   return {
-    ...TextGenerationOperations.fromRunner("AntigravityTextGeneration", runAntigravityJson),
+    ...TextGenerationOperations.fromRunner("AntigravityTextGeneration", runner),
     generateContextualSummary: TextGenerationOperations.contextualSummaryFromRunner(
       "AntigravityTextGeneration",
-      runAntigravityJson,
+      runner,
     ),
   };
 });

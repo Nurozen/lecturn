@@ -1,4 +1,5 @@
 import { GlassCard } from "../../components/GlassCard";
+import { AppActivityIndicator } from "../../components/AppActivityIndicator";
 import { ConnectionTraceId } from "./ConnectionTraceId";
 import { SymbolView } from "../../components/AppSymbol";
 import {
@@ -14,7 +15,7 @@ import {
 } from "@lecturn/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Pressable, type TextLayoutEvent, View } from "react-native";
+import { Pressable, type TextLayoutEvent, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
@@ -200,7 +201,7 @@ function CloudEnvironmentRowsContent(
         </GlassCard>
       ) : controller.relayDiscovery.isRefreshing ? (
         <GlassCard collapsable={false} radius={24} className="items-center gap-3 p-6">
-          <ActivityIndicator colorClassName={"accent-icon"} />
+          <AppActivityIndicator colorClassName={"accent-icon"} />
           <Text className="text-center text-sm leading-normal text-foreground-muted">
             Loading linked cloud environments.
           </Text>

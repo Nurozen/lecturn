@@ -12,6 +12,7 @@ import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@lecturn/shar
 import { extractJsonObject } from "@lecturn/shared/schemaJson";
 
 import { TextGenerationError } from "@lecturn/contracts";
+import * as TextGenerationOperations from "@lecturn/provider-core/server/textGenerationOperations";
 import * as TextGeneration from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,
@@ -347,5 +348,10 @@ export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(
     generateBranchName,
     generateThreadTitle,
     generateWorkflowSummary,
+    // Copilot's JSON runner has no read-only tool mode to investigate a checkout with.
+    generateReviewGuide: () =>
+      Effect.fail(
+        TextGenerationOperations.investigationUnsupported("generateReviewGuide", "GitHub Copilot"),
+      ),
   } satisfies TextGeneration.TextGeneration["Service"];
 });

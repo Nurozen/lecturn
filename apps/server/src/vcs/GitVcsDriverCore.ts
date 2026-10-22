@@ -32,6 +32,7 @@ import { dedupeRemoteBranchesWithLocalMatches, normalizeGitRemoteUrl } from "@le
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import { compactTraceAttributes } from "@lecturn/shared/observability";
 import { decodeJsonResult } from "@lecturn/shared/schemaJson";
+import { resolveSpawnCommand } from "@lecturn/shared/shell";
 import { resolveProjectFileBackedSetting } from "@lecturn/shared/projectSettings";
 import { isPathSegmentDescendant } from "@lecturn/shared/stave";
 import { parseLecturnProjectFile } from "@lecturn/shared/lecturnProjectFile";
@@ -1024,11 +1025,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           ...ceilingEnv,
           ...trace2Monitor.env,
         };
+        const spawnEnv = { ...env, ...windowsLongPathConfigEnv(hostPlatform, env) };
+        const resolved = yield* resolveSpawnCommand("git", [], { env: spawnEnv });
+        // A git.cmd wrapper would need cmd.exe, which cuts multi-line commit
+        // messages at the first newline; leave that case to Node's lookup.
+        const executable = resolved.shell ? "git" : resolved.command;
         const child = yield* commandSpawner
           .spawn(
-            ChildProcess.make("git", commandInput.args, {
+            ChildProcess.make(executable, commandInput.args, {
               cwd: commandInput.cwd,
-              env: { ...env, ...windowsLongPathConfigEnv(hostPlatform, env) },
+              env: spawnEnv,
             }),
           )
           .pipe(
@@ -2579,9 +2585,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       ["rev-parse", "HEAD"],
       true,
     ).pipe(Effect.map((stdout) => stdout.trim()));
+    // After a successful pull, HEAD before and after decides the result, so its output is not
+    // needed. A large fast-forward's diffstat can exceed the output cap, which must not fail a
+    // pull Git applied.
     yield* executeGit("GitVcsDriver.pullCurrentBranch.pull", cwd, ["pull", "--ff-only"], {
       timeoutMs: 30_000,
       fallbackErrorDetail: "git pull failed",
+      appendTruncationMarker: true,
     });
     const afterSha = yield* runGitStdout(
       "GitVcsDriver.pullCurrentBranch.afterSha",

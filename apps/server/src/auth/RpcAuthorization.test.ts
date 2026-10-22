@@ -9,6 +9,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   AuthOrchestrationOperateScope,
+  ORCHESTRATION_V2_WS_METHODS,
   AuthOrchestrationReadScope,
   AuthSourceControlWriteScope,
   AuthPreviewOperateScope,
@@ -64,6 +65,12 @@ describe("RPC authorization scopes", () => {
   });
   it("declares exactly one scope for every RPC in the server group", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
+  });
+
+  it("requires operate access to stop a workflow", () => {
+    expect(requiredScopeForRpcMethod(ORCHESTRATION_V2_WS_METHODS.stopWorkflow)).toBe(
+      AuthOrchestrationOperateScope,
+    );
   });
 
   it("authorizes background policy reporting and observation deliberately", () => {
@@ -299,6 +306,7 @@ describe("RPC scope middleware", () => {
         WS_METHODS.assetsCreateUrl,
         WS_METHODS.serverUpdateSettings,
         WS_METHODS.serverRetryResourceTelemetry,
+        WS_METHODS.projectsMutate,
       ]);
       for (const [tag, rpc] of WsRpcGroup.requests) {
         expect(rpc.middlewares.has(RpcScopeAuthorization), tag).toBe(true);

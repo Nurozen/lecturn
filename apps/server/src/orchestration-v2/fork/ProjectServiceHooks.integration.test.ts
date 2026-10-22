@@ -9,6 +9,7 @@ import * as Layer from "effect/Layer";
 
 import * as ServerConfig from "../../config.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import * as ProjectEnrichmentService from "../../project/ProjectEnrichmentService.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import * as WorkspacePaths from "../../workspace/WorkspacePaths.ts";
@@ -57,6 +58,7 @@ const TestLayer = ProbeRegistrationLive.pipe(
     }),
   ),
   Layer.provide(SqlitePersistence.layerMemory),
+  Layer.provide(ServerSettings.layerTest()),
   Layer.provide(
     ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-project-service-hooks-" }),
   ),

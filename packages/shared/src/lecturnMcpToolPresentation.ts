@@ -21,6 +21,7 @@ export type LecturnMcpToolSummaryAction =
   | "thread-send"
   | "thread-wait"
   | "thread-interrupt"
+  | "workflow-stop"
   | "thread-configuration"
   | "thread-configure"
   | "thread-fork"
@@ -58,6 +59,8 @@ export type LecturnMcpToolSummaryAction =
   | "list-prs"
   | "watch-pr"
   | "unwatch-pr"
+  | "write-pr-guides"
+  | "read-pr-guide"
   | "browser"
   | "device"
   | "html-preview"
@@ -108,6 +111,16 @@ const LECTURN_MCP_TOOLS: Readonly<Record<string, LecturnMcpToolDefinition>> = {
     "unwatch-pr",
     "pull-request",
   ),
+  write_pull_request_guides: tool(
+    ["Write", "Writing", "Started", "review guides"],
+    "write-pr-guides",
+    "pull-request",
+  ),
+  read_pull_request_guide: tool(
+    ["Read", "Reading", "Read", "a review guide"],
+    "read-pr-guide",
+    "pull-request",
+  ),
   orchestrator_capabilities: tool(
     ["Get", "Getting", "Got", "orchestration capabilities"],
     "capabilities",
@@ -138,6 +151,10 @@ const LECTURN_MCP_TOOLS: Readonly<Record<string, LecturnMcpToolDefinition>> = {
   lecturn_thread_read: tool(["Read", "Reading", "Read", "a Lecturn thread"], "thread-read"),
   lecturn_thread_send: tool(["Send", "Sending", "Sent", "to a Lecturn thread"], "thread-send"),
   lecturn_thread_wait: tool(["Wait", "Waiting", "Waited", "for a Lecturn thread"], "thread-wait"),
+  lecturn_workflow_stop: tool(
+    ["Stop", "Stopping", "Requested a stop for", "a workflow"],
+    "workflow-stop",
+  ),
   lecturn_thread_interrupt: tool(
     ["Interrupt", "Interrupting", "Requested an interrupt of", "a Lecturn thread"],
     "thread-interrupt",

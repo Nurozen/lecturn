@@ -255,6 +255,17 @@ onSelectAccount }`, reads every token through `readToken(accountId)`, and gets
   and `packages/client-runtime/src/state/connections.ts`
   (`unlistedRelayEnvironmentIdsValueAtom`): resolve as the union.
 
+**Lecturn behavior upstream removed.** Keep these when an upstream change
+drops them; line-level fork-delta reviews miss them because the removal comes
+from upstream's side.
+
+- **No project in the draft project picker.** Upstream's searchable draft
+  picker (#17664) removed the "No project" option. Lecturn keeps it as the
+  first, searchable item in `apps/web/src/components/chat/DraftHeroHeadline.tsx`
+  whenever the machine has a scratch workspace, so a draft can still start
+  without a project (as described in `docs/user/thread-sidebar.md`). Kept on
+  purpose in upstream sync PR #148.
+
 ## Recurring mechanical conflicts
 
 **Published migration identities are persistent data.** The fork's

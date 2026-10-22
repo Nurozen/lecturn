@@ -445,6 +445,31 @@ describe("chain selection and badge state", () => {
 });
 
 describe("threadPullRequestSearchTerms", () => {
+  it.each([undefined, [], [link(34)]])(
+    "searches the branch PR alongside existing links (%j)",
+    (pullRequests) => {
+      const branchPullRequest = {
+        projectId: ProjectId.make("project"),
+        repository: "nurozen/lecturn",
+        number: 11809,
+        url: "https://github.com/nurozen/lecturn/pull/11809",
+      };
+      const terms = threadPullRequestSearchTerms({
+        pullRequests,
+        branchPullRequest,
+        linkedPullRequest: {
+          ...branchPullRequest,
+          number: 12,
+          url: "https://github.com/nurozen/lecturn/pull/12",
+        },
+      });
+      for (const query of ["11809", "#11809", "nurozen/lecturn#11809", branchPullRequest.url]) {
+        expect(terms.some((term) => term.includes(query))).toBe(true);
+      }
+      expect(terms).toContain(pullRequests?.length ? "#34" : "#12");
+    },
+  );
+
   it("includes completed and unsynced links but excludes dismissed links", () => {
     const terms = threadPullRequestSearchTerms({
       pullRequests: [

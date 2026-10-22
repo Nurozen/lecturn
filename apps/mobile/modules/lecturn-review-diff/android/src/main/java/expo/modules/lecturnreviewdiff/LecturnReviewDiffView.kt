@@ -53,12 +53,21 @@ class LecturnReviewDiffView(context: Context, appContext: AppContext) : ExpoView
   private val verticalScroller = OverScroller(context)
   private val horizontalScroller = OverScroller(context)
   private var dragAxis: DragAxis? = null
+  private var scrollEnabled = true
   private var horizontalDragTarget: HorizontalPanTarget? = null
   private var lastTouchX = 0f
   private var lastTouchY = 0f
   private var velocityTracker: VelocityTracker? = null
 
   init {
+    canvasView.onContentHeightChanged = { height ->
+      onDebug(
+        mapOf(
+          "message" to "metrics",
+          "contentHeight" to height / resources.displayMetrics.density
+        )
+      )
+    }
     canvasView.onRowTap = { row, gesture, target -> handleRowTap(row, gesture, target) }
     canvasView.onVisibleRowsChanged = { first, last ->
       onDebug(
@@ -201,6 +210,14 @@ class LecturnReviewDiffView(context: Context, appContext: AppContext) : ExpoView
     scrollToY(canvasView.rowTop(index), animated)
   }
 
+  fun setScrollEnabled(enabled: Boolean) {
+    scrollEnabled = enabled
+    if (!enabled) {
+      verticalScroller.forceFinished(true)
+      canvasView.setVerticalOffset(0)
+    }
+  }
+
   fun scrollToTop(animated: Boolean) {
     scrollToY(0, animated)
   }
@@ -215,7 +232,7 @@ class LecturnReviewDiffView(context: Context, appContext: AppContext) : ExpoView
         horizontalDragTarget = canvasView.horizontalPanTarget(event.y)
         lastTouchX = event.x
         lastTouchY = event.y
-        parent?.requestDisallowInterceptTouchEvent(true)
+        parent?.requestDisallowInterceptTouchEvent(scrollEnabled)
         return false
       }
       MotionEvent.ACTION_MOVE -> {
@@ -224,7 +241,7 @@ class LecturnReviewDiffView(context: Context, appContext: AppContext) : ExpoView
           val deltaY = event.y - lastTouchY
           if (max(abs(deltaX), abs(deltaY)) > touchSlop) {
             dragAxis = if (abs(deltaY) >= abs(deltaX)) {
-              DragAxis.VERTICAL
+              if (scrollEnabled) DragAxis.VERTICAL else null
             } else {
               horizontalDragTarget
                 ?.takeIf { canvasView.maxHorizontalOffset(it) > 0 }
@@ -232,6 +249,7 @@ class LecturnReviewDiffView(context: Context, appContext: AppContext) : ExpoView
             }
           }
         }
+        if (dragAxis == DragAxis.HORIZONTAL) parent?.requestDisallowInterceptTouchEvent(true)
         return dragAxis != null
       }
       MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> return dragAxis != null
@@ -754,6 +772,7 @@ private class DiffCanvasView(context: Context) : View(context) {
     }
   var onRowTap: ((DiffRow, String, RowTapTarget) -> Unit)? = null
   var onVisibleRowsChanged: ((Int, Int) -> Unit)? = null
+  var onContentHeightChanged: ((Int) -> Unit)? = null
 
   fun prepareRows() = drawing.prepareRows(tokensByRowId, style, width)
   fun useCodeLayouts(layouts: CodeLayoutCache) {
@@ -879,6 +898,7 @@ private class DiffCanvasView(context: Context) : View(context) {
     setVerticalOffset(verticalOffset)
     setHorizontalOffset(horizontalOffset)
     clampHeaderPathOffsets()
+    onContentHeightChanged?.invoke(rowOffsets.last())
   }
 
   private fun rowHeight(row: DiffRow): Int = when (row.kind) {
@@ -1201,14 +1221,7 @@ private class DiffCanvasView(context: Context) : View(context) {
     }
     val selected = selectedRowIds.contains(row.id)
     if (selected) {
-      fill(
-        canvas,
-        withAlpha(theme.hunkText, 56),
-        0f,
-        top.toFloat(),
-        width.toFloat(),
-        bottom.toFloat(),
-      )
+      // Keep the diff and syntax colors intact; selection lives in the gutter.
       fill(
         canvas,
         withAlpha(theme.hunkText, 242),

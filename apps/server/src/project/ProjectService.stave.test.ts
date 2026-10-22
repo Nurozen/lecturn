@@ -14,6 +14,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as ServerConfig from "../config.ts";
 import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { StaveProjectShells } from "../stave/StaveProjectShells.ts";
 import { StaveWorkspaceReader } from "../stave/StaveWorkspaceReader.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
@@ -69,6 +70,7 @@ const TestLayer = RuntimeLayer.layerProjectService.pipe(
       }),
     ),
   ),
+  Layer.provideMerge(ServerSettings.layerTest()),
   Layer.provideMerge(SqlitePersistence.layerMemory),
   Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "project-service-stave-" })),
   Layer.provide(NodeServices.layer),

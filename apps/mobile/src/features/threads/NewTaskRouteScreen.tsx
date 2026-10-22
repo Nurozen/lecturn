@@ -1,3 +1,4 @@
+import { AppActivityIndicator } from "../../components/AppActivityIndicator";
 import { MaterialListRow } from "../../components/MaterialListRow";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import {
@@ -15,7 +16,7 @@ import {
 } from "@lecturn/client-runtime/state/runtime";
 import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Platform, Pressable, View } from "react-native";
+import { Alert, Platform, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { cn } from "../../lib/cn";
 import { MaterialScreenContent } from "../../components/MaterialScreenContent";
@@ -369,7 +370,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
               )}
             >
               {projectEmptyState.loading ? (
-                <ActivityIndicator colorClassName="accent-icon-muted" />
+                <AppActivityIndicator colorClassName="accent-icon-muted" />
               ) : null}
               <Text className="text-center text-lg font-lecturn-bold text-foreground">
                 {projectEmptyState.title}
@@ -470,6 +471,8 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                       subtitle={
                         staveLabel ? `${staveLabel} · ${workspaceSubtitle}` : workspaceSubtitle
                       }
+                      subtitleNumberOfLines={1}
+                      subtitleEllipsizeMode="middle"
                       disabled={reservedDestinationProject !== null}
                       onPress={() => void selectProject(selectionTarget)}
                       leading={

@@ -11,6 +11,7 @@ import {
   ThreadId,
   ProviderInstanceId,
   ProviderDriverKind,
+  SourceControlProviderKind,
   type ModelSelection,
   type ServerProvider,
   type SagaWorkbenchInferenceResult,
@@ -53,7 +54,7 @@ const actor = {
 const requirement: SagaWorkbenchRequirement = {
   key: "repo-pr",
   kind: "pull-request",
-  provider: "github",
+  provider: SourceControlProviderKind.make("github"),
   repoName: "repo",
   checkoutPath: "/repo",
   host: "github.com",

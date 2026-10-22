@@ -28,7 +28,7 @@
     "@lecturn/contracts": "workspace:*",
     "@lecturn/provider-core": "workspace:*",
     "@lecturn/shared": "workspace:*",
-    "@muse-code/sdk": "1.4.2",
+    "@muse-code/sdk": "1.4.6",
     "effect": "catalog:"
   },
   "devDependencies": {

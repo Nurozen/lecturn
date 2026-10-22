@@ -181,6 +181,12 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       yield* Fiber.interrupt(previousFiber).pipe(Effect.ignore);
     }
 
+    // Enrichment and maintenance re-derivation resolve binaries and
+    // package-manager state, which a disabled provider has no use for. A stale
+    // maintenance owner stays pending until the provider is enabled again.
+    if (!snapshot.enabled) {
+      return;
+    }
     if (!input.enrichSnapshot && !(yield* Ref.get(maintenanceStaleRef))) {
       return;
     }

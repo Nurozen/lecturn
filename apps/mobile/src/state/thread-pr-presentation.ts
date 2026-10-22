@@ -6,7 +6,7 @@ import type {
   ThreadPullRequestLink,
   VcsStatusResult,
 } from "@lecturn/contracts";
-import { resolveChangeRequestPresentation } from "@lecturn/shared/sourceControl";
+import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
 import {
   resolveThreadCurrentPullRequestLink,
   resolveThreadPullRequestBadge,
@@ -40,7 +40,7 @@ export function presentThreadPr(
   pr: ThreadPr,
   provider: VcsStatusResult["sourceControlProvider"] | null | undefined,
 ): ThreadPrPresentation {
-  const presentation = resolveChangeRequestPresentation(provider);
+  const { changeRequest } = sourceControlClients.get(provider?.kind);
   const isDraft = pr.state === "open" && pr.isDraft === true;
   return {
     kind: "pull-request",
@@ -51,7 +51,7 @@ export function presentThreadPr(
     updatedAt: pr.updatedAt ?? null,
     url: pr.url,
     label: String(pr.number),
-    accessibilityLabel: `#${pr.number} ${presentation.longName} ${isDraft ? "draft" : pr.state}`,
+    accessibilityLabel: `#${pr.number} ${changeRequest.singular} ${isDraft ? "draft" : pr.state}`,
     textClassName: isDraft ? "text-foreground-muted" : PR_STATE_TEXT_CLASS[pr.state],
   };
 }

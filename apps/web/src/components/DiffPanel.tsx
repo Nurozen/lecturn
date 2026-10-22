@@ -371,7 +371,7 @@ export default function DiffPanel({
     },
     { enabled: isGitRepo && checkpointsUnavailableReason === null && selectedTurn !== undefined },
   );
-  const primaryBranchDiffPreview = useEnvironmentQuery(
+  const branchDiffPreview = useEnvironmentQuery(
     canReadFiles && selectedRunId === null && activeEnvironmentId && activeCwd
       ? reviewEnvironment.diffPreview({
           environmentId: activeEnvironmentId!,
@@ -383,27 +383,6 @@ export default function DiffPanel({
         })
       : null,
   );
-  const shouldRetryBranchDiffAtEnvironmentCwd =
-    selectedRunId === null &&
-    !activeProject?.stave &&
-    primaryBranchDiffPreview.error?.includes("configured workspace root") === true &&
-    serverConfig?.cwd !== undefined &&
-    serverConfig.cwd !== activeCwd;
-  const fallbackBranchDiffPreview = useEnvironmentQuery(
-    canReadFiles && shouldRetryBranchDiffAtEnvironmentCwd && activeEnvironmentId && serverConfig
-      ? reviewEnvironment.diffPreview({
-          environmentId: activeEnvironmentId!,
-          input: {
-            cwd: serverConfig.cwd,
-            ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
-            ignoreWhitespace: diffIgnoreWhitespace,
-          },
-        })
-      : null,
-  );
-  const branchDiffPreview = shouldRetryBranchDiffAtEnvironmentCwd
-    ? fallbackBranchDiffPreview
-    : primaryBranchDiffPreview;
   const canRefreshGitDiff =
     isGitRepo && selectedRunId === null && activeEnvironmentId != null && activeCwd != null;
   const activeThreadRefreshKey = routeThreadRef

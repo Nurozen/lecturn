@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
-import { EnvironmentId, ProjectId, type PullRequestWatch } from "@lecturn/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  SourceControlProviderKind,
+  type PullRequestWatch,
+} from "@lecturn/contracts";
 import {
   projectPullRequestActivity,
   agentAwarenessPublishIdentity,
@@ -21,7 +26,7 @@ const watch: PullRequestWatch = {
   createdAt: "2026-09-13T20:00:00Z",
   updatedAt: "2026-09-13T20:00:00Z",
   observation: {
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     title: "Feature",
     url: "https://github.com/org/repo/pull/42",
     state: "open",
