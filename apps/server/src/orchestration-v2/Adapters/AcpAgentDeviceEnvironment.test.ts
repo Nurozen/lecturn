@@ -8,32 +8,27 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentId,
   GithubCopilotSettings,
-  GrokSettings,
   ProviderInstanceId,
   ProviderSessionId,
   ThreadId,
 } from "@lecturn/contracts";
+import { GrokSettings } from "@lecturn/provider-grok/settings";
+import { makeGrokAdapterV2 } from "@lecturn/provider-grok/testing";
 import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import { resolveSelfInvocation } from "@lecturn/shared/nodeRuntime";
 import { assert, describe, it } from "@effect/vitest";
-import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/process";
 
-import * as ServerConfig from "../../config.ts";
-import * as McpProviderSession from "@lecturn/provider-core/server/mcpSession";
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
-import {
-  ProviderAdapterV2RuntimePolicy,
-  type ProviderAdapterV2Shape,
-} from "@lecturn/provider-core/server/ProviderAdapter";
+import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
+import * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
+import * as TestProviderHost from "@lecturn/provider-testing/TestProviderHost";
+import type { SelfInvocation } from "@lecturn/shared/nodeRuntime";
 import { makeCopilotAdapterV2 } from "./CopilotAdapterV2.ts";
-import { makeGrokAdapterV2, type GrokAdapterV2Options } from "./GrokAdapterV2.ts";
 
 const AGENT_DEVICE_ENVIRONMENT = {
   PATH: "/state/device/bin",
@@ -46,38 +41,30 @@ const COPILOT_SETTINGS = Schema.decodeSync(GithubCopilotSettings)({
   binaryPath: "copilot-device-env",
 });
 
-const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
-  prefix: "lecturn-acp-device-env-",
-}).pipe(Layer.provide(NodeServices.layer));
-const testLayer = Layer.mergeAll(NodeServices.layer, IdAllocator.layer, serverConfigLayer);
-
-interface AdapterServices {
-  readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
-  readonly crypto: Crypto.Crypto;
-  readonly fileSystem: FileSystem.FileSystem;
-  readonly path: Path.Path;
-  readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
-  readonly serverConfig: ServerConfig.ServerConfig["Service"];
-  readonly selfInvocation: GrokAdapterV2Options["selfInvocation"];
-}
+const testLayer = Layer.mergeAll(
+  NodeServices.layer,
+  IdAllocator.layer,
+  McpProviderSessions.layer,
+  TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer)),
+);
 
 const makeAdapters = {
-  grok: (services: AdapterServices) =>
+  grok: (selfInvocation: SelfInvocation) =>
     makeGrokAdapterV2({
-      ...services,
+      selfInvocation,
       instanceId: ProviderInstanceId.make("grok-device-env"),
       settings: GROK_SETTINGS,
       environment: { PATH: "/usr/bin" },
       hostPlatform: "darwin",
     }),
-  copilot: (services: AdapterServices) =>
+  copilot: (selfInvocation: SelfInvocation) =>
     makeCopilotAdapterV2({
-      ...services,
+      selfInvocation,
       instanceId: ProviderInstanceId.make("copilot-device-env"),
       settings: COPILOT_SETTINGS,
       environment: { PATH: "/usr/bin", COPILOT_HOME: "/synthetic/copilot-home" },
     }),
-} satisfies Record<string, (services: AdapterServices) => ProviderAdapterV2Shape>;
+};
 
 /** Opens a session and returns the environment its provider process was spawned with. */
 const spawnEnvironment = (
@@ -98,16 +85,10 @@ const spawnEnvironment = (
         }),
       );
     });
-    const adapter = makeAdapters[provider]({
-      childProcessSpawner,
-      crypto: yield* Crypto.Crypto,
-      fileSystem: yield* FileSystem.FileSystem,
-      path: yield* Path.Path,
-      idAllocator: yield* IdAllocator.IdAllocatorV2,
-      serverConfig: yield* ServerConfig.ServerConfig,
-      selfInvocation: yield* resolveSelfInvocation(),
-    });
-    McpProviderSession.setMcpProviderSession({
+    const adapter: ProviderAdapter.ProviderAdapterV2["Service"] = yield* makeAdapters[provider](
+      yield* resolveSelfInvocation(),
+    ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner));
+    yield* (yield* McpProviderSessions.McpProviderSessions).set({
       environmentId: EnvironmentId.make(`environment-acp-device-${name}`),
       threadId,
       providerSessionId: `mcp-session-acp-device-${name}`,
@@ -122,17 +103,13 @@ const spawnEnvironment = (
         threadId,
         providerSessionId: ProviderSessionId.make(`provider-session-acp-device-${name}`),
         modelSelection: { instanceId: adapter.instanceId, model: "default" },
-        runtimePolicy: ProviderAdapterV2RuntimePolicy.make({
+        runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: "full-access",
           interactionMode: "default",
           cwd: process.cwd(),
         }),
       })
-      .pipe(
-        Effect.scoped,
-        Effect.ignore,
-        Effect.ensuring(Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId))),
-      );
+      .pipe(Effect.scoped, Effect.ignore);
     assert.isAbove(environments.length, 0, `${provider} never spawned`);
     return environments[0];
   }).pipe(

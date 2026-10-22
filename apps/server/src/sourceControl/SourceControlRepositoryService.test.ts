@@ -13,9 +13,9 @@ import { GitCommandError, SourceControlProviderError } from "@lecturn/contracts"
 
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
-import * as BitbucketApi from "./BitbucketApi.ts";
-import * as BitbucketSourceControlProvider from "./BitbucketSourceControlProvider.ts";
-import type * as SourceControlProvider from "./SourceControlProvider.ts";
+import * as BitbucketApi from "@lecturn/source-control-bitbucket/server/BitbucketApi";
+import * as BitbucketSourceControlProvider from "@lecturn/source-control-bitbucket/server/BitbucketSourceControlProvider";
+import type * as SourceControlProvider from "@lecturn/source-control-core/server/SourceControlProvider";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 import * as SourceControlRepositoryService from "./SourceControlRepositoryService.ts";
 

@@ -21,13 +21,13 @@ import {
 } from "@lecturn/contracts";
 
 import * as ServerConfig from "../config.ts";
-import { expandHomePathWith } from "@lecturn/provider-core/server/pathExpansion";
+import { expandHomePath } from "@lecturn/provider-core/server/pathExpansion";
 import {
   parseGitCloneProgressLine,
   type GitCloneProgressLine,
 } from "../project/gitCloneProgress.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
-import * as BitbucketApi from "./BitbucketApi.ts";
+import * as BitbucketApi from "@lecturn/source-control-bitbucket/server/BitbucketApi";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 const isSourceControlRepositoryError = Schema.is(SourceControlRepositoryError);
 const isSourceControlProviderError = Schema.is(SourceControlProviderError);
@@ -213,7 +213,7 @@ export const make = Effect.gen(function* () {
         });
       }
 
-      return path.resolve(expandHomePathWith(trimmed, path));
+      return path.resolve(expandHomePath(trimmed));
     },
   );
 

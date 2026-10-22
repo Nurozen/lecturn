@@ -20,7 +20,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { ProcessRunner } from "../processRunner.ts";
 import { PullRequestProviderRegistry } from "../pullRequest/PullRequestProviderRegistry.ts";
-import type { ProviderAcceptanceEvidence } from "../pullRequest/PullRequestProvider.ts";
+import type { ProviderAcceptanceEvidence } from "@lecturn/source-control-core/server/PullRequestProvider";
 import { readManifest } from "./StaveWorkspaceReader.ts";
 import { sameManifestIncarnation } from "./staveIncarnation.ts";
 import type { ManifestScalar } from "./staveManifest.ts";

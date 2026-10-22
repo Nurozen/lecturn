@@ -22,15 +22,17 @@ import { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
 import { makeClaudeTextGeneration } from "../../textGeneration/ClaudeTextGeneration.ts";
-import { ProviderHost } from "@lecturn/provider-core/server/ProviderHost";
+import * as ProviderLatestVersions from "@lecturn/provider-core/server/ProviderLatestVersions";
+import * as ProviderHost from "@lecturn/provider-core/server/ProviderHost";
 import * as ServerConfig from "../../config.ts";
 import { expandHomePath } from "@lecturn/provider-core/server/pathExpansion";
-import * as ProviderEventLoggers from "../ProviderEventLoggers.ts";
+import * as ProviderEventLoggers from "@lecturn/provider-core/server/ProviderEventLoggers";
 import {
   createClaudeAdapterV2,
   type ClaudeAdapterV2DriverEnv,
 } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import { ProviderDriverError } from "../Errors.ts";
+import { claudeUsageReader } from "./claudeUsage.ts";
 import { makeClaudeScopedLimitNames } from "../claudeUsageLimits.ts";
 import * as ClaudeResetCredits from "../claudeResetCredits.ts";
 import * as ResetCreditCoordinator from "../resetCreditCoordinator.ts";
@@ -41,7 +43,7 @@ import {
   probeClaudeWorkspaceSnapshot,
 } from "../ClaudeProvider.ts";
 import { makeManagedServerProvider } from "@lecturn/provider-core/server/managedProvider";
-import * as ModelManifest from "../ModelManifest.ts";
+import * as ModelCatalog from "@lecturn/provider-core/server/ModelCatalog";
 import {
   mergeClaudeRuntimeModelCatalog,
   resolveClaudeModelCatalog,
@@ -101,18 +103,19 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
 
 export type ClaudeDriverEnv =
   | ClaudeAdapterV2DriverEnv
-  | ProviderHost
+  | ProviderHost.ProviderHost
   | ChildProcessSpawner.ChildProcessSpawner
   | ResetCreditCoordinator.ResetCreditCoordinator
   | Crypto.Crypto
   | FileSystem.FileSystem
   | HttpClient.HttpClient
-  | ModelManifest.ModelManifest
+  | ProviderLatestVersions.ProviderLatestVersions
+  | ModelCatalog.ModelCatalog
   | Path.Path
   | ProviderEventLoggers.ProviderEventLoggers
   | ServerConfig.ServerConfig;
 
-export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
+export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.Path> = {
   driverKind: DRIVER_KIND,
   metadata: {
     displayName: "Claude",
@@ -120,6 +123,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
   },
   configSchema: ClaudeSettings,
   defaultConfig: (): ClaudeSettings => decodeClaudeSettings({}),
+  usage: claudeUsageReader,
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -127,9 +131,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const path = yield* Path.Path;
       const { cwd } = yield* ServerConfig.ServerConfig;
       const httpClient = yield* HttpClient.HttpClient;
+      const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
       const resetCreditCoordinator = yield* ResetCreditCoordinator.ResetCreditCoordinator;
-      const host = yield* ProviderHost;
-      const modelManifest = yield* ModelManifest.ModelManifest;
+      const catalogService = yield* ModelCatalog.ModelCatalog;
+      // The manifest's Claude catalog alone; runtime discoveries merge in below.
+      const manifestCatalog = catalogService
+        .current(DRIVER_KIND)
+        .pipe(Effect.map(resolveClaudeModelCatalog));
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const fallbackContinuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -146,12 +154,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         ),
       );
       // Snapshots and dispatch resolve the same per-instance runtime metadata.
-      const modelCatalog = modelManifest.current.pipe(
-        Effect.map((manifest) =>
-          mergeClaudeRuntimeModelCatalog(
-            resolveClaudeModelCatalog(manifest),
-            capabilitiesCache.currentModels,
-          ),
+      const modelCatalog = manifestCatalog.pipe(
+        Effect.map((catalog) =>
+          mergeClaudeRuntimeModelCatalog(catalog, capabilitiesCache.currentModels),
         ),
       );
       const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
@@ -221,16 +226,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
 
       // Start the TTL-gated refresh without delaying provider readiness. The
       // next check observes a remote manifest after the background fetch lands.
-      const checkProvider = modelManifest.refreshInBackground.pipe(
+      const checkProvider = catalogService.refreshInBackground.pipe(
         Effect.andThen(
-          modelManifest.current.pipe(
-            Effect.flatMap((manifest) =>
+          manifestCatalog.pipe(
+            Effect.flatMap((catalog) =>
               checkClaudeProviderStatus(
                 effectiveConfig,
                 (_settings, version) => capabilitiesCache.get(version ?? null),
                 processEnv,
                 cwd,
-                resolveClaudeModelCatalog(manifest),
+                catalog,
                 scopedLimitNames,
                 () => capabilitiesCache.currentModels,
                 (version) =>
@@ -249,7 +254,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         Effect.provideService(Path.Path, path),
       );
 
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, host.settings);
+      const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<ClaudeSettings>>({
         resolveMaintenance,
         discovery: {
@@ -261,10 +266,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         streamSettings: snapshotSettings.streamSettings,
         haveSettingsChanged: haveProviderSnapshotSettingsChanged,
         initialSnapshot: (settings) =>
-          modelManifest.current.pipe(
-            Effect.flatMap((manifest) =>
-              makePendingClaudeProvider(settings.provider, resolveClaudeModelCatalog(manifest)),
-            ),
+          manifestCatalog.pipe(
+            Effect.flatMap((catalog) => makePendingClaudeProvider(settings.provider, catalog)),
             Effect.map(stampIdentity),
           ),
         checkProvider,
@@ -276,6 +279,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
               }),
             ),
             Effect.provideService(HttpClient.HttpClient, httpClient),
+            Effect.provideService(ProviderLatestVersions.ProviderLatestVersions, latestVersions),
             Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
           ),
       }).pipe(

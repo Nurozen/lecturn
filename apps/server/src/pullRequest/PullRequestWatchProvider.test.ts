@@ -11,13 +11,13 @@ import {
 
 import { ProjectService } from "../project/ProjectService.ts";
 import { StaveWorkspaceReader } from "../stave/StaveWorkspaceReader.ts";
-import * as SourceControlRateLimit from "../sourceControl/SourceControlRateLimit.ts";
+import * as SourceControlRateLimit from "@lecturn/source-control-core/server/SourceControlRateLimit";
 import {
   PullRequestProviderError,
   type ProviderAcceptanceEvidence,
   type ProviderChangeRequestDetail,
   type PullRequestProviderApi,
-} from "./PullRequestProvider.ts";
+} from "@lecturn/source-control-core/server/PullRequestProvider";
 import { PullRequestProviderRegistry, fromProviders } from "./PullRequestProviderRegistry.ts";
 import { PullRequestService } from "./PullRequestService.ts";
 import * as WatchProvider from "./PullRequestWatchProvider.ts";

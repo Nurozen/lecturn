@@ -3,7 +3,7 @@ import type { ProviderDriverKind } from "@lecturn/contracts";
 import {
   AcpRegistryAdapterV2Driver,
   type AcpRegistryAdapterV2DriverEnv,
-} from "./Adapters/AcpRegistryAdapterV2.ts";
+} from "@lecturn/provider-acp-registry/server";
 import {
   ClaudeAdapterV2Driver,
   type ClaudeAdapterV2DriverEnv,
@@ -16,12 +16,12 @@ import {
 import {
   CursorAdapterV2Driver,
   type CursorAdapterV2DriverEnv,
-} from "./Adapters/CursorAdapterV2.ts";
-import { GrokAdapterV2Driver, type GrokAdapterV2DriverEnv } from "./Adapters/GrokAdapterV2.ts";
+} from "@lecturn/provider-cursor/server";
+import { GrokAdapterV2Driver, type GrokAdapterV2DriverEnv } from "@lecturn/provider-grok/server";
 import {
   OpenCodeAdapterV2Driver,
   type OpenCodeAdapterV2DriverEnv,
-} from "./Adapters/OpenCodeAdapterV2.ts";
+} from "@lecturn/provider-opencode/server";
 import { PiAdapterV2Driver, type PiAdapterV2DriverEnv } from "@lecturn/provider-pi/server";
 import type { AnyProviderAdapterDriver } from "@lecturn/provider-core/server/adapterDriver";
 

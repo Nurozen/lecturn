@@ -55,12 +55,13 @@ import * as TerminalManager from "../../terminal/Manager.ts";
 import { CodexProviderCapabilitiesV2 } from "../Adapters/CodexAdapterV2.ts";
 import * as EventSink from "../EventSink.ts";
 import * as Orchestrator from "../Orchestrator.ts";
-import type { ProviderAdapterV2Shape } from "@lecturn/provider-core/server/ProviderAdapter";
+import type * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as ProjectStore from "../ProjectStore.ts";
 import { OrchestrationEffectRequestV2 } from "../EffectOutbox.ts";
 import * as ResourceCleanupService from "../ResourceCleanupService.ts";
 import { threadHasQueuedTurnStart } from "../ThreadSettlementService.ts";
+import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import * as RuntimeLayer from "../runtimeLayer.ts";
 import { previewCheckpointRevert } from "./CheckpointRevertPreview.ts";
 import {
@@ -90,7 +91,7 @@ const orchestrationAdapter = {
   getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
   planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" }),
   openSession: () => Effect.die("sessions are not used by fork tests"),
-} as ProviderAdapterV2Shape;
+} as ProviderAdapter.ProviderAdapterV2["Service"];
 
 const providerInstance = {
   instanceId,
@@ -121,6 +122,7 @@ const TestLayer = Layer.mergeAll(
   ProjectionStore.layer,
 ).pipe(
   Layer.provide(McpSessionRegistryTestkit.layer),
+  Layer.provide(McpProviderSessions.layer),
   Layer.provideMerge(SqlitePersistence.layerMemory),
   Layer.provideMerge(
     Layer.mock(CheckpointStore.CheckpointStore)({

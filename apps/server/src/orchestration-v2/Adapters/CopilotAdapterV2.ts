@@ -34,10 +34,9 @@ import type * as Scope from "effect/Scope";
 import { ChildProcessSpawner } from "effect/process";
 import * as EffectAcpErrors from "effect-acp/errors";
 
-import * as ServerConfig from "../../config.ts";
 import { withAgentDeviceEnvironment } from "@lecturn/provider-core/server/mcpSession";
-import { makeAcpNativeLoggerFactory } from "../../provider/acp/AcpNativeLogging.ts";
-import type * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
+import { makeAcpNativeLoggerFactory } from "@lecturn/provider-acp/server/nativeLogging";
+import type * as AcpSessionRuntime from "@lecturn/provider-acp/server/AcpSessionRuntime";
 import {
   applyCopilotModelSelection,
   applyCopilotSessionConfiguration,
@@ -49,14 +48,16 @@ import {
   normalizeCopilotSessionStateEdit,
   withCopilotCancelledStreamDiscard,
 } from "../../provider/acp/CopilotAcpSupport.ts";
-import * as ProviderEventLoggers from "../../provider/ProviderEventLoggers.ts";
+import * as ProviderEventLoggers from "@lecturn/provider-core/server/ProviderEventLoggers";
 import { mergeProviderInstanceEnvironment } from "@lecturn/provider-core/server/instanceEnvironment";
 import {
   currentStaveMemoryResolver,
   staveMemoryAcpExtraMcpServers,
-} from "../../provider/StaveMemoryMcp.ts";
+} from "@lecturn/provider-core/server/staveMemory";
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
-import * as ProviderContinuationRequests from "@lecturn/provider-core/server/continuationRequests";
+import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
+import * as ProviderContinuationRequests from "@lecturn/provider-core/server/ProviderContinuationRequests";
+import * as ProviderHost from "@lecturn/provider-core/server/ProviderHost";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
@@ -68,7 +69,7 @@ import {
   makeAcpAdapterV2,
   type AcpAdapterV2Flavor,
   type AcpAdapterV2RuntimeInput,
-} from "./AcpAdapterV2.ts";
+} from "@lecturn/provider-acp/server/adapter";
 
 export const COPILOT_PROVIDER = ProviderDriverKind.make("githubCopilot");
 const DEFAULT_COPILOT_SETTINGS = Schema.decodeSync(GithubCopilotSettings)({});
@@ -97,13 +98,7 @@ export interface CopilotAdapterV2Options {
   readonly instanceId: Parameters<typeof makeAcpAdapterV2>[0]["instanceId"];
   readonly settings: GithubCopilotSettings;
   readonly environment: NodeJS.ProcessEnv;
-  readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
-  readonly crypto: Crypto.Crypto;
   readonly selfInvocation: SelfInvocation;
-  readonly fileSystem: FileSystem.FileSystem;
-  readonly path: Path.Path;
-  readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
-  readonly serverConfig: ServerConfig.ServerConfig["Service"];
   /** Home directory `~/.copilot` resolves under when `COPILOT_HOME` is unset. */
   readonly homeDir?: string;
   readonly nativeLogging?: Parameters<typeof makeAcpAdapterV2>[0]["nativeLogging"];
@@ -116,8 +111,14 @@ export interface CopilotAdapterV2Options {
   ) => Effect.Effect<
     AcpSessionRuntime.AcpSessionRuntime["Service"],
     EffectAcpErrors.AcpError,
-    Crypto.Crypto | Scope.Scope
+    ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | Scope.Scope
   >;
+}
+
+/** The services the Copilot flavor launches its runtime and reads plan files with. */
+export interface CopilotFlavorServices {
+  readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
+  readonly path: Path.Path;
 }
 
 function readTextFileSync(filePath: string): string | undefined {
@@ -128,7 +129,9 @@ function readTextFileSync(filePath: string): string | undefined {
   }
 }
 
-export function makeCopilotAcpAdapterFlavor(options: CopilotAdapterV2Options): AcpAdapterV2Flavor {
+export function makeCopilotAcpAdapterFlavor(
+  options: CopilotAdapterV2Options & CopilotFlavorServices,
+): AcpAdapterV2Flavor {
   const copilotHome = copilotHomeDir(
     options.path,
     options.environment,
@@ -208,14 +211,16 @@ export function makeCopilotAcpAdapterFlavor(options: CopilotAdapterV2Options): A
   };
 }
 
-export function makeCopilotAdapterV2(options: CopilotAdapterV2Options) {
-  return makeAcpAdapterV2({
+export const makeCopilotAdapterV2 = Effect.fn("makeCopilotAdapterV2")(function* (
+  options: CopilotAdapterV2Options,
+) {
+  const services: CopilotFlavorServices = {
+    childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
+    path: yield* Path.Path,
+  };
+  return yield* makeAcpAdapterV2({
     instanceId: options.instanceId,
-    flavor: makeCopilotAcpAdapterFlavor(options),
-    crypto: options.crypto,
-    fileSystem: options.fileSystem,
-    idAllocator: options.idAllocator,
-    serverConfig: options.serverConfig,
+    flavor: makeCopilotAcpAdapterFlavor({ ...options, ...services }),
     selfInvocation: options.selfInvocation,
     ...(options.nativeLogging === undefined ? {} : { nativeLogging: options.nativeLogging }),
     ...(options.continuationRequests === undefined
@@ -224,16 +229,17 @@ export function makeCopilotAdapterV2(options: CopilotAdapterV2Options) {
     ...(options.testHooks === undefined ? {} : { testHooks: options.testHooks }),
     ...(options.extraMcpServers === undefined ? {} : { extraMcpServers: options.extraMcpServers }),
   });
-}
+});
 
 export type CopilotAdapterV2DriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
   | IdAllocator.IdAllocatorV2
+  | McpProviderSessions.McpProviderSessions
   | Path.Path
   | ProviderEventLoggers.ProviderEventLoggers
-  | ServerConfig.ServerConfig;
+  | ProviderHost.ProviderHost;
 
 export const CopilotAdapterV2Driver: ProviderAdapterDriver<
   GithubCopilotSettings,
@@ -246,26 +252,14 @@ export const CopilotAdapterV2Driver: ProviderAdapterDriver<
     function* (input: ProviderAdapterDriverCreateInput<GithubCopilotSettings>) {
       const hostEnvironment = yield* HostProcessEnvironment;
       const selfInvocation = yield* resolveSelfInvocation();
-      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const crypto = yield* Crypto.Crypto;
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
-      const serverConfig = yield* ServerConfig.ServerConfig;
       const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
       const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
       const resolveStaveMemory = yield* currentStaveMemoryResolver;
-      return makeCopilotAdapterV2({
+      return yield* makeCopilotAdapterV2({
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
         environment: mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
-        childProcessSpawner,
-        crypto,
-        fileSystem,
-        path,
-        idAllocator,
-        serverConfig,
         selfInvocation,
         continuationRequests,
         extraMcpServers: staveMemoryAcpExtraMcpServers(resolveStaveMemory),

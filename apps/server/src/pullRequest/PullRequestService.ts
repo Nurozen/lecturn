@@ -83,20 +83,19 @@ import {
   isSshRemoteUrl,
 } from "@lecturn/shared/sourceControl";
 
-import { AllowGitHubReserve } from "../sourceControl/GitHubApi.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
-import * as SourceControlRateLimit from "../sourceControl/SourceControlRateLimit.ts";
+import * as SourceControlRateLimit from "@lecturn/source-control-core/server/SourceControlRateLimit";
 import {
   type ProviderChangeRequest,
   type ProviderListCursor,
   type ProviderChangeRequestWatchFingerprint,
   type PullRequestProviderApi,
   PullRequestProviderError,
-} from "./PullRequestProvider.ts";
+} from "@lecturn/source-control-core/server/PullRequestProvider";
 import * as PullRequestReadCache from "./PullRequestReadCache.ts";
 import * as PullRequestProviderRegistry from "./PullRequestProviderRegistry.ts";
 import * as ViewedFiles from "./pullRequestViewedFiles.ts";
@@ -382,6 +381,12 @@ export interface SupportedProject {
    * Unique where `repository` is not: Azure's is a bare name that repeats across an organisation.
    */
   readonly remote: string;
+  /**
+   * The host's own key for this checkout's repository (`api.repositoryKey`), normalized, or null
+   * where `owner/name` on the host identifies it. When set, only a reference whose key matches
+   * is served by this checkout.
+   */
+  readonly repositoryKey: string | null;
 }
 
 /**
@@ -572,7 +577,7 @@ export function withRateLimitBackoff(
       ),
       Effect.flatMap((lease) =>
         effect.pipe(
-          Effect.provideService(AllowGitHubReserve, allowPaused),
+          Effect.provideService(SourceControlRateLimit.Interactive, allowPaused),
           Effect.tap(() => limits.recordSuccess({ ...key, lease })),
           Effect.tapError((error) =>
             error.reason === "rate-limited"
@@ -602,6 +607,10 @@ export function withRateLimitBackoff(
   const wrapped = {
     kind: api.kind,
     capabilities: api.capabilities,
+    ...(api.mergeMessageRewrite === undefined
+      ? {}
+      : { mergeMessageRewrite: api.mergeMessageRewrite }),
+    ...(api.repositoryKey === undefined ? {} : { repositoryKey: api.repositoryKey }),
     // Refused during a pause like any other read, except for the caller that asks for the
     // bypass: a lookup that failed is not held, so letting every background read through would
     // spawn this host's CLI on each of them and re-extend the pause it was already in.
@@ -1032,6 +1041,10 @@ export const make = Effect.gen(function* () {
             if (roots === undefined) viewerRoots.set(host, [cwd]);
             else if (!roots.includes(cwd)) roots.push(cwd);
           }
+          const repositoryKey =
+            api?.repositoryKey?.({ canonicalKey: identity.canonicalKey }) ?? null;
+          // Lecturn: Azure's organization/project stay in the public `repository`, so the cursor
+          // key needs no host-specific repository key.
           const key = listCursorKey(host, repository);
           if (deduplicate && seen.has(key)) continue;
           seen.add(key);
@@ -1049,10 +1062,9 @@ export const make = Effect.gen(function* () {
             api: withRateLimitBackoff(api, host, rateLimits),
             repository,
             host,
-            remote:
-              kind === "azure-devops"
-                ? identity.canonicalKey
-                : normalizeGitRemoteUrl(`https://${host}/${repository}`),
+            remote: repositoryKey ?? normalizeGitRemoteUrl(`https://${host}/${repository}`),
+            repositoryKey:
+              repositoryKey === null ? null : canonicalRepositoryKey(repositoryKey.toLowerCase()),
           });
         }
         return { supported, identities, unimplemented, viewerRoots };
@@ -1146,22 +1158,21 @@ export const make = Effect.gen(function* () {
               const route =
                 all.supported.find(
                   (candidate) =>
-                    candidate.api.kind === "azure-devops" &&
-                    canonicalRepositoryKey(candidate.canonicalKey.toLowerCase()) === repositoryKey,
+                    candidate.repositoryKey !== null && candidate.repositoryKey === repositoryKey,
                 ) ??
                 onHost.find(
                   (candidate) =>
-                    candidate.api.kind !== "azure-devops" &&
+                    candidate.repositoryKey === null &&
                     candidate.repository.toLowerCase() === repository,
                 ) ??
-                onHost.find((candidate) => candidate.api.kind !== "azure-devops");
+                onHost.find((candidate) => candidate.repositoryKey === null);
               if (route === undefined) {
                 return Effect.fail(
                   new PullRequestUnavailableError({ reason: "provider-unsupported" }),
                 );
               }
               return Effect.succeed(
-                route.api.kind === "azure-devops" || route.repository.toLowerCase() === repository
+                route.repositoryKey !== null || route.repository.toLowerCase() === repository
                   ? route
                   : // The checkout's own canonical key stays, so a watch binding to the
                     // requested repository can never be satisfied by a borrowed checkout.
@@ -1782,8 +1793,10 @@ export const make = Effect.gen(function* () {
   )(function* (input) {
     const host = input.host.toLowerCase();
     const { supported } = yield* listWorkspaceProjects({ host });
-    const project = supported.find((candidate) => candidate.api.kind === "github");
-    const api = registry.get("github");
+    const project = supported.find(
+      (candidate) => registry.get(candidate.api.kind)?.getRoutingIdentity !== undefined,
+    );
+    const api = project === undefined ? null : registry.get(project.api.kind);
     if (project === undefined || api?.getRoutingIdentity === undefined) {
       return yield* new PullRequestUnavailableError({ reason: "provider-unsupported" });
     }
@@ -1793,6 +1806,7 @@ export const make = Effect.gen(function* () {
         host,
       })
       .pipe(Effect.mapError(toPullRequestError("routeIdentity")));
+    // Only GitHub reports a routing identity, and the contract names it.
     return { ...identity, host, provider: "github" as const };
   });
 
@@ -1808,7 +1822,7 @@ export const make = Effect.gen(function* () {
           detail: "The GitHub account could not be verified before starting the operation.",
         });
       const project = yield* requireProject(input).pipe(Effect.mapError(rejected));
-      const api = project.api.kind === "github" ? registry.get("github") : null;
+      const api = registry.get(project.api.kind);
       if (
         api?.withVerifiedCredential === undefined ||
         input.host?.toLowerCase() !== project.host.toLowerCase()
@@ -1827,7 +1841,7 @@ export const make = Effect.gen(function* () {
 
   const routing = Effect.fn("PullRequestService.routing")(function* (input: PullRequestRef) {
     const project = yield* requireProject(input);
-    const api = project.api.kind === "github" ? registry.get("github") : null;
+    const api = registry.get(project.api.kind);
     if (api?.getRoutingIdentity === undefined) {
       return yield* new PullRequestUnavailableError({ reason: "provider-unsupported" });
     }
@@ -2301,9 +2315,9 @@ export const make = Effect.gen(function* () {
                     }),
                   );
                 }
-                // Agent credits are dropped from GitHub merge messages when the project asks.
+                // Agent credits are dropped from merge messages the host lets us rewrite, when the project asks.
                 const mergeSettings =
-                  project.api.kind === "github" &&
+                  project.api.mergeMessageRewrite !== undefined &&
                   input.stackNumber === undefined &&
                   (input.action === "merge" || input.action === "enable-auto-merge")
                     ? serverSettings.getSettings.pipe(

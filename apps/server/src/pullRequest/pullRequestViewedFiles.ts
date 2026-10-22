@@ -16,7 +16,10 @@ import {
 } from "@lecturn/contracts";
 
 import type * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";
-import type { ProviderFileRevisions, PullRequestProviderError } from "./PullRequestProvider.ts";
+import type {
+  ProviderFileRevisions,
+  PullRequestProviderError,
+} from "@lecturn/source-control-core/server/PullRequestProvider";
 import type { PullRequestError, SupportedProject } from "./PullRequestService.ts";
 
 /**

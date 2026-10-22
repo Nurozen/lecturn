@@ -4,19 +4,16 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-import * as McpProviderSession from "@lecturn/provider-core/server/mcpSession";
 import { codexThreadRuntimeParams } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
-import { cursorMcpServers } from "../orchestration-v2/Adapters/CursorAdapterV2.ts";
 import type * as ProcessRunner from "../processRunner.ts";
 import { CodexSettings } from "@lecturn/contracts";
-import type { StaveMemoryResolution } from "../stave/StaveMemoryWiring.ts";
 import {
-  codexStaveMemoryMcpServers,
-  makeCodexStaveMemoryMcpResolver,
   staveMemoryAcpMcpServers,
   staveMemoryCursorMcpServers,
   staveMemoryOpenCodeMcpConfig,
-} from "./StaveMemoryMcp.ts";
+  type StaveMemoryResolution,
+} from "@lecturn/provider-core/server/staveMemory";
+import { codexStaveMemoryMcpServers, makeCodexStaveMemoryMcpResolver } from "./StaveMemoryMcp.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -146,37 +143,27 @@ describe("Stave memory MCP servers", () => {
 });
 
 describe("adapter MCP registration with Stave memory", () => {
-  const threadId = ThreadId.make("thread-stave-memory");
   const memoryForCodex = { sm_abc: { command: "/opt/context-marmot" } } as const;
 
   it("adds memory next to the lecturn server, and alone without an MCP session", () => {
     assert.deepStrictEqual(
-      codexThreadRuntimeParams({ threadId, extraMcpServers: memoryForCodex }).config.mcp_servers,
+      codexThreadRuntimeParams({ mcpSession: undefined, extraMcpServers: memoryForCodex }).config
+        .mcp_servers,
       memoryForCodex,
     );
-    const cursorMemory = staveMemoryCursorMcpServers(configured);
-    assert.deepStrictEqual(cursorMcpServers(threadId, cursorMemory), cursorMemory);
-
-    McpProviderSession.setMcpProviderSession({
-      environmentId: EnvironmentId.make("environment-stave-memory"),
-      threadId,
-      providerSessionId: "mcp-session-stave-memory",
-      providerInstanceId: ProviderInstanceId.make("codex"),
-      endpoint: "http://127.0.0.1:43123/mcp",
-      authorizationHeader: "Bearer stave-memory-token",
-      browserToolsAvailable: false,
-    });
-    try {
-      const codexServers = codexThreadRuntimeParams({ threadId, extraMcpServers: memoryForCodex })
-        .config.mcp_servers as Record<string, unknown>;
-      assert.deepStrictEqual(Object.keys(codexServers).toSorted(), ["lecturn", "sm_abc"]);
-      assert.deepStrictEqual(
-        Object.keys(cursorMcpServers(threadId, cursorMemory) ?? {}).toSorted(),
-        ["context-marmot", "lecturn"],
-      );
-    } finally {
-      McpProviderSession.clearMcpProviderSession(threadId);
-    }
+    const codexServers = codexThreadRuntimeParams({
+      mcpSession: {
+        environmentId: EnvironmentId.make("environment-stave-memory"),
+        threadId: ThreadId.make("thread-stave-memory"),
+        providerSessionId: "mcp-session-stave-memory",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        endpoint: "http://127.0.0.1:43123/mcp",
+        authorizationHeader: "Bearer stave-memory-token",
+        browserToolsAvailable: false,
+      },
+      extraMcpServers: memoryForCodex,
+    }).config.mcp_servers as Record<string, unknown>;
+    assert.deepStrictEqual(Object.keys(codexServers).toSorted(), ["lecturn", "sm_abc"]);
   });
 });
 

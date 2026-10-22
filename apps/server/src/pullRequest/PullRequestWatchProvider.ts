@@ -2,7 +2,7 @@ import { SourceControlProviderRegistry } from "../sourceControl/SourceControlPro
 import { detectSourceControlProviderFromRemoteUrl } from "@lecturn/shared/sourceControl";
 import { StaveWorkspaceReader } from "../stave/StaveWorkspaceReader.ts";
 import { sameManifestIncarnation } from "../stave/staveIncarnation.ts";
-import { SourceControlRateLimit } from "../sourceControl/SourceControlRateLimit.ts";
+import { SourceControlRateLimit } from "@lecturn/source-control-core/server/SourceControlRateLimit";
 import { stableStringify } from "@lecturn/shared/relaySigning";
 import {
   PullRequestWatchError,
@@ -23,7 +23,7 @@ import {
   withRateLimitBackoff,
   PullRequestService,
 } from "./PullRequestService.ts";
-import type { ProviderAcceptanceEvidence } from "./PullRequestProvider.ts";
+import type { ProviderAcceptanceEvidence } from "@lecturn/source-control-core/server/PullRequestProvider";
 
 const isWatchError = Schema.is(PullRequestWatchError);
 const isProviderKind = Schema.is(SourceControlProviderKind);

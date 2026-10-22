@@ -11,7 +11,10 @@ correct model data before the next successful fetch. Bump `updatedAt` whenever t
 file changes. Fetch time cannot establish which copy contains the newer edit.
 
 Generic catalog data describes presentation and capabilities. Each provider owns
-its adapter schema and dispatch mappings.
+its adapter schema and dispatch mappings. Providers never read the manifest
+itself: the server exposes each driver's entry through the
+[`ModelCatalog`](../../packages/provider-core/src/server/ModelCatalog.ts) port,
+and compatibility policies stay with the server.
 
 Claude Code discovers models through the Agent SDK initialization response, using the configured
 CLI and account without submitting a prompt. Runtime model IDs, aliases, and reported capabilities

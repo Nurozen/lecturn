@@ -30,9 +30,11 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ModelManifest from "../provider/ModelManifest.ts";
 import * as StaveMemoryWiring from "../stave/StaveMemoryWiring.ts";
 import * as ProviderInstanceRegistryHydration from "../provider/ProviderInstanceRegistryHydration.ts";
-import * as ProviderEventLoggers from "../provider/ProviderEventLoggers.ts";
-import * as OpenCodeRuntime from "../provider/opencodeRuntime.ts";
-import * as OpenCodeServerLedger from "../provider/OpenCodeServerLedger.ts";
+import * as ProviderLatestVersions from "@lecturn/provider-core/server/ProviderLatestVersions";
+import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
+import * as ProviderEventLoggers from "@lecturn/provider-core/server/ProviderEventLoggers";
+import * as OpenCodeRuntime from "@lecturn/provider-opencode/server/OpenCodeRuntime";
+import * as OpenCodeServerLedger from "@lecturn/provider-opencode/server/OpenCodeServerLedger";
 import * as ServerSettings from "../serverSettings.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
@@ -93,6 +95,7 @@ const layerProviderInstanceRegistry = ProviderInstanceRegistryHydration.layer.pi
         ProviderEventLoggers.ProviderEventLoggers,
         ProviderEventLoggers.NoOpProviderEventLoggers,
       ),
+      ProviderLatestVersions.layer,
       ModelManifest.layerTest,
       // Lecturn: drivers wire Stave memory; live runs never use it.
       StaveMemoryWiring.layerNoop,
@@ -125,6 +128,7 @@ const layerLive = RuntimeLayer.layer.pipe(
   Layer.provide(ResetCreditCoordinator.layer),
   Layer.provide(layerBackgroundPolicy),
   Layer.provide(layerPlatformTest),
+  Layer.provide(McpProviderSessions.layer),
 );
 
 const waitForIdle = Effect.fn("CursorOrchestratorV2Live.waitForIdle")(function* (
