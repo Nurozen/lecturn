@@ -401,9 +401,9 @@ describe("flattenSegmentsForNavigation", () => {
 
 describe("rollupAttention", () => {
   it("returns the highest-priority status", () => {
-    expect(
-      rollupAttention([pill("Completed"), null, pill("Plan Ready"), pill("Monitoring")])?.label,
-    ).toBe("Plan Ready");
+    expect(rollupAttention([pill("Completed"), null, pill("Plan Ready")])?.label).toBe(
+      "Plan Ready",
+    );
     expect(
       rollupAttention([pill("Working"), pill("Pending Approval"), pill("Awaiting Input")])?.label,
     ).toBe("Pending Approval");

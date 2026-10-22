@@ -34,6 +34,7 @@ import {
   type PullRequestCommentUpdateInput,
   type PullRequestDetail,
   type PullRequestPreview,
+  type PullRequestChecks,
   type PullRequestDiffFileContentsInput,
   type PullRequestDiffFileContentsResult,
   type PullRequestDiffStat,
@@ -79,8 +80,9 @@ import {
 } from "@lecturn/shared/sourceControl";
 
 import { AllowGitHubReserve } from "../sourceControl/GitHubCli.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 import * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as SourceControlRateLimit from "../sourceControl/SourceControlRateLimit.ts";
 import {
@@ -90,7 +92,7 @@ import {
   PullRequestProviderError,
 } from "./PullRequestProvider.ts";
 import * as PullRequestReadCache from "./PullRequestReadCache.ts";
-import { PullRequestProviderRegistry } from "./PullRequestProviderRegistry.ts";
+import * as PullRequestProviderRegistry from "./PullRequestProviderRegistry.ts";
 import * as ViewedFiles from "./pullRequestViewedFiles.ts";
 
 export interface PullRequestMergeEvent extends PullRequestRef {
@@ -217,6 +219,9 @@ export class PullRequestService extends Context.Service<
     readonly preview: (
       input: PullRequestRef,
     ) => Effect.Effect<PullRequestPreview, PullRequestError>;
+    readonly checks: (
+      input: PullRequestRef,
+    ) => Effect.Effect<PullRequestChecks | null, PullRequestError>;
     readonly activity: (
       input: PullRequestRef,
     ) => Effect.Effect<PullRequestActivity, PullRequestError>;
@@ -578,6 +583,9 @@ export function withRateLimitBackoff(
     ...(api.getChangeRequestPreview === undefined
       ? {}
       : { getChangeRequestPreview: wrap("getChangeRequestPreview", api.getChangeRequestPreview) }),
+    ...(api.getChangeRequestChecks === undefined
+      ? {}
+      : { getChangeRequestChecks: wrap("getChangeRequestChecks", api.getChangeRequestChecks) }),
     ...(api.getChangeRequestSummary === undefined
       ? {}
       : {
@@ -787,8 +795,9 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const vcs = yield* Effect.serviceOption(VcsDriverRegistry);
   const pullRequestRefreshes = yield* SubscriptionRef.make(0);
-  const registry = yield* PullRequestProviderRegistry;
-  const projections = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const registry = yield* PullRequestProviderRegistry.PullRequestProviderRegistry;
+  const projects = yield* ProjectService.ProjectService;
+  const repositoryIdentities = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
   const rateLimits = yield* SourceControlRateLimit.SourceControlRateLimit;
   const filesViewedStore = yield* PullRequestFilesViewed.PullRequestFilesViewedRepository;
@@ -877,8 +886,10 @@ export const make = Effect.gen(function* () {
     allRemotes = false,
   ): Effect.Effect<WorkspaceProjects, PullRequestError> =>
     (filter.projectId === undefined
-      ? projections.getProjectShells(filter.projectIds)
-      : projections.getProjectShellById(filter.projectId).pipe(Effect.map(Option.toArray))
+      ? projects.listShells(
+          filter.projectIds === undefined ? undefined : { projectIds: filter.projectIds },
+        )
+      : projects.getShell(filter.projectId).pipe(Effect.map(Option.toArray))
     ).pipe(
       Effect.mapError(
         (error) =>
@@ -890,13 +901,24 @@ export const make = Effect.gen(function* () {
       ),
       Effect.flatMap((shells) =>
         Effect.gen(function* () {
-          const projects = shells.filter(
+          const filtered = shells.filter(
             (project) =>
               (filter.projectId === undefined || project.id === filter.projectId) &&
               (filter.projectIds === undefined || filter.projectIds.includes(project.id)),
           );
+          // Projects created without a recorded identity resolve it from their checkout.
+          const resolved = yield* Effect.forEach(
+            filtered,
+            (project) =>
+              project.repositoryIdentity != null
+                ? Effect.succeed(project)
+                : repositoryIdentities
+                    .resolve(project.workspaceRoot)
+                    .pipe(Effect.map((repositoryIdentity) => ({ ...project, repositoryIdentity }))),
+            { concurrency: REPOSITORY_CONCURRENCY },
+          );
           const targets = (yield* Effect.forEach(
-            projects,
+            resolved,
             (project) => resolveProjectRepositories(project, path, vcs, allRemotes),
             { concurrency: REPOSITORY_CONCURRENCY },
           )).flat();
@@ -3131,6 +3153,30 @@ export const make = Effect.gen(function* () {
     return Cache.get(listCache, key);
   };
 
+  const checksCache = yield* Cache.makeWith(
+    (key: string) => {
+      const input = refOfCacheKey(key);
+      return requireProject(input).pipe(
+        Effect.flatMap((project) =>
+          project.api.getChangeRequestChecks === undefined
+            ? Effect.succeed(null)
+            : project.api
+                .getChangeRequestChecks({
+                  cwd: project.cwd,
+                  repository: project.repository,
+                  host: project.host,
+                  number: input.number,
+                })
+                .pipe(Effect.mapError(toPullRequestError("checks"))),
+        ),
+      );
+    },
+    {
+      capacity: DETAIL_CACHE_CAPACITY,
+      timeToLive: (exit) => (Exit.isSuccess(exit) ? DETAIL_CACHE_TTL : Duration.zero),
+    },
+  );
+
   const detailCache = yield* Cache.makeWith(
     (key: string) => {
       const statsKey = statsCacheKey(key);
@@ -3514,6 +3560,7 @@ export const make = Effect.gen(function* () {
     ),
     refreshAfterTurn,
     detail: credentialCached(detail),
+    checks: credentialCached((input) => Cache.get(checksCache, refCacheKey(input))),
     activity: credentialCached(activity),
     preview: credentialCached(preview),
     threadComments,

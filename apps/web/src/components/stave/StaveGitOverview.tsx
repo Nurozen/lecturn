@@ -163,9 +163,7 @@ function RepoRow({
                   gitCwd={target.cwd}
                   activeThreadRef={threadRef}
                   syncThreadBranch={false}
-                  {...(repositoryTarget ? { repositoryTarget } : {})}
                   {...(draftId ? { draftId } : {})}
-                  {...(repositoryTarget && onOpenPullRequest ? { onOpenPullRequest } : {})}
                 />
               </>
             ) : null}

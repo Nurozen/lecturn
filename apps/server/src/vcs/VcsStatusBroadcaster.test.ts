@@ -17,7 +17,6 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import type {
   BackgroundScope,
-  OrchestrationProject,
   OrchestrationProjectShell,
   VcsStatusLocalResult,
   VcsStatusRemoteResult,
@@ -30,11 +29,41 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as VcsStatusBroadcaster from "./VcsStatusBroadcaster.ts";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import { PersistenceSqlError } from "../persistence/Errors.ts";
+import { StaveProjectShells, StaveProjectShellsError } from "../stave/StaveProjectShells.ts";
 import { symlinksSupported } from "@lecturn/shared/testing/symlinks";
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
+
+/** A project shell plus its deletion stamp (the V1 `OrchestrationProject` read shape). */
+type OrchestrationProject = OrchestrationProjectShell & { readonly deletedAt: string | null };
+
+/** The auto-pull policy reads the V2 project store and Stave-decorated shells. */
+interface PolicyQuery {
+  readonly getActiveProjectByWorkspaceRoot: (
+    cwd: string,
+  ) => Effect.Effect<Option.Option<OrchestrationProject>, PersistenceSqlError>;
+  readonly getShellSnapshot: () => Effect.Effect<
+    { readonly projects: ReadonlyArray<OrchestrationProjectShell> },
+    PersistenceSqlError
+  >;
+}
+
+const toRow = (project: OrchestrationProject): ProjectStore.ProjectRow => ({
+  projectId: project.id,
+  title: project.title,
+  workspaceRoot: project.workspaceRoot,
+  defaultModelSelection: project.defaultModelSelection,
+  defaultThreadEnvMode: null,
+  autoPull: project.autoPull ?? false,
+  faviconPath: null,
+  projectIcon: null,
+  scripts: project.scripts,
+  createdAt: project.createdAt,
+  updatedAt: project.updatedAt,
+  deletedAt: project.deletedAt,
+});
 
 const baseLocalStatus: VcsStatusLocalResult = {
   isRepo: true,
@@ -1077,12 +1106,27 @@ describe("autoPullPolicyLayer", () => {
   });
   const queryFailure = new PersistenceSqlError({ operation: "test", detail: "unavailable" });
 
-  const makePolicyLayer = (
-    query: Partial<ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"]>,
-    settings = ServerSettings.layerTest(),
-  ) =>
+  const makePolicyLayer = (query: PolicyQuery, settings = ServerSettings.layerTest()) =>
     VcsStatusBroadcaster.autoPullPolicyLayer.pipe(
-      Layer.provide(Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)(query)),
+      Layer.provide(
+        Layer.mock(ProjectStore.ProjectStoreV2)({
+          findActiveByWorkspaceRoot: (cwd) =>
+            query.getActiveProjectByWorkspaceRoot(cwd).pipe(
+              Effect.map(Option.map(toRow)),
+              Effect.mapError(
+                (cause) => new ProjectStore.ProjectStoreV2Error({ operation: "test", cause }),
+              ),
+            ),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(StaveProjectShells)({
+          list: Effect.suspend(query.getShellSnapshot).pipe(
+            Effect.map((snapshot) => snapshot.projects),
+            Effect.mapError((cause) => new StaveProjectShellsError({ operation: "test", cause })),
+          ),
+        }),
+      ),
       Layer.provide(settings),
       Layer.provideMerge(NodeServices.layer),
     );

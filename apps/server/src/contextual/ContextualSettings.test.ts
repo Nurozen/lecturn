@@ -4,6 +4,10 @@ import { Effect, Result, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { initializeContextualThread, make } from "./ContextualSettings.ts";
+import {
+  clearV2Projection,
+  installLegacyProjectionMirror,
+} from "../threadDecisions/V2ProjectionTestFixtures.ts";
 
 const projectId = ProjectId.make("contextual-project");
 const threadId = ThreadId.make("contextual-thread");
@@ -12,6 +16,8 @@ const decodeIds = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Sc
 const encodePolicy = Schema.encodeSync(Schema.fromJsonString(ContextualSourcePolicy));
 const fixture = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  yield* installLegacyProjectionMirror(sql);
+  yield* clearV2Projection(sql);
   yield* sql`DELETE FROM contextual_project_settings`;
   yield* sql`DELETE FROM contextual_thread_settings`;
   yield* sql`DELETE FROM contextual_host_state`;

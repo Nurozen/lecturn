@@ -3,7 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Deferred, Effect, Fiber, FileSystem, Layer, Path, Ref } from "effect";
 import { ProjectId } from "@lecturn/contracts";
 import * as RuntimeFence from "./StaveRuntimeFence.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { StaveProjectShells } from "./StaveProjectShells.ts";
 import { StaveAdmission, StaveSpaceTransitioningError } from "./StaveAdmission.ts";
 
 const virtualFs = FileSystem.makeNoop({ realPath: (path) => Effect.succeed(path) });
@@ -125,31 +125,25 @@ it.layer(NodeServices.layer)("StaveRuntimeFence", (it) => {
           RuntimeFence.layer.pipe(
             Layer.provide(
               Layer.mergeAll(
-                Layer.mock(ProjectionSnapshotQuery)({
-                  getShellSnapshot: () =>
-                    Effect.succeed({
-                      snapshotSequence: 0,
-                      threads: [],
+                Layer.mock(StaveProjectShells)({
+                  list: Effect.succeed([
+                    {
+                      id: ProjectId.make("stave-owner"),
+                      title: "space",
+                      workspaceRoot: root,
+                      defaultModelSelection: null,
+                      scripts: [],
+                      createdAt: "2026-01-01T00:00:00.000Z",
                       updatedAt: "2026-01-01T00:00:00.000Z",
-                      projects: [
-                        {
-                          id: ProjectId.make("stave-owner"),
-                          title: "space",
-                          workspaceRoot: root,
-                          defaultModelSelection: null,
-                          scripts: [],
-                          createdAt: "2026-01-01T00:00:00.000Z",
-                          updatedAt: "2026-01-01T00:00:00.000Z",
-                          stave: {
-                            spaceId: "space",
-                            state: "live",
-                            isSaga: false,
-                            repos: [],
-                            memories: [],
-                          },
-                        },
-                      ],
-                    }),
+                      stave: {
+                        spaceId: "space",
+                        state: "live",
+                        isSaga: false,
+                        repos: [],
+                        memories: [],
+                      },
+                    },
+                  ]),
                 }),
                 Layer.succeed(StaveAdmission, {
                   check: (input) =>
@@ -192,15 +186,7 @@ it.layer(NodeServices.layer)("StaveRuntimeFence", (it) => {
           RuntimeFence.layer.pipe(
             Layer.provide(
               Layer.mergeAll(
-                Layer.mock(ProjectionSnapshotQuery)({
-                  getShellSnapshot: () =>
-                    Effect.succeed({
-                      snapshotSequence: 0,
-                      projects: [],
-                      threads: [],
-                      updatedAt: "2026-01-01T00:00:00.000Z",
-                    }),
-                }),
+                Layer.mock(StaveProjectShells)({ list: Effect.succeed([]) }),
                 Layer.succeed(StaveAdmission, { check: () => Effect.void }),
               ),
             ),

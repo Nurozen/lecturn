@@ -25,7 +25,7 @@
 - [Notifications and Live Activities](./user/notifications-and-live-activities.md)
 - [Running in the background](./user/background-service.md)
 - [Updating Lecturn](./user/updating.md)
-- Provider guides: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [GitHub Copilot](./user/providers-copilot.md) · [Antigravity](./user/providers-antigravity.md)
+- Provider guides: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [GitHub Copilot](./user/providers-copilot.md) · [Antigravity](./user/providers-antigravity.md) · [Pi](./user/providers-pi.md)
 
 ---
 

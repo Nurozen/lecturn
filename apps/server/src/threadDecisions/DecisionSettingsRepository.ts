@@ -145,7 +145,7 @@ export const make = Effect.gen(function* () {
     yield* requireDecisionProject(sql, projectId);
     const rows = yield* sql<{
       thread_id: string;
-    }>`SELECT thread_id FROM projection_threads WHERE thread_id = ${threadId} AND project_id = ${projectId} AND deleted_at IS NULL`;
+    }>`SELECT thread_id FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId} AND project_id = ${projectId} AND deleted_at IS NULL`;
     if (!rows[0])
       return yield* new ThreadDecisionError({
         code: "not-found",

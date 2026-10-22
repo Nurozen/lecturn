@@ -1,7 +1,7 @@
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Effect from "effect/Effect";
 
-export const STAVE_LIFECYCLE_PROJECTOR = "stave.project-lifecycle";
+const STAVE_LIFECYCLE_PROJECTOR = "stave.project-lifecycle";
 
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

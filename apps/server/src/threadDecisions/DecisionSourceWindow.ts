@@ -9,6 +9,7 @@ import { canonicalDecisionText, resolveDecisionSource } from "@lecturn/shared/de
 import { Effect, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { requireDecisionProject } from "./DecisionRevisions.ts";
+import { v2Messages } from "./V2ProjectionSources.ts";
 
 interface MessageRow {
   message_id: string;
@@ -35,7 +36,7 @@ export const decisionSourceWindow = Effect.fn("Decisions.sourceWindow")(function
       project_id: string;
       deleted_at: string | null;
       archived_at: string | null;
-    }>`SELECT project_id, deleted_at, archived_at FROM projection_threads WHERE thread_id = ${evidence.threadId}`;
+    }>`SELECT project_id, deleted_at, archived_at FROM orchestration_v2_projection_threads WHERE thread_id = ${evidence.threadId}`;
     const thread = threads[0];
     if (thread && thread.project_id !== projectId)
       return yield* new ThreadDecisionError({
@@ -45,7 +46,7 @@ export const decisionSourceWindow = Effect.fn("Decisions.sourceWindow")(function
     if (!thread || thread.deleted_at)
       return { ...base, outcome: "unavailable" as const, reason: "thread-deleted" as const };
     const targets =
-      yield* sql<MessageRow>`SELECT message_id, role, text, created_at FROM projection_thread_messages WHERE thread_id = ${evidence.threadId} AND message_id = ${evidence.messageId}`;
+      yield* sql<MessageRow>`SELECT message_id, role, text, created_at FROM ${v2Messages(sql)} m WHERE thread_id = ${evidence.threadId} AND message_id = ${evidence.messageId}`;
     const target = targets[0];
     if (!target)
       return { ...base, outcome: "unavailable" as const, reason: "message-missing" as const };
@@ -61,12 +62,12 @@ export const decisionSourceWindow = Effect.fn("Decisions.sourceWindow")(function
     if (target.text.length > 64000)
       return { ...base, outcome: "message-only" as const, reason: null };
     const before =
-      yield* sql<MessageRow>`SELECT message_id, role, text, created_at FROM projection_thread_messages
+      yield* sql<MessageRow>`SELECT message_id, role, text, created_at FROM ${v2Messages(sql)} m
       WHERE thread_id = ${evidence.threadId} AND role IN ('user', 'assistant') AND is_streaming = 0
       AND (created_at < ${target.created_at} OR (created_at = ${target.created_at} AND message_id < ${target.message_id}))
       ORDER BY created_at DESC, message_id DESC LIMIT 10`;
     const after =
-      yield* sql<MessageRow>`SELECT message_id, role, text, created_at FROM projection_thread_messages
+      yield* sql<MessageRow>`SELECT message_id, role, text, created_at FROM ${v2Messages(sql)} m
       WHERE thread_id = ${evidence.threadId} AND role IN ('user', 'assistant') AND is_streaming = 0
       AND (created_at > ${target.created_at} OR (created_at = ${target.created_at} AND message_id > ${target.message_id}))
       ORDER BY created_at, message_id LIMIT 10`;

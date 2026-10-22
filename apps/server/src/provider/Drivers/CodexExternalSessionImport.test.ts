@@ -1,11 +1,9 @@
 import { it } from "@effect/vitest";
 import { ProviderInstanceId } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import { describe, expect } from "vite-plus/test";
 
-import { CodexResumeCursorSchema } from "../Layers/CodexSessionRuntime.ts";
 import {
   type CodexImportTurn,
   codexTurnsToTranscript,
@@ -13,7 +11,6 @@ import {
 } from "./CodexExternalSessionImport.ts";
 
 const SECRET = "sk-live-DO-NOT-LEAK-7f3a";
-const isCodexResumeCursor = Schema.is(CodexResumeCursorSchema);
 
 function turn(overrides: Partial<CodexImportTurn> & { id: string }): CodexImportTurn {
   return { status: "completed", startedAt: 1_750_000_000, items: [], ...overrides };
@@ -237,8 +234,7 @@ describe("makeCodexExternalSessionImporter", () => {
       });
       const imported = yield* run;
 
-      expect(isCodexResumeCursor(imported.resumeCursor)).toBe(true);
-      expect(imported.resumeCursor).toEqual({ threadId: "fork-1" });
+      expect(imported.nativeThreadId).toBe("fork-1");
       expect(imported.title).toBe("Fix the flaky test");
       expect(imported.cwd).toBe("/source/repo");
       expect(imported.transcript.map((entry) => entry.kind === "message" && entry.text)).toEqual([
@@ -281,7 +277,7 @@ describe("makeCodexExternalSessionImporter", () => {
       });
       const imported = yield* run;
 
-      expect(imported.resumeCursor).toEqual({ threadId: "fork-2" });
+      expect(imported.nativeThreadId).toBe("fork-2");
       expect(imported.transcript.map((entry) => entry.kind === "message" && entry.text)).toEqual([
         "hi",
         "hello",
@@ -346,7 +342,7 @@ describe("makeCodexExternalSessionImporter", () => {
       });
       const imported = yield* run;
 
-      expect(imported.resumeCursor).toEqual({ threadId: "fork-2" });
+      expect(imported.nativeThreadId).toBe("fork-2");
       expect(imported.transcript.map((entry) => entry.kind === "message" && entry.text)).toEqual([
         "hi",
         "hello",

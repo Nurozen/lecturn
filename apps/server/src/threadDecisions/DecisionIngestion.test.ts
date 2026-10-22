@@ -1,45 +1,77 @@
 import { assert, it } from "@effect/vitest";
-import {
-  EventId,
-  ProjectId,
-  ThreadId,
-  MessageId,
-  type OrchestrationEvent,
-} from "@lecturn/contracts";
-import { Effect, PubSub, Stream, Result, Fiber } from "effect";
+import { ProjectId, ThreadId, type ApplicationStoredEvent } from "@lecturn/contracts";
+import { Effect, Fiber, PubSub, Result, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import {
+  OrchestrationEventStore,
+  type OrchestrationEventStoreShape,
+} from "../persistence/Services/OrchestrationEventStore.ts";
 import { DecisionSettingsRepository, make as makeSettings } from "./DecisionSettingsRepository.ts";
 import { DecisionJobRepository, make as makeJobs } from "./DecisionJobRepository.ts";
 import { make } from "./DecisionIngestion.ts";
+import {
+  clearV2Projection,
+  installLegacyProjectionMirror,
+  v2MessageEvent,
+  v2ThreadEvent,
+} from "./V2ProjectionTestFixtures.ts";
 
 const projectId = ProjectId.make("ingestion-project");
 const threadId = ThreadId.make("ingestion-thread");
-const event = (sequence: number): OrchestrationEvent => ({
-  sequence,
-  eventId: EventId.make(`ingestion-${sequence}`),
-  aggregateKind: "thread",
-  aggregateId: threadId,
-  occurredAt: "2026-09-23",
-  commandId: null,
-  causationEventId: null,
-  correlationId: null,
-  metadata: {},
-  type: "thread.message-sent",
-  payload: {
-    threadId,
-    messageId: MessageId.make("message"),
-    role: "assistant",
-    text: "",
-    turnId: null,
-    streaming: false,
-    createdAt: "2026-09-23",
-    updatedAt: "2026-09-23",
-  },
-});
+const event = (sequence: number, messageId = "message") =>
+  v2MessageEvent(sequence, { threadId, messageId });
+
+/** In-memory application event source with the store's replay/live contract. */
+const makeStore = (
+  initial: ReadonlyArray<ApplicationStoredEvent>,
+  options: {
+    readonly latest?: () => Effect.Effect<number>;
+    readonly onRead?: (afterSequence: number) => void;
+  } = {},
+) =>
+  Effect.gen(function* () {
+    const events = [...initial];
+    const live = yield* PubSub.unbounded<ApplicationStoredEvent>();
+    const latest = () => events.at(-1)?.sequence ?? 0;
+    const read = (afterSequence: number, throughSequence = Number.MAX_SAFE_INTEGER) =>
+      events.filter((item) => item.sequence > afterSequence && item.sequence <= throughSequence);
+    const store = {
+      latestApplicationSequence: Effect.suspend(() =>
+        options.latest ? options.latest() : Effect.succeed(latest()),
+      ),
+      readApplicationEvents: ({ afterSequence, throughSequence }) =>
+        Stream.suspend(() => {
+          options.onRead?.(afterSequence);
+          return Stream.fromIterable(read(afterSequence, throughSequence));
+        }),
+      streamApplicationEvents: (input) =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const subscription = yield* PubSub.subscribe(live);
+            return Stream.concat(
+              Stream.fromIterable(read(input?.afterSequence ?? 0)),
+              Stream.fromSubscription(subscription),
+            );
+          }),
+        ),
+    } satisfies Partial<OrchestrationEventStoreShape>;
+    const commit = (event: ApplicationStoredEvent) =>
+      Effect.gen(function* () {
+        events.push(event);
+        yield* PubSub.publish(live, event);
+      });
+    return {
+      store: OrchestrationEventStore.of(store as unknown as OrchestrationEventStoreShape),
+      commit,
+      events,
+    };
+  });
+
 const fixture = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  yield* installLegacyProjectionMirror(sql);
+  yield* clearV2Projection(sql);
   for (const table of [
     "decision_project_settings",
     "decision_thread_state",
@@ -61,82 +93,60 @@ const fixture = Effect.gen(function* () {
   return { sql, jobs, settings };
 });
 
-it.layer(SqlitePersistenceMemory)("Decision ingestion", (it) => {
-  it.effect(
-    "subscribes before snapshot, replays bounded pages, and drains a commit arriving during catch-up",
-    () =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const { jobs, settings } = yield* fixture;
-          yield* settings.update(
-            { operation: "update", projectId, expectedRevision: 0, enabled: true, description: "" },
-            0,
-          );
-          const events = Array.from({ length: 450 }, (_, index) => event(index + 1));
-          const changes = yield* PubSub.unbounded<OrchestrationEvent>();
-          const order: string[] = [];
-          const pageLimits: number[] = [];
-          let firstSnapshot = true;
-          const engine = OrchestrationEngineService.of({
-            dispatch: () => Effect.die("unused"),
-            readThreadEvents: () => Stream.empty,
-            getThreadReplayStats: () => Effect.die("unused thread replay stats"),
-            readEvents: (cursor, limit = 200) => {
-              pageLimits.push(limit);
-              return Stream.fromIterable(
-                events.filter((item) => item.sequence > cursor).slice(0, limit),
-              );
-            },
-            latestSequence: Effect.gen(function* () {
-              order.push("snapshot");
-              if (firstSnapshot) {
-                firstSnapshot = false;
-                events.push(event(451));
-                yield* PubSub.publish(changes, event(451));
+const enable = (settings: DecisionSettingsRepository["Service"]) =>
+  settings.update(
+    { operation: "update", projectId, expectedRevision: 0, enabled: true, description: "" },
+    0,
+  );
+
+it.layer(SqlitePersistenceMemory)("Decision ingestion on the V2 application log", (it) => {
+  it.effect("replays bounded pages from the cursor and drains a commit racing startup", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { jobs, settings } = yield* fixture;
+        yield* enable(settings);
+        const reads: number[] = [];
+        let first = true;
+        let commitDuringSnapshot: Effect.Effect<void> = Effect.void;
+        const { store, commit } = yield* makeStore(
+          Array.from({ length: 450 }, (_, index) => event(index + 1)),
+          {
+            onRead: (after) => reads.push(after),
+            latest: () =>
+              Effect.gen(function* () {
+                if (!first) return 451;
+                first = false;
+                // Commits after the high-water capture must still be delivered.
+                yield* commitDuringSnapshot;
                 return 450;
-              }
-              return events.at(-1)?.sequence ?? 0;
-            }),
-            streamDomainEvents: Stream.fromPubSub(changes),
-            subscribeDomainEvents: Effect.gen(function* () {
-              order.push("subscribe");
-              const subscription = yield* PubSub.subscribe(changes);
-              return Stream.fromSubscription(subscription);
-            }),
-          });
-          const ingestion = yield* make.pipe(
-            Effect.provideService(OrchestrationEngineService, engine),
-            Effect.provideService(DecisionJobRepository, jobs),
-          );
-          yield* ingestion.start;
-          yield* ingestion.drainThrough(451);
-          assert.deepEqual(order.slice(0, 2), ["subscribe", "snapshot"]);
-          assert.equal(yield* jobs.cursor, 451);
-          assert.isAtLeast(pageLimits.length, 3);
-          assert.isTrue(pageLimits.every((limit) => limit === 200));
-          const claimed = yield* jobs.claim({ owner: "worker" });
-          assert.isNotNull(claimed);
-          assert.equal(claimed!.fromSequence, 1);
-          assert.isNull(yield* jobs.claim({ owner: "other" }));
-          yield* ingestion.catchUp;
-          assert.equal(yield* jobs.cursor, 451);
-        }),
-      ),
+              }),
+          },
+        );
+        commitDuringSnapshot = commit(event(451));
+        const ingestion = yield* make.pipe(
+          Effect.provideService(OrchestrationEventStore, store),
+          Effect.provideService(DecisionJobRepository, jobs),
+        );
+        yield* ingestion.start;
+        yield* ingestion.drainThrough(451);
+        assert.equal(yield* jobs.cursor, 451);
+        // 200-event pages: replay reads resume from each page boundary.
+        assert.deepEqual(reads.slice(0, 3), [0, 200, 400]);
+        const claimed = yield* jobs.claim({ owner: "worker" });
+        assert.isNotNull(claimed);
+        assert.equal(claimed!.fromSequence, 1);
+        assert.isNull(yield* jobs.claim({ owner: "other" }));
+        yield* ingestion.catchUp;
+        assert.equal(yield* jobs.cursor, 451);
+      }),
+    ),
   );
   it.effect("does not advance the durable cursor over an unavailable replay range", () =>
     Effect.gen(function* () {
       const { jobs } = yield* fixture;
-      const engine = OrchestrationEngineService.of({
-        dispatch: () => Effect.die("unused"),
-        readThreadEvents: () => Stream.empty,
-        getThreadReplayStats: () => Effect.die("unused thread replay stats"),
-        readEvents: () => Stream.empty,
-        latestSequence: Effect.succeed(10),
-        streamDomainEvents: Stream.empty,
-        subscribeDomainEvents: Effect.succeed(Stream.empty),
-      });
+      const { store } = yield* makeStore([], { latest: () => Effect.succeed(10) });
       const ingestion = yield* make.pipe(
-        Effect.provideService(OrchestrationEngineService, engine),
+        Effect.provideService(OrchestrationEventStore, store),
         Effect.provideService(DecisionJobRepository, jobs),
       );
       const result = yield* ingestion.catchUp.pipe(Effect.result);
@@ -148,21 +158,10 @@ it.layer(SqlitePersistenceMemory)("Decision ingestion", (it) => {
     Effect.scoped(
       Effect.gen(function* () {
         const { sql, jobs, settings } = yield* fixture;
-        yield* settings.update(
-          { operation: "update", projectId, expectedRevision: 0, enabled: true, description: "" },
-          0,
-        );
-        const engine = OrchestrationEngineService.of({
-          dispatch: () => Effect.die("unused"),
-          readThreadEvents: () => Stream.empty,
-          getThreadReplayStats: () => Effect.die("unused thread replay stats"),
-          readEvents: (cursor) => Stream.fromIterable(cursor < 1 ? [event(1)] : []),
-          latestSequence: Effect.succeed(1),
-          streamDomainEvents: Stream.empty,
-          subscribeDomainEvents: Effect.succeed(Stream.empty),
-        });
+        yield* enable(settings);
+        const { store } = yield* makeStore([event(1)]);
         const ingestion = yield* make.pipe(
-          Effect.provideService(OrchestrationEngineService, engine),
+          Effect.provideService(OrchestrationEventStore, store),
           Effect.provideService(DecisionJobRepository, jobs),
         );
         yield* sql`CREATE TRIGGER ingestion_fail BEFORE INSERT ON decision_jobs BEGIN SELECT RAISE(ABORT, 'synthetic startup failure'); END`;
@@ -181,5 +180,69 @@ it.layer(SqlitePersistenceMemory)("Decision ingestion", (it) => {
         assert.isNotNull(yield* jobs.claim({ owner: "recovered" }));
       }),
     ),
+  );
+  it.effect(
+    "resumes a V1-era cursor at the first V2 event without replaying legacy-import history",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { sql, jobs, settings } = yield* fixture;
+          yield* enable(settings);
+          // V1 ingestion stopped at sequence 1000; V1 already indexed this message.
+          yield* sql`UPDATE decision_ingestion_cursor SET sequence = 1000`;
+          yield* sql`UPDATE decision_project_settings SET activation_sequence = 10`;
+          yield* sql`INSERT INTO decision_thread_state(thread_id,project_id,updated_at,generation_sequence) VALUES (${threadId},${projectId},'now',5)`;
+          const importId = (suffix: string) => `migration:v1:${suffix}`;
+          yield* sql`INSERT INTO projection_thread_messages(message_id,thread_id,role,text,is_streaming,created_at,updated_at) VALUES ('fresh',${threadId},'user','Adopt Postgres.',0,'now','now')`;
+          const { store, commit } = yield* makeStore([
+            // The legacy importer re-materializes V1 history above the V1 cursor.
+            v2ThreadEvent(1001, "thread.created", threadId, {
+              eventId: importId(`thread:${threadId}:created`),
+            }),
+            v2MessageEvent(1002, {
+              threadId,
+              messageId: "message",
+              eventId: importId("message:message"),
+            }),
+            // The first genuine V2 event right after the import.
+            v2MessageEvent(1003, { threadId, messageId: "fresh", role: "user" }),
+            ...Array.from({ length: 500 }, (_, index) =>
+              v2MessageEvent(1004 + index, {
+                threadId,
+                messageId: "message",
+                eventId: importId(`message:bulk-${index}`),
+              }),
+            ),
+          ]);
+          const ingestion = yield* make.pipe(
+            Effect.provideService(OrchestrationEventStore, store),
+            Effect.provideService(DecisionJobRepository, jobs),
+          );
+          yield* ingestion.start;
+          assert.equal(yield* jobs.cursor, 1503);
+          const state = yield* sql<{
+            source_generation: number;
+          }>`SELECT source_generation FROM decision_thread_state WHERE thread_id = ${threadId}`;
+          // An imported thread.created must not start a new source generation.
+          assert.equal(state[0]?.source_generation, 0);
+          const jobRows = yield* sql<{
+            source_message_id: string;
+            from_sequence: number;
+          }>`SELECT source_message_id, from_sequence FROM decision_jobs ORDER BY from_sequence`;
+          assert.deepEqual(
+            jobRows.map((row) => [row.source_message_id, row.from_sequence]),
+            [["fresh", 1003]],
+          );
+          // Live V2 commits after startup keep flowing.
+          yield* sql`INSERT INTO projection_thread_messages(message_id,thread_id,role,text,is_streaming,created_at,updated_at) VALUES ('later',${threadId},'assistant','Keep SQLite for tests.',0,'now','now')`;
+          yield* commit(v2MessageEvent(1504, { threadId, messageId: "later" }));
+          yield* ingestion.drainThrough(1504);
+          assert.equal(yield* jobs.cursor, 1504);
+          const later = yield* sql<{
+            count: number;
+          }>`SELECT count(*) AS count FROM decision_jobs WHERE source_message_id = 'later'`;
+          assert.equal(later[0]?.count, 1);
+        }),
+      ),
   );
 });

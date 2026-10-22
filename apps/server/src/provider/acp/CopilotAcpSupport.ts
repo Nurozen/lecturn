@@ -3,7 +3,8 @@ import {
   type ProviderInteractionMode,
   type RuntimeMode,
 } from "@lecturn/contracts";
-import * as Crypto from "effect/Crypto";
+import type * as Crypto from "effect/Crypto";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as Path from "effect/Path";
@@ -94,6 +95,75 @@ export const makeCopilotAcpRuntime = (
       Effect.provide(acpContext),
     );
   });
+
+/** Bounds the post-cancel discard if the next prompt never opens with `usage_update`. */
+export const COPILOT_CANCELLED_STREAM_GRACE = Duration.seconds(1);
+
+/**
+ * Copilot resolves a cancelled prompt, then keeps streaming the reply it had
+ * already generated, with no end marker. This wrapper drops the session
+ * updates that follow a cancelled prompt response until the next prompt opens
+ * with `usage_update` (Copilot sends it before any of that prompt's output),
+ * or until a short grace after that prompt is dispatched.
+ */
+export function withCopilotCancelledStreamDiscard(
+  runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+): Effect.Effect<AcpSessionRuntime.AcpSessionRuntime["Service"], never, Scope.Scope> {
+  return Effect.gen(function* () {
+    const scope = yield* Scope.Scope;
+    let discarding = false;
+    let promptsInFlight = 0;
+    let epoch = 0;
+    const stopDiscarding = () => {
+      discarding = false;
+      epoch += 1;
+    };
+    return {
+      ...runtime,
+      handleSessionUpdate: (handler) =>
+        runtime.handleSessionUpdate((notification) => {
+          if (discarding) {
+            if (notification.update.sessionUpdate !== "usage_update" || promptsInFlight === 0) {
+              return Effect.void;
+            }
+            stopDiscarding();
+          }
+          return handler(notification);
+        }),
+      prompt: (payload, options) =>
+        Effect.gen(function* () {
+          promptsInFlight += 1;
+          if (discarding) {
+            const discardEpoch = epoch;
+            // A prompt that never opens with usage_update must not lose its reply.
+            yield* Effect.sleep(COPILOT_CANCELLED_STREAM_GRACE).pipe(
+              Effect.andThen(
+                Effect.sync(() => {
+                  if (discarding && epoch === discardEpoch) stopDiscarding();
+                }),
+              ),
+              Effect.forkIn(scope),
+            );
+          }
+          return yield* runtime.prompt(payload, options).pipe(
+            Effect.tap((response) =>
+              Effect.sync(() => {
+                if (response.stopReason === "cancelled" && promptsInFlight === 1) {
+                  discarding = true;
+                  epoch += 1;
+                }
+              }),
+            ),
+            Effect.ensuring(
+              Effect.sync(() => {
+                promptsInFlight = Math.max(0, promptsInFlight - 1);
+              }),
+            ),
+          );
+        }),
+    } satisfies AcpSessionRuntime.AcpSessionRuntime["Service"];
+  });
+}
 
 /**
  * Sends `session/set_model` unless the requested model is the one last set in this
@@ -240,4 +310,108 @@ export function copilotActionableErrorDetail(message: string): string | undefine
     return "GitHub Copilot is not signed in. Run `copilot login`, then retry.";
   }
   return undefined;
+}
+
+/** `$COPILOT_HOME`, else `~/.copilot`; Copilot keeps per-session state under it. */
+export function copilotHomeDir(
+  path: Pick<Path.Path, "join">,
+  environment: NodeJS.ProcessEnv,
+  homeDir: string,
+): string {
+  return environment.COPILOT_HOME?.trim() || path.join(homeDir, ".copilot");
+}
+
+function copilotEditedPaths(toolCall: {
+  readonly data: Record<string, unknown>;
+}): ReadonlyArray<string> {
+  const paths: string[] = [];
+  const { rawInput, locations } = toolCall.data;
+  if (typeof rawInput === "string") {
+    for (const match of rawInput.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)) {
+      paths.push(match[1]!.trim());
+    }
+  } else if (typeof rawInput === "object" && rawInput !== null) {
+    for (const key of ["path", "file_path", "filePath"]) {
+      const value = (rawInput as Record<string, unknown>)[key];
+      if (typeof value === "string") paths.push(value);
+    }
+  }
+  if (Array.isArray(locations)) {
+    for (const location of locations) {
+      if (typeof location?.path === "string") paths.push(location.path);
+    }
+  }
+  return paths;
+}
+
+/** Text an `apply_patch` "Add File" hunk writes to `filePath`, if the patch adds it. */
+function addedFileText(patch: string, filePath: string): string | undefined {
+  const lines = patch.split("\n");
+  const start = lines.findIndex((line) => line.trim() === `*** Add File: ${filePath}`);
+  if (start < 0) return undefined;
+  const body: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.startsWith("***")) break;
+    if (line.startsWith("+")) body.push(line.slice(1));
+  }
+  return body.join("\n");
+}
+
+/**
+ * The proposed plan a Copilot plan-mode write carries: the `plan.md` it adds or
+ * rewrites under its session-state directory. An update patch only carries a
+ * diff, so a completed one reads the file back through `readFile`.
+ */
+export function extractCopilotPlanMarkdown(
+  path: Pick<Path.Path, "resolve" | "sep" | "basename">,
+  toolCall: {
+    readonly kind?: string;
+    readonly status?: string;
+    readonly data: Record<string, unknown>;
+  },
+  copilotHome: string,
+  readFile: (filePath: string) => string | undefined,
+): string | undefined {
+  if (toolCall.kind !== "edit") return undefined;
+  const stateRoot = path.resolve(copilotHome, "session-state") + path.sep;
+  const planPath = copilotEditedPaths(toolCall).find(
+    (filePath) =>
+      path.basename(filePath) === "plan.md" && path.resolve(filePath).startsWith(stateRoot),
+  );
+  if (planPath === undefined) return undefined;
+  const { rawInput, content } = toolCall.data;
+  if (typeof rawInput === "string") {
+    const added = addedFileText(rawInput, planPath)?.trim();
+    if (added) return added;
+  } else if (typeof rawInput === "object" && rawInput !== null) {
+    const text = (rawInput as Record<string, unknown>).content;
+    if (typeof text === "string" && text.trim()) return text.trim();
+  }
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (block?.type === "diff" && typeof block.newText === "string" && block.newText.trim()) {
+        return block.newText.trim();
+      }
+    }
+  }
+  return toolCall.status === "completed" ? readFile(planPath)?.trim() || undefined : undefined;
+}
+
+/** Title a plan-mode `plan.md` write renders under. */
+export const COPILOT_PLAN_STEP_TITLE = "Update plan";
+
+/**
+ * A write that only touches Copilot's own session state (the plan-mode
+ * `plan.md`) is not a project change: it renders as a plan step instead.
+ */
+export function normalizeCopilotSessionStateEdit<
+  T extends {
+    readonly kind?: string;
+    readonly title?: string;
+    readonly data: Record<string, unknown>;
+  },
+>(path: Pick<Path.Path, "resolve" | "sep">, toolCall: T, copilotHome: string): T {
+  return isCopilotSessionStateEdit(path, toolCall, path.resolve(copilotHome, "session-state"))
+    ? { ...toolCall, kind: "think", title: COPILOT_PLAN_STEP_TITLE }
+    : toolCall;
 }

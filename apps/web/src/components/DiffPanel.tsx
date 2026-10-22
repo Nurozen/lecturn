@@ -13,7 +13,7 @@ import type {
   EnvironmentId,
   OrchestrationProjectShell,
   ScopedThreadRef,
-  TurnId,
+  RunId,
 } from "@lecturn/contracts";
 import {
   ArrowRightIcon,
@@ -59,7 +59,7 @@ import { PREFERRED_HIGHLIGHTER } from "../lib/syntaxHighlighting";
 import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollapse";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useWorkspaceMutationRefresh } from "../hooks/useWorkspaceMutationRefresh";
-import { useProject, useThread } from "../state/entities";
+import { useProject, useThreadProjection, useThreadShell } from "../state/entities";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import { useClientSettings, useUpdateClientSettings } from "../hooks/useSettings";
 import { formatShortTimestamp } from "../timestampFormat";
@@ -174,7 +174,8 @@ export default function DiffPanel({
   });
   const routeThreadRef = resolvedRouteThreadRef ?? threadRefOverride ?? null;
   const activeThreadId = routeThreadRef?.threadId ?? null;
-  const activeThread = useThread(routeThreadRef);
+  const activeThread = useThreadShell(routeThreadRef);
+  const activeThreadProjection = useThreadProjection(routeThreadRef)?.projection ?? null;
   const activeProjectId = activeThread?.projectId ?? null;
   const loadedProject = useProject(
     activeThread && activeProjectId
@@ -217,32 +218,32 @@ export default function DiffPanel({
     selectThreadDiffPanelSelection(state.byThreadKey, routeThreadRef),
   );
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
-  const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
-    useTurnDiffSummaries(activeThread);
+  const { turnDiffSummaries, inferredCheckpointTurnCountByRunId } =
+    useTurnDiffSummaries(activeThreadProjection);
   const orderedTurnDiffSummaries = useMemo(
     () =>
       [...turnDiffSummaries].toSorted((left, right) => {
         const leftTurnCount =
-          left.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[left.turnId] ?? 0;
+          left.checkpointTurnCount ?? inferredCheckpointTurnCountByRunId[left.runId] ?? 0;
         const rightTurnCount =
-          right.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[right.turnId] ?? 0;
+          right.checkpointTurnCount ?? inferredCheckpointTurnCountByRunId[right.runId] ?? 0;
         if (leftTurnCount !== rightTurnCount) {
           return rightTurnCount - leftTurnCount;
         }
         return right.completedAt.localeCompare(left.completedAt);
       }),
-    [inferredCheckpointTurnCountByTurnId, turnDiffSummaries],
+    [inferredCheckpointTurnCountByRunId, turnDiffSummaries],
   );
 
   useEffect(() => {
     if (!routeThreadRef || diffSelection.kind !== "turn") return;
     useDiffPanelStore.getState().reconcileTurnSelection(
       routeThreadRef,
-      orderedTurnDiffSummaries.map((summary) => summary.turnId),
+      orderedTurnDiffSummaries.map((summary) => summary.runId),
     );
   }, [diffSelection, orderedTurnDiffSummaries, routeThreadRef]);
 
-  const selectedTurnId = diffSelection.kind === "turn" ? diffSelection.turnId : null;
+  const selectedRunId = diffSelection.kind === "turn" ? diffSelection.turnId : null;
   const selectedGitScope = diffSelection.kind === "unstaged" ? "unstaged" : "branch";
   const selectedBaseRef = activeProject?.stave
     ? (staveBaseRefs[activeCwd ?? ""] ?? null)
@@ -253,23 +254,23 @@ export default function DiffPanel({
   const selectedFileRevealRequestId =
     diffSelection.kind === "turn" ? diffSelection.revealRequestId : 0;
   const selectedTurn =
-    selectedTurnId === null
+    selectedRunId === null
       ? undefined
-      : (orderedTurnDiffSummaries.find((summary) => summary.turnId === selectedTurnId) ??
+      : (orderedTurnDiffSummaries.find((summary) => summary.runId === selectedRunId) ??
         orderedTurnDiffSummaries[0]);
   const selectedCheckpointTurnCount =
     selectedTurn &&
-    (selectedTurn.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[selectedTurn.turnId]);
+    (selectedTurn.checkpointTurnCount ?? inferredCheckpointTurnCountByRunId[selectedTurn.runId]);
   const latestTurn = orderedTurnDiffSummaries[0];
   const selectedScopeLabel =
-    selectedTurnId === null
+    selectedRunId === null
       ? selectedGitScope === "unstaged"
         ? "Working tree"
         : "Branch changes"
-      : selectedTurn?.turnId === latestTurn?.turnId
+      : selectedTurn?.runId === latestTurn?.runId
         ? "Latest turn"
         : `Turn ${selectedCheckpointTurnCount ?? "?"}`;
-  const reviewSectionId = selectedTurn ? `turn:${selectedTurn.turnId}` : selectedGitScope;
+  const reviewSectionId = selectedTurn ? `turn:${selectedTurn.runId}` : selectedGitScope;
   const collapseScopeKey = routeThreadRef
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}:${activeCwd ?? ""}:${reviewSectionId}`
     : null;
@@ -296,12 +297,12 @@ export default function DiffPanel({
       fromTurnCount: selectedCheckpointRange?.fromTurnCount ?? null,
       toTurnCount: selectedCheckpointRange?.toTurnCount ?? null,
       ignoreWhitespace: diffIgnoreWhitespace,
-      cacheScope: selectedTurn ? `turn:${selectedTurn.turnId}` : null,
+      cacheScope: selectedTurn ? `turn:${selectedTurn.runId}` : null,
     },
     { enabled: isGitRepo && checkpointsUnavailableReason === null && selectedTurn !== undefined },
   );
   const primaryBranchDiffPreview = useEnvironmentQuery(
-    selectedTurnId === null && activeEnvironmentId && activeCwd
+    selectedRunId === null && activeEnvironmentId && activeCwd
       ? reviewEnvironment.diffPreview({
           environmentId: activeEnvironmentId!,
           input: {
@@ -313,7 +314,7 @@ export default function DiffPanel({
       : null,
   );
   const shouldRetryBranchDiffAtEnvironmentCwd =
-    selectedTurnId === null &&
+    selectedRunId === null &&
     !activeProject?.stave &&
     primaryBranchDiffPreview.error?.includes("configured workspace root") === true &&
     serverConfig?.cwd !== undefined &&
@@ -334,7 +335,7 @@ export default function DiffPanel({
     ? fallbackBranchDiffPreview
     : primaryBranchDiffPreview;
   const canRefreshGitDiff =
-    isGitRepo && selectedTurnId === null && activeEnvironmentId != null && activeCwd != null;
+    isGitRepo && selectedRunId === null && activeEnvironmentId != null && activeCwd != null;
   const activeThreadRefreshKey = routeThreadRef
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}`
     : null;
@@ -347,7 +348,7 @@ export default function DiffPanel({
 
   const currentLoadDiffFiles = useMemo<FileDiffContentsLoader | undefined>(() => {
     const preview = branchDiffPreview.data;
-    if (selectedTurnId !== null || !activeEnvironmentId || !preview || !selectedGitSource) {
+    if (selectedRunId !== null || !activeEnvironmentId || !preview || !selectedGitSource) {
       return undefined;
     }
 
@@ -364,7 +365,7 @@ export default function DiffPanel({
     branchDiffPreview.data,
     getDiffFileContents,
     selectedGitSource,
-    selectedTurnId,
+    selectedRunId,
   ]);
   const loadDiffFilesRef = useRef(currentLoadDiffFiles);
   loadDiffFilesRef.current = currentLoadDiffFiles;
@@ -374,7 +375,7 @@ export default function DiffPanel({
     return loader(fileDiff);
   }, []);
   const localBranchRefs = useEnvironmentQuery(
-    selectedTurnId === null &&
+    selectedRunId === null &&
       selectedGitScope === "branch" &&
       activeEnvironmentId &&
       branchDiffPreview.data?.cwd
@@ -391,7 +392,7 @@ export default function DiffPanel({
       : null,
   );
   const remoteBranchRefs = useEnvironmentQuery(
-    selectedTurnId === null &&
+    selectedRunId === null &&
       selectedGitScope === "branch" &&
       activeEnvironmentId &&
       branchDiffPreview.data?.cwd
@@ -440,9 +441,9 @@ export default function DiffPanel({
       lazySource
         ? null
         : getRenderablePatch(selectedPatch, `diff-panel:${resolvedTheme}`, {
-            compactPartialHunkOffsets: selectedTurnId === null,
+            compactPartialHunkOffsets: selectedRunId === null,
           }),
-    [lazySource, resolvedTheme, selectedPatch, selectedTurnId],
+    [lazySource, resolvedTheme, selectedPatch, selectedRunId],
   );
   const fileStats = useMemo(
     () => new Map(lazySource?.files?.map((file) => [file.path, file])),
@@ -538,7 +539,7 @@ export default function DiffPanel({
     () =>
       scopeStaveDiffReview({
         repository:
-          activeProject?.stave && selectedTurnId === null && activeCwd
+          activeProject?.stave && selectedRunId === null && activeCwd
             ? {
                 workspaceRoot: activeProject.workspaceRoot,
                 repositoryRoot: activeCwd,
@@ -552,7 +553,7 @@ export default function DiffPanel({
     [
       activeProject,
       activeCwd,
-      selectedTurnId,
+      selectedRunId,
       staveGitSelection.selected?.repoName,
       reviewSectionId,
       reviewSectionTitle,
@@ -693,9 +694,9 @@ export default function DiffPanel({
     });
   }, [collapseScopeKey, defaultCollapsedDiffFileKeys, diffFileKeys]);
 
-  const selectTurn = (turnId: TurnId) => {
+  const selectTurn = (runId: RunId) => {
     if (!routeThreadRef) return;
-    useDiffPanelStore.getState().selectTurn(routeThreadRef, turnId);
+    useDiffPanelStore.getState().selectTurn(routeThreadRef, runId);
   };
   const selectGitScope = (scope: "branch" | "unstaged") => {
     if (!routeThreadRef) return;
@@ -712,21 +713,21 @@ export default function DiffPanel({
   // The scope menu has two radio groups: the top-level one treats the latest
   // turn as "latest", while the turn sub-menu keys every turn by id so the
   // latest turn is also marked there.
-  const selectedTurnValue = selectedTurn ? `turn:${selectedTurn.turnId}` : "";
+  const selectedTurnValue = selectedTurn ? `turn:${selectedTurn.runId}` : "";
   const selectedScopeValue =
-    selectedTurnId === null
+    selectedRunId === null
       ? selectedGitScope
-      : selectedTurn?.turnId === latestTurn?.turnId
+      : selectedTurn?.runId === latestTurn?.runId
         ? "latest"
         : selectedTurnValue;
   const selectScopeValue = (value: string) => {
     if (value === "unstaged" || value === "branch") {
       selectGitScope(value);
     } else if (value === "latest") {
-      if (latestTurn) selectTurn(latestTurn.turnId);
+      if (latestTurn) selectTurn(latestTurn.runId);
     } else {
-      const turn = orderedTurnDiffSummaries.find((summary) => `turn:${summary.turnId}` === value);
-      if (turn) selectTurn(turn.turnId);
+      const turn = orderedTurnDiffSummaries.find((summary) => `turn:${summary.runId}` === value);
+      if (turn) selectTurn(turn.runId);
     }
   };
 
@@ -767,12 +768,12 @@ export default function DiffPanel({
                     {orderedTurnDiffSummaries.map((summary) => {
                       const turnCount =
                         summary.checkpointTurnCount ??
-                        inferredCheckpointTurnCountByTurnId[summary.turnId] ??
+                        inferredCheckpointTurnCountByRunId[summary.runId] ??
                         "?";
                       return (
                         <DropdownMenuRadioItem
-                          key={summary.turnId}
-                          value={`turn:${summary.turnId}`}
+                          key={summary.runId}
+                          value={`turn:${summary.runId}`}
                           closeOnClick
                         >
                           <span className="flex items-center gap-2">
@@ -790,7 +791,7 @@ export default function DiffPanel({
             ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
-        {selectedTurnId === null && selectedGitScope === "branch" && selectedGitSource?.baseRef && (
+        {selectedRunId === null && selectedGitScope === "branch" && selectedGitSource?.baseRef && (
           <div
             className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-xs text-muted-foreground"
             aria-label={`Comparing ${selectedGitSource.headRef ?? "HEAD"} against ${selectedGitSource.baseRef}`}
@@ -1081,11 +1082,11 @@ export default function DiffPanel({
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           Turn diffs are unavailable because this project is not a git repository.
         </div>
-      ) : selectedTurnId !== null && checkpointsUnavailableReason !== null ? (
+      ) : selectedRunId !== null && checkpointsUnavailableReason !== null ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           {checkpointsUnavailableReason}
         </div>
-      ) : selectedTurnId !== null && orderedTurnDiffSummaries.length === 0 ? (
+      ) : selectedRunId !== null && orderedTurnDiffSummaries.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           No completed turns yet.
         </div>

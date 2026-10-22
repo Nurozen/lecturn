@@ -3,12 +3,14 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as DesktopAssets from "./DesktopAssets.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import * as DesktopUserData from "./DesktopUserData.ts";
 
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
@@ -18,24 +20,12 @@ const AppPackageMetadata = Schema.Struct({
 });
 const decodeAppPackageMetadata = Schema.decodeEffect(Schema.fromJsonString(AppPackageMetadata));
 
-export class DesktopUserDataPathResolutionError extends Schema.TaggedError<DesktopUserDataPathResolutionError>()(
-  "DesktopUserDataPathResolutionError",
-  {
-    legacyPath: Schema.String,
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return `Failed to inspect legacy desktop user-data path at "${this.legacyPath}".`;
-  }
-}
-
 export class DesktopAppIdentity extends Context.Service<
   DesktopAppIdentity,
   {
     readonly resolveUserDataPath: Effect.Effect<
       string,
-      DesktopUserDataPathResolutionError | DesktopUserDataPathCreationError
+      DesktopUserData.DesktopUserDataInitializationError | DesktopUserDataPathCreationError
     >;
     readonly configure: Effect.Effect<void>;
   }
@@ -60,68 +50,32 @@ const normalizeCommitHash = (value: string): Option.Option<string> => {
     : Option.none();
 };
 
-export function resolveUserDataPathBeforeReady(
-  environment: DesktopEnvironment.DesktopEnvironment["Service"],
-  fileSystem: {
-    readonly exists: (path: string) => boolean;
-    readonly makeDirectory: (path: string) => void;
+/**
+ * Resolve Electron's userData profile. An explicit Lecturn home isolates the
+ * profile under `<stateDir>/electron` and wins over the shared default and
+ * legacy profiles, which are never inspected in that case. Clerk calls this
+ * before Electron is ready with the synchronous pre-ready FileSystem, and the
+ * app identity calls it again after, so both must resolve the same profile.
+ */
+export const resolveUserDataPath = Effect.fn("desktop.appIdentity.resolveUserDataPath")(function* (
+  environment: Parameters<typeof DesktopUserData.resolveUserDataPath>[0] & {
+    readonly userDataPathOverride?: string | undefined;
   },
-): string {
-  if (environment.userDataPathOverride !== undefined) {
-    try {
-      fileSystem.makeDirectory(environment.userDataPathOverride);
-    } catch (cause) {
-      throw new DesktopUserDataPathCreationError({ path: environment.userDataPathOverride, cause });
-    }
-    return environment.userDataPathOverride;
-  }
-
-  const legacyPath = environment.path.join(
-    environment.appDataDirectory,
-    environment.legacyUserDataDirName,
-  );
-  try {
-    return fileSystem.exists(legacyPath)
-      ? legacyPath
-      : environment.path.join(environment.appDataDirectory, environment.userDataDirName);
-  } catch (cause) {
-    throw new DesktopUserDataPathResolutionError({ legacyPath, cause });
-  }
-}
-
-const resolveUserDataPath = Effect.gen(function* () {
-  const environment = yield* DesktopEnvironment.DesktopEnvironment;
-  const fileSystem = yield* FileSystem.FileSystem;
+) {
   const userDataPathOverride = environment.userDataPathOverride;
-  if (userDataPathOverride !== undefined) {
-    yield* fileSystem.makeDirectory(userDataPathOverride, { recursive: true }).pipe(
+  if (userDataPathOverride === undefined) {
+    return yield* DesktopUserData.resolveUserDataPath(environment);
+  }
+  const fileSystem = yield* FileSystem.FileSystem;
+  yield* fileSystem
+    .makeDirectory(userDataPathOverride, { recursive: true })
+    .pipe(
       Effect.mapError(
-        (cause) =>
-          new DesktopUserDataPathCreationError({
-            path: userDataPathOverride,
-            cause,
-          }),
+        (cause) => new DesktopUserDataPathCreationError({ path: userDataPathOverride, cause }),
       ),
     );
-    return userDataPathOverride;
-  }
-  const legacyPath = environment.path.join(
-    environment.appDataDirectory,
-    environment.legacyUserDataDirName,
-  );
-  const legacyPathExists = yield* fileSystem.exists(legacyPath).pipe(
-    Effect.mapError(
-      (cause) =>
-        new DesktopUserDataPathResolutionError({
-          legacyPath,
-          cause,
-        }),
-    ),
-  );
-  return legacyPathExists
-    ? legacyPath
-    : environment.path.join(environment.appDataDirectory, environment.userDataDirName);
-}).pipe(Effect.withSpan("desktop.appIdentity.resolveUserDataPath"));
+  return userDataPathOverride;
+});
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
@@ -129,6 +83,7 @@ export const make = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
+  const userDataContext = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
   const commitHashCache = yield* Ref.make<Option.Option<Option.Option<string>>>(Option.none());
 
   const resolveEmbeddedCommitHash = Effect.gen(function* () {
@@ -171,11 +126,7 @@ export const make = Effect.gen(function* () {
     return commitHash;
   });
 
-  const userDataPath = resolveUserDataPath.pipe(
-    Effect.provide(
-      yield* Effect.context<DesktopEnvironment.DesktopEnvironment | FileSystem.FileSystem>(),
-    ),
-  );
+  const userDataPath = resolveUserDataPath(environment).pipe(Effect.provide(userDataContext));
 
   const configure = Effect.gen(function* () {
     const commitHash = yield* resolveAboutCommitHash;

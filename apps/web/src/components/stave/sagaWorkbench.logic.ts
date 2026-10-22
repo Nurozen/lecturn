@@ -85,8 +85,9 @@ function sagaAgentActivity(status: ThreadStatusPill | null): SagaAgentActivity {
       return { kind: "running", label: "Running" };
     case "Connecting":
       return { kind: "running", label: "Connecting" };
-    case "Monitoring":
-      return { kind: "running", label: "Monitoring" };
+    // V2: background tasks still outstanding after the run settled.
+    case "Waiting":
+      return { kind: "running", label: "Background tasks" };
     default:
       return { kind: "idle", label: "Idle" };
   }

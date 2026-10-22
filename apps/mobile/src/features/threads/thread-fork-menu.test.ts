@@ -4,14 +4,13 @@ import { buildThreadForkMenuItems, resolveThreadForkAvailability } from "./threa
 
 const forkableInput = {
   serverSupportsForking: true,
-  providerConversationFork: "native",
-  latestTurn: { state: "completed" as const },
-  sessionStatus: "ready" as const,
+  latestRun: { status: "completed" as const },
+  runtimeStatus: "idle" as const,
   connected: true,
 };
 
 describe("resolveThreadForkAvailability", () => {
-  it("allows forking a connected, capable thread at a completed turn", () => {
+  it("allows forking a connected, capable thread at a completed run", () => {
     expect(resolveThreadForkAvailability(forkableInput)).toEqual({ available: true });
   });
 
@@ -28,39 +27,30 @@ describe("resolveThreadForkAvailability", () => {
     ).toEqual({ available: false, reason: "server-unsupported" });
   });
 
-  it("refuses providers without native conversation forking", () => {
-    expect(
-      resolveThreadForkAvailability({ ...forkableInput, providerConversationFork: "unsupported" }),
-    ).toEqual({ available: false, reason: "provider-unsupported" });
-    expect(
-      resolveThreadForkAvailability({ ...forkableInput, providerConversationFork: null }),
-    ).toEqual({ available: false, reason: "provider-unsupported" });
-  });
-
-  it("refuses while the latest turn is running or a session is starting", () => {
+  it("refuses while the latest run is running or the runtime is starting", () => {
     expect(
       resolveThreadForkAvailability({
         ...forkableInput,
-        latestTurn: { state: "running" },
-        sessionStatus: "running",
+        latestRun: { status: "running" },
+        runtimeStatus: "running",
       }),
     ).toEqual({ available: false, reason: "turn-in-progress" });
-    expect(resolveThreadForkAvailability({ ...forkableInput, sessionStatus: "starting" })).toEqual({
+    expect(resolveThreadForkAvailability({ ...forkableInput, runtimeStatus: "starting" })).toEqual({
       available: false,
       reason: "turn-in-progress",
     });
   });
 
-  it("refuses threads without a completed turn to fork from", () => {
-    expect(resolveThreadForkAvailability({ ...forkableInput, latestTurn: null })).toEqual({
+  it("refuses threads without a completed run to fork from", () => {
+    expect(resolveThreadForkAvailability({ ...forkableInput, latestRun: null })).toEqual({
       available: false,
       reason: "no-completed-turn",
     });
     expect(
-      resolveThreadForkAvailability({ ...forkableInput, latestTurn: { state: "interrupted" } }),
+      resolveThreadForkAvailability({ ...forkableInput, latestRun: { status: "interrupted" } }),
     ).toEqual({ available: false, reason: "no-completed-turn" });
     expect(
-      resolveThreadForkAvailability({ ...forkableInput, latestTurn: { state: "error" } }),
+      resolveThreadForkAvailability({ ...forkableInput, latestRun: { status: "failed" } }),
     ).toEqual({ available: false, reason: "no-completed-turn" });
   });
 });

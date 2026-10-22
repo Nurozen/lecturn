@@ -16,13 +16,14 @@ import {
 } from "@lecturn/contracts";
 import { Context, DateTime, Effect, Layer, Option, Schema, Semaphore, type Scope } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { ThreadBackgroundLivenessService } from "../orchestration/ThreadBackgroundLiveness.ts";
+import { ProjectionStoreV2 } from "../orchestration-v2/ProjectionStore.ts";
+import { ProjectService } from "../project/ProjectService.ts";
 import { PullRequestWatchProvider } from "./PullRequestWatchProvider.ts";
 import {
   loadWatchSagaRosters,
   mergeDecision,
   projectContainsWatch,
+  watchManagerActivity,
 } from "./PullRequestWatchPolicy.ts";
 import { StaveRpcRuntime } from "../stave/staveRpcHandlers.ts";
 
@@ -80,9 +81,18 @@ export class PullRequestWatchService extends Context.Service<
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const provider = yield* PullRequestWatchProvider;
-  const projections = yield* ProjectionSnapshotQuery;
+  const projections = yield* ProjectionStoreV2;
+  const projectService = yield* ProjectService;
   const staveRuntime = yield* Effect.serviceOption(StaveRpcRuntime);
-  const background = yield* Effect.serviceOption(ThreadBackgroundLivenessService);
+  // Active, non-deleted thread shells; V2 shells carry Stave-decorated projects separately.
+  const threadShell = (threadId: ThreadId) =>
+    projections
+      .getThreadShell(threadId)
+      .pipe(
+        Effect.map((shell) =>
+          shell === null || shell.deletedAt !== null ? Option.none() : Option.some(shell),
+        ),
+      );
   const locks = new Map<string, { semaphore: Semaphore.Semaphore; users: number }>();
   const lock = (key: string) => ({
     withPermit: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -132,9 +142,9 @@ export const make = Effect.gen(function* () {
     watch: PullRequestWatch,
   ) {
     if (!watch.managerThreadId) return "unassigned" as const;
-    const manager = yield* projections.getThreadShellById(watch.managerThreadId);
+    const manager = yield* threadShell(watch.managerThreadId);
     if (Option.isNone(manager)) return "offline" as const;
-    const projects = (yield* projections.getShellSnapshot()).projects;
+    const projects = yield* projectService.listShells();
     if (
       manager.value.projectId !== watch.reference.projectId &&
       !projectContainsWatch(
@@ -148,15 +158,7 @@ export const make = Effect.gen(function* () {
       )
     )
       return "offline" as const;
-    const session = manager.value.session;
-    if (!session || ["stopped", "error", "interrupted"].includes(session.status))
-      return "offline" as const;
-    const live = Option.isSome(background)
-      ? background.value.getThreadBackgroundLiveness(watch.managerThreadId)
-      : manager.value.backgroundLiveness;
-    if (session.activeTurnId || session.status === "running" || live === "working")
-      return "working" as const;
-    return live === "monitoring" ? ("monitoring" as const) : ("idle" as const);
+    return watchManagerActivity(manager.value);
   }, Effect.mapError(boundary));
   const present = Effect.fn("PullRequestWatch.present")(function* (watch: PullRequestWatch) {
     return { ...watch, managerStatus: yield* managerStatus(watch) };
@@ -178,8 +180,8 @@ export const make = Effect.gen(function* () {
     reference: PullRequestWatch["reference"],
     binding?: string,
   ) {
-    const thread = yield* projections.getThreadShellById(threadId);
-    const projects = (yield* projections.getShellSnapshot()).projects;
+    const thread = yield* threadShell(threadId);
+    const projects = yield* projectService.listShells();
     if (
       Option.isNone(thread) ||
       (thread.value.projectId !== reference.projectId &&
@@ -630,7 +632,10 @@ export const make = Effect.gen(function* () {
     return yield* list({});
   }, Effect.mapError(boundary));
   const tick = Effect.gen(function* () {
-    const shell = yield* projections.getShellSnapshot();
+    const shell = {
+      projects: yield* projectService.listShells(),
+      threads: (yield* projections.getShellSnapshot({ location: "active" })).threads,
+    };
     const rosters = yield* loadWatchSagaRosters(shell.projects, staveRuntime);
     const states = yield* all();
     for (const thread of shell.threads) {

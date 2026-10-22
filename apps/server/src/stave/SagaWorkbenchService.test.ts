@@ -8,12 +8,9 @@ import {
   ProjectId,
   EventId,
   MessageId,
-  CommandId,
-  CorrelationId,
   ThreadId,
   ProviderInstanceId,
   ProviderDriverKind,
-  type OrchestrationThreadShell,
   type ModelSelection,
   type ServerProvider,
   type SagaWorkbenchInferenceResult,
@@ -26,7 +23,7 @@ import {
 } from "@lecturn/contracts";
 import { Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
 import { ServerConfig } from "../config.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { StaveOrchestration, type StaveThreadView } from "./StaveOrchestration.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as Repository from "../persistence/Layers/SagaWorkbenchRepository.ts";
 import { SagaWorkbenchRepository } from "../persistence/Services/SagaWorkbenchRepository.ts";
@@ -164,27 +161,15 @@ const harness = Effect.fn("harness")(function* (
   let generatedModel: ModelSelection | undefined;
   let duringGeneration = Effect.void;
   const modelSelection = { instanceId: ProviderInstanceId.make("codex-work"), model: "gpt-6" };
-  const threadFor = (projectId: ProjectId): OrchestrationThreadShell => ({
+  const threadFor = (projectId: ProjectId): StaveThreadView => ({
     id: ThreadId.make(`thread-${projectId}`),
     projectId,
     title: "Conversation",
     modelSelection,
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    branch: null,
     worktreePath: null,
-    latestTurn: null,
-    createdAt: at,
     updatedAt: at,
-    pullRequests: [],
     archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    session: null,
-    latestUserMessageAt: at,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    hasActionableProposedPlan: false,
+    activeRunId: null,
   });
   let turns = options.noTurns
     ? []
@@ -193,7 +178,7 @@ const harness = Effect.fn("harness")(function* (
   const config = yield* ServerConfig.pipe(Effect.provide(ServerConfig.layerTest(root, root)));
   const dependencies = Layer.mergeAll(
     Layer.succeed(ServerConfig, { ...config, staveEnabled: !options.disabledServer }),
-    Layer.mock(ProjectionSnapshotQuery)({
+    Layer.mock(StaveOrchestration)({
       getInferenceTurnPairs: () => Effect.succeed(turns),
       getThreadShellById: (id) =>
         Effect.succeed(
@@ -210,7 +195,6 @@ const harness = Effect.fn("harness")(function* (
           snapshotSequence: 0,
           projects: options.saga ? [project, memberProject] : [project],
           threads: [threadFor(identity.projectId), threadFor(memberIdentity.projectId)],
-          updatedAt: at,
         }),
     }),
     Layer.mock(StaveWorkspaceReader)({
@@ -630,24 +614,11 @@ it.layer(testLayer)("Saga workbench service", (it) => {
         const makeEvent = (threadId: ThreadId): PromptInferenceEvent => ({
           sequence: 1,
           eventId: EventId.make("submitted"),
-          aggregateKind: "thread",
-          aggregateId: threadId,
-          type: "thread.turn-start-requested",
-          occurredAt: at,
-          commandId: CommandId.make("submit"),
-          causationEventId: null,
-          correlationId: CorrelationId.make("submit"),
-          metadata: {},
-          payload: {
-            threadId,
-            messageId: MessageId.make("prompt"),
-            createdAt: at,
-            runtimeMode: "full-access",
-            interactionMode: "default",
-            modelSelection: {
-              instanceId: ProviderInstanceId.make("claude-personal"),
-              model: "sonnet",
-            },
+          threadId,
+          messageId: MessageId.make("prompt"),
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("claude-personal"),
+            model: "sonnet",
           },
         });
         const standalone = yield* harness({ automaticStage: true });

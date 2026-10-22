@@ -1,4 +1,4 @@
-import { PROVIDER_CLIENT_DEFINITIONS } from "../settings/providerDriverMeta";
+import { DRIVER_OPTIONS } from "../settings/providerDriverMeta";
 import { useAuth } from "@clerk/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { selectTeam, type TeamDetail, type TeamSeatPreview } from "@lecturn/client-runtime/relay";
@@ -428,7 +428,7 @@ function HostedTeamsAccount({
                         setProviders(
                           event.target.checked
                             ? null
-                            : PROVIDER_CLIENT_DEFINITIONS.map((provider) => provider.value),
+                            : DRIVER_OPTIONS.map((provider) => provider.value),
                         )
                       }
                     />
@@ -436,7 +436,7 @@ function HostedTeamsAccount({
                   </label>
                   {providers !== null && (
                     <div className="grid grid-cols-2 gap-2">
-                      {PROVIDER_CLIENT_DEFINITIONS.map((provider) => (
+                      {DRIVER_OPTIONS.map((provider) => (
                         <label
                           key={provider.value}
                           className="flex min-h-9 items-center gap-2 text-sm"

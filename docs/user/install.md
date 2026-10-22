@@ -134,6 +134,7 @@ computer.
 | GitHub Copilot | Install [GitHub Copilot CLI](https://github.com/features/copilot/cli), then run `copilot login`.                                                          |
 | OpenCode       | Install [OpenCode](https://opencode.ai), then run `opencode auth login`.                                                                                  |
 | Antigravity    | Install and sign in with Google from Lecturn's provider settings.                                                                                         |
+| Pi             | Install [Pi](https://pi.dev), then run `pi` once to finish its login or API-key setup.                                                                    |
 
 Provider CLIs must be on the server's `PATH`. If Lecturn cannot find one, set its
 **Binary path** in provider settings, especially when using a version manager.
@@ -179,7 +180,7 @@ their original values.
 
 For provider-specific setup and accounts, see [Codex](./providers-codex.md),
 [Claude](./providers-claude.md), [OpenCode](./providers-opencode.md),
-[GitHub Copilot](./providers-copilot.md), and [Antigravity](./providers-antigravity.md).
+[GitHub Copilot](./providers-copilot.md), [Antigravity](./providers-antigravity.md), and [Pi](./providers-pi.md).
 
 ## Next steps
 

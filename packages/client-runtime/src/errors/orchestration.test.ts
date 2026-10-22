@@ -1,4 +1,8 @@
-import { OrchestrationDispatchCommandError } from "@lecturn/contracts";
+import {
+  CommandId,
+  OrchestrationDispatchCommandError,
+  OrchestrationV2DispatchCommandError,
+} from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -27,15 +31,21 @@ describe("wasBootstrapThreadDeleted", () => {
 });
 
 describe("threadImportFailureReason", () => {
-  it("reads the import reason off a dispatch error and nothing else", () => {
+  it("reads the import reason off a V2 dispatch error and nothing else", () => {
+    const failed = {
+      commandId: CommandId.make("import-command"),
+      commandType: "thread.import",
+      message: "Failed to import session.",
+    };
     expect(
       threadImportFailureReason(
-        new OrchestrationDispatchCommandError({
-          message: "Failed to import session.",
+        new OrchestrationV2DispatchCommandError({
+          ...failed,
           threadImportFailure: "session-not-found",
         }),
       ),
     ).toBe("session-not-found");
+    expect(threadImportFailureReason(new OrchestrationV2DispatchCommandError(failed))).toBeNull();
     expect(
       threadImportFailureReason(
         new OrchestrationDispatchCommandError({ message: "Failed to import session." }),

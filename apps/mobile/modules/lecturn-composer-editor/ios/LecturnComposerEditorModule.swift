@@ -91,6 +91,12 @@ public class LecturnComposerEditorModule: Module {
       Prop("spellCheck") { (view: LecturnComposerEditorView, spellCheck: Bool) in
         view.setSpellCheck(spellCheck)
       }
+      Prop("submitTitle") { (view: LecturnComposerEditorView, title: String) in
+        view.setSubmitTitle(title)
+      }
+      Prop("alternateSubmitTitle") { (view: LecturnComposerEditorView, title: String) in
+        view.setAlternateSubmitTitle(title)
+      }
       Prop("enterBehavior") { (view: LecturnComposerEditorView, behavior: String) in
         view.setEnterBehavior(behavior)
       }

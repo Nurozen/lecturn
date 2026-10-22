@@ -2,8 +2,8 @@
  * ProviderDriver / ProviderInstance — driver SPI as plain values.
  *
  * `ProviderDriver` is a record, not a Context.Service. The thing it produces
- * (`ProviderInstance`) is also a record — three captured closures
- * (`snapshot`, `adapter`, `textGeneration`), an id, and a driver kind. There
+ * (`ProviderInstance`) is also a record of captured closures
+ * (`snapshot`, `orchestrationAdapter`, `textGeneration`), an id, and a driver kind. There
  * are intentionally no per-driver Context tags because tags are
  * singleton-per-runtime and we need many instances of the same driver.
  *
@@ -26,8 +26,11 @@ import type {
   ExternalSessionsListError,
   ExternalSessionSummary,
   IsoDateTime,
-  OrchestrationThreadActivityTone,
   ProviderConsumeResetCreditOutcome,
+  AcpRegistryListSessionsResult,
+  AcpRegistryListProvidersResult,
+  AcpRegistryOperationError,
+  AcpRegistrySetProviderInput,
   ProviderDriverKind,
   ProviderInstanceEnvironment,
   ProviderInstanceId,
@@ -38,11 +41,11 @@ import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 
-import type * as TextGeneration from "../textGeneration/TextGeneration.ts";
-import type { ProviderAdapterError, ProviderDriverError } from "./Errors.ts";
-import type { ProviderAdapterShape } from "./Services/ProviderAdapter.ts";
-import type { ServerProviderShape } from "./Services/ServerProvider.ts";
+import type { TextGeneration } from "../textGeneration/TextGeneration.ts";
+import type { ProviderAdapterV2Shape } from "../orchestration-v2/ProviderAdapter.ts";
+import type { ProviderDriverError } from "./Errors.ts";
 import type { ProviderAuthController } from "./Services/ProviderAuthService.ts";
+import type { ServerProviderShape } from "./Services/ServerProvider.ts";
 
 /**
  * Static metadata advertised by a driver. Used for default presentation
@@ -76,12 +79,12 @@ export interface ListExternalSessionsInput {
   readonly searchTerm?: string | undefined;
   readonly limit: number;
   /**
-   * Every resume cursor Lecturn has persisted, across all instances and
-   * providers, since instances can share a home. Opaque to the caller: the
-   * lister keeps the ones its own cursor schema parses, skips the rest, and
-   * hides the sessions they name.
+   * Every provider-native session/thread id Lecturn already owns, across all
+   * instances and providers, since instances can share a home: the native ids
+   * of orchestration provider threads (imported forks included) plus the ids
+   * legacy resume cursors named. The lister hides the sessions they name.
    */
-  readonly knownResumeCursors: ReadonlyArray<unknown>;
+  readonly knownNativeSessionIds: ReadonlySet<string>;
 }
 
 export interface ListExternalSessionsResult {
@@ -98,6 +101,9 @@ export interface ImportExternalSessionInput {
   readonly cwd: string;
 }
 
+/** Work-log tone of an imported activity row (the V1 thread activity tones). */
+export type ImportedTranscriptActivityTone = "info" | "tool" | "approval" | "error";
+
 /**
  * One row of an external session's history, provider-neutral and
  * summary-level: activities name the work that happened and never carry tool
@@ -112,7 +118,7 @@ export type ImportedTranscriptEntry =
     }
   | {
       readonly kind: "activity";
-      readonly tone: OrchestrationThreadActivityTone;
+      readonly tone: ImportedTranscriptActivityTone;
       /** The thread activity's kind, e.g. `tool.completed`. */
       readonly activityKind: string;
       readonly summary: string;
@@ -125,10 +131,12 @@ export type ImportedTranscriptEntry =
 
 export interface ImportedExternalSession {
   /**
-   * Cursor of the native FORK cut from the external session, in the adapter's
-   * own resume cursor format. The original session is never resumed.
+   * Provider-native id of the FORK cut from the external session (Claude
+   * session id, Codex thread id). The imported thread's provider thread binds
+   * it as a strong `nativeThreadRef`, so the V2 adapter resumes the fork; the
+   * original session is never resumed.
    */
-  readonly resumeCursor: unknown;
+  readonly nativeThreadId: string;
   readonly title: string;
   /** The external session's own cwd, which may differ from the input cwd. */
   readonly cwd: string;
@@ -187,9 +195,32 @@ export interface ProviderInstance {
   readonly importExternalSession?: (
     input: ImportExternalSessionInput,
   ) => Effect.Effect<ImportedExternalSession, ExternalSessionImportError>;
-  readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
-  readonly textGeneration: TextGeneration.TextGeneration["Service"];
+  readonly orchestrationAdapter: ProviderAdapterV2Shape;
+  readonly textGeneration: TextGeneration["Service"];
   readonly auth?: ProviderAuthController;
+  readonly acpSessionManagement?: {
+    readonly listSessions: (input: {
+      readonly cwd: string;
+      readonly cursor?: string;
+    }) => Effect.Effect<AcpRegistryListSessionsResult, AcpRegistryOperationError>;
+    readonly logout: (cwd: string) => Effect.Effect<void, AcpRegistryOperationError>;
+    readonly deleteSession: (input: {
+      readonly cwd: string;
+      readonly sessionId: string;
+    }) => Effect.Effect<void, AcpRegistryOperationError>;
+    readonly listProviders: (
+      cwd: string,
+    ) => Effect.Effect<AcpRegistryListProvidersResult, AcpRegistryOperationError>;
+    readonly setProvider: (
+      input: Omit<AcpRegistrySetProviderInput, "instanceId" | "projectId"> & {
+        readonly cwd: string;
+      },
+    ) => Effect.Effect<void, AcpRegistryOperationError>;
+    readonly disableProvider: (input: {
+      readonly cwd: string;
+      readonly providerId: string;
+    }) => Effect.Effect<void, AcpRegistryOperationError>;
+  };
 }
 
 export interface ProviderContinuationIdentity {

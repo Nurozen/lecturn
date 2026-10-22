@@ -19,6 +19,7 @@ import { parseAssistantCitationHref } from "@lecturn/shared/assistantCitations";
 import { DecisionRepository, make, type CreateDecisionFromWriter } from "./DecisionRepository.ts";
 import { make as makeGroups } from "../contextual/ContextualGroups.ts";
 import { ExtensionsRuntime } from "../extensions/ExtensionsRuntime.ts";
+import { clearV2Projection, installLegacyProjectionMirror } from "./V2ProjectionTestFixtures.ts";
 
 const decodeExport = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Struct({ decisions: Schema.Array(Schema.Unknown) })),
@@ -68,6 +69,8 @@ const input: CreateDecisionFromWriter = {
 };
 const fixture = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  yield* installLegacyProjectionMirror(sql);
+  yield* clearV2Projection(sql);
   for (const table of [
     "contextual_actions",
     "contextual_outbox",

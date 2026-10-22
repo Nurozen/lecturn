@@ -32,7 +32,7 @@ const harness = Effect.fn(function* (
 ) {
   const hostCalls: { environmentId: EnvironmentId; operation: string; input: unknown }[] = [];
   const cloudCalls: { operation: string; input: unknown }[] = [];
-  const supervisor = EnvironmentSupervisor.of({
+  const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
     target,
     session: yield* SubscriptionRef.make(
       Option.some({
@@ -50,13 +50,15 @@ const harness = Effect.fn(function* (
         },
       } as unknown as RpcSession),
     ),
-  } as EnvironmentSupervisor["Service"]);
-  const registry = EnvironmentRegistry.of({
+  } as EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
+  const registry = EnvironmentRegistry.EnvironmentRegistry.of({
     run: (selected, operation) => {
       expect(selected).toBe(environmentId);
-      return operation.pipe(Effect.provideService(EnvironmentSupervisor, supervisor));
+      return operation.pipe(
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+      );
     },
-  } as EnvironmentRegistry["Service"]);
+  } as EnvironmentRegistry.EnvironmentRegistry["Service"]);
   const relay = ManagedRelay.ManagedRelayClient.of({
     createEnvironmentLinkChallenge: (input: unknown) =>
       Effect.sync(() => {
@@ -92,7 +94,7 @@ const harness = Effect.fn(function* (
         clerkToken: "PRIVATE-CLERK",
         relayUrl: "https://relay.test",
       }).pipe(
-        Effect.provideService(EnvironmentRegistry, registry),
+        Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
         Effect.provideService(ManagedRelay.ManagedRelayClient, relay),
       ),
   };

@@ -10,7 +10,11 @@ import {
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { SortableContext, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { scopeThreadRef, scopedThreadKey } from "@lecturn/client-runtime/environment";
+import {
+  parseScopedThreadKey,
+  scopeThreadRef,
+  scopedThreadKey,
+} from "@lecturn/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/models";
 import { sortSettledThreads } from "@lecturn/client-runtime/state/thread-sort";
 import {
@@ -57,6 +61,12 @@ import {
 import { SidebarDragLifecycle, SidebarPointerSensor } from "../Sidebar.pointer";
 import { createSidebarListMotion } from "../Sidebar.motion";
 import { stackedThreadToast, toastManager } from "../ui/toast";
+import { useThreadSelectionStore } from "../../threadSelectionStore";
+import {
+  dropThreadContext,
+  endThreadContextDrag,
+  moveThreadContextDrag as moveThreadContextDragGhost,
+} from "../chat/threadContextDrag";
 import {
   buildScopedSidebarItems,
   projectSidebarDrop,
@@ -82,6 +92,9 @@ interface SidebarDragContext {
   activeCount: number;
   settledCount: number;
   registerNode: (id: string, node: HTMLElement | null) => void;
+  /** The lifted row left the list sideways: it now carries thread context
+      to a composer instead of reordering. */
+  contextDrag: boolean;
 }
 const DragScope = createContext<SidebarDragContext | null>(null);
 
@@ -97,6 +110,7 @@ function SidebarDragProvider(props: SidebarDragContext & { children: ReactNode }
     activeCount,
     settledCount,
     registerNode,
+    contextDrag,
   } = props;
   const value = useMemo(
     () => ({
@@ -110,6 +124,7 @@ function SidebarDragProvider(props: SidebarDragContext & { children: ReactNode }
       activeCount,
       settledCount,
       registerNode,
+      contextDrag,
     }),
     [
       enabledKeys,
@@ -122,6 +137,7 @@ function SidebarDragProvider(props: SidebarDragContext & { children: ReactNode }
       activeCount,
       settledCount,
       registerNode,
+      contextDrag,
     ],
   );
   return <DragScope value={value}>{props.children}</DragScope>;
@@ -179,6 +195,10 @@ export function SidebarDragScope(props: {
     >;
   } | null>(null);
   const [destination, setDestination] = useState<SidebarSection | null>(null);
+  const [contextDrag, setContextDrag] = useState(false);
+  // Horizontal extent of the picked-up row: leaving it sideways turns the
+  // gesture into a thread-context drag toward a composer.
+  const contextDragRef = useRef<{ key: string; left: number; right: number } | null>(null);
   const controllers = useRef(new Set<ReturnType<typeof createSidebarListMotion>>());
   const sortableNodes = useRef(new Map<string, HTMLElement>());
   const reservation = useRef<{
@@ -203,6 +223,9 @@ export function SidebarDragScope(props: {
   };
   const finishDrag = useCallback((started: boolean) => {
     sensorRef.current = null;
+    contextDragRef.current = null;
+    endThreadContextDrag();
+    setContextDrag(false);
     if (!started) return;
     for (const controller of controllers.current) controller.release();
     reservation.current?.release();
@@ -221,10 +244,6 @@ export function SidebarDragScope(props: {
       mounted.current = false;
     };
   }, []);
-  const live = useRef({ props, configs, canAccess });
-  useLayoutEffect(() => {
-    live.current = { props, configs, canAccess };
-  });
   const canonical = useMemo(
     () =>
       new Map(
@@ -234,6 +253,10 @@ export function SidebarDragScope(props: {
       ),
     [props.lists],
   );
+  const live = useRef({ props, configs, canAccess, canonical });
+  useLayoutEffect(() => {
+    live.current = { props, configs, canAccess, canonical };
+  });
   const { sortInbox } = props;
   const lists = useMemo(
     () => projectSidebarDrop(props.lists, hold, sortInbox),
@@ -348,11 +371,58 @@ export function SidebarDragScope(props: {
       sortInbox,
     ],
   );
+  // Dragged threads: the multi-selection when the picked-up row is part of it.
+  const contextDragThreads = useCallback((): ReadonlyArray<ScopedThreadRef> => {
+    const key = contextDragRef.current?.key ?? null;
+    if (key === null) return [];
+    const selected = useThreadSelectionStore.getState().selectedThreadKeys;
+    const keys = selected.has(key) ? [...selected] : [key];
+    return keys.flatMap((candidate) => {
+      const ref = parseScopedThreadKey(candidate);
+      return ref ? [ref] : [];
+    });
+  }, []);
+  const pointerOutsideList = useCallback((point: { x: number; y: number }) => {
+    const bounds = contextDragRef.current;
+    return bounds !== null && (point.x < bounds.left || point.x > bounds.right);
+  }, []);
+  const moveContextDrag = useCallback(
+    (point: { x: number; y: number }) => {
+      const outside = pointerOutsideList(point);
+      setContextDrag(outside);
+      if (!outside) {
+        endThreadContextDrag();
+        return false;
+      }
+      const threads = contextDragThreads();
+      const title =
+        live.current.canonical.get(contextDragRef.current?.key ?? "")?.title.trim() || "Thread";
+      moveThreadContextDragGhost(point, { title, count: threads.length });
+      return true;
+    },
+    [contextDragThreads, pointerOutsideList],
+  );
+  const dropContextDrag = useCallback(
+    (point: { x: number; y: number }) => {
+      if (!pointerOutsideList(point)) return false;
+      dropThreadContext(point, contextDragThreads());
+      // Releasing outside the list never reorders, whether or not a composer took the drop.
+      return true;
+    },
+    [contextDragThreads, pointerOutsideList],
+  );
   const sensors = useSensors(
-    useSensor(SidebarPointerSensor, { distance: 6, onAttach: attachSensor, onFinish: finishDrag }),
+    useSensor(SidebarPointerSensor, {
+      distance: 6,
+      onAttach: attachSensor,
+      onFinish: finishDrag,
+      onMove: moveContextDrag,
+      onDrop: dropContextDrag,
+    }),
   );
   const strategyInput = {
     items,
+    enabled: !contextDrag,
     ...drag?.geometry,
     settledOrder: sortSettledThreads(
       drag && canonical.has(drag.key)
@@ -508,7 +578,7 @@ export function SidebarDragScope(props: {
     [],
   );
   const baselineKey = `${props.enabled}:${props.workingExpanded === true}:${props.snoozedExpanded}:${props.settledExpanded}:${props.settledLimit}:${props.routeThreadKey}`;
-  const from = drag?.section ?? null;
+  const from = contextDrag ? null : (drag?.section ?? null);
   const dragging = drag !== null;
   const enabledIds = props.enabled ? items.map(sidebarListItemId) : [];
   const draggableIds = hold ? [] : [...draggableKeys];
@@ -516,10 +586,13 @@ export function SidebarDragScope(props: {
   return (
     <DndContext
       sensors={sensors}
+      autoScroll={!contextDrag}
       modifiers={[restrictToVerticalAxis, restrictBelowPins, restrictToFirstScrollableAncestor]}
       collisionDetection={collisionDetection}
       onDragStart={(event) => {
         const key = String(event.active.id);
+        const rowRect = sortableNodes.current.get(key)?.getBoundingClientRect();
+        contextDragRef.current = rowRect ? { key, left: rowRect.left, right: rowRect.right } : null;
         const section = sectionOf(key);
         if (!props.enabled || hold || !section || section === "working" || !draggableKeys.has(key))
           return;
@@ -599,10 +672,12 @@ export function SidebarDragScope(props: {
       }}
       onDragOver={(event) =>
         setDestination(
-          event.over && planFor(String(event.active.id), String(event.over.id)).kind !== "none"
-            ? (resolveSidebarDropTarget(items, String(event.active.id), String(event.over.id))
-                ?.section ?? null)
-            : null,
+          contextDrag
+            ? null
+            : event.over && planFor(String(event.active.id), String(event.over.id)).kind !== "none"
+              ? (resolveSidebarDropTarget(items, String(event.active.id), String(event.over.id))
+                  ?.section ?? null)
+              : null,
         )
       }
       onDragEnd={end}
@@ -622,6 +697,7 @@ export function SidebarDragScope(props: {
             items.filter((item) => item.kind === "thread" && item.section === "settled").length
           }
           registerNode={registerNode}
+          contextDrag={contextDrag}
         >
           {props.children(lists)}
         </SidebarDragProvider>
@@ -662,9 +738,18 @@ export function ScopedSortableThreadRow(props: {
     },
     [setNodeRef, registerNode, key],
   );
+  const contextDrag = scope?.contextDrag === true;
   const bag = useMemo(
-    () => ({ listeners, setNodeRef: attach, transform, transition, isDragging }),
-    [listeners, attach, transform, transition, isDragging],
+    () => ({
+      listeners,
+      setNodeRef: attach,
+      transform: contextDrag ? null : transform,
+      // The lifted row normally follows the pointer without a transition.
+      // When it becomes a context ghost, glide its sidebar copy back home.
+      transition: contextDrag && isDragging ? "transform 150ms ease-out" : transition,
+      isDragging: isDragging && !contextDrag,
+    }),
+    [listeners, attach, transform, transition, isDragging, contextDrag],
   );
   return props.children(
     scope ? bag : undefined,

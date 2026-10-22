@@ -217,8 +217,8 @@ it.effect("uses the configured Lecturn home and application identity", () =>
     assert.equal(environment.baseDir, "/Users/alice/.lecturn");
     assert.equal(environment.stateDir, "/Users/alice/.lecturn/userdata");
     assert.equal(environment.displayName, "Lecturn");
-    assert.equal(environment.userDataDirName, "lecturn");
-    assert.equal(environment.legacyUserDataDirName, "Lecturn (Alpha)");
+    // Profile names live in DesktopUserData; an explicit home isolates the Electron profile.
+    assert.equal(environment.userDataPathOverride, "/Users/alice/.lecturn/userdata/electron");
     assert.equal(environment.appUserModelId, "com.cloudgatherer.lecturn");
     assert.equal(environment.linuxDesktopEntryName, "com.cloudgatherer.lecturn.desktop");
   }),

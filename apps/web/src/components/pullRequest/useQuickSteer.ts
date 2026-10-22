@@ -1,9 +1,13 @@
 import { useCallback } from "react";
 import {
+  ChatAttachment,
   CommandId,
-  ThreadTurnStartCommand,
+  MessageId,
+  ModelSelection,
+  ProviderInteractionMode,
+  RuntimeMode,
+  ThreadId,
   type EnvironmentId,
-  type ThreadId,
 } from "@lecturn/contracts";
 import * as Schema from "effect/Schema";
 import { readThreadShell } from "../../state/entities";
@@ -12,10 +16,28 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { newMessageId, randomUUID } from "../../lib/utils";
 import { formatEnvironmentQueryError } from "../../state/query";
 
-type SteerCommand = typeof ThreadTurnStartCommand.Type;
+/**
+ * The persisted turn-start intent. Same fields as the V1 `thread.turn.start`
+ * command it replaced, so intents saved before the V2 upgrade still decode.
+ */
+export const QuickSteerIntent = Schema.Struct({
+  commandId: CommandId,
+  threadId: ThreadId,
+  message: Schema.Struct({
+    messageId: MessageId,
+    role: Schema.Literal("user"),
+    text: Schema.String,
+    attachments: Schema.Array(ChatAttachment),
+  }),
+  modelSelection: Schema.optional(ModelSelection),
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+  createdAt: Schema.String,
+});
+export type SteerCommand = typeof QuickSteerIntent.Type;
 type IntentStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
-const decodeIntent = Schema.decodeUnknownSync(Schema.fromJsonString(ThreadTurnStartCommand));
-const encodeIntent = Schema.encodeSync(Schema.fromJsonString(ThreadTurnStartCommand));
+const decodeIntent = Schema.decodeUnknownSync(Schema.fromJsonString(QuickSteerIntent));
+const encodeIntent = Schema.encodeSync(Schema.fromJsonString(QuickSteerIntent));
 const inFlight = new Map<string, { text: string; promise: Promise<void> }>();
 
 /** Keep the complete command until a receipt arrives, including across app reloads. */
@@ -80,7 +102,6 @@ export function useQuickSteer() {
           if (!thread || thread.archivedAt)
             throw new Error("The managing thread is no longer available.");
           return {
-            type: "thread.turn.start",
             commandId: CommandId.make(randomUUID()),
             threadId,
             message: { messageId: newMessageId(), role: "user", text, attachments: [] },
@@ -91,7 +112,18 @@ export function useQuickSteer() {
           };
         },
         send: async (command) => {
-          const result = await start({ environmentId, input: command });
+          const result = await start({
+            environmentId,
+            input: {
+              commandId: command.commandId,
+              threadId: command.threadId,
+              message: command.message,
+              ...(command.modelSelection ? { modelSelection: command.modelSelection } : {}),
+              runtimeMode: command.runtimeMode,
+              interactionMode: command.interactionMode,
+              createdAt: command.createdAt,
+            },
+          });
           if (result._tag === "Failure") throw new Error(formatEnvironmentQueryError(result.cause));
         },
       });

@@ -1,18 +1,17 @@
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer, Option, Path, Result } from "effect";
+import { Effect, Layer, Path, Result } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   ProjectId,
   ThreadId,
   PullRequestWatchError,
-  type OrchestrationThreadShell,
   type OrchestrationProjectShell,
   type PullRequestActionInput,
   type PullRequestWatchObservation,
   type PullRequestListEntry,
 } from "@lecturn/contracts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { watchReadLayer, type WatchThreadFixture } from "./PullRequestWatchTestShells.ts";
 import { PullRequestWatchProvider } from "./PullRequestWatchProvider.ts";
 import { projectContainsWatch } from "./PullRequestWatchPolicy.ts";
 import { make, PullRequestWatchService } from "./PullRequestWatchService.ts";
@@ -53,7 +52,7 @@ const fixture = Effect.gen(function* () {
   let failAfterWrite = false;
   let failDisable = false;
   const actions: PullRequestActionInput[] = [];
-  const threads: OrchestrationThreadShell[] = [];
+  const threads: WatchThreadFixture[] = [];
   const projects: OrchestrationProjectShell[] = [];
   const provider = Layer.succeed(PullRequestWatchProvider, {
     observe: () =>
@@ -88,17 +87,7 @@ const fixture = Effect.gen(function* () {
         }
       }),
   });
-  const projections = Layer.succeed(ProjectionSnapshotQuery, {
-    getThreadShellById: (id: ThreadId) =>
-      Effect.sync(() => Option.fromNullishOr(threads.find((thread) => thread.id === id))),
-    getShellSnapshot: () =>
-      Effect.sync(() => ({
-        threads,
-        projects,
-        snapshotSequence: 0,
-        updatedAt: initial.observedAt,
-      })),
-  } as unknown as ProjectionSnapshotQuery["Service"]);
+  const projections = watchReadLayer({ threads, projects });
   const build = make.pipe(Effect.provide(Layer.merge(provider, projections)));
   const service = yield* build;
   return {
@@ -182,7 +171,7 @@ it.layer(SqlitePersistenceMemory)("durable PR watch", (it) => {
           id: managerId,
           projectId: saga.id,
           session: { status: "running" },
-        } as OrchestrationThreadShell);
+        } as WatchThreadFixture);
         let memberCreatedAt = initial.observedAt;
         const service = yield* f.restart.pipe(
           Effect.provide(
@@ -286,7 +275,7 @@ it.layer(SqlitePersistenceMemory)("durable PR watch", (it) => {
           projectId: alias.id,
           worktreePath: null,
           session: { status: "running" },
-        } as OrchestrationThreadShell;
+        } as WatchThreadFixture;
         f.projects.push(member, alias);
         f.threads.push(manager);
         const own = yield* f.service.command(
@@ -626,7 +615,7 @@ it.layer(SqlitePersistenceMemory)("durable PR watch", (it) => {
           projectId,
           linkedPullRequest: { ...reference, url: initial.url },
           session: null,
-        } as OrchestrationThreadShell);
+        } as WatchThreadFixture);
         yield* f.service.tick;
         const watch = (yield* f.service.list({})).watches[0]!;
         assert.isNull(watch.managerThreadId);
@@ -639,7 +628,7 @@ it.layer(SqlitePersistenceMemory)("durable PR watch", (it) => {
           ...f.threads[0]!,
           id: forkId,
           forkedFrom: { threadId: id },
-        } as OrchestrationThreadShell);
+        } as WatchThreadFixture);
         yield* f.service.tick;
         const updated = (yield* f.service.list({})).watches[0]!;
         assert.equal(updated.managerThreadId, id);
@@ -689,7 +678,7 @@ it.layer(SqlitePersistenceMemory)("durable PR watch", (it) => {
           id: managerId,
           projectId: sagaId,
           session: null,
-        } as OrchestrationThreadShell);
+        } as WatchThreadFixture);
         assert.equal(
           (yield* f.service.command(
             {
@@ -788,7 +777,7 @@ it.layer(SqlitePersistenceMemory)("durable PR watch", (it) => {
       Effect.gen(function* () {
         const f = yield* tracked();
         const manager = ThreadId.make("old-manager");
-        f.threads.push({ id: manager, projectId, session: null } as OrchestrationThreadShell);
+        f.threads.push({ id: manager, projectId, session: null } as WatchThreadFixture);
         yield* f.service.command(
           {
             requestId: "manager",
@@ -969,7 +958,7 @@ it.layer(SqlitePersistenceMemory)("durable PR watch", (it) => {
           projectId,
           linkedPullRequest: { ...reference, url: initial.url },
           session: null,
-        } as OrchestrationThreadShell);
+        } as WatchThreadFixture);
         yield* f.service.tick;
         const watch = (yield* f.service.list({})).watches[0]!;
         for (const [index, binding] of ["next", "original", "next"].entries()) {
@@ -1016,7 +1005,7 @@ it.layer(SqlitePersistenceMemory)("durable PR watch", (it) => {
           latestUserMessageAt: initial.observedAt,
           archivedAt: null,
           linkedPullRequest: null,
-        } as OrchestrationThreadShell);
+        } as WatchThreadFixture);
         f.projects.push({
           id: projectId,
           title: "Repo",

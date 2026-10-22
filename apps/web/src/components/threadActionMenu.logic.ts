@@ -49,7 +49,7 @@ export interface ThreadActionMenuState {
   readonly isSnoozed: boolean;
   readonly canSnoozeNow: boolean;
   readonly isRegeneratingTitle: boolean;
-  /** Archive rejects a thread with an active turn, so disable it here rather than let the action fail. */
+  /** Archive rejects a thread with an attached provider, so disable it here rather than let the action fail. */
   readonly isRunning: boolean;
   /** Shell surfaces fork at the latest completed turn, so the action is
       disabled until the thread has one (and its provider can fork). */

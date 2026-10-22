@@ -5,12 +5,15 @@ import {
   ProjectId,
   ThreadId,
   type OrchestrationProjectShell,
-  type OrchestrationThreadShell,
   type PullRequestListEntry,
   type PullRequestListInput,
   type PullRequestWatchTrackInput,
 } from "@lecturn/contracts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import {
+  toWatchThreadShell,
+  watchReadLayer,
+  type WatchThreadFixture,
+} from "./PullRequestWatchTestShells.ts";
 import { VcsDriverRegistry } from "../vcs/VcsDriverRegistry.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import { PullRequestService, pullRequestRepositoryBinding } from "./PullRequestService.ts";
@@ -19,12 +22,19 @@ import { loadWatchSagaRosters, projectContainsWatch } from "./PullRequestWatchPo
 import { StaveRpcRuntime } from "../stave/staveRpcHandlers.ts";
 import { Option } from "effect";
 import {
-  discoveryCandidates,
+  discoveryCandidates as discoveryCandidatesV2,
   make,
   matchesDiscoveredPullRequest,
 } from "./PullRequestWatchDiscovery.ts";
 
 const at = "2026-09-13T00:00:00.000Z";
+const discoveryCandidates = (
+  project: Parameters<typeof discoveryCandidatesV2>[0],
+  threads: ReadonlyArray<WatchThreadFixture>,
+  ...rest: Parameters<typeof discoveryCandidatesV2> extends [unknown, unknown, ...infer R]
+    ? R
+    : never
+) => discoveryCandidatesV2(project, threads.map(toWatchThreadShell), ...rest);
 const projectId = ProjectId.make("space");
 const identity = (name: string) => ({
   canonicalKey: `github.com/owner/${name}`,
@@ -84,7 +94,7 @@ const thread = {
   latestUserMessageAt: at,
   archivedAt: null,
   session: { status: "running" },
-} as OrchestrationThreadShell;
+} as WatchThreadFixture;
 const entry = {
   projectId,
   provider: "github",
@@ -300,10 +310,7 @@ it.effect(
         id: ProjectId.make(`space-${index}`),
       }));
       const threads = projects.map((p) => ({ ...thread, projectId: p.id }));
-      const projections = Layer.succeed(ProjectionSnapshotQuery, {
-        getShellSnapshot: () =>
-          Effect.succeed({ projects, threads, snapshotSequence: 0, updatedAt: at }),
-      } as unknown as ProjectionSnapshotQuery["Service"]);
+      const projections = watchReadLayer({ threads, projects });
       const requests = Layer.succeed(PullRequestService, {
         list: (input: PullRequestListInput) =>
           Effect.sync(() => {
@@ -378,15 +385,7 @@ it.effect(
       const service = yield* make.pipe(
         Effect.provide(
           Layer.mergeAll(
-            Layer.mock(ProjectionSnapshotQuery)({
-              getShellSnapshot: () =>
-                Effect.succeed({
-                  projects: [project],
-                  threads: [thread],
-                  snapshotSequence: 0,
-                  updatedAt: at,
-                }),
-            }),
+            watchReadLayer({ threads: [thread], projects: [project] }),
             Layer.mock(PullRequestService)({
               list: (_input, options) => {
                 assert.isTrue(options?.allRemotes);
@@ -557,15 +556,7 @@ it.effect(
           Effect.provide(
             Layer.mergeAll(
               Path.layer,
-              Layer.mock(ProjectionSnapshotQuery)({
-                getShellSnapshot: () =>
-                  Effect.succeed({
-                    projects: [project],
-                    threads: [thread],
-                    snapshotSequence: 0,
-                    updatedAt: at,
-                  }),
-              }),
+              watchReadLayer({ threads: [thread], projects: [project] }),
               Layer.mock(PullRequestService)({
                 list: () =>
                   Effect.sync(() => {

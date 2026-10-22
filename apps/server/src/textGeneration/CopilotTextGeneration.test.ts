@@ -21,7 +21,12 @@ const decodeSettings = Schema.decodeSync(GithubCopilotSettings);
 const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
 const decodeJsonLine = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown));
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
-const mockAgentPath = NodePath.join(__dirname, "../../scripts/acp-mock-agent.ts");
+// Copilot CLI speaks ACP v1; the shared v2 mock's Copilot profile covers a v2 Copilot.
+const mockAgentPath = NodePath.join(
+  __dirname,
+  "../provider/testFixtures/copilot-text-mock-agent.mjs",
+);
+const v2MockAgentPath = NodePath.join(__dirname, "../../scripts/acp-mock-agent.ts");
 const INSTANCE = ProviderInstanceId.make("githubCopilot");
 
 const TestLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
@@ -41,6 +46,7 @@ function withFakeCopilot<A, E, R>(
     textGeneration: Effect.Success<ReturnType<typeof makeCopilotTextGeneration>>,
     readRequests: () => ReadonlyArray<LoggedMessage>,
   ) => Effect.Effect<A, E, R>,
+  agentPath: string = mockAgentPath,
 ) {
   return Effect.gen(function* () {
     const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "lecturn-copilot-text-"));
@@ -62,7 +68,7 @@ function withFakeCopilot<A, E, R>(
         'if [ "$*" != "--acp --no-ask-user --disable-builtin-mcps" ]; then',
         '  echo "unexpected args: $*" >&2; exit 11',
         "fi",
-        `exec ${shellQuote(process.execPath)} ${shellQuote(mockAgentPath)}`,
+        `exec ${shellQuote(process.execPath)} ${shellQuote(agentPath)}`,
         "",
       ].join("\n"),
     );
@@ -97,6 +103,30 @@ it.layer(TestLayer)("CopilotTextGeneration", (it) => {
               .map((entry) => entry.params?.modelId),
           ).toEqual(["gpt-5-mini"]);
         }),
+    ),
+  );
+
+  it.effect("skips session/set_model on an ACP v2 agent without a model option", () =>
+    withFakeCopilot(
+      { LECTURN_ACP_PROMPT_RESPONSE_TEXT: '{"title":"Fix the login redirect"}' },
+      (textGeneration, readRequests) =>
+        Effect.gen(function* () {
+          const result = yield* textGeneration.generateThreadTitle({
+            cwd: process.cwd(),
+            message: "login redirects to a 404",
+            modelSelection: { instanceId: INSTANCE, model: "gpt-5-mini" },
+          });
+          expect(result.title).toBe("Fix the login redirect");
+          expect(
+            readRequests().filter(
+              (entry) =>
+                entry.method === "session/set_model" ||
+                (entry.method === "session/set_config_option" &&
+                  entry.params?.configId === "model"),
+            ),
+          ).toEqual([]);
+        }),
+      v2MockAgentPath,
     ),
   );
 

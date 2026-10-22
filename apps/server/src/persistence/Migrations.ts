@@ -27,6 +27,7 @@ import Migration0054 from "./Migrations/054_ThreadNotes.ts";
 import * as Migrator from "effect/unstable/sql/Migrator";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
 
 // Import all migrations statically
 import Migration0001 from "./Migrations/001_OrchestrationEvents.ts";
@@ -82,6 +83,10 @@ import Migration0050 from "./Migrations/050_StaveLifecycleRecovery.ts";
 import Migration0051 from "./Migrations/051_SagaWorkbench.ts";
 import Migration0052 from "./Migrations/052_PullRequestWatches.ts";
 import Migration0053 from "./Migrations/053_ProjectionThreadImportOrigin.ts";
+// Upstream published these as 55 and 56; Lecturn's ledger already used those ids
+// (ThreadDecisions, DecisionScanBacklog), so they run here as 70 and 71.
+import Migration0070 from "./Migrations/055_OrchestrationV2.ts";
+import Migration0071 from "./Migrations/056_RemoveRedundantProjectionIndexes.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -104,7 +109,7 @@ const StaveLifecycleRecoveryCompatibility = Effect.gen(function* () {
  * Uses Migrator.fromRecord which parses the key format and
  * returns migrations sorted by ID.
  */
-const migrationEntries = [
+export const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
   [2, "OrchestrationCommandReceipts", Migration0002],
   [3, "CheckpointDiffBlobs", Migration0003],
@@ -174,6 +179,10 @@ const migrationEntries = [
   [67, "MessageContextTitleStateCompatibility", Migration0067],
   [68, "PullRequestFilesViewedCompatibility", Migration0068],
   [69, "ProjectionThreadsAutoSettleDisabledAtCompatibility", Migration0069],
+  // Upstream 55 and 56. Preserve this migration's schema; future V2 schema
+  // changes need new migrations, remapped above Lecturn's latest id.
+  [70, "OrchestrationV2", Migration0070],
+  [71, "RemoveRedundantProjectionIndexes", Migration0071],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -193,6 +202,24 @@ const makeMigrationLoader = (throughId?: number) =>
  */
 const run = Migrator.make({});
 
+/**
+ * Upstream names Lecturn databases may have recorded at ids that the fork
+ * ledger also published. Compatibility migrations 64-69 reconcile their
+ * schema, so these rows are expected history rather than a skipped migration.
+ */
+const knownForkDivergentNames: ReadonlyMap<number, string> = new Map([
+  [48, "ProjectionThreadBranchPullRequest"],
+  [49, "ProjectionThreadsActiveOrderKey"],
+  [50, "ProjectionThreadPullRequests"],
+  [51, "ProjectionThreadMessageContext"],
+  [52, "ProjectionThreadTitleState"],
+  [53, "PullRequestFilesViewed"],
+  [54, "ProjectionThreadsAutoSettleDisabledAt"],
+]);
+
+const isKnownForkDivergence = (migrationId: number, name: string) =>
+  knownForkDivergentNames.get(migrationId) === name;
+
 export interface RunMigrationsOptions {
   readonly toMigrationInclusive?: number | undefined;
 }
@@ -210,10 +237,42 @@ export interface RunMigrationsOptions {
 export const runMigrations = Effect.fn("runMigrations")(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {}) {
-  const executedMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
+  const previewMigrations =
+    toMigrationInclusive === undefined || toMigrationInclusive >= 70
+      ? yield* reconcileV2PreviewMigration()
+      : [];
+  const executedMigrations = [
+    ...previewMigrations,
+    ...(yield* run({ loader: makeMigrationLoader(toMigrationInclusive) })),
+  ];
   const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);
   yield* migrations.length === 0
     ? Effect.logDebug("Database schema is current")
     : Effect.log("Migrations ran successfully").pipe(Effect.annotateLogs({ migrations }));
+
+  // The migrator keys on migration_id: a database that recorded a different
+  // migration under a shared id (local or fork builds) keeps that id and
+  // silently skips this build's migration at it. Surface the divergence so the
+  // skipped schema change is diagnosable.
+  const sql = yield* SqlClient.SqlClient;
+  const recorded = yield* sql<{
+    readonly migration_id: number;
+    readonly name: string;
+  }>`SELECT migration_id, name FROM effect_sql_migrations`;
+  const manifestNames = new Map<number, string>(migrationEntries.map(([id, name]) => [id, name]));
+  const divergent = recorded.flatMap((row) => {
+    const expected = manifestNames.get(row.migration_id);
+    if (expected === undefined) {
+      return [`${row.migration_id}:${row.name} (unknown to this build)`];
+    }
+    return expected === row.name || isKnownForkDivergence(row.migration_id, row.name)
+      ? []
+      : [`${row.migration_id}:${row.name} (this build: ${expected})`];
+  });
+  if (divergent.length > 0) {
+    yield* Effect.logWarning(
+      "Database migration history diverges from this build; recorded migration ids are skipped, not reconciled by name.",
+    ).pipe(Effect.annotateLogs({ divergent }));
+  }
   return executedMigrations;
 });

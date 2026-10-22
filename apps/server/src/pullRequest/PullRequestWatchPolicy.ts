@@ -3,6 +3,7 @@ import { Effect, Option, Schema } from "effect";
 import { StaveRpcRuntime } from "../stave/staveRpcHandlers.ts";
 import type {
   OrchestrationProjectShell,
+  OrchestrationV2ThreadShell,
   ProjectId,
   PullRequestRef,
   PullRequestWatch,
@@ -217,4 +218,30 @@ export function projectContainsWatch(
     if (target?.id === sourceId) return true;
   }
   return false;
+}
+
+/** Watch loops (monitors, background shells) alone keep a manager "monitoring". */
+const MONITOR_BACKGROUND_KINDS: ReadonlySet<string> = new Set(["monitor", "command"]);
+
+/**
+ * A managing thread's activity from its V2 shell: running work (an active run
+ * or agent background work) is "working", only watch loops are "monitoring",
+ * a thread never bound to a provider or whose last run failed is "offline".
+ */
+export function watchManagerActivity(
+  thread: Pick<
+    OrchestrationV2ThreadShell,
+    "status" | "activeRunId" | "activityRunStatus" | "activeProviderThreadId"
+  > & { readonly pendingBackgroundTasks?: OrchestrationV2ThreadShell["pendingBackgroundTasks"] },
+): "offline" | "working" | "monitoring" | "idle" {
+  if (thread.activeRunId !== null || thread.activityRunStatus != null) return "working";
+  if (
+    thread.activeProviderThreadId === null ||
+    thread.status === "failed" ||
+    thread.status === "interrupted"
+  )
+    return "offline";
+  const background = thread.pendingBackgroundTasks ?? [];
+  if (background.some((task) => !MONITOR_BACKGROUND_KINDS.has(task.kind))) return "working";
+  return background.length > 0 ? "monitoring" : "idle";
 }

@@ -30,9 +30,11 @@ const collapsiblePanelVariantClassName = {
 
 function CollapsiblePanel({
   className,
+  animate = true,
   variant = "default",
   ...props
 }: CollapsiblePrimitive.Panel.Props & {
+  animate?: boolean;
   variant?: keyof typeof collapsiblePanelVariantClassName;
 }) {
   // Reuses the local shadcn/Base UI panel; skip height travel for reduced motion.
@@ -40,7 +42,9 @@ function CollapsiblePanel({
   return (
     <CollapsiblePrimitive.Panel
       className={cn(
-        "h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-200 motion-reduce:transition-none data-ending-style:h-0 data-starting-style:h-0 data-open:data-ending-style:[height:var(--collapsible-panel-height)]",
+        "overflow-hidden",
+        animate &&
+          "h-(--collapsible-panel-height) transition-[height] duration-200 motion-reduce:transition-none data-ending-style:h-0 data-starting-style:h-0 data-open:data-ending-style:[height:var(--collapsible-panel-height)]",
         collapsiblePanelVariantClassName[variant],
         className,
       )}

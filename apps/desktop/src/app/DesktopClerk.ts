@@ -19,13 +19,6 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
-const isUserDataPathError = Schema.is(
-  Schema.Union([
-    DesktopAppIdentity.DesktopUserDataPathResolutionError,
-    DesktopAppIdentity.DesktopUserDataPathCreationError,
-  ]),
-);
-
 declare const __LECTURN_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
 
 export class DesktopClerkBridgeInitializationError extends Schema.TaggedError<DesktopClerkBridgeInitializationError>()(
@@ -101,31 +94,12 @@ export const make = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
   const shell = yield* ElectronShell.ElectronShell;
 
-  // Electron scopes the single-instance lock to the userData directory and
-  // creates that directory when the lock is acquired. On Windows and Linux,
-  // the SDK bridge takes the lock at creation; on macOS it does not acquire
-  // one. Set userData before the bridge and any renderer storage initialize.
-  // The profile must already point at the real
-  // directory here — under the default productName-derived path, acquiring
-  // the lock would create "Lecturn (Alpha)" and make the legacy-install
-  // detection in resolveUserDataPath match on fresh installs.
-  // An asynchronous stat or mkdir here can let Electron emit ready before
-  // createClerkBridge registers its scheme privileges.
-  const userDataPath = yield* Effect.try({
-    try: () =>
-      DesktopAppIdentity.resolveUserDataPathBeforeReady(environment, {
-        exists: NodeFS.existsSync,
-        makeDirectory: (path) => NodeFS.mkdirSync(path, { recursive: true }),
-      }),
-    catch: (cause) =>
-      isUserDataPathError(cause)
-        ? cause
-        : new DesktopClerkBridgeInitializationError({
-            stateDir: environment.stateDir,
-            isDevelopment: environment.isDevelopment,
-            cause,
-          }),
-  });
+  // The SDK bridge acquires Electron's profile-scoped single-instance lock
+  // (Windows/Linux), and Clerk's renderer storage lives in that profile, so
+  // userData must point at the real (or isolated LECTURN_HOME) profile first.
+  // Must not yield: the bridge registers a scheme Electron rejects once ready.
+  // main.ts provides the synchronous pre-ready FileSystem for this.
+  const userDataPath = yield* DesktopAppIdentity.resolveUserDataPath(environment);
   yield* electronApp.setPath("userData", userDataPath);
 
   const bridge = yield* Effect.acquireRelease(
@@ -231,5 +205,3 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(DesktopClerk, make);
-// @effect-diagnostics nodeBuiltinImport:off - profile setup must not yield before Clerk registers Electron scheme privileges.
-import * as NodeFS from "node:fs";

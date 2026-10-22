@@ -21,10 +21,14 @@ import {
   readContextualOrigins,
   recordContextualLineage,
 } from "../threadDecisions/DecisionContextualLineage.ts";
-import { ProviderService } from "../provider/Services/ProviderService.ts";
-import { ProviderUnsupportedError } from "../provider/Errors.ts";
+import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import { make, routineFollowup } from "./ContextualService.ts";
-import { applyContextualLifecycle } from "../orchestration/ContextualLifecycle.ts";
+import { applyFork } from "./ContextualLifecycle.ts";
+import {
+  clearV2Projection,
+  installLegacyProjectionMirror,
+} from "../threadDecisions/V2ProjectionTestFixtures.ts";
 import { nativeContextualFixture } from "./ContextualNativeTestFixture.ts";
 import { applyContextualSelection, contextualEvidenceCovered } from "./ContextualSelection.ts";
 import { contextualPacketText } from "./ContextualPacketText.ts";
@@ -133,6 +137,8 @@ const encode = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const fixture = (runtime?: ExtensionsRuntime["Service"]) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    yield* installLegacyProjectionMirror(sql);
+    yield* clearV2Projection(sql);
     for (const table of [
       "contextual_host_state",
       "contextual_project_settings",
@@ -397,20 +403,20 @@ const fixture = (runtime?: ExtensionsRuntime["Service"]) =>
     const resolvedInstances: C.ProviderInstanceId[] = [];
     const service = yield* make.pipe(
       Effect.provide(
-        Layer.mock(ProviderService)({
-          getInstanceInfo: (instanceId) => {
-            resolvedInstances.push(instanceId);
-            if (providerDriver === null)
-              return Effect.fail(new ProviderUnsupportedError({ provider: instanceId }));
-            const driverKind = C.ProviderDriverKind.make(providerDriver);
-            return Effect.succeed({
-              instanceId,
-              driverKind,
-              enabled: providerEnabled,
-              displayName: undefined,
-              continuationIdentity: { driverKind, continuationKey: "synthetic-provider" },
-            });
-          },
+        Layer.mock(ProviderInstanceRegistry)({
+          getInstance: (instanceId) =>
+            Effect.sync(() => {
+              resolvedInstances.push(instanceId);
+              if (providerDriver === null) return undefined;
+              const driverKind = C.ProviderDriverKind.make(providerDriver);
+              return {
+                instanceId,
+                driverKind,
+                enabled: providerEnabled,
+                displayName: undefined,
+                continuationIdentity: { driverKind, continuationKey: "synthetic-provider" },
+              } as unknown as ProviderInstance;
+            }),
         }),
       ),
       Effect.provideService(ContextualNotifications, notifications),
@@ -510,9 +516,11 @@ it.layer(SqlitePersistenceMemory)("Contextual service", (it) => {
         ["grok", true, "ready"],
         ["opencode", true, "ready"],
         ["antigravity", true, "ready"],
-        ["claude", true, "unsupported-provider"],
-        ["claudeAgent", true, "unsupported-provider"],
-        ["future-driver", true, "unsupported-provider"],
+        // V2 delivers the packet as orchestrator-owned turn input for every
+        // adapter, so drivers without a V1 receipt hook are supported too.
+        ["claude", true, "ready"],
+        ["claudeAgent", true, "ready"],
+        ["future-driver", true, "ready"],
         [null, true, "unavailable"],
         ["codex", false, "unavailable"],
       ] as const) {
@@ -1419,46 +1427,9 @@ it.layer(SqlitePersistenceMemory)("Contextual incremental corrections", (it) => 
           expectedRevision: 0,
         });
         assert.isNull(yield* f.repository.suppliedPacket(first.packetId!, child));
-        const childMessage = C.MessageId.make("child-message");
-        yield* applyContextualLifecycle(f.sql, {
-          type: "thread.forked",
-          sequence: 1,
-          eventId: C.EventId.make("fork"),
-          aggregateKind: "thread",
-          aggregateId: child,
-          occurredAt: at,
-          commandId: null,
-          causationEventId: null,
-          correlationId: null,
-          metadata: {},
-          payload: {
-            threadId: child,
-            forkedFrom: {
-              threadId,
-              turnId: C.TurnId.make("parent-turn"),
-              turnCount: 1,
-              messageId: null,
-            },
-            forkSource: null,
-            contextualMessageIdMap: [{ sourceId: first.task.messageId, targetId: childMessage }],
-            history: {
-              messages: [
-                {
-                  id: childMessage,
-                  role: "user",
-                  text: "Implement database storage",
-                  createdAt: at,
-                  updatedAt: at,
-                  turnId: null,
-                  streaming: false,
-                },
-              ],
-              activities: [],
-              proposedPlans: [],
-              turns: [],
-            },
-          },
-        });
+        // V2 forks resolve parent history lazily (no copied messages, no
+        // message map), so the child inherits the supply ledger conservatively.
+        yield* applyFork(f.sql, { parentThreadId: threadId, threadId: child });
         assert.isNull(yield* f.repository.packet(first.packetId!, child));
         const childTask = (submission: string) =>
           f.service.taskSnapshot({

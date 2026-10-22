@@ -35,7 +35,7 @@ const LISTED_PROJECTS_ATOM = Atom.make((get) =>
 const LISTED_THREAD_SHELLS_ATOM = Atom.make((get) =>
   listedThreadShells(
     get(environmentProjects.projectsAtom),
-    get(environmentThreadShells.threadShellsAtom),
+    get(environmentThreadShells.navigationThreadShellsAtom),
   ),
 ).pipe(Atom.withLabel("mobile-thread-shells:listed"));
 
@@ -78,9 +78,13 @@ export function useListedProjects(): ReadonlyArray<EnvironmentProject> {
   return useAtomValue(LISTED_PROJECTS_ATOM);
 }
 
-/** Thread shells for lists, without those of archived Stave spaces. */
+/** Navigation thread shells (no archived or subagent threads), without those of archived Stave spaces. */
 export function useListedThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
   return useAtomValue(LISTED_THREAD_SHELLS_ATOM);
+}
+
+export function useNavigationThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
+  return useAtomValue(environmentThreadShells.navigationThreadShellsAtom);
 }
 
 export function useProject(ref: ScopedProjectRef | null): EnvironmentProject | null {

@@ -13,10 +13,8 @@ interface CodexLaunchContext {
   readonly appServerArgs?: ReadonlyArray<string>;
 }
 
-/** Shared by the native session and its read-only MCP configuration inventory. */
-export const codexSpawnEnvironment = (
-  options: Pick<CodexLaunchContext, "homePath" | "environment">,
-) => {
+/** Spawn environment for the read-only MCP configuration inventory. */
+const codexSpawnEnvironment = (options: Pick<CodexLaunchContext, "homePath" | "environment">) => {
   const home = options.homePath ? expandHomePath(options.homePath) : undefined;
   return {
     env: { ...options.environment, ...(home ? { CODEX_HOME: home } : {}) },

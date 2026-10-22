@@ -11,6 +11,7 @@ import { Effect, Result } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { decisionSourceWindow } from "./DecisionSourceWindow.ts";
+import { clearV2Projection, installLegacyProjectionMirror } from "./V2ProjectionTestFixtures.ts";
 
 const projectId = ProjectId.make("source-project");
 const threadId = ThreadId.make("source-thread");
@@ -35,6 +36,8 @@ const evidence: DecisionEvidence = {
 };
 const fixture = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  yield* installLegacyProjectionMirror(sql);
+  yield* clearV2Projection(sql);
   for (const table of [
     "projection_thread_messages",
     "projection_threads",

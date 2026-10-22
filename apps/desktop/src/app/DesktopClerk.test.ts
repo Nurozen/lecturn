@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetchInEffect:off - Hosted handoff test uses a real localhost listener without an OpenAI account.
 import * as NodeHttp from "node:http";
+import * as NodePath from "@effect/platform-node/NodePath";
 import { codexAuthHandoffUrl, readCodexAuthDelivery } from "@lecturn/shared/codexAuthHandoff";
 import { EnvironmentId, ProviderInstanceId } from "@lecturn/contracts";
 import { HostProcessArguments } from "@lecturn/shared/hostProcess";
@@ -38,23 +39,37 @@ vi.mock("@clerk/electron/storage", () => ({
 
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
+import * as PlatformError from "effect/PlatformError";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import * as DesktopPreReadyFileSystem from "./DesktopPreReadyFileSystem.ts";
 
 const makeDesktopClerkLayer = (
   isDevelopment = true,
   events: string[] = [],
-  userDataPathOverride?: string,
-  shell: ElectronShell.ElectronShell["Service"] = {
-    openExternal: () => Effect.succeed(true),
-    openSystemSettings: () => Effect.succeed(false),
-    copyText: () => Effect.void,
-  },
+  options: {
+    readonly platform?: NodeJS.Platform;
+    readonly fileSystemLayer?: Layer.Layer<FileSystem.FileSystem>;
+    readonly userDataPathOverride?: string;
+    readonly shell?: ElectronShell.ElectronShell["Service"];
+  } = {},
 ) => {
+  const {
+    platform = "darwin",
+    fileSystemLayer = FileSystem.layerNoop({
+      exists: () => Effect.succeed(false),
+    }),
+    userDataPathOverride,
+    shell = {
+      openExternal: () => Effect.succeed(true),
+      openSystemSettings: () => Effect.succeed(false),
+      copyText: () => Effect.void,
+    },
+  } = options;
   mkdirSyncMock.mockImplementation((path: string, options: { recursive: boolean }) => {
     assert.equal(options.recursive, true);
     events.push(`makeDirectory:${path}`);
@@ -63,10 +78,8 @@ const makeDesktopClerkLayer = (
     stateDir: "/tmp/lecturn-state",
     isDevelopment,
     appDataDirectory: "/tmp/app-data",
+    platform,
     ...(userDataPathOverride !== undefined ? { userDataPathOverride } : {}),
-    userDataDirName: isDevelopment ? "lecturn-dev" : "lecturn",
-    legacyUserDataDirName: isDevelopment ? "Lecturn (Dev)" : "Lecturn (Alpha)",
-    path: { join: (...parts: ReadonlyArray<string>) => parts.join("/") },
   } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
 
   const electronApp = {
@@ -79,14 +92,11 @@ const makeDesktopClerkLayer = (
   return DesktopClerk.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        NodePath.layerPosix,
         Layer.succeed(DesktopEnvironment.DesktopEnvironment, environment),
         Layer.succeed(ElectronApp.ElectronApp, electronApp),
         Layer.succeed(ElectronShell.ElectronShell, shell),
-        FileSystem.layerNoop({
-          exists: () => Effect.die("Clerk startup must not perform asynchronous filesystem probes"),
-          makeDirectory: () =>
-            Effect.die("Clerk startup must not create its profile asynchronously"),
-        }),
+        fileSystemLayer,
       ),
     ),
   );
@@ -132,42 +142,73 @@ describe("DesktopClerk", () => {
     });
   });
 
-  it.effect("sets the isolated profile before creating the SDK bridge", () => {
-    const events: string[] = [];
-    storageMock.mockReturnValue(storageAdapter);
-    createClerkBridgeMock.mockImplementation(() => {
-      events.push("createClerkBridge");
-      return { cleanup: vi.fn(), isPrimaryInstance: true };
-    });
-
-    return Effect.gen(function* () {
-      yield* Effect.scoped(
-        Layer.build(makeDesktopClerkLayer(false, events, "/tmp/lecturn/userdata/electron")),
-      );
-      assert.deepEqual(events, [
+  it.each([
+    {
+      name: "packaged Windows",
+      isDevelopment: false,
+      platform: "win32" as const,
+      userDataPathOverride: undefined,
+      expected: ["setPath:userData:/tmp/app-data/lecturn-v2", "createClerkBridge"],
+    },
+    {
+      name: "development",
+      isDevelopment: true,
+      platform: "win32" as const,
+      userDataPathOverride: undefined,
+      expected: ["setPath:userData:/tmp/app-data/lecturn-dev", "createClerkBridge"],
+    },
+    {
+      name: "isolated LECTURN_HOME profile",
+      isDevelopment: false,
+      platform: "darwin" as const,
+      userDataPathOverride: "/tmp/lecturn/userdata/electron",
+      expected: [
         "makeDirectory:/tmp/lecturn/userdata/electron",
         "setPath:userData:/tmp/lecturn/userdata/electron",
         "createClerkBridge",
-      ]);
-      assert.deepEqual(storageMock.mock.calls, [[{ path: "/tmp/lecturn-state" }]]);
-      assert.deepEqual(createClerkBridgeMock.mock.calls, [
-        [
-          {
-            storage: storageAdapter,
-            passkeys: true,
-            renderer: { scheme: "lecturn", host: "app" },
-          },
-        ],
-      ]);
-    });
-  });
+      ],
+    },
+  ])(
+    "creates the bridge before startup can yield to the event loop ($name)",
+    ({ isDevelopment, platform, userDataPathOverride, expected }) => {
+      const events: string[] = [];
+      storageMock.mockReturnValue(storageAdapter);
+      createClerkBridgeMock.mockImplementation(() => {
+        events.push("createClerkBridge");
+        return { cleanup: vi.fn(), isPrimaryInstance: true };
+      });
+      // runSync throws if the layer ever suspends, which would let Electron emit
+      // ready before the bridge exists. main.ts provides the same FileSystem.
+      // oxlint-disable-next-line lecturn/no-manual-effect-runtime-in-tests -- The assertion IS that the layer builds synchronously; it.effect would mask a regression to async.
+      Effect.runSync(
+        Effect.scoped(
+          Layer.build(
+            makeDesktopClerkLayer(isDevelopment, events, {
+              platform,
+              fileSystemLayer: DesktopPreReadyFileSystem.layer,
+              ...(userDataPathOverride !== undefined ? { userDataPathOverride } : {}),
+            }),
+          ),
+        ),
+      );
+
+      assert.deepEqual(events, expected);
+      if (userDataPathOverride !== undefined) {
+        // Clerk storage stays in the Lecturn state dir; only Electron's profile is isolated.
+        assert.deepEqual(storageMock.mock.calls, [[{ path: "/tmp/lecturn-state" }]]);
+      }
+    },
+  );
 
   it.effect(
     "stops before configuring Electron or Clerk if synchronous profile creation fails",
     () => {
       const events: string[] = [];
-      const layer = makeDesktopClerkLayer(false, events, "/tmp/lecturn/userdata/electron");
-      const cause = new Error("permission denied");
+      const layer = makeDesktopClerkLayer(false, events, {
+        fileSystemLayer: DesktopPreReadyFileSystem.layer,
+        userDataPathOverride: "/tmp/lecturn/userdata/electron",
+      });
+      const cause = Object.assign(new Error("permission denied"), { code: "EACCES" });
       mkdirSyncMock.mockImplementation(() => {
         throw cause;
       });
@@ -176,7 +217,9 @@ describe("DesktopClerk", () => {
         const error = yield* Effect.scoped(Layer.build(layer)).pipe(Effect.flip);
         assert.instanceOf(error, DesktopAppIdentity.DesktopUserDataPathCreationError);
         assert.equal(error.path, "/tmp/lecturn/userdata/electron");
-        assert.strictEqual(error.cause, cause);
+        assert.instanceOf(error.cause, PlatformError.PlatformError);
+        assert.equal(error.cause.reason._tag, "PermissionDenied");
+        assert.strictEqual(error.cause.reason.cause, cause);
         assert.deepEqual(events, []);
         assert.equal(createClerkBridgeMock.mock.calls.length, 0);
       });
@@ -404,7 +447,7 @@ for (const entry of ["startup", "open-url"] as const) {
         assert.strictEqual(delivery?.flowId, request.flowId);
         assert.strictEqual(delivery?.returnUrl, request.returnUrl);
       }).pipe(
-        Effect.provide(makeDesktopClerkLayer(true, [], undefined, shell)),
+        Effect.provide(makeDesktopClerkLayer(true, [], { shell })),
         Effect.provideService(
           HostProcessArguments,
           entry === "startup" ? ["lecturn", link] : ["lecturn"],

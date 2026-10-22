@@ -3,6 +3,7 @@ import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@lecturn
 import { scopeThreadRef, scopedThreadKey } from "@lecturn/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/models";
 import { type Thread } from "../../types";
+import { makeThreadFixture } from "../../test-fixtures";
 import {
   planSidebarThreadDrop,
   resolveSidebarDropTarget,
@@ -21,30 +22,16 @@ function thread(
   id: string,
   overrides: Partial<EnvironmentThreadShell> = {},
 ): EnvironmentThreadShell {
-  return {
+  return makeThreadFixture({
     id: ThreadId.make(id),
     environmentId: EnvironmentId.make("work"),
     projectId: ProjectId.make("project"),
     title: id,
     modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    session: null,
-    latestUserMessageAt: null,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    hasActionableProposedPlan: false,
-    pullRequests: [],
     createdAt: "2026-03-09T10:00:00.000Z",
     updatedAt: "2026-03-09T10:00:00.000Z",
-    archivedAt: null,
-    settledAt: null,
-    settledOverride: null,
-    latestTurn: null,
-    branch: null,
-    worktreePath: null,
     ...overrides,
-  };
+  });
 }
 const key = (row: Pick<Thread, "id" | "environmentId">) =>
   scopedThreadKey(scopeThreadRef(row.environmentId, row.id));

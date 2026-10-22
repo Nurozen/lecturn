@@ -26,7 +26,7 @@
 
 ## `StaveWorkspaceReader`
 
-`apps/server/src/stave/StaveWorkspaceReader.ts` (service `t3/stave/StaveWorkspaceReader`),
+`apps/server/src/stave/StaveWorkspaceReader.ts` (service `lecturn/stave/StaveWorkspaceReader`),
 with the on-disk schema in `apps/server/src/stave/staveManifest.ts`.
 
 - `load(root)` reads exactly `<root>/.stave.yaml`. There is no walk-up, so a project nested
@@ -119,7 +119,7 @@ Defined in `packages/contracts/src/orchestration.ts`. `project.refresh` is a mem
 
 ## `StaveAdmission`
 
-`apps/server/src/stave/StaveAdmission.ts` (service `t3/stave/StaveAdmission`), built on the
+`apps/server/src/stave/StaveAdmission.ts` (service `lecturn/stave/StaveAdmission`), built on the
 reader. `check(input)` succeeds or fails with a typed refusal; it never fails for a non-Stave
 root.
 
@@ -173,7 +173,7 @@ archive, restore, destroy, and memory actions. Saga operations use the same regi
 
 ### `StaveBinary`
 
-`apps/server/src/stave/StaveBinary.ts` (service `t3/stave/StaveBinary`) locates the executable
+`apps/server/src/stave/StaveBinary.ts` (service `lecturn/stave/StaveBinary`) locates the executable
 and reports which source supplied it: `{ path, source, version, commit }` with `source` one of
 `settings | env | bootstrap | bundled | path`.
 
@@ -204,7 +204,7 @@ and reports which source supplied it: `{ path, source, version, commit }` with `
 
 ### `StaveCli`
 
-`apps/server/src/stave/StaveCli.ts` (service `t3/stave/StaveCli`) owns typed Stave command execution.
+`apps/server/src/stave/StaveCli.ts` (service `lecturn/stave/StaveCli`) owns typed Stave command execution.
 `StaveBinary` separately probes executable versions and command help. Every command is a typed method (`version`, `configShow`, `reposList`,
 `spaceList`, `spaceStatus`, `sagaList`, `sagaStatus`, `memoryProviders`, `memoryList`, and the
 mutation methods `setup`, `reposAdd`, `spaceInit/Create/Add/Remove/Sync/Retarget/Archive/Restore/Destroy`,
@@ -266,7 +266,7 @@ registry and its pre-flight refusals; `nested_project`, `archived_project`, and
 
 ### `StaveConfigReader` and `StaveRootsProvider`
 
-`apps/server/src/stave/StaveConfigReader.ts` (service `t3/stave/StaveConfigReader`) answers
+`apps/server/src/stave/StaveConfigReader.ts` (service `lecturn/stave/StaveConfigReader`) answers
 "where does Stave keep its things": `{ configPath, exists, root?, bareReposDir?, agentWorkDir?,
 defaultBase?, repos[], memory?, source }`.
 
@@ -364,7 +364,7 @@ implements `createSpace`, `registerRepo`, `removePartialSpace`, and `setup`. Pha
 
 ### `StaveOperations`
 
-`apps/server/src/stave/StaveOperations.ts` (service `t3/stave/StaveOperations`). Built **once**
+`apps/server/src/stave/StaveOperations.ts` (service `lecturn/stave/StaveOperations`). Built **once**
 per server process in `apps/server/src/server.ts` (`StaveOperations.layer`, over
 `ProcessRunner`) and handed to every per-socket RPC layer in `ws.ts` with `Layer.succeed`, so an
 operation is owned by the service's scope and outlives the WebSocket that started it (a

@@ -1,6 +1,6 @@
 import type {
   OrchestrationProjectShell,
-  OrchestrationThreadShell,
+  OrchestrationV2ThreadShell,
   PullRequestWatch,
   ThreadLinkedPullRequest,
 } from "@lecturn/contracts";
@@ -9,7 +9,7 @@ import { isRepositoryWatchManagerEligible } from "./repositoryScope.ts";
 
 /** Durable links remain explicit; inferred PRs require one editable Stave checkout. */
 export function resolveThreadPullRequestRef(
-  thread: Pick<OrchestrationThreadShell, "linkedPullRequest" | "branchPullRequest">,
+  thread: Pick<OrchestrationV2ThreadShell, "linkedPullRequest" | "branchPullRequest">,
   project: Pick<OrchestrationProjectShell, "workspaceRoot" | "stave"> | null,
 ) {
   if (thread.linkedPullRequest != null) return thread.linkedPullRequest;

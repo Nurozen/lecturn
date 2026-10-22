@@ -1,46 +1,63 @@
 import { it } from "@effect/vitest";
 import { expect } from "vite-plus/test";
 import {
+  type ApplicationStoredEvent,
   CommandId,
-  CorrelationId,
   EventId,
   MessageId,
   ProjectId,
   ProviderInstanceId,
+  RunId,
   SagaWorkbenchError,
   ThreadId,
 } from "@lecturn/contracts";
-import { Deferred, Effect, Fiber, Layer, PubSub, Stream } from "effect";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { DateTime, Deferred, Effect, Fiber, Layer, Queue, Stream } from "effect";
 import { emptyWorkflow } from "../persistence/Services/SagaWorkbenchRepository.ts";
-import { make } from "./SagaInferenceReactor.ts";
-import {
-  SagaWorkbenchService,
-  type PromptInferenceEvent,
-  type SagaInferenceRequest,
-} from "./SagaWorkbenchService.ts";
+import { make, promptInferenceEventOf } from "./SagaInferenceReactor.ts";
+import { SagaWorkbenchService, type SagaInferenceRequest } from "./SagaWorkbenchService.ts";
+import { StaveOrchestration } from "./StaveOrchestration.ts";
 
 const at = "2026-01-01T00:00:00.000Z";
 const threadId = ThreadId.make("thread");
-const event = (sequence: number): PromptInferenceEvent => ({
+const modelSelection = { instanceId: ProviderInstanceId.make("account"), model: "model" };
+/** A V2 `run.created` stored event: the user asked for a turn. */
+const event = (
+  sequence: number,
+  extra: { readonly restartContinuationOfRunId?: RunId } = {},
+): ApplicationStoredEvent => ({
   sequence,
-  eventId: EventId.make(`event-${sequence}`),
-  aggregateKind: "thread",
-  aggregateId: threadId,
-  type: "thread.turn-start-requested",
-  occurredAt: at,
   commandId: CommandId.make(`cmd-${sequence}`),
-  causationEventId: null,
-  correlationId: CorrelationId.make(`cmd-${sequence}`),
-  metadata: {},
-  payload: {
+  event: {
+    id: EventId.make(`event-${sequence}`),
     threadId,
-    messageId: MessageId.make(`message-${sequence}`),
-    createdAt: at,
-    runtimeMode: "full-access",
-    interactionMode: "default",
+    occurredAt: DateTime.makeUnsafe(at),
+    type: "run.created",
+    payload: {
+      id: RunId.make(`run-${sequence}`),
+      threadId,
+      ordinal: sequence,
+      providerInstanceId: modelSelection.instanceId,
+      modelSelection,
+      providerThreadId: null,
+      userMessageId: MessageId.make(`message-${sequence}`),
+      rootNodeId: null,
+      activeAttemptId: null,
+      status: "preparing",
+      requestedAt: DateTime.makeUnsafe(at),
+      startedAt: null,
+      completedAt: null,
+      checkpointId: null,
+      contextHandoffId: null,
+      ...extra,
+    },
   },
 });
+/** Mirrors the application log: events offered before the tail starts are still replayed. */
+const eventLog = (queue: Queue.Queue<ApplicationStoredEvent>) =>
+  Layer.mock(StaveOrchestration)({
+    latestSequence: Effect.succeed(0),
+    streamEvents: () => Stream.fromQueue(queue),
+  });
 const request = (sequence: number): SagaInferenceRequest => ({
   identity: {
     projectId: ProjectId.make("project"),
@@ -49,24 +66,36 @@ const request = (sequence: number): SagaInferenceRequest => ({
     createdAt: at,
   },
   threadId,
-  modelSelection: { instanceId: ProviderInstanceId.make("account"), model: "model" },
+  modelSelection,
   turns: [{ question: "Build", response: "Built" }],
   eventId: `event-${sequence}`,
   sequence,
 });
 
+it.effect("maps user-started runs to prompt events and skips server continuations", () =>
+  Effect.sync(() => {
+    expect(promptInferenceEventOf(event(4))).toEqual({
+      eventId: "event-4",
+      sequence: 4,
+      threadId,
+      messageId: "message-4",
+      modelSelection,
+    });
+    expect(
+      promptInferenceEventOf(event(5, { restartContinuationOfRunId: RunId.make("run-4") })),
+    ).toBeNull();
+  }),
+);
+
 it.effect("subscribes before returning and queues new prompts without waiting for generation", () =>
   Effect.gen(function* () {
-    const events = yield* PubSub.unbounded<PromptInferenceEvent>();
+    const events = yield* Queue.unbounded<ApplicationStoredEvent>();
     const release = yield* Deferred.make<void>();
     const entered = yield* Deferred.make<void>();
     const secondPrepared = yield* Deferred.make<void>();
     const generated: number[] = [];
     const dependencies = Layer.mergeAll(
-      Layer.mock(OrchestrationEngineService)({
-        latestSequence: Effect.succeed(0),
-        subscribeDomainEvents: PubSub.subscribe(events).pipe(Effect.map(Stream.fromSubscription)),
-      }),
+      eventLog(events),
       Layer.mock(SagaWorkbenchService)({
         preparePromptInference: (item) =>
           Effect.gen(function* () {
@@ -86,9 +115,9 @@ it.effect("subscribes before returning and queues new prompts without waiting fo
     );
     const reactor = yield* make.pipe(Effect.provide(dependencies));
     yield* reactor.start();
-    yield* PubSub.publish(events, event(1));
+    yield* Queue.offer(events, event(1));
     yield* Deferred.await(entered);
-    yield* PubSub.publish(events, event(2));
+    yield* Queue.offer(events, event(2));
     yield* Deferred.await(secondPrepared);
     expect(generated).toEqual([]);
     const drain = yield* Effect.forkChild(reactor.drainThrough(2));
@@ -100,13 +129,10 @@ it.effect("subscribes before returning and queues new prompts without waiting fo
 
 it.effect("one failed generation or ineligible prompt does not stop later updates", () =>
   Effect.gen(function* () {
-    const events = yield* PubSub.unbounded<PromptInferenceEvent>();
+    const events = yield* Queue.unbounded<ApplicationStoredEvent>();
     const generated: number[] = [];
     const dependencies = Layer.mergeAll(
-      Layer.mock(OrchestrationEngineService)({
-        latestSequence: Effect.succeed(0),
-        subscribeDomainEvents: PubSub.subscribe(events).pipe(Effect.map(Stream.fromSubscription)),
-      }),
+      eventLog(events),
       Layer.mock(SagaWorkbenchService)({
         preparePromptInference: (item) =>
           Effect.succeed(item.sequence === 2 ? null : request(item.sequence)),
@@ -124,9 +150,9 @@ it.effect("one failed generation or ineligible prompt does not stop later update
     );
     const reactor = yield* make.pipe(Effect.provide(dependencies));
     yield* reactor.start();
-    yield* PubSub.publish(events, event(1));
-    yield* PubSub.publish(events, event(2));
-    yield* PubSub.publish(events, event(3));
+    yield* Queue.offer(events, event(1));
+    yield* Queue.offer(events, event(2));
+    yield* Queue.offer(events, event(3));
     yield* reactor.drainThrough(3);
     expect(generated).toEqual([1, 3]);
   }),

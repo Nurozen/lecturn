@@ -64,6 +64,8 @@ export function shouldShowEnvironmentIndicator(input: {
 }
 
 export function shouldShowComposerContextStrip(input: {
+  isDraftHeroState: boolean;
+  persistInActiveThreads: boolean;
   hasActiveProject: boolean;
   isGitRepo: boolean;
   /** Stave space context remains useful without an editable Git repo. */
@@ -74,6 +76,7 @@ export function shouldShowComposerContextStrip(input: {
 }): boolean {
   return (
     input.hasActiveProject &&
+    (input.isDraftHeroState || input.persistInActiveThreads) &&
     (input.isGitRepo ||
       input.isStaveProject === true ||
       input.showEnvironmentIndicator ||
@@ -117,6 +120,13 @@ export function resolveLockedWorkspaceLabel(
 ): string {
   if (activeWorktreePath) return "Worktree";
   return effectiveEnvMode === "worktree" ? resolveEnvModeLabel("worktree") : "Local checkout";
+}
+
+export function resolveWorkspaceDisplayName(path: string | null): string | null {
+  if (!path) return null;
+  const normalizedPath = path.replace(/[\\/]+$/, "");
+  if (normalizedPath.length === 0) return path;
+  return normalizedPath.split(/[\\/]/).at(-1) ?? normalizedPath;
 }
 
 export interface PreviousWorktreeSeed {

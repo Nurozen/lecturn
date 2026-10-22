@@ -1,4 +1,8 @@
-import type { EnvironmentId, ServerProvider } from "@lecturn/contracts";
+import type {
+  EnvironmentId,
+  OrchestrationV2ProviderFailureClass,
+  ServerProvider,
+} from "@lecturn/contracts";
 import { ProviderDetectionRecovery } from "../ProviderDetectionProgress";
 import { isProviderExecutableError } from "../providerDetection";
 import { memo } from "react";
@@ -43,11 +47,13 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   onDismiss,
   environmentId,
   provider,
+  errorClass,
   chatGptUsageLimit = false,
 }: {
   error: string | null;
   environmentId?: EnvironmentId;
   provider?: ServerProvider | null;
+  errorClass?: OrchestrationV2ProviderFailureClass | null;
   onDismiss?: () => void;
   chatGptUsageLimit?: boolean;
 }) {
@@ -68,9 +74,10 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
       </div>
     );
   }
+  const variant = errorClass === "usage_limit" ? "warning" : "error";
   return (
     <div className="pointer-events-auto mx-auto w-fit max-w-[min(48rem,calc(100%-2rem))] pt-3">
-      <Alert variant="error" surface="glass" controlAlignment="first-line">
+      <Alert variant={variant} surface="glass" controlAlignment="first-line" data-variant={variant}>
         {chatGptUsageLimit ? (
           <OpenAI className="size-4 text-foreground!" aria-hidden="true" />
         ) : (
@@ -96,7 +103,7 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
             {chatGptUsageLimit ? <ChatGptUsageButton variant="default" size="sm" /> : null}
             {onDismiss ? (
               <Button variant="ghost" size="icon-xs" aria-label="Dismiss error" onClick={onDismiss}>
-                <XIcon className="text-destructive" />
+                <XIcon />
               </Button>
             ) : null}
           </AlertAction>

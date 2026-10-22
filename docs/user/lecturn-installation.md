@@ -20,7 +20,7 @@ For example, leave Lecturn Nightly running normally and launch a local test buil
 ```sh
 open -n /Applications/Lecturn.app \
   --env "LECTURN_HOME=$HOME/.lecturn-stave-test" \
-  --env T3CODE_DISABLE_AUTO_UPDATE=true
+  --env LECTURN_DISABLE_AUTO_UPDATE=true
 ```
 
 Use that command again when reopening the test build. It starts with its own projects, settings,

@@ -9,7 +9,6 @@ import {
   ProjectId,
   ThreadId,
   ThreadDecisionError,
-  type OrchestrationEvent,
   type ThreadDecisionScanInput,
   type ThreadDecisionScanResult,
   type DecisionJobState,
@@ -37,6 +36,8 @@ import {
   requireDecisionProject,
 } from "./DecisionRevisions.ts";
 import { DecisionSettingsRepository } from "./DecisionSettingsRepository.ts";
+import type { DecisionSourceEvent } from "./DecisionSourceEvents.ts";
+import { v2Messages } from "./V2ProjectionSources.ts";
 
 const boundedId = Schema.String.check(Schema.isMaxLength(256));
 /** Traversal continuation is data only; each consumer validates its versioned payload. */
@@ -256,7 +257,7 @@ export class DecisionJobRepository extends Context.Service<
   {
     readonly cursor: Effect.Effect<number, ThreadDecisionError>;
     readonly nextLeaseDelay: Effect.Effect<number | null, ThreadDecisionError>;
-    readonly processEvent: (event: OrchestrationEvent) => Effect.Effect<void, ThreadDecisionError>;
+    readonly processEvent: (event: DecisionSourceEvent) => Effect.Effect<void, ThreadDecisionError>;
     readonly get: (jobId: DecisionJobId) => Effect.Effect<DecisionJob | null, ThreadDecisionError>;
     readonly claim: (input: {
       owner: string;
@@ -416,62 +417,53 @@ export const make = Effect.gen(function* () {
     yield* coverage({ ...baseCoverage, state: "pending" });
   });
   const processEvent = Effect.fn("DecisionJobs.processEvent")(function* (
-    event: OrchestrationEvent,
+    event: DecisionSourceEvent,
   ) {
     if (event.sequence <= (yield* cursor)) return;
     const at = yield* instant;
-    if (event.type === "project.deleted") {
-      yield* settingsRepository.purge(event.payload.projectId, undefined, true);
-    } else if ("threadId" in event.payload) {
-      const threadId = event.payload.threadId;
+    if (event.kind === "project-deleted") {
+      yield* settingsRepository.purge(event.projectId, undefined, true);
+    } else if (event.kind !== "ignored") {
+      const threadId = event.threadId;
       const threads =
-        yield* sql<ThreadRow>`SELECT project_id,deleted_at,archived_at FROM projection_threads WHERE thread_id = ${threadId}`;
+        yield* sql<ThreadRow>`SELECT project_id,deleted_at,archived_at FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}`;
       const thread = threads[0];
       if (thread) {
         const projectId = ProjectId.make(thread.project_id);
         const state = yield* threadState(threadId, projectId);
-        if (
-          event.type === "thread.created" ||
-          event.type === "thread.forked" ||
-          event.type === "thread.imported" ||
-          event.type === "thread.reverted"
-        ) {
+        if (event.kind === "thread-generation") {
           if (event.sequence > state.generation_sequence) {
             const generation =
               state.source_generation +
-              (state.generation_sequence > 0 || event.type !== "thread.created" ? 1 : 0);
+              (state.generation_sequence > 0 || event.reason !== "created" ? 1 : 0);
             yield* sql`UPDATE decision_thread_state SET source_generation = ${generation}, generation_sequence = ${event.sequence}, activation_sequence = ${event.sequence}, updated_at = ${at} WHERE thread_id = ${threadId}`;
             yield* sql`UPDATE decision_jobs SET state = 'canceled', reason = 'source-changed', fence = fence + 1, lease_owner = NULL, lease_until = NULL, updated_at = ${at} WHERE thread_id = ${threadId} AND state NOT IN ('committed','no_match','canceled')`;
             yield* sql`UPDATE decision_coverage SET state = 'canceled', reason = 'source-changed', updated_at = ${at} WHERE thread_id = ${threadId} AND state IN ('pending','incomplete')`;
           }
-        } else if (event.type === "thread.deleted" || event.type === "thread.archived") {
-          yield* sql`UPDATE decision_jobs SET state = ${event.type === "thread.deleted" ? "canceled" : "waiting"}, reason = ${event.type}, fence = fence + 1, lease_owner = NULL, lease_until = NULL, updated_at = ${at} WHERE thread_id = ${threadId} AND state NOT IN ('committed','no_match','canceled')`;
-          if (event.type === "thread.deleted")
+        } else if (event.kind === "thread-deleted" || event.kind === "thread-archived") {
+          const reason = event.kind === "thread-deleted" ? "thread.deleted" : "thread.archived";
+          yield* sql`UPDATE decision_jobs SET state = ${event.kind === "thread-deleted" ? "canceled" : "waiting"}, reason = ${reason}, fence = fence + 1, lease_owner = NULL, lease_until = NULL, updated_at = ${at} WHERE thread_id = ${threadId} AND state NOT IN ('committed','no_match','canceled')`;
+          if (event.kind === "thread-deleted")
             yield* sql`UPDATE decision_coverage SET state = 'canceled', reason = 'thread.deleted', updated_at = ${at} WHERE thread_id = ${threadId} AND state IN ('pending','incomplete')`;
-        } else if (event.type === "thread.unarchived") {
+        } else if (event.kind === "thread-unarchived") {
           yield* sql`UPDATE decision_jobs SET state = 'queued', reason = NULL, updated_at = ${at} WHERE thread_id = ${threadId} AND state = 'waiting' AND reason = 'thread.archived'`;
-        } else if (
-          event.type === "thread.message-sent" &&
-          !event.payload.streaming &&
-          (event.payload.role === "user" || event.payload.role === "assistant") &&
-          thread.deleted_at === null
-        ) {
+        } else if (event.kind === "message-final" && thread.deleted_at === null) {
           const messages = yield* sql<{
             text: string;
             role: "user" | "assistant";
             created_at: string;
-          }>`SELECT text,role,created_at FROM projection_thread_messages WHERE thread_id = ${threadId} AND message_id = ${event.payload.messageId} AND is_streaming = 0 AND role IN ('user','assistant')`;
+          }>`SELECT text,role,created_at FROM ${v2Messages(sql)} m WHERE thread_id = ${threadId} AND message_id = ${event.messageId} AND is_streaming = 0 AND role IN ('user','assistant')`;
           const message = messages[0];
           if (message && message.text.trim().length > 0) {
             const sourceHash = decisionSourceHash(message.text);
             const prior = yield* sql<{
               source_hash: string;
               source_sequence: number;
-            }>`SELECT source_hash,source_sequence FROM decision_sources WHERE thread_id = ${threadId} AND message_id = ${event.payload.messageId} AND source_generation = ${state.source_generation}`;
+            }>`SELECT source_hash,source_sequence FROM decision_sources WHERE thread_id = ${threadId} AND message_id = ${event.messageId} AND source_generation = ${state.source_generation}`;
             // Repeated final events preserve the first occurrence order and cannot enqueue again.
             if (prior[0]?.source_hash !== sourceHash) {
               const sequence = prior[0]?.source_sequence ?? event.sequence;
-              yield* sql`INSERT INTO decision_sources(thread_id,message_id,source_generation,project_id,source_hash,source_sequence,role,created_at) VALUES (${threadId},${event.payload.messageId},${state.source_generation},${projectId},${sourceHash},${sequence},${message.role},${message.created_at}) ON CONFLICT(thread_id,message_id,source_generation) DO UPDATE SET source_hash = excluded.source_hash`;
+              yield* sql`INSERT INTO decision_sources(thread_id,message_id,source_generation,project_id,source_hash,source_sequence,role,created_at) VALUES (${threadId},${event.messageId},${state.source_generation},${projectId},${sourceHash},${sequence},${message.role},${message.created_at}) ON CONFLICT(thread_id,message_id,source_generation) DO UPDATE SET source_hash = excluded.source_hash`;
               const settings =
                 yield* sql<SettingsRow>`SELECT * FROM decision_project_settings WHERE project_id = ${projectId}`;
               const config = settings[0];
@@ -486,7 +478,7 @@ export const make = Effect.gen(function* () {
                   threadId,
                   generation: state.source_generation,
                   sequence,
-                  messageId: event.payload.messageId,
+                  messageId: event.messageId,
                   sourceHash,
                   settings: config,
                   pauseEpoch: state.pause_epoch,
@@ -494,7 +486,7 @@ export const make = Effect.gen(function* () {
                 });
                 if (state.tracking_override !== "paused") {
                   const unresolved =
-                    yield* sql<JobRow>`SELECT * FROM decision_jobs WHERE thread_id = ${threadId} AND source_generation = ${state.source_generation} AND cancellation_epoch = ${config.cancellation_epoch} AND state = 'incomplete' AND reason = 'needs-context' AND source_message_id <> ${event.payload.messageId} ORDER BY through_sequence DESC LIMIT 8`;
+                    yield* sql<JobRow>`SELECT * FROM decision_jobs WHERE thread_id = ${threadId} AND source_generation = ${state.source_generation} AND cancellation_epoch = ${config.cancellation_epoch} AND state = 'incomplete' AND reason = 'needs-context' AND source_message_id <> ${event.messageId} ORDER BY through_sequence DESC LIMIT 8`;
                   for (const row of unresolved) {
                     const job = yield* decodeJob(row);
                     if (job.stage.contextRefreshCount >= 1) continue;
@@ -523,11 +515,14 @@ export const make = Effect.gen(function* () {
             }
           }
         }
-      } else if (event.type === "thread.deleted") {
+      } else if (event.kind === "thread-deleted") {
         yield* sql`UPDATE decision_jobs SET state = 'canceled', reason = 'thread.deleted', fence = fence + 1, lease_owner = NULL, lease_until = NULL, updated_at = ${at} WHERE thread_id = ${threadId} AND state NOT IN ('committed','no_match','canceled')`;
         yield* sql`UPDATE decision_coverage SET state = 'canceled',reason = 'thread.deleted',updated_at = ${at} WHERE thread_id = ${threadId} AND state IN ('pending','incomplete')`;
       }
-      if (event.type === "thread.deleted" || event.type === "thread.reverted") {
+      if (
+        event.kind === "thread-deleted" ||
+        (event.kind === "thread-generation" && event.reason === "reverted")
+      ) {
         const scans = yield* sql<{
           id: string;
           project_id: string;
@@ -555,7 +550,7 @@ export const make = Effect.gen(function* () {
     const settings =
       yield* sql<SettingsRow>`SELECT * FROM decision_project_settings WHERE project_id = ${job.projectId}`;
     const thread =
-      yield* sql<ThreadRow>`SELECT * FROM projection_threads WHERE thread_id = ${job.threadId} AND project_id = ${job.projectId}`;
+      yield* sql<ThreadRow>`SELECT * FROM orchestration_v2_projection_threads WHERE thread_id = ${job.threadId} AND project_id = ${job.projectId}`;
     const state = yield* threadState(job.threadId, job.projectId);
     if (
       settings[0]?.enabled !== 1 ||
@@ -612,7 +607,7 @@ export const make = Effect.gen(function* () {
     if (reusable.length > 0) yield* notify;
     const rows = yield* sql<JobRow>`SELECT j.* FROM decision_jobs j
       JOIN projection_projects p ON p.project_id = j.project_id AND p.deleted_at IS NULL
-      JOIN projection_threads t ON t.thread_id = j.thread_id AND t.project_id = j.project_id AND t.deleted_at IS NULL AND t.archived_at IS NULL
+      JOIN orchestration_v2_projection_threads t ON t.thread_id = j.thread_id AND t.project_id = j.project_id AND t.deleted_at IS NULL AND t.archived_at IS NULL
       JOIN decision_project_settings ps ON ps.project_id = j.project_id AND ps.enabled = 1 AND ps.cancellation_epoch = j.cancellation_epoch
       JOIN decision_thread_state ts ON ts.thread_id = j.thread_id AND ts.source_generation = j.source_generation
       WHERE (j.state = 'queued' OR (j.state IN ('detecting','localizing','writing') AND j.lease_until <= ${at}))
@@ -663,7 +658,7 @@ export const make = Effect.gen(function* () {
       JOIN decision_scans scan ON c.consumer_id = 'scan:' || scan.id AND scan.prepared = 1 AND scan.state IN ('queued','running','incomplete')
       JOIN decision_project_settings ps ON ps.project_id = c.project_id AND ps.enabled = 1 AND ps.cancellation_epoch = scan.project_cancellation_epoch
       JOIN projection_projects p ON p.project_id = c.project_id AND p.deleted_at IS NULL
-      JOIN projection_threads t ON t.thread_id = c.thread_id AND t.project_id = c.project_id AND t.deleted_at IS NULL AND t.archived_at IS NULL
+      JOIN orchestration_v2_projection_threads t ON t.thread_id = c.thread_id AND t.project_id = c.project_id AND t.deleted_at IS NULL AND t.archived_at IS NULL
       JOIN decision_thread_state ts ON ts.thread_id = c.thread_id AND ts.source_generation = c.source_generation
       WHERE c.state = 'unscanned' AND c.reason = 'backlog' AND c.source_message_id <> '' AND c.source_hash IS NOT NULL`;
     const projects = yield* sql<{ project_id: string }>`SELECT DISTINCT c.project_id ${eligible}
@@ -699,7 +694,7 @@ export const make = Effect.gen(function* () {
       scans.add(scanId);
       const messages = yield* sql<{
         text: string;
-      }>`SELECT text FROM projection_thread_messages WHERE thread_id = ${row.thread_id} AND message_id = ${row.source_message_id} AND is_streaming = 0`;
+      }>`SELECT text FROM ${v2Messages(sql)} m WHERE thread_id = ${row.thread_id} AND message_id = ${row.source_message_id} AND is_streaming = 0`;
       if (!messages[0] || decisionSourceHash(messages[0].text) !== row.source_hash) {
         yield* sql`UPDATE decision_coverage SET reason = 'source-changed',updated_at = ${yield* instant}
           WHERE consumer_id = ${"scan:" + scanId} AND thread_id = ${row.thread_id} AND source_generation = ${row.source_generation} AND source_message_id = ${row.source_message_id}`;
@@ -822,7 +817,7 @@ export const make = Effect.gen(function* () {
       role: "user" | "assistant";
       text: string;
       created_at: string;
-    }>`SELECT m.thread_id,m.message_id,m.role,m.text,m.created_at FROM projection_thread_messages m JOIN projection_threads t ON t.thread_id = m.thread_id AND t.project_id = ${projectId} AND t.deleted_at IS NULL AND t.archived_at IS NULL JOIN projection_projects p ON p.project_id = t.project_id AND p.deleted_at IS NULL WHERE m.is_streaming = 0 AND m.role IN ('user','assistant') AND length(trim(m.text)) > 0 AND ${threadId ? sql`m.thread_id = ${threadId}` : sql`1 = 1`} AND (m.thread_id > ${afterThread} OR (m.thread_id = ${afterThread} AND m.message_id > ${afterMessage})) ORDER BY m.thread_id,m.message_id LIMIT 200`;
+    }>`SELECT m.thread_id,m.message_id,m.role,m.text,m.created_at FROM ${v2Messages(sql)} m JOIN orchestration_v2_projection_threads t ON t.thread_id = m.thread_id AND t.project_id = ${projectId} AND t.deleted_at IS NULL AND t.archived_at IS NULL JOIN projection_projects p ON p.project_id = t.project_id AND p.deleted_at IS NULL WHERE m.is_streaming = 0 AND m.role IN ('user','assistant') AND length(trim(m.text)) > 0 AND ${threadId ? sql`m.thread_id = ${threadId}` : sql`1 = 1`} AND (m.thread_id > ${afterThread} OR (m.thread_id = ${afterThread} AND m.message_id > ${afterMessage})) ORDER BY m.thread_id,m.message_id LIMIT 200`;
   });
   const snapshot = Effect.fn("DecisionJobs.scanSnapshot")(function* (
     projectId: ProjectId,
@@ -1097,7 +1092,7 @@ export const make = Effect.gen(function* () {
   }) {
     yield* requireDecisionProject(sql, input.projectId);
     const context = Math.min(10, Math.max(0, input.contextMessages ?? 2));
-    const sourceFrom = sql`FROM decision_sources s JOIN projection_thread_messages m ON m.thread_id = s.thread_id AND m.message_id = s.message_id AND m.is_streaming = 0 JOIN projection_threads t ON t.thread_id = m.thread_id AND t.project_id = ${input.projectId} AND t.deleted_at IS NULL WHERE s.project_id = ${input.projectId} AND s.thread_id = ${input.threadId} AND s.source_generation = ${input.sourceGeneration}`;
+    const sourceFrom = sql`FROM decision_sources s JOIN ${v2Messages(sql)} m ON m.thread_id = s.thread_id AND m.message_id = s.message_id AND m.is_streaming = 0 JOIN orchestration_v2_projection_threads t ON t.thread_id = m.thread_id AND t.project_id = ${input.projectId} AND t.deleted_at IS NULL WHERE s.project_id = ${input.projectId} AND s.thread_id = ${input.threadId} AND s.source_generation = ${input.sourceGeneration}`;
     const columns = sql`m.message_id,m.thread_id,m.role,m.text,m.created_at,s.source_sequence,s.source_generation,s.source_hash`;
     const targets =
       yield* sql<SourceRow>`SELECT ${columns} ${sourceFrom} AND ${input.messageId ? sql`m.message_id = ${input.messageId}` : sql`s.source_sequence >= ${input.fromSequence} AND s.source_sequence <= ${input.throughSequence}`} ORDER BY s.source_sequence,m.created_at,m.message_id LIMIT 21`;

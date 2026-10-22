@@ -14,6 +14,7 @@ import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopAssets from "./DesktopAssets.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import * as DesktopUserData from "./DesktopUserData.ts";
 
 const defaultEnvironmentInput = {
   dirname: "/repo/apps/desktop/dist-electron",
@@ -125,6 +126,7 @@ const withIdentity = <A, E, R>(
   return effect.pipe(
     Effect.provide(
       DesktopAppIdentity.layer.pipe(
+        Layer.provide(NodePath.layerPosix),
         Layer.provideMerge(
           FileSystem.layerNoop({
             makeDirectory: input.makeDirectory ?? (() => Effect.void),
@@ -132,7 +134,7 @@ const withIdentity = <A, E, R>(
               input.legacyPathProbeError
                 ? Effect.fail(input.legacyPathProbeError)
                 : Effect.succeed(
-                    input.legacyPathExists === true && path.includes("Lecturn (Alpha)"),
+                    input.legacyPathExists === true && /Lecturn \((Alpha|Dev)\)/.test(path),
                   ),
             readFileString: () =>
               Effect.succeed(input.packageJson ?? '{"lecturnCommitHash":"abcdef1234567890"}'),
@@ -147,27 +149,30 @@ const withIdentity = <A, E, R>(
 };
 
 describe("DesktopAppIdentity", () => {
-  it.effect(
-    "uses the same profile before and after ready for explicit, default, and legacy homes",
-    () =>
-      Effect.gen(function* () {
-        for (const home of [undefined, "   ", "/tmp/lecturn-test"]) {
-          for (const legacyPathExists of [false, true]) {
+  it.effect("Clerk's pre-ready resolution matches the app identity profile for every home", () =>
+    Effect.gen(function* () {
+      for (const home of [undefined, "   ", "/tmp/lecturn-test"]) {
+        for (const legacyPathExists of [false, true]) {
+          for (const devServer of [undefined, "http://localhost:5173"]) {
             yield* withIdentity(
               Effect.gen(function* () {
                 const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
                 const environment = yield* DesktopEnvironment.DesktopEnvironment;
-                const beforeReady = DesktopAppIdentity.resolveUserDataPathBeforeReady(environment, {
-                  exists: () => legacyPathExists,
-                  makeDirectory: () => {},
-                });
+                // DesktopClerk calls this same function before Electron is ready.
+                const beforeReady = yield* DesktopAppIdentity.resolveUserDataPath(environment).pipe(
+                  Effect.provide(NodePath.layerPosix),
+                );
                 assert.equal(beforeReady, yield* identity.resolveUserDataPath);
               }),
-              { environment: { env: { LECTURN_HOME: home } }, legacyPathExists },
+              {
+                environment: { env: { LECTURN_HOME: home, VITE_DEV_SERVER_URL: devServer } },
+                legacyPathExists,
+              },
             );
           }
         }
-      }),
+      }
+    }),
   );
 
   it.effect("isolates explicit homes from each other and existing legacy profiles", () =>
@@ -238,25 +243,41 @@ describe("DesktopAppIdentity", () => {
           }),
           { environment: { env: { LECTURN_HOME: home } } },
         );
-        assert.equal(userDataPath, "/Users/alice/Library/Application Support/lecturn");
+        assert.equal(userDataPath, "/Users/alice/Library/Application Support/lecturn-v2");
       }
     }),
   );
 
-  it.effect("keeps using the legacy userData path when it already exists", () =>
+  it.effect("isolates the V2 profile even when the legacy profile exists", () =>
     withIdentity(
       Effect.gen(function* () {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
         const userDataPath = yield* identity.resolveUserDataPath;
 
-        assert.equal(userDataPath, "/Users/alice/Library/Application Support/Lecturn (Alpha)");
+        assert.equal(userDataPath, "/Users/alice/Library/Application Support/lecturn-v2");
       }),
       { legacyPathExists: true },
     ),
   );
 
+  it.effect("keeps using the legacy development profile", () =>
+    withIdentity(
+      Effect.gen(function* () {
+        const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
+        assert.equal(
+          yield* identity.resolveUserDataPath,
+          "/Users/alice/Library/Application Support/Lecturn (Dev)",
+        );
+      }),
+      {
+        legacyPathExists: true,
+        environment: { env: { VITE_DEV_SERVER_URL: "http://localhost:5173" } },
+      },
+    ),
+  );
+
   it.effect("preserves failures while inspecting the legacy userData path", () => {
-    const legacyPath = "/Users/alice/Library/Application Support/Lecturn (Alpha)";
+    const legacyPath = "/Users/alice/Library/Application Support/Lecturn (Dev)";
     const cause = PlatformError.systemError({
       _tag: "PermissionDenied",
       module: "FileSystem",
@@ -270,15 +291,18 @@ describe("DesktopAppIdentity", () => {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
         const error = yield* identity.resolveUserDataPath.pipe(Effect.flip);
 
-        assert.instanceOf(error, DesktopAppIdentity.DesktopUserDataPathResolutionError);
-        assert.equal(error.legacyPath, legacyPath);
+        assert.instanceOf(error, DesktopUserData.DesktopUserDataInitializationError);
+        assert.equal(error.resourcePath, legacyPath);
         assert.strictEqual(error.cause, cause);
         assert.equal(
           error.message,
-          `Failed to inspect legacy desktop user-data path at "${legacyPath}".`,
+          `Could not initialize Electron user data during inspect at ${legacyPath} (PermissionDenied).`,
         );
       }),
-      { legacyPathProbeError: cause },
+      {
+        legacyPathProbeError: cause,
+        environment: { env: { VITE_DEV_SERVER_URL: "http://localhost:5173" } },
+      },
     );
   });
 

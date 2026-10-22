@@ -14,12 +14,18 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { make } from "./ContextualRepository.ts";
 import { make as makeSettings } from "./ContextualSettings.ts";
+import {
+  clearV2Projection,
+  installLegacyProjectionMirror,
+} from "../threadDecisions/V2ProjectionTestFixtures.ts";
 
 const projectId = ProjectId.make("contextual-project");
 const threadId = ThreadId.make("contextual-thread");
 const now = "2026-09-25T00:00:00.000Z";
 const fixture = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  yield* installLegacyProjectionMirror(sql);
+  yield* clearV2Projection(sql);
   for (const table of [
     "contextual_preparations",
     "contextual_turn_queue",

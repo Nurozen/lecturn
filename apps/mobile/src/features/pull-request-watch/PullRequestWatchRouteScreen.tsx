@@ -12,7 +12,7 @@ import {
   mergeHandoffMessage,
   selectMergeHandoffThread,
 } from "@lecturn/client-runtime/state/pullRequestHandoff";
-import { useThreadDetail } from "../../state/queries";
+import { useThreadProjection } from "../../state/use-thread-detail";
 import {
   activityVisualColor,
   activityVisualState,
@@ -230,10 +230,10 @@ function PullRequestWatchControls({
   const manager = useThreadShell(
     watch?.managerThreadId ? { environmentId, threadId: watch.managerThreadId } : null,
   );
-  const managerDetail = useThreadDetail(
-    focused && connected && authenticated && manager ? environmentId : null,
-    focused && connected && authenticated ? (manager?.id ?? null) : null,
-  );
+  const managerDetail = useThreadProjection({
+    environmentId: focused && connected && authenticated && manager ? environmentId : null,
+    threadId: focused && connected && authenticated ? (manager?.id ?? null) : null,
+  });
   const runCommand = useAtomCommand(pullRequestWatchEnvironment.command, { reportFailure: false });
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -360,9 +360,7 @@ function PullRequestWatchControls({
       )
     : null;
   const managerProvider = config?.providers.find(
-    (provider) =>
-      provider.instanceId ===
-      (manager?.session?.providerInstanceId ?? manager?.modelSelection.instanceId),
+    (provider) => provider.instanceId === manager?.providerInstanceId,
   );
   const managerVisualState = activityVisualState({
     status: !connected
@@ -371,7 +369,7 @@ function PullRequestWatchControls({
         ? "approval"
         : manager?.hasPendingUserInput
           ? "needs input"
-          : (manager?.session?.status ?? watch?.managerStatus ?? "idle"),
+          : (manager?.runtime?.status ?? watch?.managerStatus ?? "idle"),
     settled: manager?.settledOverride === "settled",
   });
   const prVisualState = activityVisualState({
@@ -383,7 +381,7 @@ function PullRequestWatchControls({
           observation?.checksState ?? "unknown",
           manager?.hasPendingApprovals ? "approval" : "",
           manager?.hasPendingUserInput ? "needs input" : "",
-          manager?.session?.status ??
+          manager?.runtime?.status ??
             (watch?.managerStatus === "offline" ? "idle" : (watch?.managerStatus ?? "idle")),
         ].join(" "),
     checks: observation?.checks ?? [],
@@ -521,7 +519,7 @@ function PullRequestWatchControls({
                 </Text>
               </Pressable>
               <Text className="text-sm text-foreground-muted" numberOfLines={3}>
-                {threadActivityExcerpt(manager, managerDetail.data?.messages)}
+                {threadActivityExcerpt(manager, managerDetail?.projection.messages)}
               </Text>
             </WatchActivityFrame>
           ) : null}
@@ -544,7 +542,7 @@ function PullRequestWatchControls({
                 </Text>
               </View>
               <Text className="text-foreground-muted">
-                {describeThreadActivity(manager, managerDetail.data?.messages)}
+                {describeThreadActivity(manager, managerDetail?.projection.messages)}
               </Text>
               <TextInput
                 accessibilityLabel="Instructions for managing thread"
@@ -763,7 +761,7 @@ function PullRequestWatchControls({
             ) : null}
             {manager ? (
               <Text className="text-foreground-muted">
-                {describeThreadActivity(manager, managerDetail.data?.messages)}
+                {describeThreadActivity(manager, managerDetail?.projection.messages)}
               </Text>
             ) : null}
             <Text className="text-xs text-foreground-muted">

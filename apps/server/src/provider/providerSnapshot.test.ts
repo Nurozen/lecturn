@@ -16,21 +16,20 @@ import {
   providerModelsFromSettings,
   spawnAndCollect,
 } from "./providerSnapshot.ts";
-import { CLAUDE_ADAPTER_CAPABILITIES } from "./Layers/ClaudeAdapter.ts";
-import { CLAUDE_PRESENTATION } from "./Layers/ClaudeProvider.ts";
-import { CODEX_ADAPTER_CAPABILITIES } from "./Layers/CodexAdapter.ts";
-import { CODEX_PRESENTATION } from "./Layers/CodexProvider.ts";
-import { CURSOR_ADAPTER_CAPABILITIES } from "./Layers/CursorAdapter.ts";
-import { CURSOR_PRESENTATION } from "./Layers/CursorProvider.ts";
-import { GROK_ADAPTER_CAPABILITIES } from "./Layers/GrokAdapter.ts";
-import { GROK_PRESENTATION } from "./Layers/GrokProvider.ts";
-import { COPILOT_ADAPTER_CAPABILITIES } from "./Layers/CopilotAdapter.ts";
-import { COPILOT_PRESENTATION } from "./Layers/CopilotProvider.ts";
-import { OPENCODE_ADAPTER_CAPABILITIES } from "./Layers/OpenCodeAdapter.ts";
-import { OPENCODE_PRESENTATION } from "./Layers/OpenCodeProvider.ts";
-
-import { ANTIGRAVITY_ADAPTER_CAPABILITIES } from "./Layers/AntigravityAdapter.ts";
+import { AntigravityProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/AntigravityAdapterV2.ts";
+import { ClaudeProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
+import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
+import { CopilotProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CopilotAdapterV2.ts";
+import { CursorProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CursorAdapterV2.ts";
+import { GrokProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/GrokAdapterV2.ts";
+import { OpenCodeProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/OpenCodeAdapterV2.ts";
 import { ANTIGRAVITY_PRESENTATION } from "./Layers/AntigravityProvider.ts";
+import { CLAUDE_PRESENTATION } from "./Layers/ClaudeProvider.ts";
+import { CODEX_PRESENTATION } from "./Layers/CodexProvider.ts";
+import { COPILOT_PRESENTATION } from "./Layers/CopilotProvider.ts";
+import { CURSOR_PRESENTATION } from "./Layers/CursorProvider.ts";
+import { GROK_PRESENTATION } from "./Layers/GrokProvider.ts";
+import { OPENCODE_PRESENTATION } from "./Layers/OpenCodeProvider.ts";
 
 const OPENCODE_CUSTOM_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [
@@ -197,40 +196,38 @@ describe("ProviderCommandNotFoundError", () => {
 });
 
 describe("conversationFork capability/presentation parity", () => {
+  // Presentation says "native" exactly when the orchestration adapter forks the
+  // provider thread itself; every other provider forks through a portable handoff.
   const drivers = [
     {
       driver: "antigravity",
-      capabilities: ANTIGRAVITY_ADAPTER_CAPABILITIES,
+      capabilities: AntigravityProviderCapabilitiesV2,
       presentation: ANTIGRAVITY_PRESENTATION,
     },
     {
       driver: "codex",
-      capabilities: CODEX_ADAPTER_CAPABILITIES,
+      capabilities: CodexProviderCapabilitiesV2,
       presentation: CODEX_PRESENTATION,
     },
     {
       driver: "claudeAgent",
-      capabilities: CLAUDE_ADAPTER_CAPABILITIES,
+      capabilities: ClaudeProviderCapabilitiesV2,
       presentation: CLAUDE_PRESENTATION,
     },
     {
       driver: "opencode",
-      capabilities: OPENCODE_ADAPTER_CAPABILITIES,
+      capabilities: OpenCodeProviderCapabilitiesV2,
       presentation: OPENCODE_PRESENTATION,
     },
     {
       driver: "cursor",
-      capabilities: CURSOR_ADAPTER_CAPABILITIES,
+      capabilities: CursorProviderCapabilitiesV2,
       presentation: CURSOR_PRESENTATION,
     },
-    {
-      driver: "grok",
-      capabilities: GROK_ADAPTER_CAPABILITIES,
-      presentation: GROK_PRESENTATION,
-    },
+    { driver: "grok", capabilities: GrokProviderCapabilitiesV2, presentation: GROK_PRESENTATION },
     {
       driver: "githubCopilot",
-      capabilities: COPILOT_ADAPTER_CAPABILITIES,
+      capabilities: CopilotProviderCapabilitiesV2,
       presentation: COPILOT_PRESENTATION,
     },
   ] as const;
@@ -238,7 +235,7 @@ describe("conversationFork capability/presentation parity", () => {
   it.each(drivers)(
     "$driver presentation matches the adapter capability",
     ({ capabilities, presentation }) => {
-      expect(presentation.conversationFork).toBe(capabilities.conversationFork);
+      expect(presentation.conversationFork === "native").toBe(capabilities.threads.canForkThread);
     },
   );
 
@@ -265,17 +262,10 @@ describe("conversationFork capability/presentation parity", () => {
 
   // Claude is the only provider without a positional fallback for anchor-less
   // turns, so it alone rejects mid-thread forks of pre-anchor history.
-  it.each(drivers)("$driver declares its fork anchor requirement", ({ driver, capabilities }) => {
-    expect(capabilities.conversationForkRequiresAnchor).toBe(driver === "claudeAgent");
+  it.each(drivers)("$driver declares its fork anchor requirement", ({ driver, presentation }) => {
+    expect(
+      "conversationForkRequiresAnchor" in presentation &&
+        presentation.conversationForkRequiresAnchor,
+    ).toBe(driver === "claudeAgent");
   });
-
-  it.each(drivers)(
-    "$driver exposes the anchor requirement consistently for message actions",
-    ({ presentation, capabilities }) => {
-      expect(
-        "conversationForkRequiresAnchor" in presentation &&
-          presentation.conversationForkRequiresAnchor,
-      ).toBe(capabilities.conversationForkRequiresAnchor);
-    },
-  );
 });

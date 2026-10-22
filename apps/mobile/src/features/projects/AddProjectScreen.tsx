@@ -739,7 +739,6 @@ export function useDispatchProjectCreate() {
           commandId: CommandId.make(uuidv4()),
           projectId,
           workspaceRoot: input.workspaceRoot,
-          createdAt: new Date().toISOString(),
           ...(input.title === undefined ? {} : { title: input.title }),
           ...(input.createWorkspaceRootIfMissing === undefined
             ? {}

@@ -10,7 +10,6 @@ import type * as Scope from "effect/Scope";
 import type * as CodexClient from "effect-codex-app-server/client";
 
 import { LECTURN_CODEX_CLIENT_NAME } from "../Layers/CodexProvider.ts";
-import { CodexResumeCursorSchema } from "../Layers/CodexSessionRuntime.ts";
 import type {
   ExternalSessionListing,
   ListExternalSessionsResult,
@@ -55,7 +54,6 @@ const CodexThreadListPage = Schema.Struct({
   nextCursor: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 const decodeCodexThreadListPage = Schema.decodeUnknownEffect(CodexThreadListPage);
-const isCodexResumeCursor = Schema.is(CodexResumeCursorSchema);
 
 type CodexThreadListClient = {
   readonly raw: Pick<CodexClient.CodexAppServerClient["Service"]["raw"], "request">;
@@ -177,9 +175,7 @@ export function makeCodexExternalSessionsLister<E>(options: {
           cwd: input.cwd,
           searchTerm: input.searchTerm,
           limit: input.limit,
-          knownThreadIds: new Set(
-            input.knownResumeCursors.filter(isCodexResumeCursor).map((cursor) => cursor.threadId),
-          ),
+          knownThreadIds: input.knownNativeSessionIds,
         }),
       ),
       Effect.scoped,

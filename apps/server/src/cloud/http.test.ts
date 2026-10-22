@@ -99,9 +99,9 @@ const unusedSecretStoreOperation = () => Effect.die("unused secret-store operati
 // Linking wakes the awareness relay; these tests do not run it.
 const idleAwarenessRelay = AgentAwarenessRelay.AgentAwarenessRelay.of({
   publishThread: () => Effect.void,
+  drain: Effect.void,
   requestCatchUp: () => Effect.void,
   start: () => Effect.void,
-  drain: Effect.void,
 });
 const decodeManagedTunnelRecoveryRegistration = Schema.decodeUnknownEffect(
   Schema.fromJsonString(RelayManagedEndpointRecoveryRegistrationRequest),

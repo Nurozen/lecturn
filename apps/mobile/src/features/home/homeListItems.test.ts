@@ -1,4 +1,5 @@
 import { buildPendingNewTasks } from "../../state/pending-new-tasks-model";
+import { makeThreadShellFixture } from "../../test-fixtures";
 import { threadMoveScopes } from "./threadMoveScopes";
 import type {
   EnvironmentProject,
@@ -51,7 +52,7 @@ function makeProject(id: string, title: string): EnvironmentProject {
 }
 
 function makeThread(id: string, projectId: ProjectId): EnvironmentThreadShell {
-  return {
+  return makeThreadShellFixture({
     environmentId,
     id: ThreadId.make(id),
     projectId,
@@ -61,19 +62,16 @@ function makeThread(id: string, projectId: ProjectId): EnvironmentThreadShell {
     interactionMode: "default",
     branch: null,
     worktreePath: null,
-    pullRequests: [],
-    latestTurn: null,
     createdAt: "2026-06-01T00:00:00.000Z",
     updatedAt: "2026-06-01T00:00:00.000Z",
     archivedAt: null,
     settledOverride: null,
     settledAt: null,
-    session: null,
     latestUserMessageAt: null,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
-  };
+  });
 }
 
 function makeGroup(key: string, threadCount: number): HomeThreadGroup {

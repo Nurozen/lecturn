@@ -2,8 +2,10 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@lecturn/client-runtime/state/shell";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@lecturn/contracts";
+import { EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
+
+import { makeThreadShellFixture } from "../test-fixtures";
 
 import { listedProjects, listedThreadShells } from "./listed-entities";
 
@@ -29,29 +31,12 @@ function makeProject(
 }
 
 function makeThread(id: string, project: EnvironmentProject): EnvironmentThreadShell {
-  return {
+  return makeThreadShellFixture({
     environmentId: project.environmentId,
     id: ThreadId.make(id),
     projectId: project.id,
     title: id,
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    branch: null,
-    worktreePath: null,
-    latestTurn: null,
-    createdAt: "2026-06-01T00:00:00.000Z",
-    updatedAt: "2026-06-01T00:00:00.000Z",
-    archivedAt: null,
-    session: null,
-    latestUserMessageAt: null,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    hasActionableProposedPlan: false,
-    settledOverride: null,
-    settledAt: null,
-    pullRequests: [],
-  };
+  });
 }
 
 describe("listed projects and threads", () => {

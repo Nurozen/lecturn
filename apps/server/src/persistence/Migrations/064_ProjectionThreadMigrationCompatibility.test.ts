@@ -1,18 +1,10 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeSqliteClient from "@lecturn/shared/nodeSqliteClient";
-import { ThreadId } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { runMigrations } from "../Migrations.ts";
-import { ProjectionThreadRepository } from "../Services/ProjectionThreads.ts";
-import { ProjectionThreadRepositoryLive } from "../Layers/ProjectionThreads.ts";
 import UpstreamMigration48 from "./048_ProjectionThreadBranchPullRequest.ts";
-
-const decodeJson = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const timestamp = "2026-09-06T00:00:00.000Z";
 const lineage = '{"threadId":"parent","turnId":"parent-turn","turnCount":1,"messageId":null}';
@@ -45,33 +37,24 @@ const assertCompatible = Effect.gen(function* () {
   }
   const turnColumns = yield* sql<{ readonly name: string }>`PRAGMA table_info(projection_turns)`;
   assert.ok(turnColumns.some((column) => column.name === "provider_turn_ref"));
-  assert.deepStrictEqual(yield* runMigrations(), []);
+  assert.deepStrictEqual(yield* runMigrations({ toMigrationInclusive: 69 }), []);
 });
 
 it.effect("creates a fresh schema with fork lineage and branch PR discovery", () =>
   Effect.gen(function* () {
-    const executed = yield* runMigrations();
+    const executed = yield* runMigrations({ toMigrationInclusive: 69 });
     assert.deepStrictEqual(executed.at(-1), [
       69,
       "ProjectionThreadsAutoSettleDisabledAtCompatibility",
     ]);
     yield* seedThread;
-    const repository = yield* ProjectionThreadRepository;
-    const upgraded = yield* repository.getById({ threadId: ThreadId.make("fixture-thread") });
-    assert.ok(Option.isSome(upgraded));
-    if (Option.isSome(upgraded)) {
-      assert.equal(upgraded.value.branchPullRequest, null);
-      assert.equal(upgraded.value.forkedFrom, null);
-      assert.equal(upgraded.value.forkSource, null);
-    }
+    const sql = yield* SqlClient.SqlClient;
+    assert.deepStrictEqual(
+      yield* sql`SELECT forked_from_json, fork_source_json, branch_pull_request_json FROM projection_threads`,
+      [{ forked_from_json: null, fork_source_json: null, branch_pull_request_json: null }],
+    );
     yield* assertCompatible;
-  }).pipe(
-    Effect.provide(
-      ProjectionThreadRepositoryLive.pipe(
-        Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
-      ),
-    ),
-  ),
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
 for (const throughId of [48, 49, 63, 64]) {
@@ -86,7 +69,7 @@ for (const throughId of [48, 49, 63, 64]) {
         yield* sql`UPDATE projection_turns SET provider_turn_ref = 'provider-anchor'`;
         const ledgerBefore = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
 
-        yield* runMigrations();
+        yield* runMigrations({ toMigrationInclusive: 69 });
         const ledgerAfter =
           yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= ${throughId} ORDER BY migration_id`;
         assert.deepStrictEqual(ledgerAfter, ledgerBefore);
@@ -104,22 +87,8 @@ for (const throughId of [48, 49, 63, 64]) {
         assert.deepStrictEqual(yield* sql`SELECT provider_turn_ref FROM projection_turns`, [
           { provider_turn_ref: "provider-anchor" },
         ]);
-        const repository = yield* ProjectionThreadRepository;
-        const upgraded = yield* repository.getById({ threadId: ThreadId.make("fixture-thread") });
-        assert.ok(Option.isSome(upgraded));
-        if (Option.isSome(upgraded)) {
-          assert.deepStrictEqual(upgraded.value.forkedFrom, decodeJson(lineage));
-          assert.deepStrictEqual(upgraded.value.forkSource, decodeJson(forkSource));
-          assert.equal(upgraded.value.branchPullRequest, null);
-        }
         yield* assertCompatible;
-      }).pipe(
-        Effect.provide(
-          ProjectionThreadRepositoryLive.pipe(
-            Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
-          ),
-        ),
-      ),
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 }
 
@@ -135,7 +104,7 @@ it.effect(
       yield* sql`UPDATE projection_threads SET branch_pull_request_json = ${pullRequest}`;
       const ledgerBefore = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
 
-      yield* runMigrations();
+      yield* runMigrations({ toMigrationInclusive: 69 });
       assert.deepStrictEqual(
         yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= 48 ORDER BY migration_id`,
         ledgerBefore,
@@ -154,20 +123,6 @@ it.effect(
       assert.deepStrictEqual(yield* sql`SELECT state, provider_turn_ref FROM projection_turns`, [
         { state: "completed", provider_turn_ref: null },
       ]);
-      const repository = yield* ProjectionThreadRepository;
-      const upgraded = yield* repository.getById({ threadId: ThreadId.make("fixture-thread") });
-      assert.ok(Option.isSome(upgraded));
-      if (Option.isSome(upgraded)) {
-        assert.deepStrictEqual(upgraded.value.branchPullRequest, decodeJson(pullRequest));
-        assert.equal(upgraded.value.forkedFrom, null);
-        assert.equal(upgraded.value.forkSource, null);
-      }
       yield* assertCompatible;
-    }).pipe(
-      Effect.provide(
-        ProjectionThreadRepositoryLive.pipe(
-          Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
-        ),
-      ),
-    ),
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );

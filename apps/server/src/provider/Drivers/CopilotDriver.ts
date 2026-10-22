@@ -13,19 +13,22 @@ import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
-import { ServerConfig } from "../../config.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
+import * as ServerConfig from "../../config.ts";
+import {
+  CopilotAdapterV2Driver,
+  type CopilotAdapterV2DriverEnv,
+} from "../../orchestration-v2/Adapters/CopilotAdapterV2.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import { StaveMemoryWiring } from "../../stave/StaveMemoryWiring.ts";
 import { makeCopilotTextGeneration } from "../../textGeneration/CopilotTextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
-import { makeCopilotAdapter } from "../Layers/CopilotAdapter.ts";
 import {
   buildInitialCopilotProviderSnapshot,
   checkCopilotProviderStatus,
   COPILOT_DETECTION_TIMEOUT_MS,
   enrichCopilotSnapshot,
 } from "../Layers/CopilotProvider.ts";
-import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
+import * as ProviderEventLoggers from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
   defaultProviderContinuationIdentity,
@@ -89,15 +92,16 @@ export const COPILOT_UPDATE_RESOLVER: ProviderMaintenanceCapabilitiesResolver = 
 
 export type CopilotDriverEnv =
   | StaveMemoryWiring
+  | CopilotAdapterV2DriverEnv
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
   | HttpClient.HttpClient
   | Path.Path
-  | ProviderEventLoggers
-  | ServerConfig
-  | ServerSettingsService;
+  | ProviderEventLoggers.ProviderEventLoggers
+  | ServerConfig.ServerConfig
+  | ServerSettings.ServerSettingsService;
 
 export const CopilotDriver: ProviderDriver<GithubCopilotSettings, CopilotDriverEnv> = {
   driverKind: DRIVER_KIND,
@@ -114,8 +118,7 @@ export const CopilotDriver: ProviderDriver<GithubCopilotSettings, CopilotDriverE
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
-      const serverSettings = yield* ServerSettingsService;
-      const eventLoggers = yield* ProviderEventLoggers;
+      const serverSettings = yield* ServerSettings.ServerSettingsService;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -140,12 +143,26 @@ export const CopilotDriver: ProviderDriver<GithubCopilotSettings, CopilotDriverE
         ),
       );
 
-      const adapter = yield* makeCopilotAdapter(effectiveConfig, {
-        staveMemoryWiring: yield* StaveMemoryWiring,
-        environment: processEnv,
-        ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+      const staveMemoryWiring = yield* StaveMemoryWiring;
+      const orchestrationAdapter = yield* CopilotAdapterV2Driver.create({
         instanceId,
-      });
+        displayName,
+        accentColor,
+        environment,
+        enabled,
+        config,
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER_KIND,
+              instanceId,
+              detail: "Failed to build GitHub Copilot orchestration adapter.",
+              cause,
+            }),
+        ),
+        Effect.provideService(StaveMemoryWiring, staveMemoryWiring),
+      );
       const textGeneration = yield* makeCopilotTextGeneration(effectiveConfig, processEnv);
 
       const checkProvider = checkCopilotProviderStatus(effectiveConfig, processEnv).pipe(
@@ -205,7 +222,7 @@ export const CopilotDriver: ProviderDriver<GithubCopilotSettings, CopilotDriverE
         accentColor,
         enabled,
         snapshot,
-        adapter,
+        orchestrationAdapter,
         textGeneration,
       } satisfies ProviderInstance;
     }),

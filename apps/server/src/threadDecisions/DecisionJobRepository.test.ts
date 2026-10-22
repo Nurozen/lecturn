@@ -1,13 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import {
-  CommandId,
-  DEFAULT_DECISION_TRACKING_DESCRIPTION,
-  EventId,
-  MessageId,
-  ProjectId,
-  ThreadId,
-  type OrchestrationEvent,
-} from "@lecturn/contracts";
+import { DEFAULT_DECISION_TRACKING_DESCRIPTION, ProjectId, ThreadId } from "@lecturn/contracts";
 import { Effect, Result } from "effect";
 import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -18,33 +10,29 @@ import {
   emptyDecisionJobStage,
   countDecisionUnscannedMessages,
 } from "./DecisionJobRepository.ts";
+import { decisionSourceEvent, type DecisionSourceEvent } from "./DecisionSourceEvents.ts";
+import {
+  clearV2Projection,
+  installLegacyProjectionMirror,
+  v2MessageEvent,
+  v2RunEvent,
+  v2ThreadEvent,
+} from "./V2ProjectionTestFixtures.ts";
 
 const projectId = ProjectId.make("jobs-project");
 const threadId = ThreadId.make("jobs-thread");
-const event = (sequence: number, messageId = "message", streaming = false): OrchestrationEvent => ({
-  sequence,
-  eventId: EventId.make(`event-${sequence}`),
-  aggregateKind: "thread",
-  aggregateId: threadId,
-  occurredAt: "2026-09-23",
-  commandId: CommandId.make(`command-${sequence}`),
-  causationEventId: null,
-  correlationId: null,
-  metadata: {},
-  type: "thread.message-sent",
-  payload: {
-    threadId,
-    messageId: MessageId.make(messageId),
-    role: "assistant",
-    text: "",
-    turnId: null,
-    streaming,
-    createdAt: "2026-09-23",
-    updatedAt: "2026-09-23",
-  },
-});
+// V2 `message.updated` events carry no authority over text: ingestion reads the projection.
+const event = (
+  sequence: number,
+  messageId = "message",
+  streaming = false,
+  role: "user" | "assistant" = "assistant",
+): DecisionSourceEvent =>
+  decisionSourceEvent(v2MessageEvent(sequence, { threadId, messageId, streaming, role }));
 const fixture = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  yield* installLegacyProjectionMirror(sql);
+  yield* clearV2Projection(sql);
   for (const table of [
     "decision_project_settings",
     "decision_thread_state",
@@ -297,10 +285,7 @@ it.layer(SqlitePersistenceMemory)("Decision job storage", (it) => {
         assert.isNull(yield* jobs.claim({ owner: "prepare" }));
         const scanJob = (yield* jobs.claim({ owner: "scan" }))!;
         yield* sql`INSERT INTO projection_thread_messages(message_id,thread_id,role,text,is_streaming,created_at,updated_at) VALUES ('live',${threadId},'user','Switch to Postgres.',0,'2026-09-24','2026-09-24')`;
-        yield* jobs.processEvent({
-          ...event(3, "live"),
-          payload: { ...event(3, "live").payload, role: "user" },
-        } as OrchestrationEvent);
+        yield* jobs.processEvent(event(3, "live", false, "user"));
         const stale = yield* jobs
           .scan({
             operation: "start",
@@ -338,11 +323,7 @@ it.layer(SqlitePersistenceMemory)("Decision job storage", (it) => {
       );
       yield* jobs.processEvent(event(1));
       const old = (yield* jobs.claim({ owner: "old" }))!;
-      yield* jobs.processEvent({
-        ...event(2),
-        type: "thread.reverted",
-        payload: { threadId, turnCount: 0 },
-      });
+      yield* jobs.processEvent(decisionSourceEvent(v2RunEvent(2, threadId, "run", "rolled_back")));
       assert.isNull(yield* jobs.claim({ owner: "new" }));
       assert.isTrue(
         Result.isFailure(
@@ -355,11 +336,7 @@ it.layer(SqlitePersistenceMemory)("Decision job storage", (it) => {
         source_generation: number;
       }>`SELECT source_generation FROM decision_thread_state WHERE thread_id = ${threadId}`;
       assert.equal(state[0]?.source_generation, 1);
-      yield* jobs.processEvent({
-        ...event(2),
-        type: "thread.reverted",
-        payload: { threadId, turnCount: 0 },
-      });
+      yield* jobs.processEvent(decisionSourceEvent(v2RunEvent(2, threadId, "run", "rolled_back")));
       assert.equal(
         (yield* sql<{
           source_generation: number;
@@ -680,9 +657,11 @@ it.layer(SqlitePersistenceMemory)("Decision job storage", (it) => {
           assert.isNull(yield* jobs.claim({ owner: "prepare" }));
           assert.isNotNull(yield* jobs.claim({ owner: "working" }));
           yield* jobs.processEvent(
-            operation === "thread.deleted"
-              ? { ...event(1), type: operation, payload: { threadId, deletedAt: "2026-09-24" } }
-              : { ...event(1), type: operation, payload: { threadId, turnCount: 0 } },
+            decisionSourceEvent(
+              operation === "thread.deleted"
+                ? v2ThreadEvent(1, "thread.deleted", threadId)
+                : v2RunEvent(1, threadId, "run", "rolled_back"),
+            ),
           );
           assert.isNull(yield* jobs.claim({ owner: "after-cancel" }));
           assert.equal(

@@ -58,7 +58,7 @@ import { ServerSettingsService } from "../serverSettings.ts";
 /** Environment override consulted right after the persisted settings path. */
 const STAVE_BINARY_ENV_VAR = "LECTURN_STAVE_PATH";
 /** Command name searched on PATH as the last resort. */
-export const STAVE_COMMAND_NAME = "stave";
+const STAVE_COMMAND_NAME = "stave";
 /** Upper bound for the `stave version` probe; a hung binary is reported as version-less, not fatal. */
 const STAVE_VERSION_PROBE_TIMEOUT = "10 seconds";
 

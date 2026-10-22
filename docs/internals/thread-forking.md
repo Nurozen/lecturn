@@ -94,8 +94,14 @@ Each adapter maps that input onto its provider's native mechanism
   init. Seeding a session id instead would write into the parent's history.
 - **OpenCode** calls `session.fork` and, for a mid-thread fork, `session.revert` to the fork
   turn's assistant message in the forked session.
-- **Cursor**, **Grok**, and **GitHub Copilot** declare `conversationFork: "unsupported"` and fail a start that
-  carries a `fork` input with a `ProviderAdapterValidationError` — no silent cold session.
+- **Cursor**, **Grok**, **GitHub Copilot**, and **Antigravity** have no native fork
+  (`threads.canForkThread: false`; an ACP agent that advertises `session.fork` at initialize turns
+  it on). They still fork: the fork decision (`decideForkExecution` in
+  [`CommandPolicy.ts`][policy]) falls back to a portable context handoff, so the child starts a
+  fresh provider session seeded with the source transcript up to the fork point (see
+  [context-handoffs.md](./context-handoffs.md)). Every provider forks; native-capable providers
+  also take the handoff when the source run did not complete, the source has no strong native
+  thread id, or the fork point is a specific turn the adapter cannot fork from.
 
 The `providerTurnRef` anchors come from turn completion: a `thread.session-set` event carries
 the provider's native turn id in its event metadata alongside the completed turn id, and
@@ -237,6 +243,7 @@ only what Lecturn shows: the first resumed turn makes the provider re-read the w
 [snapshot]: ../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts
 [mig048]: ../../apps/server/src/persistence/Migrations/048_ProjectionThreadForkLineage.ts
 [ckpt]: ../../apps/server/src/checkpointing/CheckpointStore.ts
+[policy]: ../../apps/server/src/orchestration-v2/CommandPolicy.ts
 [reactor]: ../../apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
 [env]: ../../apps/server/src/environment/ServerEnvironment.ts
 [threadimport]: ../../apps/server/src/orchestration/threadImport.ts

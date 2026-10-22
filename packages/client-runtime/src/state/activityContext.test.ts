@@ -1,3 +1,5 @@
+import { ProviderInstanceId } from "@lecturn/contracts";
+import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 import {
   activityVisualState,
@@ -10,7 +12,7 @@ import {
 
 const thread: ActivityThreadContext = {
   title: "Fix the failing CI check",
-  session: null,
+  runtime: null,
   hasPendingApprovals: false,
   hasPendingUserInput: false,
   latestUserMessageAt: "2026-09-13T12:00:00Z",
@@ -40,6 +42,30 @@ describe("activity task context", () => {
     });
     expect(result).toContain("Waiting for your approval");
     expect(result).toContain("Run targeted tests (2/3 complete)");
+  });
+  it("reads V2 projection messages and a failed runtime", () => {
+    const failed = {
+      ...thread,
+      runtime: {
+        status: "failed" as const,
+        activeRunId: null,
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        providerName: null,
+        lastError: "provider process exited",
+        updatedAt: "2026-09-13T12:00:05Z",
+      },
+    };
+    const v2Message = {
+      role: "assistant" as const,
+      text: "Rebuilding the index",
+      createdAt: DateTime.makeUnsafe("2026-09-13T12:00:03Z"),
+      updatedAt: DateTime.makeUnsafe("2026-09-13T12:00:04Z"),
+    };
+    const result = describeThreadActivity(failed, [v2Message]);
+    expect(result).toContain("Agent error: provider process exited");
+    expect(result).toContain("Latest response: Rebuilding the index");
+    expect(threadActivityExcerpt(failed, [v2Message])).toBe("provider process exited");
+    expect(threadActivityExcerpt(thread, [v2Message])).toBe("Rebuilding the index");
   });
   it("does not mislabel a silent agent as stuck or reuse prior-turn progress", () => {
     const result = describeThreadActivity(thread, [

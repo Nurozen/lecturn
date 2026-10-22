@@ -1,8 +1,8 @@
 import { RequestActionButton } from "./RequestActionButton";
 import type {
-  ApprovalRequestId,
   ProviderApprovalDecision,
   ProviderApprovalOption,
+  RuntimeRequestId,
 } from "@lecturn/contracts";
 import { View } from "react-native";
 
@@ -12,9 +12,9 @@ import type { PendingApproval } from "../../lib/threadActivity";
 
 export interface PendingApprovalCardProps {
   readonly approval: PendingApproval;
-  readonly respondingApprovalId: ApprovalRequestId | null;
+  readonly respondingApprovalId: RuntimeRequestId | null;
   readonly onRespond: (
-    requestId: ApprovalRequestId,
+    requestId: RuntimeRequestId,
     decision: ProviderApprovalDecision,
   ) => Promise<unknown>;
 }
@@ -31,6 +31,8 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
   const warning = options.find((option) => option.warning)?.warning;
   // Opaque for the same reason as PendingUserInputCard: nothing blurs the feed
   // behind this card, so a translucent surface bleeds messages through it.
+  const canRespond = props.approval.responseCapability === "live";
+  const disabled = !canRespond || props.respondingApprovalId === props.approval.requestId;
   return (
     <GlassCard tone="accent" radius={24} className="gap-2.5 p-4" opaque>
       <Text className="font-lecturn-medium text-xs text-primary">Approval needed</Text>
@@ -40,6 +42,12 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
       {props.approval.detail ? (
         <Text className="font-sans text-sm leading-normal text-foreground-secondary">
           {props.approval.detail}
+        </Text>
+      ) : null}
+      {!canRespond ? (
+        <Text className="font-sans text-sm leading-5 text-adaptive-neutral-600-400">
+          The provider process for this request is no longer available. Interrupt or restart the run
+          to continue.
         </Text>
       ) : null}
       {warning ? (
@@ -57,7 +65,7 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
                   ? "danger"
                   : "secondary"
             }
-            disabled={props.respondingApprovalId === props.approval.requestId}
+            disabled={disabled}
             onPress={() => void props.onRespond(props.approval.requestId, option.decision)}
           />
         ))}

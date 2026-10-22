@@ -1,6 +1,5 @@
 import { assert, it } from "@effect/vitest";
 import {
-  EventId,
   MessageId,
   ProjectId,
   ThreadId,
@@ -38,6 +37,12 @@ import {
 import { DecisionCloudClient } from "./DecisionCloudClient.ts";
 import { DecisionWriterBinding, type WriterBinding } from "./DecisionWriterBinding.ts";
 import { make } from "./DecisionWorker.ts";
+import { decisionSourceEvent } from "./DecisionSourceEvents.ts";
+import {
+  clearV2Projection,
+  installLegacyProjectionMirror,
+  v2MessageEvent,
+} from "./V2ProjectionTestFixtures.ts";
 const projectId = ProjectId.make("worker-project");
 const threadId = ThreadId.make("worker-thread");
 const instanceId = ProviderInstanceId.make("custom-codex");
@@ -124,6 +129,8 @@ interface Options {
 const fixture = (options: Options = {}) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    yield* installLegacyProjectionMirror(sql);
+    yield* clearV2Projection(sql);
     for (const table of [
       "decision_project_settings",
       "decision_thread_state",
@@ -160,28 +167,16 @@ const fixture = (options: Options = {}) =>
       },
       0,
     );
-    yield* jobs.processEvent({
-      sequence: 1,
-      eventId: EventId.make("worker-event"),
-      aggregateKind: "thread",
-      aggregateId: threadId,
-      occurredAt: "2026-09-23",
-      commandId: null,
-      causationEventId: null,
-      correlationId: null,
-      metadata: {},
-      type: "thread.message-sent",
-      payload: {
-        threadId,
-        messageId: MessageId.make("message"),
-        role: "assistant",
-        text: "",
-        turnId: null,
-        streaming: false,
-        createdAt: "2026-09-23",
-        updatedAt: "2026-09-23",
-      },
-    });
+    yield* jobs.processEvent(
+      decisionSourceEvent(
+        v2MessageEvent(1, {
+          threadId,
+          messageId: "message",
+          role: "assistant",
+          eventId: "worker-event",
+        }),
+      ),
+    );
     const requests: DecisionEvaluationRequest[] = [];
     let writerCalls = 0;
     let unsupported = options.unsupported;
@@ -515,7 +510,12 @@ it.layer(testLayer)("Decision worker", (it) => {
       const interrupted = (yield* f.jobs.claim({ owner: "old-process", leaseMs: 1000 }))!;
       yield* f.worker.start;
       assert.equal(f.requests.length, 0);
-      yield* TestClock.adjust(1000);
+      // The lease timer is armed by a forked fiber; advance in lease-sized steps
+      // so the wake does not depend on that fiber winning the race to sleep().
+      for (let step = 0; step < 20 && !(yield* Deferred.isDone(written)); step++) {
+        yield* TestClock.adjust(1000);
+        yield* Effect.yieldNow;
+      }
       yield* Deferred.await(written);
       yield* f.worker.drive;
       const resumed = (yield* f.jobs.get(interrupted.id))!;
@@ -725,28 +725,16 @@ it.layer(testLayer)("Decision worker", (it) => {
         for (const sequence of [2, 3]) {
           const messageId = MessageId.make(`clarification-${sequence}`);
           yield* f.sql`INSERT INTO projection_thread_messages(message_id,thread_id,role,text,is_streaming,created_at,updated_at) VALUES (${messageId},${threadId},'user','The first option refers to SQLite.',0,'2026-09-24','2026-09-24')`;
-          yield* f.jobs.processEvent({
-            sequence,
-            eventId: EventId.make(`context-${sequence}`),
-            aggregateKind: "thread",
-            aggregateId: threadId,
-            occurredAt: "2026-09-24",
-            commandId: null,
-            causationEventId: null,
-            correlationId: null,
-            metadata: {},
-            type: "thread.message-sent",
-            payload: {
-              threadId,
-              messageId,
-              role: "user",
-              text: "",
-              turnId: null,
-              streaming: false,
-              createdAt: "2026-09-24",
-              updatedAt: "2026-09-24",
-            },
-          });
+          yield* f.jobs.processEvent(
+            decisionSourceEvent(
+              v2MessageEvent(sequence, {
+                threadId,
+                messageId: messageId,
+                role: "user",
+                eventId: `context-${sequence}`,
+              }),
+            ),
+          );
           yield* f.worker.drive;
           const original = (yield* f.jobs.get(id))!;
           assert.equal(original.attempts, 2);
@@ -824,28 +812,16 @@ it.layer(testLayer)("Decision worker", (it) => {
         yield* f.sql`UPDATE thread_decisions SET thread_id = 'another-thread', occurred_at = '2000-01-01' WHERE id = ${prior.id}`;
         yield* f.sql`UPDATE decision_evidence SET thread_id = 'another-thread', message_id = 'old-message' WHERE decision_id = ${prior.id}`;
         yield* f.sql`INSERT INTO projection_thread_messages(message_id,thread_id,role,text,is_streaming,created_at,updated_at) VALUES ('new-message',${threadId},'assistant',${action === "duplicate" ? "Use SQLite." : "Use PostgreSQL instead of SQLite."},0,'2026-09-24','2026-09-24')`;
-        yield* f.jobs.processEvent({
-          sequence: 2,
-          eventId: EventId.make(`cross-thread-${action}`),
-          aggregateKind: "thread",
-          aggregateId: threadId,
-          occurredAt: "2026-09-24",
-          commandId: null,
-          causationEventId: null,
-          correlationId: null,
-          metadata: {},
-          type: "thread.message-sent",
-          payload: {
-            threadId,
-            messageId: MessageId.make("new-message"),
-            role: "assistant",
-            text: "",
-            turnId: null,
-            streaming: false,
-            createdAt: "2026-09-24",
-            updatedAt: "2026-09-24",
-          },
-        });
+        yield* f.jobs.processEvent(
+          decisionSourceEvent(
+            v2MessageEvent(2, {
+              threadId,
+              messageId: "new-message",
+              role: "assistant",
+              eventId: `cross-thread-${action}`,
+            }),
+          ),
+        );
         yield* f.worker.drive;
         const notes = (yield* f.repository.list({ projectId })).decisions;
         assert.equal(f.writerCalls(), 2);
@@ -860,28 +836,16 @@ it.layer(testLayer)("Decision worker", (it) => {
     Effect.gen(function* () {
       const { sql, jobs, worker, repository, requests } = yield* fixture();
       yield* sql`UPDATE projection_thread_messages SET text = ${"a".repeat(5000)}`;
-      yield* jobs.processEvent({
-        sequence: 2,
-        eventId: EventId.make("branches"),
-        aggregateKind: "thread",
-        aggregateId: threadId,
-        occurredAt: "2026-09-23",
-        commandId: null,
-        causationEventId: null,
-        correlationId: null,
-        metadata: {},
-        type: "thread.message-sent",
-        payload: {
-          threadId,
-          messageId: MessageId.make("message"),
-          role: "assistant",
-          text: "",
-          turnId: null,
-          streaming: false,
-          createdAt: "2026-09-23",
-          updatedAt: "2026-09-23",
-        },
-      });
+      yield* jobs.processEvent(
+        decisionSourceEvent(
+          v2MessageEvent(2, {
+            threadId,
+            messageId: "message",
+            role: "assistant",
+            eventId: "branches",
+          }),
+        ),
+      );
       yield* worker.drive;
       const notes = (yield* repository.list({ projectId })).decisions;
       assert.equal(notes.length, 4);

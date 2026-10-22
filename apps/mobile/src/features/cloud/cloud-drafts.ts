@@ -25,7 +25,7 @@ export const removeCloudEnvironments = createRuntimeCommand(connectionAtomRuntim
   label: "cloud:preserve-drafts-and-remove-environments",
   execute: Effect.fn("removeCloudEnvironments")(function* (accountId: string | null) {
     if (accountId === null) return;
-    const registry = yield* EnvironmentRegistry;
+    const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
     const entries = yield* SubscriptionRef.get(registry.entries);
     const environmentIds = new Set(
       [...entries.values()]

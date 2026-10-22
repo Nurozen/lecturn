@@ -5,6 +5,10 @@ import { scopedProjectKey } from "../../lib/scopedEntities";
 import { scopeThreadRef } from "@lecturn/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 import { canSnooze, effectiveSnoozed } from "@lecturn/client-runtime/state/thread-settled";
+import {
+  forkSourcePointForRun,
+  latestForkableRunId,
+} from "@lecturn/client-runtime/state/thread-fork-points";
 import { ThreadId, type ScopedThreadRef } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import * as Haptics from "expo-haptics";
@@ -38,6 +42,7 @@ import {
   threadDropLifecycle,
 } from "../threads/threadOrder";
 import { getThreadListV2OrderedSection } from "../threads/threadListV2";
+import { threadCanArchive } from "./threadArchive";
 import { resolveThreadTitleRename } from "../threads/thread-title-rename";
 
 /** Version skew: never send settle/unsettle to a server that predates them
@@ -158,11 +163,7 @@ function useThreadActionExecutor(
         }
         // Archive keeps its original, narrower guard: never interrupt a
         // thread mid-turn.
-        if (
-          action === "archive" &&
-          thread.session?.status === "running" &&
-          thread.session.activeTurnId != null
-        ) {
+        if (action === "archive" && !threadCanArchive(thread.runtime)) {
           Alert.alert(
             actionFailureTitle(action),
             "This thread is working. Interrupt it first, then try again.",
@@ -259,13 +260,12 @@ const FORK_UNAVAILABLE_MESSAGES: Record<ThreadForkUnavailableReason, string> = {
   disconnected: "This environment is offline. Reconnect to fork this thread.",
   "server-unsupported":
     "This environment's server does not support forking yet. Update the server to fork threads.",
-  "provider-unsupported": "This thread's agent does not support forking conversations.",
   "turn-in-progress": "This thread is working. Wait for the turn to finish, then try again.",
   "no-completed-turn": "This thread has no completed turn to fork from yet.",
 };
 
 /**
- * Forks a thread at its latest completed turn and resolves to the new child
+ * Forks a thread through its latest completed run and resolves to the new child
  * thread's ref (null when the fork was refused or failed, after alerting).
  * Shared by the thread list rows and the thread screen's header action so
  * every surface applies the same availability gates.
@@ -283,27 +283,18 @@ export function useForkThread(): (
       if (forkInFlightThreadKeys.current.has(key)) {
         return null;
       }
-      const provider = appAtomRegistry
-        .get(environmentServerConfigsAtom)
-        .get(thread.environmentId)
-        ?.providers.find(
-          (candidate) =>
-            candidate.instanceId ===
-            (thread.session?.providerInstanceId ?? thread.modelSelection.instanceId),
-        );
-      const latestTurn = thread.latestTurn;
       const availability = resolveThreadForkAvailability({
         serverSupportsForking: environmentSupportsThreadForking(thread.environmentId),
-        providerConversationFork: provider?.conversationFork ?? null,
-        latestTurn,
-        sessionStatus: thread.session?.status ?? null,
+        latestRun: thread.latestRun,
+        runtimeStatus: thread.runtime?.status ?? null,
         connected: connectedEnvironments.some(
           (environment) =>
             environment.environmentId === thread.environmentId &&
             environment.connectionState === "connected",
         ),
       });
-      if (!availability.available || latestTurn === null) {
+      const runId = latestForkableRunId(thread);
+      if (!availability.available || runId === null) {
         Alert.alert(
           "Could not fork thread",
           FORK_UNAVAILABLE_MESSAGES[
@@ -320,9 +311,9 @@ export function useForkThread(): (
         const result = await forkMutation({
           environmentId: thread.environmentId,
           input: {
-            threadId: childThreadId,
             sourceThreadId: thread.id,
-            throughTurnId: latestTurn.turnId,
+            targetThreadId: childThreadId,
+            sourcePoint: forkSourcePointForRun(runId),
             // The untitled fallback keeps the "(fork)" suffix so the
             // first-turn titleSeed guard still auto-retitles the child.
             title: thread.title.trim() ? `${thread.title.trim()} (fork)` : "Untitled (fork)",

@@ -22,7 +22,7 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 import { afterEach, vi } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as AgentSessionScanner from "./AgentSessionScanner.ts";
 
@@ -43,48 +43,12 @@ const makeProjectShell = (workspaceRoot: string): OrchestrationProjectShell => (
   updatedAt: "2026-01-01T00:00:00.000Z",
 });
 
-/** Only `getShellSnapshot` is exercised; the rest must not be called. */
-const makeProjectionSnapshotQueryLayer = (importedWorkspaceRoots: ReadonlyArray<string>) =>
-  Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-    getCommandReadModel: () => Effect.die("unused"),
-    getUserInputActivity: () => Effect.die("unused"),
-    listActivitiesByKind: () => Effect.die("unused"),
-    getSnapshot: () => Effect.die("unused"),
-    getShellSnapshot: () =>
-      Effect.succeed({
-        snapshotSequence: 0,
-        projects: importedWorkspaceRoots.map((workspaceRoot) => makeProjectShell(workspaceRoot)),
-        threads: [],
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      }),
-    getDeletedWorktreeThreads: () => Effect.die("unused"),
-    listThreadsWithPullRequests: () => Effect.die("unused"),
-    getArchivedShellSnapshot: () => Effect.die("unused"),
-    getSnapshotSequence: () => Effect.die("unused"),
-    getCounts: () => Effect.die("unused"),
-    getEventReplayStats: () => Effect.die("unused"),
-    getActiveProjectByWorkspaceRoot: () => Effect.die("unused"),
-    getProjectShells: () => Effect.die("unused"),
-    getProjectShellById: () => Effect.die("unused"),
-    getImportedAgentSessionSources: () => Effect.succeed([]),
-    getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
-    getThreadCheckpointContext: () => Effect.die("unused"),
-    getFullThreadDiffContext: () => Effect.die("unused"),
-    getThreadShellById: () => Effect.die("unused"),
-    getThreadRuntimeContext: () => Effect.die("unused"),
-    getTurnStartMessage: () => Effect.die("unused"),
-    getThreadDetailById: () => Effect.die("unused"),
-    getThreadDetailSnapshot: () => Effect.die("unused"),
-    searchThreads: () => Effect.die("unused"),
-    listThreadLifecycleAnchorsByProjectId: () => Effect.die("unused"),
-    listActiveProjectRootsUnder: () => Effect.die("unused"),
-    listThreadActivitiesById: () => Effect.die("unused"),
-    getInferenceTurnPairs: () => Effect.die("unused"),
-    listThreadTurnsById: () => Effect.die("unused"),
-    getThreadForkContextById: () => Effect.die("unused"),
-    getThreadImportSourceById: () => Effect.die("unused"),
-    listThreadImportSources: () => Effect.die("unused"),
-    listThreadIdsByWorktreePath: () => Effect.die("unused"),
+const makeProjectStoreLayer = (importedWorkspaceRoots: ReadonlyArray<string>) =>
+  Layer.mock(ProjectStore.ProjectStoreV2)({
+    listShells: () =>
+      Effect.succeed(
+        importedWorkspaceRoots.map((workspaceRoot) => makeProjectShell(workspaceRoot)),
+      ),
   });
 
 /**
@@ -117,7 +81,7 @@ const makeScannerTestLayer = (input: ScannerTestInput) =>
           input.claudeHomePath,
           input.configBaseDir ?? { prefix: "lecturn-scanner-config-" },
         ),
-        makeProjectionSnapshotQueryLayer(input.importedWorkspaceRoots ?? []),
+        makeProjectStoreLayer(input.importedWorkspaceRoots ?? []),
       ),
     ),
   );

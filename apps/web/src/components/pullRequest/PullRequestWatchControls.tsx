@@ -41,7 +41,7 @@ import type {
 } from "@lecturn/contracts";
 import { isRepositoryWatchManagerEligible } from "@lecturn/client-runtime/state/repositoryScope";
 import { formatEnvironmentQueryError } from "../../state/query";
-import { useProjects, useThreadShells, useThreadDetail } from "../../state/entities";
+import { useProjects, useThreadShells, useThreadProjection } from "../../state/entities";
 import { pullRequestWatchEnvironment, usePullRequestWatches } from "../../state/pullRequestWatch";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
@@ -200,7 +200,9 @@ function WatchCard({
   const manager = allThreads.find(
     (thread) => thread.environmentId === environmentId && thread.id === watch.managerThreadId,
   );
-  const managerDetail = useThreadDetail(manager ? { environmentId, threadId: manager.id } : null);
+  const managerMessages = useThreadProjection(
+    manager ? { environmentId, threadId: manager.id } : null,
+  )?.projection.messages;
   const project = projects.find(
     (candidate) =>
       candidate.environmentId === environmentId &&
@@ -218,7 +220,7 @@ function WatchCard({
     ? "Needs approval"
     : manager?.hasPendingUserInput
       ? "Needs input"
-      : (manager?.session?.status ??
+      : (manager?.runtime?.status ??
         (watch.managerStatus === "offline" ? "idle" : watch.managerStatus));
   const state = activityVisualState({
     status:
@@ -312,7 +314,7 @@ function WatchCard({
                 <span className="truncate">{manager.title}</span>
               </button>
               <p className="line-clamp-2 text-xs text-muted-foreground">
-                {threadActivityExcerpt(manager, managerDetail?.messages)}
+                {threadActivityExcerpt(manager, managerMessages)}
               </p>
             </>
           ) : null}
@@ -498,7 +500,7 @@ function WatchCard({
         </div>
         {manager ? (
           <p className="whitespace-pre-line text-xs text-muted-foreground">
-            {describeThreadActivity(manager, managerDetail?.messages)}
+            {describeThreadActivity(manager, managerMessages)}
           </p>
         ) : null}
         {manager ? (

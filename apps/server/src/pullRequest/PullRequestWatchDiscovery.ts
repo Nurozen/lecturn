@@ -2,13 +2,14 @@ import {
   pullRequestHostOf,
   SourceControlProviderKind,
   type OrchestrationProjectShell,
-  type OrchestrationThreadShell,
+  type OrchestrationV2ThreadShell,
   type PullRequestListEntry,
   type PullRequestWatchTrackInput,
 } from "@lecturn/contracts";
 import { stableStringify } from "@lecturn/shared/relaySigning";
 import { Context, DateTime, Effect, Layer, Path, Schema, Semaphore, type Scope } from "effect";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ProjectionStoreV2 } from "../orchestration-v2/ProjectionStore.ts";
+import { ProjectService } from "../project/ProjectService.ts";
 import { forkParked } from "../serverActivation.ts";
 import { VcsDriverRegistry } from "../vcs/VcsDriverRegistry.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
@@ -34,7 +35,7 @@ const PROJECTS_PER_TICK = 4;
 const REPOSITORIES_PER_PROJECT = 16;
 
 export interface DiscoveryCandidate {
-  readonly thread: OrchestrationThreadShell;
+  readonly thread: OrchestrationV2ThreadShell;
   readonly projectId: OrchestrationProjectShell["id"];
   readonly cwd: string;
   readonly repository: string;
@@ -61,13 +62,13 @@ export function matchesDiscoveredPullRequest(
     entry.headBranch !== entry.baseBranch &&
     viewer !== undefined &&
     entry.author?.login.toLowerCase() === viewer.toLowerCase() &&
-    entry.createdAt >= candidate.thread.createdAt
+    Date.parse(entry.createdAt) >= DateTime.toEpochMillis(candidate.thread.createdAt)
   );
 }
 
 export function discoveryCandidates(
   project: OrchestrationProjectShell,
-  threads: readonly OrchestrationThreadShell[],
+  threads: readonly OrchestrationV2ThreadShell[],
   path: Path.Path,
   now: number,
   projects: readonly OrchestrationProjectShell[] = [project],
@@ -90,11 +91,14 @@ export function discoveryCandidates(
         ) &&
         !thread.archivedAt &&
         thread.latestUserMessageAt !== null &&
-        (thread.session?.activeTurnId ||
-          thread.session?.status === "running" ||
-          now - DateTime.toEpochMillis(DateTime.makeUnsafe(thread.updatedAt)) <= RECENT_MS),
+        (thread.activeRunId !== null ||
+          thread.activityRunStatus != null ||
+          now - DateTime.toEpochMillis(thread.updatedAt) <= RECENT_MS),
     )
-    .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .toSorted(
+      (left, right) =>
+        DateTime.toEpochMillis(right.updatedAt) - DateTime.toEpochMillis(left.updatedAt),
+    )
     .slice(0, 100);
   return active.flatMap((thread) =>
     repositories.flatMap(({ identity, cwd }) => {
@@ -151,7 +155,8 @@ export class PullRequestWatchDiscovery extends Context.Service<
 >()("lecturn/pullRequest/PullRequestWatchDiscovery") {}
 
 export const make = Effect.gen(function* () {
-  const projections = yield* ProjectionSnapshotQuery;
+  const projectService = yield* ProjectService;
+  const projections = yield* ProjectionStoreV2;
   const staveRuntime = yield* Effect.serviceOption(StaveRpcRuntime);
   const requests = yield* PullRequestService;
   const watches = yield* PullRequestWatchService;
@@ -163,7 +168,10 @@ export const make = Effect.gen(function* () {
   const semaphore = Semaphore.makeUnsafe(1);
   const tick = Effect.gen(function* () {
     const at = DateTime.toEpochMillis(yield* DateTime.now);
-    const snapshot = yield* projections.getShellSnapshot();
+    const snapshot = {
+      projects: yield* projectService.listShells(),
+      threads: (yield* projections.getShellSnapshot({ location: "active" })).threads,
+    };
     const rosters = yield* loadWatchSagaRosters(snapshot.projects, staveRuntime);
     const known = (yield* watches.list({})).watches;
     const liveIds = new Set(snapshot.projects.map((project) => project.id));
@@ -189,8 +197,12 @@ export const make = Effect.gen(function* () {
             )
             .map((thread) => [
               thread.id,
-              thread.latestUserMessageAt,
-              thread.latestTurn?.completedAt,
+              thread.latestUserMessageAt === null
+                ? null
+                : DateTime.toEpochMillis(thread.latestUserMessageAt),
+              thread.latestRunCompletedAt == null
+                ? null
+                : DateTime.toEpochMillis(thread.latestRunCompletedAt),
               thread.linkedPullRequest,
             ]),
         ),

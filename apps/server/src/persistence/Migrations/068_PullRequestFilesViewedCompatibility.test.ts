@@ -45,13 +45,13 @@ const assertReconciled = Effect.gen(function* () {
     "revision",
     "viewed_at",
   ]);
-  assert.deepEqual(yield* runMigrations(), []);
+  assert.deepEqual(yield* runMigrations({ toMigrationInclusive: 69 }), []);
 });
 
 describe("068 collision compatibility", () => {
   it.effect("creates the viewed files table on a fresh database", () =>
     Effect.gen(function* () {
-      const executed = yield* runMigrations();
+      const executed = yield* runMigrations({ toMigrationInclusive: 69 });
       assert.deepEqual(executed.at(-1), latest);
       assert.deepEqual(yield* viewedRows, []);
       yield* assertReconciled;
@@ -67,7 +67,7 @@ describe("068 collision compatibility", () => {
         VALUES ('thread', 'project', 'Preserved', '{"instanceId":"codex","model":"fixture"}', '{"kind":"fixture"}', ${at}, ${at})`;
       const ledger = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
 
-      assert.deepEqual(yield* runMigrations(), [compatibility, latest]);
+      assert.deepEqual(yield* runMigrations({ toMigrationInclusive: 69 }), [compatibility, latest]);
       assert.deepEqual(
         yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= 67 ORDER BY migration_id`,
         ledger,
@@ -101,7 +101,7 @@ describe("068 collision compatibility", () => {
         VALUES ('github', 'github.com', 'example/fixture', 7, 'reader', 'src/a.ts', 'abc', ${at})`;
       const ledger = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
 
-      const executed = yield* runMigrations();
+      const executed = yield* runMigrations({ toMigrationInclusive: 69 });
       assert.deepEqual(executed[0], [54, "ThreadNotes"]);
       assert.deepEqual(executed.at(-1), latest);
       assert.deepEqual(

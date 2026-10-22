@@ -36,6 +36,7 @@ import {
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   resolveEnvironmentMachineKind,
 } from "@lecturn/contracts";
+import { deriveThreadTitleSeed } from "@lecturn/client-runtime/operations";
 
 import {
   ComposerEditor,
@@ -106,7 +107,11 @@ import {
   type ComposerDraft,
   waitForComposerDraftsLoaded,
 } from "../../state/use-composer-drafts";
-import { useEnvironmentServerConfig, useListedProjects } from "../../state/entities";
+import {
+  useEnvironmentServerConfig,
+  useListedProjects,
+  useThreadShells,
+} from "../../state/entities";
 import { useProjectClone } from "../../state/projectClones";
 import { projectEnvironment } from "../../state/projects";
 import { sourceControlEnvironment } from "../../state/sourceControl";
@@ -116,7 +121,6 @@ import {
   isModelSelectionUnavailable,
   resolveSelectableModelSelection,
 } from "../../lib/modelOptions";
-import { deriveThreadTitleFromPrompt } from "../../lib/projectThreadStartTurn";
 import { armAgentAwarenessLiveActivityForLocalWork } from "../agent-awareness/remoteRegistration";
 import { enqueueThreadOutboxMessage } from "../../state/thread-outbox";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
@@ -465,6 +469,7 @@ export function NewTaskDraftScreen(props: {
     draftMessage: flow.prompt,
     ownerKey: flow.draftKey,
     environmentId: selectedProject?.environmentId ?? null,
+    threadShells: useThreadShells(),
     pullRequestProjectId: selectedEnvironmentServerConfig?.environment.capabilities.pullRequests
       ? (selectedProject?.id ?? null)
       : null,
@@ -1289,7 +1294,10 @@ export function NewTaskDraftScreen(props: {
       // finds no work and ends the card within seconds.
       armAgentAwarenessLiveActivityForLocalWork({
         environmentId: selectedProject.environmentId,
-        threadTitle: deriveThreadTitleFromPrompt(initialMessageText),
+        threadTitle: deriveThreadTitleSeed({
+          text: initialMessageText,
+          attachments: draft.attachments,
+        }),
         projectTitle: selectedProject.title,
       });
     }
@@ -1756,6 +1764,7 @@ export function NewTaskDraftScreen(props: {
                         emphasized
                         renderIcon={(size) => (
                           <ProviderIcon
+                            iconUrl={flow.selectedModelOption?.providerIconUrl}
                             provider={flow.selectedModelOption?.providerDriver}
                             size={size}
                           />

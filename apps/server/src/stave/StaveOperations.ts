@@ -74,16 +74,13 @@ import {
   StaveLifecycleRepository,
   type StaveLifecycleRow,
 } from "../persistence/Services/StaveLifecycleRepository.ts";
-import { ProviderService } from "../provider/Services/ProviderService.ts";
 import { TerminalManager } from "../terminal/Manager.ts";
 import { WorkspacePaths } from "../workspace/WorkspacePaths.ts";
 import { isPathUnder, StaveSpaceLock } from "./StaveSpaceLock.ts";
 import * as Stream from "effect/Stream";
 import * as NodeCrypto from "node:crypto";
 
-import { normalizeDispatchCommand } from "../orchestration/Normalizer.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { StaveOrchestration } from "./StaveOrchestration.ts";
 import { ProcessRunner } from "../processRunner.ts";
 import {
   buildStaveArgv,
@@ -342,17 +339,17 @@ export const make = Effect.fn("StaveOperations.make")(function* (
   const readCache = yield* Effect.serviceOption(StaveReadCache);
   const invalidateReads = Option.isSome(readCache) ? readCache.value.invalidate : Effect.void;
   const processRunner = yield* ProcessRunner;
-  const engine = yield* OrchestrationEngineService;
-  const snapshotQuery = yield* ProjectionSnapshotQuery;
+  // One V2-backed surface serves the former engine, snapshot and provider roles.
+  const orchestration = yield* StaveOrchestration;
+  const engine = orchestration;
+  const snapshotQuery = orchestration;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const lifecycle = yield* StaveLifecycleRepository;
-  const providers = yield* ProviderService;
+  const providers = orchestration;
   const terminals = yield* TerminalManager;
   const workspacePaths = yield* WorkspacePaths;
   const serviceScope = yield* Effect.scope;
-  const normalizerContext =
-    yield* Effect.context<Effect.Services<ReturnType<typeof normalizeDispatchCommand>>>();
 
   const eventLimit = limits.eventLimit ?? STAVE_OPERATION_EVENT_LIMIT;
   const byteLimit = limits.byteLimit ?? STAVE_OPERATION_BYTE_LIMIT;
@@ -608,7 +605,6 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           type: "project.refresh",
           commandId: CommandId.make(`server:stave:refresh:${NodeCrypto.randomUUID()}`),
           projectId: project.value.id,
-          createdAt: DateTime.formatIso(yield* DateTime.now),
         })
         .pipe(
           Effect.catchCause((cause) =>
@@ -733,18 +729,18 @@ export const make = Effect.fn("StaveOperations.make")(function* (
   ) =>
     Effect.gen(function* () {
       const projectId = ProjectId.make(NodeCrypto.randomUUID());
-      const command = yield* normalizeDispatchCommand({
-        type: "project.create",
-        commandId: CommandId.make(
-          `server:stave:create:${path.basename(spacePath)}:${NodeCrypto.randomUUID()}`,
-        ),
-        projectId,
-        title,
-        workspaceRoot: spacePath,
-        createWorkspaceRootIfMissing: false,
-        createdAt: DateTime.formatIso(yield* DateTime.now),
-      }).pipe(Effect.provide(normalizerContext));
-      const { sequence } = yield* engine.dispatch(command, { staveReconciliation: true });
+      const { sequence } = yield* engine.dispatch(
+        {
+          type: "project.create",
+          commandId: CommandId.make(
+            `server:stave:create:${path.basename(spacePath)}:${NodeCrypto.randomUUID()}`,
+          ),
+          projectId,
+          title,
+          workspaceRoot: spacePath,
+        },
+        { staveReconciliation: true },
+      );
       return { projectId, sequence };
     }).pipe(
       Effect.mapError((cause) =>
@@ -1021,10 +1017,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                 memberships,
               },
             );
-          if (
-            providers.stopSessionsUnder === undefined ||
-            terminals.closeSessionsUnder === undefined
-          )
+          if (terminals.closeSessionsUnder === undefined)
             return yield* refuse("unknown", "Session quiescence is unavailable.");
           yield* providers
             .stopSessionsUnder(candidate)
@@ -1617,17 +1610,17 @@ export const make = Effect.fn("StaveOperations.make")(function* (
               (thread) => Option.isSome(project) && thread.projectId === project.value.id,
             );
             for (const thread of ownThreads) {
-              if (thread.session?.activeTurnId != null) {
-                const command = yield* normalizeDispatchCommand({
-                  type: "thread.turn.interrupt",
-                  commandId: CommandId.make(`server:stave:interrupt:${NodeCrypto.randomUUID()}`),
-                  threadId: thread.id,
-                  createdAt: yield* nowIso,
-                }).pipe(Effect.provide(normalizerContext), Effect.mapError(asRefusal));
-                yield* engine.dispatch(command).pipe(Effect.mapError(asRefusal));
+              if (thread.activeRunId != null) {
+                yield* engine
+                  .dispatch({
+                    type: "thread.turn.interrupt",
+                    commandId: CommandId.make(`server:stave:interrupt:${NodeCrypto.randomUUID()}`),
+                    threadId: thread.id,
+                  })
+                  .pipe(Effect.mapError(asRefusal));
               }
             }
-            const sessions = yield* providers.listSessions();
+            const sessions = yield* providers.listSessions().pipe(Effect.mapError(asRefusal));
             for (const session of sessions) {
               if (
                 !ownThreads.some((thread) => thread.id === session.threadId) &&
@@ -1635,22 +1628,18 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                 (yield* Effect.findFirst(mutationRoots, (root) =>
                   isPathUnder(root, session.cwd!),
                 ).pipe(Effect.map(Option.isSome))) &&
-                session.activeTurnId !== undefined &&
-                session.activeTurnId !== null
+                session.active
               ) {
-                const command = yield* normalizeDispatchCommand({
-                  type: "thread.turn.interrupt",
-                  commandId: CommandId.make(`server:stave:interrupt:${NodeCrypto.randomUUID()}`),
-                  threadId: session.threadId,
-                  createdAt: yield* nowIso,
-                }).pipe(Effect.provide(normalizerContext), Effect.mapError(asRefusal));
-                yield* engine.dispatch(command).pipe(Effect.mapError(asRefusal));
+                yield* engine
+                  .dispatch({
+                    type: "thread.turn.interrupt",
+                    commandId: CommandId.make(`server:stave:interrupt:${NodeCrypto.randomUUID()}`),
+                    threadId: session.threadId,
+                  })
+                  .pipe(Effect.mapError(asRefusal));
               }
             }
-            if (
-              providers.stopSessionsUnder === undefined ||
-              terminals.closeSessionsUnder === undefined
-            )
+            if (terminals.closeSessionsUnder === undefined)
               return yield* refuse("unknown", "Session quiescence is unavailable.");
             for (const session of sessions) {
               if (
@@ -2642,35 +2631,30 @@ export const make = Effect.fn("StaveOperations.make")(function* (
               refusalMessage: null,
             });
           const shell = yield* snapshotQuery.getShellSnapshot().pipe(Effect.mapError(asRefusal));
-          const sessions = yield* providers.listSessions();
-          if (
-            providers.stopSessionsUnder === undefined ||
-            terminals.closeSessionsUnder === undefined
-          )
+          const sessions = yield* providers.listSessions().pipe(Effect.mapError(asRefusal));
+          if (terminals.closeSessionsUnder === undefined)
             return yield* refuse("unknown", "Session quiescence is unavailable.");
           const ownedThreads = shell.threads.filter((thread) =>
             leases.some((row) => row.projectId === thread.projectId),
           );
           const interruptIds = new Set(
-            ownedThreads
-              .filter((thread) => thread.session?.activeTurnId != null)
-              .map((thread) => thread.id),
+            ownedThreads.filter((thread) => thread.activeRunId != null).map((thread) => thread.id),
           );
           for (const session of sessions) {
-            if (session.cwd !== undefined && session.activeTurnId != null) {
+            if (session.cwd !== undefined && session.active) {
               for (const member of saga.participants)
                 if (yield* isPathUnder(member.root, session.cwd))
                   interruptIds.add(session.threadId);
             }
           }
           for (const threadId of interruptIds) {
-            const command = yield* normalizeDispatchCommand({
-              type: "thread.turn.interrupt",
-              commandId: CommandId.make(`server:stave:interrupt:${NodeCrypto.randomUUID()}`),
-              threadId,
-              createdAt: yield* nowIso,
-            }).pipe(Effect.provide(normalizerContext), Effect.mapError(asRefusal));
-            yield* engine.dispatch(command).pipe(Effect.mapError(asRefusal));
+            yield* engine
+              .dispatch({
+                type: "thread.turn.interrupt",
+                commandId: CommandId.make(`server:stave:interrupt:${NodeCrypto.randomUUID()}`),
+                threadId,
+              })
+              .pipe(Effect.mapError(asRefusal));
           }
           for (const session of sessions)
             if (

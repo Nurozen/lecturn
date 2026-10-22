@@ -38,7 +38,7 @@ describe("065 collision compatibility", () => {
         yield* sql`UPDATE projection_threads SET branch_pull_request_json = '{"number":42}'`;
         if (upstreamId === 49) yield* sql`UPDATE projection_threads SET active_order_key = 'gm'`;
         const ledger = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
-        const executed = yield* runMigrations();
+        const executed = yield* runMigrations({ toMigrationInclusive: 69 });
         assert.deepEqual(executed.at(-1), [
           69,
           "ProjectionThreadsAutoSettleDisabledAtCompatibility",
@@ -70,7 +70,7 @@ describe("065 collision compatibility", () => {
         );
         assert.deepEqual(yield* sql`SELECT * FROM stave_project_lifecycle`, []);
         assert.deepEqual(yield* sql`SELECT * FROM stave_lifecycle_policy`, []);
-        assert.deepEqual(yield* runMigrations(), []);
+        assert.deepEqual(yield* runMigrations({ toMigrationInclusive: 69 }), []);
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
     );
   }
@@ -94,7 +94,7 @@ describe("065 collision compatibility", () => {
         const projector =
           yield* sql`SELECT * FROM projection_state WHERE projector = 'stave.project-lifecycle'`;
         const ledger = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
-        yield* runMigrations();
+        yield* runMigrations({ toMigrationInclusive: 69 });
         assert.deepEqual(
           yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= ${forkId} ORDER BY migration_id`,
           ledger,
@@ -123,7 +123,7 @@ describe("065 collision compatibility", () => {
             },
           ],
         );
-        assert.deepEqual(yield* runMigrations(), []);
+        assert.deepEqual(yield* runMigrations({ toMigrationInclusive: 69 }), []);
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
     );
   }

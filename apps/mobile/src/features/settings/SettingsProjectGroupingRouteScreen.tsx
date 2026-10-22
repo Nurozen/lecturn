@@ -8,7 +8,6 @@ import { Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/AppText";
-import { SymbolView } from "../../components/AppSymbol";
 import { SettingsScreen } from "./components/SettingsScreen";
 import {
   mobileProjectGroupingModePatch,
@@ -16,6 +15,7 @@ import {
 } from "../../state/project-grouping";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { useSidebarNestSagas } from "../../state/stave";
+import { SettingsChoiceRow } from "./components/SettingsChoiceRow";
 import { SettingsSection } from "./components/SettingsSection";
 
 const GROUPING_OPTIONS: ReadonlyArray<{
@@ -62,43 +62,15 @@ export function SettingsProjectGroupingRouteScreen() {
       >
         <SettingsSection title="Project grouping">
           {GROUPING_OPTIONS.map((option, index) => (
-            <Pressable
+            <SettingsChoiceRow
               key={option.mode}
-              accessibilityRole="radio"
-              accessibilityState={{
-                checked: selectedMode === option.mode,
-                disabled: !preferencesReady,
-              }}
+              label={option.label}
+              description={option.description}
+              selected={selectedMode === option.mode}
+              separated={index > 0}
               disabled={!preferencesReady}
               onPress={() => savePreferences(mobileProjectGroupingModePatch(option.mode))}
-              style={({ pressed }) => ({
-                backgroundColor: pressed
-                  ? themeColorWithAlpha(glass.accent, glass.dark ? 0.12 : 0.07)
-                  : "transparent",
-                opacity: preferencesReady ? 1 : 0.5,
-              })}
-              className={
-                index === 0
-                  ? "flex-row items-center gap-4 p-4"
-                  : "flex-row items-center gap-4 border-t border-border-subtle p-4"
-              }
-            >
-              <View className="min-w-0 flex-1 gap-1">
-                <Text className="text-base text-foreground">{option.label}</Text>
-                <Text className="text-sm leading-normal text-foreground-muted">
-                  {option.description}
-                </Text>
-              </View>
-              {selectedMode === option.mode ? (
-                <SymbolView
-                  name="checkmark"
-                  size={18}
-                  tintColor={glass.accent}
-                  type="monochrome"
-                  weight="semibold"
-                />
-              ) : null}
-            </Pressable>
+            />
           ))}
         </SettingsSection>
         <SettingsSection title="Stave sagas">

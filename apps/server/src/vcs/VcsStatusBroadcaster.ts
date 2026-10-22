@@ -32,9 +32,10 @@ import { resolveProjectAutoPull } from "@lecturn/shared/serverSettings";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { makeStaveAutoPullOwnerCheck } from "../stave/StaveAutoPullOwnership.ts";
+import { StaveProjectShells } from "../stave/StaveProjectShells.ts";
 
 const DEFAULT_VCS_STATUS_REFRESH_INTERVAL = Duration.seconds(30);
 const STAVE_OWNERSHIP_REFRESH_INTERVAL_MS = 30_000;
@@ -160,7 +161,8 @@ export class VcsAutoPullPolicy extends Context.Reference<{
 export const autoPullPolicyLayer = Layer.effect(
   VcsAutoPullPolicy,
   Effect.gen(function* () {
-    const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+    const projects = yield* ProjectStore.ProjectStoreV2;
+    const staveShells = yield* Effect.serviceOption(StaveProjectShells);
     const serverSettings = yield* ServerSettings.ServerSettingsService;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -177,19 +179,25 @@ export const autoPullPolicyLayer = Layer.effect(
     return {
       isEnabled: Effect.fn("VcsAutoPullPolicy.isEnabled")(
         function* (cwd: string) {
-          const project = yield* snapshots.getActiveProjectByWorkspaceRoot(cwd);
-          if (Option.isNone(project) || project.value.stave != null) return false;
+          const project = yield* projects.findActiveByWorkspaceRoot(cwd);
+          if (Option.isNone(project)) return false;
           const settings = yield* serverSettings.getSettings;
           // After the one-time fold, project overrides alone decide so a reset in
           // settings is not undone by the legacy aggregate flag.
           const autoPull = settings.projectSettingsFolded
-            ? resolveProjectSettings(settings, project.value.id).settings.defaultAutoPull
-            : resolveProjectAutoPull(settings, project.value.id, project.value.autoPull);
+            ? resolveProjectSettings(settings, project.value.projectId).settings.defaultAutoPull
+            : resolveProjectAutoPull(settings, project.value.projectId, project.value.autoPull);
           if (!autoPull) return false;
+          // Stave owns pulls inside its spaces: a project on a space root, a
+          // space's repos, and any cwd under a `.stave.yaml` ceiling.
           const hasOwner = yield* ownershipLock.withPermits(1)(
             Effect.gen(function* () {
-              const snapshot = yield* snapshots.getShellSnapshot();
-              const projects = snapshot.projects.map(({ workspaceRoot, stave }) => ({
+              // Decorated shells carry each project's manifest (cached), like V1's
+              // projection; without the Stave reader only disk manifests count.
+              const shells = Option.isSome(staveShells)
+                ? yield* staveShells.value.list
+                : yield* projects.listShells();
+              const projectRoots = shells.map(({ workspaceRoot, stave }) => ({
                 workspaceRoot,
                 stave,
               }));
@@ -198,13 +206,13 @@ export const autoPullPolicyLayer = Layer.effect(
               // within one poll interval. Candidate paths and manifest ceilings stay live.
               if (
                 ownership === undefined ||
-                !NodeUtil.isDeepStrictEqual(ownership.projects, projects) ||
+                !NodeUtil.isDeepStrictEqual(ownership.projects, projectRoots) ||
                 ownership.expiresAt <= now
               ) {
                 ownership = {
-                  projects,
+                  projects: projectRoots,
                   expiresAt: now + STAVE_OWNERSHIP_REFRESH_INTERVAL_MS,
-                  hasOwner: yield* makeStaveAutoPullOwnerCheck(snapshot.projects).pipe(
+                  hasOwner: yield* makeStaveAutoPullOwnerCheck(shells).pipe(
                     Effect.provideService(FileSystem.FileSystem, fs),
                     Effect.provideService(Path.Path, path),
                   ),
