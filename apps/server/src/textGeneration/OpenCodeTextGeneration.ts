@@ -3,33 +3,12 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import {
-  NonNegativeInt,
-  TextGenerationError,
-  type ChatAttachment,
-  type ModelSelection,
-  type OpenCodeSettings,
-} from "@lecturn/contracts";
-import { formatGeneratedBranchName, sanitizeFeatureBranchName } from "@lecturn/shared/git";
+import { NonNegativeInt, TextGenerationError, type OpenCodeSettings } from "@lecturn/contracts";
 import { getModelSelectionStringOptionValue } from "@lecturn/shared/model";
-import { extractJsonObject } from "@lecturn/shared/schemaJson";
 
 import * as ServerConfig from "../config.ts";
 import { resolveAttachmentPath } from "../attachmentStore.ts";
-import {
-  buildBranchNamePrompt,
-  buildCommitMessagePrompt,
-  buildPrContentPrompt,
-  buildThreadTitlePrompt,
-  buildWorkflowSummaryPrompt,
-  normalizeWorkflowSummary,
-} from "./TextGenerationPrompts.ts";
-import * as TextGeneration from "./TextGeneration.ts";
-import {
-  sanitizeCommitSubject,
-  sanitizePrTitle,
-  sanitizeThreadTitle,
-} from "./TextGenerationUtils.ts";
+import * as TextGenerationOperations from "./TextGenerationOperations.ts";
 import * as OpenCodeRuntime from "../provider/opencodeRuntime.ts";
 import * as OpenCodeServerOwner from "../provider/OpenCodeServerOwner.ts";
 
@@ -42,9 +21,10 @@ const OpenCodeTextGenerationOperation = Schema.Literals([
   "generateBranchName",
   "generateThreadTitle",
   "generateWorkflowSummary",
+  "generateContextualSummary",
+  "generateDecisionNotes",
+  "checkDecisionWriter",
 ]);
-
-type OpenCodeTextGenerationOperation = typeof OpenCodeTextGenerationOperation.Type;
 
 const openCodeTextGenerationErrorContext = {
   operation: OpenCodeTextGenerationOperation,
@@ -186,14 +166,9 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
   const fileSystem = yield* FileSystem.FileSystem;
   const serverOwner = yield* OpenCodeServerOwner.OpenCodeServerOwner;
 
-  const runOpenCodeJson = Effect.fn("runOpenCodeJson")(function* <S extends Schema.Top>(input: {
-    readonly operation: OpenCodeTextGenerationOperation;
-    readonly cwd: string;
-    readonly prompt: string;
-    readonly outputSchemaJson: S;
-    readonly modelSelection: ModelSelection;
-    readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
-  }) {
+  const runOpenCodeJson = Effect.fn("runOpenCodeJson")(function* <S extends Schema.Top>(
+    input: TextGenerationOperations.Request<S>,
+  ) {
     const inference = input.operation === "generateWorkflowSummary";
     const directory = inference
       ? yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-workflow-inference-" }).pipe(
@@ -417,165 +392,8 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       }),
     );
 
-    const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(input.outputSchemaJson));
-    return yield* decodeOutput(extractJsonObject(rawOutput)).pipe(
-      Effect.catchTags({
-        SchemaError: (cause) =>
-          Effect.fail(
-            new TextGenerationError({
-              operation: input.operation,
-              detail: "OpenCode returned invalid structured output.",
-              cause,
-            }),
-          ),
-      }),
-    );
+    return yield* TextGenerationOperations.decodeJsonReply(input, "OpenCode", rawOutput);
   }, Effect.scoped);
 
-  return makeOpenCodeOperations(runOpenCodeJson);
+  return TextGenerationOperations.fromRunner("OpenCodeTextGeneration", runOpenCodeJson);
 });
-
-/** Runs one prompt and decodes its reply as `outputSchemaJson`, for either OpenCode runtime. */
-export type OpenCodeJsonRunner = <S extends Schema.Top>(input: {
-  readonly operation: OpenCodeTextGenerationOperation;
-  readonly cwd: string;
-  readonly prompt: string;
-  readonly outputSchemaJson: S;
-  readonly modelSelection: ModelSelection;
-  readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
-}) => Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]>;
-
-/** The four text generation operations over an OpenCode prompt runner. */
-export function makeOpenCodeOperations(
-  runOpenCodeJson: OpenCodeJsonRunner,
-): TextGeneration.TextGeneration["Service"] {
-  const generateCommitMessage: TextGeneration.TextGeneration["Service"]["generateCommitMessage"] =
-    Effect.fn("OpenCodeTextGeneration.generateCommitMessage")(function* (input) {
-      const { prompt, outputSchema } = buildCommitMessagePrompt({
-        branch: input.branch,
-        stagedSummary: input.stagedSummary,
-        stagedPatch: input.stagedPatch,
-        includeBranch: input.includeBranch === true,
-        policy: input.policy,
-      });
-      const generated = yield* runOpenCodeJson({
-        operation: "generateCommitMessage",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        subject: sanitizeCommitSubject(generated.subject),
-        body: generated.body.trim(),
-        ...("branch" in generated && typeof generated.branch === "string"
-          ? { branch: sanitizeFeatureBranchName(generated.branch) }
-          : {}),
-      };
-    });
-
-  const generatePrContent: TextGeneration.TextGeneration["Service"]["generatePrContent"] =
-    Effect.fn("OpenCodeTextGeneration.generatePrContent")(function* (input) {
-      const { prompt, outputSchema } = buildPrContentPrompt({
-        baseBranch: input.baseBranch,
-        headBranch: input.headBranch,
-        commitSummary: input.commitSummary,
-        diffSummary: input.diffSummary,
-        diffPatch: input.diffPatch,
-        policy: input.policy,
-        changeRequestTemplate: input.changeRequestTemplate,
-      });
-      const generated = yield* runOpenCodeJson({
-        operation: "generatePrContent",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        title: sanitizePrTitle(generated.title),
-        body: generated.body.trim(),
-      };
-    });
-
-  const generateBranchName: TextGeneration.TextGeneration["Service"]["generateBranchName"] =
-    Effect.fn("OpenCodeTextGeneration.generateBranchName")(function* (input) {
-      const { prompt, outputSchema } = buildBranchNamePrompt({
-        message: input.message,
-        attachments: input.attachments,
-        naming: input.naming,
-      });
-      const generated = yield* runOpenCodeJson({
-        operation: "generateBranchName",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-        attachments: input.attachments,
-      });
-
-      return {
-        branch: formatGeneratedBranchName(generated.branch, input.naming),
-      };
-    });
-
-  const generateThreadTitle: TextGeneration.TextGeneration["Service"]["generateThreadTitle"] =
-    Effect.fn("OpenCodeTextGeneration.generateThreadTitle")(function* (input) {
-      const { prompt, outputSchema } = buildThreadTitlePrompt({
-        message: input.message,
-        previousTitle: input.previousTitle,
-        linkedContext: input.linkedContext,
-        attachments: input.attachments,
-      });
-      const generated = yield* runOpenCodeJson({
-        operation: "generateThreadTitle",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-        attachments: input.attachments,
-      });
-
-      return {
-        title: sanitizeThreadTitle(generated.title),
-        ...(generated.needsRefinement ? { needsRefinement: true } : {}),
-      };
-    });
-
-  const generateWorkflowSummary: TextGeneration.TextGeneration["Service"]["generateWorkflowSummary"] =
-    Effect.fn("OpenCodeTextGeneration.generateWorkflowSummary")(function* (input) {
-      const { prompt, outputSchema } = yield* Effect.try({
-        try: () => buildWorkflowSummaryPrompt(input),
-        catch: (cause) =>
-          new TextGenerationError({
-            operation: "generateWorkflowSummary",
-            detail: "Workflow inference requires a prior summary and completed textual turns.",
-            cause,
-          }),
-      });
-      const generated = yield* runOpenCodeJson({
-        operation: "generateWorkflowSummary",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-      const summary = normalizeWorkflowSummary(generated.summary);
-      if (!summary)
-        return yield* new TextGenerationError({
-          operation: "generateWorkflowSummary",
-          detail: "The provider returned an empty workflow summary.",
-        });
-      return { summary, stage: generated.stage, confidence: generated.confidence };
-    });
-
-  return {
-    generateCommitMessage,
-    generatePrContent,
-    generateBranchName,
-    generateThreadTitle,
-    generateWorkflowSummary,
-  } satisfies TextGeneration.TextGeneration["Service"];
-}

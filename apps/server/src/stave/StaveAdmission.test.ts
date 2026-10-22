@@ -10,7 +10,7 @@ import * as Path from "effect/Path";
 import {
   StaveLifecycleRepository,
   type StaveLifecycleRow,
-} from "../persistence/Services/StaveLifecycleRepository.ts";
+} from "../persistence/StaveLifecycleRepository.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as StaveAdmission from "./StaveAdmission.ts";
 import { STAVE_MANIFEST_FILE_NAME } from "./staveManifest.ts";

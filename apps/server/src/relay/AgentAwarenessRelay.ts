@@ -580,6 +580,8 @@ export const make = Effect.gen(function* () {
     }
     const environmentId = yield* serverEnvironment.getEnvironmentId;
 
+    // Only the relay interaction (signing the proof and the call) is exported;
+    // the reads that decide what to publish are the user's local work.
     const publishState = (input: {
       readonly projectId: string | null;
       readonly state: RelayAgentActivityState | null;
@@ -634,7 +636,7 @@ export const make = Effect.gen(function* () {
         } else {
           suppressedRingThreadIds.delete(threadId);
         }
-      });
+      }).pipe(Effect.withSpan("relay.agent_activity.publish"), withRelayClientTracing);
 
     const watchId = threadId.startsWith("pr-watch:") ? threadId.slice("pr-watch:".length) : null;
     if (watchId !== null && Option.isSome(watches)) {
@@ -805,7 +807,6 @@ export const make = Effect.gen(function* () {
         }).pipe(Effect.andThen(schedulePublishRetry(threadId)));
       }),
       Effect.withSpan("AgentAwarenessRelay.publishThread"),
-      withRelayClientTracing,
     );
   });
 

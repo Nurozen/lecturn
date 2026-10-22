@@ -69,23 +69,11 @@ import * as HttpApiScalar from "effect/http-api/HttpApiScalar";
 import { RelayApi } from "@lecturn/contracts/relay";
 
 import {
-  clientApi,
-  dpopClientApi,
-  healthApi,
-  metadataApi,
-  mobileApi,
   RELAY_HTTP_ROUTER_CONFIG,
-  relayClientAuthLayer,
-  relayDpopClientAuthLayer,
-  makeRelayCors,
-  relayDocsRedirectRoute,
-  relayEnvironmentAuthLayer,
-  relayNotFoundRoute,
-  serverApi,
   traceRelayHttpRequestWith,
-  tokenApi,
   withoutCapturedParentSpan,
 } from "./http/Api.ts";
+import * as RelayHttpApi from "./http/Api.ts";
 import { ManagedEndpointZone, RelayApiZone, RelayDeploymentConfig } from "./zone.ts";
 import { relayStageSlug } from "./deploymentConfig.ts";
 import { makeRelayTraceLayer, RelayObservability } from "./observability.ts";
@@ -125,8 +113,12 @@ import * as ManagedEndpointProvider from "./environments/ManagedEndpointProvider
 import * as ManagedEndpointReaper from "./environments/ManagedEndpointReaper.ts";
 import * as ManagedTunnelLimits from "./environments/ManagedTunnelLimits.ts";
 import * as MobileRegistrations from "./agentActivity/MobileRegistrations.ts";
+import * as HookForwarder from "./hooks/HookForwarder.ts";
+import * as HeldHooks from "./hooks/HeldHooks.ts";
+import * as HookInbox from "./hooks/HookInbox.ts";
+import * as HookInboxObject from "./hooks/HookInboxObject.ts";
 
-const webcryptoLayer = Layer.succeed(
+const layerWebcrypto = Layer.succeed(
   Crypto.Crypto,
   Crypto.make({
     randomBytes: (size) => globalThis.crypto.getRandomValues(new Uint8Array(size)),
@@ -139,7 +131,7 @@ const webcryptoLayer = Layer.succeed(
   }),
 );
 
-const httpPlatformNotSupportedLayer = Layer.succeed(HttpPlatform.HttpPlatform, {
+const layerHttpPlatformNotSupported = Layer.succeed(HttpPlatform.HttpPlatform, {
   platform: "web",
   compression: {
     algorithms: new Set<HttpPlatform.CompressionAlgorithm>(),
@@ -149,14 +141,14 @@ const httpPlatformNotSupportedLayer = Layer.succeed(HttpPlatform.HttpPlatform, {
   fileWebResponse: () => Effect.die("Relay API does not serve file responses"),
 });
 
-const relayApiLayer = Layer.mergeAll(
-  healthApi,
-  metadataApi,
-  mobileApi,
-  clientApi,
-  tokenApi,
-  dpopClientApi,
-  serverApi,
+const layerRelayApi = Layer.mergeAll(
+  RelayHttpApi.layerHealthApi,
+  RelayHttpApi.layerMetadataApi,
+  RelayHttpApi.layerMobileApi,
+  RelayHttpApi.layerClientApi,
+  RelayHttpApi.layerTokenApi,
+  RelayHttpApi.layerDpopClientApi,
+  RelayHttpApi.layerServerApi,
 );
 
 const CloudMintKeyPair = Alchemy.KeyPair("CloudMintKeyPair");
@@ -174,7 +166,7 @@ class ManagedGatewayRuntime extends Context.Service<
 
 export class Api extends Cloudflare.Worker<Api, {}>()("Api") {}
 
-export const ApiLive = Api.make(
+export const layer = Api.make(
   RelayDeploymentConfig.pipe(
     Effect.map(({ relayPublicDomain }) => ({
       main: import.meta.filename,
@@ -409,6 +401,28 @@ export const ApiLive = Api.make(
     const managedEndpointDnsBinding = yield* Cloudflare.DNS.ReadWriteDns(managedEndpointZone);
     const managedEndpointZoneName = yield* managedEndpointZone.name;
     const managedEndpointCleanupMode = yield* RelayConfiguration.managedEndpointCleanupModeConfig;
+    const legacyManagedEndpointCleanupMode =
+      yield* RelayConfiguration.legacyManagedEndpointCleanupModeConfig;
+    const legacyTunnelGraceMinutes = Option.getOrUndefined(
+      yield* RelayConfiguration.legacyTunnelGraceMinutesConfig,
+    );
+    // Keys are endpoint keys or hashes over them, which already differ per
+    // stage, so stages sharing an account cannot collide in these namespaces.
+    const hookRateLimit = yield* Cloudflare.RateLimit("HOOK_RATE_LIMIT", {
+      namespaceId: 1001,
+      simple: {
+        limit: HookForwarder.RELAY_HOOK_RATE_LIMIT.limit,
+        period: HookForwarder.RELAY_HOOK_RATE_LIMIT.periodSeconds,
+      },
+    });
+    const hookEndpointRateLimit = yield* Cloudflare.RateLimit("HOOK_ENDPOINT_RATE_LIMIT", {
+      namespaceId: 1002,
+      simple: {
+        limit: HookForwarder.RELAY_HOOK_ENDPOINT_RATE_LIMIT.limit,
+        period: HookForwarder.RELAY_HOOK_ENDPOINT_RATE_LIMIT.periodSeconds,
+      },
+    });
+    const hookInboxes = yield* HookInboxObject.HookInboxObject;
 
     //
     // 3. Runtime layers and app construction
@@ -515,7 +529,34 @@ export const ApiLive = Api.make(
         managedEndpointBaseDomain: yield* managedEndpointZoneName,
         managedEndpointNamespace: stage,
         managedEndpointCleanupMode,
+        legacyManagedEndpointCleanupMode,
+        ...(legacyTunnelGraceMinutes === undefined ? {} : { legacyTunnelGraceMinutes }),
       });
+    });
+
+    // Each managed endpoint's held webhook requests live in its own Durable Object.
+    const inboxCall =
+      <A>(operation: HookInbox.HookInboxError["operation"], endpointKey: string) =>
+      (effect: Effect.Effect<A, never, Alchemy.RuntimeContext>) =>
+        effect.pipe(
+          Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
+          Effect.catchCause((cause) =>
+            Effect.fail(
+              new HookInbox.HookInboxError({
+                operation,
+                endpointKey,
+                cause: Cause.squash(cause),
+              }),
+            ),
+          ),
+        );
+    const layerHookInbox = Layer.succeed(HookInbox.HookInbox, {
+      hold: ({ endpointKey, baseUrl, hook }) =>
+        hookInboxes.getByName(endpointKey).hold(hook, baseUrl).pipe(inboxCall("hold", endpointKey)),
+      wake: ({ endpointKey, baseUrl }) =>
+        hookInboxes.getByName(endpointKey).wake(baseUrl).pipe(inboxCall("wake", endpointKey)),
+      clear: ({ endpointKey }) =>
+        hookInboxes.getByName(endpointKey).clear().pipe(inboxCall("clear", endpointKey)),
     });
 
     const relayTraceLayer = Layer.unwrap(
@@ -620,7 +661,7 @@ export const ApiLive = Api.make(
           processPending: () => Effect.void,
         });
 
-    const runtimeLayer = Layer.empty
+    const layerRuntime = Layer.empty
       .pipe(
         Layer.provideMerge(
           Layer.merge(BillingService.layer(billingConfig), MobileRegistrations.layer),
@@ -631,7 +672,11 @@ export const ApiLive = Api.make(
           EnvironmentLinker.layer.pipe(Layer.provideMerge(EnvironmentRelinks.layer)),
         ),
         Layer.provideMerge(
-          Layer.merge(EnvironmentPublishSignatures.layer, ManagedEndpointReaper.layer),
+          Layer.mergeAll(
+            EnvironmentPublishSignatures.layer,
+            ManagedEndpointReaper.layer,
+            HeldHooks.layer,
+          ),
         ),
         Layer.provideMerge(
           ManagedEndpointProvider.layerCloudflareBindings(
@@ -669,7 +714,7 @@ export const ApiLive = Api.make(
         Layer.provideMerge(
           ApnsDeliveryQueue.layerCloudflareQueues(apnsDeliveryQueueSender, alchemyRuntimeContext),
         ),
-        Layer.provideMerge(Layer.mergeAll(AgentActivityRows.layer, Devices.layer)),
+        Layer.provideMerge(Layer.mergeAll(AgentActivityRows.layer, Devices.layer, layerHookInbox)),
         Layer.provideMerge(EnvironmentCredentials.layer),
         Layer.provideMerge(
           Layer.mergeAll(
@@ -711,10 +756,44 @@ export const ApiLive = Api.make(
         ),
         Layer.provideMerge(Layer.effect(RelayConfiguration.RelayConfiguration, loadSettings)),
       )
-      .pipe(Layer.provideMerge(webcryptoLayer));
+      .pipe(Layer.provideMerge(layerWebcrypto));
 
-    const appLayer = Layer.mergeAll(
-      relayApiLayer,
+    // Fails open: a limiter outage must not drop webhooks the environment would accept.
+    const allowWith =
+      (limiter: typeof hookRateLimit) =>
+      (key: string): Effect.Effect<boolean> =>
+        limiter.limit({ key }).pipe(
+          Effect.map((result) => result.success),
+          Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
+          Effect.catch((error) =>
+            Effect.logWarning("Hook rate limiter unavailable", { error: error.message }).pipe(
+              // Visible on the forward span, so an outage that disables limits shows up.
+              Effect.andThen(
+                Effect.annotateCurrentSpan({ "relay.hook.rate_limiter_failed_open": true }),
+              ),
+              Effect.as(true),
+            ),
+          ),
+        );
+    const layerHookRateLimiter = Layer.succeed(HookForwarder.HookRateLimiter, {
+      allowHook: allowWith(hookRateLimit),
+      allowEndpoint: allowWith(hookEndpointRateLimit),
+    });
+    // Forwarded webhooks reach gateway-routed endpoints through the gateway binding,
+    // like every other internal request; a same-zone fetch would not reach them.
+    const layerHookHttpClient = Layer.effect(
+      HttpClient.HttpClient,
+      Effect.gen(function* () {
+        return yield* ManagedGatewayHttpClient;
+      }),
+    ).pipe(Layer.provide(gatewayHttpClientLayer));
+
+    const layerApp = Layer.mergeAll(
+      layerRelayApi,
+      HookForwarder.layerApi.pipe(
+        Layer.provide(HookForwarder.layer.pipe(Layer.provide(layerHookHttpClient))),
+        Layer.provide(layerHookRateLimiter),
+      ),
       decisionsApi({
         appOrigin: billingConfig.appOrigin,
         additionalAppOrigins: billingConfig.additionalAppOrigins ?? [],
@@ -724,10 +803,10 @@ export const ApiLive = Api.make(
         additionalAppOrigins: billingConfig.additionalAppOrigins ?? [],
       }),
     ).pipe(
-      Layer.provideMerge(relayClientAuthLayer),
-      Layer.provideMerge(relayDpopClientAuthLayer),
-      Layer.provideMerge(relayEnvironmentAuthLayer),
-      Layer.provide(runtimeLayer),
+      Layer.provideMerge(RelayHttpApi.layerClientAuth),
+      Layer.provideMerge(RelayHttpApi.layerDpopClientAuth),
+      Layer.provideMerge(RelayHttpApi.layerEnvironmentAuth),
+      Layer.provide(layerRuntime),
     );
 
     yield* Cloudflare.Queues.consumeQueueMessages<unknown>(
@@ -748,7 +827,7 @@ export const ApiLive = Api.make(
               Effect.withSpan("relay.apn_delivery_queue.process_message"),
             ),
           ),
-          Effect.provide(runtimeLayer),
+          Effect.provide(layerRuntime),
         ),
     );
 
@@ -765,7 +844,7 @@ export const ApiLive = Api.make(
         stream.pipe(
           Stream.withSpan("relay.fcm_delivery_queue.process_batch"),
           Stream.runForEach(FcmDeliveryQueueConsumer.processMessage),
-          Effect.provide(runtimeLayer),
+          Effect.provide(layerRuntime),
         ),
     );
 
@@ -813,7 +892,7 @@ export const ApiLive = Api.make(
       ).pipe(
         Effect.withSpan("relay.cron.prune_expired_state"),
         // Export cron spans to Axiom like HTTP spans; the scope flushes them before the run ends.
-        Effect.provide(Layer.merge(runtimeLayer, relayTraceLayer)),
+        Effect.provide(Layer.merge(layerRuntime, relayTraceLayer)),
       ),
     );
 
@@ -871,7 +950,7 @@ export const ApiLive = Api.make(
             ),
             { concurrency: "unbounded", discard: true },
           );
-        }).pipe(Effect.provide(runtimeLayer), (maintenance) =>
+        }).pipe(Effect.provide(layerRuntime), (maintenance) =>
           traceBillingMaintenance(maintenance, relayTraceLayer),
         ),
       );
@@ -890,7 +969,7 @@ export const ApiLive = Api.make(
         }).pipe(
           Effect.timeout("45 seconds"),
           Effect.catch(() => Effect.logWarning("Identity reconciliation deferred")),
-          Effect.provide(runtimeLayer),
+          Effect.provide(layerRuntime),
         ),
       );
 
@@ -920,7 +999,7 @@ export const ApiLive = Api.make(
         ),
         Effect.timeout("45 seconds"),
         Effect.catchCause(() => Effect.logWarning("Decisions reconciliation deferred")),
-        Effect.provide(runtimeLayer),
+        Effect.provide(layerRuntime),
       ),
     );
 
@@ -929,7 +1008,7 @@ export const ApiLive = Api.make(
         Effect.flatMap((service) => service.cleanupPrivate()),
         Effect.timeout("45 seconds"),
         Effect.catch(() => Effect.logWarning("Extensions evaluator cleanup deferred")),
-        Effect.provide(runtimeLayer),
+        Effect.provide(layerRuntime),
       ),
     );
 
@@ -950,17 +1029,17 @@ export const ApiLive = Api.make(
         Effect.timeout("45 seconds"),
         Effect.catchCause(() => Effect.logWarning("Managed gateway maintenance deferred")),
         Effect.withSpan("relay.gateway.reconcile"),
-        Effect.provide(runtimeLayer),
+        Effect.provide(layerRuntime),
       ),
     );
 
     const fetch = Layer.merge(
       Layer.mergeAll(
         HttpApiBuilder.layer(RelayApi, { openapiPath: "/openapi.json" }).pipe(
-          Layer.provide(appLayer),
+          Layer.provide(layerApp),
         ),
         HttpApiScalar.layer(RelayApi, { path: "/docs" }),
-        relayDocsRedirectRoute,
+        RelayHttpApi.layerDocsRedirectRoute,
         ...(teamsEnabled
           ? [
               teamsRoutes({
@@ -968,20 +1047,20 @@ export const ApiLive = Api.make(
                 additionalAppOrigins: billingConfig.additionalAppOrigins ?? [],
                 clerkWebhookSecret: Redacted.value(teamClerkWebhook),
                 checkoutEnabled: billingConfig.checkoutEnabled,
-              }).pipe(Layer.provide(runtimeLayer)),
+              }).pipe(Layer.provide(layerRuntime)),
             ]
           : []),
         billingRoutes(billingConfig, Redacted.value(clerkBillingWebhook)).pipe(
-          Layer.provide(runtimeLayer),
+          Layer.provide(layerRuntime),
         ),
       ).pipe(
         Layer.provide([
           Etag.layerWeak,
-          httpPlatformNotSupportedLayer,
-          makeRelayCors(billingConfig.appOrigin, billingConfig.additionalAppOrigins),
+          layerHttpPlatformNotSupported,
+          RelayHttpApi.layerCorsFor(billingConfig.appOrigin, billingConfig.additionalAppOrigins),
         ]),
       ),
-      relayNotFoundRoute,
+      RelayHttpApi.layerNotFoundRoute,
     ).pipe(
       HttpRouter.toHttpEffect,
       Effect.provideService(HttpRouter.RouterConfig, RELAY_HTTP_ROUTER_CONFIG),
@@ -1032,7 +1111,7 @@ export const ApiLive = Api.make(
                 return mutableGatewayBindingResponse(
                   yield* gatewayNamespace.getByName(mapping.userId).fetch(request),
                 );
-              }).pipe(Effect.provide(runtimeLayer));
+              }).pipe(Effect.provide(layerRuntime));
             }).pipe(
               Effect.catchCause(() =>
                 Effect.succeed(
@@ -1056,10 +1135,12 @@ export const ApiLive = Api.make(
         Layer.provideMerge(Cloudflare.Queues.EventSourceLive),
         Layer.provideMerge(Cloudflare.Tunnel.ReadWriteTunnelBinding),
         Layer.provideMerge(Cloudflare.DNS.ReadWriteDnsHttp),
+        Layer.provideMerge(Cloudflare.Workers.RateLimitBinding),
+        Layer.provideMerge(HookInboxObject.layer),
         Layer.provideMerge(ManagedGatewayLive),
       ),
     ),
   ),
 );
 
-export default ApiLive;
+export default layer;

@@ -9,7 +9,7 @@ import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import type * as CodexClient from "effect-codex-app-server/client";
 
-import { LECTURN_CODEX_CLIENT_NAME } from "../Layers/CodexProvider.ts";
+import { LECTURN_CODEX_CLIENT_NAME } from "../CodexProvider.ts";
 import type {
   ExternalSessionListing,
   ListExternalSessionsResult,

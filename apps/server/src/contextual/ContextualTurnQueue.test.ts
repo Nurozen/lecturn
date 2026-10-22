@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { MessageId, RunId, ThreadId } from "@lecturn/contracts";
 import { Effect, Result } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { clearV2Projection, insertV2Run } from "../threadDecisions/V2ProjectionTestFixtures.ts";
 import { make } from "./ContextualTurnQueue.ts";
 
@@ -22,7 +22,7 @@ const fixture = Effect.gen(function* () {
   return { sql, queue: yield* make };
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual V2 admission ledger", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual V2 admission ledger", (it) => {
   it.effect("admits a run once and never readmits it after it finishes", () =>
     Effect.gen(function* () {
       const { sql, queue } = yield* fixture;

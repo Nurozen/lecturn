@@ -14,7 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import type { ImportedTranscriptEntry, ProviderInstance } from "../../provider/ProviderDriver.ts";
-import { ProviderInstanceRegistry } from "../../provider/Services/ProviderInstanceRegistry.ts";
+import { ProviderInstanceRegistry } from "../../provider/ProviderInstanceRegistry.ts";
 import {
   buildImportedThreadHistoryV2,
   ExternalSessionImporterV2,

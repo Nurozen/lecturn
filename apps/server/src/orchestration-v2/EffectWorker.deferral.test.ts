@@ -12,7 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EffectWorker from "./EffectWorker.ts";
 
@@ -92,7 +92,7 @@ const harness = Effect.gen(function* () {
   return { outbox, attempts, started, cleaned, enqueue, row, resolveReview, daemon };
 });
 
-const TestLayer = EffectOutbox.layer.pipe(Layer.provideMerge(SqlitePersistenceMemory));
+const TestLayer = EffectOutbox.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory));
 
 it.layer(TestLayer)("effect worker deferral (Lecturn)", (it) => {
   it.effect(

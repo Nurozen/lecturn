@@ -19,13 +19,13 @@ import {
 import { Deferred, Effect, Layer, DateTime, PubSub, Ref, Schema, Stream } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { HostPowerMonitor } from "../background/HostPowerMonitor.ts";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import { ProviderWorkAdmission, make as makeAdmission } from "../provider/ProviderWorkAdmission.ts";
-import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
-import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import { ProviderRegistry } from "../provider/ProviderRegistry.ts";
+import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import { buildUnavailableProviderSnapshot } from "../provider/unavailableProviderSnapshot.ts";
 import { DecisionSettingsRepository, make as makeSettings } from "./DecisionSettingsRepository.ts";
 import { DecisionRepository, make as makeRepository } from "./DecisionRepository.ts";
@@ -72,7 +72,7 @@ const hostLayer = Layer.effect(
   }),
 );
 const testLayer = Layer.merge(
-  SqlitePersistenceMemory,
+  SqlitePersistence.layerMemory,
   BackgroundPolicy.layer.pipe(
     Layer.provide(Layer.merge(hostLayer, ServerSettingsService.layerTest())),
   ),

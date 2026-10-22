@@ -15,7 +15,7 @@ import {
   type ContextualPacketGroup,
 } from "@lecturn/contracts";
 import { decisionSourceHash } from "@lecturn/shared/decisionEvidence";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import {
   make as makeRepository,
@@ -149,7 +149,7 @@ const group = (value: ContextualDecisionCandidate): ContextualPacketGroup => ({
   reasons: ["decision"],
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual Decision candidates", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual Decision candidates", (it) => {
   it.effect("reads authoritative scope, exclusions, lifecycle and replacement changes", () =>
     Effect.gen(function* () {
       const { service, adapter } = yield* fixture;

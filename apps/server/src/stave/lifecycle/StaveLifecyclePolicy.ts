@@ -1,6 +1,6 @@
 import * as DateTime from "effect/DateTime";
 import type { StaveLifecycleSettings, StaveProjectInfo } from "@lecturn/contracts";
-import type { StaveLifecycleRow } from "../../persistence/Services/StaveLifecycleRepository.ts";
+import type { StaveLifecycleRow } from "../../persistence/StaveLifecycleRepository.ts";
 import type { StaveThreadLifecycleAnchor } from "../StaveOrchestration.ts";
 
 /** Keep the full manifest timestamp: Stave can recreate a root within one millisecond. */

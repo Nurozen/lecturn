@@ -17,9 +17,8 @@ import {
   RPC_REQUIRED_SCOPES,
   requiredScopeForRpcMethod,
   requiredScopeForDeviceList,
-  rpcAuthorizationError,
-  rpcScopeAuthorizationLayer,
 } from "./RpcAuthorization.ts";
+import * as RpcAuthorization from "./RpcAuthorization.ts";
 
 describe("RPC authorization scopes", () => {
   it("keeps Decisions data readable without granting processing or mutation", () => {
@@ -68,6 +67,16 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.subscribeBackgroundPolicy)).toBe(
       AuthOrchestrationReadScope,
     );
+  });
+
+  it("keeps webhook delivery logs, which hold request bodies, behind operate scope", () => {
+    for (const method of [
+      WS_METHODS.scheduledTasksListWebhookDeliveries,
+      WS_METHODS.scheduledTasksGetWebhookDelivery,
+      WS_METHODS.scheduledTasksRotateWebhookToken,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    }
   });
 
   it("allows relay status reads without granting relay installation access", () => {
@@ -211,7 +220,7 @@ describe("RPC scope middleware", () => {
         const required = requiredScopeForRpcMethod(tag);
         for (const scope of AuthEnvironmentScope.literals) {
           const middleware = yield* Effect.service(RpcScopeAuthorization).pipe(
-            Effect.provide(rpcScopeAuthorizationLayer([scope])),
+            Effect.provide(RpcAuthorization.layer([scope])),
           );
           type MiddlewareArgs = Parameters<typeof middleware>;
           const handler = Effect.succeed("handled") as unknown as MiddlewareArgs[0];
@@ -219,7 +228,7 @@ describe("RPC scope middleware", () => {
             Effect.catch((error) => Effect.succeed(error)),
           );
           expect(outcome, `${tag} with ${scope}`).toEqual(
-            scope === required ? "handled" : rpcAuthorizationError(required),
+            scope === required ? "handled" : RpcAuthorization.rpcAuthorizationError(required),
           );
         }
       }
@@ -244,7 +253,7 @@ describe("RPC scope middleware", () => {
             group.toLayerHandler(WS_METHODS.serverRetryResourceTelemetry, () =>
               Effect.sync(() => handled.push("retry")).pipe(Effect.andThen(Effect.never)),
             ),
-            rpcScopeAuthorizationLayer([AuthOrchestrationReadScope]),
+            RpcAuthorization.layer([AuthOrchestrationReadScope]),
           ),
         ),
       );

@@ -11,7 +11,7 @@ import * as Path from "effect/Path";
 import * as Migrator from "effect/sql/Migrator";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { makeSqlitePersistenceLive } from "../../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
 import BranchPullRequest from "../../persistence/Migrations/048_ProjectionThreadBranchPullRequest.ts";
 import ActiveOrderKey from "../../persistence/Migrations/049_ProjectionThreadsActiveOrderKey.ts";
@@ -191,7 +191,7 @@ const ledgerFrom = (fromId: number) =>
   });
 
 const v2Layer = (dbPath: string) => {
-  const database = makeSqlitePersistenceLive(dbPath);
+  const database = SqlitePersistence.layerFromPath(dbPath);
   const stores = Layer.mergeAll(EventStore.layer, ProjectionStore.layer).pipe(
     Layer.provideMerge(database),
   );
@@ -201,7 +201,7 @@ const v2Layer = (dbPath: string) => {
 
 describe("Lecturn fork ledger upgrade to orchestration V2", () => {
   it.effect.each(["fork names", "upstream names at 48-54"] as const)(
-    "migrates a %s ledger at 069 to 071 and imports fork lineage",
+    "migrates a %s ledger at 069 to 073 and imports fork lineage",
     (variant) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
@@ -264,6 +264,8 @@ describe("Lecturn fork ledger upgrade to orchestration V2", () => {
           [69, "ProjectionThreadsAutoSettleDisabledAtCompatibility"],
           [70, "OrchestrationV2"],
           [71, "RemoveRedundantProjectionIndexes"],
+          [72, "ScheduledTaskWebhooks"],
+          [73, "WebhookRelayDeliveries"],
         ]);
         for (const table of [
           "orchestration_v2_events",

@@ -33,11 +33,11 @@ import {
 import { ServerConfig } from "../config.ts";
 import type { AuthenticatedSession } from "../auth/EnvironmentAuth.ts";
 import { StaveOrchestration } from "./StaveOrchestration.ts";
-import { SagaWorkbenchRepository } from "../persistence/Services/SagaWorkbenchRepository.ts";
+import { SagaWorkbenchRepository } from "../persistence/SagaWorkbenchRepository.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
 import { resolveSagaInferenceModel } from "./sagaInferenceModel.ts";
-import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import { SagaWorkbenchEvidence } from "./SagaWorkbenchEvidence.ts";
 import { archiveEntriesMatching } from "./StaveOperations.ts";
 import { StaveSpaceLock } from "./StaveSpaceLock.ts";

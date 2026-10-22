@@ -11,7 +11,7 @@ import {
   type StaveLifecycleRow,
   type StaveLifecycleRepositoryShape,
   StaveLifecycleRepository,
-} from "../persistence/Services/StaveLifecycleRepository.ts";
+} from "../persistence/StaveLifecycleRepository.ts";
 import { TerminalManager } from "../terminal/Manager.ts";
 import * as StaveSpaceLock from "./StaveSpaceLock.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";

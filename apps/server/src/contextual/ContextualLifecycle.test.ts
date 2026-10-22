@@ -9,7 +9,7 @@ import {
 } from "@lecturn/contracts";
 import { Effect, Schema } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import {
   clearV2Projection,
   insertV2Message,
@@ -88,7 +88,7 @@ const fixture = Effect.gen(function* () {
   return { sql, lifecycle: yield* make, queue: yield* makeQueue, insertPreparation, stateOf };
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual V2 lifecycle", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual V2 lifecycle", (it) => {
   it.effect("a fork child inherits supply, exclusions and observations idempotently", () =>
     Effect.gen(function* () {
       const { sql } = yield* fixture;

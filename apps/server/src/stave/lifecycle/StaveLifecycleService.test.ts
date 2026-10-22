@@ -26,12 +26,12 @@ import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ServerConfig, layerTest as configLayerTest } from "../../config.ts";
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
-import { StaveLifecycleRepositoryLive } from "../../persistence/Layers/StaveLifecycleRepository.ts";
+import * as SqlitePersistence from "../../persistence/Sqlite.ts";
+import * as StaveLifecycle from "../../persistence/StaveLifecycleRepository.ts";
 import {
   StaveLifecycleRepository,
   type StaveLifecyclePatch,
-} from "../../persistence/Services/StaveLifecycleRepository.ts";
+} from "../../persistence/StaveLifecycleRepository.ts";
 import { ServerActivation } from "../../serverActivation.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { StaveBinary, StaveBinaryNotFound } from "../StaveBinary.ts";
@@ -72,7 +72,7 @@ const ANCHOR: StaveThreadLifecycleAnchor = {
   deletedAt: null,
   settledOverride: null,
 };
-const persistence = StaveLifecycleRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory));
+const persistence = StaveLifecycle.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory));
 
 const harness = Effect.fn(function* (
   options: {

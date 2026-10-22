@@ -26,20 +26,15 @@ import {
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
-import {
-  LecturnOrchestrationHooksLayerLive,
-  OrchestrationEventInfrastructureLayerLive,
-  OrchestrationV2LayerLive,
-  ProjectServiceLayerLive,
-} from "../orchestration-v2/runtimeLayer.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import { StaveLifecycleRepositoryLive } from "../persistence/Layers/StaveLifecycleRepository.ts";
-import { OrchestrationEventStore } from "../persistence/Services/OrchestrationEventStore.ts";
+import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as StaveLifecycle from "../persistence/StaveLifecycleRepository.ts";
+import { OrchestrationEventStore } from "../persistence/OrchestrationEventStore.ts";
 import { ProcessRunner } from "../processRunner.ts";
 import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import { RepositoryIdentityResolver } from "../project/RepositoryIdentityResolver.ts";
-import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstanceRegistry.ts";
+import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as StaveAdmission from "../stave/StaveAdmission.ts";
@@ -67,12 +62,12 @@ const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "g
 
 /** The V2 orchestrator and project service with the shared hook registry. */
 const OrchestrationLayer = Layer.mergeAll(
-  OrchestrationV2LayerLive.pipe(Layer.provide(ProjectServiceLayerLive)),
-  ProjectServiceLayerLive,
+  RuntimeLayer.layer.pipe(Layer.provide(RuntimeLayer.layerProjectService)),
+  RuntimeLayer.layerProjectService,
   ProjectStore.layer,
   ProjectionStore.layer,
 ).pipe(
-  Layer.provideMerge(LecturnOrchestrationHooksLayerLive),
+  Layer.provideMerge(RuntimeLayer.layerLecturnOrchestrationHooks),
   Layer.provide(McpSessionRegistryTestkit.layer),
   Layer.provide(Layer.mock(CheckpointStore.CheckpointStore)({})),
   Layer.provide(ServerSettings.layerTest()),
@@ -146,14 +141,14 @@ function makeStack(input: {
     Layer.provideMerge(
       Layer.mergeAll(
         ProjectStore.layer,
-        OrchestrationEventInfrastructureLayerLive,
+        RuntimeLayer.layerEventInfrastructure,
         Layer.mock(ProjectEnrichmentService.ProjectEnrichmentService)({
           peek: () => Effect.succeed(NO_ENRICHMENT),
           getAvailable: () => Effect.succeed(NO_ENRICHMENT),
           invalidate: () => Effect.void,
         }),
         StaveSpaceLock.layer,
-        StaveLifecycleRepositoryLive,
+        StaveLifecycle.layer,
         StaveWorkspaceReader.layer.pipe(
           Layer.provide(
             Layer.succeed(RepositoryIdentityResolver, { resolve: () => Effect.succeed(null) }),
@@ -168,7 +163,7 @@ function makeStack(input: {
         WorkspacePaths.layer,
       ),
     ),
-    Layer.provideMerge(SqlitePersistenceMemory),
+    Layer.provideMerge(SqlitePersistence.layerMemory),
     Layer.provideMerge(ServerConfig.layerTest(input.root, { prefix: "stave-lock-v2-" })),
   );
 }

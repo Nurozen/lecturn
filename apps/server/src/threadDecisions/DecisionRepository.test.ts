@@ -13,7 +13,7 @@ import {
   type ThreadDecision,
 } from "@lecturn/contracts";
 import { decisionSourceHash } from "@lecturn/shared/decisionEvidence";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import { parseAssistantCitationHref } from "@lecturn/shared/assistantCitations";
 import { DecisionRepository, make, type CreateDecisionFromWriter } from "./DecisionRepository.ts";
@@ -127,7 +127,7 @@ const groupsFor = (service: DecisionRepository["Service"]) =>
     }),
   );
 
-it.layer(SqlitePersistenceMemory)("DecisionRepository", (it) => {
+it.layer(SqlitePersistence.layerMemory)("DecisionRepository", (it) => {
   it.effect("offers and executes the latest merge undo from the visible canonical decision", () =>
     Effect.gen(function* () {
       const { sql, service } = yield* fixture;

@@ -206,6 +206,11 @@ and keeps the same address. When the host starts again or wakes, Lecturn Connect
 creates a replacement tunnel on its own. You do not need to pair again. Cleanup
 usually runs five to ten minutes after the tunnel goes down.
 
+Lecturn Connect also removes the tunnel of an environment running an older version of
+Lecturn once it has been offline for seven days. That environment shows a message
+asking you to update. Start Lecturn on that computer and update it to the latest
+version; it reconnects at the same address without pairing again.
+
 On a command-line host, `lecturn connect unlink` disables exposure while retaining
 your login; `lecturn connect logout` also clears that login. Background-service
 [removal](./background-service.md#manage-the-service) is separate.

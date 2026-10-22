@@ -19,7 +19,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { ProviderInstanceRegistry } from "./Services/ProviderInstanceRegistry.ts";
+import { ProviderInstanceRegistry } from "./ProviderInstanceRegistry.ts";
 
 const EXTERNAL_SESSION_TEXT_MAX_LENGTH = 200;
 

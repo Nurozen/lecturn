@@ -22,7 +22,7 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import {
   StaveLifecycleRepository,
   type StaveLifecycleRow,
-} from "../persistence/Services/StaveLifecycleRepository.ts";
+} from "../persistence/StaveLifecycleRepository.ts";
 import { StaveDisplayMembership } from "./StaveDisplayMembership.ts";
 import { StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
 

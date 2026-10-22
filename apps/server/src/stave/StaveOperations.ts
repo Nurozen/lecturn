@@ -73,7 +73,7 @@ import * as Schema from "effect/Schema";
 import {
   StaveLifecycleRepository,
   type StaveLifecycleRow,
-} from "../persistence/Services/StaveLifecycleRepository.ts";
+} from "../persistence/StaveLifecycleRepository.ts";
 import { TerminalManager } from "../terminal/Manager.ts";
 import { WorkspacePaths } from "../workspace/WorkspacePaths.ts";
 import { isPathUnder, StaveSpaceLock } from "./StaveSpaceLock.ts";

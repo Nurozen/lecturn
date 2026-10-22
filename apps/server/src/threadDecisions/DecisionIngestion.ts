@@ -1,6 +1,6 @@
 import { ThreadDecisionError } from "@lecturn/contracts";
 import { Context, Effect, Layer, Ref, Semaphore, Stream, type Scope } from "effect";
-import { OrchestrationEventStore } from "../persistence/Services/OrchestrationEventStore.ts";
+import { OrchestrationEventStore } from "../persistence/OrchestrationEventStore.ts";
 import { DecisionJobRepository } from "./DecisionJobRepository.ts";
 import { decisionSourceEvent } from "./DecisionSourceEvents.ts";
 

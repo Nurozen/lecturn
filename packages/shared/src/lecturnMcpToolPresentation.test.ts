@@ -95,6 +95,16 @@ describe("resolveLecturnMcpToolPresentation", () => {
     expect(resolveLecturnMcpToolPresentation("mcp__t3-code__lecturn_thread_read")).toBeNull();
   });
 
+  it("matches OpenCode 2's per-thread server names, whose thread ids hold underscores", () => {
+    expect(
+      resolveLecturnMcpToolPresentation("lecturn-thread_opencode2-adapter_delegate_task")
+        ?.displayName,
+    ).toBe("Delegate a child task");
+    expect(
+      resolveLecturnMcpToolPresentation("lecturn-thread_opencode2-adapter_not_a_tool"),
+    ).toBeNull();
+  });
+
   it("keeps unknown MCP tools on the generic renderer path", () => {
     expect(resolveLecturnMcpToolPresentation("mcp__github__search_issues")).toBeNull();
     expect(resolveLecturnMcpToolPresentation("lecturn.not_a_real_tool")).toBeNull();

@@ -5,7 +5,7 @@ import {
   type StaveProjectInfo,
 } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
-import type { StaveLifecycleRow } from "../../persistence/Services/StaveLifecycleRepository.ts";
+import type { StaveLifecycleRow } from "../../persistence/StaveLifecycleRepository.ts";
 import type { StaveThreadLifecycleAnchor } from "../StaveOrchestration.ts";
 import { evaluateDeletedProject, resolveArchiveDeadline } from "./StaveLifecyclePolicy.ts";
 

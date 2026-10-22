@@ -9,7 +9,7 @@ import {
 import { decisionSourceHash } from "@lecturn/shared/decisionEvidence";
 import { Effect, Result } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { decisionSourceWindow } from "./DecisionSourceWindow.ts";
 import { clearV2Projection, installLegacyProjectionMirror } from "./V2ProjectionTestFixtures.ts";
 
@@ -51,7 +51,7 @@ const fixture = Effect.gen(function* () {
   yield* sql`INSERT INTO projection_thread_messages(message_id,thread_id,role,text,is_streaming,created_at,updated_at) VALUES ('target',${threadId},'user',${text},0,${at},${at})`;
   return sql;
 });
-it.layer(SqlitePersistenceMemory)("Decision source windows", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Decision source windows", (it) => {
   it.effect("maps canonical UTF16 quotes to raw Markdown CRLF coordinates", () =>
     Effect.gen(function* () {
       yield* fixture;

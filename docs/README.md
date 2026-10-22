@@ -16,6 +16,7 @@
 - [Forking threads](./user/forking-threads.md)
 - [Importing sessions](./user/importing-sessions.md)
 - [SnapShots](./user/snap-shot.md)
+- [Visual replies](./user/html-renders.md)
 - [Import browser sessions](./user/browser-import.md)
 - [Devices](./user/devices.md)
 - [Usage and limits](./user/usage.md)

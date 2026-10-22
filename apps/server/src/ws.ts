@@ -3,7 +3,6 @@ import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
-import * as NodeCrypto from "node:crypto";
 
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -31,7 +30,9 @@ import {
   CommandId,
   AuthAccessStreamError,
   type AuthAccessStreamEvent,
+  AuthOrchestrationOperateScope,
   type AuthEnvironmentScope,
+  type ScheduledTaskListResult,
   AuthSessionId,
   ClientConnectionMethod,
   ClientDeviceType,
@@ -127,6 +128,7 @@ import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts"
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
 import * as IdAllocator from "./orchestration-v2/IdAllocator.ts";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
+import * as SecretRequests from "./secrets/SecretRequests.ts";
 import {
   archivedShellStreamItemFromThreadShell,
   buildActiveShellSnapshot,
@@ -138,6 +140,7 @@ import {
   shellStreamItemFromThreadShell,
   shellStreamItemsFromInitialSnapshot,
   shellStreamItemsFromResumeSnapshot,
+  skipUnchangedThreadShells,
   toShellApplicationEvent,
   type ShellApplicationEvent,
 } from "./orchestration-v2/ShellStream.ts";
@@ -162,21 +165,21 @@ import {
 } from "./orchestration-v2/WireProjection.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
-import * as OrchestrationEventStore from "./persistence/Services/OrchestrationEventStore.ts";
+import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
 import { userFacingDispatchErrorMessage } from "./orchestration-v2/UserFacingErrors.ts";
 import {
   observeRpcEffect,
   observeRpcStream,
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
-import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
-import * as ProviderInstanceRegistry from "./provider/Services/ProviderInstanceRegistry.ts";
+import * as ProviderRegistry from "./provider/ProviderRegistry.ts";
+import * as ProviderInstanceRegistry from "./provider/ProviderInstanceRegistry.ts";
 import * as AcpRegistrySupport from "./provider/acp/AcpRegistrySupport.ts";
 import * as AcpRegistryRuntimeCoordinator from "./provider/acp/AcpRegistryRuntimeCoordinator.ts";
 import * as ModelManifest from "./provider/ModelManifest.ts";
 import * as ProviderMaintenance from "./provider/providerMaintenance.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
-import * as ProviderAuthService from "./provider/Services/ProviderAuthService.ts";
+import * as ProviderAuthService from "./provider/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -216,11 +219,8 @@ import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
-import {
-  requiredScopeForDeviceList,
-  rpcAuthorizationError,
-  rpcScopeAuthorizationLayer,
-} from "./auth/RpcAuthorization.ts";
+import { requiredScopeForDeviceList, rpcAuthorizationError } from "./auth/RpcAuthorization.ts";
+import * as RpcAuthorization from "./auth/RpcAuthorization.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
@@ -1189,6 +1189,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
         Stream.groupedWithin(512, Duration.millis(50)),
         Stream.mapEffect((events) => projectShellItems(Array.from(events))),
         Stream.flatMap(Stream.fromIterable),
+        skipUnchangedThreadShells,
       );
 
     const liveFrom = (afterSequence: number) =>
@@ -1401,6 +1402,7 @@ const makeWsRpcHandlers = (
     const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
     const providerSessionManager = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
+    const secretRequests = yield* SecretRequests.SecretRequests;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
     const deviceService = yield* DeviceService.DeviceService;
@@ -1499,6 +1501,14 @@ const makeWsRpcHandlers = (
     const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
     const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
     const relayClient = yield* RelayClient.RelayClient;
+    // A webhook URL starts agent runs, so only sessions that may operate
+    // see it; read-only sessions still see the task itself.
+    const withVisibleWebhookUrls = (result: ScheduledTaskListResult): ScheduledTaskListResult =>
+      currentSession.scopes.includes(AuthOrchestrationOperateScope)
+        ? result
+        : {
+            tasks: result.tasks.map(({ webhook: _webhook, ...task }) => task),
+          };
     // RpcScopeAuthorization checks each RPC's declared scope before its handler
     // runs. This covers the one RPC whose scope depends on its input.
     const authorizeEffect = <A, E, R>(
@@ -1642,7 +1652,7 @@ const makeWsRpcHandlers = (
             provider?.models.find((candidate) => candidate.isDefault)?.slug ??
             provider?.models[0]?.slug ??
             "default";
-          const commandId = CommandId.make(NodeCrypto.randomUUID());
+          const commandId = CommandId.make(yield* crypto.randomUUIDv4.pipe(Effect.orDie));
           const launched = yield* Effect.result(
             startup.enqueueCommand(
               threadLaunch.launch({
@@ -2462,13 +2472,17 @@ const makeWsRpcHandlers = (
           },
         ),
       [WS_METHODS.scheduledTasksList]: (_input) =>
-        observeRpcEffect(WS_METHODS.scheduledTasksList, scheduledTasks.list(), {
-          "rpc.aggregate": "scheduledTasks",
-        }),
+        observeRpcEffect(
+          WS_METHODS.scheduledTasksList,
+          scheduledTasks.list().pipe(Effect.map(withVisibleWebhookUrls)),
+          { "rpc.aggregate": "scheduledTasks" },
+        ),
       [WS_METHODS.scheduledTasksSubscribe]: (_input) =>
-        observeRpcStream(WS_METHODS.scheduledTasksSubscribe, scheduledTasks.subscribeList(), {
-          "rpc.aggregate": "scheduledTasks",
-        }),
+        observeRpcStream(
+          WS_METHODS.scheduledTasksSubscribe,
+          scheduledTasks.subscribeList().pipe(Stream.map(withVisibleWebhookUrls)),
+          { "rpc.aggregate": "scheduledTasks" },
+        ),
       [WS_METHODS.scheduledTasksUpsert]: (input) =>
         observeRpcEffect(WS_METHODS.scheduledTasksUpsert, scheduledTasks.upsert(input), {
           "rpc.aggregate": "scheduledTasks",
@@ -2488,6 +2502,29 @@ const makeWsRpcHandlers = (
           "rpc.aggregate": "scheduledTasks",
           "scheduled_task.id": input.id,
         }),
+      [WS_METHODS.scheduledTasksRotateWebhookToken]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.scheduledTasksRotateWebhookToken,
+          scheduledTasks.rotateWebhookToken(input),
+          { "rpc.aggregate": "scheduledTasks", "scheduled_task.id": input.id },
+        ),
+      [WS_METHODS.secretsAnswerRequest]: (input) =>
+        observeRpcEffect(WS_METHODS.secretsAnswerRequest, secretRequests.answer(input), {
+          "rpc.aggregate": "secrets",
+          "orchestration_v2.thread_id": input.threadId,
+        }),
+      [WS_METHODS.scheduledTasksListWebhookDeliveries]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.scheduledTasksListWebhookDeliveries,
+          scheduledTasks.listWebhookDeliveries(input),
+          { "rpc.aggregate": "scheduledTasks", "scheduled_task.id": input.id },
+        ),
+      [WS_METHODS.scheduledTasksGetWebhookDelivery]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.scheduledTasksGetWebhookDelivery,
+          scheduledTasks.getWebhookDelivery(input),
+          { "rpc.aggregate": "scheduledTasks", "scheduled_task.id": input.id },
+        ),
       [WS_METHODS.serverProbe]: (_input) =>
         observeRpcEffect(WS_METHODS.serverProbe, Effect.succeed({}), {
           "rpc.aggregate": "server",
@@ -3052,15 +3089,16 @@ const makeWsRpcHandlers = (
                     status,
                   }),
                 ),
-                Effect.catchTag("RelayClientInstallError", (error) =>
-                  Queue.fail(
-                    queue,
-                    new RelayClientInstallFailedError({
-                      reason: error.reason,
-                      message: error.message,
-                    }),
-                  ),
-                ),
+                Effect.catchTags({
+                  RelayClientInstallError: (error) =>
+                    Queue.fail(
+                      queue,
+                      new RelayClientInstallFailedError({
+                        reason: error.reason,
+                        message: error.message,
+                      }),
+                    ),
+                }),
                 Effect.andThen(Queue.end(queue)),
                 Effect.forkScoped,
               ),
@@ -3538,6 +3576,7 @@ const makeWsRpcHandlers = (
             if (
               input.resource._tag === "attachment" ||
               input.resource._tag === "native-app-icon" ||
+              input.resource._tag === "tool-output-image" ||
               // GitHub media names the repository it authenticates through itself.
               input.resource._tag === "github-media" ||
               (input.resource._tag === "media-file" && path.isAbsolute(input.resource.path))
@@ -4226,7 +4265,7 @@ export const WS_RPC_HANDLER_GROUPS = {
   lecturn: WsLecturnRpcGroup,
 } as const;
 
-const makeWsRpcLayer = (
+const layerWsRpc = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
   clientOrigin: OrchestrationClientOrigin,
   clientAnalyticsProps: Readonly<Record<string, unknown>>,
@@ -4252,7 +4291,7 @@ const makeWsRpcLayer = (
     ),
   );
 
-export const websocketRpcRouteLayer = Layer.unwrap(
+export const layer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
@@ -4326,19 +4365,14 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
           yield* RpcServer.make(ServerWsRpcGroup, { disableTracing: true }).pipe(
             Effect.provideService(RpcServer.Protocol, withTerminalOutputWindow(protocol)),
-            Effect.provide(rpcScopeAuthorizationLayer(session.scopes)),
+            Effect.provide(RpcAuthorization.layer(session.scopes)),
             Effect.forkScoped,
           );
           // @effect-diagnostics-next-line returnEffectInGen:off
           return httpEffect;
         }).pipe(
           Effect.provide(
-            makeWsRpcLayer(
-              session,
-              clientOrigin,
-              clientAnalyticsProps,
-              previewAutomationBroker,
-            ).pipe(
+            layerWsRpc(session, clientOrigin, clientAnalyticsProps, previewAutomationBroker).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),
               Layer.provide(AgentSessionScanner.layer),

@@ -22,7 +22,7 @@ import {
 import * as RelayConfiguration from "../Config.ts";
 import * as DpopProofs from "../auth/DpopProofs.ts";
 import * as RelayTokens from "../auth/RelayTokens.ts";
-import { tokenApi } from "./Api.ts";
+import { layerTokenApi } from "./Api.ts";
 
 vi.mock("@clerk/backend", () => ({ createClerkClient: vi.fn(), verifyToken: vi.fn() }));
 afterEach(() => vi.resetAllMocks());
@@ -92,7 +92,7 @@ function fixture(failure?: DpopProofs.DpopProofFailureCode) {
       : Effect.succeed("verified-proof-thumbprint"),
   );
   const routes = HttpApiBuilder.layer(HttpApi.make("RelayApi").add(RelayApi.groups.token)).pipe(
-    Layer.provide(tokenApi),
+    Layer.provide(layerTokenApi),
     Layer.provide(
       Layer.mergeAll(
         configLayer,

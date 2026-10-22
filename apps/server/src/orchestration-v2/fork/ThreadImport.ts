@@ -32,7 +32,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import type { ImportedTranscriptEntry } from "../../provider/ProviderDriver.ts";
-import { ProviderInstanceRegistry } from "../../provider/Services/ProviderInstanceRegistry.ts";
+import { ProviderInstanceRegistry } from "../../provider/ProviderInstanceRegistry.ts";
 
 /** An import shows the tail of the session: only its last messages are copied. */
 export const IMPORT_HISTORY_MAX_MESSAGES = 200;

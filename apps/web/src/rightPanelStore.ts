@@ -8,17 +8,13 @@
  * workspace paths, and diff/files remain singleton surfaces.
  */
 import { scopedThreadKey, scopeThreadRef } from "@lecturn/client-runtime/environment";
-import {
-  EnvironmentId,
-  ThreadId,
-  type ChatFileAttachment,
-  type ScopedThreadRef,
-} from "@lecturn/contracts";
+import { EnvironmentId, ThreadId, type ScopedThreadRef } from "@lecturn/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import { resolveStorage } from "./lib/storage";
 import type { ThreadPanelPresentation } from "./rightPanelLayout";
+import type { ChatFileAttachment } from "./types";
 
 const RIGHT_PANEL_KINDS = [
   "diff",

@@ -8,7 +8,7 @@ import * as Path from "effect/Path";
 
 import * as LecturnProjectFileLoader from "./LecturnProjectFileLoader.ts";
 
-const TestLayer = Layer.empty.pipe(
+const layerTest = Layer.empty.pipe(
   Layer.provideMerge(LecturnProjectFileLoader.layer),
   Layer.provideMerge(NodeServices.layer),
 );
@@ -26,7 +26,7 @@ const writeProjectFile = Effect.fn("writeProjectFile")(function* (cwd: string, c
   yield* fileSystem.writeFileString(path.join(cwd, "lecturn.json"), contents).pipe(Effect.orDie);
 });
 
-it.layer(TestLayer)("LecturnProjectFileLoader", (it) => {
+it.layer(layerTest)("LecturnProjectFileLoader", (it) => {
   describe("load", () => {
     it.effect("loads and decodes a valid lecturn.json", () =>
       Effect.gen(function* () {

@@ -23,7 +23,7 @@ import * as Path from "effect/Path";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import { StaveLifecycleRepository } from "../persistence/Services/StaveLifecycleRepository.ts";
+import { StaveLifecycleRepository } from "../persistence/StaveLifecycleRepository.ts";
 import { StaveSpaceLock } from "./StaveSpaceLock.ts";
 import { StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
 import { sameManifestIncarnation } from "./staveIncarnation.ts";

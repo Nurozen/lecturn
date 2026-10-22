@@ -7,7 +7,7 @@ import * as Redacted from "effect/Redacted";
 import * as HttpRouter from "effect/http/HttpRouter";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
-import { makeRelayCors } from "./Api.ts";
+import { layerCorsFor } from "./Api.ts";
 import { billingRoutes } from "./BillingApi.ts";
 import { parseBillingConfig } from "../billing/BillingConfig.ts";
 import { BillingService, type BillingServiceShape } from "../billing/BillingService.ts";
@@ -63,7 +63,7 @@ const run = (request: Request, service = makeService(), activeConfig = config) =
     const handler = yield* HttpRouter.toHttpEffect(
       Layer.merge(
         billingRoutes(activeConfig, "whsec_test"),
-        makeRelayCors(activeConfig.appOrigin, activeConfig.additionalAppOrigins),
+        layerCorsFor(activeConfig.appOrigin, activeConfig.additionalAppOrigins),
       ).pipe(
         Layer.provide(
           Layer.merge(

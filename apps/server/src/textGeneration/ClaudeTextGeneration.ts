@@ -14,28 +14,11 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-import { type ClaudeSettings, type ModelSelection } from "@lecturn/contracts";
-import { formatGeneratedBranchName, sanitizeFeatureBranchName } from "@lecturn/shared/git";
+import { type ClaudeSettings, TextGenerationError } from "@lecturn/contracts";
 import { resolveSpawnCommand } from "@lecturn/shared/shell";
 
-import { TextGenerationError } from "@lecturn/contracts";
-import * as TextGeneration from "./TextGeneration.ts";
-import {
-  buildBranchNamePrompt,
-  buildCommitMessagePrompt,
-  buildPrContentPrompt,
-  buildThreadTitlePrompt,
-  buildWorkflowSummaryPrompt,
-  buildContextualSummaryPrompt,
-  normalizeWorkflowSummary,
-} from "./TextGenerationPrompts.ts";
-import {
-  normalizeCliError,
-  sanitizeCommitSubject,
-  sanitizePrTitle,
-  sanitizeThreadTitle,
-  toJsonSchemaObject,
-} from "./TextGenerationUtils.ts";
+import * as TextGenerationOperations from "./TextGenerationOperations.ts";
+import { normalizeCliError, toJsonSchemaObject } from "./TextGenerationUtils.ts";
 import {
   getModelSelectionStringOptionValue,
   getProviderOptionDescriptors,
@@ -101,13 +84,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     );
 
   const encodeJsonForOperation = (
-    operation:
-      | "generateCommitMessage"
-      | "generatePrContent"
-      | "generateBranchName"
-      | "generateThreadTitle"
-      | "generateWorkflowSummary"
-      | "generateContextualSummary",
+    operation: TextGenerationOperations.Operation,
     value: unknown,
     detail: string,
   ): Effect.Effect<string, TextGenerationError> =>
@@ -130,21 +107,13 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     operation,
     cwd,
     prompt,
-    outputSchemaJson,
+    outputSchema: outputSchemaJson,
     modelSelection,
-  }: {
-    operation:
-      | "generateCommitMessage"
-      | "generatePrContent"
-      | "generateBranchName"
-      | "generateThreadTitle"
-      | "generateWorkflowSummary"
-      | "generateContextualSummary";
-    cwd: string;
-    prompt: string;
-    outputSchemaJson: S;
-    modelSelection: ModelSelection;
-  }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
+  }: TextGenerationOperations.Request<S>): Effect.fn.Return<
+    S["Type"],
+    TextGenerationError,
+    S["DecodingServices"]
+  > {
     const catalog = yield* scopedModelCatalog;
     const resolvedModelSelection = {
       ...modelSelection,
@@ -338,177 +307,11 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     );
   });
 
-  // ---------------------------------------------------------------------------
-  // TextGeneration service methods
-  // ---------------------------------------------------------------------------
-
-  const generateCommitMessage: TextGeneration.TextGeneration["Service"]["generateCommitMessage"] =
-    Effect.fn("ClaudeTextGeneration.generateCommitMessage")(function* (input) {
-      const { prompt, outputSchema } = buildCommitMessagePrompt({
-        branch: input.branch,
-        stagedSummary: input.stagedSummary,
-        stagedPatch: input.stagedPatch,
-        includeBranch: input.includeBranch === true,
-        policy: input.policy,
-      });
-
-      const generated = yield* runClaudeJson({
-        operation: "generateCommitMessage",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        subject: sanitizeCommitSubject(generated.subject),
-        body: generated.body.trim(),
-        ...("branch" in generated && typeof generated.branch === "string"
-          ? { branch: sanitizeFeatureBranchName(generated.branch) }
-          : {}),
-      };
-    });
-
-  const generatePrContent: TextGeneration.TextGeneration["Service"]["generatePrContent"] =
-    Effect.fn("ClaudeTextGeneration.generatePrContent")(function* (input) {
-      const { prompt, outputSchema } = buildPrContentPrompt({
-        baseBranch: input.baseBranch,
-        headBranch: input.headBranch,
-        commitSummary: input.commitSummary,
-        diffSummary: input.diffSummary,
-        diffPatch: input.diffPatch,
-        policy: input.policy,
-        changeRequestTemplate: input.changeRequestTemplate,
-      });
-
-      const generated = yield* runClaudeJson({
-        operation: "generatePrContent",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        title: sanitizePrTitle(generated.title),
-        body: generated.body.trim(),
-      };
-    });
-
-  const generateBranchName: TextGeneration.TextGeneration["Service"]["generateBranchName"] =
-    Effect.fn("ClaudeTextGeneration.generateBranchName")(function* (input) {
-      const { prompt, outputSchema } = buildBranchNamePrompt({
-        message: input.message,
-        attachments: input.attachments,
-        naming: input.naming,
-      });
-
-      const generated = yield* runClaudeJson({
-        operation: "generateBranchName",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        branch: formatGeneratedBranchName(generated.branch, input.naming),
-      };
-    });
-
-  const generateThreadTitle: TextGeneration.TextGeneration["Service"]["generateThreadTitle"] =
-    Effect.fn("ClaudeTextGeneration.generateThreadTitle")(function* (input) {
-      const { prompt, outputSchema } = buildThreadTitlePrompt({
-        message: input.message,
-        previousTitle: input.previousTitle,
-        linkedContext: input.linkedContext,
-        attachments: input.attachments,
-      });
-
-      const generated = yield* runClaudeJson({
-        operation: "generateThreadTitle",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        title: sanitizeThreadTitle(generated.title),
-        ...(generated.needsRefinement ? { needsRefinement: true } : {}),
-      };
-    });
-
-  const generateWorkflowSummary: TextGeneration.TextGeneration["Service"]["generateWorkflowSummary"] =
-    Effect.fn("ClaudeTextGeneration.generateWorkflowSummary")(function* (input) {
-      const { prompt, outputSchema } = yield* Effect.try({
-        try: () => buildWorkflowSummaryPrompt(input),
-        catch: (cause) =>
-          new TextGenerationError({
-            operation: "generateWorkflowSummary",
-            detail: "Workflow inference requires a prior summary and completed textual turns.",
-            cause,
-          }),
-      });
-      const generated = yield* runClaudeJson({
-        operation: "generateWorkflowSummary",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-      const summary = normalizeWorkflowSummary(generated.summary);
-      if (!summary)
-        return yield* new TextGenerationError({
-          operation: "generateWorkflowSummary",
-          detail: "The provider returned an empty workflow summary.",
-        });
-      return { summary, stage: generated.stage, confidence: generated.confidence };
-    });
-
-  const generateContextualSummary: NonNullable<
-    TextGeneration.TextGeneration["Service"]["generateContextualSummary"]
-  > = Effect.fn("ClaudeTextGeneration.generateContextualSummary")(
-    function* (input) {
-      const { prompt, outputSchema } = yield* Effect.try({
-        try: () => buildContextualSummaryPrompt(input),
-        catch: (cause) =>
-          new TextGenerationError({
-            operation: "generateContextualSummary",
-            detail: "Contextual summary requires bounded evidence text.",
-            cause,
-          }),
-      });
-      const generated = yield* runClaudeJson({
-        operation: "generateContextualSummary",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-      const text = generated.text.trim();
-      if (!text)
-        return yield* new TextGenerationError({
-          operation: "generateContextualSummary",
-          detail: "The provider returned an empty Contextual summary.",
-        });
-      return { text };
-    },
-    Effect.mapError(
-      () =>
-        new TextGenerationError({
-          operation: "generateContextualSummary",
-          detail: "Contextual summary generation is unavailable.",
-        }),
-    ),
-  );
-
   return {
-    generateCommitMessage,
-    generatePrContent,
-    generateBranchName,
-    generateThreadTitle,
-    generateWorkflowSummary,
-    generateContextualSummary,
-  } satisfies TextGeneration.TextGeneration["Service"];
+    ...TextGenerationOperations.fromRunner("ClaudeTextGeneration", runClaudeJson),
+    generateContextualSummary: TextGenerationOperations.contextualSummaryFromRunner(
+      "ClaudeTextGeneration",
+      runClaudeJson,
+    ),
+  };
 });

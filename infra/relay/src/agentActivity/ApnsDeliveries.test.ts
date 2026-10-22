@@ -175,7 +175,7 @@ const target: LiveActivities.TargetRow = {
   last_live_activity_delivery_at: null,
 };
 
-function makeLayer(input: {
+function layerFor(input: {
   readonly managedAccess?: ManagedAccess["Service"];
   readonly failCompletion?: boolean;
   readonly attempts: Array<DeliveryAttempts.DeliveryAttemptInput>;
@@ -371,7 +371,7 @@ describe("ApnsDeliveries", () => {
       expect(attempts).toHaveLength(0);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           queuedJobs,
           config: { ...config, apns: null },
@@ -410,7 +410,7 @@ describe("ApnsDeliveries", () => {
       expect(queuedJobs).toEqual([]);
       expect(queuedStarts).toEqual([]);
       expect(attempts).toEqual([]);
-    }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs, queuedStarts })));
+    }).pipe(Effect.provide(layerFor({ attempts, queuedJobs, queuedStarts })));
   });
 
   it.effect("ends the armed card when nothing remains to show", () => {
@@ -452,7 +452,7 @@ describe("ApnsDeliveries", () => {
         },
       ]);
       expect(attempts).toEqual([]);
-    }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs })));
+    }).pipe(Effect.provide(layerFor({ attempts, queuedJobs })));
   });
 
   it.effect("does not queue a remote start when Live Activities are disabled", () => {
@@ -477,7 +477,7 @@ describe("ApnsDeliveries", () => {
       expect(result).toBeNull();
       expect(queuedJobs).toEqual([]);
       expect(attempts).toEqual([]);
-    }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs })));
+    }).pipe(Effect.provide(layerFor({ attempts, queuedJobs })));
   });
 
   it.effect("does not queue a duplicate remote start while a start is already queued", () => {
@@ -502,7 +502,7 @@ describe("ApnsDeliveries", () => {
       expect(result).toBeNull();
       expect(queuedJobs).toEqual([]);
       expect(attempts).toEqual([]);
-    }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs })));
+    }).pipe(Effect.provide(layerFor({ attempts, queuedJobs })));
   });
 
   it.effect("queues bounded Live Activity aggregate payloads", () => {
@@ -546,7 +546,7 @@ describe("ApnsDeliveries", () => {
       expect(payloadAggregate?.activities[0]?.status.length).toBeLessThanOrEqual(40);
       expect(payloadAggregate?.activities[0]?.deepLink).toBe("/");
       expect(attempts).toEqual([]);
-    }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs })));
+    }).pipe(Effect.provide(layerFor({ attempts, queuedJobs })));
   });
 
   it.effect("queues Live Activity jobs with the device's APNs routing", () => {
@@ -579,7 +579,7 @@ describe("ApnsDeliveries", () => {
           },
         },
       ]);
-    }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs })));
+    }).pipe(Effect.provide(layerFor({ attempts, queuedJobs })));
   });
 
   it.effect("sends signed jobs to the device's APNs environment and bundle topic", () => {
@@ -632,7 +632,7 @@ describe("ApnsDeliveries", () => {
       );
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           currentTargets: [
             {
@@ -687,7 +687,7 @@ describe("ApnsDeliveries", () => {
         expect(result).toBeNull();
         expect(queuedJobs).toEqual([]);
         expect(attempts).toEqual([]);
-      }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs })));
+      }).pipe(Effect.provide(layerFor({ attempts, queuedJobs })));
     },
   );
 
@@ -732,7 +732,7 @@ describe("ApnsDeliveries", () => {
             },
           },
         ]);
-      }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs })));
+      }).pipe(Effect.provide(layerFor({ attempts, queuedJobs })));
     },
   );
 
@@ -762,7 +762,7 @@ describe("ApnsDeliveries", () => {
 
         expect(result).toBeNull();
         expect(queuedJobs).toEqual([]);
-      }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs })));
+      }).pipe(Effect.provide(layerFor({ attempts, queuedJobs })));
     },
   );
 
@@ -794,7 +794,7 @@ describe("ApnsDeliveries", () => {
         },
       ]);
       expect(attempts).toEqual([]);
-    }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs })));
+    }).pipe(Effect.provide(layerFor({ attempts, queuedJobs })));
   });
 
   it.effect(
@@ -855,7 +855,7 @@ describe("ApnsDeliveries", () => {
           },
         ]);
         expect(attempts).toEqual([]);
-      }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs })));
+      }).pipe(Effect.provide(layerFor({ attempts, queuedJobs })));
     },
   );
 
@@ -898,7 +898,7 @@ describe("ApnsDeliveries", () => {
         },
       ]);
       expect(attempts).toEqual([]);
-    }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs })));
+    }).pipe(Effect.provide(layerFor({ attempts, queuedJobs })));
   });
 
   it.effect(
@@ -952,7 +952,7 @@ describe("ApnsDeliveries", () => {
           },
         ]);
         expect(attempts).toEqual([]);
-      }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs })));
+      }).pipe(Effect.provide(layerFor({ attempts, queuedJobs })));
     },
   );
 
@@ -978,7 +978,7 @@ describe("ApnsDeliveries", () => {
       expect(result).toBeNull();
       expect(queuedJobs).toEqual([]);
       expect(attempts).toEqual([]);
-    }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs })));
+    }).pipe(Effect.provide(layerFor({ attempts, queuedJobs })));
   });
 
   it.effect("queues bounded alert notification payloads", () => {
@@ -1019,7 +1019,7 @@ describe("ApnsDeliveries", () => {
       expect(notification?.body.length).toBeLessThanOrEqual(120);
       expect(notification?.deepLink).toBe("/");
       expect(attempts).toEqual([]);
-    }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs })));
+    }).pipe(Effect.provide(layerFor({ attempts, queuedJobs })));
   });
 
   it.effect("preserves the schema cause for invalid queue payloads", () => {
@@ -1035,7 +1035,7 @@ describe("ApnsDeliveries", () => {
         message: "Invalid APNs delivery queue job with object payload.",
       });
       expect(error.cause).toMatchObject({ _tag: "SchemaError" });
-    }).pipe(Effect.provide(makeLayer({ attempts })));
+    }).pipe(Effect.provide(layerFor({ attempts })));
   });
 
   it.effect("skips a queued start when the user no longer has live work", () => {
@@ -1077,7 +1077,7 @@ describe("ApnsDeliveries", () => {
         },
       ]);
       expect(clearedStarts).toMatchObject([{ userId: target.user_id, deviceId: target.device_id }]);
-    }).pipe(Effect.provide(makeLayer({ attempts, clearedStarts, activityStates: [] })));
+    }).pipe(Effect.provide(layerFor({ attempts, clearedStarts, activityStates: [] })));
   });
 
   it.effect("processes signed jobs through APNs and records attempts", () => {
@@ -1139,7 +1139,7 @@ describe("ApnsDeliveries", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          makeLayer({ attempts }),
+          layerFor({ attempts }),
           Logger.layer([logger], { mergeWithExisting: false }),
         ),
       ),
@@ -1174,7 +1174,7 @@ describe("ApnsDeliveries", () => {
       );
       const started = yield* Deferred.make<void>();
       const results: Array<{ deviceId: string; ok: boolean }> = [];
-      const layer = makeLayer({
+      const layer = layerFor({
         attempts,
         markedDeliveries,
         currentTargets: [target, secondTarget],
@@ -1274,7 +1274,7 @@ describe("ApnsDeliveries", () => {
       ]);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           currentTargets: [
             {
@@ -1333,7 +1333,7 @@ describe("ApnsDeliveries", () => {
       expect(attempts).toEqual([]);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           sourceJobClaims: new Map([["job-push-duplicate", "completed"]]),
           config: signingConfig,
@@ -1387,7 +1387,7 @@ describe("ApnsDeliveries", () => {
       ]);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           config: signingConfig,
           execute,
@@ -1447,7 +1447,7 @@ describe("ApnsDeliveries", () => {
       ]);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           currentTargets: [
             {
@@ -1519,7 +1519,7 @@ describe("ApnsDeliveries", () => {
       ]);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           activityStates: [
             {
@@ -1588,7 +1588,7 @@ describe("ApnsDeliveries", () => {
       ]);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           currentTargets: [{ ...target, push_token: "apns-device-token" }],
           currentActivityStates: [
@@ -1648,7 +1648,7 @@ describe("ApnsDeliveries", () => {
       expect(attempts).toEqual([]);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           sourceJobClaims: new Map([["job-push-in-flight", "in_flight"]]),
           config: signingConfig,
@@ -1709,7 +1709,7 @@ describe("ApnsDeliveries", () => {
       ]);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           invalidatedTokens,
           currentTargets: [
@@ -1759,7 +1759,7 @@ describe("ApnsDeliveries", () => {
       ]);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           clearedStarts,
           activityStates: [{ ...state, updatedAt: "9999-01-01T00:00:00.000Z" }],
@@ -1812,7 +1812,7 @@ describe("ApnsDeliveries", () => {
       ]);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           invalidatedTokens,
           activityStates: [{ ...state, updatedAt: "9999-01-01T00:00:00.000Z" }],
@@ -1866,7 +1866,7 @@ describe("ApnsDeliveries", () => {
         },
       ]);
     }).pipe(
-      Effect.provide(makeLayer({ attempts, invalidatedTokens, config: signingConfig, execute })),
+      Effect.provide(layerFor({ attempts, invalidatedTokens, config: signingConfig, execute })),
     );
   });
 });
@@ -1945,7 +1945,7 @@ describe("once-per-event push notifications", () => {
       });
     }).pipe(
       Effect.provide(
-        makeLayer({ attempts: [], queuedJobs: input.queuedJobs, deviceRow: input.deviceRow }),
+        layerFor({ attempts: [], queuedJobs: input.queuedJobs, deviceRow: input.deviceRow }),
       ),
     );
 
@@ -2025,7 +2025,7 @@ describe("once-per-event push notifications", () => {
         expect(sends).toBe(0);
       }).pipe(
         Effect.provide(
-          makeLayer({
+          layerFor({
             attempts: [],
             config: signingConfig,
             currentTargets: [{ ...target, push_token: "apns-device-token" }],
@@ -2222,7 +2222,7 @@ describe("once-per-event push notifications", () => {
       expect(executeCount).toBe(1);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           currentTargets: [{ ...target, push_token: "apns-device-token" }],
           currentActivityStates: [
@@ -2301,7 +2301,7 @@ describe("Live Activity alerts while the user is present", () => {
       }
     }).pipe(
       Effect.provide(
-        makeLayer({ attempts: [], queuedJobs: input.queuedJobs, deviceRow: input.device }),
+        layerFor({ attempts: [], queuedJobs: input.queuedJobs, deviceRow: input.device }),
       ),
     );
 
@@ -2396,7 +2396,7 @@ describe("Live Activity alerts while the user is present", () => {
         return yield* deliveries.processSignedJob(job);
       }).pipe(
         Effect.provide(
-          makeLayer({
+          layerFor({
             attempts: [],
             config: signingConfig,
             activityStates: current,
@@ -3010,7 +3010,7 @@ describe("paid recipient delivery", () => {
         expect([...new Set(calls)]).toEqual([target.user_id, "paid-user"]);
       }).pipe(
         Effect.provide(
-          makeLayer({
+          layerFor({
             attempts: [],
             queuedJobs,
             managedAccess: {
@@ -3043,7 +3043,7 @@ describe("paid recipient delivery", () => {
       expect(sends).toBe(0);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts: [],
           queuedJobs,
           managedAccess: { check: () => (paid ? Effect.void : denied()) },
@@ -3074,7 +3074,7 @@ describe("paid recipient delivery", () => {
       expect(attempts).toEqual([]);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           queuedJobs,
           managedAccess: {
@@ -3110,7 +3110,7 @@ describe("paid recipient delivery", () => {
       expect(sends).toBe(1);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts: [],
           queuedJobs,
           config: signingConfig,
@@ -3156,7 +3156,7 @@ describe("last-moment paid checks", () => {
       expect(sends).toBe(0);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts: [],
           managedAccess: {
             check: () => {
@@ -3196,7 +3196,7 @@ describe("last-moment paid checks", () => {
         expect(body).not.toContain('"alert"');
       }).pipe(
         Effect.provide(
-          makeLayer({
+          layerFor({
             attempts: [],
             config: signingConfig,
             managedAccess: {
@@ -3253,7 +3253,7 @@ describe("durable subscription-denied receipts", () => {
         expect(sends).toBe(0);
       }).pipe(
         Effect.provide(
-          makeLayer({
+          layerFor({
             attempts,
             config: signingConfig,
             currentTargets: [{ ...target, push_token: "push-token" }],
@@ -3292,7 +3292,7 @@ describe("durable subscription-denied receipts", () => {
       expect(failure._tag).toBe("DeliveryAttemptRecordPersistenceError");
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts: [],
           failCompletion: true,
           managedAccess: {
@@ -3369,7 +3369,7 @@ describe("queued delivery entitlement windows", () => {
       }
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           config: signingConfig,
           currentTargets: [{ ...target, push_token: "push-token" }],
@@ -3399,7 +3399,7 @@ describe("queued delivery entitlement windows", () => {
       expect(attempts[0]?.apnsReason).toContain("access expired");
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           config: signingConfig,
           currentTargets: [{ ...target, push_token: "push-token" }],
@@ -3431,7 +3431,7 @@ describe("queued delivery entitlement windows", () => {
       expect(sends).toBe(1);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts: [],
           config: signingConfig,
           currentTargets: [{ ...target, push_token: "push-token" }],
@@ -3462,7 +3462,7 @@ describe("queued delivery entitlement windows", () => {
         expect(body).not.toContain('"alert"');
       }).pipe(
         Effect.provide(
-          makeLayer({
+          layerFor({
             attempts: [],
             config: signingConfig,
             managedAccess: makeManagedAccess((userId) =>
@@ -3491,7 +3491,7 @@ describe("queued delivery entitlement windows", () => {
       expect(sends).toBe(1);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts: [],
           config: signingConfig,
           currentTargets: [{ ...target, push_token: "push-token" }],
@@ -3522,7 +3522,7 @@ describe("company notification authorization", () => {
       expect(queuedJobs).toHaveLength(1);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts: [],
           queuedJobs,
           managedAccess: {
@@ -3566,7 +3566,7 @@ describe("company notification authorization", () => {
       expect(body).toContain(state.threadTitle);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts: [],
           queuedJobs,
           config: signingConfig,
@@ -3637,7 +3637,7 @@ describe("signed APNs registration metadata", () => {
       );
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layerFor({
           attempts,
           config: signingConfig,
           currentTargets: [

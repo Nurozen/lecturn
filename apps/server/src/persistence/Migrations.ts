@@ -87,6 +87,10 @@ import Migration0053 from "./Migrations/053_ProjectionThreadImportOrigin.ts";
 // (ThreadDecisions, DecisionScanBacklog), so they run here as 70 and 71.
 import Migration0070 from "./Migrations/055_OrchestrationV2.ts";
 import Migration0071 from "./Migrations/056_RemoveRedundantProjectionIndexes.ts";
+// Upstream published these as 57 and 58, which Lecturn's ledger already used
+// (DecisionScanPreparation, DecisionEvaluationReuse), so they run here as 72 and 73.
+import Migration0072 from "./Migrations/057_ScheduledTaskWebhooks.ts";
+import Migration0073 from "./Migrations/058_WebhookRelayDeliveries.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -97,6 +101,15 @@ const StaveLifecycleRecoveryCompatibility = Effect.gen(function* () {
     yield* sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'stave_project_lifecycle'`;
   if (tables.length === 0) yield* Migration0049;
   yield* Migration0050;
+});
+
+// Upstream 57 adds columns without IF NOT EXISTS. A database that already ran
+// it under upstream's id keeps that schema, so only add what is missing.
+const ScheduledTaskWebhooksCompatibility = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(scheduled_tasks)`;
+  if (columns.some((column) => column.name === "webhook_token")) return;
+  yield* Migration0072;
 });
 
 /**
@@ -183,6 +196,9 @@ export const migrationEntries = [
   // changes need new migrations, remapped above Lecturn's latest id.
   [70, "OrchestrationV2", Migration0070],
   [71, "RemoveRedundantProjectionIndexes", Migration0071],
+  // Upstream 57 and 58.
+  [72, "ScheduledTaskWebhooks", ScheduledTaskWebhooksCompatibility],
+  [73, "WebhookRelayDeliveries", Migration0073],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

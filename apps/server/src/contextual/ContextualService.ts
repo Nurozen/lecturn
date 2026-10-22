@@ -2,7 +2,7 @@ import * as NodeCrypto from "node:crypto";
 import * as C from "@lecturn/contracts";
 import { Context, DateTime, Effect, Layer, Option, Schema, Semaphore, Stream } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import { ExtensionsRuntime } from "../extensions/ExtensionsRuntime.ts";
 import { ExtensionsCloudClient } from "../extensions/ExtensionsCloudClient.ts";
 import {

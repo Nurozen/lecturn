@@ -237,6 +237,7 @@ snooze limit stops by default. Providers without a reset time offer manual
 retry and the normal snooze choices.
 
 On web and desktop, use **Agents** to follow work delegated to subagents.
+Stop on a thread also stops the subagents it delegated to.
 
 On mobile, the work log groups subagents and shows how many are still working.
 Before a workflow reports its members, its coordinator shows its own status and

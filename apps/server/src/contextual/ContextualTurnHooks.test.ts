@@ -3,7 +3,7 @@ import * as C from "@lecturn/contracts";
 import { Effect, Fiber, Result, Schema } from "effect";
 import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import type {
   LecturnTurnStartDecision,
   LecturnTurnStartInput,
@@ -294,7 +294,7 @@ const harness = (
 const deferralOf = (decision: LecturnTurnStartDecision | void) =>
   decision && "defer" in decision ? decision.defer : undefined;
 
-it.layer(SqlitePersistenceMemory)("Contextual V2 turn hooks", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual V2 turn hooks", (it) => {
   it.effect("does nothing for threads without Contextual intent", () =>
     Effect.gen(function* () {
       const f = yield* harness();

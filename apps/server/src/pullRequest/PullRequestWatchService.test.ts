@@ -10,7 +10,7 @@ import {
   type PullRequestWatchObservation,
   type PullRequestListEntry,
 } from "@lecturn/contracts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { watchReadLayer, type WatchThreadFixture } from "./PullRequestWatchTestShells.ts";
 import { PullRequestWatchProvider } from "./PullRequestWatchProvider.ts";
 import { projectContainsWatch } from "./PullRequestWatchPolicy.ts";
@@ -123,7 +123,7 @@ const tracked = Effect.fn(function* () {
   return { ...f, watch };
 });
 
-it.layer(SqlitePersistenceMemory)("durable PR watch", (it) => {
+it.layer(SqlitePersistence.layerMemory)("durable PR watch", (it) => {
   it.effect(
     "runtime rosters resolve duplicate saga names and reject replaced member incarnations",
     () =>

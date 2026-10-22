@@ -9,9 +9,9 @@ import {
 import { Effect, Layer, Result, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
-import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import { make as makeAdmission, ProviderWorkAdmission } from "../provider/ProviderWorkAdmission.ts";
 import { buildUnavailableProviderSnapshot } from "../provider/unavailableProviderSnapshot.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../provider/providerMaintenance.ts";
@@ -106,7 +106,7 @@ const fixture = Effect.gen(function* () {
     },
   };
 });
-it.layer(SqlitePersistenceMemory)("Decision writer binding", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Decision writer binding", (it) => {
   it.effect(
     "retains unchanged bindings after process reconstruction and rejects effective configuration drift",
     () =>

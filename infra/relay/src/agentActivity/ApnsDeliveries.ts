@@ -973,7 +973,7 @@ export const make = Effect.gen(function* () {
           )
           .pipe(
             Effect.as(true),
-            Effect.catchTag("ManagedAccessRequired", () => Effect.succeed(false)),
+            Effect.catchTags({ ManagedAccessRequired: () => Effect.succeed(false) }),
           );
   // Cleanup may end an existing card even if billing cannot be read, but must stay silent.
   const cleanupAlertsPermitted = (
@@ -984,9 +984,10 @@ export const make = Effect.gen(function* () {
   ) =>
     managedAccess.check(userId, feature, originCreatedAtSeconds, environmentId).pipe(
       Effect.as(true),
-      Effect.catchTag(["ManagedAccessRequired", "ManagedAccessUnavailable"], () =>
-        Effect.succeed(false),
-      ),
+      Effect.catchTags({
+        ManagedAccessRequired: () => Effect.succeed(false),
+        ManagedAccessUnavailable: () => Effect.succeed(false),
+      }),
     );
   const aggregatePermitted = (
     userId: string,
@@ -1199,9 +1200,10 @@ export const make = Effect.gen(function* () {
       input.aggregate,
       input.originCreatedAtSeconds,
     ).pipe(
-      Effect.catchTag("ManagedAccessUnavailable", (error) =>
-        input.kind === "live_activity_end" ? Effect.succeed(null) : Effect.fail(error),
-      ),
+      Effect.catchTags({
+        ManagedAccessUnavailable: (error) =>
+          input.kind === "live_activity_end" ? Effect.succeed(null) : Effect.fail(error),
+      }),
     );
     if (
       input.aggregate !== null &&

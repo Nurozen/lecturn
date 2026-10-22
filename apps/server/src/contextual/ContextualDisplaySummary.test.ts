@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import * as C from "@lecturn/contracts";
 import { Deferred, Effect, Schema } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { ServerSettingsService, layerTest as settingsLayer } from "../serverSettings.ts";
 import {
   TextGeneration,
@@ -161,7 +161,7 @@ const fixture = (
     );
     return { sql, service, notifications };
   });
-it.layer(SqlitePersistenceMemory)("Contextual display summaries", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual display summaries", (it) => {
   it.effect(
     "runs asynchronously through the configured model without modifying the agent packet",
     () =>

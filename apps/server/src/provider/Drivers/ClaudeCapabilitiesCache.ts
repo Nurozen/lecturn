@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Semaphore from "effect/Semaphore";
 
 import type { ClaudeRuntimeModelInfo } from "../ClaudeModelCatalog.ts";
-import type { ClaudeCapabilitiesProbe } from "../Layers/ClaudeProvider.ts";
+import type { ClaudeCapabilitiesProbe } from "../ClaudeProvider.ts";
 
 /** One instance owns one account's metadata and last successful runtime model list. */
 export const makeClaudeCapabilitiesCache = Effect.fn("makeClaudeCapabilitiesCache")(function* (

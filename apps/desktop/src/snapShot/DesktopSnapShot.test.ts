@@ -484,7 +484,7 @@ import {
   snapShotAnimationDisplayBounds,
   snapShotAnimationOverlayBounds,
 } from "./SnapShotTransition.ts";
-const testLayer = (
+const layerTest = (
   platform: NodeJS.Platform,
   fileSystemOverrides: Parameters<typeof FileSystem.layerNoop>[0] = {},
   initialSettings: Option.Option<ClientSettings> = Option.none(),
@@ -639,7 +639,7 @@ function concurrentCaptureFixture(platform: NodeJS.Platform, animations: boolean
   const handoff = Effect.sync(() => captures[state.handoffs++]!.handoff.resolve());
   let randomByte = 0;
   const layer = Layer.mergeAll(
-    testLayer(platform, {
+    layerTest(platform, {
       makeDirectory: () => Effect.void,
       writeFile: (path, bytes) =>
         Effect.sync(() => {
@@ -776,7 +776,7 @@ it.effect("rejects desktop config changes outside Niri or Hyprland", () =>
         assert.equal(error.message, "Config setup requires a Niri or Hyprland session.");
       }
     }),
-  ).pipe(Effect.provide(testLayer("win32"))),
+  ).pipe(Effect.provide(layerTest("win32"))),
 );
 
 it.effect("reads and acknowledges queued captures through Effect services", () => {
@@ -797,7 +797,7 @@ it.effect("reads and acknowledges queued captures through Effect services", () =
       windowTitle: "main.ts",
     },
   });
-  const layer = testLayer("linux", {
+  const layer = layerTest("linux", {
     readDirectory: () => Effect.succeed([captureId + ".json", "invalid.json"]),
     readFileString: (filePath) => Effect.succeed(filePath === metadataPath ? metadata : "invalid"),
     readFile: () => Effect.succeed(new Uint8Array([1, 2, 3])),
@@ -841,7 +841,7 @@ it.effect("captures the active Windows window without enumerating desktop source
   getFileIconMock.mockReset().mockResolvedValue(fakeIcon("file"));
   const writtenFiles: Array<[string, Uint8Array]> = [];
   let metadata = "";
-  const layer = testLayer("win32", {
+  const layer = layerTest("win32", {
     makeDirectory: () => Effect.void,
     rename: () => Effect.void,
     writeFile: (path, bytes) =>
@@ -897,7 +897,7 @@ it.effect.each([
       result: Promise.resolve(undefined),
     });
     let metadata = "";
-    const layer = testLayer("darwin", {
+    const layer = layerTest("darwin", {
       makeDirectory: () => Effect.void,
       rename: () => Effect.void,
       writeFileString: (_, text) =>
@@ -1030,7 +1030,7 @@ it.effect.each(["win32", "darwin", "linux"] as const)(
       }),
     ).pipe(
       Effect.provide(
-        testLayer(platform, {
+        layerTest(platform, {
           makeDirectory: () => Effect.void,
           rename: () => Effect.void,
           writeFile: (_, bytes) =>
@@ -1291,7 +1291,7 @@ it.effect("matches Windows accessibility windows on a scaled display", () => {
     }),
   ).pipe(
     Effect.provide(
-      testLayer("win32", {
+      layerTest("win32", {
         makeDirectory: () => Effect.void,
         rename: () => Effect.void,
         writeFile: () => Effect.void,
@@ -1323,7 +1323,7 @@ it.effect("skips accessibility capture when the setting is disabled", () => {
   accessibilityProcessWarmMock.mockClear();
   accessibilityProcessReadMock.mockClear();
   accessibilityByPidMock.mockClear();
-  const layer = testLayer("win32", {
+  const layer = layerTest("win32", {
     makeDirectory: () => Effect.void,
     rename: () => Effect.void,
     writeFile: () => Effect.void,
@@ -1367,7 +1367,7 @@ it.effect("keeps an accessibility helper warm only while capture data is enabled
 
       assert.lengthOf(accessibilityProcessCoolMock.mock.calls, 1);
     }),
-  ).pipe(Effect.provide(testLayer("win32")));
+  ).pipe(Effect.provide(layerTest("win32")));
 });
 
 it.effect("rejects X11 capture without registering shortcuts or loading capture backends", () => {
@@ -1392,7 +1392,7 @@ it.effect("rejects X11 capture without registering shortcuts or loading capture 
       assert.lengthOf(activeWindowMock.mock.calls, 0);
     }),
   ).pipe(
-    Effect.provide(testLayer("linux")),
+    Effect.provide(layerTest("linux")),
     Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
   );
 });
@@ -1479,7 +1479,7 @@ it.effect.each(["gnome", "niri", "kde", "hyprland"] as const)(
       }),
     ).pipe(
       Effect.provide(
-        testLayer("linux", {
+        layerTest("linux", {
           makeDirectory: () => Effect.void,
           rename: () => Effect.void,
           writeFile: () => Effect.void,
@@ -1546,7 +1546,7 @@ it.effect("persists a window capture from a portal activation without a setup te
     }),
   ).pipe(
     Effect.provide(
-      testLayer("linux", {
+      layerTest("linux", {
         makeDirectory: () => Effect.void,
         rename: () => Effect.void,
         writeFile: (_, bytes) =>
@@ -1577,7 +1577,7 @@ it.effect("does not fall back to the picker when an automatic Wayland capture fa
     }),
   ).pipe(
     Effect.provide(
-      testLayer("linux", {
+      layerTest("linux", {
         makeDirectory: () => Effect.void,
         remove: () => Effect.void,
       }),
@@ -1652,7 +1652,7 @@ it.effect(
     ).pipe(
       Effect.provide(
         Layer.mergeAll(
-          testLayer("linux", {
+          layerTest("linux", {
             makeDirectory: () => Effect.void,
             rename: () => Effect.void,
             writeFile: () => Effect.void,
@@ -1689,7 +1689,7 @@ it.effect("does not read unverified accessibility context for a Wayland portal c
       thumbnail: { isEmpty: () => false, toPNG: () => png },
     },
   ]);
-  const layer = testLayer("linux", {
+  const layer = layerTest("linux", {
     makeDirectory: () => Effect.void,
     rename: () => Effect.void,
     writeFile: () => Effect.void,
@@ -1731,7 +1731,7 @@ it.effect("uses display-local macOS capture surfaces across the source and main 
     isDestroyed: () => false,
   });
   flashWindows.length = 0;
-  const layer = testLayer("darwin", {
+  const layer = layerTest("darwin", {
     makeDirectory: () => Effect.void,
     rename: () => Effect.void,
     writeFileString: () => Effect.void,
@@ -1810,7 +1810,7 @@ it.effect.each(["ready", "failed"] as const)(
       }),
     ).pipe(
       Effect.provide(
-        testLayer("win32", {
+        layerTest("win32", {
           makeDirectory: () => Effect.void,
           rename: () => Effect.void,
           writeFile: () => Effect.void,
@@ -1851,7 +1851,7 @@ it.effect("uses the unfocused main window for a macOS cross-display transition",
     },
   ]);
   flashWindows.length = 0;
-  const layer = testLayer("darwin", {
+  const layer = layerTest("darwin", {
     makeDirectory: () => Effect.void,
     rename: () => Effect.void,
     writeFileString: () => Effect.void,
@@ -3051,7 +3051,7 @@ it.effect("does not request permissions or create the flash during desktop start
       assert.lengthOf(getSourcesMock.mock.calls, 0);
       assert.lengthOf(openExternalMock.mock.calls, 0);
     }),
-  ).pipe(Effect.provide(testLayer("darwin", {}, Option.some(settings))));
+  ).pipe(Effect.provide(layerTest("darwin", {}, Option.some(settings))));
 });
 
 it.effect("keeps snapshots disabled when client settings cannot be read at startup", () => {
@@ -3067,7 +3067,7 @@ it.effect("keeps snapshots disabled when client settings cannot be read at start
       yield* service.initialize;
       assert.isFalse((yield* service.state).shortcutRegistered);
     }),
-  ).pipe(Effect.provide(testLayer("win32", {}, Option.none(), Effect.fail(readError))));
+  ).pipe(Effect.provide(layerTest("win32", {}, Option.none(), Effect.fail(readError))));
 });
 
 it.effect("does not request macOS permissions while synchronizing enabled settings", () => {
@@ -3086,7 +3086,7 @@ it.effect("does not request macOS permissions while synchronizing enabled settin
       assert.lengthOf(getSourcesMock.mock.calls, 0);
       assert.lengthOf(openExternalMock.mock.calls, 0);
     }),
-  ).pipe(Effect.provide(testLayer("darwin")));
+  ).pipe(Effect.provide(layerTest("darwin")));
 });
 
 it.effect("requests macOS permissions only for an explicit enable action", () => {
@@ -3104,7 +3104,7 @@ it.effect("requests macOS permissions only for an explicit enable action", () =>
       assert.lengthOf(getSourcesMock.mock.calls, 1);
       assert.lengthOf(openExternalMock.mock.calls, 1);
     }),
-  ).pipe(Effect.provide(testLayer("darwin")));
+  ).pipe(Effect.provide(layerTest("darwin")));
 });
 
 it.effect("does not request macOS accessibility permission when capture data is disabled", () => {
@@ -3122,7 +3122,7 @@ it.effect("does not request macOS accessibility permission when capture data is 
       assert.lengthOf(getSourcesMock.mock.calls, 1);
       assert.lengthOf(openExternalMock.mock.calls, 1);
     }),
-  ).pipe(Effect.provide(testLayer("darwin")));
+  ).pipe(Effect.provide(layerTest("darwin")));
 });
 
 it.effect("reports macOS permission status and requests each permission on its own", () => {
@@ -3146,7 +3146,7 @@ it.effect("reports macOS permission status and requests each permission on its o
       assert.lengthOf(getSourcesMock.mock.calls, 1);
       assert.lengthOf(openExternalMock.mock.calls, 1);
     }),
-  ).pipe(Effect.provide(testLayer("darwin")));
+  ).pipe(Effect.provide(layerTest("darwin")));
 });
 
 it.effect("flags revoked macOS permissions on read and re-registers once they return", () => {
@@ -3186,7 +3186,7 @@ it.effect("flags revoked macOS permissions on read and re-registers once they re
       assert.isNull(recovered.message);
       assert.isTrue(recovered.shortcutRegistered);
     }),
-  ).pipe(Effect.provide(testLayer("darwin")));
+  ).pipe(Effect.provide(layerTest("darwin")));
 });
 
 it.effect("rejects macOS permission actions off macOS and omits macPermissions there", () => {
@@ -3199,7 +3199,7 @@ it.effect("rejects macOS permission actions off macOS and omits macPermissions t
       const error = yield* service.setup("allow-screen-recording").pipe(Effect.flip);
       assert.equal(error.reason, "unsupported-session");
     }),
-  ).pipe(Effect.provide(testLayer("win32")));
+  ).pipe(Effect.provide(layerTest("win32")));
 });
 
 it.effect("registers macOS capture without accessibility permission when data is disabled", () => {
@@ -3219,7 +3219,7 @@ it.effect("registers macOS capture without accessibility permission when data is
       assert.lengthOf(accessibilityTrustedMock.mock.calls, 0);
       assert.isTrue((yield* service.state).shortcutRegistered);
     }),
-  ).pipe(Effect.provide(testLayer("darwin")));
+  ).pipe(Effect.provide(layerTest("darwin")));
 });
 
 it.effect("starts the Shift listener outside the Electron main process", () => {
@@ -3243,7 +3243,7 @@ it.effect("starts the Shift listener outside the Electron main process", () => {
       yield* Effect.promise(() => new Promise<void>((resolve) => queueMicrotask(resolve)));
       assert.isFalse((yield* service.state).shortcutRegistered);
     }),
-  ).pipe(Effect.provide(testLayer("win32")));
+  ).pipe(Effect.provide(layerTest("win32")));
 });
 
 it.effect("passes the configured modifier pair to the listener process", () => {
@@ -3264,7 +3264,7 @@ it.effect("passes the configured modifier pair to the listener process", () => {
       assert.isTrue(state.shortcutRegistered);
       assert.deepEqual(shortcutForkArgs[0], ["meta"]);
     }),
-  ).pipe(Effect.provide(testLayer("win32")));
+  ).pipe(Effect.provide(layerTest("win32")));
 });
 
 it.effect("registers a configured key chord instead of the Shift listener", () => {
@@ -3292,7 +3292,7 @@ it.effect("registers a configured key chord instead of the Shift listener", () =
       assert.strictEqual(registerShortcutMock.mock.calls[0]?.[0], "Control+Alt+K");
       assert.lengthOf(shortcutProcesses, 0);
     }),
-  ).pipe(Effect.provide(testLayer("win32")));
+  ).pipe(Effect.provide(layerTest("win32")));
 });
 
 it.effect("an unrelated client-setting change keeps the registered shortcut", () => {
@@ -3333,7 +3333,7 @@ it.effect("an unrelated client-setting change keeps the registered shortcut", ()
         ["Control+Alt+K", "Control+Alt+J"],
       );
     }),
-  ).pipe(Effect.provide(testLayer("win32")));
+  ).pipe(Effect.provide(layerTest("win32")));
 });
 
 it.effect("capture fails closed while snapshots are disabled", () => {
@@ -3351,7 +3351,7 @@ it.effect("capture fails closed while snapshots are disabled", () => {
       assert.lengthOf(getSourcesMock.mock.calls, 0);
       assert.lengthOf(regionCaptureMock.mock.calls, 0);
     }),
-  ).pipe(Effect.provide(testLayer("win32")));
+  ).pipe(Effect.provide(layerTest("win32")));
 });
 
 it.effect("keeps shortcut registration errors off the capture status", () => {
@@ -3381,7 +3381,7 @@ it.effect("keeps shortcut registration errors off the capture status", () => {
         "This shortcut is already used by the system or another app.",
       );
     }),
-  ).pipe(Effect.provide(testLayer("win32")));
+  ).pipe(Effect.provide(layerTest("win32")));
 });
 
 it.effect("uses an external Niri shortcut without registering an Electron accelerator", () => {
@@ -3414,7 +3414,7 @@ it.effect("uses an external Niri shortcut without registering an Electron accele
       assert.isUndefined((yield* service.state).shortcutBinding);
     }),
   ).pipe(
-    Effect.provide(testLayer("linux")),
+    Effect.provide(layerTest("linux")),
     Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
   );
 });
@@ -3455,7 +3455,7 @@ it.effect("defers ordinary Wayland shortcut registration until settings are appl
       assert.lengthOf(registerShortcutMock.mock.calls, 0);
     }),
   ).pipe(
-    Effect.provide(testLayer("linux")),
+    Effect.provide(layerTest("linux")),
     Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
   );
 });
@@ -3475,7 +3475,7 @@ it.effect.each(["GNOME", "KDE", "niri", "Hyprland"] as const)(
         assert.isFalse(state.shortcutVerified);
       }),
     ).pipe(
-      Effect.provide(testLayer("linux")),
+      Effect.provide(layerTest("linux")),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );
   },
@@ -3542,7 +3542,7 @@ it.effect(
             });
             assert.isTrue((yield* service.state).shortcutVerified);
           }),
-        ).pipe(Effect.provide(testLayer("linux", {}, Option.some(settings))));
+        ).pipe(Effect.provide(layerTest("linux", {}, Option.some(settings))));
       }
     }).pipe(
       Effect.ensuring(
@@ -3572,7 +3572,7 @@ it.effect("does not register a Wayland modifier-pair shortcut when enabled", () 
       assert.match(state.shortcutMessage ?? "", /Modifier-pair shortcuts aren't available/);
     }),
   ).pipe(
-    Effect.provide(testLayer("linux")),
+    Effect.provide(layerTest("linux")),
     Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
   );
 });
@@ -3629,7 +3629,7 @@ it.effect("exposes pending portal permission and then the real assigned shortcut
       assert.equal(failed.shortcutMessage, "Permission denied");
     }),
   ).pipe(
-    Effect.provide(testLayer("linux")),
+    Effect.provide(layerTest("linux")),
     Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
   );
 });
@@ -3686,7 +3686,7 @@ it.effect("verifies only native shortcut delivery and captures normally", () => 
     }),
   ).pipe(
     Effect.provide(
-      testLayer("linux", {
+      layerTest("linux", {
         makeDirectory: () => Effect.void,
         rename: () => Effect.void,
         writeFile: () => Effect.void,
@@ -3746,7 +3746,7 @@ it.effect(
         assert.isFalse((yield* service.state).shortcutRegistered);
       }),
     ).pipe(
-      Effect.provide(testLayer("linux")),
+      Effect.provide(layerTest("linux")),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );
   },
@@ -3784,7 +3784,7 @@ it.effect(
         assert.notEqual((yield* service.state).shortcutActionRegistered, true);
       }),
     ).pipe(
-      Effect.provide(testLayer("linux")),
+      Effect.provide(layerTest("linux")),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );
   },
@@ -3799,7 +3799,7 @@ it.effect("advises about the system menu for a meta pair on Windows", () =>
       assert.match(result.message ?? "", /Super \+ Super is observed/);
       assert.match(result.message ?? "", /system's own menu/);
     }),
-  ).pipe(Effect.provide(testLayer("win32"))),
+  ).pipe(Effect.provide(layerTest("win32"))),
 );
 
 it.effect("probes macOS modifier pairs with the flags poller", () => {
@@ -3815,7 +3815,7 @@ it.effect("probes macOS modifier pairs with the flags poller", () => {
       assert.deepEqual(spawnedPollers[0]?.args.slice(-2), ["2", "4"]);
       assert.strictEqual(spawnedPollers[0]?.kill.mock.calls.length, 1);
     }),
-  ).pipe(Effect.provide(testLayer("darwin")));
+  ).pipe(Effect.provide(layerTest("darwin")));
 });
 
 it.effect("registers macOS modifier pairs through the flags poller", () => {
@@ -3839,7 +3839,7 @@ it.effect("registers macOS modifier pairs through the flags poller", () => {
       assert.deepEqual(spawnedPollers[0]?.args.slice(-2), ["8", "16"]);
       assert.isTrue(state.shortcutRegistered);
     }),
-  ).pipe(Effect.provide(testLayer("darwin")));
+  ).pipe(Effect.provide(layerTest("darwin")));
 });
 
 it.effect("waits to apply settings while permissions are pending", () => {
@@ -3852,7 +3852,7 @@ it.effect("waits to apply settings while permissions are pending", () => {
         finishPermissionRequest = () => resolve([]);
       }),
   );
-  const layer = testLayer("darwin");
+  const layer = layerTest("darwin");
 
   return Effect.scoped(
     Effect.gen(function* () {
@@ -3908,7 +3908,7 @@ it.effect.each([false, true])(
       }),
     ).pipe(
       Effect.provide(
-        testLayer("darwin", {
+        layerTest("darwin", {
           makeTempDirectoryScoped: () =>
             Effect.acquireRelease(Effect.succeed("/tmp/setup-test"), () =>
               Effect.sync(() => {
@@ -3929,5 +3929,5 @@ it.effect("rejects macOS test capture on other platforms", () =>
       const error = yield* service.setup("test-mac-capture").pipe(Effect.flip);
       assert.equal(error.reason, "unsupported-session");
     }),
-  ).pipe(Effect.provide(testLayer("win32"))),
+  ).pipe(Effect.provide(layerTest("win32"))),
 );

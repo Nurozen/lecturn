@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as TestClock from "effect/testing/TestClock";
 
-import type { ClaudeCapabilitiesProbe } from "../Layers/ClaudeProvider.ts";
+import type { ClaudeCapabilitiesProbe } from "../ClaudeProvider.ts";
 import { makeClaudeCapabilitiesCache } from "./ClaudeCapabilitiesCache.ts";
 
 const capabilities = (slug: string): ClaudeCapabilitiesProbe => ({

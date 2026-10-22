@@ -27,8 +27,8 @@ import { Context, Effect, Layer, Ref, Schema, Semaphore, Stream, type Scope } fr
 import * as SqlClient from "effect/sql/SqlClient";
 import { BackgroundPolicy } from "../background/BackgroundPolicy.ts";
 import { ProviderWorkAdmission } from "../provider/ProviderWorkAdmission.ts";
-import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
-import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import { ProviderRegistry } from "../provider/ProviderRegistry.ts";
+import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import { DecisionRepository } from "./DecisionRepository.ts";
 import { DecisionSettingsRepository } from "./DecisionSettingsRepository.ts";
 import {

@@ -38,6 +38,7 @@ export type LecturnMcpToolSummaryAction =
   | "question-list"
   | "question-read"
   | "question-respond"
+  | "secret-request"
   | "worktree-handoff"
   | "worktree-list"
   | "worktree-status"
@@ -58,7 +59,9 @@ export type LecturnMcpToolSummaryAction =
   | "watch-pr"
   | "unwatch-pr"
   | "browser"
-  | "device";
+  | "device"
+  | "html-preview"
+  | "html-render";
 
 export interface LecturnMcpToolDefinition {
   readonly displayName: string;
@@ -128,6 +131,7 @@ const LECTURN_MCP_TOOLS: Readonly<Record<string, LecturnMcpToolDefinition>> = {
     ["Delete", "Deleting", "Requested deletion of", "a scheduled task"],
     "schedule-delete",
   ),
+  request_secret: tool(["Ask for", "Asking for", "Asked for", "a secret"], "secret-request"),
   create_threads: tool(["Create", "Creating", "Created", "Lecturn threads"], "thread-create"),
   lecturn_thread_start: tool(["Start", "Starting", "Started", "a Lecturn thread"], "thread-create"),
   lecturn_thread_list: tool(["List", "Listing", "Listed", "Lecturn threads"], "thread-list"),
@@ -321,6 +325,8 @@ const LECTURN_MCP_TOOLS: Readonly<Record<string, LecturnMcpToolDefinition>> = {
     ["Send", "Sending", "Sent", "attachments"],
     "attachment-send",
   ),
+  html_preview: tool(["Preview", "Previewing", "Previewed", "an HTML page"], "html-preview"),
+  html_render: tool(["Render", "Rendering", "Rendered", "an HTML page"], "html-render"),
 };
 
 /**
@@ -362,7 +368,22 @@ function resolveLecturnMcpToolName(value: string): string | null {
   if (Object.hasOwn(LECTURN_MCP_TOOLS, label)) return label;
   const prefixed = /^(?:mcp[-_]{1,2})?lecturn(?:__|[-_.:/ ])(?<tool>.+)$/i.exec(label);
   const candidate = prefixed?.groups?.tool ?? label;
-  return Object.hasOwn(LECTURN_MCP_TOOLS, candidate) ? candidate : null;
+  if (Object.hasOwn(LECTURN_MCP_TOOLS, candidate)) return candidate;
+  // OpenCode 2 registers one server per thread, `lecturn-<thread>`, and joins
+  // it to the tool with `_`. Thread ids can hold `_` too, so take the longest
+  // known tool name that ends the label.
+  if (!/^lecturn-/i.test(label)) return null;
+  let longest: string | null = null;
+  for (const tool of Object.keys(LECTURN_MCP_TOOLS)) {
+    if (label.endsWith(`_${tool}`) && tool.length > (longest?.length ?? 0)) longest = tool;
+  }
+  return longest;
+}
+
+/** The bare Lecturn tool name (`html_render`) for any provider's spelling of it. */
+export function resolveLecturnMcpToolId(toolName: string | null | undefined): string | null {
+  const name = toolName == null ? null : resolveLecturnMcpToolName(toolName);
+  return name !== null && Object.hasOwn(LECTURN_MCP_TOOLS, name) ? name : null;
 }
 
 export function resolveLecturnMcpToolDefinition(
