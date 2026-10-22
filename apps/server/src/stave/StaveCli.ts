@@ -24,7 +24,7 @@ import { missingStaveFeatures, supportsStaveVerb, type StaveFeatureVerb } from "
  *
  * @module StaveCli
  */
-import { HostProcessEnvironment } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { isValidStaveSpaceId, type StaveVersionInfo } from "@lecturn/shared/stave";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -854,7 +854,7 @@ export const make = Effect.fn("StaveCli.make")(function* () {
   const staveBinary = yield* StaveBinary;
   const processRunner = yield* ProcessRunner;
   const serverSettings = yield* ServerSettingsService;
-  const hostEnvironment = yield* HostProcessEnvironment;
+  const hostEnvironment = yield* HostProcess.Environment;
   const lastFailure = yield* Ref.make(Option.none<StaveLastFailure>());
 
   const passthroughEnv = (): NodeJS.ProcessEnv | undefined => {

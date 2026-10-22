@@ -1,4 +1,4 @@
-import { HostProcessEnvironment, HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import {
   listLoginShellCandidates,
   mergePathEntries,
@@ -49,13 +49,11 @@ export function hydratePosixHome(
   }
 }
 
-const fixPath = Effect.fn("fixPath")(function* (): Effect.fn.Return<
-  void,
-  never,
-  FileSystem.FileSystem | Path.Path
-> {
-  const platform = yield* HostProcessPlatform;
-  const env = yield* HostProcessEnvironment;
+export const fixPath = Effect.fn("fixPath")(function* (options?: {
+  readonly shellEnvironmentPrepared?: boolean | undefined;
+}): Effect.fn.Return<void, never, FileSystem.FileSystem | Path.Path> {
+  const platform = yield* HostProcess.Platform;
+  const env = yield* HostProcess.Environment;
 
   if (platform === "win32") {
     const repairedEnvironment = yield* resolveWindowsEnvironment(env).pipe(
@@ -83,6 +81,7 @@ const fixPath = Effect.fn("fixPath")(function* (): Effect.fn.Return<
       }),
     ),
   );
+  if (options?.shellEnvironmentPrepared === true) return;
   yield* Effect.sync(() => hydratePosixPath(env, platform)).pipe(
     Effect.catchDefect((defect) =>
       Effect.sync(() => {
@@ -92,27 +91,35 @@ const fixPath = Effect.fn("fixPath")(function* (): Effect.fn.Return<
   );
 });
 
-/** Start discovery while HTTP, settings, and provider status remain available. */
-export const startPathDiscovery = Effect.fn("startPathDiscovery")(function* () {
-  const platform = yield* HostProcessPlatform;
-  const env = yield* HostProcessEnvironment;
+/**
+ * Start discovery while HTTP, settings, and provider status remain available.
+ * When the desktop already handed over a prepared shell environment, POSIX
+ * hosts keep that PATH and skip the login-shell probe entirely.
+ */
+export const startPathDiscovery = Effect.fn("startPathDiscovery")(function* (options?: {
+  readonly shellEnvironmentPrepared?: boolean | undefined;
+}) {
+  const platform = yield* HostProcess.Platform;
+  const env = yield* HostProcess.Environment;
   if (platform !== "darwin" && platform !== "linux") {
-    yield* fixPath();
+    yield* fixPath(options);
     return;
   }
   yield* Effect.sync(() => {
     hydratePosixHome(env);
+    if (options?.shellEnvironmentPrepared === true) return;
     startShellEnvironment(env, platform);
   });
 });
 
 export const expandHomePath = Effect.fn(function* (input: string) {
   const { join } = yield* Path.Path;
+  const home = yield* HostProcess.HomeDirectory;
   if (input === "~") {
-    return NodeOS.homedir();
+    return home;
   }
   if (input.startsWith("~/") || input.startsWith("~\\")) {
-    return join(NodeOS.homedir(), input.slice(2));
+    return join(home, input.slice(2));
   }
   return input;
 });
@@ -120,7 +127,7 @@ export const expandHomePath = Effect.fn(function* (input: string) {
 export const resolveBaseDir = Effect.fn(function* (raw: string | undefined) {
   const { join, resolve } = yield* Path.Path;
   if (!raw || raw.trim().length === 0) {
-    return join(NodeOS.homedir(), ".lecturn");
+    return join(yield* HostProcess.HomeDirectory, ".lecturn");
   }
   return resolve(yield* expandHomePath(raw.trim()));
 });

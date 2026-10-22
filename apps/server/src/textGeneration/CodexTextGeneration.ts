@@ -29,6 +29,7 @@ import {
 import { codexModelFamily, getModelSelectionStringOptionValue } from "@lecturn/shared/model";
 import { prepareCodexInferenceIsolation } from "./CodexInferenceIsolation.ts";
 import { getCodexServiceTierOptionValue } from "../codexModelOptions.ts";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 
 const CODEX_INFERENCE_CONFIG = [
   "features.view_image=false",
@@ -274,7 +275,12 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       const commandEnvironment = {
         ...effectiveEnvironment,
         ...(effectiveConfig.homePath
-          ? { CODEX_HOME: expandHomePath(effectiveConfig.homePath) }
+          ? {
+              CODEX_HOME: expandHomePath(
+                effectiveConfig.homePath,
+                yield* HostProcess.HomeDirectory,
+              ),
+            }
           : {}),
       };
       const inferenceArgs = inference
@@ -452,7 +458,12 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         env: {
           ...effectiveEnvironment,
           ...(effectiveConfig.homePath
-            ? { CODEX_HOME: expandHomePath(effectiveConfig.homePath) }
+            ? {
+                CODEX_HOME: expandHomePath(
+                  effectiveConfig.homePath,
+                  yield* HostProcess.HomeDirectory,
+                ),
+              }
             : {}),
         },
         cwd,

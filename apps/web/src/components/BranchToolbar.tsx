@@ -72,6 +72,7 @@ import { useComposerMenuProps } from "./chat/composerEventScope";
 import { measureRestingComposerControls } from "./chat/restingComposerControlsMeasurement";
 import { resolveRestingComposerControlsNaturalWidth } from "./composerFooterLayout";
 import { cn } from "~/lib/utils";
+import { observeResize } from "~/lib/observeResize";
 import { describeStaveWorkspace } from "./stave/staveWorkspaceContext.logic";
 import { StaveWorkspaceContext } from "./stave/StaveWorkspaceContext";
 
@@ -595,11 +596,10 @@ function useLabelsOverflow(element: HTMLDivElement | null): boolean {
 
   useEffect(() => {
     if (!element) return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
+    const stopObserving = observeResize(element, measure);
     document.fonts.addEventListener("loadingdone", measure);
     return () => {
-      observer.disconnect();
+      stopObserving();
       document.fonts.removeEventListener("loadingdone", measure);
     };
   }, [element, measure]);

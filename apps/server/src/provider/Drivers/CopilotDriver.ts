@@ -119,7 +119,7 @@ export const CopilotDriver: ProviderDriver<GithubCopilotSettings, CopilotDriverE
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
       const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const processEnv = yield* mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,
@@ -181,7 +181,11 @@ export const CopilotDriver: ProviderDriver<GithubCopilotSettings, CopilotDriverE
         discovery: {
           waitForShell: !/[\\/]/.test(effectiveConfig.binaryPath?.trim() ?? ""),
           refreshEnvironment: () =>
-            Object.assign(processEnv, mergeProviderInstanceEnvironment(environment)),
+            mergeProviderInstanceEnvironment(environment).pipe(
+              Effect.map((next) => {
+                Object.assign(processEnv, next);
+              }),
+            ),
         },
         getSettings: snapshotSettings.getSettings,
         streamSettings: snapshotSettings.streamSettings,

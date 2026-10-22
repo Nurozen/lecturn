@@ -180,7 +180,7 @@ export function ContextualArchive({ environmentId }: { environmentId: Environmen
                 maxLength={1000}
                 placeholder="Keyword, issue, or decision"
                 onChange={(event) => setQuery(event.target.value)}
-                className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               />
             </div>
             <Button size="sm" variant="outline" type="submit" disabled={inspect.isPending}>

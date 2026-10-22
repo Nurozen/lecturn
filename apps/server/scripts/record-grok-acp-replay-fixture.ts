@@ -12,7 +12,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { type ProviderReplayEntry } from "@lecturn/contracts";
 import { GrokSettings } from "@lecturn/provider-grok/settings";
-import { HostProcessEnvironment, HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { resolveSelfInvocation } from "@lecturn/shared/nodeRuntime";
 import * as Clock from "effect/Clock";
 import * as Console from "effect/Console";
@@ -442,12 +442,12 @@ const recordScenario = Effect.fn("recordGrokScenario")(function* (fixtureName: s
   const settings = { ...DEFAULT_GROK_SETTINGS, binaryPath: process.env.LECTURN_GROK_BIN ?? "grok" };
   const layerRegistry = ProviderAdapterRegistry.layerFromAdaptersEffect(
     Effect.gen(function* () {
-      const environment = yield* HostProcessEnvironment;
+      const environment = yield* HostProcess.Environment;
       const adapter = yield* makeGrokAdapterV2({
         instanceId: GROK_DEFAULT_INSTANCE_ID,
         settings,
         environment,
-        hostPlatform: yield* HostProcessPlatform,
+        hostPlatform: yield* HostProcess.Platform,
         selfInvocation: yield* resolveSelfInvocation(),
         continuationRequests: yield* ProviderContinuationRequests.ProviderContinuationRequests,
         // Production's runtime factory, with the protocol logger teeing raw lines.

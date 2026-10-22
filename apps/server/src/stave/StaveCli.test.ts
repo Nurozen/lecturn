@@ -15,7 +15,7 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/process";
-import { HostProcessEnvironment, HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -512,7 +512,7 @@ describe("StaveCli spawn discipline", () => {
           ),
         (cli) => cli.spaceStatus("s-1"),
       ).pipe(
-        Effect.provideService(HostProcessEnvironment, {
+        Effect.provideService(HostProcess.Environment, {
           PATH: "/usr/bin",
           STAVE_CD_FD: "3",
           MARMOT_HOME: "/m",
@@ -529,7 +529,7 @@ describe("StaveCli spawn discipline", () => {
     Effect.gen(function* () {
       const { spawns } = yield* withCli(canned({ stdout: SAMPLE_SPACE_STATUS }), (cli) =>
         cli.spaceStatus("s-1"),
-      ).pipe(Effect.provideService(HostProcessEnvironment, { PATH: "/usr/bin", MARMOT_HOME: "" }));
+      ).pipe(Effect.provideService(HostProcess.Environment, { PATH: "/usr/bin", MARMOT_HOME: "" }));
 
       expect(spawns[0]?.env).toEqual({ PATH: "/usr/bin", MARMOT_HOME: "" });
       expect(spawns[0]?.extendEnv).toBe(false);
@@ -897,7 +897,7 @@ it.layer(NodeServices.layer)("StaveCli real process", (it) => {
   it.effect("drives a real binary through every output path", () =>
     Effect.gen(function* () {
       // This integration fixture is a POSIX shell executable.
-      if ((yield* HostProcessPlatform) === "win32") return;
+      if ((yield* HostProcess.Platform) === "win32") return;
       const fileSystem = yield* FileSystem.FileSystem;
       const { binary, argvFile } = yield* installFakeStave;
 

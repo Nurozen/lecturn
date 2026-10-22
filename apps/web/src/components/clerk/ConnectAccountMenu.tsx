@@ -179,7 +179,7 @@ export function ConnectAccountMenu() {
           render={
             <button
               type="button"
-              className="relative rounded-lg p-1 outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-sidebar-row-hover"
+              className="relative rounded-lg p-1 outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-popup-open:bg-sidebar-row-hover"
             />
           }
         >

@@ -10,6 +10,7 @@ import {
   type ThreadNoteHighlightSelector,
 } from "~/lib/threadNoteHighlights";
 import { toastManager } from "../ui/toast";
+import { observeResize } from "~/lib/observeResize";
 
 const CITATION_PULSE_DURATION_MS = 650;
 // The second pulse settles into a held highlight so late glances still find the quote.
@@ -317,9 +318,7 @@ export function observeAssistantCitationSource({
     }
   });
   observer.observe(scrollNode, { childList: true, characterData: true, subtree: true });
-  const resizeObserver = new ResizeObserver(schedule);
-  resizeObserver.observe(root);
-  resizeObserver.observe(scrollNode);
+  const stopObservingResize = observeResize([root, scrollNode], schedule);
   const state = list.getState();
   const unsubscribe = [
     state.listenToPosition(itemKey, schedule),
@@ -348,7 +347,7 @@ export function observeAssistantCitationSource({
     pulseAnimation?.cancel();
     if (frame !== null) cancelAnimationFrame(frame);
     observer.disconnect();
-    resizeObserver.disconnect();
+    stopObservingResize();
     for (const stop of unsubscribe) stop();
     if (activation.cancelScroll === cancelScroll) delete activation.cancelScroll;
     clear();

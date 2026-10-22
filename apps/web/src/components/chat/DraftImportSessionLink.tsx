@@ -27,7 +27,7 @@ export function DraftImportSessionLink({ projectRef }: { readonly projectRef: Sc
       <button
         type="button"
         onClick={() => openCommandPalette({ open: "import-session", projectRef })}
-        className="cursor-pointer rounded-sm text-muted-foreground/70 text-xs transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+        className="cursor-pointer rounded-sm text-muted-foreground/70 text-xs transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         {continueSessionLinkLabel(driverKinds)}
       </button>

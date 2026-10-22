@@ -546,7 +546,7 @@ function AvailableDecisionsPanel({
           <article
             key={note.id}
             tabIndex={0}
-            className="lecturn-panel-tile rounded-lg p-4 focus-visible:ring-2 focus-visible:ring-primary"
+            className="lecturn-panel-tile rounded-lg p-4 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
             aria-label={note.title}
             onKeyDown={(event) => {
               if (event.target !== event.currentTarget) return;
@@ -597,7 +597,7 @@ function AvailableDecisionsPanel({
                 {note.evidence.map((evidence) => (
                   <button
                     key={evidence.id}
-                    className="block w-full rounded border border-border/50 p-2 text-left hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-primary"
+                    className="block w-full rounded border border-border/50 p-2 text-left hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
                     onClick={() => setSource({ note, evidence })}
                   >
                     <span className="block whitespace-pre-wrap">{evidence.quote}</span>

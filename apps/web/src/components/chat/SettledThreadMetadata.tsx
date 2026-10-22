@@ -28,7 +28,7 @@ function MetadataItem(props: { label: string; children: ReactNode }) {
           <span
             tabIndex={0}
             aria-label={props.label}
-            className="inline-flex min-w-0 items-center gap-1.5 rounded outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="inline-flex min-w-0 items-center gap-1.5 rounded outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
           />
         }
       >

@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { expandHomePath } from "@lecturn/provider-core/server/pathExpansion";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import type { ProcessRunner } from "../processRunner.ts";
 import { codexExecLaunchArgs } from "./codexLaunchArgs.ts";
 
@@ -14,8 +15,11 @@ interface CodexLaunchContext {
 }
 
 /** Spawn environment for the read-only MCP configuration inventory. */
-const codexSpawnEnvironment = (options: Pick<CodexLaunchContext, "homePath" | "environment">) => {
-  const home = options.homePath ? expandHomePath(options.homePath) : undefined;
+const codexSpawnEnvironment = (
+  options: Pick<CodexLaunchContext, "homePath" | "environment">,
+  userHome: string,
+) => {
+  const home = options.homePath ? expandHomePath(options.homePath, userHome) : undefined;
   return {
     env: { ...options.environment, ...(home ? { CODEX_HOME: home } : {}) },
     extendEnv: options.environment === undefined,
@@ -50,7 +54,7 @@ export const hasCanonicalMarmotServer = Effect.fn("hasCanonicalMarmotServer")(fu
         "--json",
       ],
       cwd: options.cwd,
-      ...codexSpawnEnvironment(options),
+      ...codexSpawnEnvironment(options, yield* HostProcess.HomeDirectory),
       stdin: "",
       timeout: "10 seconds",
       timeoutBehavior: "timedOutResult",

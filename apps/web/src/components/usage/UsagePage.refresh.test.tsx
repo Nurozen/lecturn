@@ -84,6 +84,7 @@ vi.mock("../WorkspaceBreadcrumb", () => ({
   WorkspaceBreadcrumb: "div",
   WorkspaceBreadcrumbItem: "div",
   WorkspaceBreadcrumbSeparator: "span",
+  WorkspaceBreadcrumbText: "span",
 }));
 // The fork wraps the page in AccountSurface, which reads Connect account atoms.
 vi.mock("../AccountSurface", () => ({ AccountSurface: "div" }));

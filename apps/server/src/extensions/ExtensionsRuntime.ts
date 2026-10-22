@@ -1,9 +1,5 @@
 import { ContextualError, type ExtensionsHelperRequest } from "@lecturn/contracts";
-import {
-  HostProcessArchitecture,
-  HostProcessHostname,
-  HostProcessPlatform,
-} from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { Context, Effect, Layer, Path, Semaphore } from "effect";
 import { ServerConfig } from "../config.ts";
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
@@ -34,9 +30,9 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const identity = yield* ServerEnvironmentIdentity;
   const environmentId = yield* identity.getEnvironmentId;
-  const platform = yield* HostProcessPlatform;
-  const architecture = yield* HostProcessArchitecture;
-  const hostName = yield* HostProcessHostname;
+  const platform = yield* HostProcess.Platform;
+  const architecture = yield* HostProcess.Architecture;
+  const hostName = yield* HostProcess.Hostname;
   const supervisor = config.extensions
     ? yield* Effect.acquireRelease(
         Effect.sync(

@@ -1372,6 +1372,14 @@ export interface DesktopBridge {
     install: () => Promise<DesktopCliCommandState>;
     uninstall: () => Promise<DesktopCliCommandState>;
   };
+  /**
+   * Web links the OS opens with Lecturn as the default browser (macOS). The
+   * renderer reports when it listens; links queue in the main process until then.
+   */
+  webLinks?: {
+    setReady: (ready: boolean) => Promise<void>;
+    onOpen: (listener: (url: string) => void) => () => void;
+  };
   /** Present when the desktop shell accepts `lecturn app` activation requests. */
   appActivation?: {
     setReady: (ready: boolean) => Promise<void>;

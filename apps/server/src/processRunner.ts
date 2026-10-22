@@ -9,7 +9,7 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
-import { HostProcessEnvironment } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { resolveSpawnCommand } from "@lecturn/shared/shell";
 import {
   collectUint8StreamText,
@@ -362,7 +362,7 @@ const resolveEnvOptions = Effect.fnUntraced(function* (
     return input.env === undefined ? {} : { env: input.env, extendEnv: true };
   }
 
-  const hostEnvironment = yield* HostProcessEnvironment;
+  const hostEnvironment = yield* HostProcess.Environment;
   const env: NodeJS.ProcessEnv = {
     ...(input.extendEnv === false ? {} : hostEnvironment),
     ...input.env,

@@ -125,7 +125,10 @@ interface AntigravityProviderState {
 }
 
 interface AntigravityProviderOptions {
-  readonly discovery?: { readonly waitForShell: boolean; readonly refreshEnvironment: () => void };
+  readonly discovery?: {
+    readonly waitForShell: boolean;
+    readonly refreshEnvironment: () => Effect.Effect<void>;
+  };
   readonly stampIdentity: (snapshot: ServerProviderDraft) => Effect.Effect<ServerProvider>;
   readonly probe: Effect.Effect<
     EffectAcpSchema.InitializeResponse,

@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { CLI_PUBLISHED_ARCHIVE_PLATFORM_KEYS } from "@lecturn/shared/cliRelease";
-import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -36,7 +36,7 @@ describe("install scripts", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect.skipIf(HostProcessPlatform.defaultValue() === "win32")(
+  it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "points unpublished platforms at npx before any download",
     () =>
       Effect.gen(function* () {

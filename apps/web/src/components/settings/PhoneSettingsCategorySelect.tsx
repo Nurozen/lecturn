@@ -13,7 +13,7 @@ export function PhoneSettingsCategorySelect() {
   return (
     <select
       aria-label="Settings category"
-      className="min-h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="min-h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       value={selected?.[0] ?? ""}
       onChange={(event) => {
         const category = categories.find(([path]) => path === event.currentTarget.value);

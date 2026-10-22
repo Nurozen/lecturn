@@ -4,7 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import { ChildProcessSpawner } from "effect/process";
 
@@ -25,7 +25,7 @@ const resolve = (
     platform,
     ...context,
   }).pipe(
-    Effect.provideService(HostProcessPlatform, platform),
+    Effect.provideService(HostProcess.Platform, platform),
     Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn),
     Effect.provide(NodeServices.layer),
   );

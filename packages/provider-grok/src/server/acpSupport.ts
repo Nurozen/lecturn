@@ -12,7 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as EffectAcpErrors from "effect-acp/errors";
-import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { normalizeModelSlug } from "@lecturn/shared/model";
 
 import * as AcpSessionRuntime from "@lecturn/provider-acp/server/AcpSessionRuntime";
@@ -159,7 +159,7 @@ export const makeGrokAcpRuntime = (
   ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | Scope.Scope
 > =>
   Effect.gen(function* () {
-    const processGroupPlatform = yield* HostProcessPlatform.pipe(
+    const processGroupPlatform = yield* HostProcess.Platform.pipe(
       Effect.provide(NodeServices.layer),
     );
     const acpContext = yield* Layer.build(

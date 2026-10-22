@@ -5,7 +5,7 @@ import type {
   DesktopPreviewRecordingFrame,
   DesktopPreviewRecordingInputEvent,
 } from "@lecturn/contracts";
-import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { parseKeybindingShortcut } from "@lecturn/shared/keybindings";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
@@ -313,7 +313,7 @@ const managerLayer = (platform: NodeJS.Platform = "darwin") =>
     Layer.provideMerge(layerFileSystem),
     Layer.provideMerge(Path.layer),
     Layer.provideMerge(NodeCrypto.layer),
-    Layer.provideMerge(Layer.succeed(HostProcessPlatform, platform)),
+    Layer.provideMerge(Layer.succeed(HostProcess.Platform, platform)),
   );
 
 const withManager = <A>(

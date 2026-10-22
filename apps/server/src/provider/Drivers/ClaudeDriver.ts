@@ -79,6 +79,7 @@ import {
   resolveClaudeHomePath,
 } from "./ClaudeHome.ts";
 import { makeClaudeCapabilitiesCache } from "./ClaudeCapabilitiesCache.ts";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
@@ -138,7 +139,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       const manifestCatalog = catalogService
         .current(DRIVER_KIND)
         .pipe(Effect.map(resolveClaudeModelCatalog));
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const processEnv = yield* mergeProviderInstanceEnvironment(environment);
       const fallbackContinuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,
@@ -146,10 +147,25 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       const effectiveConfig = {
         ...config,
         enabled,
-        binaryPath: expandHomePath(config.binaryPath),
+        binaryPath: expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
       } satisfies ClaudeSettings;
+      const configDir = yield* resolveClaudeHomePath(effectiveConfig, processEnv);
+      const accountConfigPath = yield* ClaudeResetCredits.claudeAccountConfigPath(
+        effectiveConfig.homePath.trim() || processEnv.CLAUDE_CONFIG_DIR?.trim()
+          ? configDir
+          : undefined,
+      );
+      // One email can sign in to several organizations, so the workspace id
+      // keeps each login's account metadata distinct.
       const capabilitiesCache = yield* makeClaudeCapabilitiesCache(
-        probeClaudeCapabilities(effectiveConfig, processEnv, cwd).pipe(
+        Effect.all([
+          probeClaudeCapabilities(effectiveConfig, processEnv, cwd),
+          ClaudeResetCredits.readClaudeOrganizationId(accountConfigPath),
+        ]).pipe(
+          Effect.map(([capabilities, workspaceId]) =>
+            capabilities && workspaceId ? { ...capabilities, workspaceId } : capabilities,
+          ),
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
         ),
       );
@@ -172,12 +188,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       const continuationGroupKey = yield* makeClaudeContinuationGroupKey(
         effectiveConfig,
         processEnv,
-      );
-      const configDir = yield* resolveClaudeHomePath(effectiveConfig, processEnv);
-      const accountConfigPath = yield* ClaudeResetCredits.claudeAccountConfigPath(
-        effectiveConfig.homePath.trim() || processEnv.CLAUDE_CONFIG_DIR?.trim()
-          ? configDir
-          : undefined,
       );
       // External sessions are only listable from the server process's own
       // Claude home, so a custom-home instance reports the capability off.
@@ -260,7 +270,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         discovery: {
           waitForShell: !/[\\/]/.test(effectiveConfig.binaryPath?.trim() ?? ""),
           refreshEnvironment: () =>
-            Object.assign(processEnv, mergeProviderInstanceEnvironment(environment)),
+            mergeProviderInstanceEnvironment(environment).pipe(
+              Effect.map((next) => {
+                Object.assign(processEnv, next);
+              }),
+            ),
         },
         getSettings: snapshotSettings.getSettings,
         streamSettings: snapshotSettings.streamSettings,

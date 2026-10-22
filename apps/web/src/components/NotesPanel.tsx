@@ -269,7 +269,7 @@ function SavedNotesPanel({
                     <button
                       type="button"
                       tabIndex={index === Math.min(focused, rows.length - 1) ? 0 : -1}
-                      className="block w-full rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="block w-full rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                       aria-current={note.id === activeId ? "true" : undefined}
                       onFocus={() => setFocused(index)}
                       onClick={() => jump(note)}

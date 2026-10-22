@@ -10,7 +10,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
-import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { STAVE_PLATFORM_KEYS, staveAssetName } from "@lecturn/shared/stave";
 
 import {
@@ -331,7 +331,7 @@ it.layer(NodeServices.layer)("extractStaveArchive", (it) => {
     assert.isFalse(yield* fs.exists(path.join(directory, "README.md")));
     assert.isFalse(yield* fs.exists(path.join(directory, "docs")));
 
-    const hostPlatform = yield* HostProcessPlatform;
+    const hostPlatform = yield* HostProcess.Platform;
     if (hostPlatform !== "win32") {
       const info = yield* fs.stat(path.join(directory, executableName));
       assert.notEqual(info.mode & 0o111, 0);

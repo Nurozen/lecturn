@@ -14,7 +14,7 @@ import {
 } from "@lecturn/contracts";
 import { GrokSettings } from "@lecturn/provider-grok/settings";
 import { makeGrokAdapterV2 } from "@lecturn/provider-grok/testing";
-import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { resolveSelfInvocation } from "@lecturn/shared/nodeRuntime";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -114,7 +114,7 @@ const spawnEnvironment = (
     return environments[0];
   }).pipe(
     // Keep the spawn environment unwrapped by the Linux cgroup shim.
-    Effect.provideService(HostProcessPlatform, "darwin"),
+    Effect.provideService(HostProcess.Platform, "darwin"),
     Effect.provide(testLayer),
   );
 

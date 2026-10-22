@@ -30,14 +30,7 @@ import {
  *
  * @module StaveBinary
  */
-import {
-  HostProcessArchitecture,
-  HostProcessEnvironment,
-  HostProcessExecutablePath,
-  HostProcessIsExecutable,
-  HostProcessPlatform,
-  HostProcessWorkingDirectory,
-} from "@lecturn/shared/hostProcess";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { CommandResolutionCache, resolveCommandPath } from "@lecturn/shared/shell";
 import { isStavePlatformKey, parseStaveVersionOutput } from "@lecturn/shared/stave";
 import * as Context from "effect/Context";
@@ -189,18 +182,18 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
   const processRunner = yield* ProcessRunner;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const platform = yield* HostProcessPlatform;
-  const architecture = yield* HostProcessArchitecture;
-  const environment = yield* HostProcessEnvironment;
-  const workingDirectory = yield* HostProcessWorkingDirectory;
+  const platform = yield* HostProcess.Platform;
+  const architecture = yield* HostProcess.Architecture;
+  const environment = yield* HostProcess.Environment;
+  const workingDirectory = yield* HostProcess.WorkingDirectory;
   // The CLI release archive (scripts/build-cli-archive.ts --stave-binary)
   // stages Stave at stave/<platformKey>/ beside the single-executable.
   const executablePlatformKey = stavePlatformKey(platform, architecture);
   const executableCandidates =
-    (yield* HostProcessIsExecutable) && executablePlatformKey !== undefined
+    (yield* HostProcess.IsExecutable) && executablePlatformKey !== undefined
       ? [
           path.resolve(
-            path.dirname(yield* HostProcessExecutablePath),
+            path.dirname(yield* HostProcess.ExecutablePath),
             "stave",
             executablePlatformKey,
             staveExecutableName(platform),
@@ -264,7 +257,7 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
     Effect.option,
     Effect.provideService(FileSystem.FileSystem, fileSystem),
     Effect.provideService(Path.Path, path),
-    Effect.provideService(HostProcessPlatform, platform),
+    Effect.provideService(HostProcess.Platform, platform),
   );
 
   const probeVersion = Effect.fn("StaveBinary.probeVersion")(function* (binaryPath: string) {
