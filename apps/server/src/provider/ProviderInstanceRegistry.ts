@@ -48,6 +48,8 @@
  *
  * @module provider/ProviderInstanceRegistry
  */
+// A synchronous fingerprint digest; the Effect Crypto service would widen reconcile's requirements.
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- synchronous hash/token helper; Effect Crypto would widen caller layer requirements.
 import * as NodeCrypto from "node:crypto";
 import {
   providerInstanceConfigEnabledFlag,

@@ -167,6 +167,17 @@ vi.mock("../../state/presentation", () => ({
     presentationAtom: (id: EnvironmentId) => backend.getPresentation!(id),
   },
 }));
+// Every fixture connection holds the diagnostics grant the usage tab needs.
+vi.mock("../../state/session", () => {
+  const session = Atom.make(
+    AsyncResult.success({ authenticated: true, permissions: ["diagnostics:read"] }),
+  );
+  return {
+    environmentSession: { sessionStateAtom: () => session },
+    readEnvironmentScope: () => true,
+    useEnvironmentScope: () => true,
+  };
+});
 vi.mock("../../state/server", () => {
   const providers = Atom.make(null);
   return {

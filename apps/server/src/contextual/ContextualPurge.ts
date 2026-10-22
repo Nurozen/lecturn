@@ -1,3 +1,4 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- synchronous randomUUID ids; Effect Crypto would add a Crypto requirement to every caller layer.
 import * as NodeCrypto from "node:crypto";
 import {
   ContextualDataForgetRequest,

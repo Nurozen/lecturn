@@ -222,6 +222,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       Absent on pre-Stave servers (and builds started with LECTURN_STAVE=false),
       so clients hide every Stave control instead of probing the RPCs. */
   stave: Schema.optionalKey(Schema.Struct({ protocolVersion: Schema.Number })),
+  /** Server hosts preview tabs in its own headless Chromium (`runtime:
+      "server"`) and streams them over `/api/preview-stream`. Clients
+      without a local browser runtime open server tabs here. */
+  serverBrowser: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

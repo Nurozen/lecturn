@@ -143,6 +143,16 @@ vi.mock("../../state/use-remote-environment-registry", () => ({
   setPendingConnectionError: vi.fn(),
   useRemoteConnectionStatus: () => ({ connectedEnvironments: [] }),
 }));
+// Fixture connections hold every grant; the real session module pulls the
+// connection runtime into this screen test.
+vi.mock("../../state/session", () => ({
+  environmentSession: { sessionStateAtom: () => null },
+  readEnvironmentScope: () => true,
+  useEnvironmentScope: () => true,
+}));
+vi.mock("../../state/presentation", () => ({
+  useEnvironmentPresentation: () => ({ isReady: true, presentation: null }),
+}));
 vi.mock("../../state/query", () => ({
   useEnvironmentQuery: () => ({ data: null, isPending: false }),
 }));

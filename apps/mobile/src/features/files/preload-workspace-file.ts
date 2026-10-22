@@ -1,3 +1,5 @@
+import { AuthFilesystemReadScope } from "@lecturn/contracts";
+import { readEnvironmentScope } from "../../state/session";
 import { executeAtomQuery } from "@lecturn/client-runtime/state/runtime";
 import type { EnvironmentId } from "@lecturn/contracts";
 import {
@@ -30,6 +32,7 @@ export function preloadWorkspaceFileContents(input: {
   readonly theme: ReviewDiffTheme;
 }): void {
   if (
+    !readEnvironmentScope(input.environmentId, AuthFilesystemReadScope) ||
     isWorkspaceBrowserPreviewPath(input.relativePath) ||
     isWorkspaceImagePreviewPath(input.relativePath) ||
     isVideoPreviewFile(input.relativePath)

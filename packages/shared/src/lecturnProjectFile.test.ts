@@ -51,6 +51,7 @@ describe("buildLecturnProjectFileJsonSchema", () => {
       "icon",
       "name",
       "previewUrl",
+      "runOnSettle",
       "runOnWorktreeCreate",
     ]);
   });

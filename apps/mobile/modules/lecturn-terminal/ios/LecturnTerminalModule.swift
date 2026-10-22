@@ -27,6 +27,10 @@ public class LecturnTerminalModule: Module {
         view.focusRequest = focusRequest
       }
 
+      Prop("readOnly") { (view: LecturnTerminalView, readOnly: Bool) in
+        view.readOnly = readOnly
+      }
+
       Prop("autoFocus") { (view: LecturnTerminalView, autoFocus: Bool) in
         view.autoFocus = autoFocus
       }

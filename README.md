@@ -154,6 +154,7 @@ Read [AGENTS.md](./AGENTS.md) and [CONTRIBUTING.md](./CONTRIBUTING.md) before ma
 - [Keyboard shortcuts](./docs/user/keybindings.md)
 - [Project settings](./docs/user/project-settings.md)
 - [Remote access](./docs/user/remote-access.md)
+- [Connect Claude Code, Codex, ChatGPT and other agents over MCP](./docs/user/outside-agents.md)
 - [Source control integrations](./docs/user/source-control.md)
 - Multiple provider accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
 

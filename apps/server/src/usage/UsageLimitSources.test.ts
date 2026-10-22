@@ -3,6 +3,7 @@ import {
   UsageLimitSourceId,
   type UsageLimitSourceConfig,
 } from "@lecturn/contracts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -96,6 +97,7 @@ function fixture() {
           }),
           Layer.mock(BackgroundPolicy)({ shouldRunScopeWork: () => Effect.succeed(false) }),
           Layer.succeed(HttpClient.HttpClient, http),
+          NodeCrypto.layer,
         ),
       ),
     );

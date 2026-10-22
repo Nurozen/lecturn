@@ -22,7 +22,11 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@lecturn/client-runtime/state/runtime";
-import type { ScopedThreadRef } from "@lecturn/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  type EnvironmentId,
+  type ScopedThreadRef,
+} from "@lecturn/contracts";
 import {
   createContext,
   useCallback,
@@ -36,6 +40,11 @@ import {
 } from "react";
 import type { useThreadActions } from "../../hooks/useThreadActions";
 import { environmentServerConfigsAtom } from "../../state/server";
+import {
+  readEnvironmentScope,
+  useEnvironmentScope,
+  useEnvironmentsWithScope,
+} from "../../state/session";
 import { cn } from "../../lib/utils";
 import { accountByEnvironmentIdAtom } from "../../cloud/connectAccounts";
 import { knownConnectAccountsAtom } from "../../cloud/knownAccounts";
@@ -175,12 +184,36 @@ export function SidebarDragScope(props: {
   const configs = useAtomValue(environmentServerConfigsAtom);
   const accounts = useAtomValue(accountByEnvironmentIdAtom);
   const known = useAtomValue(knownConnectAccountsAtom);
+  // Subscribe to operate grants so rows become movable once a connection's session loads.
+  const environmentKey = [
+    ...new Set(
+      Object.values(props.lists)
+        .flat()
+        .map((thread) => thread.environmentId),
+    ),
+  ]
+    .toSorted()
+    .join("\n");
+  const environments = useMemo(
+    () =>
+      environmentKey === ""
+        ? []
+        : environmentKey.split("\n").map((id) => ({ environmentId: id as EnvironmentId })),
+    [environmentKey],
+  );
+  const operable = useEnvironmentsWithScope(environments, AuthOrchestrationOperateScope);
+  // A drop writes every reassigned row, so a row is only movable when its account is signed in
+  // and its connection may change threads. Checked again before each write.
   const canAccess = useCallback(
     (thread: EnvironmentThreadShell) => {
       const account = accounts.get(thread.environmentId);
-      return !account || !known.needsSignIn.includes(account);
+      return (
+        (!account || !known.needsSignIn.includes(account)) &&
+        operable.has(thread.environmentId) &&
+        readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope)
+      );
     },
-    [accounts, known],
+    [accounts, known, operable],
   );
   const { actions } = props;
   const [hold, setHold] = useSidebarDropHold(props.lists, props.enabled);
@@ -718,11 +751,17 @@ export function ScopedSortableThreadRow(props: {
 }) {
   const scope = useContext(DragScope);
   const key = keyOf(props.thread);
+  // Subscribes the row to its grant so a scope change re-enables or blocks pickup immediately.
+  const canOperateThread = useEnvironmentScope(
+    props.thread.environmentId,
+    AuthOrchestrationOperateScope,
+  );
   const sortable = useSortable({
     id: key,
     disabled: {
       draggable:
         props.dragDisabled === true ||
+        !canOperateThread ||
         !scope?.enabledKeys.has(key) ||
         !scope.draggableKeys.has(key),
       droppable: !scope?.enabledKeys.has(key),

@@ -737,7 +737,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
       yield* fs.writeFileString(
         derivedPaths.settingsPath,
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
         `${JSON.stringify({
           observability: {
             otlpTracesUrl: "http://localhost:4318/v1/traces",
@@ -809,7 +808,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
       yield* fs.writeFileString(
         derivedPaths.settingsPath,
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
         `${JSON.stringify({
           observability: {
             otlpTracesUrl: "http://localhost:4318/v1/traces",
@@ -861,7 +859,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
       yield* fs.writeFileString(
         derivedPaths.settingsPath,
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
         `${JSON.stringify({
           observability: {
             otlpTracesUrl: "http://localhost:4318/v1/traces",
@@ -1160,7 +1157,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
         yield* fs.writeFileString(
           derivedPaths.settingsPath,
-          // @effect-diagnostics-next-line preferSchemaOverJson:off
           `${JSON.stringify({ observability: { otlpLogsUrl: "http://settings:4318/v1/logs" } })}\n`,
         );
 
@@ -1232,7 +1228,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
         yield* fs.writeFileString(
           derivedPaths.settingsPath,
-          // @effect-diagnostics-next-line preferSchemaOverJson:off
           `${JSON.stringify({ observability: { otlpLogsUrl: "http://settings:4318/v1/logs" } })}\n`,
         );
 

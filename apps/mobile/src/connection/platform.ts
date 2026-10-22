@@ -13,7 +13,6 @@ import {
   managedRelayAccountChanges,
   managedRelaySessionsAtom,
 } from "@lecturn/client-runtime/relay";
-import { AuthStandardClientScopes } from "@lecturn/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -224,7 +223,6 @@ const layerCapabilities = Layer.effectContext(
         ClientCapabilities.ClientPresentation,
         ClientCapabilities.ClientPresentation.of({
           metadata: authClientMetadata(Constants.expoConfig?.version),
-          scopes: AuthStandardClientScopes,
         }),
       ),
       Context.add(

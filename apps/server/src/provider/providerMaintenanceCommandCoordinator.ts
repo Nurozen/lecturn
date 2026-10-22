@@ -1,3 +1,5 @@
+// A lock owner token; the Effect Crypto service would widen every caller's requirements.
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- synchronous hash/token helper; Effect Crypto would widen caller layer requirements.
 import * as NodeCrypto from "node:crypto";
 import * as NodeOS from "node:os";
 

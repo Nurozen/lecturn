@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@lecturn/contracts";
+import { EnvironmentId, AuthRelayReadScope, AuthRelayWriteScope } from "@lecturn/contracts";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { serverEnvironment } from "../state/server";
 import { threadDecisionEnvironment } from "../state/threadDecisions";
@@ -22,13 +22,14 @@ import { isConnectSubscriptionRequired } from "./connectSubscriptionGate";
 
 import { toastManager } from "../components/ui/toast";
 import { relayEnvironmentDiscovery } from "../state/relay";
+import { readEnvironmentScope } from "../state/session";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
   linkPrimaryEnvironment as linkPrimaryEnvironmentAtom,
   unlinkPrimaryEnvironment as unlinkPrimaryEnvironmentAtom,
   updatePrimaryEnvironmentPreferences as updatePrimaryEnvironmentPreferencesAtom,
 } from "./linkEnvironmentAtoms";
-import { usePrimaryCloudLinkState } from "./primaryCloudLinkState";
+import { readCachedPrimaryCloudLinkState, usePrimaryCloudLinkState } from "./primaryCloudLinkState";
 
 export interface CloudLinkDesiredState {
   readonly managedTunnel: boolean;
@@ -202,9 +203,33 @@ export function useCloudLinkController(
       reportUpdateFailure(new Error("Local environment is not ready yet."));
       return false;
     }
+    const environmentId = EnvironmentId.make(target.environmentId);
+    const canManageLink = () => {
+      if (
+        !readEnvironmentScope(environmentId, AuthRelayReadScope) ||
+        !readEnvironmentScope(environmentId, AuthRelayWriteScope)
+      ) {
+        reportUpdateFailure(
+          new Error(
+            "This connection needs permission to view and manage Lecturn Connect settings.",
+          ),
+        );
+        return false;
+      }
+      return true;
+    };
+    const readLinkState = () => {
+      const state = readCachedPrimaryCloudLinkState(target);
+      if (state === null) {
+        reportUpdateFailure(
+          new Error("Wait until the current Lecturn Connect settings can be read."),
+        );
+      }
+      return state;
+    };
+    if (!canManageLink()) return false;
     let keepDecisionFunding = desired.decisions === true && desired.unlink !== true;
     let revokeFundingGeneration: number | null = null;
-    const environmentId = EnvironmentId.make(target.environmentId);
     if (
       linked &&
       !desired.managedTunnel &&
@@ -234,6 +259,7 @@ export function useCloudLinkController(
         keepDecisionFunding = funding.value.state === "active" || funding.value.state === "pending";
     }
     const wantsLink = desired.managedTunnel || desired.publish || keepDecisionFunding;
+    if (wantsLink && readLinkState() === null) return false;
     // Another account's link can only be removed, and only when it is one of
     // this client's own accounts.
     if (accountMismatchMessage && (wantsLink || !publishAccount.unlink.allowed)) {
@@ -243,6 +269,7 @@ export function useCloudLinkController(
     const tokenAccountId =
       !wantsLink && publishAccount.unlink.allowed ? publishAccount.unlink.tokenAccountId : userId;
     const tokenResult = await settlePromise(() => readAccountToken(tokenAccountId));
+    if (!canManageLink()) return false;
 
     // A failure after this point may follow a partially applied mutation (e.g.
     // the link succeeded but the preference update did not), so every exit —
@@ -273,6 +300,8 @@ export function useCloudLinkController(
         return false;
       }
     } else {
+      const currentLinkState = readLinkState();
+      if (currentLinkState === null) return false;
       if (tokenResult._tag === "Failure") {
         reportUpdateFailure(squashAtomCommandFailure(tokenResult));
         return false;
@@ -287,10 +316,11 @@ export function useCloudLinkController(
         (!linked && selectedTeam(userId) !== organizationId)
       )
         return false;
+      const currentManagedTunnel = currentLinkState.managedTunnelActive ?? currentLinkState.linked;
       if (
-        !linked ||
-        managedTunnelActive !== desired.managedTunnel ||
-        primaryCloudLinkState.data?.deviceRelayConflict
+        !currentLinkState.linked ||
+        currentManagedTunnel !== desired.managedTunnel ||
+        currentLinkState.deviceRelayConflict
       ) {
         const linkResult = await linkPrimaryEnvironment({
           target,
@@ -308,6 +338,10 @@ export function useCloudLinkController(
           primaryCloudLinkState.refresh();
           return false;
         }
+      }
+      if (!canManageLink() || readLinkState() === null) {
+        primaryCloudLinkState.refresh();
+        return false;
       }
       const prefResult = await updatePrimaryEnvironmentPreferences({
         target,

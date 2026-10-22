@@ -570,7 +570,6 @@ it.layer(TestLayer)("Lecturn fork behavior on the V2 orchestrator", (it) => {
         orchestrator.dispatch(importCommand(ThreadId.make("thread:import-empty"), projectId)),
       );
       // The rejection detail sits several causes deep; the serialized error shows it.
-      // @effect-diagnostics-next-line preferSchemaOverJson:off
       assert.include(JSON.stringify(empty), "empty-session");
       assert.isNull(yield* orchestrator.getThreadShell(ThreadId.make("thread:import-empty")));
     }),
@@ -616,7 +615,6 @@ it.layer(TestLayer)("Lecturn fork behavior on the V2 orchestrator", (it) => {
         }),
       );
       // The rejection detail sits several causes deep; the serialized error shows it.
-      // @effect-diagnostics-next-line preferSchemaOverJson:off
       assert.include(JSON.stringify(missingWorktree), "needs the worktree to prepare");
 
       yield* orchestrator.dispatch({
@@ -1160,7 +1158,6 @@ it.layer(TestLayer)("Lecturn fork behavior on the V2 orchestrator", (it) => {
             threadId,
           }),
         );
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
         assert.include(JSON.stringify(resume), "Unsettle it to resume its queue");
         const held = yield* orchestrator.getThreadProjection(threadId);
         assert.equal(held.runs.find((run) => run.id === queued.runId)?.status, "queued");

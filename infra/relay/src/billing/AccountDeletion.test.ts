@@ -1,3 +1,4 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no HMAC for signing this webhook fixture.
 import * as NodeCrypto from "node:crypto";
 import { describe, expect, it } from "@effect/vitest";
 import { Clock, Effect, Schema } from "effect";

@@ -1,3 +1,4 @@
+import { PermissionUpdateNotice } from "./components/PermissionUpdateNotice";
 import * as Linking from "expo-linking";
 import { handleIncomingAppLink } from "./features/agent-awareness/activityLinking";
 import * as SplashScreen from "expo-splash-screen";
@@ -92,6 +93,7 @@ function AppContent() {
     <>
       <SplashScreenCoordinator />
       <SubscriptionUsageCoordinator />
+      <PermissionUpdateNotice />
       <GestureHandlerRootView className="flex-1">
         <KeyboardProvider statusBarTranslucent>
           <SafeAreaProvider>

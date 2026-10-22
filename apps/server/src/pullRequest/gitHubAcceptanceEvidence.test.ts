@@ -2,8 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
-import { ChildProcessSpawner } from "effect/process";
-import { GitHubCli } from "../sourceControl/GitHubCli.ts";
+import { GitHubApi, type GitHubRestResponse } from "../sourceControl/GitHubApi.ts";
 import {
   evaluateGitHubRequiredChecks,
   listGitHubAcceptanceCandidates,
@@ -42,35 +41,39 @@ const responses = (
 ) => [
   pull,
   overrides.protection ?? protection,
-  overrides.rules ?? [[]],
-  overrides.checks ?? [{ total_count: 1, check_runs: [run] }],
-  overrides.statuses ?? [[]],
+  overrides.rules ?? [],
+  overrides.checks ?? { total_count: 1, check_runs: [run] },
+  overrides.statuses ?? [],
   overrides.after ?? pull,
 ];
+const restResponse = (value: unknown, truncated = false): GitHubRestResponse => ({
+  status: 200,
+  headers: {},
+  body: JSON.stringify(value),
+  truncated,
+  invalidUtf8: false,
+});
+const graphqlCandidates = (nodes: ReadonlyArray<unknown>) =>
+  JSON.stringify({
+    data: { repository: { pullRequests: { totalCount: nodes.length, nodes } } },
+  });
 const readFixture = Effect.fn("readFixture")(function* (
   values: ReadonlyArray<unknown>,
   truncated = false,
 ) {
-  const calls: ReadonlyArray<string>[] = [];
+  const calls: Array<{ readonly host: string; readonly path: string }> = [];
   const program = Effect.gen(function* () {
-    const cli = yield* GitHubCli;
-    const evidence = yield* readGitHubAcceptanceEvidence(cli, input);
+    const api = yield* GitHubApi;
+    const evidence = yield* readGitHubAcceptanceEvidence(api, input);
     return { evidence, calls };
   });
   return yield* program.pipe(
     Effect.provide(
-      Layer.mock(GitHubCli)({
-        execute: (request) => {
+      Layer.mock(GitHubApi)({
+        rest: (request) => {
           const value = values[calls.length];
-          calls.push(request.args);
-          return Effect.succeed({
-            exitCode: ChildProcessSpawner.ExitCode(0),
-            stdout: JSON.stringify(value),
-            stderr: "",
-            stdoutTruncated: truncated,
-            stderrTruncated: false,
-            stdoutInvalidUtf8: false,
-          });
+          calls.push({ host: request.host, path: request.path });
+          return Effect.succeed(restResponse(value, truncated));
         },
       }),
     ),
@@ -91,14 +94,14 @@ describe("GitHub revision-bound acceptance evidence", () => {
           mergedSourceRevision: head,
         });
         expect(result.calls).toHaveLength(6);
-        expect(result.calls[1]).toContain("repos/acme/app/branches/release%2Fnext/protection");
-        expect(result.calls[2]).toContain(
-          "repos/acme/app/rules/branches/release%2Fnext?per_page=100",
+        expect(result.calls[1]?.path).toBe("repos/acme/app/branches/release%2Fnext/protection");
+        expect(result.calls[2]?.path).toBe(
+          "repos/acme/app/rules/branches/release%2Fnext?per_page=100&page=1",
         );
-        expect(result.calls[3]).toContain(
-          `repos/acme/app/commits/${head}/check-runs?filter=latest&per_page=100`,
+        expect(result.calls[3]?.path).toBe(
+          `repos/acme/app/commits/${head}/check-runs?filter=latest&per_page=100&page=1`,
         );
-        expect(result.calls.every((args) => args.includes("github.example.com"))).toBe(true);
+        expect(result.calls.every((call) => call.host === "github.example.com")).toBe(true);
       }),
   );
 
@@ -107,14 +110,12 @@ describe("GitHub revision-bound acceptance evidence", () => {
       const none = yield* readFixture(
         responses({
           protection: { url: protection.url, required_status_checks: null },
-          checks: [{ total_count: 0, check_runs: [] }],
+          checks: { total_count: 0, check_runs: [] },
         }),
       );
       expect(none.evidence.requiredChecks).toBe("none");
       expect(none.evidence.checksRevision).toBe(head);
-      const missing = yield* readFixture(
-        responses({ checks: [{ total_count: 0, check_runs: [] }] }),
-      );
+      const missing = yield* readFixture(responses({ checks: { total_count: 0, check_runs: [] } }));
       expect(missing.evidence.requiredChecks).toBe("pending");
       const malformed = yield* readFixture(responses({ protection: {} }));
       expect(malformed.evidence.requiredChecks).toBe("unknown");
@@ -127,12 +128,10 @@ describe("GitHub revision-bound acceptance evidence", () => {
         responses({
           protection: { url: protection.url, required_status_checks: null },
           rules: [
-            [
-              {
-                type: "required_status_checks",
-                parameters: { required_status_checks: [{ context: "deploy", integration_id: 77 }] },
-              },
-            ],
+            {
+              type: "required_status_checks",
+              parameters: { required_status_checks: [{ context: "deploy", integration_id: 77 }] },
+            },
           ],
         }),
       );
@@ -143,7 +142,7 @@ describe("GitHub revision-bound acceptance evidence", () => {
   it.effect("required workflows and merge queues remain unknown capability limits", () =>
     Effect.gen(function* () {
       for (const type of ["workflows", "merge_queue", "code_scanning"]) {
-        const result = yield* readFixture(responses({ rules: [[{ type }]] }));
+        const result = yield* readFixture(responses({ rules: [{ type }] }));
         expect(result.evidence.requiredChecks).toBe("unknown");
         expect(result.evidence.checksRevision).toBeNull();
       }
@@ -155,11 +154,11 @@ describe("GitHub revision-bound acceptance evidence", () => {
     () =>
       Effect.gen(function* () {
         const old = yield* readFixture(
-          responses({ checks: [{ total_count: 1, check_runs: [{ ...run, head_sha: base }] }] }),
+          responses({ checks: { total_count: 1, check_runs: [{ ...run, head_sha: base }] } }),
         );
         expect(old.evidence.requiredChecks).toBe("pending");
         const truncated = yield* readFixture(
-          responses({ checks: [{ total_count: 2, check_runs: [run] }] }),
+          responses({ checks: { total_count: 2, check_runs: [run] } }),
         );
         expect(truncated.evidence.requiredChecks).toBe("unknown");
         const moving = yield* readFixture(responses({ after: { ...pull, head: { sha: base } } }));
@@ -167,6 +166,46 @@ describe("GitHub revision-bound acceptance evidence", () => {
         const malformed = yield* readFixture(responses(), true).pipe(Effect.result);
         expect(Result.isFailure(malformed)).toBe(true);
       }),
+  );
+
+  it.effect("follows every page GitHub links to, the way gh --paginate did", () =>
+    Effect.gen(function* () {
+      const paths: Array<string> = [];
+      const pages: Record<string, unknown> = {
+        [`repos/acme/app/pulls/7`]: pull,
+        "repos/acme/app/branches/release%2Fnext/protection": protection,
+        "repos/acme/app/rules/branches/release%2Fnext?per_page=100&page=1": [],
+        [`repos/acme/app/commits/${head}/check-runs?filter=latest&per_page=100&page=1`]: {
+          total_count: 2,
+          check_runs: [run],
+        },
+        [`repos/acme/app/commits/${head}/check-runs?filter=latest&per_page=100&page=2`]: {
+          total_count: 2,
+          check_runs: [{ ...run, id: 2, name: "lint" }],
+        },
+        [`repos/acme/app/commits/${head}/statuses?per_page=100&page=1`]: [],
+      };
+      const evidence = yield* Effect.gen(function* () {
+        const api = yield* GitHubApi;
+        return yield* readGitHubAcceptanceEvidence(api, input);
+      }).pipe(
+        Effect.provide(
+          Layer.mock(GitHubApi)({
+            rest: (request) => {
+              paths.push(request.path);
+              const response = restResponse(pages[request.path]);
+              return Effect.succeed(
+                request.path.endsWith("check-runs?filter=latest&per_page=100&page=1")
+                  ? { ...response, headers: { link: '<https://x/?page=2>; rel="next"' } }
+                  : response,
+              );
+            },
+          }),
+        ),
+      );
+      expect(evidence.requiredChecks).toBe("passing");
+      expect(paths.filter((path) => path.includes("check-runs"))).toHaveLength(2);
+    }),
   );
 
   it("requires the expected app, latest run, source SHA, and legacy status contexts", () => {
@@ -226,8 +265,8 @@ describe("GitHub revision-bound acceptance evidence", () => {
     "keeps verified fork deliveries while rejecting other forks with the same branch and head",
     () =>
       Effect.gen(function* () {
-        const cli = yield* GitHubCli;
-        const result = yield* listGitHubAcceptanceCandidates(cli, {
+        const api = yield* GitHubApi;
+        const result = yield* listGitHubAcceptanceCandidates(api, {
           ...input,
           branch: "feature/fix",
           headRevision: head,
@@ -236,7 +275,7 @@ describe("GitHub revision-bound acceptance evidence", () => {
         });
         expect(result.items.map((item) => item.number)).toEqual([21, 22]);
         expect(result.truncated).toBe(false);
-        const crossHost = yield* listGitHubAcceptanceCandidates(cli, {
+        const crossHost = yield* listGitHubAcceptanceCandidates(api, {
           ...input,
           branch: "feature/fix",
           headRevision: head,
@@ -246,11 +285,10 @@ describe("GitHub revision-bound acceptance evidence", () => {
         expect(Result.isFailure(crossHost)).toBe(true);
       }).pipe(
         Effect.provide(
-          Layer.mock(GitHubCli)({
-            execute: () =>
-              Effect.succeed({
-                exitCode: ChildProcessSpawner.ExitCode(0),
-                stdout: JSON.stringify(
+          Layer.mock(GitHubApi)({
+            graphql: () =>
+              Effect.succeed(
+                graphqlCandidates(
                   [
                     { number: 21, owner: "alice", state: "OPEN", revision: head },
                     { number: 22, owner: "alice", state: "MERGED", revision: head },
@@ -267,11 +305,7 @@ describe("GitHub revision-bound acceptance evidence", () => {
                     state: row.state,
                   })),
                 ),
-                stderr: "",
-                stdoutTruncated: false,
-                stderrTruncated: false,
-                stdoutInvalidUtf8: false,
-              }),
+              ),
           }),
         ),
       ),
@@ -281,10 +315,10 @@ describe("GitHub revision-bound acceptance evidence", () => {
     "discovers exact source repo and branch, retaining current merged PRs and excluding old deliveries or fork namesakes",
     () =>
       Effect.gen(function* () {
-        let args: ReadonlyArray<string> = [];
+        let request: { readonly host: string; readonly variables?: unknown } | undefined;
         const result = yield* Effect.gen(function* () {
-          const cli = yield* GitHubCli;
-          return yield* listGitHubAcceptanceCandidates(cli, {
+          const api = yield* GitHubApi;
+          return yield* listGitHubAcceptanceCandidates(api, {
             ...input,
             branch: "feature/fix",
             headRevision: head,
@@ -293,12 +327,11 @@ describe("GitHub revision-bound acceptance evidence", () => {
           });
         }).pipe(
           Effect.provide(
-            Layer.mock(GitHubCli)({
-              execute: (request) => {
-                args = request.args;
-                return Effect.succeed({
-                  exitCode: ChildProcessSpawner.ExitCode(0),
-                  stdout: JSON.stringify([
+            Layer.mock(GitHubApi)({
+              graphql: (input) => {
+                request = input;
+                return Effect.succeed(
+                  graphqlCandidates([
                     {
                       number: 7,
                       url: "https://github.example.com/acme/app/pull/7",
@@ -345,20 +378,15 @@ describe("GitHub revision-bound acceptance evidence", () => {
                       state: "CLOSED",
                     },
                   ]),
-                  stderr: "",
-                  stdoutTruncated: false,
-                  stderrTruncated: false,
-                  stdoutInvalidUtf8: false,
-                });
+                );
               },
             }),
           ),
         );
         expect(result.items.map((item) => item.number)).toEqual([7]);
         expect(result.truncated).toBe(false);
-        expect(args).toContain("--head");
-        expect(args).toContain("feature/fix");
-        expect(args).toContain("github.example.com/acme/app");
+        expect(request?.host).toBe("github.example.com");
+        expect(request?.variables).toEqual({ owner: "acme", name: "app", head: "feature/fix" });
       }),
   );
 });

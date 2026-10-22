@@ -1,6 +1,5 @@
 import {
   type AuthClientPresentationMetadata,
-  type AuthEnvironmentScope,
   type DesktopSshEnvironmentBootstrap,
   type DesktopSshEnvironmentTarget,
   EnvironmentId,
@@ -64,7 +63,6 @@ export class ClientPresentation extends Context.Service<
   ClientPresentation,
   {
     readonly metadata: AuthClientPresentationMetadata;
-    readonly scopes: ReadonlyArray<AuthEnvironmentScope>;
   }
 >()("@lecturn/client-runtime/platform/capabilities/ClientPresentation") {}
 

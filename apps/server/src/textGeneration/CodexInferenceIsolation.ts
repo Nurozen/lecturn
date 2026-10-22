@@ -1,3 +1,4 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- synchronous sha256 path key; Effect Crypto digest is async.
 import * as NodeCrypto from "node:crypto";
 import * as CodexClient from "effect-codex-app-server/client";
 import * as Effect from "effect/Effect";

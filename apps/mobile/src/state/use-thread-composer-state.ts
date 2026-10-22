@@ -1,3 +1,5 @@
+import { AuthOrchestrationOperateScope } from "@lecturn/contracts";
+import { readEnvironmentScope } from "./session";
 import type { ComposerTextPaste } from "../native/LecturnComposerEditor.types";
 import { useAtomValue } from "@effect/atom-react";
 import { threadRuntimeIsActive } from "@lecturn/client-runtime/state/shell";
@@ -548,6 +550,12 @@ export function useThreadComposerState() {
 
   const onSendMessage = useCallback(
     async (followUpOverride?: ActiveTurnComposerAction) => {
+      if (
+        selectedThreadShell &&
+        selectedEnvironmentRuntime?.connectionState === "connected" &&
+        !readEnvironmentScope(selectedThreadShell.environmentId, AuthOrchestrationOperateScope)
+      )
+        return null;
       if (!selectedThreadShell) {
         return null;
       }
@@ -624,6 +632,8 @@ export function useThreadComposerState() {
           ? parseCodexFeedbackCommand(text)
           : null;
       if (feedbackCommand) {
+        if (!readEnvironmentScope(selectedThreadShell.environmentId, AuthOrchestrationOperateScope))
+          return null;
         if (thread.activeProviderThreadId === null) {
           Alert.alert("Start a Codex thread first", "Send a message before you submit feedback.");
           return null;

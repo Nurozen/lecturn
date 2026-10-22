@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import type { GitHubCli } from "../sourceControl/GitHubCli.ts";
+import type { GitHubApi } from "../sourceControl/GitHubApi.ts";
 import type { ProviderAcceptanceEvidence, ProviderRepositoryRef } from "./PullRequestProvider.ts";
 
 class GitHubAcceptanceReadError extends Schema.TaggedError<GitHubAcceptanceReadError>()(
@@ -46,51 +46,77 @@ const RuleChecks = Schema.Struct({
     }),
   ),
 });
-const CheckPages = Schema.Array(
-  Schema.Struct({
-    total_count: Schema.Number,
-    check_runs: Schema.Array(
-      Schema.Struct({
-        id: Schema.Number,
-        name: Schema.String,
-        head_sha: Revision,
-        app: Schema.NullOr(Schema.Struct({ id: Schema.Number })),
-        status: Schema.String,
-        conclusion: Schema.NullOr(Schema.String),
-      }),
-    ),
-  }),
-);
-const StatusPages = Schema.Array(
-  Schema.Array(
+const CheckPage = Schema.Struct({
+  total_count: Schema.Number,
+  check_runs: Schema.Array(
     Schema.Struct({
       id: Schema.Number,
-      context: Schema.String,
-      state: Schema.String,
+      name: Schema.String,
+      head_sha: Revision,
+      app: Schema.NullOr(Schema.Struct({ id: Schema.Number })),
+      status: Schema.String,
+      conclusion: Schema.NullOr(Schema.String),
     }),
   ),
+});
+const StatusPage = Schema.Array(
+  Schema.Struct({
+    id: Schema.Number,
+    context: Schema.String,
+    state: Schema.String,
+  }),
 );
 
 const decodeRuleChecks = Schema.decodeUnknownEffect(RuleChecks);
 const decodeCandidates = Schema.decodeUnknownEffect(
   Schema.fromJsonString(
-    Schema.Array(
-      Schema.Struct({
-        number: Schema.Number,
-        url: Schema.String,
-        headRefName: Schema.String,
-        headRefOid: Revision,
-        headRepository: Schema.NullOr(Schema.Struct({ name: Schema.String })),
-        headRepositoryOwner: Schema.NullOr(Schema.Struct({ login: Schema.String })),
-        state: Schema.String,
+    Schema.Struct({
+      data: Schema.Struct({
+        repository: Schema.Struct({
+          pullRequests: Schema.Struct({
+            totalCount: Schema.Number,
+            nodes: Schema.Array(
+              Schema.Struct({
+                number: Schema.Number,
+                url: Schema.String,
+                headRefName: Schema.String,
+                headRefOid: Revision,
+                headRepository: Schema.NullOr(Schema.Struct({ name: Schema.String })),
+                headRepositoryOwner: Schema.NullOr(Schema.Struct({ login: Schema.String })),
+                state: Schema.String,
+              }),
+            ),
+          }),
+        }),
       }),
-    ),
+    }),
   ),
 );
 
+/** Every pull request with this head branch name, from any fork, as `gh pr list --head` lists them. */
+const ACCEPTANCE_CANDIDATES_GRAPHQL_QUERY = `
+query AcceptanceCandidates($owner: String!, $name: String!, $head: String!) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(headRefName: $head, states: [OPEN, CLOSED, MERGED], first: 100, orderBy: { field: CREATED_AT, direction: DESC }) {
+      totalCount
+      nodes {
+        number
+        url
+        headRefName
+        headRefOid
+        headRepository { name }
+        headRepositoryOwner { login }
+        state
+      }
+    }
+  }
+}`;
+
+const MAX_ACCEPTANCE_PAGES = 100;
+
 type Required = typeof RequiredCheck.Type;
-type Run = (typeof CheckPages.Type)[number]["check_runs"][number];
-type Status = (typeof StatusPages.Type)[number][number];
+type Run = (typeof CheckPage.Type)["check_runs"][number];
+type Status = (typeof StatusPage.Type)[number];
 
 /** Only explicit, fully enumerated required contexts can establish clean CI. */
 export function evaluateGitHubRequiredChecks(
@@ -137,30 +163,44 @@ export function evaluateGitHubRequiredChecks(
  * Workflow rules and merge queues need provider-specific proof that this boundary cannot supply.
  */
 export const readGitHubAcceptanceEvidence = Effect.fn("readGitHubAcceptanceEvidence")(function* (
-  cli: GitHubCli["Service"],
+  api: GitHubApi["Service"],
   input: ProviderRepositoryRef & { readonly number: number },
 ) {
-  const read = Effect.fn("readGitHubAcceptanceEvidence.api")(function* <S extends Schema.Top>(
+  const fetch = Effect.fn("readGitHubAcceptanceEvidence.api")(function* <S extends Schema.Top>(
     endpoint: string,
     schema: S,
-    pages = false,
   ) {
-    const result = yield* cli.execute({
-      cwd: input.cwd,
-      args: [
-        "api",
-        "--hostname",
-        input.host,
-        endpoint,
-        ...(pages ? ["--paginate", "--slurp"] : []),
-      ],
+    const response = yield* api.rest({
+      host: input.host,
+      operation: "readAcceptanceEvidence",
+      path: endpoint,
     });
-    if (result.stdoutTruncated || result.stdoutInvalidUtf8) {
+    if (response.truncated || response.invalidUtf8) {
       return yield* new GitHubAcceptanceReadError({
         message: "GitHub acceptance evidence was truncated or invalid.",
       });
     }
-    return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(result.stdout);
+    const value = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(response.body);
+    return { value, next: /rel="next"/.test(response.headers["link"] ?? "") };
+  });
+  const read = <S extends Schema.Top>(endpoint: string, schema: S) =>
+    fetch(endpoint, schema).pipe(Effect.map((result) => result.value));
+  // Every page, in order, the way `gh api --paginate --slurp` collected them.
+  const readPages = Effect.fn("readGitHubAcceptanceEvidence.pages")(function* <
+    S extends Schema.Top,
+  >(endpoint: string, schema: S) {
+    const pages: Array<S["Type"]> = [];
+    for (let page = 1; page <= MAX_ACCEPTANCE_PAGES; page++) {
+      const result = yield* fetch(
+        `${endpoint}${endpoint.includes("?") ? "&" : "?"}page=${page}`,
+        schema,
+      );
+      pages.push(result.value);
+      if (!result.next) return pages;
+    }
+    return yield* new GitHubAcceptanceReadError({
+      message: "GitHub acceptance evidence had too many pages to enumerate.",
+    });
   });
   const pullPath = `repos/${input.repository}/pulls/${input.number}`;
   const pull = yield* read(pullPath, Pull);
@@ -184,10 +224,9 @@ export const readGitHubAcceptanceEvidence = Effect.fn("readGitHubAcceptanceEvide
       `repos/${input.repository}/branches/${base}/protection`,
       Protection,
     );
-    const rulePages = yield* read(
+    const rulePages = yield* readPages(
       `repos/${input.repository}/rules/branches/${base}?per_page=100`,
-      Schema.Array(Schema.Array(Rule)),
-      true,
+      Schema.Array(Rule),
     );
     const rules = rulePages.flat();
     if (
@@ -231,10 +270,9 @@ export const readGitHubAcceptanceEvidence = Effect.fn("readGitHubAcceptanceEvide
         })),
       );
     }
-    const pages = yield* read(
+    const pages = yield* readPages(
       `repos/${input.repository}/commits/${pull.head.sha}/check-runs?filter=latest&per_page=100`,
-      CheckPages,
-      true,
+      CheckPage,
     );
     const runs = pages.flatMap((page) => page.check_runs);
     if (pages.length === 0 || pages.some((page) => page.total_count !== runs.length)) {
@@ -242,10 +280,9 @@ export const readGitHubAcceptanceEvidence = Effect.fn("readGitHubAcceptanceEvide
         message: "GitHub did not enumerate all check runs.",
       });
     }
-    const statuses = (yield* read(
+    const statuses = (yield* readPages(
       `repos/${input.repository}/commits/${pull.head.sha}/statuses?per_page=100`,
-      StatusPages,
-      true,
+      StatusPage,
     )).flat();
     const after = yield* read(pullPath, Pull);
     if (
@@ -286,7 +323,7 @@ export const readGitHubAcceptanceEvidence = Effect.fn("readGitHubAcceptanceEvide
 
 export const listGitHubAcceptanceCandidates = Effect.fn("listGitHubAcceptanceCandidates")(
   function* (
-    cli: GitHubCli["Service"],
+    api: GitHubApi["Service"],
     input: ProviderRepositoryRef & {
       readonly branch: string;
       readonly headRevision: string | null;
@@ -298,29 +335,15 @@ export const listGitHubAcceptanceCandidates = Effect.fn("listGitHubAcceptanceCan
       return yield* new GitHubAcceptanceReadError({
         message: "The pull request source and target hosts do not match.",
       });
-    const result = yield* cli.execute({
-      cwd: input.cwd,
-      args: [
-        "pr",
-        "list",
-        "--repo",
-        `${input.host}/${input.repository}`,
-        "--head",
-        input.branch,
-        "--state",
-        "all",
-        "--limit",
-        "101",
-        "--json",
-        "number,url,headRefName,headRefOid,headRepository,headRepositoryOwner,state",
-      ],
+    const [owner = "", name = ""] = input.repository.split("/");
+    const raw = yield* api.graphql({
+      host: input.host,
+      operation: "listAcceptanceCandidates",
+      query: ACCEPTANCE_CANDIDATES_GRAPHQL_QUERY,
+      variables: { owner, name, head: input.branch },
     });
-    if (result.stdoutTruncated || result.stdoutInvalidUtf8) {
-      return yield* new GitHubAcceptanceReadError({
-        message: "GitHub pull request enumeration was truncated or invalid.",
-      });
-    }
-    const rows = yield* decodeCandidates(result.stdout);
+    const listed = (yield* decodeCandidates(raw)).data.repository.pullRequests;
+    const rows = listed.nodes;
     const candidates = rows.filter(
       (row) =>
         row.headRefName === input.branch &&
@@ -341,7 +364,7 @@ export const listGitHubAcceptanceCandidates = Effect.fn("listGitHubAcceptanceCan
           `${row.headRepositoryOwner!.login}/${row.headRepository!.name}`.toLowerCase() ===
           input.sourceRepository.toLowerCase(),
       ),
-      truncated: rows.length > 100,
+      truncated: listed.totalCount > rows.length,
     };
   },
 );

@@ -1,5 +1,6 @@
 import { withoutArchivedStaveProjects } from "@lecturn/client-runtime/state/stave-archive";
 import { DesktopActivityBridge } from "../components/pullRequest/DesktopActivityBridge";
+import { AuthPreviewOperateScope } from "@lecturn/contracts";
 import { Outlet, createFileRoute, redirect, useParams } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useMemo } from "react";
@@ -10,7 +11,9 @@ import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { openCommandPalette } from "../commandPaletteBus";
 import { useProjects } from "../state/entities";
+import { isPreviewAvailableFor } from "../browser/previewRuntime";
 import { usePrimaryEnvironmentId } from "../state/environments";
+import { useEnvironmentScope } from "../state/session";
 import { selectProjectGroupingSettings } from "../logicalProject";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { dispatchPreviewAction } from "../components/preview/previewActionBus";
@@ -25,7 +28,6 @@ import { isModelPickerOpen } from "../modelPickerVisibility";
 import { undoLatestThreadAction } from "../hooks/showThreadUndoNotice";
 import { resolveShortcutCommand } from "../keybindings";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
-import { isPreviewSupportedInRuntime } from "../previewStateStore";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
@@ -37,6 +39,10 @@ function ChatRouteGlobalShortcuts() {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
     useHandleNewThread();
   const { forkThreadAtLatestTurn } = useForkThread();
+  const canOperatePreview = useEnvironmentScope(
+    routeThreadRef?.environmentId ?? null,
+    AuthPreviewOperateScope,
+  );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const legacySidebarEnabled = useLegacySidebarEnabled();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
@@ -155,8 +161,8 @@ function ChatRouteGlobalShortcuts() {
       if (command === "preview.toggle") {
         event.preventDefault();
         event.stopPropagation();
-        if (!routeThreadRef) return;
-        if (!isPreviewSupportedInRuntime()) {
+        if (!routeThreadRef || (!canOperatePreview && !previewOpen)) return;
+        if (!isPreviewAvailableFor(routeThreadRef.environmentId)) {
           toastManager.add(
             stackedThreadToast({
               type: "info",
@@ -182,6 +188,7 @@ function ChatRouteGlobalShortcuts() {
       ) {
         event.preventDefault();
         event.stopPropagation();
+        if (!canOperatePreview) return;
         const action =
           command === "preview.refresh"
             ? "refresh"
@@ -205,6 +212,7 @@ function ChatRouteGlobalShortcuts() {
     activeThread,
     clearSelection,
     forkThreadAtLatestTurn,
+    canOperatePreview,
     handleNewThread,
     keybindings,
     defaultProjectRef,

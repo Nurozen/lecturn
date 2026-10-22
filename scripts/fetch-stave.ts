@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- the checksum helper hashes synchronously; Effect's Crypto digest is async.
 import * as NodeCrypto from "node:crypto";
 import * as NodeZlib from "node:zlib";
 

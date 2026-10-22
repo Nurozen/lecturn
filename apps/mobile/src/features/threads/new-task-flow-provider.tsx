@@ -1,3 +1,6 @@
+import { resolveFilesystemReadAccess } from "@lecturn/client-runtime/state/filesystem";
+import { useEnvironmentPresentation } from "../../state/presentation";
+import { environmentSession } from "../../state/session";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert } from "react-native";
 
@@ -494,8 +497,24 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   // uses for new draft threads: forced by the environment (Stave), then the
   // per-project setting, then the repo's checked-in lecturn.json, then the
   // server's configured default. A forced mode makes the file read moot.
+  const fileAccessSession = useEnvironmentQuery(
+    selectedProject !== null && selectedProject.workspaceRoot !== ""
+      ? environmentSession.sessionStateAtom(selectedProject.environmentId)
+      : null,
+  );
+  const fileEnvironment = useEnvironmentPresentation(selectedProject?.environmentId ?? null);
+  const fileAccess = resolveFilesystemReadAccess({
+    isCatalogReady: fileEnvironment.isReady,
+    connection: fileEnvironment.presentation?.connection ?? null,
+    session: fileAccessSession.data,
+    sessionError: fileAccessSession.error,
+  });
+  const { canReadFiles } = fileAccess;
+  const fileAccessPending =
+    selectedProject !== null && selectedProject.workspaceRoot !== "" && fileAccess.isPending;
   const lecturnProjectFileQuery = useEnvironmentQuery(
-    selectedProject !== null &&
+    canReadFiles &&
+      selectedProject !== null &&
       selectedProject.workspaceRoot !== "" &&
       forcedWorkspaceMode === undefined
       ? projectEnvironment.readFile({
@@ -540,7 +559,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     selectedProjectDraft.workspaceSelection?.mode !== undefined ||
     forcedWorkspaceMode !== undefined ||
     projectSettings.sources.defaultThreadEnvMode !== "environment" ||
-    !lecturnProjectFileQuery.isPending;
+    (!lecturnProjectFileQuery.isPending && !fileAccessPending);
   // The forced mode also beats a stale explicit pick left in the draft.
   const workspaceMode =
     forcedWorkspaceMode ??

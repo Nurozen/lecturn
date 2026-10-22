@@ -5,6 +5,7 @@ import type {
 } from "@lecturn/client-runtime/state/thread-requests";
 import { turnItemIsWorkspacePreparation } from "@lecturn/client-runtime/state/turn-item-presentation";
 import { formatSubagentDisplayTitle } from "@lecturn/client-runtime/state/subagent-display";
+import { isLiveSubagentTurnItem } from "@lecturn/client-runtime/state/subagentRuntime";
 import { extractToolActivityPresentation } from "@lecturn/client-runtime/work-log/tool-presentation";
 import {
   turnItemHasDetail,
@@ -1137,7 +1138,10 @@ function deriveThreadFeedRunFolds(
                 (activity) =>
                   activity.prominent ||
                   activity.projectedItem.item.type === "notification" ||
-                  activity.projectedItem.item.type === "handoff",
+                  activity.projectedItem.item.type === "handoff" ||
+                  // A child still working outlives its settled launching run;
+                  // its group stays visible while any member is live.
+                  isLiveSubagentTurnItem(activity.projectedItem.item),
               )
             ),
         )

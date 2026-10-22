@@ -63,6 +63,7 @@ const ManagedEndpointProvisioningStage = Schema.Literals([
   "gateway-enrollment",
   "load-allocation",
   "verify-endpoint",
+  "verify-tunnel",
   "sync-origin",
 ]);
 
@@ -241,6 +242,7 @@ export interface ManagedEndpointTunnel {
   readonly status?: string | null;
   readonly createdAt?: string | null;
   readonly connsInactiveAt?: string | null;
+  readonly deletedAt?: string | null;
 }
 
 export interface ManagedEndpointTunnelListRequest {
@@ -722,6 +724,30 @@ export const make = Effect.gen(function* () {
           reason: "endpoint-mismatch",
           hostname: allocation.hostname,
         });
+      }
+      // A release keeps the recorded tunnel id, so the record alone cannot
+      // tell a live tunnel from one deleted by a shutdown whose host was
+      // killed before it dropped its config. Ask Cloudflare, or the host
+      // starts a connector that can never connect.
+      const recorded = yield* tunnels.get(input.tunnelId).pipe(
+        Effect.asSome,
+        Effect.catchTags({
+          ManagedEndpointTunnelClientError: (cause) =>
+            isManagedEndpointNotFound(cause.cause)
+              ? Effect.succeedNone
+              : Effect.fail(
+                  new ManagedEndpointProvisioningFailed({
+                    userId: input.userId,
+                    environmentId: input.environmentId,
+                    stage: "verify-tunnel",
+                    tunnelId: input.tunnelId,
+                    cause,
+                  }),
+                ),
+        }),
+      );
+      if (Option.isNone(recorded) || recorded.value.deletedAt) {
+        return "recovery_required";
       }
       if (
         allocation.origin?.localHttpHost === input.origin.localHttpHost &&

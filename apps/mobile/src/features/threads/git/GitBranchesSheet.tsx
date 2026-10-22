@@ -47,6 +47,7 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
     useSelectedThreadWorktree(props.route.params.repoKey);
   const gitState = useSelectedThreadGitState(props.route.params.repoKey);
   const gitActions = useSelectedThreadGitActions(props.route.params.repoKey);
+  const { canChangeThreadBranch } = gitActions;
   // Stave threads always run in the space root, so there is no worktree to
   // create or move to; the sheet only offers branch switching there.
   const worktreesSupported = !isStaveProject(selectedThreadProject);
@@ -135,11 +136,12 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
               icon="plus"
               label="Create & checkout"
               tone="primary"
-              disabled={busy || newBranchName.trim().length === 0}
+              disabled={!canChangeThreadBranch || busy || newBranchName.trim().length === 0}
               onPress={() => {
                 const branch = sanitizeFeatureBranchName(newBranchName.trim());
                 if (branch.length === 0) return;
-                void gitActions.onCreateSelectedThreadBranch(branch).then(() => {
+                void gitActions.onCreateSelectedThreadBranch(branch).then((result) => {
+                  if (result === null) return;
                   setNewBranchName("");
                   navigation.goBack();
                 });
@@ -175,6 +177,7 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
                 label="Create worktree"
                 tone="primary"
                 disabled={
+                  !canChangeThreadBranch ||
                   busy ||
                   worktreeBaseBranch.trim().length === 0 ||
                   worktreeBranchName.trim().length === 0
@@ -185,7 +188,8 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
                   if (baseBranch.length === 0 || newBranch.length === 0) return;
                   void gitActions
                     .onCreateSelectedThreadWorktree({ baseBranch, newBranch })
-                    .then(() => {
+                    .then((result) => {
+                      if (result === null) return;
                       setWorktreeBranchName("");
                       navigation.goBack();
                     });
@@ -229,9 +233,10 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
                   )}
                   accessibilityRole="button"
                   accessibilityState={{ selected: branch.current, disabled: busy || disabled }}
-                  disabled={busy || disabled}
+                  disabled={!canChangeThreadBranch || busy || disabled}
                   onPress={() => {
-                    void gitActions.onCheckoutSelectedThreadBranch(branch.name).then(() => {
+                    void gitActions.onCheckoutSelectedThreadBranch(branch.name).then((result) => {
+                      if (result === null) return;
                       navigation.goBack();
                     });
                   }}

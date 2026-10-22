@@ -10,7 +10,11 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
-import { formatCliCommand, resolveServerInstallation } from "./invocation.ts";
+import {
+  formatCliCommand,
+  resolveRootCliCommand,
+  resolveServerInstallation,
+} from "./invocation.ts";
 
 it("never suggests package runner commands from cache entry paths", () => {
   for (const entryPath of [
@@ -72,6 +76,29 @@ it("formats the requested subcommand", () => {
     "lecturn connect",
   );
 });
+
+it.effect("keeps a user-installed Node reachable when the command runs under sudo", () =>
+  Effect.gen(function* () {
+    const command = (node: string, entry: string) =>
+      resolveRootCliCommand("browser setup").pipe(
+        Effect.provideService(HostProcessExecutablePath, node),
+        Effect.provideService(HostProcessArguments, [node, entry]),
+      );
+    const npx = "/home/theo/.npm/_npx/abc/node_modules/lecturn/dist/bin.mjs";
+    // sudo's secure_path already has a system Node.
+    expect(yield* command("/usr/bin/node", npx)).toBe("sudo lecturn browser setup");
+    // nvm, fnm, and tarball installs are dropped by sudo's PATH reset.
+    expect(yield* command("/home/theo/.nvm/versions/node/v24/bin/node", npx)).toBe(
+      'sudo env "PATH=$PATH" lecturn browser setup',
+    );
+    expect(
+      yield* command(
+        "/home/theo/.local/node/bin/node",
+        "/home/theo/.local/lib/node_modules/lecturn/dist/bin.mjs",
+      ),
+    ).toBe('sudo env "PATH=$PATH" lecturn browser setup');
+  }),
+);
 
 it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
   it.effect("leaves every install unknown until Lecturn publishes an npm distribution", () =>

@@ -367,7 +367,6 @@ it.layer(Layer.merge(NodeServices.layer, Layer.succeed(RuntimeReleaseArchivesPub
           current: true,
           installedVersion: "1.2.3",
         });
-        // @effect-diagnostics-next-line preferSchemaOverJson:off - fixed launcher-owned test document.
         const pendingState = JSON.stringify({
           protocol: SERVICE_LAUNCHER_PROTOCOL,
           activeVersion: "1.2.3",
@@ -557,7 +556,6 @@ it.layer(Layer.merge(NodeServices.layer, Layer.succeed(RuntimeReleaseArchivesPub
       Effect.gen(function* () {
         const { service, fs, statePath } = yield* makeHarness();
         yield* service.install();
-        // @effect-diagnostics-next-line preferSchemaOverJson:off - fixed launcher-owned test document.
         const pendingState = JSON.stringify({
           protocol: SERVICE_LAUNCHER_PROTOCOL,
           activeVersion: "1.2.3",
@@ -658,7 +656,6 @@ it.layer(Layer.merge(NodeServices.layer, Layer.succeed(RuntimeReleaseArchivesPub
       Effect.gen(function* () {
         const { service, fs, statePath, commands } = yield* makeHarness();
         yield* service.install();
-        // @effect-diagnostics-next-line preferSchemaOverJson:off - fixed launcher-owned test document.
         const pendingState = JSON.stringify({
           protocol: SERVICE_LAUNCHER_PROTOCOL - 1,
           activeVersion: "1.2.3",
@@ -823,7 +820,6 @@ it.layer(Layer.merge(NodeServices.layer, Layer.succeed(RuntimeReleaseArchivesPub
         const { service, fs, statePath, commands } = yield* makeHarness("darwin");
         yield* service.install();
         const plistPath = (yield* service.status).unitPath;
-        // @effect-diagnostics-next-line preferSchemaOverJson:off - fixed launcher-owned test document.
         const pendingState = JSON.stringify({
           protocol: SERVICE_LAUNCHER_PROTOCOL - 1,
           activeVersion: "1.2.3",

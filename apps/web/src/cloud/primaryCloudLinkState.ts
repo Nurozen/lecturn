@@ -1,5 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
-import { EnvironmentId, type EnvironmentCloudLinkStateResult } from "@lecturn/contracts";
+import {
+  AuthRelayReadScope,
+  EnvironmentId,
+  type EnvironmentCloudLinkStateResult,
+} from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -15,6 +19,7 @@ import { environmentCatalog } from "../connection/catalog";
 import { usePrimaryEnvironment } from "../state/environments";
 import { runtime } from "../lib/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
 import { readPrimaryCloudLinkState, type CloudLinkTarget } from "./linkEnvironment";
 import { hasCloudPublicConfig } from "./publicConfig";
 
@@ -80,13 +85,24 @@ export const primaryCloudPublisherAtom = Atom.make((get) => {
 }).pipe(Atom.withLabel("primary-cloud-publisher"));
 
 function refreshPrimaryCloudLinkState(target: CloudLinkTarget | null): void {
-  if (target) {
+  if (
+    target &&
+    readEnvironmentScope(EnvironmentId.make(target.environmentId), AuthRelayReadScope)
+  ) {
     appAtomRegistry.refresh(primaryCloudLinkStateAtom(targetKey(target)));
   }
 }
 
+export function readCachedPrimaryCloudLinkState(target: CloudLinkTarget) {
+  if (!readEnvironmentScope(EnvironmentId.make(target.environmentId), AuthRelayReadScope))
+    return null;
+  const result = appAtomRegistry.get(primaryCloudLinkStateAtom(targetKey(target)));
+  return result._tag === "Success" ? result.value : null;
+}
+
 export function usePrimaryCloudLinkState() {
   const primary = usePrimaryEnvironment();
+  const canReadRelay = useEnvironmentScope(primary?.environmentId ?? null, AuthRelayReadScope);
   const target = useMemo(
     () =>
       primary?.entry.target._tag === "PrimaryConnectionTarget"
@@ -101,7 +117,7 @@ export function usePrimaryCloudLinkState() {
   );
   // Builds without Lecturn Connect have no link to read; skip the request.
   const atom =
-    target && hasCloudPublicConfig()
+    target && hasCloudPublicConfig() && canReadRelay
       ? primaryCloudLinkStateAtom(targetKey(target))
       : EMPTY_PRIMARY_CLOUD_LINK_STATE_ATOM;
   const result = useAtomValue(atom);
@@ -115,7 +131,7 @@ export function usePrimaryCloudLinkState() {
   }
 
   return {
-    data: Option.getOrNull(AsyncResult.value(result)),
+    data: result._tag === "Failure" ? null : Option.getOrNull(AsyncResult.value(result)),
     error,
     isPending: result.waiting,
     refresh,
