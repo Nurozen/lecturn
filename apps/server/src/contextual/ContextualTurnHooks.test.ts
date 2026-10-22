@@ -302,6 +302,15 @@ it.layer(SqlitePersistenceMemory)("Contextual V2 turn hooks", (it) => {
       assert.isUndefined(yield* f.hooks.beforeTurnStart(turnInput("run-off", "message-off")));
       assert.isNull(yield* f.queueState("run-off"));
       assert.equal(f.prepareCalls.length, 0);
+      // Enabling Contextual mid-run never makes a restart of that run hold.
+      yield* f.sql`UPDATE contextual_thread_settings SET enabled=1`;
+      assert.deepEqual(yield* f.hooks.beforeTurnStart(turnInput("run-off", "message-off")), {});
+      assert.isNull(yield* f.queueState("run-off"));
+      assert.equal(f.prepareCalls.length, 0);
+      // The run's terminal releases the pin; its next run sees the setting.
+      yield* f.hooks.onRunTerminal(terminal("run-off", "completed"));
+      assert.isDefined(yield* f.hooks.beforeTurnStart(turnInput("run-on", "message-on")));
+      assert.equal(f.prepareCalls.length, 1);
     }),
   );
 

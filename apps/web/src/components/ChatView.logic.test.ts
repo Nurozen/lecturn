@@ -1,5 +1,6 @@
 import { findRecordedWorktreeSetup, resolveVisibleWorktreeSetup } from "./ChatView.logic";
 import {
+  canRevertThreadFiles,
   recallCheckoutIsRepo,
   rememberCheckoutIsRepo,
   threadShellHasStarted,
@@ -42,6 +43,7 @@ import {
   ENVIRONMENT_RECONNECT_WARNING_GRACE_MS,
   getAntigravitySendBlockReason,
   getProviderSendBlockReason,
+  buildForkPointByRunlessReplyId,
   buildForkPointByUserMessageId,
   resolveDraftBranchSync,
   buildForkTitle,
@@ -2604,6 +2606,35 @@ describe("buildForkPointByUserMessageId", () => {
     ]);
   });
 
+  it("forks a run-less reply through its own turn, never inherited or native replies", () => {
+    const history = [
+      makeChatMessage("old-user-1", "2026-03-28T00:00:00.000Z"),
+      makeChatMessage("old-answer-1", "2026-03-28T00:00:01.000Z", { role: "assistant" }),
+      makeChatMessage("old-user-2", "2026-03-28T00:00:02.000Z"),
+      makeChatMessage("old-answer-2", "2026-03-28T00:00:03.000Z", { role: "assistant" }),
+    ];
+    const input = {
+      runlessHistory: true,
+      timelineEntries: [...history.map((message) => messageEntry(message)), ...entries],
+      completedRunIds: new Set([run1, run2]),
+      activeRunId: null,
+    };
+    const byReply = buildForkPointByRunlessReplyId(input);
+    expect([...byReply.entries()]).toEqual([
+      ["old-answer-1", { type: "runless", messageId: "old-user-1" }],
+      ["old-answer-2", { type: "runless", messageId: "old-user-2" }],
+    ]);
+    expect(buildForkPointByRunlessReplyId(input, byReply)).toBe(byReply);
+    // A fork child that only inherits run-less history (or a native thread) has none.
+    expect(buildForkPointByRunlessReplyId({ ...input, runlessHistory: false }).size).toBe(0);
+    expect(
+      buildForkPointByRunlessReplyId({
+        ...input,
+        timelineEntries: history.map((message) => messageEntry(message, "inherited")),
+      }).size,
+    ).toBe(0);
+  });
+
   it("keeps the previous map identity while unchanged", () => {
     const input = {
       ...base,
@@ -2725,5 +2756,15 @@ describe("resolveForkRevertDisabledReason", () => {
         createdAt,
       }),
     ).toBeNull();
+  });
+});
+
+describe("canRevertThreadFiles", () => {
+  it("offers file revert only for threads with their own worktree", () => {
+    expect(canRevertThreadFiles({ worktreePath: "/repo/.worktrees/feature" })).toBe(true);
+    // A local-checkout thread shares the project directory; the server refuses the restore.
+    expect(canRevertThreadFiles({ worktreePath: null })).toBe(false);
+    expect(canRevertThreadFiles(null)).toBe(false);
+    expect(canRevertThreadFiles(undefined)).toBe(false);
   });
 });

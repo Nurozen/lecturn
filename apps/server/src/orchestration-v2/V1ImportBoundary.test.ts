@@ -22,6 +22,8 @@ const legacyReaderFiles: Record<string, string> = {
   // Lecturn: decisions/notes read a V1 transcript only while its thread is not yet hydrated.
   "threadDecisions/V2ProjectionSources.ts": "V1 transcript fallback for unhydrated threads",
   "threadDecisions/V2ProjectionTestFixtures.ts": "test-only fixture mirroring V1 seeds into V2",
+  // Lecturn: thread deletion keeps attachment files a not-yet-hydrated V1 thread still shows.
+  "orchestration-v2/fork/AttachmentReferences.ts": "attachment refs of unhydrated V1 threads",
   // Lecturn: native ids of V1 imports copied over must stay hidden from external sessions.
   "provider/externalSessions.ts": "native session ids of copied V1 imports",
 };

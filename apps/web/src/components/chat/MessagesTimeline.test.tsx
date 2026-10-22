@@ -1507,6 +1507,74 @@ describe("MessagesTimeline", () => {
     expect(markup.includes('aria-label="Fork from this response"')).toBe(visible);
   });
 
+  it.each([
+    [true, true],
+    [false, false],
+  ])(
+    "per-response fork on a run-less reply follows its fork point (offered=%s)",
+    async (offered, visible) => {
+      const { MessagesTimeline } = await import("./MessagesTimeline");
+      const replyId = MessageId.make("imported-reply-1");
+      const projectedItem = {
+        position: 0,
+        visibility: "local",
+        sourceThreadId: "thread-1",
+        sourceItemId: "imported-item-1",
+        item: {
+          id: "imported-item-1",
+          threadId: "thread-1",
+          runId: null,
+          nodeId: null,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 0,
+          status: "completed",
+          title: null,
+          startedAt: null,
+          completedAt: null,
+          updatedAt: {},
+          type: "assistant_message",
+          messageId: replyId,
+          text: "Imported answer",
+          streaming: false,
+        },
+      } as never;
+      const markup = renderToStaticMarkup(
+        <MessagesTimeline
+          {...buildProps()}
+          timelineEntries={[
+            {
+              id: replyId,
+              kind: "message",
+              createdAt: MESSAGE_CREATED_AT,
+              projectedItem,
+              message: {
+                id: replyId,
+                role: "assistant",
+                text: "Imported answer",
+                runId: null,
+                createdAt: MESSAGE_CREATED_AT,
+                updatedAt: MESSAGE_CREATED_AT,
+                streaming: false,
+              },
+            },
+          ]}
+          forkPointByRunlessReplyId={
+            offered
+              ? new Map([
+                  [replyId, { type: "runless", messageId: MessageId.make("imported-user-1") }],
+                ])
+              : new Map()
+          }
+        />,
+      );
+
+      expect(markup.includes('aria-label="Fork from this response"')).toBe(visible);
+    },
+  );
+
   it("renders inline terminal labels with the composer chip UI", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(

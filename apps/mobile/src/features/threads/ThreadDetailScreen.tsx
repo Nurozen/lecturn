@@ -45,6 +45,7 @@ import {
 import type { ThreadUserInputQuestion } from "@lecturn/client-runtime/state/thread-requests";
 import { presentPendingBackgroundWork } from "@lecturn/client-runtime/state/thread-execution";
 import { resolveSubagentPillSegment } from "@lecturn/client-runtime/state/thread-subagents";
+import { hasRunlessForkHistory } from "@lecturn/client-runtime/state/thread-fork-points";
 import {
   formatModelSelectionEffort,
   type ProviderSubagentStatus,
@@ -1175,6 +1176,7 @@ const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
               latestRun={props.activityRun}
               importedFrom={props.selectedThread.importedFrom ?? null}
               historyOrigin={props.selectedThread.historyOrigin}
+              runlessForkHistory={hasRunlessForkHistory(props.selectedThread)}
               activeWorkStartedAt={props.activeWorkStartedAt}
               runlessWorkActive={props.runlessWorkActive ?? false}
               listRef={listRef}

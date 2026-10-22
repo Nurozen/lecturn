@@ -88,24 +88,34 @@ describe("Lecturn fork points over run-less history", () => {
   });
 
   it("detects V1-migrated and imported history", () => {
-    expect(hasRunlessForkHistory({ historyOrigin: "v1_import", importedFrom: null })).toBe(true);
-    expect(hasRunlessForkHistory({ historyOrigin: "native", importedFrom })).toBe(true);
-    expect(hasRunlessForkHistory({ historyOrigin: "native", importedFrom: null })).toBe(false);
-    expect(hasRunlessForkHistory({})).toBe(false);
+    expect(
+      hasRunlessForkHistory({ historyOrigin: "v1_import", importedFrom: null, forkedFrom: null }),
+    ).toBe(true);
+    expect(hasRunlessForkHistory({ historyOrigin: "native", importedFrom, forkedFrom: null })).toBe(
+      true,
+    );
+    expect(
+      hasRunlessForkHistory({ historyOrigin: "native", importedFrom: null, forkedFrom: null }),
+    ).toBe(false);
+    expect(hasRunlessForkHistory({ forkedFrom: null })).toBe(false);
     expect(hasRunlessForkHistory(null)).toBe(false);
   });
 
   it("forks the whole run-less history of a thread that never ran", () => {
-    expect(latestForkPoint({ latestRun: null, historyOrigin: "v1_import" })).toEqual({
+    expect(
+      latestForkPoint({ latestRun: null, historyOrigin: "v1_import", forkedFrom: null }),
+    ).toEqual({
       type: "runless",
       messageId: null,
     });
-    expect(latestForkPoint({ latestRun: null, importedFrom })).toEqual({
+    expect(latestForkPoint({ latestRun: null, importedFrom, forkedFrom: null })).toEqual({
       type: "runless",
       messageId: null,
     });
     // A completed run is the cut once the thread has one.
-    expect(latestForkPoint({ latestRun: completedRun, historyOrigin: "v1_import" })).toEqual({
+    expect(
+      latestForkPoint({ latestRun: completedRun, historyOrigin: "v1_import", forkedFrom: null }),
+    ).toEqual({
       type: "run",
       runId: "run-1",
     });
@@ -114,10 +124,41 @@ describe("Lecturn fork points over run-less history", () => {
       latestForkPoint({
         latestRun: { ...completedRun, status: "running" },
         historyOrigin: "v1_import",
+        forkedFrom: null,
       }),
     ).toBeNull();
-    expect(latestForkPoint({ latestRun: null, historyOrigin: "native" })).toBeNull();
+    expect(
+      latestForkPoint({ latestRun: null, historyOrigin: "native", forkedFrom: null }),
+    ).toBeNull();
     expect(latestForkPoint(null)).toBeNull();
+  });
+
+  it("offers no run-less fork on a V2 fork child that inherits the history", () => {
+    // ThreadForkService spreads the source thread, so a native fork child of an
+    // imported or V1-migrated thread carries importedFrom/historyOrigin while
+    // its run-less history stays on the parent; the server would reject it.
+    const forkedFrom = {
+      type: "run" as const,
+      threadId: ThreadId.make("parent"),
+      runId: RunId.make("parent-run"),
+    };
+    const nativeChild = {
+      latestRun: null,
+      historyOrigin: "v1_import" as const,
+      importedFrom,
+      forkedFrom,
+    };
+    expect(hasRunlessForkHistory(nativeChild)).toBe(false);
+    expect(latestForkPoint(nativeChild)).toBeNull();
+    // Its own completed run is still a fork point.
+    expect(latestForkPoint({ ...nativeChild, latestRun: completedRun })).toEqual({
+      type: "run",
+      runId: "run-1",
+    });
+    // A run-less fork child (forkedFrom null) owns its copied history.
+    const runlessChild = { latestRun: null, importedFrom, forkedFrom: null };
+    expect(hasRunlessForkHistory(runlessChild)).toBe(true);
+    expect(latestForkPoint(runlessChild)).toEqual({ type: "runless", messageId: null });
   });
 
   it("builds thread.fork source fields the server resolves", () => {

@@ -74,15 +74,15 @@ A new thread that continues an existing thread from a provider-finished run. In 
 
 #### Fork point
 
-The run a fork continues from, inclusive. It comes from the command's `sourcePoint` or, when the user forks at a message, from the run that `sourceMessageId` started; `forkOrigin.messageId` records that message (null for a fork at the end). On the provider side, a native fork is cut at that run's provider turn. See [the contracts][1] and [ThreadForkService.ts][27].
+The run a fork continues from, inclusive. It comes from the command's `sourcePoint` or, when the user forks at a message, from the run that `sourceMessageId` started; `forkOrigin.messageId` records that message (null for a fork at the end). On the provider side, a native fork is cut at that run's provider turn. Run-less history (V1-migrated or imported) is cut by message instead: through the turn a run-less `sourceMessageId` started, or all of it for `latest_stable` before any stable run. See [the contracts][1], [ThreadForkService.ts][27], and [thread forking][32].
 
 #### Inherited history
 
-The source thread's turn items through the fork point, shown above a fork marker in the child. Nothing is copied: the child's projection reads them from the source by following `forkedFrom` ([ProjectionStore.ts][4]). V1 forks migrated by the legacy importer are the exception and keep their copied history as their own.
+The source thread's turn items through the fork point, shown above a fork marker in the child. A run fork copies nothing: the child's projection reads them from the source by following `forkedFrom` ([ProjectionStore.ts][4]). Two kinds of fork own a copy instead and have `forkedFrom` null with the parent in `forkOrigin`: V1 forks migrated by the legacy importer, and run-less forks, which copy the source's V1-migrated or imported history up to the cut and hand it to the provider as a portable `full_thread_summary` on the child's first turn.
 
 #### Imported thread
 
-A thread created from an [external session](#external-session) by the `thread.import` command, which emits `thread.created`, the forked provider thread, the history rows, and `thread.imported`. It runs on a native fork of that session cut at import time, so the original is never touched; the copied history belongs to no run and cannot be reverted or diffed. Origin is stored as `importedFrom` in [the contracts][1], and a fork of an imported thread inherits it so its copy of that history stays protected; the flow is in [thread forking][30].
+A thread created from an [external session](#external-session) by the `thread.import` command, which emits `thread.created`, the forked provider thread, the history rows, and `thread.imported`. It runs on a native fork of that session cut at import time, so the original is never touched; the copied history belongs to no run and cannot be reverted or diffed. Origin is stored as `importedFrom` in [the contracts][1], and a fork of an imported thread inherits it so its copy of that history stays protected. A message inside imported history is a run-less fork point (see [Inherited history](#inherited-history)); the flow is in [thread forking][30].
 
 #### External session
 

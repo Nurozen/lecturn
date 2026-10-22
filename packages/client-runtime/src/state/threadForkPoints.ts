@@ -36,14 +36,22 @@ export function forkSourcePointForRun(runId: RunId): OrchestrationV2ThreadForkSo
 }
 
 /**
- * Whether the thread holds run-less history the server can fork: a V1
- * migration transcript or an imported external session. Mirrors the server's
- * `hasRunlessHistory`.
+ * Whether the thread itself holds run-less history the server can fork: a V1
+ * migration transcript or an imported external session (the server's
+ * `hasRunlessHistory`), stored on this thread. A V2 native fork child
+ * (`forkedFrom` set) inherits `importedFrom`/`historyOrigin` from its source,
+ * but its history stays on the parent: the server reads only the child's own
+ * run-less items, finds none and rejects the fork. A run-less fork child
+ * (`forkedFrom` null) owns its copy, so it stays forkable.
  */
 export function hasRunlessForkHistory(
-  thread: Pick<EnvironmentThreadShell, "historyOrigin" | "importedFrom"> | null | undefined,
+  thread:
+    | Pick<EnvironmentThreadShell, "historyOrigin" | "importedFrom" | "forkedFrom">
+    | null
+    | undefined,
 ): boolean {
-  return thread?.historyOrigin === "v1_import" || thread?.importedFrom != null;
+  if (thread == null || thread.forkedFrom != null) return false;
+  return thread.historyOrigin === "v1_import" || thread.importedFrom != null;
 }
 
 /**
@@ -84,7 +92,7 @@ export function isSameForkPoint(left: ThreadForkPoint, right: ThreadForkPoint): 
  */
 export function latestForkPoint(
   shell:
-    | Pick<EnvironmentThreadShell, "latestRun" | "historyOrigin" | "importedFrom">
+    | Pick<EnvironmentThreadShell, "latestRun" | "historyOrigin" | "importedFrom" | "forkedFrom">
     | null
     | undefined,
 ): ThreadForkPoint | null {

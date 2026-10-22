@@ -7,6 +7,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
+  ChatAttachment,
   CheckpointId,
   CheckpointRef,
   CheckpointScopeId,
@@ -29,9 +30,12 @@ import {
 import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../../config.ts";
@@ -43,12 +47,15 @@ import type { ImportedTranscriptEntry, ProviderInstance } from "../../provider/P
 import * as ProviderInstanceRegistry from "../../provider/Services/ProviderInstanceRegistry.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as SourceControlProviderRegistry from "../../sourceControl/SourceControlProviderRegistry.ts";
+import * as TerminalManager from "../../terminal/Manager.ts";
 import { CodexProviderCapabilitiesV2 } from "../Adapters/CodexAdapterV2.ts";
 import * as EventSink from "../EventSink.ts";
 import * as Orchestrator from "../Orchestrator.ts";
 import type { ProviderAdapterV2Shape } from "../ProviderAdapter.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as ProjectStore from "../ProjectStore.ts";
+import { OrchestrationEffectRequestV2 } from "../EffectOutbox.ts";
+import * as ResourceCleanupService from "../ResourceCleanupService.ts";
 import { threadHasQueuedTurnStart } from "../ThreadSettlementService.ts";
 import { OrchestrationV2EventSinkLayerLive, OrchestrationV2LayerLive } from "../runtimeLayer.ts";
 import { previewCheckpointRevert } from "./CheckpointRevertPreview.ts";
@@ -59,6 +66,11 @@ import {
   type LecturnThreadLifecycleNotice,
 } from "./LecturnOrchestrationHooks.ts";
 import { guardWorktreeRemoval, listThreadIdsUsingWorktree } from "./WorktreeRemovalGuard.ts";
+
+const decodeEffectRequest = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(OrchestrationEffectRequestV2),
+);
+const encodeAttachments = Schema.encodeSync(Schema.fromJsonString(Schema.Array(ChatAttachment)));
 
 const driver = ProviderDriverKind.make("codex");
 const instanceId = ProviderInstanceId.make("codex");
@@ -105,7 +117,7 @@ const TestLayer = Layer.mergeAll(
   ProjectionStore.layer,
 ).pipe(
   Layer.provide(McpSessionRegistryTestkit.layer),
-  Layer.provide(SqlitePersistenceMemory),
+  Layer.provideMerge(SqlitePersistenceMemory),
   Layer.provideMerge(
     Layer.mock(CheckpointStore.CheckpointStore)({
       listRestoreDeletions: (input) =>
@@ -317,6 +329,8 @@ const writeLegacyThread = (input: {
   readonly threadId: ThreadId;
   readonly projectId: ProjectId;
   readonly texts: ReadonlyArray<readonly ["user" | "assistant", string]>;
+  /** Attached to the first message. */
+  readonly attachments?: ReadonlyArray<ChatAttachment>;
 }) =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -335,6 +349,7 @@ const writeLegacyThread = (input: {
         },
         ...input.texts.flatMap(([role, text], index) => {
           const messageId = MessageId.make(`${input.threadId}:legacy-message:${index}`);
+          const attachments = index === 0 ? (input.attachments ?? []) : [];
           const common = {
             id: TurnItemId.make(`${input.threadId}:legacy-item:${index}`),
             threadId: input.threadId,
@@ -366,7 +381,7 @@ const writeLegacyThread = (input: {
                 nodeId: null,
                 role,
                 text,
-                attachments: [],
+                attachments,
                 streaming: false,
                 createdAt: at,
                 updatedAt: at,
@@ -387,7 +402,7 @@ const writeLegacyThread = (input: {
                       messageId,
                       inputIntent: "turn_start" as const,
                       text,
-                      attachments: [],
+                      attachments,
                     }
                   : {
                       ...common,
@@ -770,6 +785,117 @@ it.layer(TestLayer)("Lecturn fork behavior on the V2 orchestrator", (it) => {
       assert.deepEqual(transcriptText(cutChild), ["IMPORTED_Q", "IMPORTED_A"]);
       assert.deepEqual(cutChild.thread.importedFrom, imported.thread.importedFrom);
     }),
+  );
+
+  it.effect("keeps attachment files a run-less fork shares until no live thread shows them", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const sql = yield* SqlClient.SqlClient;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cleanup = yield* ResourceCleanupService.ResourceCleanupService;
+      const { attachmentsDir } = yield* ServerConfig.ServerConfig;
+      const projectId = ProjectId.make("project:fork-attachments");
+      yield* seedProject(projectId, "/repo/fork-attachments");
+      const sourceThreadId = ThreadId.make("thread:fork-attachments-source");
+      const image = (id: string): ChatAttachment => ({
+        type: "image",
+        id,
+        name: "shot.png",
+        mimeType: "image/png",
+        sizeBytes: 4,
+      });
+      const sharedId = "thread-fork-attachments-source-0b5e7c1a-3f7d-4c55-9a7e-2d4f1e6b8c90";
+      const legacyId = "thread-fork-attachments-legacy-5a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+      yield* writeLegacyThread({
+        threadId: sourceThreadId,
+        projectId,
+        texts: [
+          ["user", "LOOK_AT_THIS"],
+          ["assistant", "SEEN"],
+        ],
+        attachments: [image(sharedId), image(legacyId)],
+      });
+      yield* fileSystem.makeDirectory(attachmentsDir, { recursive: true });
+      const fileOf = (id: string) => `${attachmentsDir}/${id}.png`;
+      yield* fileSystem.writeFileString(fileOf(sharedId), "png!");
+      yield* fileSystem.writeFileString(fileOf(legacyId), "png!");
+      const forkChild = (suffix: string) =>
+        Effect.gen(function* () {
+          const targetThreadId = ThreadId.make(`${sourceThreadId}:${suffix}`);
+          yield* orchestrator.dispatch({
+            type: "thread.fork",
+            createdBy: "user",
+            creationSource: "web",
+            commandId: CommandId.make(`${targetThreadId}:fork`),
+            sourceThreadId,
+            targetThreadId,
+            sourcePoint: { type: "latest_stable" },
+          });
+          return targetThreadId;
+        });
+      const firstChild = yield* forkChild("first");
+      const secondChild = yield* forkChild("second");
+      // The copied history keeps the source's attachment refs.
+      const copied = (yield* orchestrator.getThreadProjection(firstChild)).messages;
+      assert.deepEqual(
+        copied.flatMap((message) => message.attachments.map((attachment) => attachment.id)),
+        [sharedId, legacyId],
+      );
+      // A V1 thread whose transcript is not hydrated yet shows legacyId too.
+      const legacyThreadId = ThreadId.make("thread:fork-attachments-legacy");
+      yield* createThread(legacyThreadId, projectId);
+      yield* sql`INSERT INTO orchestration_v2_legacy_imports (thread_id, source_updated_at, shell_imported_at)
+        VALUES (${legacyThreadId}, ${t(0)}, ${t(0)})`;
+      yield* sql`INSERT INTO projection_thread_messages (
+          message_id, thread_id, turn_id, role, text, attachments_json, is_streaming, created_at, updated_at
+        ) VALUES (
+          'message:fork-attachments-legacy', ${legacyThreadId}, NULL, 'user', 'legacy', ${encodeAttachments([image(legacyId)])},
+          0, ${t(0)}, ${t(0)}
+        )`;
+
+      const deleteAndClean = (threadId: ThreadId) =>
+        Effect.gen(function* () {
+          yield* orchestrator.dispatch({
+            type: "thread.delete",
+            commandId: CommandId.make(`${threadId}:delete`),
+            threadId,
+          });
+          const rows = yield* sql<{ readonly payload_json: string }>`
+            SELECT payload_json FROM orchestration_v2_effect_outbox
+            WHERE thread_id = ${threadId} AND effect_type = 'attachment.cleanup'`;
+          assert.lengthOf(rows, 1);
+          const request = yield* decodeEffectRequest(rows[0]!.payload_json);
+          assert(request.type === "attachment.cleanup");
+          assert.sameMembers([...request.attachmentIds], [sharedId, legacyId]);
+          yield* cleanup.cleanupAttachments(request.attachmentIds, threadId);
+        });
+      const exists = (id: string) => fileSystem.exists(fileOf(id));
+
+      // Deleting a fork child keeps the source's files.
+      yield* deleteAndClean(firstChild);
+      assert.isTrue(yield* exists(sharedId));
+      // Deleting the source keeps the files its other child still shows.
+      yield* deleteAndClean(sourceThreadId);
+      assert.isTrue(yield* exists(sharedId));
+      // The last thread showing a file removes it.
+      yield* deleteAndClean(secondChild);
+      assert.isFalse(yield* exists(sharedId));
+      assert.isTrue(yield* exists(legacyId));
+      // Once the V1 transcript is hydrated, only V2 messages count.
+      yield* sql`UPDATE orchestration_v2_legacy_imports SET transcript_imported_at = ${t(1)}
+        WHERE thread_id = ${legacyThreadId}`;
+      yield* cleanup.cleanupAttachments([legacyId], secondChild);
+      assert.isFalse(yield* exists(legacyId));
+    }).pipe(
+      Effect.provide(
+        ResourceCleanupService.live.pipe(
+          Layer.provideMerge(
+            ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-fork-attachments-" }),
+          ),
+          Layer.provide(Layer.mock(TerminalManager.TerminalManager)({})),
+        ),
+      ),
+    ),
   );
 
   it.effect("keeps a fork child's rename through its first send", () =>

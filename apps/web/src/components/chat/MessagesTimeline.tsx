@@ -322,6 +322,7 @@ interface TimelineRowSharedState {
   runs: ReadonlyArray<HandoffTimelineRun>;
   activeThreadEnvironmentId: EnvironmentId;
   onForkFromMessage: (messageId: MessageId) => void;
+  forkPointByRunlessReplyId: ReadonlyMap<MessageId, ThreadForkPoint>;
   forkFromRunEnabled: boolean;
   forkWarning: string | null;
   revertDisabledReason: string | null;
@@ -481,8 +482,13 @@ interface MessagesTimelineProps {
   }) => void;
   /** Lecturn: user messages that fork through the turn completed before them. */
   forkPointByUserMessageId?: ReadonlyMap<MessageId, ThreadForkPoint>;
-  /** Lecturn: forks from a user message (edit-and-branch). */
+  /**
+   * Lecturn: forks from a user message (edit-and-branch) or, for a run-less
+   * reply in `forkPointByRunlessReplyId`, through that reply's turn.
+   */
   onForkFromMessage?: (messageId: MessageId) => void;
+  /** Lecturn: run-less (V1-migrated, imported) replies and the turn each forks through. */
+  forkPointByRunlessReplyId?: ReadonlyMap<MessageId, ThreadForkPoint>;
   /** Lecturn: the environment advertises `threadForking` (per-response fork). */
   forkFromRunEnabled?: boolean;
   forkWarning?: string | null;
@@ -568,6 +574,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onRollbackCheckpoint,
   forkPointByUserMessageId = EMPTY_FORK_POINTS,
   onForkFromMessage = NOOP_FORK_FROM_MESSAGE,
+  forkPointByRunlessReplyId = EMPTY_FORK_POINTS,
   forkFromRunEnabled = true,
   forkWarning = null,
   revertDisabledReason = null,
@@ -1399,6 +1406,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       runs,
       activeThreadEnvironmentId,
       onForkFromMessage,
+      forkPointByRunlessReplyId,
       forkFromRunEnabled,
       forkWarning,
       revertDisabledReason,
@@ -1440,6 +1448,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       runs,
       activeThreadEnvironmentId,
       onForkFromMessage,
+      forkPointByRunlessReplyId,
       forkFromRunEnabled,
       forkWarning,
       revertDisabledReason,
@@ -2876,8 +2885,10 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
 }
 
 function AssistantForkButton({
+  messageId,
   projectedItem,
 }: {
+  readonly messageId: MessageId;
   readonly projectedItem: NonNullable<Extract<TimelineRow, { kind: "message" }>["projectedItem"]>;
 }) {
   const ctx = use(TimelineRowCtx);
@@ -2887,15 +2898,21 @@ function AssistantForkButton({
     sourceThreadId: projectedItem.sourceThreadId,
     sourceItemId: projectedItem.sourceItemId,
   });
+  // Lecturn: a run-less reply (V1-migrated or imported history) has no
+  // provider turn; the server copies its history into the child as portable
+  // context, so no provider capability applies (same as mobile).
+  const runlessPoint = ctx.forkPointByRunlessReplyId.get(messageId);
+  const runId = projectedItem.item.runId;
   const canFork =
     ctx.forkFromRunEnabled &&
-    canForkProjectedAssistantItem({
-      projectedItem,
-      capabilities: support.providerSession?.capabilities,
-    });
+    (runlessPoint !== undefined ||
+      (runId !== null &&
+        canForkProjectedAssistantItem({
+          projectedItem,
+          capabilities: support.providerSession?.capabilities,
+        })));
 
-  if (!canFork || projectedItem.item.runId === null) return null;
-  const runId = projectedItem.item.runId;
+  if (!canFork) return null;
 
   return (
     <Tooltip>
@@ -2907,6 +2924,10 @@ function AssistantForkButton({
             variant="ghost"
             disabled={busy}
             onClick={() => {
+              if (runlessPoint !== undefined || runId === null) {
+                ctx.onForkFromMessage(messageId);
+                return;
+              }
               setBusy(true);
               void ctx
                 .onForkFromRun({ sourceThreadId: projectedItem.sourceThreadId, runId })
@@ -2970,7 +2991,7 @@ function AssistantMessageMeta({
       )}
     >
       {projectedItem?.item.type === "assistant_message" ? (
-        <AssistantForkButton projectedItem={projectedItem} />
+        <AssistantForkButton messageId={message.id} projectedItem={projectedItem} />
       ) : null}
       {projectedItem && projectedItem.item.status !== "completed" ? (
         <span className="rounded-full border border-border/70 px-1.5 py-0.5 font-mono text-3xs text-muted-foreground">

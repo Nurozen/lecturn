@@ -302,6 +302,11 @@ export interface ThreadFeedProps {
   readonly importedFrom?: ThreadImportOrigin | null;
   /** "v1_import" when the thread's early history came from a V1 migration (run-less). */
   readonly historyOrigin?: EnvironmentThreadShell["historyOrigin"];
+  /**
+   * Lecturn: the thread itself holds run-less history the server forks
+   * (`hasRunlessForkHistory`); a V2 fork child that only inherits it does not.
+   */
+  readonly runlessForkHistory?: boolean;
   readonly activeWorkStartedAt: string | null;
   readonly runlessWorkActive?: boolean;
   readonly listRef: RefObject<LegendListRef | null>;
@@ -2762,7 +2767,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     [props.feed, props.importedFrom, v1History],
   );
   // Lecturn: a reply of run-less history forks through its turn.
-  const runlessHistory = v1History || props.importedFrom != null;
+  const runlessHistory = props.runlessForkHistory === true;
   const runlessForkPoints = useMemo(
     () =>
       runlessHistory

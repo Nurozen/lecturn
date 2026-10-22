@@ -111,8 +111,9 @@ export const executorLayer: Layer.Layer<
     const settings = yield* ServerSettings.ServerSettingsService;
     // A restart has already interrupted and detached the old turn, so it cannot
     // be re-run from the top. A fork hook defers only a turn that has not been
-    // dispatched yet (Contextual returns the bound packet for a restarted run),
-    // so waiting in place here is a never-expected fallback, not a hold path.
+    // dispatched yet: Contextual pins each run's first-start decision (packet
+    // or none) until the run ends, so a restarted run does not hold. Waiting
+    // in place here is a never-expected fallback, not a hold path.
     const startRestartedTurn = (input: {
       readonly threadId: ThreadId;
       readonly runId: RunId;
@@ -453,16 +454,18 @@ export const executorLayer: Layer.Layer<
               ),
             );
           case "attachment.cleanup":
-            return resourceCleanup.cleanupAttachments(effect.request.attachmentIds).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new OrchestrationEffectExecutionError({
-                    effectId: effect.id,
-                    effectType: effect.request.type,
-                    cause,
-                  }),
-              ),
-            );
+            return resourceCleanup
+              .cleanupAttachments(effect.request.attachmentIds, effect.threadId)
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationEffectExecutionError({
+                      effectId: effect.id,
+                      effectType: effect.request.type,
+                      cause,
+                    }),
+                ),
+              );
           case "thread-title.generate":
             return threadTitleRegeneration
               .execute({

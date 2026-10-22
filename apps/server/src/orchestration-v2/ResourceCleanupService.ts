@@ -3,10 +3,12 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
+import { listAttachmentIdsReferencedElsewhere } from "./fork/AttachmentReferences.ts";
 
 export class ResourceCleanupError extends Schema.TaggedError<ResourceCleanupError>()(
   "ResourceCleanupError",
@@ -20,8 +22,10 @@ export class ResourceCleanupError extends Schema.TaggedError<ResourceCleanupErro
 
 export class ResourceCleanupService extends Context.Reference<{
   readonly cleanupTerminals: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
+  /** Lecturn: `threadId` is the deleted thread; ids other live threads still reference are kept. */
   readonly cleanupAttachments: (
     attachmentIds: ReadonlyArray<string>,
+    threadId: string,
   ) => Effect.Effect<void, ResourceCleanupError>;
 }>("lecturn/orchestration-v2/ResourceCleanupService", {
   defaultValue: () => ({
@@ -36,6 +40,28 @@ export const live = Layer.effect(
     const terminals = yield* TerminalManager.TerminalManager;
     const fileSystem = yield* FileSystem.FileSystem;
     const config = yield* ServerConfig.ServerConfig;
+    const sql = yield* SqlClient.SqlClient;
+    const removeAttachments = (attachmentIds: ReadonlyArray<string>) =>
+      Effect.forEach(
+        attachmentIds,
+        (attachmentId) => {
+          const path = resolveAttachmentPathById({
+            attachmentsDir: config.attachmentsDir,
+            attachmentId,
+          });
+          return path === null
+            ? Effect.void
+            : fileSystem
+                .remove(path, { force: true })
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ResourceCleanupError({ operation: "attachment", attachmentId, cause }),
+                  ),
+                );
+        },
+        { discard: true, concurrency: 4 },
+      );
     return {
       cleanupTerminals: (threadId: string) =>
         terminals
@@ -45,26 +71,15 @@ export const live = Layer.effect(
               (cause) => new ResourceCleanupError({ operation: "terminal", threadId, cause }),
             ),
           ),
-      cleanupAttachments: (attachmentIds: ReadonlyArray<string>) =>
-        Effect.forEach(
-          attachmentIds,
-          (attachmentId) => {
-            const path = resolveAttachmentPathById({
-              attachmentsDir: config.attachmentsDir,
-              attachmentId,
-            });
-            return path === null
-              ? Effect.void
-              : fileSystem
-                  .remove(path, { force: true })
-                  .pipe(
-                    Effect.mapError(
-                      (cause) =>
-                        new ResourceCleanupError({ operation: "attachment", attachmentId, cause }),
-                    ),
-                  );
-          },
-          { discard: true, concurrency: 4 },
+      cleanupAttachments: (attachmentIds: ReadonlyArray<string>, threadId: string) =>
+        listAttachmentIdsReferencedElsewhere({ threadId, attachmentIds }).pipe(
+          Effect.provideService(SqlClient.SqlClient, sql),
+          Effect.mapError(
+            (cause) => new ResourceCleanupError({ operation: "attachment", threadId, cause }),
+          ),
+          Effect.flatMap((shared) =>
+            removeAttachments(attachmentIds.filter((attachmentId) => !shared.has(attachmentId))),
+          ),
         ),
     };
   }),

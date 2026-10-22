@@ -1313,26 +1313,15 @@ export function buildForkTitle(parentTitle: string | null | undefined): string {
   return base ? `${base} (fork)` : "Untitled (fork)";
 }
 
-/**
- * Fork points for user-message rows: a user message forks through the turn
- * completed just before it, and its text is re-seeded into the child's
- * composer (edit-and-branch). That turn is a completed run or, on a thread
- * with run-less history (V1 migration, import), a run-less turn. Assistant
- * rows use the upstream per-response fork button instead. Only this thread's
- * own rows qualify: inherited rows cannot be cut here, and the first user
- * message has no turn before it (as on V1). Returns `previous` when unchanged
- * so timeline rows keep their identity across streaming updates.
- */
-export function buildForkPointByUserMessageId(
-  input: {
-    timelineEntries: ReadonlyArray<TimelineEntry>;
-    completedRunIds: ReadonlySet<RunId>;
-    activeRunId: RunId | null;
-    runlessHistory: boolean;
-  },
-  previous: ReadonlyMap<MessageId, ThreadForkPoint> | null = null,
-): ReadonlyMap<MessageId, ThreadForkPoint> {
-  const { byUserMessage } = resolveMessageForkPoints({
+interface TimelineForkPointsInput {
+  timelineEntries: ReadonlyArray<TimelineEntry>;
+  completedRunIds: ReadonlySet<RunId>;
+  activeRunId: RunId | null;
+  runlessHistory: boolean;
+}
+
+function resolveTimelineForkPoints(input: TimelineForkPointsInput) {
+  return resolveMessageForkPoints({
     messages: input.timelineEntries.flatMap((entry) =>
       entry.kind === "message"
         ? [
@@ -1350,12 +1339,50 @@ export function buildForkPointByUserMessageId(
     activeRunId: input.activeRunId,
     runlessHistory: input.runlessHistory,
   });
-  if (previous === null || previous.size !== byUserMessage.size) return byUserMessage;
-  for (const [messageId, point] of byUserMessage) {
+}
+
+/** `next`, or `previous` when it holds the same fork points. */
+function reuseForkPoints(
+  next: ReadonlyMap<MessageId, ThreadForkPoint>,
+  previous: ReadonlyMap<MessageId, ThreadForkPoint> | null,
+): ReadonlyMap<MessageId, ThreadForkPoint> {
+  if (previous === null || previous.size !== next.size) return next;
+  for (const [messageId, point] of next) {
     const before = previous.get(messageId);
-    if (before === undefined || !isSameForkPoint(before, point)) return byUserMessage;
+    if (before === undefined || !isSameForkPoint(before, point)) return next;
   }
   return previous;
+}
+
+/**
+ * Fork points for user-message rows: a user message forks through the turn
+ * completed just before it, and its text is re-seeded into the child's
+ * composer (edit-and-branch). That turn is a completed run or, on a thread
+ * with run-less history (V1 migration, import), a run-less turn. Assistant
+ * rows use the upstream per-response fork button instead. Only this thread's
+ * own rows qualify: inherited rows cannot be cut here, and the first user
+ * message has no turn before it (as on V1). Returns `previous` when unchanged
+ * so timeline rows keep their identity across streaming updates.
+ */
+export function buildForkPointByUserMessageId(
+  input: TimelineForkPointsInput,
+  previous: ReadonlyMap<MessageId, ThreadForkPoint> | null = null,
+): ReadonlyMap<MessageId, ThreadForkPoint> {
+  return reuseForkPoints(resolveTimelineForkPoints(input).byUserMessage, previous);
+}
+
+/**
+ * Fork points for the per-response fork button on run-less replies (V1
+ * migration, import): a reply has no run, so it forks through its own
+ * run-less turn (`latest_stable` + the turn's user message), the same cut
+ * mobile sends. Empty unless `runlessHistory`. Returns `previous` when
+ * unchanged.
+ */
+export function buildForkPointByRunlessReplyId(
+  input: TimelineForkPointsInput,
+  previous: ReadonlyMap<MessageId, ThreadForkPoint> | null = null,
+): ReadonlyMap<MessageId, ThreadForkPoint> {
+  return reuseForkPoints(resolveTimelineForkPoints(input).byRunlessReply, previous);
 }
 
 /**
@@ -1636,4 +1663,16 @@ export function restorePlanFollowUpComposer(input: {
     prompt: input.snapshot.prompt,
     detectTrigger: true,
   });
+}
+
+/**
+ * Lecturn: "Revert files too" restores a checkpoint of the whole checkout. A
+ * thread without its own worktree shares the project directory, so the server
+ * refuses the restore (CheckpointRestoreSafety); the dialog hides the option and
+ * says files stay as they are instead of offering a button that only errors.
+ */
+export function canRevertThreadFiles(
+  thread: { readonly worktreePath: string | null } | null | undefined,
+): boolean {
+  return thread?.worktreePath != null;
 }

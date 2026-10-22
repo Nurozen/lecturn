@@ -22,8 +22,22 @@ then hands the command to the V2 orchestrator and records `client.thread.forked`
 message-anchored fork cuts at the run that user message started (`resolveForkCut` in
 [`ThreadForkDeltas.ts`][deltas]); otherwise the run comes from the source point. Only
 provider-finished runs are forkable: completed, waiting (checkpoint capture pending), failed,
-interrupted, or cancelled. In-progress and rolled-back runs are rejected. A message inside
-imported history has no run and is rejected too; fork after a turn sent in Lecturn instead.
+interrupted, or cancelled. In-progress and rolled-back runs are rejected.
+
+Run-less history (a V1 migration transcript or an imported session, `hasRunlessHistory` in
+[`ProjectionStore.ts`][projection]) has no run to cut at, so it is forked by message instead.
+`sourceMessageId` at a run-less user message cuts through that message's turn (its reply, up to
+the next user message), and `latest_stable` on a thread with no stable run takes all of it.
+`planRunlessForkHistory` ([`ThreadForkDeltas.ts`][deltas]) copies the source's own run-less items
+and messages up to the cut onto the child, with ids derived from the child and source ids and the
+source timestamps kept (so imported rows still read as imported). `planRunlessThreadFork`
+([`ThreadForkService.ts`][forkservice]) plans that child with fork `lineage`, `forkedFrom: null`,
+and a pending fork transfer anchored at the last copied item with no run. Only history the source
+thread itself stores counts: a V2 fork child of an imported or migrated thread inherits
+`importedFrom`/`historyOrigin` but stores none of that history, so the server rejects a run-less
+fork of it ("No stable source run was found…"), and clients (`hasRunlessForkHistory` in
+[`threadForkPoints.ts`][forkpoints]) only offer whole-thread and per-reply run-less forks on a
+thread with `forkedFrom` null. Its own completed runs fork normally.
 
 The upstream [`ThreadForkService.ts`][forkservice] plans the child as a copy of the source app
 thread with fork `lineage`, `forkedFrom: { type: "run", threadId, runId }`, no provider thread,
@@ -36,7 +50,7 @@ for the parent's branch. The orchestrator emits `thread.created` and `context-tr
 
 ## Inherited history
 
-Nothing is copied. The child's projection reads the source's turn items through the fork run,
+A run fork copies nothing. The child's projection reads the source's turn items through the fork run,
 adds a synthetic `fork` marker item, then appends its own items (`buildVisibleTurnItems` in
 [`ProjectionStore.ts`][projection]). History paging follows `forkedFrom` into the source, and a
 fork of a fork chains. Shell item counts include the inherited prefix. A V1 fork migrated by the
@@ -44,6 +58,8 @@ fork of a fork chains. Shell item counts include the inherited prefix. A V1 fork
 history into the child, so the importer keeps that copy as the child's own transcript, records
 the parent in `lineage`, leaves `forkedFrom` null, and keeps the user-facing fork point in
 `forkOrigin`. `forkOrigin` exists for that reason; V1 fork points have no V2 run to reference.
+A run-less fork (above) is the other copy: its history is the child's own, `forkedFrom` is null,
+and `forkOrigin` records the parent and cut message.
 
 ## Native fork or portable handoff
 
@@ -62,7 +78,9 @@ seeded with a bounded transcript of the source up to the fork point (`full_threa
 [context-handoffs.md](./context-handoffs.md)). That covers providers without a native fork
 (Cursor and ACP agents that do not advertise `session.fork`), a different provider instance than
 the source's, and sources whose run failed, was interrupted, or has no strong native thread id.
-Every provider can fork.
+Every provider can fork. A run-less fork always takes the portable path: its first turn hands
+the child's own copied run-less items over as `full_thread_summary`. A run fork of a thread with
+run-less history includes that history in the handoff too.
 
 A child that still has its default fork title generates a real title on its first new turn
 (`shouldGenerateForkChildTitle`). An explicit title is kept.
@@ -123,8 +141,9 @@ because a fork of an imported thread keeps `importedFrom` (it rides the spread o
 thread) and inherits the imported rows, while its own creation time would also cover genuine
 run-less messages. The queued-turn heuristics (`threadHasQueuedTurnStart` in
 [`ThreadSettlementService.ts`][settlement], the client's `hasQueuedTurnStart` in
-[`threadSettled.ts`][settled]) never treat an imported user message as a pending start. A fork
-can only be cut at a run, so a message inside imported history cannot be a fork point.
+[`threadSettled.ts`][settled]) never treat an imported user message as a pending start. A
+message inside imported history is a run-less fork point: forking there copies the imported
+history through that turn (see [Command and planning](#command-and-planning)).
 
 - **Claude** ([`ClaudeExternalSessionImport.ts`][claude-import]) forks the whole session with no
   anchor message and no `cwd`: the SDK rejects a fork directed at another project, and a fork
@@ -149,8 +168,12 @@ The web client derives an imported thread's look from `importedFrom` alone, in
 [`ChatView.logic.ts`][web-logic]. `resolveThreadImportDivider` draws the import divider above the
 first message that is not imported history, or at the end until one exists; a fork of an import
 also gets the fork line from its inherited V2 items. `deriveUnsentImportInstanceId` pins the
-composer to `importedFrom.providerInstanceId` until the thread's first run, unless it is a fork;
-the fork only resumes on the instance that cut it. Models within that instance stay selectable.
+composer to `importedFrom.providerInstanceId` until the thread is continued, unless it is a fork
+(`forkedFrom` or `forkOrigin` set); the fork only resumes on the instance that cut it.
+"Continued" means a run, or a user message newer than `importedAt`, because a V1-migrated import
+has no V2 run even after the user sent to it. The pin is also dropped when a loaded provider
+catalog no longer has the instance, so the picker keeps a selectable provider. Models within the
+pinned instance stay selectable.
 `shouldShowImportTruncatedNote` waits for the oldest page, so the truncated-history note appears
 only once there is nothing earlier to load.
 
@@ -186,3 +209,4 @@ only what Lecturn shows: the first resumed turn makes the provider re-read the w
 [codex-import]: ../../apps/server/src/provider/Drivers/CodexExternalSessionImport.ts
 [settlement]: ../../apps/server/src/orchestration-v2/ThreadSettlementService.ts
 [settled]: ../../packages/client-runtime/src/state/threadSettled.ts
+[forkpoints]: ../../packages/client-runtime/src/state/threadForkPoints.ts

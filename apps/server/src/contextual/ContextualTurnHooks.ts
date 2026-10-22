@@ -188,7 +188,12 @@ export const make = Effect.gen(function* () {
       const intent =
         yield* sql`SELECT 1 FROM contextual_thread_settings WHERE thread_id=${thread.id} AND enabled=1
         UNION ALL SELECT 1 FROM contextual_turn_queue WHERE event_id=${run.id} AND state NOT IN ('done','canceled','unknown') LIMIT 1`;
-      if (!intent[0]) return;
+      if (!intent[0]) {
+        // Pin "no Contextual" for this run: a later restart of it (steering)
+        // must not start holding after Contextual is enabled mid-run.
+        inFlight.set(run.id, { threadId: thread.id, evidence: undefined, prefix: undefined });
+        return;
+      }
       // Terminal notices are live only; settle rows a restart left behind first.
       yield* queue.reconcile(thread.id);
       const queued = yield* queue.admit({

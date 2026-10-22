@@ -1,3 +1,5 @@
+import { RunId, ThreadId } from "@lecturn/contracts";
+import { hasRunlessForkHistory } from "@lecturn/client-runtime/state/thread-fork-points";
 import { describe, expect, it } from "vite-plus/test";
 
 import { buildThreadForkMenuItems, resolveThreadForkAvailability } from "./thread-fork-menu";
@@ -75,6 +77,39 @@ describe("resolveThreadForkAvailability", () => {
         runtimeStatus: "starting",
       }),
     ).toEqual({ available: false, reason: "turn-in-progress" });
+  });
+});
+
+describe("whole-thread fork of a never-run fork child", () => {
+  const importedFrom = {
+    driverKind: "codex",
+    providerInstanceId: "codex",
+    sessionId: "external-1",
+    title: "Imported",
+    cwd: "/repo",
+    importedAt: "2026-01-01T00:00:00.000Z",
+  } as never;
+  const availability = (thread: Parameters<typeof hasRunlessForkHistory>[0]) =>
+    resolveThreadForkAvailability({
+      ...forkableInput,
+      latestRun: null,
+      runlessHistory: hasRunlessForkHistory(thread),
+    });
+
+  it("refuses a V2 fork child whose inherited run-less history stays on the parent", () => {
+    // The child copies importedFrom/historyOrigin from its source; the server
+    // finds no run-less items of its own and would reject the fork.
+    expect(
+      availability({
+        importedFrom,
+        historyOrigin: "v1_import",
+        forkedFrom: { type: "run", threadId: ThreadId.make("parent"), runId: RunId.make("run-1") },
+      }),
+    ).toEqual({ available: false, reason: "no-completed-turn" });
+  });
+
+  it("allows a run-less fork child, which owns its copied history", () => {
+    expect(availability({ importedFrom, forkedFrom: null })).toEqual({ available: true });
   });
 });
 

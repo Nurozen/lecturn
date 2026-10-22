@@ -561,7 +561,9 @@ import {
   revokeUserMessagePreviewUrls,
   startNewThreadForProject,
   codexArtifactTemplatePromptToAppend,
+  buildForkPointByRunlessReplyId,
   buildForkPointByUserMessageId,
+  canRevertThreadFiles,
   resolveDraftBranchSync,
   resolveForkDisabledReason,
   waitForStartedServerThread,
@@ -4018,6 +4020,33 @@ export default function ChatView(props: ChatViewProps) {
       lastForkPointsRef.current,
     );
     lastForkPointsRef.current = next;
+    return next;
+  }, [
+    activeRuntime?.activeRunId,
+    completedForkRunIds,
+    forkUnavailable,
+    isServerThread,
+    runlessForkHistory,
+    timelineEntries,
+  ]);
+  // Lecturn: run-less replies fork through their own turn (per-response fork).
+  const lastRunlessReplyForkPointsRef = useRef<ReadonlyMap<MessageId, ThreadForkPoint> | null>(
+    null,
+  );
+  const forkPointByRunlessReplyId = useMemo(() => {
+    if (forkUnavailable || !isServerThread || !runlessForkHistory) {
+      return EMPTY_FORK_POINTS;
+    }
+    const next = buildForkPointByRunlessReplyId(
+      {
+        timelineEntries,
+        completedRunIds: completedForkRunIds,
+        activeRunId: activeRuntime?.activeRunId ?? null,
+        runlessHistory: true,
+      },
+      lastRunlessReplyForkPointsRef.current,
+    );
+    lastRunlessReplyForkPointsRef.current = next;
     return next;
   }, [
     activeRuntime?.activeRunId,
@@ -7949,6 +7978,7 @@ export default function ChatView(props: ChatViewProps) {
   if (pendingRevert && pendingRevert.routeThreadKey !== routeThreadKey) {
     setPendingRevert(null);
   }
+  const revertFilesAvailable = canRevertThreadFiles(activeThread);
 
   const onRevertToTurnCount = useCallback(
     async (turnCount: number, messageId: MessageId, restoreFiles?: boolean) => {
@@ -10585,10 +10615,15 @@ export default function ChatView(props: ChatViewProps) {
   // to the timeline stays identity-stable across renders.
   const forkPointByUserMessageIdRef = useRef(forkPointByUserMessageId);
   forkPointByUserMessageIdRef.current = forkPointByUserMessageId;
+  const forkPointByRunlessReplyIdRef = useRef(forkPointByRunlessReplyId);
+  forkPointByRunlessReplyIdRef.current = forkPointByRunlessReplyId;
   const forkFromMessageRef = useRef(forkFromMessage);
   forkFromMessageRef.current = forkFromMessage;
   const onForkFromMessage = useCallback((messageId: MessageId) => {
-    const point = forkPointByUserMessageIdRef.current.get(messageId);
+    // A run-less reply forks through its own turn (no seed: not a user message).
+    const point =
+      forkPointByUserMessageIdRef.current.get(messageId) ??
+      forkPointByRunlessReplyIdRef.current.get(messageId);
     if (point === undefined) {
       return;
     }
@@ -11149,6 +11184,9 @@ export default function ChatView(props: ChatViewProps) {
                     paintOnlyDisplayedTimeline ? EMPTY_FORK_POINTS : forkPointByUserMessageId
                   }
                   onForkFromMessage={paintOnlyDisplayedTimeline ? noopHeldFork : onForkFromMessage}
+                  forkPointByRunlessReplyId={
+                    paintOnlyDisplayedTimeline ? EMPTY_FORK_POINTS : forkPointByRunlessReplyId
+                  }
                   forkFromRunEnabled={environmentSupportsForking}
                   forkWarning={paintOnlyDisplayedTimeline ? null : forkWarning}
                   revertDisabledReason={paintOnlyDisplayedTimeline ? null : revertDisabledReason}
@@ -11817,8 +11855,11 @@ export default function ChatView(props: ChatViewProps) {
               <AlertDialogDescription>
                 Rewind chat to before this message. Your prompt and attachments return to the
                 composer.
+                {revertFilesAvailable
+                  ? null
+                  : " Files stay as they are because this thread shares the project directory."}
               </AlertDialogDescription>
-              {pendingRevert && pendingRevert.removedPaths.length > 0 ? (
+              {revertFilesAvailable && pendingRevert && pendingRevert.removedPaths.length > 0 ? (
                 <div className="text-sm text-muted-foreground">
                   <p>
                     {pendingRevert.removedPaths.length === 1
@@ -11843,16 +11884,22 @@ export default function ChatView(props: ChatViewProps) {
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-              <Button
-                variant="destructive"
-                onClick={() => {
-                  if (!pendingRevert || pendingRevert.routeThreadKey !== routeThreadKey) return;
-                  setPendingRevert(null);
-                  void onRevertToTurnCount(pendingRevert.turnCount, pendingRevert.messageId, true);
-                }}
-              >
-                Revert files too
-              </Button>
+              {revertFilesAvailable ? (
+                <Button
+                  variant="destructive"
+                  onClick={() => {
+                    if (!pendingRevert || pendingRevert.routeThreadKey !== routeThreadKey) return;
+                    setPendingRevert(null);
+                    void onRevertToTurnCount(
+                      pendingRevert.turnCount,
+                      pendingRevert.messageId,
+                      true,
+                    );
+                  }}
+                >
+                  Revert files too
+                </Button>
+              ) : null}
               <Button
                 onClick={() => {
                   if (!pendingRevert || pendingRevert.routeThreadKey !== routeThreadKey) return;
