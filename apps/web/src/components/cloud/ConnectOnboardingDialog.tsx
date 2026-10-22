@@ -1,11 +1,6 @@
 import { useAuth } from "@clerk/react";
 import { useAtomValue } from "@effect/atom-react";
-import {
-  AuthAdministrativeScopes,
-  AuthRelayReadScope,
-  AuthRelayWriteScope,
-  type AuthSessionState,
-} from "@lecturn/contracts";
+import { AuthRelayReadScope, AuthRelayWriteScope, type AuthSessionState } from "@lecturn/contracts";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useEffect, useRef, useState } from "react";
 

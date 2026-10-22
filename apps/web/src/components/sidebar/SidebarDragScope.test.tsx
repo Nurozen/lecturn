@@ -18,16 +18,45 @@ const state = vi.hoisted(() => ({
   accounts: new Map<string, string>(),
   known: { needsSignIn: [] as string[] },
   readOnly: new Set<string>(),
+  grantListeners: new Set<() => void>(),
+  grantVersion: 0,
   setNodeRef: vi.fn(),
   useSortable: vi.fn(),
 }));
 vi.mock("../../state/server", () => ({ environmentServerConfigsAtom: "configs" }));
 vi.mock("../../cloud/connectAccounts", () => ({ accountByEnvironmentIdAtom: "accounts" }));
 vi.mock("../../cloud/knownAccounts", () => ({ knownConnectAccountsAtom: "known" }));
-vi.mock("../../state/session", () => ({
-  readEnvironmentScope: (environmentId: string) => !state.readOnly.has(environmentId),
-  useEnvironmentScope: (environmentId: string) => !state.readOnly.has(environmentId),
-}));
+vi.mock("../../state/session", async () => {
+  const { useSyncExternalStore } = await import("react");
+  const useGrants = () =>
+    useSyncExternalStore(
+      (listener) => {
+        state.grantListeners.add(listener);
+        return () => state.grantListeners.delete(listener);
+      },
+      () => state.grantVersion,
+    );
+  return {
+    readEnvironmentScope: (environmentId: string) => !state.readOnly.has(environmentId),
+    useEnvironmentScope: (environmentId: string) => {
+      useGrants();
+      return !state.readOnly.has(environmentId);
+    },
+    useEnvironmentsWithScope: (environments: ReadonlyArray<{ environmentId: string }>) => {
+      useGrants();
+      return new Set(
+        environments
+          .map(({ environmentId }) => environmentId)
+          .filter((environmentId) => !state.readOnly.has(environmentId)),
+      );
+    },
+  };
+});
+function changeGrants(change: () => void) {
+  change();
+  state.grantVersion += 1;
+  for (const listener of state.grantListeners) listener();
+}
 vi.mock("@effect/atom-react", () => ({
   useAtomValue: (atom: keyof typeof state) => state[atom],
 }));
@@ -87,6 +116,7 @@ beforeEach(() => {
   state.accounts.clear();
   state.known.needsSignIn = [];
   state.readOnly.clear();
+  state.grantListeners.clear();
   state.configs.clear();
   for (const id of ["source", "target"])
     state.configs.set(id, {
@@ -190,6 +220,25 @@ it("never picks up or writes a row whose connection cannot operate threads", asy
     (action) => (action as { mock: { calls: unknown[][] } }).mock.calls,
   );
   expect(writes).toEqual([]);
+});
+
+it("enables pickup once the connection's operate grant loads", async () => {
+  state.readOnly.add("source");
+  const row = thread("move", "source");
+  await act(async () => {
+    renderer = create(
+      scope({ pinned: [], active: [row], snoozed: [], settled: [] }, () => (
+        <ScopedSortableThreadRow thread={row}>{() => null}</ScopedSortableThreadRow>
+      )),
+    );
+  });
+  expect(state.useSortable).toHaveBeenLastCalledWith(
+    expect.objectContaining({ disabled: expect.objectContaining({ draggable: true }) }),
+  );
+  await act(async () => changeGrants(() => state.readOnly.delete("source")));
+  expect(state.useSortable).toHaveBeenLastCalledWith(
+    expect.objectContaining({ disabled: expect.objectContaining({ draggable: false }) }),
+  );
 });
 
 it("unpins and materializes each destination member using its own environment", async () => {
