@@ -91,8 +91,12 @@ export function describeStaveThreadIntent(
         : { intent: "thread.fork", threadId: command.sourceThreadId };
     case "delegated_task.request":
       // A delegated task creates a child thread in the parent's project and
-      // workspace, so it answers to the creation rule for that workspace.
-      return { intent: "thread.create", threadId: command.parentThreadId };
+      // workspace, so it answers to the creation rule for that workspace. A
+      // worktree-isolated child is provisioned after this commits, so admit
+      // the new worktree here, under the space lock, before any checkout exists.
+      return command.workspaceStrategy?.type === "worktree"
+        ? { intent: "thread.create", threadId: command.parentThreadId, prepareWorktree: true }
+        : { intent: "thread.create", threadId: command.parentThreadId };
     case "thread.merge_back":
       // Merge-back moves a fork's context into its parent, which runs the
       // next turn: the fork rule applies to the receiving thread.

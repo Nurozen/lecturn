@@ -67,6 +67,7 @@ it.layer(NodeServices.layer)("CliState", (it) => {
       const secrets = yield* ServerSecretStore.ServerSecretStore;
       const dropped = [
         CLOUD_LINKED_USER_ID,
+        CLOUD_LINKED_ORGANIZATION_ID,
         RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
         CLOUD_MINT_PUBLIC_KEY,
         CLOUD_ENDPOINT_RUNTIME_CONFIG,

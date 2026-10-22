@@ -79,6 +79,12 @@ const delegatedTaskRequest: OrchestrationV2ServerCommand = {
   interactionMode: "default",
 };
 
+const delegatedWorktreeTaskRequest: OrchestrationV2ServerCommand = {
+  ...delegatedTaskRequest,
+  commandId: CommandId.make("delegate-worktree"),
+  workspaceStrategy: { type: "worktree", baseRef: "abc123", startFromOrigin: false },
+};
+
 const mergeBack: OrchestrationV2ServerCommand = {
   type: "thread.merge_back",
   createdBy: "user",
@@ -264,6 +270,27 @@ it.layer(NodeServices.layer)("StaveOrchestrationHooks", (it) => {
           );
         }),
       ),
+  );
+
+  it.effect("admits a worktree-isolated delegated task as worktree provisioning", () =>
+    withHarness([projectRow(PROJECT, "/spaces/delegate")], (harness, hooks) =>
+      Effect.gen(function* () {
+        yield* hooks.aroundCommand(
+          { scope: "thread", command: delegatedWorktreeTaskRequest },
+          Effect.void,
+        );
+        assert.deepEqual(yield* Ref.get(harness.calls), [
+          {
+            projectRoot: "/spaces/delegate",
+            projectId: PROJECT,
+            intent: "thread.create",
+            worktreePath: null,
+            prepareWorktree: true,
+            lockHeld: true,
+          },
+        ]);
+      }),
+    ),
   );
 
   it.effect("refuses a thread command while a Stave operation holds the space", () =>
@@ -482,6 +509,11 @@ it("maps V2 thread commands to the V1 admission intents", () => {
   assert.deepEqual(describeStaveThreadIntent(delegatedTaskRequest), {
     intent: "thread.create",
     threadId: THREAD,
+  });
+  assert.deepEqual(describeStaveThreadIntent(delegatedWorktreeTaskRequest), {
+    intent: "thread.create",
+    threadId: THREAD,
+    prepareWorktree: true,
   });
   assert.deepEqual(describeStaveThreadIntent(mergeBack), {
     intent: "thread.fork",

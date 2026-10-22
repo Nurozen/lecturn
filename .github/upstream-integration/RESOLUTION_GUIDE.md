@@ -342,6 +342,9 @@ from upstream's side.
   `codex mcp list` probe because the fork's isolation already disables every
   MCP server. Fork turn-hold results pass through upstream's turn-start
   wrapper unchanged.
+- **Contributor policy.** `CONTRIBUTING.md` rules are the Lecturn maintainer's
+  call. Upstream's rule to close PRs written by named models (#19286) is not
+  taken; adopt it only on an explicit maintainer decision.
 - **Workflows.** `release-desktop.yml` and `cursor-hygiene-webhook.yml` stay
   deleted on the fork; upstream fixes to them (for example the Windows ARM
   PowerShell pin, #18573) are not ported while fork Windows arm64 builds are

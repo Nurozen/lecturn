@@ -72,6 +72,7 @@ export const dropRevokedCloudLink = Effect.gen(function* () {
   yield* Effect.all(
     [
       secrets.remove(CLOUD_LINKED_USER_ID),
+      secrets.remove(CLOUD_LINKED_ORGANIZATION_ID),
       secrets.remove(RELAY_ENVIRONMENT_CREDENTIAL_SECRET),
       secrets.remove(CLOUD_MINT_PUBLIC_KEY),
       secrets.remove(CLOUD_ENDPOINT_RUNTIME_CONFIG),
