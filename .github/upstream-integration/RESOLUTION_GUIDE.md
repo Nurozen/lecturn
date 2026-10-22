@@ -265,6 +265,16 @@ from upstream's side.
   whenever the machine has a scratch workspace, so a draft can still start
   without a project (as described in `docs/user/thread-sidebar.md`). Kept on
   purpose in upstream sync PR #148.
+- **Account-grouped environment filter on phone Home.** Upstream's workspace
+  Home (`WorkspaceRootScreen`, Threads | Pull requests tabs) hides
+  `HomeHeader` on phones (`usesWorkspaceToolbar`), so the fork's header menu
+  (`buildHomeListFilterMenu`) no longer shows there. Lecturn keeps the account
+  grouping in upstream's `ThreadListFilters`
+  (`apps/mobile/src/features/home/ThreadListFilters.tsx`): its environment pill
+  uses `buildEnvironmentFilterActions` (`home-list-filter-menu.ts`), which
+  reuses `groupAccountFilterEnvironments` for per-account submenus with "Sign
+  in again"/attention labels. With one account the list stays flat, as
+  upstream ships it.
 
 ## Recurring mechanical conflicts
 

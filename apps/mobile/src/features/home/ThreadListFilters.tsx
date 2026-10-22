@@ -2,6 +2,8 @@ import { Pressable, ScrollView } from "react-native";
 import { SymbolView } from "../../components/AppSymbol";
 import { ListFilterMenu } from "../workspace/ListFilterMenu";
 import type { HomeHeaderProps } from "./HomeHeader.types";
+import { buildEnvironmentFilterActions } from "./home-list-filter-menu";
+import { useAccountAttention, useAccountSections } from "./useAccountSections";
 
 export function ThreadListFilters(
   props: Pick<
@@ -14,6 +16,10 @@ export function ThreadListFilters(
     | "onProjectChange"
   >,
 ) {
+  // Lecturn: with several Connect accounts, group environments per account
+  // (single-account users get upstream's flat list).
+  const accountSections = useAccountSections();
+  const accountAttention = useAccountAttention(accountSections);
   const selectedEnvironment = props.environments.find(
     (environment) => environment.environmentId === props.selectedEnvironmentId,
   );
@@ -30,21 +36,12 @@ export function ThreadListFilters(
         label={selectedEnvironment?.label ?? "All environments"}
         accessibilityLabel="Filter threads by environment"
         active={selectedEnvironment !== undefined}
-        actions={[
-          {
-            id: "all",
-            title: "All environments",
-            state: props.selectedEnvironmentId === null ? "on" : "off",
-          },
-          ...props.environments.map((environment) => ({
-            id: JSON.stringify(environment.environmentId),
-            title: environment.label,
-            state:
-              environment.environmentId === props.selectedEnvironmentId
-                ? ("on" as const)
-                : ("off" as const),
-          })),
-        ]}
+        actions={buildEnvironmentFilterActions({
+          environments: props.environments,
+          selectedEnvironmentId: props.selectedEnvironmentId,
+          accountSections,
+          accountAttention,
+        })}
         onSelect={(id) => {
           if (id === "all") props.onEnvironmentChange(null);
           else {
