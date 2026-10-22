@@ -7,7 +7,7 @@ import {
   sessionGrantsScope,
   type SessionGrantInput,
 } from "@lecturn/contracts";
-import { normalizeNativeMarkdownUrl } from "@lecturn/mobile-markdown-text/links";
+import { normalizeNativeMarkdownUrl } from "../lib/markdownLinks";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";
 import { useEffect, useRef, useState } from "react";

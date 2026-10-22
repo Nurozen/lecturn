@@ -88,7 +88,7 @@
         "@lecturn/mobile-terminal-native",
       ],
     },
-    "apps/mobile/modules/lecturn-markdown-text": {
+    "apps/mobile/modules/lecturn-source-text": {
       // React Native codegen discovers component specifications by filename.
       "entry": ["src/*NativeComponent.ts!"],
     },

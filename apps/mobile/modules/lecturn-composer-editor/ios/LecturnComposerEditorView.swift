@@ -973,9 +973,7 @@ public final class LecturnComposerEditorView: ExpoView, UITextViewDelegate, UITe
     iconImage: UIImage?,
     style: ComposerChipStyle
   ) -> UIImage {
-    // Kept in step with `LecturnContextChipVectorIcon` in the markdown module: a chip drawn here and
-    // the same chip drawn in a sent message have to be the same picture. Lecturn draws chip labels
-    // in the system font (see `LecturnContextChipFont`).
+    // Lecturn draws chip labels in the system font, matching the Android `LecturnContextChip`.
     let chipFontSize = fontSize * 0.86
     let font = UIFont.systemFont(ofSize: chipFontSize, weight: .medium)
     let fallbackIcon = Self.vectorIcon(named: iconName, size: 14, color: style.textColor)

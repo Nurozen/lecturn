@@ -275,6 +275,24 @@ from upstream's side.
   reuses `groupAccountFilterEnvironments` for per-account submenus with "Sign
   in again"/attention labels. With one account the list stays flat, as
   upstream ships it.
+- **Mobile Markdown is Enriched only (upstream #16979, sync PR for
+  6bbb72c6).** The fork's native renderer `apps/mobile/modules/lecturn-markdown-text`
+  is retired with upstream's. Markdown renders through
+  `apps/mobile/src/native/EnrichedMarkdownText.tsx`; icons live in
+  `apps/mobile/assets/{file-icons,link-icons}` and helpers in
+  `apps/mobile/src/lib`. Upstream's `t3-source-text` module is
+  `apps/mobile/modules/lecturn-source-text` (`@lecturn/mobile-source-text`,
+  `LecturnSourceText*` native names); the composer chip is
+  `LecturnContextChip`. Deliberate differences from upstream: the strong
+  style uses `enrichedStrongFontWeight` (Lecturn iOS uses the System family
+  for every weight, so upstream's `"normal"` would unbold `**strong**`);
+  `apps/mobile/assets/file-icons/pierre_claude.png` is fork artwork, keep ours
+  on relocation; the old renderer's tap-the-inline-icon link patch and the
+  medium weight of file-preview links and sent-message context chips are
+  retired (Enriched owns link hit-testing and has no link weight). The composer clipboard identifiers
+  `app.t3.context-fragment`, `data-t3-context-fragment` and `t3-context:` are
+  shared wire formats with contracts and the composer editor; keep them.
+  Vendored third-party tarballs keep upstream file names (`*-t3.N.tgz`).
 
 ## Recurring mechanical conflicts
 

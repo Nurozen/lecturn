@@ -411,7 +411,7 @@ export default defineConfig({
           "apps/mobile/src/lib/useMobileNavigationTheme.ts",
           "apps/mobile/src/native/LecturnComposerEditor.ios.tsx",
           "apps/mobile/src/native/LecturnComposerEditor.native.tsx",
-          "apps/mobile/src/native/SelectableMarkdownText.android.tsx",
+          "apps/mobile/src/native/SelectableMarkdownText.tsx",
         ],
         rules: {
           "lecturn/no-mobile-uniwind-theme-escape-hatches": ["error", { allowUniwindTheme: true }],

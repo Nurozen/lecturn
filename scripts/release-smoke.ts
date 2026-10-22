@@ -17,7 +17,7 @@ const workspaceFiles = [
   "apps/desktop/package.json",
   "apps/web/package.json",
   "apps/mobile/package.json",
-  "apps/mobile/modules/lecturn-markdown-text/package.json",
+  "apps/mobile/modules/lecturn-source-text/package.json",
   "apps/mobile/modules/lecturn-review-diff/package.json",
   "apps/mobile/modules/lecturn-terminal/package.json",
   "apps/marketing/package.json",

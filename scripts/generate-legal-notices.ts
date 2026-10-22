@@ -10,7 +10,7 @@ const sources = [
   "native/libghostty-vt/LICENSE",
   "apps/web/src/terminal/ghostty/fonts/LICENSE",
   "apps/mobile/modules/lecturn-composer-editor/LICENSE",
-  "apps/mobile/modules/lecturn-markdown-text/LICENSE",
+  "apps/mobile/modules/lecturn-source-text/LICENSE",
   "apps/mobile/modules/lecturn-terminal/THIRD_PARTY_NOTICES.md",
   "licenses/Apache-2.0.txt",
   "licenses/DM-Sans-OFL-1.1.txt",
