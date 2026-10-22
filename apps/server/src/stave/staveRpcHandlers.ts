@@ -65,7 +65,7 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import { parse as parseYamlDocument } from "yaml";
 
-import { StaveLifecycleRepository } from "../persistence/Services/StaveLifecycleRepository.ts";
+import { StaveLifecycleRepository } from "../persistence/StaveLifecycleRepository.ts";
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { StaveBinary, type StaveBinaryError } from "./StaveBinary.ts";

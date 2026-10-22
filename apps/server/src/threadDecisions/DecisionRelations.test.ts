@@ -12,7 +12,7 @@ import {
 } from "@lecturn/contracts";
 import * as SqlClient from "effect/sql/SqlClient";
 import { decisionSourceHash } from "@lecturn/shared/decisionEvidence";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import {
   DecisionRepository,
@@ -250,7 +250,7 @@ const relationsFixture = Effect.gen(function* () {
     },
   };
 });
-it.layer(SqlitePersistenceMemory)("Decision intake relationships", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Decision intake relationships", (it) => {
   it.effect(
     "saves a revision-bound suggestion without changing note authority and invalidates it after an edit",
     () =>

@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../Layers/Sqlite.ts";
+import * as SqlitePersistence from "../Sqlite.ts";
 import { runMigrations } from "../Migrations.ts";
 
 it.effect("upgrades an already applied early scan migration and preserves accepted work", () =>
@@ -32,5 +32,5 @@ it.effect("upgrades an already applied early scan migration and preserves accept
       [{ prepared: 1, description: "Original scope", config_revision: 4 }],
     );
     assert.deepEqual(yield* runMigrations({ toMigrationInclusive: 57 }), []);
-  }).pipe(Effect.provide(SqlitePersistenceMemory)),
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

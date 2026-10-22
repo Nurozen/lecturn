@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { DEFAULT_DECISION_TRACKING_DESCRIPTION, ProjectId, ThreadId } from "@lecturn/contracts";
 import { Effect, Result } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { make } from "./DecisionSettingsRepository.ts";
 import { clearV2Projection, installLegacyProjectionMirror } from "./V2ProjectionTestFixtures.ts";
 
@@ -23,7 +23,7 @@ const fixture = Effect.gen(function* () {
   yield* sql`INSERT OR REPLACE INTO projection_threads(thread_id, project_id, title, model_selection_json, created_at, updated_at, runtime_mode, interaction_mode) VALUES (${threadId}, ${projectId}, 'QA', '{}', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', 'full-access', 'default')`;
   return { sql, repo: yield* make };
 });
-it.layer(SqlitePersistenceMemory)("Decision settings", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Decision settings", (it) => {
   it.effect(
     "activates at the committed boundary and description changes preserve admitted work epochs",
     () =>

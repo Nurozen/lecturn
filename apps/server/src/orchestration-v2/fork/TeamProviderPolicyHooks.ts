@@ -4,13 +4,13 @@
  * every turn, because the policy can change while a session is live.
  *
  * Registration layer; s-surface provides it with TeamPolicyLive next to
- * OrchestrationV2ProductionLayerLive (see hooks-ready).
+ * runtimeLayer.layerProduction (see hooks-ready).
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import { TeamPolicy } from "../../cloud/TeamPolicy.ts";
-import { ProviderInstanceRegistry } from "../../provider/Services/ProviderInstanceRegistry.ts";
+import { ProviderInstanceRegistry } from "../../provider/ProviderInstanceRegistry.ts";
 import {
   LecturnHookRejectedError,
   LecturnOrchestrationHooks,

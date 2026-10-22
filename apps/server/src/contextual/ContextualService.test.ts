@@ -4,7 +4,7 @@ import * as C from "@lecturn/contracts";
 import { Deferred, Effect, Fiber, Layer, Queue, Result, Schema, Stream } from "effect";
 import { ContextualNotifications, make as makeNotifications } from "./ContextualNotifications.ts";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { ExtensionsRuntime } from "../extensions/ExtensionsRuntime.ts";
 import { ExtensionsCloudClient } from "../extensions/ExtensionsCloudClient.ts";
 import { DecisionCandidates, completeCoverage, decisionCandidate } from "./DecisionCandidates.ts";
@@ -21,7 +21,7 @@ import {
   readContextualOrigins,
   recordContextualLineage,
 } from "../threadDecisions/DecisionContextualLineage.ts";
-import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import { make, routineFollowup } from "./ContextualService.ts";
 import { applyFork } from "./ContextualLifecycle.ts";
@@ -501,7 +501,7 @@ const fixture = (runtime?: ExtensionsRuntime["Service"]) =>
       comparisonRequests,
     };
   });
-it.layer(SqlitePersistenceMemory)("Contextual service", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual service", (it) => {
   it.effect("reports provider readiness from the next-turn instance without paid preparation", () =>
     Effect.gen(function* () {
       const f = yield* fixture();
@@ -707,7 +707,7 @@ it.layer(SqlitePersistenceMemory)("Contextual service", (it) => {
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual explicit reuse controls", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual explicit reuse controls", (it) => {
   it.effect(
     "preserves exclusions across real merges, undo and detached aliases without excluding unrelated guidance",
     () =>
@@ -1052,7 +1052,7 @@ it.layer(SqlitePersistenceMemory)("Contextual explicit reuse controls", (it) => 
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual evaluation cache", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual evaluation cache", (it) => {
   it.effect(
     "reuses an identical no-match without another paid attempt and invalidates on known-context change",
     () =>
@@ -1079,7 +1079,7 @@ it.layer(SqlitePersistenceMemory)("Contextual evaluation cache", (it) => {
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual collection lease", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual collection lease", (it) => {
   it.effect(
     "renews requested collection without inference, pauses loss of paid eligibility, preserves intent and honors explicit pause",
     () =>
@@ -1109,7 +1109,7 @@ it.layer(SqlitePersistenceMemory)("Contextual collection lease", (it) => {
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual crash recovery", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual crash recovery", (it) => {
   it.effect(
     "converts a pre-handoff marker into stable unknown supply without retrying inference",
     () =>
@@ -1141,7 +1141,7 @@ it.layer(SqlitePersistenceMemory)("Contextual crash recovery", (it) => {
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual stale conflict choices", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual stale conflict choices", (it) => {
   it.effect.each(["skip-context", "cancel-turn"] as const)(
     "rejects a choice when only the discarded occurrence changed and still permits %s",
     (escape) =>
@@ -1188,7 +1188,7 @@ it.layer(SqlitePersistenceMemory)("Contextual stale conflict choices", (it) => {
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual incremental corrections", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual incremental corrections", (it) => {
   it.effect(
     "keeps legacy quote-only supply suppressed when the saved summary was never delivered",
     () =>
@@ -1584,7 +1584,7 @@ it.layer(SqlitePersistenceMemory)("Contextual incremental corrections", (it) => 
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual visible preparation wait", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual visible preparation wait", (it) => {
   it.effect(
     "persists a requested preparation before waiting for funding and preserves an explicit skip",
     () =>
@@ -1620,7 +1620,7 @@ it.layer(SqlitePersistenceMemory)("Contextual visible preparation wait", (it) =>
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual native generation boundary", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual native generation boundary", (it) => {
   it.effect.each(
     [
       {
@@ -1742,7 +1742,7 @@ it.layer(SqlitePersistenceMemory)("Contextual native generation boundary", (it) 
 // Private executable integration is opt-in; public/community CI needs no private artifact.
 // LECTURN_CONTEXTUAL_TEST_HELPER=/absolute/path/lecturn-extensions-helper vp test run <this file>
 const nativeHelperBinary = process.env.LECTURN_CONTEXTUAL_TEST_HELPER;
-it.layer(SqlitePersistenceMemory)("Contextual actual native helper admission", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual actual native helper admission", (it) => {
   const cases = [
     {
       name: "prepares a cited standalone constraint from a partial native cache",
@@ -1903,7 +1903,7 @@ it.layer(SqlitePersistenceMemory)("Contextual actual native helper admission", (
     );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual remaining pool", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual remaining pool", (it) => {
   it.effect.each(["accepted", "unknown"] as const)(
     "reassesses unsupplied evidence after known context changes with %s supply",
     (acceptance) =>
@@ -2012,7 +2012,7 @@ it.layer(SqlitePersistenceMemory)("Contextual remaining pool", (it) => {
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual remote invalidation", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual remote invalidation", (it) => {
   it.effect("delivers host and project changes to two connected consumers and replays them", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -2083,7 +2083,7 @@ it.layer(SqlitePersistenceMemory)("Contextual remote invalidation", (it) => {
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual exhausted allowance", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual exhausted allowance", (it) => {
   it.effect("reports exhausted evaluation while preserving collection and thread intent", () =>
     Effect.gen(function* () {
       const f = yield* fixture();
@@ -2120,162 +2120,165 @@ it.layer(SqlitePersistenceMemory)("Contextual exhausted allowance", (it) => {
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual prior guidance comparisons and restoration", (it) => {
-  it.effect.each(["conflict", "excluded", "source-removed", "stale"] as const)(
-    "checks prior Decision against independent Slack with %s source state",
-    (mode) =>
-      Effect.gen(function* () {
-        const f = yield* fixture();
-        const prior = savedCandidate("prior");
-        f.setCandidates([prior]);
-        const first = yield* f.service.prepare(
-          yield* f.task("Implement database storage", "prior-first"),
-          "{}",
-        );
-        yield* f.repository.update(
-          {
-            ...first,
-            state: "dispatching",
-            dispatchId: "prior-dispatch",
-            revision: first.revision + 1,
-          },
-          first.revision,
-        );
-        yield* f.service.recover();
-        yield* f.sql`UPDATE contextual_host_state SET source_policy_json=${encode({ ...emptyPolicy, allowedSourceIds: [sourceId] })} WHERE singleton=1`;
-        const sources = mode === "source-removed" ? [sourceId] : [decisionSourceId, sourceId];
-        yield* f.settings.updateProject({
-          projectId,
-          expectedRevision: 1,
-          defaultEnabled: true,
-          sourceIds: sources,
-        });
-        yield* f.settings.updateThread({
-          threadId,
-          expectedRevision: 1,
-          enabled: true,
-          sourceIds: sources,
-        });
-        const slack = candidate("new-slack");
-        f.setHelperCandidates([
-          {
-            ...slack,
-            evidence: slack.evidence.map((e) => ({ ...e, quote: "Use Postgres", end: 12 })),
-          },
-        ]);
-        if (mode === "excluded")
-          yield* f.service.exclude({
-            actionId: "exclude-prior",
-            threadId,
-            guidanceId: prior.guidanceId,
-            excluded: true,
-            expectedRevision: 0,
-          });
-        if (mode === "stale") f.invalidateOccurrence(prior.occurrenceId);
-        f.setConflict();
-        const count = f.comparisonRequests.length;
-        const next = yield* f.service.prepare(
-          yield* f.task("Implement database storage", "independent"),
-          "{}",
-        );
-        assert.equal(
-          next.state,
-          mode === "conflict"
-            ? "awaiting-conflict-review"
-            : mode === "stale"
-              ? "skipped"
-              : "prepared",
-        );
-        const comparisons = f.comparisonRequests.slice(count);
-        if (mode === "conflict") {
-          assert.isTrue(
-            comparisons.some(
-              (pair) => pair.left.candidateId === slack.id && pair.right.candidateId === prior.id,
-            ),
-          );
-          const conflict = (yield* f.service.conflicts({ threadId })).items.find(
-            (c) => c.pair.right.candidateId === prior.id,
-          )!;
-          assert.equal(conflict.state, "awaiting-review");
-          const packet = (yield* f.repository.packet(next.packetId!, threadId))!;
-          assert.deepEqual(
-            packet.groups.map((group) => group.guidanceId),
-            [slack.guidanceId],
-          );
-          assert.isFalse(
-            packet.groups.some((group) =>
-              group.evidence.some((e) => e.sourceKind === "lecturn-decision"),
-            ),
-          );
-        } else assert.isFalse(comparisons.some((pair) => pair.right.candidateId === prior.id));
-      }),
-  );
-
-  it.effect(
-    "restores each item once per confirmed epoch after acknowledgments and no-match turns",
-    () =>
-      Effect.gen(function* () {
-        const f = yield* fixture();
-        const originals = [savedCandidate("restore-a"), savedCandidate("restore-b")];
-        const supply = Effect.fn(function* (submission: string) {
-          const p = yield* f.service.prepare(
-            yield* f.task("Implement database storage", submission),
+it.layer(SqlitePersistence.layerMemory)(
+  "Contextual prior guidance comparisons and restoration",
+  (it) => {
+    it.effect.each(["conflict", "excluded", "source-removed", "stale"] as const)(
+      "checks prior Decision against independent Slack with %s source state",
+      (mode) =>
+        Effect.gen(function* () {
+          const f = yield* fixture();
+          const prior = savedCandidate("prior");
+          f.setCandidates([prior]);
+          const first = yield* f.service.prepare(
+            yield* f.task("Implement database storage", "prior-first"),
             "{}",
           );
-          assert.equal(p.state, "prepared");
           yield* f.repository.update(
-            { ...p, state: "dispatching", dispatchId: submission, revision: p.revision + 1 },
-            p.revision,
+            {
+              ...first,
+              state: "dispatching",
+              dispatchId: "prior-dispatch",
+              revision: first.revision + 1,
+            },
+            first.revision,
           );
           yield* f.service.recover();
-          return (yield* f.repository.packet(p.packetId!, threadId))!;
-        });
-        f.setCandidates([originals[0]!]);
-        yield* supply("original-a");
-        f.setCandidates(originals);
-        yield* supply("original-b");
-        yield* f.sql`UPDATE contextual_thread_settings SET context_epoch='compaction:multiple' WHERE thread_id=${threadId}`;
-        const calls = f.calls();
-        assert.equal(
-          (yield* f.service.prepare(yield* f.task("thanks", "compaction-thanks"), "{}")).state,
-          "no-useful-context",
-        );
-        assert.deepEqual(f.calls(), calls);
-        f.setUseful(0);
-        assert.equal(
-          (yield* f.service.prepare(
-            yield* f.task("Inspect unrelated documentation", "compaction-unrelated"),
+          yield* f.sql`UPDATE contextual_host_state SET source_policy_json=${encode({ ...emptyPolicy, allowedSourceIds: [sourceId] })} WHERE singleton=1`;
+          const sources = mode === "source-removed" ? [sourceId] : [decisionSourceId, sourceId];
+          yield* f.settings.updateProject({
+            projectId,
+            expectedRevision: 1,
+            defaultEnabled: true,
+            sourceIds: sources,
+          });
+          yield* f.settings.updateThread({
+            threadId,
+            expectedRevision: 1,
+            enabled: true,
+            sourceIds: sources,
+          });
+          const slack = candidate("new-slack");
+          f.setHelperCandidates([
+            {
+              ...slack,
+              evidence: slack.evidence.map((e) => ({ ...e, quote: "Use Postgres", end: 12 })),
+            },
+          ]);
+          if (mode === "excluded")
+            yield* f.service.exclude({
+              actionId: "exclude-prior",
+              threadId,
+              guidanceId: prior.guidanceId,
+              excluded: true,
+              expectedRevision: 0,
+            });
+          if (mode === "stale") f.invalidateOccurrence(prior.occurrenceId);
+          f.setConflict();
+          const count = f.comparisonRequests.length;
+          const next = yield* f.service.prepare(
+            yield* f.task("Implement database storage", "independent"),
             "{}",
-          )).state,
-          "no-useful-context",
-        );
-        f.setUseful(1);
-        const restoredA = yield* supply("restored-a");
-        const restoredB = yield* supply("restored-b");
-        assert.equal(restoredA.purpose, "restored-after-compaction");
-        assert.equal(restoredB.purpose, "restored-after-compaction");
-        assert.notEqual(restoredA.groups[0]!.guidanceId, restoredB.groups[0]!.guidanceId);
-        const after = f.calls();
-        assert.equal(
-          (yield* f.service.prepare(
-            yield* f.task("Implement database storage", "restored-finished"),
-            "{}",
-          )).state,
-          "no-useful-context",
-        );
-        assert.deepEqual(f.calls(), after);
-        assert.equal(
-          (yield* f.sql<{
-            count: number;
-          }>`SELECT COUNT(*) AS count FROM contextual_supply WHERE thread_id=${threadId} AND context_epoch='compaction:multiple'`)[0]
-            ?.count,
-          2,
-        );
-      }),
-  );
-});
+          );
+          assert.equal(
+            next.state,
+            mode === "conflict"
+              ? "awaiting-conflict-review"
+              : mode === "stale"
+                ? "skipped"
+                : "prepared",
+          );
+          const comparisons = f.comparisonRequests.slice(count);
+          if (mode === "conflict") {
+            assert.isTrue(
+              comparisons.some(
+                (pair) => pair.left.candidateId === slack.id && pair.right.candidateId === prior.id,
+              ),
+            );
+            const conflict = (yield* f.service.conflicts({ threadId })).items.find(
+              (c) => c.pair.right.candidateId === prior.id,
+            )!;
+            assert.equal(conflict.state, "awaiting-review");
+            const packet = (yield* f.repository.packet(next.packetId!, threadId))!;
+            assert.deepEqual(
+              packet.groups.map((group) => group.guidanceId),
+              [slack.guidanceId],
+            );
+            assert.isFalse(
+              packet.groups.some((group) =>
+                group.evidence.some((e) => e.sourceKind === "lecturn-decision"),
+              ),
+            );
+          } else assert.isFalse(comparisons.some((pair) => pair.right.candidateId === prior.id));
+        }),
+    );
 
-it.layer(SqlitePersistenceMemory)("Contextual unavailable funding", (it) => {
+    it.effect(
+      "restores each item once per confirmed epoch after acknowledgments and no-match turns",
+      () =>
+        Effect.gen(function* () {
+          const f = yield* fixture();
+          const originals = [savedCandidate("restore-a"), savedCandidate("restore-b")];
+          const supply = Effect.fn(function* (submission: string) {
+            const p = yield* f.service.prepare(
+              yield* f.task("Implement database storage", submission),
+              "{}",
+            );
+            assert.equal(p.state, "prepared");
+            yield* f.repository.update(
+              { ...p, state: "dispatching", dispatchId: submission, revision: p.revision + 1 },
+              p.revision,
+            );
+            yield* f.service.recover();
+            return (yield* f.repository.packet(p.packetId!, threadId))!;
+          });
+          f.setCandidates([originals[0]!]);
+          yield* supply("original-a");
+          f.setCandidates(originals);
+          yield* supply("original-b");
+          yield* f.sql`UPDATE contextual_thread_settings SET context_epoch='compaction:multiple' WHERE thread_id=${threadId}`;
+          const calls = f.calls();
+          assert.equal(
+            (yield* f.service.prepare(yield* f.task("thanks", "compaction-thanks"), "{}")).state,
+            "no-useful-context",
+          );
+          assert.deepEqual(f.calls(), calls);
+          f.setUseful(0);
+          assert.equal(
+            (yield* f.service.prepare(
+              yield* f.task("Inspect unrelated documentation", "compaction-unrelated"),
+              "{}",
+            )).state,
+            "no-useful-context",
+          );
+          f.setUseful(1);
+          const restoredA = yield* supply("restored-a");
+          const restoredB = yield* supply("restored-b");
+          assert.equal(restoredA.purpose, "restored-after-compaction");
+          assert.equal(restoredB.purpose, "restored-after-compaction");
+          assert.notEqual(restoredA.groups[0]!.guidanceId, restoredB.groups[0]!.guidanceId);
+          const after = f.calls();
+          assert.equal(
+            (yield* f.service.prepare(
+              yield* f.task("Implement database storage", "restored-finished"),
+              "{}",
+            )).state,
+            "no-useful-context",
+          );
+          assert.deepEqual(f.calls(), after);
+          assert.equal(
+            (yield* f.sql<{
+              count: number;
+            }>`SELECT COUNT(*) AS count FROM contextual_supply WHERE thread_id=${threadId} AND context_epoch='compaction:multiple'`)[0]
+              ?.count,
+            2,
+          );
+        }),
+    );
+  },
+);
+
+it.layer(SqlitePersistence.layerMemory)("Contextual unavailable funding", (it) => {
   it.effect(
     "records an outage without claiming membership is unpaid or no evidence was useful",
     () =>
@@ -2295,7 +2298,7 @@ it.layer(SqlitePersistenceMemory)("Contextual unavailable funding", (it) => {
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual historical outcomes", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual historical outcomes", (it) => {
   it.effect("returns one recorded preparation for the requested message after later turns", () =>
     Effect.gen(function* () {
       const f = yield* fixture();
@@ -2326,7 +2329,7 @@ it.layer(SqlitePersistenceMemory)("Contextual historical outcomes", (it) => {
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual overlapping window resolution", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual overlapping window resolution", (it) => {
   it.effect("keeps both guidance identities while rendering shared exact evidence once", () =>
     Effect.gen(function* () {
       const f = yield* fixture();
@@ -2446,7 +2449,7 @@ it.layer(SqlitePersistenceMemory)("Contextual overlapping window resolution", (i
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual private source selections", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual private source selections", (it) => {
   it.effect(
     "supplies another original fragment on a later task without resupplying the old selection",
     () =>

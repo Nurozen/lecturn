@@ -1,19 +1,16 @@
-import { makeRelayClientTracingLayer } from "@lecturn/shared/relayTracing";
+import * as RelayTracing from "@lecturn/shared/relayTracing";
 
 import { resolveRelayClientTracingConfig } from "./publicConfig.ts";
 
 const relayClientTracingConfig = resolveRelayClientTracingConfig();
 
-export const headlessRelayClientTracingLayer = makeRelayClientTracingLayer(
-  relayClientTracingConfig,
-  {
-    serviceName: "lecturn-server",
-    runtime: "node",
-    client: "headless-cli",
-  },
-);
+export const layerHeadlessRelayClient = RelayTracing.layer(relayClientTracingConfig, {
+  serviceName: "lecturn-server",
+  runtime: "node",
+  client: "headless-cli",
+});
 
-export const serverRelayBrokerTracingLayer = makeRelayClientTracingLayer(relayClientTracingConfig, {
+export const layerServerRelayBroker = RelayTracing.layer(relayClientTracingConfig, {
   serviceName: "lecturn-server",
   runtime: "node",
   client: "environment-server",

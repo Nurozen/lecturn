@@ -10,8 +10,10 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as NodeCryptoLayer from "@effect/platform-node/NodeCrypto";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -22,7 +24,9 @@ import * as Redacted from "effect/Redacted";
 import * as TestClock from "effect/testing/TestClock";
 import * as Tracer from "effect/Tracer";
 import * as Etag from "effect/http/Etag";
+import * as HttpEffect from "effect/http/HttpEffect";
 import * as HttpRouter from "effect/http/HttpRouter";
+import * as HttpMiddleware from "effect/http/HttpMiddleware";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as HttpApi from "effect/http-api/HttpApi";
@@ -42,16 +46,10 @@ import {
   RELAY_HTTP_ROUTER_CONFIG,
   RELAY_REQUEST_DEADLINE_MS,
   RELAY_LIFECYCLE_REQUEST_DEADLINE_MS,
-  clientApi,
-  relayCors,
-  relayDocsRedirectRoute,
-  relayEnvironmentAuthLayer,
-  relayNotFoundRoute,
   recoverEnvironmentTunnelRecord,
   registerEnvironmentTunnelRecovery,
   relayDpopFailureReason,
   revokeEnvironmentLinkRecord,
-  serverApi,
   syncManagedEndpointOriginRecord,
   traceRelayHttpRequestWith,
   unlinkEnvironmentRecord,
@@ -59,9 +57,13 @@ import {
   verifyEnvironmentTunnelRecoveryProof,
   withoutCapturedParentSpan,
 } from "./Api.ts";
+import * as RelayHttpApi from "./Api.ts";
 import * as RelayConfiguration from "../Config.ts";
+import { managedEndpointTunnelNameForKey } from "../deploymentConfig.ts";
 import * as RelayDb from "../db.ts";
 import * as EnvironmentCredentials from "../environments/EnvironmentCredentials.ts";
+import * as HeldHooks from "../hooks/HeldHooks.ts";
+import * as HookInbox from "../hooks/HookInbox.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as ManagedEndpointAllocations from "../environments/ManagedEndpointAllocations.ts";
 import * as ManagedEndpointProvider from "../environments/ManagedEndpointProvider.ts";
@@ -118,13 +120,14 @@ describe("device listing compatibility", () => {
       iosMajorVersion: null,
       androidApiLevel: 36,
     };
-    const handlers = clientApi.pipe(
+    const layerHandlers = RelayHttpApi.layerClientApi.pipe(
       HttpRouter.provideRequest(
         Layer.mergeAll(
           Layer.mock(EnvironmentCredentials.EnvironmentCredentials, {}),
           Layer.mock(EnvironmentLinks.EnvironmentLinks, {}),
           Layer.mock(ManagedEndpointProvider.ManagedEndpointProvider, {}),
           Layer.mock(RelayDb.RelayTransactions, {}),
+          Layer.mock(HookInbox.HookInbox, {}),
         ),
       ),
       Layer.provide(
@@ -158,7 +161,7 @@ describe("device listing compatibility", () => {
         Effect.sync(() =>
           HttpRouter.toWebHandler(
             HttpApiBuilder.layer(HttpApi.make("RelayApi").add(RelayApi.groups.client)).pipe(
-              Layer.provide(handlers),
+              Layer.provide(layerHandlers),
               Layer.provide(HttpServer.layerServices),
             ),
             { disableLogger: true },
@@ -299,7 +302,7 @@ describe("relay environment authentication", () => {
         route: {} as never,
       }),
       Effect.provide(
-        relayEnvironmentAuthLayer.pipe(
+        RelayHttpApi.layerEnvironmentAuth.pipe(
           Layer.provide(Layer.succeed(EnvironmentCredentials.EnvironmentCredentials, credentials)),
         ),
       ),
@@ -308,7 +311,7 @@ describe("relay environment authentication", () => {
   });
 });
 
-function relayUnlinkTestLayer(input?: {
+function layerRelayUnlinkTest(input?: {
   readonly withTransaction?: RelayDb.RelayTransactions["Service"]["withTransaction"];
   readonly getForUser?: EnvironmentLinks.EnvironmentLinks["Service"]["getForUser"];
   readonly revokeForUser?: EnvironmentLinks.EnvironmentLinks["Service"]["revokeForUser"];
@@ -320,8 +323,12 @@ function relayUnlinkTestLayer(input?: {
   readonly provision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["provision"];
   readonly reconcileOrigin?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["reconcileOrigin"];
   readonly release?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["release"];
+  readonly clearInbox?: HookInbox.HookInbox["Service"]["clear"];
 }) {
   return Layer.mergeAll(
+    Layer.mock(HookInbox.HookInbox, {
+      clear: input?.clearInbox ?? (() => Effect.void),
+    }),
     Layer.succeed(
       RelayDb.RelayTransactions,
       RelayDb.RelayTransactions.of({
@@ -337,6 +344,8 @@ function relayUnlinkTestLayer(input?: {
         listDeliveryUsersForEnvironment: () => Effect.die("unused listDeliveryUsersForEnvironment"),
         listForUser: () => Effect.die("unused listForUser"),
         getForUser: input?.getForUser ?? (() => Effect.succeed(null)),
+        findActiveManagedForEnvironment: () => Effect.die("unused findActiveManagedForEnvironment"),
+        setHoldWebhooksWhileOffline: () => Effect.die("unused setHoldWebhooksWhileOffline"),
         revokeForUser: input?.revokeForUser ?? (() => Effect.succeed(false)),
       }),
     ),
@@ -509,7 +518,7 @@ describe("relay managed tunnel recovery", () => {
     }).pipe(
       Effect.provide(
         Layer.merge(
-          relayUnlinkTestLayer({
+          layerRelayUnlinkTest({
             getForUser: () => Effect.succeed(linkedEnvironmentRecord),
             provision: () => Effect.die("registration must not provision a tunnel"),
           }),
@@ -542,7 +551,7 @@ describe("relay managed tunnel recovery", () => {
     }).pipe(
       Effect.provide(
         Layer.merge(
-          relayUnlinkTestLayer({
+          layerRelayUnlinkTest({
             getForUser: () => Effect.succeed(linkedEnvironmentRecord),
             reconcileOrigin: () => Effect.succeed("recovery_required"),
           }),
@@ -577,7 +586,7 @@ describe("relay managed tunnel recovery", () => {
     }).pipe(
       Effect.provide(
         Layer.merge(
-          relayUnlinkTestLayer({
+          layerRelayUnlinkTest({
             getForUser: () => Effect.succeed(linkedEnvironmentRecord),
           }),
           Layer.mock(ManagedEndpointAllocations.ManagedEndpointAllocations)({
@@ -608,7 +617,7 @@ describe("relay managed tunnel recovery", () => {
     }).pipe(
       Effect.provide(
         Layer.merge(
-          relayUnlinkTestLayer({
+          layerRelayUnlinkTest({
             getForUser: () => Effect.succeed(linkedEnvironmentRecord),
           }),
           Layer.mock(ManagedEndpointAllocations.ManagedEndpointAllocations)({
@@ -654,7 +663,7 @@ describe("relay managed tunnel recovery", () => {
     }).pipe(
       Effect.provide(
         Layer.merge(
-          relayUnlinkTestLayer({
+          layerRelayUnlinkTest({
             getForUser: () => Effect.succeed(linkedEnvironmentRecord),
             provision: () =>
               Effect.succeed({
@@ -691,7 +700,7 @@ describe("relay managed tunnel recovery", () => {
     }).pipe(
       Effect.provide(
         Layer.merge(
-          relayUnlinkTestLayer({
+          layerRelayUnlinkTest({
             getForUser: () => Effect.succeed(linkedEnvironmentRecord),
             provision: () =>
               Effect.sync(() => {
@@ -724,7 +733,7 @@ describe("relay managed tunnel recovery", () => {
     }).pipe(
       Effect.provide(
         Layer.merge(
-          relayUnlinkTestLayer({
+          layerRelayUnlinkTest({
             getForUser: () =>
               Effect.succeed({
                 ...linkedEnvironmentRecord,
@@ -761,7 +770,7 @@ describe("relay managed tunnel recovery", () => {
     }).pipe(
       Effect.provide(
         Layer.merge(
-          relayUnlinkTestLayer({
+          layerRelayUnlinkTest({
             getForUser: () => Effect.succeed(linkedEnvironmentRecord),
             provision: () =>
               Effect.succeed({
@@ -826,6 +835,7 @@ describe("relay managed tunnel recovery", () => {
         origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
         updatedAt: "replacement-generation",
         generation: 3,
+        tunnelReleasedAt: null,
       },
     } satisfies ManagedEndpointProvider.ManagedEndpointDeprovisionTarget;
 
@@ -843,7 +853,7 @@ describe("relay managed tunnel recovery", () => {
     }).pipe(
       Effect.provide(
         Layer.merge(
-          relayUnlinkTestLayer({
+          layerRelayUnlinkTest({
             getForUser: () =>
               Effect.sync(() => (++lookups === 1 ? linkedEnvironmentRecord : currentLink)),
             provision: () =>
@@ -886,7 +896,7 @@ describe("relay environment unlink", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          relayUnlinkTestLayer({
+          layerRelayUnlinkTest({
             withTransaction: (effect) => {
               events.push("transaction");
               return effect;
@@ -929,7 +939,7 @@ describe("relay environment unlink", () => {
       expect(calls).toEqual(["transaction", "link", "credential"]);
     }).pipe(
       Effect.provide(
-        relayUnlinkTestLayer({
+        layerRelayUnlinkTest({
           withTransaction: (effect) => {
             calls.push("transaction");
             return effect;
@@ -949,6 +959,57 @@ describe("relay environment unlink", () => {
     );
   });
 
+  it.effect("drops the unlinked endpoint's held webhooks, even if clearing fails", () => {
+    const cleared: Array<string> = [];
+    const endpointKey = "0123456789abcdef";
+    const unlink = (clearFails: boolean) =>
+      unlinkEnvironmentRecord({
+        userId: "user-1",
+        environmentId: "environment-1",
+        managedEndpointNamespace: "dev",
+      }).pipe(
+        Effect.provide(
+          layerRelayUnlinkTest({
+            getForUser: () => Effect.succeed(linkedEnvironmentRecord),
+            revokeForUser: () => Effect.succeed(true),
+            prepareDeprovision: () =>
+              Effect.succeed({
+                reservationGeneration: null,
+                allocation: {
+                  userId: "user-1",
+                  environmentId: "environment-1",
+                  hostname: "dev-0123456789abcdef.example.test",
+                  tunnelId: "tunnel-1",
+                  tunnelName: managedEndpointTunnelNameForKey("dev", endpointKey),
+                  dnsRecordId: "dns-1",
+                  readyAt: "2026-07-28T00:00:00.000Z",
+                  tunnelReleasedAt: null,
+                  origin: null,
+                  updatedAt: "2026-07-28T00:00:00.000Z",
+                  generation: 1,
+                },
+              }),
+            clearInbox: (input) =>
+              clearFails
+                ? Effect.fail(
+                    new HookInbox.HookInboxError({
+                      operation: "clear",
+                      endpointKey: input.endpointKey,
+                      cause: new Error("unavailable"),
+                    }),
+                  )
+                : Effect.sync(() => void cleared.push(input.endpointKey)),
+          }),
+        ),
+      );
+    return Effect.gen(function* () {
+      expect(yield* unlink(false)).toBe(true);
+      expect(cleared).toEqual([endpointKey]);
+      // The link is already revoked; a failed clear must not fail the unlink.
+      expect(yield* unlink(true)).toBe(true);
+    });
+  });
+
   it.effect("commits database revocation before deprovisioning the managed endpoint", () => {
     const calls: Array<string> = [];
     const deprovisionTarget = {
@@ -964,6 +1025,7 @@ describe("relay environment unlink", () => {
         origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
         updatedAt: "generation-before-unlink",
         generation: 1,
+        tunnelReleasedAt: null,
       },
     } satisfies ManagedEndpointProvider.ManagedEndpointDeprovisionTarget;
 
@@ -984,7 +1046,7 @@ describe("relay environment unlink", () => {
       ]);
     }).pipe(
       Effect.provide(
-        relayUnlinkTestLayer({
+        layerRelayUnlinkTest({
           withTransaction: (effect) => {
             calls.push("transaction");
             return effect;
@@ -1039,7 +1101,7 @@ describe("relay environment unlink", () => {
       expect(calls).toEqual(["prepare", "transaction", "link", "credential"]);
     }).pipe(
       Effect.provide(
-        relayUnlinkTestLayer({
+        layerRelayUnlinkTest({
           withTransaction: (effect) => {
             calls.push("transaction");
             return effect;
@@ -1081,7 +1143,7 @@ describe("relay environment unlink", () => {
       expect(calls).toEqual(["prepare", "deprovision"]);
     }).pipe(
       Effect.provide(
-        relayUnlinkTestLayer({
+        layerRelayUnlinkTest({
           prepareDeprovision: () =>
             Effect.sync(() => {
               calls.push("prepare");
@@ -1113,6 +1175,7 @@ describe("relay environment unlink", () => {
         origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
         updatedAt: "original-generation",
         generation: 1,
+        tunnelReleasedAt: null,
       },
     } satisfies ManagedEndpointProvider.ManagedEndpointDeprovisionTarget;
 
@@ -1126,7 +1189,7 @@ describe("relay environment unlink", () => {
       expect(targets).toEqual([target, target]);
     }).pipe(
       Effect.provide(
-        relayUnlinkTestLayer({
+        layerRelayUnlinkTest({
           getForUser: () => Effect.sync(() => (++lookups === 1 ? linkedEnvironmentRecord : null)),
           revokeForUser: () => Effect.succeed(true),
           prepareDeprovision: () => Effect.succeed(target),
@@ -1174,7 +1237,7 @@ describe("relay managed endpoint origin sync", () => {
       ]);
     }).pipe(
       Effect.provide(
-        relayUnlinkTestLayer({
+        layerRelayUnlinkTest({
           listUsersForEnvironment: (input) =>
             Effect.sync(() => {
               lookups.push(input);
@@ -1283,6 +1346,38 @@ describe("relay request tracing", () => {
     }),
   );
 
+  it.effect("records one server span inside the worker's disabled HTTP tracer", () =>
+    Effect.gen(function* () {
+      const spans: Array<Tracer.NativeSpan> = [];
+      const tracer = Tracer.make({
+        span: (options) => {
+          const span = new Tracer.NativeSpan(options);
+          spans.push(span);
+          return span;
+        },
+      });
+      const request = HttpServerRequest.fromWeb(
+        new Request("https://relay.test/v1/mobile/devices", { method: "POST" }),
+      );
+
+      // As the worker runtime runs it: its own tracer around ours, turned off.
+      yield* HttpMiddleware.tracer(
+        traceRelayHttpRequestWith(
+          Effect.succeed(HttpServerResponse.empty({ status: 204 })),
+          Layer.empty,
+        ),
+      ).pipe(
+        Effect.provideService(HttpMiddleware.TracerDisabledWhen, () => true),
+        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+        Effect.withTracer(tracer),
+      );
+      yield* Effect.yieldNow;
+
+      expect(spans.filter((span) => span.kind === "server")).toHaveLength(1);
+      expect(spans[0]?.attributes.get("url.path")).toBe("/v1/mobile/devices");
+    }),
+  );
+
   it.effect("fails hung requests with a 504 before the client's 10s abort", () =>
     Effect.gen(function* () {
       const spans: Array<Tracer.NativeSpan> = [];
@@ -1324,7 +1419,7 @@ describe("relay routing fallback", () => {
           EnvironmentPublishSignatures.EnvironmentPublishSignatures["Service"]["verify"]
         >[0]
       > = [];
-      const publisher = Layer.succeed(AgentActivityPublisher.AgentActivityPublisher, {
+      const layerPublisher = Layer.succeed(AgentActivityPublisher.AgentActivityPublisher, {
         publish: (input) =>
           Effect.sync(() => {
             published.push(input);
@@ -1332,13 +1427,16 @@ describe("relay routing fallback", () => {
           }),
         replayForLiveActivityRegistration: () => Effect.succeed(null),
       });
-      const signatures = Layer.succeed(EnvironmentPublishSignatures.EnvironmentPublishSignatures, {
-        verify: (input) =>
-          Effect.sync(() => {
-            verified.push(input);
-          }),
-      });
-      const auth = Layer.succeed(RelayEnvironmentAuth, {
+      const layerSignatures = Layer.succeed(
+        EnvironmentPublishSignatures.EnvironmentPublishSignatures,
+        {
+          verify: (input) =>
+            Effect.sync(() => {
+              verified.push(input);
+            }),
+        },
+      );
+      const layerAuth = Layer.succeed(RelayEnvironmentAuth, {
         environmentBearer: (effect) =>
           effect.pipe(
             Effect.provideService(RelayEnvironmentPrincipal, {
@@ -1347,11 +1445,11 @@ describe("relay routing fallback", () => {
             }),
           ),
       });
-      const routes = HttpApiBuilder.layer(
+      const layerRoutes = HttpApiBuilder.layer(
         HttpApi.make("RelayApi").add(RelayApi.groups.server),
       ).pipe(
         Layer.provide(
-          serverApi.pipe(
+          RelayHttpApi.layerServerApi.pipe(
             // Fork routes resolve owner and managed-endpoint services per request.
             HttpRouter.provideRequest(
               Layer.mergeAll(
@@ -1361,14 +1459,14 @@ describe("relay routing fallback", () => {
                 Layer.mock(ManagedEndpointProvider.ManagedEndpointProvider, {}),
               ),
             ),
-            Layer.provide([publisher, signatures]),
+            Layer.provide([layerPublisher, layerSignatures, Layer.mock(HeldHooks.HeldHooks, {})]),
           ),
         ),
-        Layer.provide(auth),
+        Layer.provide(layerAuth),
         Layer.provide([NodeServices.layer, NodeHttpPlatform.layer, Etag.layerWeak]),
       );
       const httpEffect = yield* HttpRouter.toHttpEffect(
-        Layer.mergeAll(routes, relayNotFoundRoute, relayCors),
+        Layer.mergeAll(layerRoutes, RelayHttpApi.layerNotFoundRoute, RelayHttpApi.layerCors),
       ).pipe(Effect.provideService(HttpRouter.RouterConfig, RELAY_HTTP_ROUTER_CONFIG));
       const threadIds = [
         "b7c8c522-d244-43dc-875f-7224fce79912",
@@ -1409,13 +1507,14 @@ describe("relay routing fallback", () => {
 
   it.effect("redirects the relay root to the API docs", () =>
     Effect.gen(function* () {
-      const request = HttpServerRequest.fromWeb(new Request("https://relay.test/"));
       const httpEffect = yield* HttpRouter.toHttpEffect(
-        Layer.mergeAll(relayDocsRedirectRoute, relayNotFoundRoute, relayCors),
+        Layer.mergeAll(
+          RelayHttpApi.layerDocsRedirectRoute,
+          RelayHttpApi.layerNotFoundRoute,
+          RelayHttpApi.layerCors,
+        ),
       );
-      const response = yield* httpEffect.pipe(
-        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
-      );
+      const response = yield* sendRelayRequest(httpEffect, new Request("https://relay.test/"));
 
       expect(response.status).toBe(302);
       expect(response.headers.location).toBe("/docs");
@@ -1425,12 +1524,12 @@ describe("relay routing fallback", () => {
 
   it.effect("returns a CORS-compatible 404 response for unmatched paths", () =>
     Effect.gen(function* () {
-      const request = HttpServerRequest.fromWeb(
-        new Request("https://relay.test/v1/environmentsd", { method: "GET" }),
+      const httpEffect = yield* HttpRouter.toHttpEffect(
+        Layer.merge(RelayHttpApi.layerNotFoundRoute, RelayHttpApi.layerCors),
       );
-      const httpEffect = yield* HttpRouter.toHttpEffect(Layer.merge(relayNotFoundRoute, relayCors));
-      const response = yield* httpEffect.pipe(
-        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+      const response = yield* sendRelayRequest(
+        httpEffect,
+        new Request("https://relay.test/v1/environmentsd", { method: "GET" }),
       );
 
       expect(response.status).toBe(404);
@@ -1475,7 +1574,9 @@ it.effect.each([
   ],
 ] as const)("billing CORS %s %s %s %s", ([method, path, origin, preflightMethod, expectedOrigin]) =>
   Effect.gen(function* () {
-    const httpEffect = yield* HttpRouter.toHttpEffect(Layer.merge(relayNotFoundRoute, relayCors));
+    const httpEffect = yield* HttpRouter.toHttpEffect(
+      Layer.merge(RelayHttpApi.layerNotFoundRoute, RelayHttpApi.layerCors),
+    );
     const response = yield* httpEffect.pipe(
       Effect.provideService(
         HttpServerRequest.HttpServerRequest,
@@ -1495,3 +1596,105 @@ it.effect.each([
     }
   }).pipe(Effect.scoped),
 );
+
+describe("relay CORS", () => {
+  const origin = "https://lecturn.cloudgatherer.net";
+
+  class HandlerFailed extends Data.TaggedError("HandlerFailed") {}
+
+  it.effect("answers preflight requests without reaching a route", () =>
+    Effect.gen(function* () {
+      const httpEffect = yield* HttpRouter.toHttpEffect(
+        Layer.merge(RelayHttpApi.layerNotFoundRoute, RelayHttpApi.layerCors),
+      );
+      const response = yield* sendRelayRequest(
+        httpEffect,
+        new Request("https://relay.test/v1/client/environments", {
+          method: "OPTIONS",
+          headers: {
+            origin,
+            "access-control-request-method": "POST",
+            "access-control-request-headers": "authorization,dpop,content-type",
+          },
+        }),
+      );
+
+      expect(response.status).toBe(204);
+      expect(
+        response.headers["access-control-allow-methods"]?.split(",").map((method) => method.trim()),
+      ).toEqual(["GET", "POST", "DELETE", "OPTIONS"]);
+      expect(response.headers).toMatchObject({
+        "access-control-allow-origin": "*",
+        "access-control-allow-headers": "authorization,b3,traceparent,content-type,dpop",
+        "access-control-expose-headers": "traceparent,www-authenticate",
+        "access-control-max-age": "86400",
+      });
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("adds CORS headers to handler failures and defects", () =>
+    Effect.gen(function* () {
+      const httpEffect = yield* HttpRouter.toHttpEffect(
+        Layer.mergeAll(
+          HttpRouter.add("GET", "/v1/fail", Effect.fail(new HandlerFailed())),
+          HttpRouter.add("GET", "/v1/die", Effect.die(new Error("handler defect"))),
+          RelayHttpApi.layerNotFoundRoute,
+          RelayHttpApi.layerCors,
+        ),
+      );
+      for (const path of ["/v1/fail", "/v1/die"]) {
+        const response = yield* sendRelayRequest(
+          httpEffect,
+          new Request(`https://relay.test${path}`, { headers: { origin } }),
+        );
+
+        expect(response.status).toBe(500);
+        expect(response.headers["access-control-allow-origin"]).toBe("*");
+        expect(response.headers["access-control-expose-headers"]).toBe(
+          "traceparent,www-authenticate",
+        );
+      }
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("adds CORS headers to the request deadline response", () =>
+    Effect.gen(function* () {
+      const httpEffect = yield* HttpRouter.toHttpEffect(
+        Layer.mergeAll(
+          HttpRouter.add("GET", "/v1/hang", Effect.never),
+          RelayHttpApi.layerNotFoundRoute,
+          RelayHttpApi.layerCors,
+        ),
+      );
+      const fiber = yield* sendRelayRequest(
+        traceRelayHttpRequestWith(httpEffect, Layer.empty),
+        new Request("https://relay.test/v1/hang", { headers: { origin } }),
+      ).pipe(Effect.forkChild);
+      yield* TestClock.adjust(Duration.millis(RELAY_REQUEST_DEADLINE_MS));
+      const response = yield* Fiber.join(fiber);
+
+      expect(response.status).toBe(504);
+      expect(response.headers["access-control-allow-origin"]).toBe("*");
+      expect(response.headers["access-control-expose-headers"]).toBe(
+        "traceparent,www-authenticate",
+      );
+    }).pipe(Effect.scoped),
+  );
+});
+
+// Sends a request through Effect's request handler, which applies pre-response
+// handlers to the response it sends, as the Workers runtime does.
+const sendRelayRequest = Effect.fnUntraced(function* <E, R>(
+  httpEffect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
+  request: Request,
+) {
+  const sent = yield* Deferred.make<HttpServerResponse.HttpServerResponse>();
+  yield* HttpEffect.toHandled(httpEffect, (_request, response) =>
+    Deferred.succeed(sent, response),
+  ).pipe(
+    Effect.provideService(HttpServerRequest.HttpServerRequest, HttpServerRequest.fromWeb(request)),
+    // A handler failure still fails this effect after its 500 has been sent.
+    Effect.exit,
+  );
+  return yield* Deferred.await(sent);
+});

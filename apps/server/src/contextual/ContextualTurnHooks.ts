@@ -40,7 +40,7 @@ import {
   type LecturnTurnStartDecision,
   type LecturnTurnStartInput,
 } from "../orchestration-v2/fork/LecturnOrchestrationHooks.ts";
-import { OrchestrationEventStore } from "../persistence/Services/OrchestrationEventStore.ts";
+import { OrchestrationEventStore } from "../persistence/OrchestrationEventStore.ts";
 import { prepareContextualDispatch } from "../provider/ContextualDispatch.ts";
 import { v2Messages } from "../threadDecisions/V2ProjectionSources.ts";
 import { ContextualLifecycle } from "./ContextualLifecycle.ts";

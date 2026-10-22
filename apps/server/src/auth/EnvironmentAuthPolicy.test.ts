@@ -7,11 +7,9 @@ import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as EnvironmentAuthPolicy from "./EnvironmentAuthPolicy.ts";
 
-const makeEnvironmentAuthPolicyLayer = (
-  overrides?: Partial<ServerConfig.ServerConfig["Service"]>,
-) =>
+const layerEnvironmentAuthPolicy = (overrides?: Partial<ServerConfig.ServerConfig["Service"]>) =>
   EnvironmentAuthPolicy.layer.pipe(
-    Layer.provide(ServerEnvironment.identityLayer),
+    Layer.provide(ServerEnvironment.layerIdentity),
     Layer.provide(
       Layer.effect(
         ServerConfig.ServerConfig,
@@ -44,7 +42,7 @@ it.layer(NodeServices.layer)("EnvironmentAuthPolicy.layer", (it) => {
       expect(descriptor.sessionCookieName).toBe("lecturn_session_3773");
     }).pipe(
       Effect.provide(
-        makeEnvironmentAuthPolicyLayer({
+        layerEnvironmentAuthPolicy({
           mode: "desktop",
           port: 3773,
         }),
@@ -60,7 +58,7 @@ it.layer(NodeServices.layer)("EnvironmentAuthPolicy.layer", (it) => {
       expect(descriptor.sessionCookieName).toBe("lecturn_session_3774");
     }).pipe(
       Effect.provide(
-        makeEnvironmentAuthPolicyLayer({
+        layerEnvironmentAuthPolicy({
           mode: "desktop",
           port: 3774,
         }),
@@ -77,7 +75,7 @@ it.layer(NodeServices.layer)("EnvironmentAuthPolicy.layer", (it) => {
       expect(descriptor.bootstrapMethods).toEqual(["desktop-bootstrap", "one-time-token"]);
     }).pipe(
       Effect.provide(
-        makeEnvironmentAuthPolicyLayer({
+        layerEnvironmentAuthPolicy({
           mode: "desktop",
           host: "0.0.0.0",
         }),
@@ -95,7 +93,7 @@ it.layer(NodeServices.layer)("EnvironmentAuthPolicy.layer", (it) => {
       expect(descriptor.sessionCookieName).toMatch(/^lecturn_session_3773_[a-f0-9]{12}$/);
     }).pipe(
       Effect.provide(
-        makeEnvironmentAuthPolicyLayer({
+        layerEnvironmentAuthPolicy({
           mode: "web",
           host: "127.0.0.1",
           port: 3773,
@@ -114,7 +112,7 @@ it.layer(NodeServices.layer)("EnvironmentAuthPolicy.layer", (it) => {
       expect(descriptor.sessionCookieName).toMatch(/^lecturn_session_[a-f0-9]{12}$/);
     }).pipe(
       Effect.provide(
-        makeEnvironmentAuthPolicyLayer({
+        layerEnvironmentAuthPolicy({
           mode: "web",
           host: "0.0.0.0",
         }),
@@ -131,7 +129,7 @@ it.layer(NodeServices.layer)("EnvironmentAuthPolicy.layer", (it) => {
       expect(descriptor.sessionCookieName).toMatch(/^lecturn_session_5775_[a-f0-9]{12}$/);
     }).pipe(
       Effect.provide(
-        makeEnvironmentAuthPolicyLayer({
+        layerEnvironmentAuthPolicy({
           mode: "web",
           host: "0.0.0.0",
           port: 5775,
@@ -150,7 +148,7 @@ it.layer(NodeServices.layer)("EnvironmentAuthPolicy.layer", (it) => {
       expect(descriptor.sessionCookieName).toMatch(/^lecturn_session_[a-f0-9]{12}$/);
     }).pipe(
       Effect.provide(
-        makeEnvironmentAuthPolicyLayer({
+        layerEnvironmentAuthPolicy({
           mode: "web",
           host: "192.168.1.50",
         }),

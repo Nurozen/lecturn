@@ -12,7 +12,7 @@ import {
   ThreadId,
 } from "@lecturn/contracts";
 import { DateTime, Deferred, Effect, Fiber, Layer, Queue, Stream } from "effect";
-import { emptyWorkflow } from "../persistence/Services/SagaWorkbenchRepository.ts";
+import { emptyWorkflow } from "../persistence/SagaWorkbenchRepository.ts";
 import { make, promptInferenceEventOf } from "./SagaInferenceReactor.ts";
 import { SagaWorkbenchService, type SagaInferenceRequest } from "./SagaWorkbenchService.ts";
 import { StaveOrchestration } from "./StaveOrchestration.ts";

@@ -11,7 +11,7 @@ import {
 } from "@lecturn/contracts";
 import { Effect, Result } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { make } from "./ContextualRepository.ts";
 import { make as makeSettings } from "./ContextualSettings.ts";
 import {
@@ -172,7 +172,7 @@ const ready = Effect.gen(function* () {
   return { ...f, preparation: p };
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual durable delivery", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual durable delivery", (it) => {
   it.effect("does not mark supply until a matching native acceptance receipt", () =>
     Effect.gen(function* () {
       const f = yield* ready;
@@ -283,7 +283,7 @@ it.layer(SqlitePersistenceMemory)("Contextual durable delivery", (it) => {
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual inherited disclosure", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual inherited disclosure", (it) => {
   it.effect("refuses cancellation after durable dispatch admission", () =>
     Effect.gen(function* () {
       const f = yield* ready;

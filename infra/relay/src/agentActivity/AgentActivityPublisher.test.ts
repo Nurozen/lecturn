@@ -12,7 +12,7 @@ import * as ApnsDeliveries from "./ApnsDeliveries.ts";
 import { TeamRuntime } from "../teams/TeamRuntime.ts";
 import { TeamError } from "../teams/TeamStore.ts";
 
-const publisherLayer = AgentActivityPublisher.layer.pipe(
+const layerPublisher = AgentActivityPublisher.layer.pipe(
   Layer.provide(
     Layer.succeed(FcmDeliveries.FcmDeliveries, {
       enqueue: () => Effect.succeed(null),
@@ -100,6 +100,8 @@ function makeEnvironmentLinks(
       ]),
     listForUser: () => Effect.succeed([]),
     getForUser: () => Effect.succeed(null),
+    findActiveManagedForEnvironment: () => Effect.succeed([]),
+    setHoldWebhooksWhileOffline: () => Effect.void,
     revokeForUser: () => Effect.succeed(false),
     ...overrides,
   };
@@ -229,7 +231,7 @@ describe("AgentActivityPublisher", () => {
         });
       }).pipe(
         Effect.provide(
-          publisherLayer.pipe(
+          layerPublisher.pipe(
             Layer.provide(
               Layer.mergeAll(
                 Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
@@ -303,7 +305,7 @@ describe("AgentActivityPublisher", () => {
         });
       }).pipe(
         Effect.provide(
-          publisherLayer.pipe(
+          layerPublisher.pipe(
             Layer.provide(
               Layer.mergeAll(
                 Layer.succeed(
@@ -398,7 +400,7 @@ describe("AgentActivityPublisher", () => {
         });
       }).pipe(
         Effect.provide(
-          publisherLayer.pipe(
+          layerPublisher.pipe(
             Layer.provide(
               Layer.mergeAll(
                 Layer.succeed(
@@ -510,7 +512,7 @@ describe("AgentActivityPublisher", () => {
       ]);
     }).pipe(
       Effect.provide(
-        publisherLayer.pipe(
+        layerPublisher.pipe(
           Layer.provide(
             Layer.mergeAll(
               Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
@@ -580,7 +582,7 @@ describe("AgentActivityPublisher", () => {
         });
       }).pipe(
         Effect.provide(
-          publisherLayer.pipe(
+          layerPublisher.pipe(
             Layer.provide(
               Layer.mergeAll(
                 Layer.succeed(
@@ -693,7 +695,7 @@ describe("AgentActivityPublisher", () => {
           });
         }).pipe(
           Effect.provide(
-            publisherLayer.pipe(
+            layerPublisher.pipe(
               Layer.provide(
                 Layer.mergeAll(
                   Layer.succeed(
@@ -963,7 +965,7 @@ describe("company activity ingestion", () => {
   function fixture(policy: TeamRuntime["Service"]["policy"], owners = ["owner"]) {
     const writes: string[] = [];
     const ownerQueries: unknown[] = [];
-    const service = publisherLayer.pipe(
+    const service = layerPublisher.pipe(
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(

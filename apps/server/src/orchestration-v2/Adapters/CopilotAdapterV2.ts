@@ -49,7 +49,7 @@ import {
   normalizeCopilotSessionStateEdit,
   withCopilotCancelledStreamDiscard,
 } from "../../provider/acp/CopilotAcpSupport.ts";
-import * as ProviderEventLoggers from "../../provider/Layers/ProviderEventLoggers.ts";
+import * as ProviderEventLoggers from "../../provider/ProviderEventLoggers.ts";
 import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
 import {
   currentStaveMemoryResolver,

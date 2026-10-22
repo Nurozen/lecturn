@@ -8,11 +8,11 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as ServerConfig from "../../config.ts";
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ProjectEnrichmentService from "../../project/ProjectEnrichmentService.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import * as WorkspacePaths from "../../workspace/WorkspacePaths.ts";
-import { LecturnOrchestrationHooksLayerLive, ProjectServiceLayerLive } from "../runtimeLayer.ts";
+import * as RuntimeLayer from "../runtimeLayer.ts";
 import * as ThreadCommandExecutor from "../ThreadCommandExecutor.ts";
 import * as LecturnOrchestrationHooks from "./LecturnOrchestrationHooks.ts";
 
@@ -31,8 +31,8 @@ const ProbeRegistrationLive = Layer.effectDiscard(
 
 // Server order: ProjectService first (outer provide), registrations afterwards.
 const TestLayer = ProbeRegistrationLive.pipe(
-  Layer.provide(LecturnOrchestrationHooksLayerLive),
-  Layer.provideMerge(ProjectServiceLayerLive),
+  Layer.provide(RuntimeLayer.layerLecturnOrchestrationHooks),
+  Layer.provideMerge(RuntimeLayer.layerProjectService),
   Layer.provide(ThreadCommandExecutor.layer),
   Layer.provide(
     Layer.mock(ProjectEnrichmentService.ProjectEnrichmentService)({
@@ -56,7 +56,7 @@ const TestLayer = ProbeRegistrationLive.pipe(
       normalizeWorkspaceRoot: (workspaceRoot) => Effect.succeed(workspaceRoot),
     }),
   ),
-  Layer.provide(SqlitePersistenceMemory),
+  Layer.provide(SqlitePersistence.layerMemory),
   Layer.provide(
     ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-project-service-hooks-" }),
   ),

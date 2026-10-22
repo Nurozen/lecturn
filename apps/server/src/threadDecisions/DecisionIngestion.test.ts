@@ -2,11 +2,8 @@ import { assert, it } from "@effect/vitest";
 import { ProjectId, ThreadId, type ApplicationStoredEvent } from "@lecturn/contracts";
 import { Effect, Fiber, PubSub, Result, Stream } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import {
-  OrchestrationEventStore,
-  type OrchestrationEventStoreShape,
-} from "../persistence/Services/OrchestrationEventStore.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import { OrchestrationEventStore } from "../persistence/OrchestrationEventStore.ts";
 import { DecisionSettingsRepository, make as makeSettings } from "./DecisionSettingsRepository.ts";
 import { DecisionJobRepository, make as makeJobs } from "./DecisionJobRepository.ts";
 import { make } from "./DecisionIngestion.ts";
@@ -55,14 +52,14 @@ const makeStore = (
             );
           }),
         ),
-    } satisfies Partial<OrchestrationEventStoreShape>;
+    } satisfies Partial<OrchestrationEventStore["Service"]>;
     const commit = (event: ApplicationStoredEvent) =>
       Effect.gen(function* () {
         events.push(event);
         yield* PubSub.publish(live, event);
       });
     return {
-      store: OrchestrationEventStore.of(store as unknown as OrchestrationEventStoreShape),
+      store: OrchestrationEventStore.of(store as unknown as OrchestrationEventStore["Service"]),
       commit,
       events,
     };
@@ -99,7 +96,7 @@ const enable = (settings: DecisionSettingsRepository["Service"]) =>
     0,
   );
 
-it.layer(SqlitePersistenceMemory)("Decision ingestion on the V2 application log", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Decision ingestion on the V2 application log", (it) => {
   it.effect("replays bounded pages from the cursor and drains a commit racing startup", () =>
     Effect.scoped(
       Effect.gen(function* () {

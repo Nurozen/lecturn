@@ -9,7 +9,7 @@ const access = Effect.gen(function* () {
   const scope = yield* requireThreadMcpCapability("preview");
   return { scope, manager: yield* Preview.PreviewManager };
 });
-export const PreviewControlsHandlersLive = PreviewControlsToolkit.toLayer({
+export const layer = PreviewControlsToolkit.toLayer({
   lecturn_preview_list: (input) =>
     Effect.gen(function* () {
       const { scope, manager } = yield* access;

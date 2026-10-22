@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { EnvironmentId, ProjectId, type DecisionFundingStatusResult } from "@lecturn/contracts";
 import { Effect, Stream } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as Repository from "./DecisionRepository.ts";
 import * as Settings from "./DecisionSettingsRepository.ts";
 import * as Jobs from "./DecisionJobRepository.ts";
@@ -10,7 +10,7 @@ import { DecisionCloudClient } from "./DecisionCloudClient.ts";
 import { DecisionWriterAvailability, make } from "./DecisionService.ts";
 
 const projectId = ProjectId.make("service-project");
-it.layer(SqlitePersistenceMemory)("Decision service", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Decision service", (it) => {
   it.effect("new project settings inherit funding and remain readable after revoke and purge", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

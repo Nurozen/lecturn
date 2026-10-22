@@ -35,6 +35,8 @@ export interface CloudLinkDesiredState {
   readonly publish: boolean;
   readonly decisions?: boolean;
   readonly unlink?: boolean;
+  /** Omit to leave the webhook-hold setting as it is. */
+  readonly holdWebhooksWhileOffline?: boolean;
 }
 
 /**
@@ -129,6 +131,7 @@ export function useCloudLinkController(
   const managedTunnelActive =
     primaryCloudLinkState.data?.managedTunnelActive ?? primaryCloudLinkState.data?.linked ?? false;
   const publishAgentActivity = primaryCloudLinkState.data?.publishAgentActivity ?? false;
+  const holdWebhooksWhileOffline = primaryCloudLinkState.data?.holdWebhooksWhileOffline ?? false;
   const linked = primaryCloudLinkState.data?.linked ?? false;
 
   const { onSelectAccount } = options;
@@ -309,6 +312,9 @@ export function useCloudLinkController(
       const prefResult = await updatePrimaryEnvironmentPreferences({
         target,
         publishAgentActivity: desired.publish && companyPublishingAllowed.current,
+        ...(desired.holdWebhooksWhileOffline === undefined
+          ? {}
+          : { holdWebhooksWhileOffline: desired.holdWebhooksWhileOffline }),
       });
       if (prefResult._tag === "Failure") {
         if (!isAtomCommandInterrupted(prefResult)) {
@@ -334,6 +340,7 @@ export function useCloudLinkController(
     linked,
     managedTunnelActive,
     publishAgentActivity,
+    holdWebhooksWhileOffline,
     operationError,
     subscriptionRequired,
     checkSubscription,

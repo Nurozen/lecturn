@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import * as C from "@lecturn/contracts";
 import { Effect, Result } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { DecisionRepository } from "../threadDecisions/DecisionRepository.ts";
 import { ExtensionsRuntime } from "../extensions/ExtensionsRuntime.ts";
 import { make } from "./ContextualGroups.ts";
@@ -105,7 +105,7 @@ const fixture = Effect.gen(function* () {
   yield* service.ensure(notes.get("a")!);
   return { sql, notes, service };
 });
-it.layer(SqlitePersistenceMemory)("Contextual occurrence groups", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual occurrence groups", (it) => {
   it.effect("replays only current group data and cannot expose deleted note bodies", () =>
     Effect.gen(function* () {
       const f = yield* fixture;

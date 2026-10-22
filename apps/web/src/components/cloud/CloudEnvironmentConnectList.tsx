@@ -10,7 +10,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
-import { bucketByAccount } from "@lecturn/client-runtime/relay";
+import { bucketByAccount, relayOfflineReasonMessage } from "@lecturn/client-runtime/relay";
 import {
   type EnvironmentId,
   resolveEnvironmentMachineKind,
@@ -387,7 +387,14 @@ export function CloudEnvironmentConnectRows({
     // A connected machine's own config (with the user's icon pick) wins. Before
     // that, the relay's health probe already carries the server's descriptor, so
     // a machine can wear its detected glyph before this device ever connects.
-    const descriptor = status === undefined ? undefined : Option.getOrNull(status)?.descriptor;
+    const relayStatus = status === undefined ? null : Option.getOrNull(status);
+    const descriptor = relayStatus?.descriptor;
+    // Why the relay reports this environment offline, when it knows more than
+    // "no answer". Shown for saved and unsaved rows alike.
+    const offlineReason =
+      availability === "offline" && relayStatus !== null
+        ? relayOfflineReasonMessage(relayStatus)
+        : null;
     const machineKind = resolveEnvironmentMachineKind(
       savedEnvironment?.serverConfig ??
         (descriptor === undefined ? null : { environment: descriptor }),
@@ -413,16 +420,18 @@ export function CloudEnvironmentConnectRows({
     const statusText =
       unsupported && !savedEnvironment
         ? `Lecturn Connect · ${notAdded} · Client not supported`
-        : savedConnection
-          ? savedConnection.statusText
-          : availability === "online"
-            ? `Lecturn Connect · ${notAdded} · Relay online`
-            : availability === "offline"
-              ? `Lecturn Connect · ${notAdded} · Relay offline`
-              : availability === "checking"
-                ? `Lecturn Connect · ${notAdded} · Checking relay status…`
-                : (Option.getOrNull(error)?.message ??
-                  `Lecturn Connect · ${notAdded} · Relay status unavailable`);
+        : offlineReason !== null
+          ? offlineReason
+          : savedConnection
+            ? savedConnection.statusText
+            : availability === "online"
+              ? `Lecturn Connect · ${notAdded} · Relay online`
+              : availability === "offline"
+                ? `Lecturn Connect · ${notAdded} · Relay offline`
+                : availability === "checking"
+                  ? `Lecturn Connect · ${notAdded} · Checking relay status…`
+                  : (Option.getOrNull(error)?.message ??
+                    `Lecturn Connect · ${notAdded} · Relay status unavailable`);
     if (selection) {
       return (
         <label
@@ -489,15 +498,17 @@ export function CloudEnvironmentConnectRows({
                 tooltipText={
                   unsupportedDetail !== null
                     ? unsupportedDetail
-                    : savedConnection
-                      ? savedConnection.statusText
-                      : availability === "online"
-                        ? "Relay online"
-                        : availability === "offline"
-                          ? "Relay offline"
-                          : availability === "checking"
-                            ? "Checking relay status"
-                            : (Option.getOrNull(error)?.message ?? "Relay status unavailable")
+                    : offlineReason !== null
+                      ? offlineReason
+                      : savedConnection
+                        ? savedConnection.statusText
+                        : availability === "online"
+                          ? "Relay online"
+                          : availability === "offline"
+                            ? "Relay offline"
+                            : availability === "checking"
+                              ? "Checking relay status"
+                              : (Option.getOrNull(error)?.message ?? "Relay status unavailable")
                 }
               />
               <EnvironmentMachineIcon

@@ -3,6 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { AuthAccessWriteScope } from "@lecturn/contracts";
 
 import { knownConnectAccountsAtom } from "~/cloud/knownAccounts";
+import { usePrimaryCloudLinkState } from "~/cloud/primaryCloudLinkState";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { isElectron } from "~/env";
 import { isLocalEnvironmentDisabled } from "~/localEnvironment";
@@ -29,6 +30,10 @@ export function useAvailableSettingsSearchItems(scopeSearch: SettingsScopeSearch
   const desktopWsl = useEnvironmentQuery(
     isElectron && !localEnvironmentDisabled ? desktopWslStateAtom : null,
   );
+  const cloudLinkState = usePrimaryCloudLinkState().data;
+  // Same fallback as the Relay publishing row: older servers imply a tunnel from `linked`.
+  const managedTunnelActive =
+    cloudLinkState?.managedTunnelActive ?? cloudLinkState?.linked ?? false;
   const canManageLocalBackend =
     !localEnvironmentDisabled &&
     (isElectron ||
@@ -75,8 +80,10 @@ export function useAvailableSettingsSearchItems(scopeSearch: SettingsScopeSearch
         hasStaveDestroy:
           primaryServerConfig?.settings.stave.enabled === true &&
           primaryServerConfig.settings.stave.lifecycle.onProjectDelete === "destroy",
+        managedTunnelActive,
       }),
     [
+      managedTunnelActive,
       canManageLocalBackend,
       desktopWsl.data,
       desktopWsl.error,

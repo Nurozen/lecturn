@@ -96,7 +96,7 @@ const makeFixture = Effect.fn("VcsAutoPullPolicy.test.makeFixture")(function* ()
       ),
     exists: (filePath) => record("exists", filePath).pipe(Effect.andThen(fs.exists(filePath))),
   });
-  const policyLayer = VcsStatusBroadcaster.autoPullPolicyLayer.pipe(
+  const policyLayer = VcsStatusBroadcaster.layerAutoPullPolicy.pipe(
     Layer.provide(
       Layer.mock(ProjectStore.ProjectStoreV2)({
         findActiveByWorkspaceRoot: (cwd) =>

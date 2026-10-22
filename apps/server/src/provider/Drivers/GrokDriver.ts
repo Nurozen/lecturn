@@ -10,7 +10,7 @@ import { ChildProcessSpawner } from "effect/process";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import * as ServerConfig from "../../config.ts";
-import * as ProviderEventLoggers from "../Layers/ProviderEventLoggers.ts";
+import * as ProviderEventLoggers from "../ProviderEventLoggers.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import { makeGrokTextGeneration } from "../../textGeneration/GrokTextGeneration.ts";
 import {
@@ -23,8 +23,8 @@ import {
   checkGrokProviderStatus,
   enrichGrokSnapshot,
   GROK_DETECTION_TIMEOUT_MS,
-} from "../Layers/GrokProvider.ts";
-import { readGrokAccount } from "../Layers/grokUsageLimits.ts";
+} from "../GrokProvider.ts";
+import { readGrokAccount } from "../grokUsageLimits.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
   defaultProviderContinuationIdentity,

@@ -20,7 +20,7 @@ import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import { awaitShellEnvironment, getShellEnvironmentStatus } from "../shellEnvironment.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { applyUsageLimitsUpdate, resolveUsageLimitsAfterProbe } from "./providerUsageLimits.ts";
-import type { ServerProviderShape } from "./Services/ServerProvider.ts";
+import type { ServerProviderShape } from "./ServerProvider.ts";
 
 const DETECTION_TIMED_OUT_MESSAGE =
   "Provider detection timed out. Retry or configure the executable path in Settings.";

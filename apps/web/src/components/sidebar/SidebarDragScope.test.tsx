@@ -139,7 +139,7 @@ async function drop(
 }
 
 it.each(["capability", "access"])(
-  "rejects the whole Active drop before unpinning when a destination lacks %s",
+  "moves next to a destination that lacks %s without ever writing to its environment",
   async (reason) => {
     if (reason === "capability")
       state.configs.get("target")!.environment.capabilities.threadPinReorder = false;
@@ -148,8 +148,15 @@ it.each(["capability", "access"])(
       state.known.needsSignIn = ["expired"];
     }
     await drop();
-    expect(unpin).not.toHaveBeenCalled();
-    expect(reorder).not.toHaveBeenCalled();
+    const moved = scopeThreadRef(EnvironmentId.make("source"), ThreadId.make("move"));
+    expect(unpin.mock.calls.map(([ref]) => ref)).toEqual([moved]);
+    expect(reorder.mock.calls.map(([ref]) => ref)).toEqual([moved]);
+    const writes = Object.values(actions).flatMap((action) =>
+      (action as { mock: { calls: unknown[][] } }).mock.calls.map(([ref]) => ref),
+    );
+    expect(writes).not.toContainEqual(
+      expect.objectContaining({ environmentId: EnvironmentId.make("target") }),
+    );
   },
 );
 

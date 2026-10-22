@@ -17,7 +17,7 @@ import {
   checkCodexProviderStatus,
   makePendingCodexProvider,
   probeCodexSkillsForCwd,
-} from "../Layers/CodexProvider.ts";
+} from "../CodexProvider.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { type ProviderDriverCreateInput, type ProviderInstance } from "../ProviderDriver.ts";

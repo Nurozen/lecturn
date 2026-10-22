@@ -27,8 +27,8 @@ import {
   checkCopilotProviderStatus,
   COPILOT_DETECTION_TIMEOUT_MS,
   enrichCopilotSnapshot,
-} from "../Layers/CopilotProvider.ts";
-import * as ProviderEventLoggers from "../Layers/ProviderEventLoggers.ts";
+} from "../CopilotProvider.ts";
+import * as ProviderEventLoggers from "../ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
   defaultProviderContinuationIdentity,

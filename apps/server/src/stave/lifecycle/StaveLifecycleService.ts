@@ -41,7 +41,7 @@ import {
   StaveLifecycleRepository,
   type StaveLifecycleRow,
   type StaveLifecyclePatch,
-} from "../../persistence/Services/StaveLifecycleRepository.ts";
+} from "../../persistence/StaveLifecycleRepository.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { forkParked } from "../../serverActivation.ts";
 import { StaveBinary } from "../StaveBinary.ts";

@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { ContextualSourcePolicy, ProjectId, ThreadId } from "@lecturn/contracts";
 import { Effect, Result, Schema } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { initializeContextualThread, make } from "./ContextualSettings.ts";
 import {
   clearV2Projection,
@@ -27,7 +27,7 @@ const fixture = Effect.gen(function* () {
   return { sql, repo: yield* make };
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual settings", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual settings", (it) => {
   it.effect(
     "copies project defaults only at creation and preserves explicit toggles on replay",
     () =>
@@ -131,7 +131,7 @@ it.layer(SqlitePersistenceMemory)("Contextual settings", (it) => {
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual removed project sources", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual removed project sources", (it) => {
   it.effect.each(["disable", "change-sources"] as const)(
     "normalizes a removed selection when the client requests %s",
     (operation) =>
@@ -194,7 +194,7 @@ it.layer(SqlitePersistenceMemory)("Contextual removed project sources", (it) => 
   );
 });
 
-it.layer(SqlitePersistenceMemory)("Contextual removed host sources", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Contextual removed host sources", (it) => {
   it.effect.each(["web", "mobile"] as const)(
     "keeps %s project controls usable after host source removal",
     (client) =>

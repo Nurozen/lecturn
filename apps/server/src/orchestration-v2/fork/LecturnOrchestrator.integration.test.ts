@@ -1,6 +1,6 @@
 /**
  * Lecturn fork behavior on the production V2 orchestrator composition
- * (OrchestrationV2LayerLive): thread.import (A1), thread.fork deltas (A12),
+ * (RuntimeLayer.layer): thread.import (A1), thread.fork deltas (A12),
  * a settled thread holding its queue (A13), the fork hook call sites, the
  * checkpoint revert preview (A2) and the worktree removal guard (A3).
  */
@@ -41,10 +41,10 @@ import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../../config.ts";
 import * as GitWorkflow from "../../git/GitWorkflowService.ts";
 import * as McpSessionRegistryTestkit from "../../mcp/McpSessionRegistry.testkit.ts";
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import type { ImportedTranscriptEntry, ProviderInstance } from "../../provider/ProviderDriver.ts";
-import * as ProviderInstanceRegistry from "../../provider/Services/ProviderInstanceRegistry.ts";
+import * as ProviderInstanceRegistry from "../../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as SourceControlProviderRegistry from "../../sourceControl/SourceControlProviderRegistry.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
@@ -57,7 +57,7 @@ import * as ProjectStore from "../ProjectStore.ts";
 import { OrchestrationEffectRequestV2 } from "../EffectOutbox.ts";
 import * as ResourceCleanupService from "../ResourceCleanupService.ts";
 import { threadHasQueuedTurnStart } from "../ThreadSettlementService.ts";
-import { OrchestrationV2EventSinkLayerLive, OrchestrationV2LayerLive } from "../runtimeLayer.ts";
+import * as RuntimeLayer from "../runtimeLayer.ts";
 import { previewCheckpointRevert } from "./CheckpointRevertPreview.ts";
 import {
   LecturnHookRejectedError,
@@ -111,13 +111,13 @@ const providerInstance = {
 } satisfies ProviderInstance;
 
 const TestLayer = Layer.mergeAll(
-  OrchestrationV2LayerLive,
-  OrchestrationV2EventSinkLayerLive,
+  RuntimeLayer.layer,
+  RuntimeLayer.layerEventSink,
   ProjectStore.layer,
   ProjectionStore.layer,
 ).pipe(
   Layer.provide(McpSessionRegistryTestkit.layer),
-  Layer.provideMerge(SqlitePersistenceMemory),
+  Layer.provideMerge(SqlitePersistence.layerMemory),
   Layer.provideMerge(
     Layer.mock(CheckpointStore.CheckpointStore)({
       listRestoreDeletions: (input) =>
@@ -926,7 +926,7 @@ it.layer(TestLayer)("Lecturn fork behavior on the V2 orchestrator", (it) => {
       assert.isFalse(yield* exists(legacyId));
     }).pipe(
       Effect.provide(
-        ResourceCleanupService.live.pipe(
+        ResourceCleanupService.layer.pipe(
           Layer.provideMerge(
             ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-fork-attachments-" }),
           ),
@@ -1041,7 +1041,7 @@ it.layer(TestLayer)("Lecturn fork behavior on the V2 orchestrator", (it) => {
       assert.isFalse(yield* exists(childImage));
     }).pipe(
       Effect.provide(
-        ResourceCleanupService.live.pipe(
+        ResourceCleanupService.layer.pipe(
           Layer.provideMerge(
             ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-native-fork-attachments-" }),
           ),

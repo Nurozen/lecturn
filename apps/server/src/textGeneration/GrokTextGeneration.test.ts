@@ -22,7 +22,7 @@ const decodeGrokSettings = Schema.decodeSync(GrokSettings);
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 const mockAgentPath = NodePath.join(__dirname, "../provider/testFixtures/grok-text-mock-agent.mjs");
 
-const GrokTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
+const layerGrokTextGenerationTest = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "lecturn-grok-text-generation-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
@@ -76,7 +76,7 @@ function readJsonRpcRequests(
     .map((line) => JSON.parse(line) as { method?: string; params?: Record<string, unknown> });
 }
 
-it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
+it.layer(layerGrokTextGenerationTest)("GrokTextGeneration", (it) => {
   it.effect.each([
     ["malformed JSON", "not JSON"],
     ["missing stage", JSON.stringify({ summary: "Working", confidence: 0.8 })],

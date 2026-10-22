@@ -208,6 +208,8 @@ function run(
               listForUser: () => Effect.succeed([]),
               getForUser: () => Effect.succeed(null),
               revokeForUser: () => Effect.succeed(false),
+              findActiveManagedForEnvironment: () => Effect.succeed([]),
+              setHoldWebhooksWhileOffline: () => Effect.void,
             }),
             Layer.succeed(TeamStore, f.store),
             Layer.succeed(TeamDirectory, f.directoryService),

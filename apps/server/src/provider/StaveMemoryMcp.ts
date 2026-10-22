@@ -20,11 +20,8 @@ import {
   type StaveMemoryConfig,
   type StaveMemoryResolution,
 } from "../stave/StaveMemoryWiring.ts";
-import { resolveCodexLaunchArgs } from "./Layers/codexLaunchArgs.ts";
-import {
-  type CodexMcpInventoryError,
-  hasCanonicalMarmotServer,
-} from "./Layers/codexMcpInventory.ts";
+import { resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
+import { type CodexMcpInventoryError, hasCanonicalMarmotServer } from "./codexMcpInventory.ts";
 
 export const STAVE_MEMORY_MCP_SERVER_NAME = "context-marmot";
 

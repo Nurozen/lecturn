@@ -43,7 +43,7 @@ const connection: SavedRemoteConnection = {
   bearerToken: "local-bearer",
 };
 
-const testLayer = Layer.mergeAll(
+const layerTest = Layer.mergeAll(
   Layer.succeed(ManagedRelay.ManagedRelayClient, null as never),
   Layer.succeed(
     HttpClient.HttpClient,
@@ -88,7 +88,7 @@ describe("liveActivityPreferences", () => {
         connection,
         liveActivitiesEnabled: false,
       });
-    }).pipe(Effect.provide(testLayer)),
+    }).pipe(Effect.provide(layerTest)),
   );
 
   it.effect("pushes enabled Live Activity preferences to relay registrations", () =>
@@ -108,7 +108,7 @@ describe("liveActivityPreferences", () => {
         connection,
         liveActivitiesEnabled: true,
       });
-    }).pipe(Effect.provide(testLayer)),
+    }).pipe(Effect.provide(layerTest)),
   );
 
   it.effect("uses environment-owner credentials even when the active account has no token", () =>
@@ -128,7 +128,7 @@ describe("liveActivityPreferences", () => {
         connection,
         liveActivitiesEnabled: false,
       });
-    }).pipe(Effect.provide(testLayer)),
+    }).pipe(Effect.provide(layerTest)),
   );
 
   it.effect("does not try to re-link managed relay connections without bearer credentials", () => {
@@ -151,7 +151,7 @@ describe("liveActivityPreferences", () => {
         connection,
         liveActivitiesEnabled: true,
       });
-    }).pipe(Effect.provide(testLayer));
+    }).pipe(Effect.provide(layerTest));
   });
 
   it.effect("restores relay preferences when an environment update fails", () => {
@@ -186,6 +186,6 @@ describe("liveActivityPreferences", () => {
         connection,
         liveActivitiesEnabled: true,
       });
-    }).pipe(Effect.provide(testLayer));
+    }).pipe(Effect.provide(layerTest));
   });
 });

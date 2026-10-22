@@ -8,7 +8,7 @@ import {
   type EnvironmentResourceNotFoundError,
   type EnvironmentScopeRequiredError,
 } from "@lecturn/contracts";
-import { httpHeaderRedactionLayer } from "@lecturn/shared/httpObservability";
+import * as HttpObservability from "@lecturn/shared/httpObservability";
 import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -78,12 +78,12 @@ export type RemoteEnvironmentRequestError =
   | RemoteEnvironmentAuthUndeclaredStatusError
   | RemoteEnvironmentAuthTimeoutError;
 
-export const remoteHttpClientLayer = (
+export const layerRemoteHttpClient = (
   fetchFn: typeof globalThis.fetch,
 ): Layer.Layer<HttpClient.HttpClient> =>
   Layer.merge(
     FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetchFn))),
-    httpHeaderRedactionLayer,
+    HttpObservability.layer,
   );
 
 const remoteApiBaseUrl = (httpBaseUrl: string): string => {

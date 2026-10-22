@@ -64,6 +64,8 @@ export interface SettingsSearchItem {
   readonly localBackendManagementOnly?: boolean;
   readonly localEnvironmentOnly?: boolean;
   readonly wslAvailableOnly?: boolean;
+  // Its row only renders while this environment's Lecturn Connect managed tunnel is on.
+  readonly managedTunnelOnly?: boolean;
   /**
    * Sorts after every other match. Keybinding commands mirror rows on other
    * surfaces, so "model" must still lead with Default model, not Model Picker.
@@ -91,6 +93,7 @@ export interface SettingsSearchAvailability {
   readonly hasStaveLifecycle?: boolean;
   readonly hasStaveGrace?: boolean;
   readonly hasStaveDestroy?: boolean;
+  readonly managedTunnelActive?: boolean;
 }
 
 /**
@@ -162,6 +165,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [
       "disk storage delete deleted archived threads old inactive merged unchanged worktrees retention days project inherit off custom",
     ],
+  },
+  {
+    id: "storage-worktrees-location",
+    title: "Worktree location",
+    to: "/settings/storage",
+    scope: "environment-defaults",
+    searchTerms: ["worktree location folder directory path drive external disk"],
   },
   {
     id: "storage-artifacts",
@@ -808,6 +818,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["auto pull default branch current checkout fast forward upstream"],
   },
   {
+    id: "remove-agent-credits-on-merge",
+    title: "Remove agent credits when merging",
+    to: "/settings/source-control",
+    scope: "project-defaults",
+    searchTerms: ["pull request github squash co-authored-by attribution claude codex generated"],
+  },
+  {
     id: "pull-request-merge-method",
     title: "Default merge method",
     to: "/settings/source-control",
@@ -934,6 +951,16 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "relay-publishing",
     searchTerms: ["managed tunnel cloud other devices remote"],
     cloudOnly: true,
+  },
+  {
+    id: "hold-webhooks-while-offline",
+    localEnvironmentOnly: true,
+    title: "Hold webhooks while offline",
+    to: "/settings/relay",
+    targetId: "relay-publishing",
+    searchTerms: ["webhook automations offline queue mailbox lecturn connect"],
+    cloudOnly: true,
+    managedTunnelOnly: true,
   },
   {
     id: "publish-agent-activity",
@@ -1143,7 +1170,8 @@ export function filterAvailableSettingsSearchItems(
       (!item.requiresStave || availability.hasStave) &&
       (!item.requiresStaveLifecycle || availability.hasStaveLifecycle === true) &&
       (!item.requiresStaveGrace || availability.hasStaveGrace === true) &&
-      (!item.requiresStaveDestroy || availability.hasStaveDestroy === true),
+      (!item.requiresStaveDestroy || availability.hasStaveDestroy === true) &&
+      (!item.managedTunnelOnly || availability.managedTunnelActive === true),
   );
 }
 

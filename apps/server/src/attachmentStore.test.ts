@@ -19,6 +19,7 @@ import {
   parseThreadSegmentFromAttachmentId,
   resolveAttachmentPathById,
   sweepStalePendingAttachments,
+  threadHtmlRenderAttachmentIds,
 } from "./attachmentStore.ts";
 
 describe("attachmentStore", () => {
@@ -342,5 +343,29 @@ describe("attachmentStore", () => {
     } finally {
       NodeFS.rmSync(attachmentsDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("threadHtmlRenderAttachmentIds", () => {
+  it("returns pages this thread published and skips other threads' and failed calls", () => {
+    const own = createAttachmentId("thread-a", "html")!;
+    const other = createAttachmentId("thread-b", "html")!;
+    const render = (attachmentId: string, extra = {}) => ({
+      toolName: "mcp__lecturn__html_render",
+      output: [
+        {
+          type: "text",
+          text: JSON.stringify({ htmlRender: { attachmentId, title: "x", height: 300 }, ...extra }),
+        },
+      ],
+    });
+    expect(
+      threadHtmlRenderAttachmentIds("thread-a", [
+        render(own),
+        render(other),
+        render(createAttachmentId("thread-a", "html")!, { isError: true }),
+        { toolName: "mcp__lecturn__html_preview", output: render(own).output },
+      ]),
+    ).toEqual([own]);
   });
 });

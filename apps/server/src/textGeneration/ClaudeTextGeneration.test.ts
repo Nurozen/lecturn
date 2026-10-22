@@ -24,7 +24,7 @@ import { makeClaudeTextGeneration } from "./ClaudeTextGeneration.ts";
 import { writeFakeCli } from "../testUtils/fakeCli.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
-const ClaudeTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
+const layerClaudeTextGenerationTest = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "lecturn-claude-text-generation-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
@@ -191,7 +191,7 @@ function withFakeClaudeEnv<A, E, R>(
   }).pipe(Effect.scoped);
 }
 
-it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
+it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
   it.effect.each([
     { label: "malformed JSON", output: "not JSON" },
     { label: "missing stage", output: JSON.stringify({ summary: "Working", confidence: 0.8 }) },

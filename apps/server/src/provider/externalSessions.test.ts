@@ -14,7 +14,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import type * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import {
   importExternalSession,
@@ -27,7 +27,7 @@ import type {
   ProviderInstance,
 } from "./ProviderDriver.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "./providerMaintenance.ts";
-import { ProviderInstanceRegistry } from "./Services/ProviderInstanceRegistry.ts";
+import { ProviderInstanceRegistry } from "./ProviderInstanceRegistry.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const CLAUDE_DRIVER = ProviderDriverKind.make("claudeAgent");
@@ -131,7 +131,7 @@ const fakeInstanceRegistryLayer = Layer.succeed(ProviderInstanceRegistry, {
 
 const layer = Layer.mergeAll(
   fakeInstanceRegistryLayer,
-  SqlitePersistenceMemory,
+  SqlitePersistence.layerMemory,
   NodeServices.layer,
 );
 

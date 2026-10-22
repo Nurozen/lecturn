@@ -7,6 +7,7 @@ import { compareSemverVersions } from "@lecturn/shared/semver";
 import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import { causeErrorTag } from "@lecturn/shared/observability";
 import { resolveCommandPath } from "@lecturn/shared/shell";
+import * as Cache from "effect/Cache";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -718,17 +719,20 @@ export const resolveProviderMaintenanceCapabilitiesEffect = Effect.fn(
 /**
  * Turn a one-shot resolution into the shape drivers expose: a cached read for
  * advisories and a `fresh` read that update execution uses so it never trusts
- * ownership derived before the user clicked.
+ * ownership derived before the user clicked. An interrupted resolution is not
+ * cached, so the next read resolves again.
  */
 export const makeCachedProviderMaintenanceResolution = Effect.fn(
   "makeCachedProviderMaintenanceResolution",
 )(function* (resolve: Effect.Effect<ProviderMaintenanceCapabilities>) {
-  const [cached, invalidate] = yield* Effect.cachedInvalidateWithTTL(
-    resolve,
-    MAINTENANCE_CAPABILITIES_CACHE_TTL,
-  );
+  const cache = yield* Cache.make({
+    capacity: 1,
+    timeToLive: MAINTENANCE_CAPABILITIES_CACHE_TTL,
+    lookup: () => resolve,
+  });
+  const cached = Cache.get(cache, undefined);
   return (options?: { readonly fresh?: boolean }) =>
-    options?.fresh ? invalidate.pipe(Effect.andThen(cached)) : cached;
+    options?.fresh ? Cache.invalidate(cache, undefined).pipe(Effect.andThen(cached)) : cached;
 });
 
 function deriveVersionAdvisory(input: {

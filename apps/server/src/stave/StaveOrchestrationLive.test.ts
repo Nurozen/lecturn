@@ -11,9 +11,9 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import { StaveLifecycleRepositoryLive } from "../persistence/Layers/StaveLifecycleRepository.ts";
-import { OrchestrationEventStore } from "../persistence/Services/OrchestrationEventStore.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as StaveLifecycle from "../persistence/StaveLifecycleRepository.ts";
+import { OrchestrationEventStore } from "../persistence/OrchestrationEventStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import { StaveOrchestration } from "./StaveOrchestration.ts";
 import * as StaveOrchestrationLive from "./StaveOrchestrationLive.ts";
@@ -29,7 +29,7 @@ const layer = StaveOrchestrationLive.layer.pipe(
   Layer.provideMerge(
     Layer.mergeAll(
       ProjectStore.layer,
-      StaveLifecycleRepositoryLive,
+      StaveLifecycle.layer,
       Layer.mock(StaveWorkspaceReader)({
         load: (root) =>
           Effect.succeed(
@@ -50,7 +50,7 @@ const layer = StaveOrchestrationLive.layer.pipe(
       Layer.mock(OrchestrationEventStore)({}),
     ),
   ),
-  Layer.provideMerge(SqlitePersistenceMemory),
+  Layer.provideMerge(SqlitePersistence.layerMemory),
   Layer.provideMerge(NodeServices.layer),
 );
 

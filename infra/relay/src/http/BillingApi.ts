@@ -125,11 +125,12 @@ export function billingRoutes(config: BillingConfig, clerkWebhookSecret = "") {
       return json(yield* service.portal(userId));
     }).pipe(
       Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(16 * 1024)),
-      Effect.catchTag("BillingError", (error) =>
-        Effect.succeed(
-          json({ code: error.code, message: error.message }, statusForCode(error.code)),
-        ),
-      ),
+      Effect.catchTags({
+        BillingError: (error) =>
+          Effect.succeed(
+            json({ code: error.code, message: error.message }, statusForCode(error.code)),
+          ),
+      }),
     );
   const stripeWebhook = Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
@@ -142,9 +143,12 @@ export function billingRoutes(config: BillingConfig, clerkWebhookSecret = "") {
     return json({ received: true });
   }).pipe(
     Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(512 * 1024)),
-    Effect.catchTag("BillingError", (error) =>
-      Effect.succeed(json({ code: error.code, message: error.message }, statusForCode(error.code))),
-    ),
+    Effect.catchTags({
+      BillingError: (error) =>
+        Effect.succeed(
+          json({ code: error.code, message: error.message }, statusForCode(error.code)),
+        ),
+    }),
   );
   const clerkWebhook = Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
@@ -159,9 +163,12 @@ export function billingRoutes(config: BillingConfig, clerkWebhookSecret = "") {
     return json({ received: true });
   }).pipe(
     Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(512 * 1024)),
-    Effect.catchTag("BillingError", (error) =>
-      Effect.succeed(json({ code: error.code, message: error.message }, statusForCode(error.code))),
-    ),
+    Effect.catchTags({
+      BillingError: (error) =>
+        Effect.succeed(
+          json({ code: error.code, message: error.message }, statusForCode(error.code)),
+        ),
+    }),
   );
   return Layer.unwrap(
     Effect.gen(function* () {

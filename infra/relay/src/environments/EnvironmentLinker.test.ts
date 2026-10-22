@@ -114,7 +114,7 @@ const makeRequest = Effect.gen(function* () {
   };
 });
 
-function testLayer(input?: {
+function layerTest(input?: {
   readonly access?: ManagedAccess.ManagedAccess["Service"];
   readonly teams?: TeamRuntime["Service"];
   readonly upsert?: EnvironmentLinks.EnvironmentLinks["Service"]["upsert"];
@@ -145,6 +145,8 @@ function testLayer(input?: {
           listDeliveryUsersForEnvironment: () => Effect.succeed([]),
           listForUser: () => Effect.succeed([]),
           getForUser: () => Effect.succeed(null),
+          findActiveManagedForEnvironment: () => Effect.succeed([]),
+          setHoldWebhooksWhileOffline: () => Effect.void,
           revokeForUser: () => Effect.succeed(false),
         }),
         Layer.succeed(EnvironmentCredentials.EnvironmentCredentials, {
@@ -210,7 +212,7 @@ describe("EnvironmentLinker", () => {
       expect(persisted).toBe(supportsPolicy ? 1 : 0);
     }).pipe(
       Effect.provide(
-        testLayer({
+        layerTest({
           teams,
           upsert: () =>
             Effect.sync(() => {
@@ -247,7 +249,7 @@ describe("EnvironmentLinker", () => {
       expect(upserts).toBe(0);
     }).pipe(
       Effect.provide(
-        testLayer({
+        layerTest({
           access: {
             check: () =>
               Effect.fail(
@@ -280,7 +282,7 @@ describe("EnvironmentLinker", () => {
       expect(cleanups).toBe(1);
     }).pipe(
       Effect.provide(
-        testLayer({
+        layerTest({
           access: { check: () => Effect.die("Cleanup must not require billing") },
           deprovision: () =>
             Effect.sync(() => {
@@ -310,7 +312,7 @@ describe("EnvironmentLinker", () => {
       expect(persistedEnvironmentId).toBe(payload.environmentId);
     }).pipe(
       Effect.provide(
-        testLayer({
+        layerTest({
           upsert: (input) =>
             Effect.sync(() => {
               persistedEnvironmentId = input.proof.environmentId;
@@ -357,7 +359,7 @@ describe("EnvironmentLinker", () => {
       expect(persisted).toBe(false);
     }).pipe(
       Effect.provide(
-        testLayer({
+        layerTest({
           upsert: () =>
             Effect.sync(() => {
               persisted = true;
@@ -426,7 +428,7 @@ describe("EnvironmentLinker", () => {
       expect(deprovisionedEnvironmentId).toBe("env-link-test");
     }).pipe(
       Effect.provide(
-        testLayer({
+        layerTest({
           upsert: (input) =>
             Effect.sync(() => {
               persistedEndpoint = input.endpoint.httpBaseUrl;
@@ -467,7 +469,7 @@ describe("EnvironmentLinker", () => {
       expect(persisted).toBe(false);
     }).pipe(
       Effect.provide(
-        testLayer({
+        layerTest({
           displace: () =>
             Effect.sync(() => {
               persisted = true;
@@ -498,6 +500,6 @@ describe("EnvironmentLinker", () => {
           });
         }
       }
-    }).pipe(Effect.provide(testLayer({ consume: () => Effect.succeed(false) }))),
+    }).pipe(Effect.provide(layerTest({ consume: () => Effect.succeed(false) }))),
   );
 });

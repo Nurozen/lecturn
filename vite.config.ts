@@ -170,6 +170,8 @@ export default defineConfig({
       "lecturn/no-test-in-loop": "error",
       "lecturn/no-unscoped-has": "error",
       "lecturn/namespace-node-imports": "error",
+      "lecturn/prefer-catch-tags": "error",
+      "lecturn/require-suppression-reason": "error",
     },
     overrides: [
       {

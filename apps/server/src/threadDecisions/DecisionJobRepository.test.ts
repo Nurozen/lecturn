@@ -3,7 +3,7 @@ import { DEFAULT_DECISION_TRACKING_DESCRIPTION, ProjectId, ThreadId } from "@lec
 import { Effect, Result } from "effect";
 import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { DecisionSettingsRepository, make as makeSettings } from "./DecisionSettingsRepository.ts";
 import {
   make,
@@ -56,7 +56,7 @@ const fixture = Effect.gen(function* () {
   return { sql, settings, jobs };
 });
 
-it.layer(SqlitePersistenceMemory)("Decision job storage", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Decision job storage", (it) => {
   it.effect("indexes finalized projection text once even when completion events are empty", () =>
     Effect.gen(function* () {
       const { sql, settings, jobs } = yield* fixture;

@@ -9,6 +9,7 @@ import {
 } from "@lecturn/contracts/relay";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as SqlError from "effect/sql/SqlError";
 import * as Effect from "effect/Effect";
 import * as Function from "effect/Function";
 import * as Layer from "effect/Layer";
@@ -412,7 +413,12 @@ export const make = Effect.gen(function* () {
             return yield* use({ ...target, notified_push_events_json: json });
           }),
         )
-        .pipe(Effect.catchTag("SqlError", (cause) => Effect.fail(persistenceError(cause))));
+        .pipe(
+          // `use` brings its own error type, so match the transaction's SqlError by guard.
+          Effect.mapError((cause) =>
+            SqlError.isSqlError(cause) ? persistenceError(cause) : cause,
+          ),
+        );
     },
 
     markPushNotified: Effect.fn("relay.live_activities.mark_push_notified")(function* (input) {

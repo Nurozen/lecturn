@@ -8,7 +8,7 @@ import {
   ThreadNoteId,
   type ThreadNoteCreateInput,
 } from "@lecturn/contracts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { make } from "./ThreadNoteService.ts";
 import {
   clearV2Projection,
@@ -46,7 +46,7 @@ const fixture = Effect.gen(function* () {
   });
   return { sql, service: yield* make };
 });
-it.layer(SqlitePersistenceMemory)("ThreadNoteService", (it) => {
+it.layer(SqlitePersistence.layerMemory)("ThreadNoteService", (it) => {
   it.effect("derives project, persists anchors, edits comments and deletes idempotently", () =>
     Effect.gen(function* () {
       const { service } = yield* fixture;

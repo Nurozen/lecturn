@@ -31,10 +31,10 @@ import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../../config.ts";
 import * as GitWorkflow from "../../git/GitWorkflowService.ts";
 import * as McpSessionRegistryTestkit from "../../mcp/McpSessionRegistry.testkit.ts";
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import type { ProviderInstance } from "../../provider/ProviderDriver.ts";
-import * as ProviderInstanceRegistry from "../../provider/Services/ProviderInstanceRegistry.ts";
+import * as ProviderInstanceRegistry from "../../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as SourceControlProviderRegistry from "../../sourceControl/SourceControlProviderRegistry.ts";
 import { CodexProviderCapabilitiesV2 } from "../Adapters/CodexAdapterV2.ts";
@@ -44,7 +44,7 @@ import type { ProviderAdapterV2Shape } from "../ProviderAdapter.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import { makeProviderFailure } from "../ProviderFailure.ts";
 import * as ProjectStore from "../ProjectStore.ts";
-import { OrchestrationV2EventSinkLayerLive, OrchestrationV2LayerLive } from "../runtimeLayer.ts";
+import * as RuntimeLayer from "../runtimeLayer.ts";
 
 const driver = ProviderDriverKind.make("codex");
 const instanceId = ProviderInstanceId.make("codex");
@@ -72,13 +72,13 @@ const providerInstance = {
 } satisfies ProviderInstance;
 
 const TestLayer = Layer.mergeAll(
-  OrchestrationV2LayerLive,
-  OrchestrationV2EventSinkLayerLive,
+  RuntimeLayer.layer,
+  RuntimeLayer.layerEventSink,
   ProjectStore.layer,
   ProjectionStore.layer,
 ).pipe(
   Layer.provide(McpSessionRegistryTestkit.layer),
-  Layer.provide(SqlitePersistenceMemory),
+  Layer.provide(SqlitePersistence.layerMemory),
   Layer.provideMerge(
     Layer.mock(CheckpointStore.CheckpointStore)({
       listRestoreDeletions: (input) =>

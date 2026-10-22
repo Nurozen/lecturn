@@ -9,7 +9,7 @@ import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { CLOUD_LINKED_USER_ID, RELAY_ENVIRONMENT_CREDENTIAL_SECRET } from "./config.ts";
-import { applyCloudRelayConfig, unlinkCloudRelayConfig } from "./http.ts";
+import { applyCloudRelayConfig, unlinkCloudRelayConfig } from "./CloudLink.ts";
 import type { CloudManagedEndpointRuntime } from "./ManagedEndpointRuntime.ts";
 
 const publicKey = NodeCrypto.generateKeyPairSync("ed25519")
@@ -57,6 +57,7 @@ const blockedRuntime = Effect.gen(function* () {
       }),
     recoveryRequests: Stream.empty,
     requestRecovery: () => Effect.void,
+    tunnelConnected: Stream.empty,
     withLinkStateLock: (effect) => effect,
   };
   return { endpointRuntime, entered, release, calls: () => calls };
@@ -80,7 +81,7 @@ it.effect("rejects a competing account after an in-flight publish installs its o
     yield* Fiber.join(first);
     const result = yield* Fiber.join(second);
     expect(Result.isFailure(result)).toBe(true);
-    if (Result.isFailure(result)) expect(result.failure._tag).toBe("EnvironmentHttpConflictError");
+    if (Result.isFailure(result)) expect(result.failure._tag).toBe("CloudLinkAccountMismatchError");
     expect(new TextDecoder().decode(store.values.get(CLOUD_LINKED_USER_ID))).toBe("account-a");
     expect(new TextDecoder().decode(store.values.get(RELAY_ENVIRONMENT_CREDENTIAL_SECRET))).toBe(
       "credential-account-a",
@@ -145,6 +146,7 @@ it.effect.each([
         }),
       recoveryRequests: Stream.empty,
       requestRecovery: () => Effect.void,
+      tunnelConnected: Stream.empty,
       withLinkStateLock: (effect) => effect,
     };
     const dependencies = { secrets, endpointRuntime };
@@ -175,6 +177,7 @@ it.effect("a losing same-home installation cannot clear the owner's stored crede
           applyConfig: () => Effect.die("must not stop owner"),
           recoveryRequests: Stream.empty,
           requestRecovery: () => Effect.void,
+          tunnelConnected: Stream.empty,
           withLinkStateLock: (effect) => effect,
         },
       }).pipe(Effect.provideService(ServerSecretStore.ServerSecretStore, store.secrets)),

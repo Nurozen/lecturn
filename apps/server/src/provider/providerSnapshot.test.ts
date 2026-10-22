@@ -23,13 +23,13 @@ import { CopilotProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/Copi
 import { CursorProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CursorAdapterV2.ts";
 import { GrokProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/GrokAdapterV2.ts";
 import { OpenCodeProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/OpenCodeAdapterV2.ts";
-import { ANTIGRAVITY_PRESENTATION } from "./Layers/AntigravityProvider.ts";
-import { CLAUDE_PRESENTATION } from "./Layers/ClaudeProvider.ts";
-import { CODEX_PRESENTATION } from "./Layers/CodexProvider.ts";
-import { COPILOT_PRESENTATION } from "./Layers/CopilotProvider.ts";
-import { CURSOR_PRESENTATION } from "./Layers/CursorProvider.ts";
-import { GROK_PRESENTATION } from "./Layers/GrokProvider.ts";
-import { OPENCODE_PRESENTATION } from "./Layers/OpenCodeProvider.ts";
+import { ANTIGRAVITY_PRESENTATION } from "./AntigravityProvider.ts";
+import { CLAUDE_PRESENTATION } from "./ClaudeProvider.ts";
+import { CODEX_PRESENTATION } from "./CodexProvider.ts";
+import { COPILOT_PRESENTATION } from "./CopilotProvider.ts";
+import { CURSOR_PRESENTATION } from "./CursorProvider.ts";
+import { GROK_PRESENTATION } from "./GrokProvider.ts";
+import { OPENCODE_PRESENTATION } from "./OpenCodeProvider.ts";
 
 const OPENCODE_CUSTOM_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [

@@ -67,7 +67,7 @@ import * as ServerConfig from "../config.ts";
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome.ts";
-import { deriveProviderInstanceConfigMap } from "../provider/Layers/ProviderInstanceRegistryHydration.ts";
+import { deriveProviderInstanceConfigMap } from "../provider/ProviderInstanceRegistryHydration.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   increment,
@@ -2735,10 +2735,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         ),
       )
       .pipe(
-        Effect.catchTag(
-          "StaveRuntimeFenced",
-          (cause) => new TerminalCwdStatError({ cwd: input.cwd, cause }),
-        ),
+        Effect.catchTags({
+          StaveRuntimeFenced: (cause) => new TerminalCwdStatError({ cwd: input.cwd, cause }),
+        }),
       );
   });
 
@@ -3129,10 +3128,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         ),
       )
       .pipe(
-        Effect.catchTag(
-          "StaveRuntimeFenced",
-          (cause) => new TerminalCwdStatError({ cwd: input.cwd, cause }),
-        ),
+        Effect.catchTags({
+          StaveRuntimeFenced: (cause) => new TerminalCwdStatError({ cwd: input.cwd, cause }),
+        }),
       );
 
   const close: TerminalManager["Service"]["close"] = (input) =>

@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { DecisionId, ThreadId } from "@lecturn/contracts";
 import { Effect, Result, Schema } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { emptyPolicy } from "../contextual/ContextualPurge.ts";
 import {
   assertContextualOrigins,
@@ -29,7 +29,7 @@ const fixture = Effect.gen(function* () {
   return sql;
 });
 
-it.layer(SqlitePersistenceMemory)("Decision Contextual lineage", (it) => {
+it.layer(SqlitePersistence.layerMemory)("Decision Contextual lineage", (it) => {
   it.effect(
     "keeps flattened source identities after packet expiry without recovering source quotes",
     () =>

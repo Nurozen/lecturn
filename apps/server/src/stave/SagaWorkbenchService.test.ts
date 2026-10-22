@@ -24,9 +24,9 @@ import {
 import { Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
 import { ServerConfig } from "../config.ts";
 import { StaveOrchestration, type StaveThreadView } from "./StaveOrchestration.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import * as Repository from "../persistence/Layers/SagaWorkbenchRepository.ts";
-import { SagaWorkbenchRepository } from "../persistence/Services/SagaWorkbenchRepository.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as Repository from "../persistence/SagaWorkbenchRepository.ts";
+import { SagaWorkbenchRepository } from "../persistence/SagaWorkbenchRepository.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
 import { SagaWorkbenchEvidence } from "./SagaWorkbenchEvidence.ts";
@@ -36,13 +36,10 @@ import {
   make,
   type PromptInferenceEvent,
 } from "./SagaWorkbenchService.ts";
-import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import * as SqlClient from "effect/sql/SqlClient";
-import {
-  emptyWorkflow,
-  workflowIdentityKey,
-} from "../persistence/Services/SagaWorkbenchRepository.ts";
+import { emptyWorkflow, workflowIdentityKey } from "../persistence/SagaWorkbenchRepository.ts";
 import { StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
 import { StaveRpcRuntime } from "./staveRpcHandlers.ts";
 import * as Lock from "./StaveSpaceLock.ts";
@@ -369,7 +366,7 @@ const harness = Effect.fn("harness")(function* (
   };
 });
 const testLayer = Repository.layer.pipe(
-  Layer.provideMerge(SqlitePersistenceMemory),
+  Layer.provideMerge(SqlitePersistence.layerMemory),
   Layer.provideMerge(NodeServices.layer),
 );
 it.layer(testLayer)("Saga workbench service", (it) => {

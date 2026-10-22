@@ -45,7 +45,10 @@ import {
   type CodexArtifactTemplate,
 } from "@lecturn/client-runtime/codex-artifact-templates";
 import type { ThreadUserInputQuestion } from "@lecturn/client-runtime/state/thread-requests";
-import { presentPendingBackgroundWork } from "@lecturn/client-runtime/state/thread-execution";
+import {
+  presentPendingBackgroundWork,
+  presentProviderGoal,
+} from "@lecturn/client-runtime/state/thread-execution";
 import { resolveSubagentPillSegment } from "@lecturn/client-runtime/state/thread-subagents";
 import { hasRunlessForkHistory } from "@lecturn/client-runtime/state/thread-fork-points";
 import {
@@ -583,6 +586,14 @@ const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
           .map((item) => item.label)
           .join(", ")}`,
         waiting: pendingBackgroundWork.waiting,
+      };
+    }
+    if (props.selectedThread.goal !== null && contentPresentationKind === "ready") {
+      const goal = presentProviderGoal(props.selectedThread.goal, false);
+      return {
+        kind: "goal",
+        label: goal.title,
+        accessibilityLabel: `${goal.title}: ${goal.objective}`,
       };
     }
     return null;
