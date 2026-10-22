@@ -20,7 +20,7 @@ import {
   decisionWriterOutputFixture,
 } from "./decisionWriterTestFixtures.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
-import { writeFakeCli } from "../testUtils/fakeCli.ts";
+import { writeFakeCli } from "@lecturn/provider-testing/fakeCli";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 const encodeTestJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 

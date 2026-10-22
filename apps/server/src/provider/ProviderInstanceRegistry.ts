@@ -72,7 +72,7 @@ import * as Stream from "effect/Stream";
 
 import { buildUnavailableProviderSnapshot } from "./unavailableProviderSnapshot.ts";
 import * as ProviderInstanceRegistryMutator from "./ProviderInstanceRegistryMutator.ts";
-import type { AnyProviderDriver, ProviderInstance } from "./ProviderDriver.ts";
+import type { AnyProviderDriver, ProviderInstance } from "@lecturn/provider-core/server/driver";
 
 export class ProviderInstanceRegistry extends Context.Service<
   ProviderInstanceRegistry,

@@ -25,8 +25,8 @@ import type {
   ImportExternalSessionInput,
   ListExternalSessionsInput,
   ProviderInstance,
-} from "./ProviderDriver.ts";
-import { makeManualOnlyProviderMaintenanceCapabilities } from "./providerMaintenance.ts";
+} from "@lecturn/provider-core/server/driver";
+import { makeManualOnlyProviderMaintenanceCapabilities } from "@lecturn/provider-core/server/maintenanceResolver";
 import { ProviderInstanceRegistry } from "./ProviderInstanceRegistry.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));

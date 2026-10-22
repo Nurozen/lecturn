@@ -2018,6 +2018,29 @@ const multiSelectQuestion = {
 } as const;
 
 describe("pending user input answers", () => {
+  it("preserves exact editor text, including a deliberately cleared answer", () => {
+    const question = { ...singleSelectQuestion, initialAnswer: "  Proposed message\n" };
+    expect(
+      buildPendingUserInputAnswers([question], {
+        runtime: { customAnswer: question.initialAnswer },
+      }),
+    ).toEqual({ runtime: question.initialAnswer });
+    expect(
+      buildPendingUserInputAnswers([question], {
+        runtime: { customAnswer: "  Edited message\n\n" },
+      }),
+    ).toEqual({ runtime: "  Edited message\n\n" });
+    expect(buildPendingUserInputAnswers([question], { runtime: { customAnswer: "" } })).toEqual({
+      runtime: "",
+    });
+    expect(buildPendingUserInputAnswers([question], { runtime: { customAnswer: " \n" } })).toEqual({
+      runtime: " \n",
+    });
+    expect(setPendingUserInputCustomAnswer(question, { selectedOptionValues: ["Go"] }, "")).toEqual(
+      { customAnswer: "" },
+    );
+  });
+
   it("replaces single-select options and toggles multi-select options", () => {
     expect(
       togglePendingUserInputOptionSelection(
@@ -2286,7 +2309,8 @@ it.each(["First paragraph.\n\nSecond paragraph.", ""])(
     );
     if (text) {
       expect(rows.find((row) => row.type === "work-toggle")).toMatchObject({
-        summary: "First paragraph. Second paragraph.",
+        summary: "Thinking",
+        thought: "First paragraph.",
         live: true,
       });
     } else {
@@ -2299,6 +2323,32 @@ it.each(["First paragraph.\n\nSecond paragraph.", ""])(
     }
   },
 );
+
+it("keeps the latest thought under the live tool status", () => {
+  const at = "2026-06-20T00:00:02.000Z";
+  const thought: OrchestrationV2TurnItem = {
+    ...base("found-thought", at, 1),
+    type: "reasoning",
+    status: "completed",
+    streaming: false,
+    text: "Found the cause: no commits yet. Checking the UI next.",
+  };
+  const tool = { ...command(at), status: "running" as const, completedAt: null };
+  const rows = deriveThreadFeedPresentation(
+    buildThreadFeed([projected(userMessage(), 0), projected(thought, 1), projected(tool, 2)]),
+    { runId, status: "running", startedAt: at, completedAt: null },
+    new Set(),
+    new Set(),
+    at,
+  );
+  expect(rows.find((row) => row.type === "work-toggle")).toMatchObject({
+    thought: "Found the cause: no commits yet.",
+    live: true,
+  });
+  expect(rows.find((row) => row.type === "work-toggle")).not.toMatchObject({
+    summary: "Thinking",
+  });
+});
 
 it("stops stranded thinking after a steer and follows the next thought or tool", () => {
   const at = "2026-06-20T00:00:02.000Z";
@@ -2323,7 +2373,8 @@ it("stops stranded thinking after a steer and follows the next thought or tool",
       at,
     );
   expect(rows([first]).find((row) => row.type === "work-toggle")).toMatchObject({
-    summary: "first-thought",
+    summary: "Thinking",
+    thought: "first-thought",
     live: true,
     shimmer: true,
   });
@@ -2347,9 +2398,11 @@ it("stops stranded thinking after a steer and follows the next thought or tool",
   ]) {
     const live = rows(items).filter((row) => row.type === "work-toggle" && row.shimmer);
     expect(live).toHaveLength(1);
-    expect(live[0]).toMatchObject({
-      summary: items.at(-1)!.type === "reasoning" ? "next-thought" : "Running vp",
-    });
+    expect(live[0]).toMatchObject(
+      items.at(-1)!.type === "reasoning"
+        ? { summary: "Thinking", thought: "next-thought" }
+        : { summary: "Running vp" },
+    );
   }
   expect(first.status).toBe("running");
 });
@@ -2799,5 +2852,37 @@ describe("html renders", () => {
       const entries = buildThreadFeed([projected(call, 0)]);
       expect(entries.map((entry) => entry.type)).toEqual(["activity-group"]);
     }
+  });
+});
+
+describe("MCP apps", () => {
+  const app = {
+    attachmentId: "attachment-app",
+    server: "weather",
+    tool: "get_weather",
+    resourceUri: "ui://weather/dashboard",
+  };
+  const appCall = (status: OrchestrationV2TurnItem["status"]): OrchestrationV2TurnItem => ({
+    ...base("item-app", "2026-06-20T00:00:02.500Z", 2),
+    status,
+    type: "dynamic_tool",
+    toolName: "weather.get_weather",
+    input: { city: "Oslo" },
+    output: { lecturnMcpApp: app, result: { content: [] } },
+  });
+  const feed = (status: OrchestrationV2TurnItem["status"]) =>
+    buildThreadFeed([
+      projected(userMessage(), 0),
+      projected(appCall(status), 1),
+      projected(assistantMessage("2026-06-20T00:00:04.000Z"), 2),
+    ]);
+
+  it("hosts a completed app in place of its tool row, owned by its source item", () => {
+    const entry = feed("completed").find((candidate) => candidate.type === "mcp-app");
+    expect(entry).toMatchObject({ type: "mcp-app", app, itemId: "item-app", runId });
+  });
+
+  it("keeps a running app call an ordinary work row", () => {
+    expect(feed("running").some((candidate) => candidate.type === "mcp-app")).toBe(false);
   });
 });

@@ -18,9 +18,12 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { HttpClient } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import * as NodeUtil from "node:util";
 
 import * as ModelManifest from "./ModelManifest.ts";
 import { resolveProviderCompatibility } from "./providerCompatibility.ts";
@@ -32,9 +35,9 @@ import {
   resolveLatestProviderVersion,
   type ProviderMaintenanceCommandAction,
   ProviderVersionCache,
-} from "./providerMaintenance.ts";
-import type { ProviderMaintenanceCapabilities } from "./providerMaintenance.ts";
-import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
+} from "@lecturn/provider-core/server/maintenanceResolver";
+import type { ProviderMaintenanceCapabilities } from "@lecturn/provider-core/server/maintenanceResolver";
+import { collectUint8StreamText } from "@lecturn/provider-core/server/collectStreamText";
 const isServerProviderUpdateError = Schema.is(ServerProviderUpdateError);
 
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
@@ -45,6 +48,12 @@ const UPDATE_FAILURE_LOG_OUTPUT_MAX_LENGTH = 2_000;
 // Package managers must not inherit it: it leaks into install scripts and any
 // Electron-based tool they launch.
 const UPDATE_ENV_BLOCKLIST = new Set(["ELECTRON_RUN_AS_NODE"]);
+// Every progress publish resends the provider list to each client, so the
+// installer's output is sampled rather than forwarded line by line.
+const UPDATE_PROGRESS_INTERVAL = Duration.seconds(1);
+const UPDATE_PROGRESS_MAX_LENGTH = 200;
+// An installer may write for minutes without a line ending; only its tail matters.
+const UPDATE_PARTIAL_LINE_MAX_LENGTH = 4_096;
 
 export interface ProviderMaintenanceCommandResult {
   readonly stdout: string;
@@ -90,6 +99,7 @@ const runProviderMaintenanceCommandWithSpawner = Effect.fn("ProviderMaintenanceR
     readonly command: string;
     readonly args: ReadonlyArray<string>;
     readonly env?: NodeJS.ProcessEnv;
+    readonly onProgress?: (line: string) => Effect.Effect<void>;
   }) {
     const collectCommandResult = Effect.fn("ProviderMaintenanceRunner.collectCommandResult")(
       function* () {
@@ -124,14 +134,44 @@ const runProviderMaintenanceCommandWithSpawner = Effect.fn("ProviderMaintenanceR
           );
         yield* Effect.addFinalizer(() => child.kill().pipe(Effect.ignore));
 
+        // Holds the newest output line not yet reported; the sampler takes it.
+        const pendingProgress = yield* Ref.make<string | null>(null);
+        const onProgress = input.onProgress;
+        if (onProgress) {
+          yield* Ref.getAndSet(pendingProgress, null).pipe(
+            Effect.flatMap((line) => (line === null ? Effect.void : onProgress(line))),
+            Effect.repeat(Schedule.spaced(UPDATE_PROGRESS_INTERVAL)),
+            Effect.forkScoped,
+          );
+        }
+        const trackProgress = <E>(stream: Stream.Stream<Uint8Array, E>) => {
+          if (!onProgress) {
+            return stream;
+          }
+          const decoder = new TextDecoder();
+          let partialLine = "";
+          return stream.pipe(
+            Stream.tap((chunk) => {
+              const split = splitOutputLines(partialLine, decoder.decode(chunk, { stream: true }));
+              partialLine = split.partialLine;
+              // A progress bar that redraws with a leading `\r` keeps its newest
+              // frame unterminated, so that frame is the latest status.
+              const line =
+                toProgressLine(split.partialLine) ??
+                split.lines.map(toProgressLine).findLast((value) => value !== null);
+              return line ? Ref.set(pendingProgress, line) : Effect.void;
+            }),
+          );
+        };
+
         const [stdout, stderr, exitCode] = yield* Effect.all(
           [
             collectUint8StreamText({
-              stream: child.stdout,
+              stream: trackProgress(child.stdout),
               maxBytes: UPDATE_OUTPUT_MAX_BYTES,
             }),
             collectUint8StreamText({
-              stream: child.stderr,
+              stream: trackProgress(child.stderr),
               maxBytes: UPDATE_OUTPUT_MAX_BYTES,
             }),
             child.exitCode,
@@ -178,6 +218,35 @@ const runProviderMaintenanceCommandWithSpawner = Effect.fn("ProviderMaintenanceR
     );
   },
 );
+
+/**
+ * Split a chunk of installer output into complete lines. `\r` ends a line too,
+ * so a redrawn progress bar reports its latest frame.
+ */
+export function splitOutputLines(
+  partialLine: string,
+  text: string,
+): { readonly lines: ReadonlyArray<string>; readonly partialLine: string } {
+  const parts = (partialLine + text).split(/\r\n|\r|\n/);
+  return { partialLine: (parts.pop() ?? "").slice(-UPDATE_PARTIAL_LINE_MAX_LENGTH), lines: parts };
+}
+
+/** Turn one raw output line into a short status message, or null if it has no text. */
+export function toProgressLine(line: string): string | null {
+  const text = NodeUtil.stripVTControlCharacters(line).replace(/\s+/g, " ").trim();
+  if (text.length === 0) {
+    return null;
+  }
+  return text.length <= UPDATE_PROGRESS_MAX_LENGTH
+    ? text
+    : `${text.slice(0, UPDATE_PROGRESS_MAX_LENGTH - 1)}…`;
+}
+
+/** `claude update` reads better in a status line than the full executable path. */
+function describeCommand(command: ProviderMaintenanceCommandAction): string {
+  const executable = command.executable.split(/[\\/]/).pop() || command.executable;
+  return [executable, ...command.args].join(" ");
+}
 
 function trimNullable(value: string): string | null {
   const trimmed = value.trim();
@@ -237,11 +306,15 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
   const versionCache = yield* ProviderVersionCache;
-  const runMaintenanceCommand = (update: ProviderMaintenanceCommandAction) =>
+  const runMaintenanceCommand = (
+    update: ProviderMaintenanceCommandAction,
+    onProgress: (line: string) => Effect.Effect<void>,
+  ) =>
     runProviderMaintenanceCommandWithSpawner({
       spawner,
       command: update.executable,
       args: update.args,
+      onProgress,
       ...(update.env ? { env: update.env } : {}),
     });
   const commandCoordinator = yield* makeProviderMaintenanceCommandCoordinator({
@@ -370,14 +443,16 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
           function* () {
             const startedAt = yield* nowIso;
             yield* Ref.set(startedAtRef, startedAt);
-            yield* setUpdateState(
-              makeUpdateState({
-                status: "running",
-                startedAt,
-                finishedAt: null,
-                message: "Updating provider.",
-              }),
-            );
+            const setRunningMessage = (message: string) =>
+              setUpdateState(
+                makeUpdateState({
+                  status: "running",
+                  startedAt,
+                  finishedAt: null,
+                  message,
+                }),
+              ).pipe(Effect.asVoid);
+            yield* setRunningMessage("Checking for the latest version");
 
             // Whoever held the lock may have installed this same update (another
             // Lecturn server sharing the global prefix), so re-probe before
@@ -461,7 +536,8 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
                 }),
               );
             }
-            const result = yield* runMaintenanceCommand(command);
+            yield* setRunningMessage(`Running ${describeCommand(command)}`);
+            const result = yield* runMaintenanceCommand(command, setRunningMessage);
             const finishedAt = yield* nowIso;
             if (result.timedOut || result.exitCode !== 0) {
               yield* Effect.logWarning("Provider update command failed", {
@@ -483,6 +559,7 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
               );
             }
 
+            yield* setRunningMessage("Verifying the installed version");
             // Homebrew's "latest" moves once the upgrade lands; read it again.
             const verified = yield* providerRegistry.getProviderMaintenanceCapabilitiesForInstance(
               instanceId,

@@ -37,7 +37,7 @@ import {
   type PromptInferenceEvent,
 } from "./SagaWorkbenchService.ts";
 import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
-import type { ProviderInstance } from "../provider/ProviderDriver.ts";
+import type { ProviderInstance } from "@lecturn/provider-core/server/driver";
 import * as SqlClient from "effect/sql/SqlClient";
 import { emptyWorkflow, workflowIdentityKey } from "../persistence/SagaWorkbenchRepository.ts";
 import { StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";

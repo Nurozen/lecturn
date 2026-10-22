@@ -22,7 +22,7 @@ import type {
   ImportedExternalSession,
   ImportedTranscriptEntry,
   ProviderInstance,
-} from "../ProviderDriver.ts";
+} from "@lecturn/provider-core/server/driver";
 
 const THREAD_IMPORT_TIMEOUT = "20 seconds";
 const TURNS_PAGE_SIZE = 100;

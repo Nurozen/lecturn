@@ -29,9 +29,9 @@ import { getModelSelectionStringOptionValue } from "@lecturn/shared/model";
 import * as AnalyticsService from "../telemetry/AnalyticsService.ts";
 import * as EventSink from "./EventSink.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
-import * as IdAllocator from "./IdAllocator.ts";
-import { ProviderAdapterV2Event } from "./ProviderAdapter.ts";
-import { makeProviderFailureTurnItem } from "./ProviderFailure.ts";
+import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
+import { ProviderAdapterV2Event } from "@lecturn/provider-core/server/ProviderAdapter";
+import { makeProviderFailureTurnItem } from "@lecturn/provider-core/server/failure";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import { stripUnservedToolOutputImageBytes } from "./toolOutputImageBytes.ts";
 

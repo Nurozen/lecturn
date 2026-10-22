@@ -9,6 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildHomeProjectScopes,
   buildHomeThreadGroups,
+  findHomeProjectScope,
   sortHomeProjectScopes,
 } from "./homeThreadList";
 import { makeThreadShellFixture } from "../../test-fixtures";
@@ -839,4 +840,37 @@ it("never merges the same repository across Connect accounts", () => {
     ["direct"],
   ]);
   expect(new Set(scopes.map((scope) => scope.key)).size).toBe(3);
+});
+
+describe("findHomeProjectScope", () => {
+  it("prefers an exact scope key over a project ID that collides with it", () => {
+    const environmentId = EnvironmentId.make("environment-local");
+    // project.create accepts caller-supplied IDs, so one project's scoped ref
+    // key can equal another project's normalized workspace-root scope key.
+    const collidingProject = makeProject({
+      environmentId,
+      id: ProjectId.make("/workspaces/target"),
+      title: "Colliding",
+      workspaceRoot: "/workspaces/colliding",
+    });
+    const targetProject = makeProject({
+      environmentId,
+      id: ProjectId.make("project-target"),
+      title: "Target",
+      workspaceRoot: "/workspaces/target",
+    });
+    const scopes = buildHomeProjectScopes({
+      projects: [collidingProject, targetProject],
+      environmentId: null,
+      projectGroupingMode: "separate",
+    });
+    const targetScope = scopes.find((scope) => scope.title === "Target");
+    expect(scopes.map((scope) => scope.title)).toEqual(["Colliding", "Target"]);
+    expect(targetScope?.key).toBe("environment-local:/workspaces/target");
+
+    expect(findHomeProjectScope(scopes, "environment-local:/workspaces/target")).toBe(targetScope);
+    expect(findHomeProjectScope(scopes, "environment-local:project-target")).toBe(targetScope);
+    expect(findHomeProjectScope(scopes, "environment-local:missing")).toBeNull();
+    expect(findHomeProjectScope(scopes, null)).toBeNull();
+  });
 });

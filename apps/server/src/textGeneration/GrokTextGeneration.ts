@@ -10,7 +10,7 @@ import type * as EffectAcpErrors from "effect-acp/errors";
 import { type GrokSettings, TextGenerationError } from "@lecturn/contracts";
 import { getModelSelectionStringOptionValue } from "@lecturn/shared/model";
 
-import * as TextGenerationOperations from "./TextGenerationOperations.ts";
+import * as TextGenerationOperations from "@lecturn/provider-core/server/textGenerationOperations";
 import {
   applyGrokAcpModelSelection,
   currentGrokModelIdFromSessionSetup,

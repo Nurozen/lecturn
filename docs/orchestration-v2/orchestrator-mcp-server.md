@@ -145,8 +145,13 @@ provider-specific extensions; those remain in flavors such as Grok.
 
 ### Pi V2
 
-Pi core has no MCP client. When a provider session credential exists, the
-adapter writes a Lecturn-owned extension into the server cache and spawns
+Lecturn keeps a provider-session HTTP bridge even when Pi supports native MCP.
+`mcp.json` entries override native registrations, and native MCP's default
+60-second request timeout can interrupt long-running Lecturn tools. The bridge
+owns the injected endpoint and credential and forwards Pi's cancellation signal.
+
+When a provider session credential exists, the adapter writes a Lecturn-owned
+extension into the server cache and spawns
 `pi --mode rpc --extension <cache>/pi-lecturn-mcp-extension.ts` with:
 
 ```text
@@ -154,9 +159,15 @@ LECTURN_MCP_URL=http://127.0.0.1:<port>/mcp
 LECTURN_MCP_BEARER_TOKEN=<provider-session-token>
 ```
 
-The extension connects to that HTTP endpoint, lists tools, and registers each
-one with `pi.registerTool` under a `mcp__lecturn__` namespace
-(`mcp__lecturn__delegate_task`, `mcp__lecturn__lecturn_thread_launch`, and the rest).
+The extension registers each tool with `pi.registerTool` under the
+`mcp__lecturn__` namespace (`mcp__lecturn__delegate_task`,
+`mcp__lecturn__lecturn_thread_launch`, and the rest). Those public names stay
+stable for saved loadouts and tool selectors, and because `lecturn` is already
+Pi's normalized server name they also reserve it against a configured MCP server
+of the same name. On Pi 0.99+, `orchestrator_capabilities`, `delegate_task`,
+and `task_status` remain directly available; optional tools are discovered
+through Pi's builtin `tool_search`. On older Pi or without builtin search, all
+tools remain directly available.
 The bridge calls the original MCP tool name over HTTP. Follow-up requests send
 `mcp-protocol-version: 2025-06-18`; Effect's MCP transport returns 400
 without it. The first turn of a session also receives the shared Lecturn
@@ -352,9 +363,12 @@ and `creationSource: "mcp"`; provider output uses `creationSource: "provider"`.
 Actor and ingress are separate so agent-authored user-role messages remain
 distinguishable from human-authored messages.
 
-List, read, and launch results include `link`, a Markdown link of the form
-`[title](lecturn-thread://v1/<environmentId>/<threadId>)` that clients open as
-the thread. List and read results also report `snoozed` and `snoozedUntil`, and
+Agents mention another thread as `[title](lecturn-thread://v1/<threadId>)`.
+The link carries only the id, which resolves in the environment of the message
+that holds it. Clients show the thread's current title rather than the label, so
+a rename never leaves a stale link.
+
+List and read results report `snoozed` and `snoozedUntil`, and
 `lecturn_thread_list` filters on `snoozed`. The server's `isSnoozed` follows the
 client's `effectiveSnoozed`, so agents and the sidebar agree: a snoozed thread
 wakes early when it has a pending request, fails, or completes after the snooze.

@@ -22,13 +22,16 @@ import * as Stream from "effect/Stream";
 
 import * as ProviderAuthFlow from "../provider/ProviderAuthFlow.ts";
 import type { ProviderAuthController } from "../provider/ProviderAuthService.ts";
-import type { ProviderInstance } from "../provider/ProviderDriver.ts";
+import type { ProviderInstance } from "@lecturn/provider-core/server/driver";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
-import { ProviderAdapterOpenSessionError, type ProviderAdapterV2Shape } from "./ProviderAdapter.ts";
+import {
+  ProviderAdapterOpenSessionError,
+  type ProviderAdapterV2Shape,
+} from "@lecturn/provider-core/server/ProviderAdapter";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
-} from "./ProviderAdapterDriver.ts";
+} from "@lecturn/provider-core/server/adapterDriver";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 
 const isOpenSessionError = Schema.is(ProviderAdapterOpenSessionError);

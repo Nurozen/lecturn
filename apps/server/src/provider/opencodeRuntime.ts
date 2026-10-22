@@ -30,10 +30,10 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-import { signalProcessGroup } from "../process/processGroup.ts";
+import { signalProcessGroup } from "@lecturn/provider-core/server/processGroup";
 import { isWindowsCommandNotFound } from "../processRunner.ts";
 import * as OpenCodeServerLedger from "./OpenCodeServerLedger.ts";
-import { collectStreamAsString } from "./providerSnapshot.ts";
+import { collectStreamAsString } from "@lecturn/provider-core/server/snapshotProbe";
 import * as NetService from "@lecturn/shared/Net";
 import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import { compareSemverVersions, parseSemver } from "@lecturn/shared/semver";

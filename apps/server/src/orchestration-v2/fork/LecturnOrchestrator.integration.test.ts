@@ -43,15 +43,19 @@ import * as GitWorkflow from "../../git/GitWorkflowService.ts";
 import * as McpSessionRegistryTestkit from "../../mcp/McpSessionRegistry.testkit.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
-import type { ImportedTranscriptEntry, ProviderInstance } from "../../provider/ProviderDriver.ts";
+import type {
+  ImportedTranscriptEntry,
+  ProviderInstance,
+} from "@lecturn/provider-core/server/driver";
 import * as ProviderInstanceRegistry from "../../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as SourceControlProviderRegistry from "../../sourceControl/SourceControlProviderRegistry.ts";
+import * as PreviewManager from "../../preview/Manager.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
 import { CodexProviderCapabilitiesV2 } from "../Adapters/CodexAdapterV2.ts";
 import * as EventSink from "../EventSink.ts";
 import * as Orchestrator from "../Orchestrator.ts";
-import type { ProviderAdapterV2Shape } from "../ProviderAdapter.ts";
+import type { ProviderAdapterV2Shape } from "@lecturn/provider-core/server/ProviderAdapter";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as ProjectStore from "../ProjectStore.ts";
 import { OrchestrationEffectRequestV2 } from "../EffectOutbox.ts";
@@ -929,6 +933,7 @@ it.layer(TestLayer)("Lecturn fork behavior on the V2 orchestrator", (it) => {
             ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-fork-attachments-" }),
           ),
           Layer.provide(Layer.mock(TerminalManager.TerminalManager)({})),
+          Layer.provide(Layer.mock(PreviewManager.PreviewManager)({})),
         ),
       ),
     ),
@@ -1044,6 +1049,7 @@ it.layer(TestLayer)("Lecturn fork behavior on the V2 orchestrator", (it) => {
             ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-native-fork-attachments-" }),
           ),
           Layer.provide(Layer.mock(TerminalManager.TerminalManager)({})),
+          Layer.provide(Layer.mock(PreviewManager.PreviewManager)({})),
         ),
       ),
     ),

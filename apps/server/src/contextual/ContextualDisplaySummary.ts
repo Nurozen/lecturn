@@ -3,7 +3,7 @@ import { Context, Deferred, Effect, Layer, Schema, Semaphore, Stream } from "eff
 import * as SqlClient from "effect/sql/SqlClient";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
-import { ContextualSummaryOutput } from "../textGeneration/TextGenerationPrompts.ts";
+import { ContextualSummaryOutput } from "@lecturn/provider-core/server/textGenerationPrompts";
 import { ContextualNotifications } from "./ContextualNotifications.ts";
 import { contextualPacketText } from "./ContextualPacketText.ts";
 import { appendContextualEvent } from "./ContextualSettings.ts";

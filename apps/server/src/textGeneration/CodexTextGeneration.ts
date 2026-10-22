@@ -17,12 +17,15 @@ import { resolveSpawnCommand } from "@lecturn/shared/shell";
 
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
-import { expandHomePath } from "../pathExpansion.ts";
+import { expandHomePath } from "@lecturn/provider-core/server/pathExpansion";
 import { codexExecLaunchArgs, resolveCodexLaunchArgs } from "../provider/codexLaunchArgs.ts";
 import type * as TextGeneration from "./TextGeneration.ts";
-import * as TextGenerationOperations from "./TextGenerationOperations.ts";
-import { buildDecisionNotesPrompt } from "./TextGenerationPrompts.ts";
-import { normalizeCliError, toCodexJsonSchemaObject } from "./TextGenerationUtils.ts";
+import * as TextGenerationOperations from "@lecturn/provider-core/server/textGenerationOperations";
+import { buildDecisionNotesPrompt } from "@lecturn/provider-core/server/textGenerationPrompts";
+import {
+  normalizeCliError,
+  toCodexJsonSchemaObject,
+} from "@lecturn/provider-core/server/textGenerationUtils";
 import { codexModelFamily, getModelSelectionStringOptionValue } from "@lecturn/shared/model";
 import { prepareCodexInferenceIsolation } from "./CodexInferenceIsolation.ts";
 import { getCodexServiceTierOptionValue } from "../codexModelOptions.ts";

@@ -22,7 +22,7 @@ import {
   recordContextualLineage,
 } from "../threadDecisions/DecisionContextualLineage.ts";
 import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
-import type { ProviderInstance } from "../provider/ProviderDriver.ts";
+import type { ProviderInstance } from "@lecturn/provider-core/server/driver";
 import { make, routineFollowup } from "./ContextualService.ts";
 import { applyFork } from "./ContextualLifecycle.ts";
 import {

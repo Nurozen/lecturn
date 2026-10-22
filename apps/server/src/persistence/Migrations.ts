@@ -91,6 +91,10 @@ import Migration0071 from "./Migrations/056_RemoveRedundantProjectionIndexes.ts"
 // (DecisionScanPreparation, DecisionEvaluationReuse), so they run here as 72 and 73.
 import Migration0072 from "./Migrations/057_ScheduledTaskWebhooks.ts";
 import Migration0073 from "./Migrations/058_WebhookRelayDeliveries.ts";
+// Upstream published these as 59 and 60, which Lecturn's ledger already used
+// (Contextual, DecisionRelations), so they run here as 74 and 75.
+import Migration0074 from "./Migrations/059_McpAppModelContext.ts";
+import Migration0075 from "./Migrations/060_ThreadSnapshotWindowIndexes.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -199,6 +203,10 @@ export const migrationEntries = [
   // Upstream 57 and 58.
   [72, "ScheduledTaskWebhooks", ScheduledTaskWebhooksCompatibility],
   [73, "WebhookRelayDeliveries", Migration0073],
+  // Upstream 59 and 60. Both are idempotent, so a database that already ran
+  // them under upstream's ids is safe to run again here.
+  [74, "McpAppModelContext", Migration0074],
+  [75, "ThreadSnapshotWindowIndexes", Migration0075],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

@@ -10,11 +10,11 @@ import { Effect, Layer, Result, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
-import type { ProviderInstance } from "../provider/ProviderDriver.ts";
+import type { ProviderInstance } from "@lecturn/provider-core/server/driver";
 import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import { make as makeAdmission, ProviderWorkAdmission } from "../provider/ProviderWorkAdmission.ts";
 import { buildUnavailableProviderSnapshot } from "../provider/unavailableProviderSnapshot.ts";
-import { makeManualOnlyProviderMaintenanceCapabilities } from "../provider/providerMaintenance.ts";
+import { makeManualOnlyProviderMaintenanceCapabilities } from "@lecturn/provider-core/server/maintenanceResolver";
 import { make } from "./DecisionWriterBinding.ts";
 import { clearV2Projection, installLegacyProjectionMirror } from "./V2ProjectionTestFixtures.ts";
 

@@ -38,9 +38,9 @@ import {
   buildServerProvider,
   COMPACT_SLASH_COMMAND,
   type ServerProviderDraft,
-} from "./providerSnapshot.ts";
-import { expandHomePath } from "../pathExpansion.ts";
-import { makeUnavailableUsageLimits } from "./providerUsageLimits.ts";
+} from "@lecturn/provider-core/server/snapshotProbe";
+import { expandHomePath } from "@lecturn/provider-core/server/pathExpansion";
+import { makeUnavailableUsageLimits } from "@lecturn/provider-core/server/usageLimits";
 import {
   codexRateLimitsFailureMessage,
   codexRateLimitsToLimits,

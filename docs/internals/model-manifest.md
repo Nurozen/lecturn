@@ -28,6 +28,12 @@ For supplemental Claude metadata, add an object to `providers.claudeAgent.models
 profile where possible. Add or change a profile only when the required capability combination does
 not already exist.
 
+A model that needs a newer provider CLI should still be announced as soon as it
+ships. Claude entries set `adapter.claudeCode.minVersion`; Codex entries set
+`adapter.codex.minVersion`, since Codex's own `model/list` cannot name models
+released after the installed build. Snapshots report those models in
+`updateRequiredModels`, and the picker tells the user which update unlocks them.
+
 `currentModels.claudeAgent` is the current-model classification overlay for
 releases that predate catalog discovery; it does not add models to their catalogs.
 Catalog-aware releases use `providers.claudeAgent.models[].status` instead.

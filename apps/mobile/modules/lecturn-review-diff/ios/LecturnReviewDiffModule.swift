@@ -49,6 +49,14 @@ public class LecturnReviewDiffModule: Module {
         view.setContentWidth(CGFloat(contentWidth))
       }
 
+      Prop("contentInsetTop") { (view: LecturnReviewDiffView, inset: Double) in
+        view.setContentInsetTop(CGFloat(inset))
+      }
+
+      Prop("contentInsetBottom") { (view: LecturnReviewDiffView, inset: Double) in
+        view.setContentInsetBottom(CGFloat(inset))
+      }
+
       Prop("initialRowIndex") { (view: LecturnReviewDiffView, initialRowIndex: Double) in
         view.setInitialRowIndex(initialRowIndex)
       }

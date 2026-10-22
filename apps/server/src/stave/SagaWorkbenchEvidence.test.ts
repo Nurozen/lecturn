@@ -8,7 +8,7 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as GitHubProvider from "../pullRequest/GitHubPullRequestProvider.ts";
-import { GitHubPullRequestCli } from "../pullRequest/GitHubPullRequestCli.ts";
+import { GitHubPullRequestApi } from "../pullRequest/GitHubPullRequestApi.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { PullRequestProviderRegistry } from "../pullRequest/PullRequestProviderRegistry.ts";
 import {
@@ -74,7 +74,7 @@ const fixture = Effect.fn("fixture")(function* (
   > = [];
   const reads: Array<{ host: string; repository: string; number: number }> = [];
   const { readAcceptanceEvidence: _unusedAcceptance, ...providerBase } =
-    yield* GitHubProvider.make.pipe(Effect.provide(Layer.mock(GitHubPullRequestCli)({})));
+    yield* GitHubProvider.make.pipe(Effect.provide(Layer.mock(GitHubPullRequestApi)({})));
   const provider: PullRequestProviderApi = {
     ...providerBase,
     kind: "github",

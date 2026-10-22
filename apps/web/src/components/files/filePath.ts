@@ -1,7 +1,5 @@
 import type { ProjectEntry } from "@lecturn/contracts";
-import { isWindowsAbsolutePath } from "@lecturn/shared/path";
-
-import { isAbsolutePath } from "~/terminal-links";
+import { isWindowsAbsolutePath, isAbsolutePath } from "@lecturn/shared/path";
 
 export interface FileBreadcrumb {
   label: string;

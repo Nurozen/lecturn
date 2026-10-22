@@ -33,11 +33,11 @@ import {
   providerModelsFromSettings,
   spawnAndCollect,
   type ServerProviderDraft,
-} from "./providerSnapshot.ts";
+} from "@lecturn/provider-core/server/snapshotProbe";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   type ProviderMaintenanceCapabilities,
-} from "./providerMaintenance.ts";
+} from "@lecturn/provider-core/server/maintenanceResolver";
 import { COPILOT_AUTH_METHOD_ID, makeCopilotAcpRuntime } from "./acp/CopilotAcpSupport.ts";
 
 export const COPILOT_PRESENTATION = {

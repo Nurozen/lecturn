@@ -5,7 +5,7 @@ import type {
   ServerProvider,
 } from "@lecturn/contracts";
 import { formatModelSlugName, resolveSelectableModel } from "@lecturn/shared/model";
-import { fileBasename } from "../markdownLinks.ts";
+import { fileBasename } from "@lecturn/shared/path";
 import { isTerminalSubagentStatus } from "./subagentRuntime.ts";
 
 /** Summarizes one adjacent group, without changing its member identities or order. */

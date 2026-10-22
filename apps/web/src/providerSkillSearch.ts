@@ -1,7 +1,7 @@
+import { formatProviderSkillDisplayName } from "@lecturn/shared/inlineSkills";
 import type { ServerProviderSkill } from "@lecturn/contracts";
 import {
   dedupeProviderSkillsByName,
-  formatProviderSkillDisplayName,
   isProviderSkillUserInvocable,
 } from "@lecturn/client-runtime/providerSkills";
 import {

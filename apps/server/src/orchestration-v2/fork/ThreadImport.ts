@@ -31,7 +31,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import type { ImportedTranscriptEntry } from "../../provider/ProviderDriver.ts";
+import type { ImportedTranscriptEntry } from "@lecturn/provider-core/server/driver";
 import { ProviderInstanceRegistry } from "../../provider/ProviderInstanceRegistry.ts";
 
 /** An import shows the tail of the session: only its last messages are copied. */

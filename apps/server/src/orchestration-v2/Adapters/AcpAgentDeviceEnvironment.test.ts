@@ -26,9 +26,12 @@ import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as ServerConfig from "../../config.ts";
-import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
-import * as IdAllocator from "../IdAllocator.ts";
-import { ProviderAdapterV2RuntimePolicy, type ProviderAdapterV2Shape } from "../ProviderAdapter.ts";
+import * as McpProviderSession from "@lecturn/provider-core/server/mcpSession";
+import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
+import {
+  ProviderAdapterV2RuntimePolicy,
+  type ProviderAdapterV2Shape,
+} from "@lecturn/provider-core/server/ProviderAdapter";
 import { makeCopilotAdapterV2 } from "./CopilotAdapterV2.ts";
 import { makeGrokAdapterV2, type GrokAdapterV2Options } from "./GrokAdapterV2.ts";
 

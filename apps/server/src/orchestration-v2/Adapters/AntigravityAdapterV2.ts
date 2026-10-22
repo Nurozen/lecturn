@@ -34,7 +34,7 @@ import {
   makeAntigravityUserInputResponse,
   normalizeAntigravityToolCall,
 } from "../../provider/acp/AntigravityProtocol.ts";
-import type { IdAllocatorV2 } from "../IdAllocator.ts";
+import type { IdAllocatorV2 } from "@lecturn/provider-core/server/IdAllocator";
 import {
   AcpProviderCapabilitiesV2,
   makeAcpAdapterV2,

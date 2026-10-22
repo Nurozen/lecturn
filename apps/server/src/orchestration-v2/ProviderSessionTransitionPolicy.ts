@@ -7,8 +7,8 @@ import type {
 } from "@lecturn/contracts";
 import { modelSelectionsEqual } from "@lecturn/shared/model";
 
-import type { ProviderContinuationIdentity } from "../provider/ProviderDriver.ts";
-import type { ProviderSelectionTransitionPlan } from "./ProviderSelectionTransition.ts";
+import type { ProviderContinuationIdentity } from "@lecturn/provider-core/server/driver";
+import type { ProviderSelectionTransitionPlan } from "@lecturn/provider-core/server/selectionTransition";
 
 export type ProviderSessionTransition =
   | { readonly type: "reuse" }

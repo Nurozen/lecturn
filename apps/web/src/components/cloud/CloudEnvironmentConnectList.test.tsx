@@ -104,7 +104,7 @@ vi.mock("../ui/button", () => ({
 vi.mock("../ui/toast", () => ({ toastManager: { add: vi.fn() } }));
 
 import { CloudEnvironmentConnectRows } from "./CloudEnvironmentConnectList";
-import { areOnboardingComputersReady } from "~/onboarding/computerSelection.logic";
+import { resolveOnboardingSetup } from "~/onboarding/targetEnvironment.logic";
 
 const newMachineId = EnvironmentId.make("new-computer");
 const linkedMachines: DiscoveredEnvironments = new Map([
@@ -275,7 +275,7 @@ describe("cloud onboarding discovery", () => {
                   }),
               }}
             />
-            <button disabled={!areOnboardingComputersReady(selectedIds, [local, saved])}>
+            <button disabled={!resolveOnboardingSetup([local, saved], selectedIds).ready}>
               Continue
             </button>
           </>
@@ -287,7 +287,8 @@ describe("cloud onboarding discovery", () => {
       const checkbox = () => renderer!.root.findByType("input");
       expect(checkbox().props.checked).toBe(true);
       expect(checkbox().props.disabled).toBe(false);
-      expect(renderer!.root.findByType("button").props.disabled).toBe(true);
+      // Continue skips the saved computer that is not connected rather than locking.
+      expect(renderer!.root.findByType("button").props.disabled).toBe(false);
       expect(renderer!.root.findByType("section").props["aria-label"]).toBe("Work");
       expect(renderer!.root.findByProps({ "data-account-mark": newMachineId })).toBeDefined();
       expect(renderer!.root.findAllByType("span").map((node) => node.children)).toContainEqual([

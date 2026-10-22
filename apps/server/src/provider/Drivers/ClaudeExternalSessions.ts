@@ -12,7 +12,10 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
-import type { ExternalSessionListing, ProviderInstance } from "../ProviderDriver.ts";
+import type {
+  ExternalSessionListing,
+  ProviderInstance,
+} from "@lecturn/provider-core/server/driver";
 
 // The SDK returns newest first, so the cap only ever hides the oldest sessions.
 const SDK_SESSION_CAP = 500;

@@ -1,33 +1,25 @@
 import { EnvironmentId } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
-import {
-  areOnboardingComputersReady,
-  reconcileOnboardingComputers,
-} from "./computerSelection.logic";
+import { reconcileOnboardingComputers } from "./computerSelection.logic";
 
 const localId = EnvironmentId.make("local");
 const relayId = EnvironmentId.make("expired-account-computer");
 const pendingId = EnvironmentId.make("registering-computer");
-const local = { environmentId: localId, connection: { phase: "connected" } };
-const relay = { environmentId: relayId, connection: { phase: "available" } };
 
 describe("onboarding computer selection", () => {
-  it("requires selected saved computers to connect and becomes ready after deselecting one", () => {
+  it("selects unseen saved computers and keeps a deselection", () => {
     const catalog = new Set([localId, relayId]);
     const selected = reconcileOnboardingComputers(new Set(), catalog, new Set(), new Set());
     expect(selected).toEqual(catalog);
-    expect(areOnboardingComputersReady(selected, [local, relay])).toBe(false);
-    expect(
-      areOnboardingComputersReady(selected, [
-        local,
-        { ...relay, connection: { phase: "connected" } },
-      ]),
-    ).toBe(true);
     const deselected = new Set([localId]);
     expect(reconcileOnboardingComputers(deselected, catalog, catalog, catalog)).toBe(deselected);
-    expect(areOnboardingComputersReady(deselected, [local, relay])).toBe(true);
-    expect(areOnboardingComputersReady(new Set(), [local, relay])).toBe(false);
-    expect(areOnboardingComputersReady(new Set([pendingId]), [local, relay])).toBe(false);
+  });
+
+  it("leaves a switched-off computer unselected when the caller marks it seen", () => {
+    const catalog = new Set([localId, relayId]);
+    expect(reconcileOnboardingComputers(new Set(), catalog, new Set(), new Set([relayId]))).toEqual(
+      new Set([localId]),
+    );
   });
 
   it("removes vanished catalog IDs while retaining discoveries being registered", () => {
@@ -40,11 +32,9 @@ describe("onboarding computer selection", () => {
       previous,
     );
     expect(selected).toEqual(new Set([localId, pendingId]));
-    expect(areOnboardingComputersReady(selected, [local])).toBe(false);
     expect(
       reconcileOnboardingComputers(new Set([localId, relayId]), current, previous, previous),
     ).toEqual(current);
-    expect(areOnboardingComputersReady(current, [local])).toBe(true);
   });
 
   it("preserves deselection after removal, rediscovery and registration while adding unseen computers", () => {

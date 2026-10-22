@@ -1,11 +1,11 @@
 import type { ProviderInteractionMode } from "@lecturn/contracts";
 import type { V2TurnStartParams__AdditionalContextEntry } from "effect-codex-app-server/schema";
-import { buildRuntimeInstructions } from "./RuntimeInstructions.ts";
+import { buildRuntimeInstructions } from "@lecturn/provider-core/server/runtimeInstructions";
 
 import {
   LECTURN_BROWSER_TOOL_INSTRUCTIONS,
   LECTURN_ORCHESTRATION_INSTRUCTIONS,
-} from "./LecturnOrchestrationInstructions.ts";
+} from "@lecturn/provider-core/server/orchestrationInstructions";
 
 const LECTURN_DEVICE_TOOL_INSTRUCTIONS = `## Lecturn devices
 

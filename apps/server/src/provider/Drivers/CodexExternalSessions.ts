@@ -14,7 +14,7 @@ import type {
   ExternalSessionListing,
   ListExternalSessionsResult,
   ProviderInstance,
-} from "../ProviderDriver.ts";
+} from "@lecturn/provider-core/server/driver";
 
 // Lecturn's own threads are filtered out after the fact, so how deep the scan
 // goes must not depend on the caller's `limit`: a user who mostly works in

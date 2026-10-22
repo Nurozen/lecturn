@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, expect, it } from "@effect/vitest";
 import {
   HostProcessArguments,
+  HostProcessEnvironment,
   HostProcessExecutablePath,
   HostProcessIsExecutable,
   HostProcessPlatform,
@@ -77,28 +78,87 @@ it("formats the requested subcommand", () => {
   );
 });
 
-it.effect("keeps a user-installed Node reachable when the command runs under sudo", () =>
-  Effect.gen(function* () {
-    const command = (node: string, entry: string) =>
-      resolveRootCliCommand("browser setup").pipe(
-        Effect.provideService(HostProcessExecutablePath, node),
-        Effect.provideService(HostProcessArguments, [node, entry]),
-      );
-    const npx = "/home/theo/.npm/_npx/abc/node_modules/lecturn/dist/bin.mjs";
-    // sudo's secure_path already has a system Node.
-    expect(yield* command("/usr/bin/node", npx)).toBe("sudo lecturn browser setup");
-    // nvm, fnm, and tarball installs are dropped by sudo's PATH reset.
-    expect(yield* command("/home/theo/.nvm/versions/node/v24/bin/node", npx)).toBe(
-      'sudo env "PATH=$PATH" lecturn browser setup',
+it.layer(NodeServices.layer)("root CLI commands", (it) => {
+  /** `sudo lecturn browser setup` as this process would render it, with `lecturn` on PATH or not. */
+  const rootCommand = (input: {
+    readonly node: string;
+    readonly entry: string;
+    readonly path?: string;
+    readonly env?: Record<string, string>;
+    readonly executable?: boolean;
+  }) =>
+    resolveRootCliCommand("browser setup").pipe(
+      Effect.provideService(HostProcessExecutablePath, input.node),
+      Effect.provideService(HostProcessArguments, [input.node, input.entry]),
+      Effect.provideService(HostProcessIsExecutable, input.executable ?? false),
+      Effect.provideService(HostProcessPlatform, "linux"),
+      Effect.provideService(HostProcessEnvironment, { PATH: input.path ?? "", ...input.env }),
     );
-    expect(
-      yield* command(
-        "/home/theo/.local/node/bin/node",
-        "/home/theo/.local/lib/node_modules/lecturn/dist/bin.mjs",
-      ),
-    ).toBe('sudo env "PATH=$PATH" lecturn browser setup');
-  }),
-);
+
+  /** A directory holding an executable `lecturn`, to stand in for one on PATH. */
+  const pathWithLecturn = Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const bin = yield* fs.makeTempDirectoryScoped();
+    yield* fs.writeFileString(path.join(bin, "lecturn"), "#!/bin/sh\n", { mode: 0o755 });
+    return bin;
+  });
+
+  it.effect("keeps a user-installed Node reachable when the command runs under sudo", () =>
+    Effect.gen(function* () {
+      const npx = "/home/theo/.npm/_npx/abc/node_modules/lecturn/dist/bin.mjs";
+      // sudo's secure_path already has a system Node.
+      expect(yield* rootCommand({ node: "/usr/bin/node", entry: npx })).toBe(
+        "sudo lecturn browser setup",
+      );
+      // nvm, fnm, and tarball installs are dropped by sudo's PATH reset.
+      expect(
+        yield* rootCommand({ node: "/home/theo/.nvm/versions/node/v24/bin/node", entry: npx }),
+      ).toBe('sudo env "PATH=$PATH" lecturn browser setup');
+      expect(
+        yield* rootCommand({
+          node: "/home/theo/.local/node/bin/node",
+          entry: "/home/theo/.local/lib/node_modules/lecturn/dist/bin.mjs",
+          path: yield* pathWithLecturn,
+        }),
+      ).toBe('sudo env "PATH=$PATH" lecturn browser setup');
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("names this install's launcher when lecturn is not on PATH", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped();
+      const shim = path.join(home, ".local bin", "lecturn");
+      yield* fs.makeDirectory(path.dirname(shim), { recursive: true });
+      yield* fs.writeFileString(shim, "#!/bin/sh\n", { mode: 0o755 });
+      const desktop = {
+        node: "/tmp/.mount_Lecturnabc/lecturn",
+        entry: "/tmp/.mount_Lecturnabc/resources/app.asar/apps/server/dist/bin.mjs",
+        env: { LECTURN_CLI_PATH: shim },
+      };
+      // The desktop app's shim, quoted for the shell and run as root as is.
+      expect(yield* rootCommand(desktop)).toBe(`sudo '${shim}' browser setup`);
+      // A `lecturn` the person put on PATH still wins.
+      expect(yield* rootCommand({ ...desktop, path: yield* pathWithLecturn })).toBe(
+        'sudo env "PATH=$PATH" lecturn browser setup',
+      );
+      // A standalone binary names itself.
+      expect(
+        yield* rootCommand({
+          node: "/opt/lecturn/lecturn",
+          entry: "/opt/lecturn/lecturn",
+          executable: true,
+        }),
+      ).toBe("sudo /opt/lecturn/lecturn browser setup");
+      // A stale shim path, then no launcher at all, fall back to plain `lecturn`.
+      expect(
+        yield* rootCommand({ ...desktop, env: { LECTURN_CLI_PATH: path.join(home, "gone") } }),
+      ).toBe('sudo env "PATH=$PATH" lecturn browser setup');
+    }).pipe(Effect.scoped),
+  );
+});
 
 it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
   it.effect("leaves every install unknown until Lecturn publishes an npm distribution", () =>

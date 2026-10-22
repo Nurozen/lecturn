@@ -46,7 +46,7 @@ import {
   appendCodexArtifactTemplateUsePrompt,
   codexArtifactTemplateUsePrompt,
   type CodexArtifactTemplate,
-} from "@lecturn/client-runtime/codex-artifact-templates";
+} from "@lecturn/shared/codexArtifactTemplates";
 import { presentThreadShell } from "@lecturn/client-runtime/state/shell";
 import {
   type ChatMessage,
