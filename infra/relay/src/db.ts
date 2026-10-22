@@ -86,6 +86,6 @@ export const RelayHyperdrive = Effect.gen(function* () {
     caching: {
       disabled: true,
     },
-    originConnectionLimit: 40,
+    originConnectionLimit: 20,
   });
 });
