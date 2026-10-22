@@ -21,6 +21,8 @@ export type {
   DecisionWriterCheckInput,
   PrContentGenerationInput,
   PrContentGenerationResult,
+  ReviewGuideGenerationInput,
+  ReviewGuideGenerationResult,
   ThreadTitleGenerationInput,
   ThreadTitleGenerationResult,
   WorkflowSummaryGenerationInput,
@@ -42,7 +44,8 @@ type TextGenerationOp =
   | "generateWorkflowSummary"
   | "generateContextualSummary"
   | "generateDecisionNotes"
-  | "checkDecisionWriter";
+  | "checkDecisionWriter"
+  | "generateReviewGuide";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -126,6 +129,10 @@ export const makeTextGenerationFromRegistry = (
   generateWorkflowSummary: (input) =>
     resolveInstance(registry, "generateWorkflowSummary", input.modelSelection.instanceId).pipe(
       Effect.flatMap((textGeneration) => textGeneration.generateWorkflowSummary(input)),
+    ),
+  generateReviewGuide: (input) =>
+    resolveInstance(registry, "generateReviewGuide", input.modelSelection.instanceId).pipe(
+      Effect.flatMap((textGeneration) => textGeneration.generateReviewGuide(input)),
     ),
   generateThreadTitle: (input) =>
     resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(

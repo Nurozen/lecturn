@@ -61,12 +61,14 @@ export const make = Effect.gen(function* () {
   const reader = yield* StaveWorkspaceReader;
   const limits = yield* SourceControlRateLimit;
   const sourceProviders = yield* Effect.serviceOption(SourceControlProviderRegistry);
-  const kindOf = (identity: Parameters<typeof repositorySelector>[0]) =>
+  const unknownKind = SourceControlProviderKind.make("unknown");
+  const kindOf = (identity: Parameters<typeof repositorySelector>[0]): SourceControlProviderKind =>
     identity && isProviderKind(identity.provider) && identity.provider !== "unknown"
       ? identity.provider
       : identity
-        ? (detectSourceControlProviderFromRemoteUrl(identity.locator.remoteUrl)?.kind ?? "unknown")
-        : "unknown";
+        ? (detectSourceControlProviderFromRemoteUrl(identity.locator.remoteUrl)?.kind ??
+          unknownKind)
+        : unknownKind;
   const observe = Effect.fn("PullRequestWatchProvider.observe")(function* (
     reference: PullRequestRef,
   ) {
@@ -147,7 +149,7 @@ export const make = Effect.gen(function* () {
             : {}),
         })
         .pipe(Effect.orElseSucceed(() => null));
-      kind = handle?.context?.provider.kind ?? "unknown";
+      kind = handle?.context?.provider.kind ?? unknownKind;
     }
     const rawApi = registry.get(kind);
     if (!rawApi)

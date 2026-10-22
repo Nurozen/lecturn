@@ -253,6 +253,12 @@ describe("ssh tunnel scripts", () => {
     );
   });
 
+  it("embeds the runner in the launch script byte for byte", () => {
+    const runner = SshTunnel.buildRemoteLecturnRunnerScript(ARCHIVE);
+    assert.include(runner, 'printf \'%s\\n\' "$$" > "$LECTURN_LOCK/pid.tmp"');
+    assert.include(SshTunnel.buildRemoteLaunchScript(ARCHIVE), runner);
+  });
+
   it("uses the remote lecturn runner for launch and pairing scripts", () => {
     const stateKey = "711bc738002d72fd";
     const launch = SshTunnel.buildRemoteLaunchScript(ARCHIVE);

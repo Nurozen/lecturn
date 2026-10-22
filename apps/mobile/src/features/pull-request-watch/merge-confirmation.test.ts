@@ -1,4 +1,4 @@
-import { ProjectId, type PullRequestWatch } from "@lecturn/contracts";
+import { ProjectId, SourceControlProviderKind, type PullRequestWatch } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import { matchesMergeConfirmation, mergeConfirmationTarget } from "./merge-confirmation";
 
@@ -17,7 +17,7 @@ const watch: PullRequestWatch = {
   createdAt: "2026-09-13T00:00:00.000Z",
   updatedAt: "2026-09-13T00:00:00.000Z",
   observation: {
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     title: "Fix",
     url: "https://github.com/owner/repo/pull/42",
     state: "open",

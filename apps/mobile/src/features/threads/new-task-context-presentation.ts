@@ -1,6 +1,7 @@
 import { resolveProjectGitCwd } from "@lecturn/client-runtime/state/projectGit";
 import type { OrchestrationProjectShell } from "@lecturn/contracts";
 import { sanitizeNewRefName } from "@lecturn/shared/git";
+import { parseChangeRequestUrl } from "@lecturn/shared/changeRequestUrl";
 
 type WorkspaceMode = "local" | "worktree";
 
@@ -90,7 +91,12 @@ export function resolveNewTaskBranchLabel(input: {
   readonly branchName: string | null;
   readonly startFromOrigin: boolean;
   readonly workspaceMode: WorkspaceMode;
+  readonly pullRequestReference?: string;
 }): string {
+  if (input.workspaceMode === "worktree" && input.pullRequestReference) {
+    const pr = parseChangeRequestUrl(input.pullRequestReference);
+    if (pr) return `From PR #${pr.number}`;
+  }
   if (!input.branchName) {
     return "Choose branch";
   }

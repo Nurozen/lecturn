@@ -70,6 +70,7 @@ const fixture = Effect.gen(function* () {
       generateBranchName: () => Effect.die("unused"),
       generateThreadTitle: () => Effect.die("unused"),
       generateWorkflowSummary: () => Effect.die("unused"),
+      generateReviewGuide: () => Effect.die("unused"),
       checkDecisionWriter: () =>
         Effect.sync(() => {
           preflightCalls++;

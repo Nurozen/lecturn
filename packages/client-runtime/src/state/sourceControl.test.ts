@@ -1,3 +1,4 @@
+import { SourceControlProviderKind } from "@lecturn/contracts";
 import { vi } from "vite-plus/test";
 import {
   EnvironmentId,
@@ -36,7 +37,7 @@ const TARGET = new PrimaryConnectionTarget({
 
 const PUBLISH_RESULT: SourceControlPublishRepositoryResult = {
   repository: {
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     nameWithOwner: "nurozen/lecturn",
     url: "https://github.com/nurozen/lecturn",
     sshUrl: "git@github.com:nurozen/lecturn.git",
@@ -140,7 +141,7 @@ describe("source control environment atoms", () => {
             environmentId: TARGET.environmentId,
             input: {
               cwd: "/repo",
-              provider: "github",
+              provider: SourceControlProviderKind.make("github"),
               repository: "nurozen/lecturn",
               visibility: "private",
             },
@@ -156,7 +157,7 @@ describe("source control environment atoms", () => {
             environmentId: TARGET.environmentId,
             input: {
               cwd: "/repo",
-              provider: "github",
+              provider: SourceControlProviderKind.make("github"),
               repository: "nurozen/lecturn",
               visibility: "private",
             },

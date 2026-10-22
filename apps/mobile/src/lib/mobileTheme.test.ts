@@ -10,6 +10,7 @@ import { readDefaultMobileThemeVariables } from "./mobileTheme.test-support";
 import { getMobileThemeRuntimeVariables } from "./mobileThemeVariables";
 
 import {
+  MOBILE_THEME_IDS,
   MOBILE_THEME_VARIABLE_NAMES,
   createMobileThemePairPatch,
   createMobileThemeSelectionPatch,
@@ -160,6 +161,21 @@ describe("mobile themes", () => {
           variables["--color-thread-selected"],
         ),
       ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it.each(MOBILE_THEME_IDS)("keeps %s sidebar text readable on Android", (themeId) => {
+    for (const appearance of ["light", "dark"] as const) {
+      const variables = getMobileThemeRuntimeVariables(themeId, appearance, "android");
+      for (const foreground of [
+        "--color-drawer-foreground",
+        "--color-drawer-foreground-muted",
+      ] as const) {
+        expect(
+          contrastRatio(variables[foreground], variables["--color-drawer"]),
+          `${appearance}: ${foreground}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
     }
   });
 

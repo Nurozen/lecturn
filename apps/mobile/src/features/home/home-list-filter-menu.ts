@@ -1,5 +1,6 @@
 import { accountForEnvironment, type AccountSectionContext } from "./accountSections";
 import type { EnvironmentId } from "@lecturn/contracts";
+import type { MenuAction } from "@react-native-menu/menu";
 
 export interface HomeListFilterMenuEnvironment {
   readonly environmentId: EnvironmentId;
@@ -133,4 +134,41 @@ export function groupAccountFilterEnvironments(
       ),
     }))
     .filter((group) => group.environments.length > 0);
+}
+
+/**
+ * Environment choices for the workspace Home filter pill (ThreadListFilters).
+ * Upstream lists environments flat; with more than one Lecturn Connect account
+ * they are grouped per owning account, labelled with sign-in and attention
+ * state. Action ids are `JSON.stringify(environmentId)`.
+ */
+export function buildEnvironmentFilterActions(props: {
+  readonly environments: ReadonlyArray<HomeListFilterMenuEnvironment>;
+  readonly selectedEnvironmentId: EnvironmentId | null;
+  readonly accountSections?: AccountSectionContext | undefined;
+  readonly accountAttention?: ReadonlyMap<string, string> | undefined;
+}): MenuAction[] {
+  const environmentAction = (environment: HomeListFilterMenuEnvironment): MenuAction => ({
+    id: JSON.stringify(environment.environmentId),
+    title: environment.label,
+    state: environment.environmentId === props.selectedEnvironmentId ? "on" : "off",
+  });
+  return [
+    {
+      id: "all",
+      title: "All environments",
+      state: props.selectedEnvironmentId === null ? "on" : "off",
+    },
+    ...(props.accountSections
+      ? groupAccountFilterEnvironments(
+          props.environments,
+          props.accountSections,
+          props.accountAttention,
+        ).map((group) => ({
+          id: `account:${group.id}`,
+          title: group.label,
+          subactions: group.environments.map(environmentAction),
+        }))
+      : props.environments.map(environmentAction)),
+  ];
 }

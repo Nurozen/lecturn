@@ -145,6 +145,7 @@ const fixture = (
       generateBranchName: () => Effect.die("unused"),
       generateThreadTitle: () => Effect.die("unused"),
       generateWorkflowSummary: () => Effect.die("unused"),
+      generateReviewGuide: () => Effect.die("unused"),
     };
     const configured = yield* Effect.service(ServerSettingsService).pipe(
       Effect.provide(settingsLayer()),

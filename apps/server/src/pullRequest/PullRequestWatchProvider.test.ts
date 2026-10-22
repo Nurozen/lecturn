@@ -2,6 +2,7 @@ import { VcsDriverRegistry } from "../vcs/VcsDriverRegistry.ts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer, Option, Path } from "effect";
 import {
+  SourceControlProviderKind,
   type ProjectId,
   type OrchestrationProjectShell,
   type RepositoryIdentity,
@@ -103,7 +104,7 @@ const evidence: ProviderAcceptanceEvidence = {
   blockers: [],
 };
 const provider = (overrides: Partial<PullRequestProviderApi> = {}): PullRequestProviderApi => ({
-  kind: "github",
+  kind: SourceControlProviderKind.make("github"),
   capabilities: {
     diff: false,
     comment: false,
@@ -330,7 +331,7 @@ it.effect("keeps required CI unknown when acceptance evidence is absent or fails
         readAcceptanceEvidence: () =>
           Effect.fail(
             new PullRequestProviderError({
-              provider: "github",
+              provider: SourceControlProviderKind.make("github"),
               operation: "readAcceptanceEvidence",
               reason: "failed",
               detail: "Required checks unavailable",
@@ -361,7 +362,7 @@ it.effect("blocks subsequent host reads after acceptance evidence reports rate l
         readAcceptanceEvidence: () =>
           Effect.fail(
             new PullRequestProviderError({
-              provider: "github",
+              provider: SourceControlProviderKind.make("github"),
               operation: "readAcceptanceEvidence",
               reason: "rate-limited",
               detail: "Slow down",

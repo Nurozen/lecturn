@@ -189,9 +189,15 @@ export interface ThreadDetailScreenProps {
    * The server has not created this thread yet. "preparing" runs while the
    * queued creation is delivered (a worktree may be checking out); "failed"
    * is a rejected creation whose content went back to the project draft.
+   * `serverOwned` marks a thread the server already created that is still
+   * setting up its worktree; follow-ups queue on the server behind that setup.
    */
   readonly creationState:
-    | { readonly kind: "preparing"; readonly preparingWorktree: boolean }
+    | {
+        readonly kind: "preparing";
+        readonly preparingWorktree: boolean;
+        readonly serverOwned: boolean;
+      }
     | { readonly kind: "failed"; readonly reason: string; readonly onEditTask: () => void }
     | null;
   readonly activePendingApproval: PendingApproval | null;
@@ -271,12 +277,12 @@ function SettledThreadMetadata({
 }) {
   const model = useMemo(
     () =>
-      buildModelOptions(serverConfig, thread.modelSelection).find(
+      buildModelOptions(serverConfig, thread.modelSelection, undefined, thread.projectId).find(
         (option) =>
           option.selection.instanceId === thread.modelSelection.instanceId &&
           option.selection.model === thread.modelSelection.model,
       ),
-    [serverConfig, thread.modelSelection],
+    [serverConfig, thread.modelSelection, thread.projectId],
   );
   const optionLabels = providerOptionValueLabels(
     resolveProviderOptionDescriptors({
@@ -1622,11 +1628,14 @@ const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
                         canStopThread={props.canStopThread}
                         environmentId={props.environmentId}
                         projectCwd={props.threadCwd ?? props.projectWorkspaceRoot}
-                        // Follow-ups typed during setup wait in the draft: queueing
-                        // them against a thread id the server may still reject
-                        // would strand them in the outbox.
+                        // Follow-ups typed before the server creates the thread wait in
+                        // the draft: queueing them against a thread id the server may
+                        // still reject would strand them in the outbox.
                         sendBlockedReason={
-                          props.creationState?.kind === "preparing" ? "Starting the task…" : null
+                          props.creationState?.kind === "preparing" &&
+                          !props.creationState.serverOwned
+                            ? "Starting the task…"
+                            : null
                         }
                         draftKey={props.composerDraftKey ?? undefined}
                         followUpBehavior={props.followUpBehavior}

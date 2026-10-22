@@ -78,6 +78,7 @@ export function buildHomeProjectScopes(input: {
   );
   const groups = buildProjectGroups({
     projects,
+    groupScratchProjects: true,
     settings: {
       sidebarProjectGroupingMode: input.projectGroupingMode,
       sidebarProjectGroupingOverrides: {},

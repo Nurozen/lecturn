@@ -106,14 +106,16 @@ export function useImportThreadAttempt(): (
       );
       const modelSelection = resolveImportModelSelection({
         instanceId: session.providerInstanceId,
-        modelOptions: buildModelOptions(serverConfig, null),
+        modelOptions: buildModelOptions(serverConfig, null, undefined, project.id),
         projectDefault: resolveDefaultableModelSelection(
           serverConfig,
           project.defaultModelSelection,
+          project.id,
         ),
         stickySelection: resolveDefaultableModelSelection(
           serverConfig,
           appAtomRegistry.get(stickyComposerModelSelectionAtom),
+          project.id,
         ),
       });
       if (modelSelection === null) {

@@ -1,3 +1,4 @@
+import { SourceControlProviderKind } from "@lecturn/contracts";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import type { ChangeRequest } from "@lecturn/contracts";
@@ -26,7 +27,7 @@ export const ForgejoPullRequestSchema = Schema.Struct({
 });
 export function toForgejoChangeRequest(raw: typeof ForgejoPullRequestSchema.Type): ChangeRequest {
   return {
-    provider: "forgejo",
+    provider: SourceControlProviderKind.make("forgejo"),
     number: raw.number,
     title: raw.title,
     url: raw.html_url,

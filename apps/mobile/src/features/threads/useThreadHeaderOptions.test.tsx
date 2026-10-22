@@ -31,6 +31,8 @@ vi.mock("@react-navigation/native", () => {
     useNavigation: () => navigation,
   };
 });
+vi.mock("../../native/useOpenPullRequest", () => ({ useOpenPullRequest: () => () => {} }));
+
 vi.mock("../../state/session", () => ({ useEnvironmentScope: () => true }));
 // Lecturn: the git controls read the pinned Stave repository.
 vi.mock("../../state/use-selected-thread-worktree", () => ({

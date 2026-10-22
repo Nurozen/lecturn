@@ -37,6 +37,7 @@ const native = vi.hoisted(() => ({
   },
 }));
 vi.mock("react-native", () => ({
+  ActivityIndicator: native.noop,
   View: native.noop,
   Pressable: native.noop,
   ScrollView: native.noop,

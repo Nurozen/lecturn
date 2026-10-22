@@ -9,6 +9,7 @@ import {
   LECTURN_MCP_BEARER_ENV,
   LECTURN_MCP_URL_ENV,
   LECTURN_PI_RUNTIME_MODE_ENV,
+  LECTURN_PI_MCP_EXTENSION_PATH_ENV,
 } from "./mcpExtensionSource.ts";
 
 const RESERVED_PI_LAUNCH_ARGUMENTS = new Set([
@@ -291,11 +292,15 @@ export function buildPiRpcLaunch(input: {
   // credentials inherited from the server or a parent provider process.
   delete environment[LECTURN_MCP_URL_ENV];
   delete environment[LECTURN_MCP_BEARER_ENV];
+  delete environment[LECTURN_PI_MCP_EXTENSION_PATH_ENV];
 
   return {
     args,
     env: {
       ...environment,
+      ...(hasLecturnExtension && input.extensionPath !== undefined
+        ? { [LECTURN_PI_MCP_EXTENSION_PATH_ENV]: input.extensionPath }
+        : {}),
       ...(hasLecturnExtension && input.runtimeMode !== undefined
         ? {
             [LECTURN_PI_RUNTIME_MODE_ENV]:

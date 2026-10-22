@@ -118,7 +118,11 @@ function SettingsContentLayout() {
   const backToChat = useBackToChat();
   const { isMobile } = useSidebar();
   const navigateToMainApp = useNavigateToMainApp();
-  const { search } = useSettingsScope();
+  const { search, environment } = useSettingsScope();
+  const contentScopeKey =
+    location.pathname === "/settings/diagnostics" || location.pathname === "/settings/providers"
+      ? environment?.environmentId
+      : JSON.stringify(search);
   // Phones unwind to the chat they came from; wider layouts return to the
   // last main app page however many utility pages were visited since.
   const navigateBackWithinApp = useCallback(() => {
@@ -191,10 +195,7 @@ function SettingsContentLayout() {
             <RestoreDeviceDefaultsButton onRestored={handleRestored} />
           </div>
         ) : null}
-        <div
-          key={`${JSON.stringify(search)}:${restoreSignal}`}
-          className="min-h-0 flex flex-1 flex-col"
-        >
+        <div key={`${contentScopeKey}:${restoreSignal}`} className="min-h-0 flex flex-1 flex-col">
           <SettingsScopeBoundary pathname={location.pathname}>
             <Outlet />
           </SettingsScopeBoundary>

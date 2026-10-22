@@ -157,5 +157,8 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
     );
   };
 
-  return TextGenerationOperations.fromRunner("GrokTextGeneration", runGrokJson);
+  return TextGenerationOperations.fromRunner(
+    "GrokTextGeneration",
+    TextGenerationOperations.withoutInvestigation("Grok", runGrokJson),
+  );
 });

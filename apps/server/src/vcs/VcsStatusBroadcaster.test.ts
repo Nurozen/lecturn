@@ -1,3 +1,4 @@
+import { SourceControlProviderKind } from "@lecturn/contracts";
 import { assert, it, describe } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Cause from "effect/Cause";
@@ -68,7 +69,7 @@ const toRow = (project: OrchestrationProject): ProjectStore.ProjectRow => ({
 const baseLocalStatus: VcsStatusLocalResult = {
   isRepo: true,
   sourceControlProvider: {
-    kind: "github",
+    kind: SourceControlProviderKind.make("github"),
     name: "GitHub",
     baseUrl: "https://github.com",
   },

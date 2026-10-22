@@ -1,6 +1,10 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { ProjectId, type SagaWorkbenchIdentity } from "@lecturn/contracts";
+import {
+  ProjectId,
+  SourceControlProviderKind,
+  type SagaWorkbenchIdentity,
+} from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -20,8 +24,9 @@ import * as Evidence from "./SagaWorkbenchEvidence.ts";
 
 const projectId = Schema.decodeUnknownSync(ProjectId)("p1");
 const createdAt = "2026-09-10T00:00:00.000Z";
+const github = SourceControlProviderKind.make("github");
 const failure = new PullRequestProviderError({
-  provider: "github",
+  provider: github,
   operation: "test",
   reason: "failed",
   detail: "offline",
@@ -77,7 +82,7 @@ const fixture = Effect.fn("fixture")(function* (
     yield* GitHubProvider.make.pipe(Effect.provide(Layer.mock(GitHubPullRequestApi)({})));
   const provider: PullRequestProviderApi = {
     ...providerBase,
-    kind: "github",
+    kind: github,
     listAcceptanceCandidates: (input) => {
       discoveries += 1;
       discoveryInputs.push(input);
@@ -109,7 +114,7 @@ const fixture = Effect.fn("fixture")(function* (
   const service = yield* Evidence.make.pipe(
     Effect.provideService(PullRequestProviderRegistry, {
       get: (kind) => (kind === "github" ? provider : null),
-      kinds: ["github"],
+      kinds: [github],
     }),
   );
   return {

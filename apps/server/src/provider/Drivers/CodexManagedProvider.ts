@@ -2,6 +2,8 @@ import { StaveMemoryWiring } from "../../stave/StaveMemoryWiring.ts";
 import { ProviderDriverKind, TextGenerationError, type CodexSettings } from "@lecturn/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 import * as Option from "effect/Option";
 import { ChildProcessSpawner } from "effect/process";
@@ -35,6 +37,8 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
   const { instanceId, enabled, displayName, accentColor, config } = input;
   const http = yield* HttpClient.HttpClient;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const host = yield* ProviderHost.ProviderHost;
   const runtime = yield* makeCodexManagedRuntime({
     instanceId,
@@ -194,7 +198,11 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
       ),
       Effect.scoped,
     );
-  }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+  }).pipe(
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    Effect.provideService(FileSystem.FileSystem, fileSystem),
+    Effect.provideService(Path.Path, path),
+  );
   const snapshot = yield* makeManagedServerProvider({
     resolveMaintenance: () => Effect.succeed({ provider: DRIVER, packageName: null, update: null }),
     getSettings: host.settings.get,
@@ -297,6 +305,8 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
             protect("checkDecisionWriter", nativeGeneration.checkDecisionWriter!(value)),
         }
       : {}),
+    generateReviewGuide: (value) =>
+      protect("generateReviewGuide", nativeGeneration.generateReviewGuide(value)),
   };
   return {
     instanceId,

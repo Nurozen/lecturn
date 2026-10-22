@@ -1,7 +1,15 @@
-import type { EnvironmentId, ProjectId, PullRequestListEntry } from "@lecturn/contracts";
+import { SourceControlProviderKind } from "@lecturn/contracts";
+import type {
+  EnvironmentId,
+  ProjectId,
+  PullRequestAction,
+  PullRequestListEntry,
+} from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  pullRequestHostActions,
+  pullRequestQuickActions,
   filterPullRequestsByInvolvement,
   findScopedProject,
   mergePullRequestLists,
@@ -338,7 +346,7 @@ describe("pull request involvement filtering", () => {
       entry({ number: 1, author: { login: "Bilal", name: null, avatarUrl: null } }),
       entry({
         number: 2,
-        provider: "gitlab",
+        provider: SourceControlProviderKind.make("gitlab"),
         host: "gitlab.com",
         author: { login: "Bilal", name: null, avatarUrl: null },
       }),
@@ -1437,7 +1445,7 @@ describe("merging the environments' own listings", () => {
           providers: [
             {
               host: "github.com",
-              kind: "github",
+              kind: SourceControlProviderKind.make("github"),
               searchesOnHost: false,
               projectCount: 2,
               configured: false,
@@ -1868,5 +1876,37 @@ describe("pull request list override settlement", () => {
     const swapped = reusePullRequestEntries(previous, [entry(2, "open"), entry(1, "open")], key);
     expect(swapped).not.toBe(previous);
     expect(swapped.map((row) => row.number)).toEqual([2, 1]);
+  });
+});
+
+describe("pull request quick actions", () => {
+  const summary = (host: string, kind: string, actions?: ReadonlyArray<PullRequestAction>) => ({
+    host,
+    kind: SourceControlProviderKind.make(kind),
+    searchesOnHost: true,
+    projectCount: 1,
+    configured: true,
+    detail: null,
+    ...(actions === undefined ? {} : { actions }),
+  });
+
+  it("offers what each host reports, and GitHub's legacy set when a server reports none", () => {
+    const actionsOf = pullRequestHostActions([
+      summary("bitbucket.org", "bitbucket", ["merge", "close"]),
+      summary("github.com", "github"),
+    ]);
+    const bitbucket = actionsOf({
+      host: "bitbucket.org",
+      provider: SourceControlProviderKind.make("bitbucket"),
+    });
+    expect(pullRequestQuickActions({ state: "closed", isDraft: false }, bitbucket)).toEqual([]);
+    const github = actionsOf({
+      host: "github.com",
+      provider: SourceControlProviderKind.make("github"),
+    });
+    expect(pullRequestQuickActions({ state: "open", isDraft: true }, github)).toEqual([
+      "close",
+      "ready",
+    ]);
   });
 });

@@ -1,4 +1,5 @@
 import { GlassCard } from "../../components/GlassCard";
+import { AppActivityIndicator } from "../../components/AppActivityIndicator";
 import { MaterialListRow } from "../../components/MaterialListRow";
 import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
@@ -18,10 +19,12 @@ import {
   getCloneDestinationPath,
   getCloneDirectoryName,
   getDefaultCloneUrl,
-  getNewProjectGitHubRepository,
-  getNewProjectGitHubTarget,
   getNewProjectPathPreview,
+  getNewProjectPublishTarget,
+  getNewProjectPublishTargets,
+  getNewProjectRepository,
   normalizePastedCloneUrl,
+  parseAddProjectRemoteSource,
   resolveAddProjectPath,
   sortAddProjectProviderSources,
   type AddProjectRemoteSource,
@@ -55,11 +58,12 @@ import {
   type EnvironmentMachineKind,
   ProjectId,
   resolveEnvironmentMachineKind,
+  SourceControlProviderKind,
 } from "@lecturn/contracts";
 import { CommonActions, StackActions, useNavigation } from "@react-navigation/native";
 import { SymbolView } from "../../components/AppSymbol";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Platform, ActivityIndicator, Alert, Pressable, View } from "react-native";
+import { Platform, Alert, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
@@ -78,6 +82,7 @@ import { AppText as Text, AppTextInput as TextInput } from "../../components/App
 import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { SourceControlIcon } from "../../components/SourceControlIcon";
+import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
 import { ThemedSwitch } from "../../components/ThemedSwitch";
 import { uuidv4 } from "../../lib/uuid";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -131,18 +136,7 @@ function stringParam(value: string | string[] | undefined): string | null {
 }
 
 function sourceFromParam(value: string | string[] | undefined): AddProjectRemoteSource {
-  const source = stringParam(value);
-  if (
-    source === "url" ||
-    source === "github" ||
-    source === "gitlab" ||
-    source === "forgejo" ||
-    source === "bitbucket" ||
-    source === "azure-devops"
-  ) {
-    return source;
-  }
-  return "url";
+  return parseAddProjectRemoteSource(stringParam(value));
 }
 
 export function SectionTitle(props: { readonly children: string }) {
@@ -276,7 +270,7 @@ export function PrimaryActionButton(props: {
       className="h-12 items-center justify-center rounded-full bg-primary active:opacity-70 disabled:opacity-45"
     >
       {props.loading ? (
-        <ActivityIndicator colorClassName={String("accent-primary-foreground")} />
+        <AppActivityIndicator colorClassName={String("accent-primary-foreground")} />
       ) : (
         <Text className="text-base font-lecturn-bold text-primary-foreground">{props.label}</Text>
       )}
@@ -502,7 +496,7 @@ function SourceControlRow(props: {
       />
     ) : (
       <SourceControlIcon
-        kind={props.source}
+        kind={sourceControlClients.get(props.source).icon}
         size={Platform.OS === "android" ? 24 : 18}
         colorClassName="accent-icon"
       />
@@ -666,13 +660,13 @@ export function AddProjectSourceScreen() {
                   key={candidate}
                   source={candidate}
                   selectedEnvironmentId={selectedEnvironment.environmentId}
-                  ready={canCloneProject && readiness[candidate].ready}
+                  ready={canCloneProject && readiness(candidate).ready}
                   hint={
                     !canCloneProject
                       ? "This connection cannot clone projects."
-                      : readiness[candidate].ready
+                      : readiness(candidate).ready
                         ? addProjectRemoteSourcePathHint(candidate)
-                        : (readiness[candidate].hint ?? "")
+                        : (readiness(candidate).hint ?? "")
                   }
                   isFirst={false}
                 />
@@ -734,7 +728,7 @@ export function AddProjectSourceScreen() {
             </ListSection>
           ) : null}
           {discoveryState.isPending ? (
-            <ActivityIndicator colorClassName="accent-icon-muted" />
+            <AppActivityIndicator colorClassName="accent-icon-muted" />
           ) : null}
         </>
       ) : null}
@@ -1016,7 +1010,7 @@ function FolderBrowser(props: {
       <ListSection>
         {fileAccess.isPending || (browseState.isPending && browseState.data === null) ? (
           <View className="items-center py-5">
-            <ActivityIndicator colorClassName="accent-icon-muted" />
+            <AppActivityIndicator colorClassName="accent-icon-muted" />
           </View>
         ) : null}
         {browsePath.canBrowseUp ? (
@@ -1094,9 +1088,12 @@ export function AddProjectNewScreen(props: { readonly environmentId?: string | s
           input: {},
         }),
   );
-  const githubTarget = getNewProjectGitHubTarget(discoveryState.data);
+  const publishTargets = getNewProjectPublishTargets(discoveryState.data);
   const [name, setName] = useState("");
-  const [publishesToGitHub, setPublishesToGitHub] = useState(false);
+  const [publishes, setPublishes] = useState(false);
+  // Null takes the first ready host, GitHub when it is ready.
+  const [publishKind, setPublishKind] = useState<SourceControlProviderKind | null>(null);
+  const publishTarget = getNewProjectPublishTarget(publishTargets, publishKind);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const trimmedName = name.trim();
@@ -1165,19 +1162,19 @@ export function AddProjectNewScreen(props: { readonly environmentId?: string | s
       if (commitError !== undefined) {
         Alert.alert("Created without a first commit", commitError);
       }
-      if (publishesToGitHub && githubTarget !== null) {
+      if (publishes && publishTarget !== null) {
         void publishRepository({
           environmentId: environment.environmentId,
           input: {
             cwd: workspaceRoot,
-            provider: "github",
-            repository: getNewProjectGitHubRepository(githubTarget, workspaceRoot),
+            provider: publishTarget.definition.kind,
+            repository: getNewProjectRepository(publishTarget, workspaceRoot),
             visibility: "private",
           },
         }).then((publishResult) => {
           if (AsyncResult.isFailure(publishResult)) {
             Alert.alert(
-              "Could not create the GitHub repository",
+              `Could not create the ${publishTarget.definition.label} repository`,
               errorMessage(Cause.squash(publishResult.cause)),
             );
           }
@@ -1232,18 +1229,18 @@ export function AddProjectNewScreen(props: { readonly environmentId?: string | s
             </Text>
           ) : null}
           {machineRows}
-          {githubTarget !== null ? (
+          {publishTarget !== null ? (
             <ListSection>
               <ListRow
-                title="Create private repository on GitHub"
+                title={`Create private repository on ${publishTarget.definition.label}`}
                 subtitle={
                   trimmedName.length > 0 && pathPreview !== null
-                    ? getNewProjectGitHubRepository(githubTarget, pathPreview)
-                    : githubTarget.account
+                    ? getNewProjectRepository(publishTarget, pathPreview)
+                    : publishTarget.owner
                 }
                 icon={
                   <SourceControlIcon
-                    kind="github"
+                    kind={publishTarget.definition.icon}
                     size={Platform.OS === "android" ? 24 : 18}
                     colorClassName="accent-icon"
                   />
@@ -1251,13 +1248,44 @@ export function AddProjectNewScreen(props: { readonly environmentId?: string | s
                 isFirst
                 right={
                   <ThemedSwitch
-                    accessibilityLabel="Create private repository on GitHub"
-                    value={publishesToGitHub}
-                    onValueChange={setPublishesToGitHub}
+                    accessibilityLabel={`Create private repository on ${publishTarget.definition.label}`}
+                    value={publishes}
+                    onValueChange={setPublishes}
                   />
                 }
-                onPress={() => setPublishesToGitHub((publishes) => !publishes)}
+                onPress={() => setPublishes((current) => !current)}
               />
+              {publishes && publishTargets.length > 1
+                ? publishTargets.map((target) => {
+                    const selected = target.definition.kind === publishTarget.definition.kind;
+                    return (
+                      <ListRow
+                        key={target.definition.kind}
+                        title={target.definition.label}
+                        icon={
+                          <SourceControlIcon
+                            kind={target.definition.icon}
+                            size={Platform.OS === "android" ? 24 : 17}
+                            colorClassName="accent-icon"
+                          />
+                        }
+                        selected={selected}
+                        disabled={isSubmitting}
+                        right={
+                          selected ? (
+                            <SymbolView
+                              name="checkmark"
+                              size={Platform.OS === "android" ? 20 : 14}
+                              tintColorClassName="accent-icon"
+                              type="monochrome"
+                            />
+                          ) : null
+                        }
+                        onPress={() => setPublishKind(target.definition.kind)}
+                      />
+                    );
+                  })
+                : null}
             </ListSection>
           ) : null}
           <PrimaryActionButton

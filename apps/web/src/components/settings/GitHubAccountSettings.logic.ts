@@ -1,4 +1,5 @@
-import type { GitHubSettings, SourceControlProviderAuth } from "@lecturn/contracts";
+import type { SourceControlProviderAuth } from "@lecturn/contracts";
+import type { GitHubSettings } from "@lecturn/client-runtime/source-control-clients";
 
 export type GitHubDiscoveredAccount = NonNullable<SourceControlProviderAuth["accounts"]>[number];
 

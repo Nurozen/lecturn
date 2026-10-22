@@ -9,6 +9,7 @@ import {
   LECTURN_MCP_BEARER_ENV,
   LECTURN_MCP_URL_ENV,
   LECTURN_PI_RUNTIME_MODE_ENV,
+  LECTURN_PI_MCP_EXTENSION_PATH_ENV,
 } from "./mcpExtensionSource.ts";
 import {
   buildPiRpcLaunch,
@@ -65,12 +66,17 @@ describe("pi Lecturn MCP injection", () => {
     assert.equal(launch.env[LECTURN_MCP_URL_ENV], "http://127.0.0.1:43123/mcp");
     assert.equal(launch.env[LECTURN_MCP_BEARER_ENV], "secret-pi-token");
     assert.equal(launch.env[LECTURN_PI_RUNTIME_MODE_ENV], "approval-required");
+    assert.equal(
+      launch.env[LECTURN_PI_MCP_EXTENSION_PATH_ENV],
+      "/tmp/cache/pi-lecturn-mcp-extension.ts",
+    );
 
     const permissionOnly = buildPiRpcLaunch({
       launchArgs: [],
       environment: {
         [LECTURN_MCP_URL_ENV]: "http://127.0.0.1:9999/stale",
         [LECTURN_MCP_BEARER_ENV]: "stale-token",
+        [LECTURN_PI_MCP_EXTENSION_PATH_ENV]: "/stale/extension.ts",
       },
       mcpSession: undefined,
       extensionPath: "/tmp/cache/pi-lecturn-mcp-extension.ts",
@@ -86,6 +92,10 @@ describe("pi Lecturn MCP injection", () => {
     assert.isUndefined(permissionOnly.env[LECTURN_MCP_URL_ENV]);
     assert.isUndefined(permissionOnly.env[LECTURN_MCP_BEARER_ENV]);
     assert.equal(permissionOnly.env[LECTURN_PI_RUNTIME_MODE_ENV], "auto-accept-edits");
+    assert.equal(
+      permissionOnly.env[LECTURN_PI_MCP_EXTENSION_PATH_ENV],
+      "/tmp/cache/pi-lecturn-mcp-extension.ts",
+    );
   });
 
   it("falls back to Pi's first supported mode for legacy auto threads", () => {
