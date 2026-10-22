@@ -54,6 +54,8 @@ export interface SavedCloudEnvironmentConnection {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly connection: EnvironmentConnectionPresentation;
+  /** False for a machine saved over another route (LAN, Tailscale, SSH) only. */
+  readonly relayManaged: boolean;
   /** Present once connected; carries the user's icon override. */
   readonly serverConfig?: ServerConfig | null;
 }
@@ -149,7 +151,15 @@ export function CloudEnvironmentConnectRows({
     ReadonlySet<EnvironmentId>
   >(new Set());
   const savedById = new Map(
-    savedEnvironments.map((environment) => [environment.environmentId, environment]),
+    savedEnvironments
+      .filter((environment) => environment.relayManaged)
+      .map((environment) => [environment.environmentId, environment]),
+  );
+  // Saved over another route only: Lecturn Connect would be an added fallback.
+  const savedWithoutRelay = new Set(
+    savedEnvironments
+      .filter((environment) => !environment.relayManaged)
+      .map((environment) => environment.environmentId),
   );
 
   useEffect(() => {
@@ -181,8 +191,12 @@ export function CloudEnvironmentConnectRows({
     if (result._tag === "Success") {
       toastManager.add({
         type: "success",
-        title: "Environment added",
-        description: `Connecting to ${environment.label} through Lecturn Connect.`,
+        title: savedWithoutRelay.has(environment.environmentId)
+          ? "Lecturn Connect route added"
+          : "Environment added",
+        description: savedWithoutRelay.has(environment.environmentId)
+          ? `${environment.label} falls back to Lecturn Connect when its other routes are unreachable.`
+          : `Connecting to ${environment.label} through Lecturn Connect.`,
       });
       return true;
     }
@@ -210,10 +224,14 @@ export function CloudEnvironmentConnectRows({
     return false;
   };
 
+  // During onboarding selection a machine saved over another route already
+  // has its own row elsewhere, and selecting it must not add a Lecturn Connect
+  // route as a side effect, so it is left out here.
   const discoveredEnvironments = [...environmentsState.environments.values()].filter(
     ({ environment }) =>
       environment.environmentId !== primaryEnvironmentId &&
-      (showSavedEnvironments || !savedById.has(environment.environmentId)),
+      (showSavedEnvironments || !savedById.has(environment.environmentId)) &&
+      !(selection && savedWithoutRelay.has(environment.environmentId)),
   );
   // Saved selections must remain editable when their account cannot list them.
   const visibleEnvironments = [
@@ -221,7 +239,8 @@ export function CloudEnvironmentConnectRows({
     ...(showSavedEnvironments && selection
       ? savedEnvironments
           .filter(
-            ({ environmentId }) =>
+            ({ environmentId, relayManaged }) =>
+              relayManaged &&
               environmentId !== primaryEnvironmentId &&
               !environmentsState.environments.has(environmentId),
           )
@@ -388,19 +407,22 @@ export function CloudEnvironmentConnectRows({
           : availability === "checking"
             ? "bg-warning"
             : "bg-muted-foreground/35";
+    const notAdded = savedWithoutRelay.has(environment.environmentId)
+      ? "Saved without Lecturn Connect"
+      : "Not added";
     const statusText =
       unsupported && !savedEnvironment
-        ? "Lecturn Connect · Not added · Client not supported"
+        ? `Lecturn Connect · ${notAdded} · Client not supported`
         : savedConnection
           ? savedConnection.statusText
           : availability === "online"
-            ? "Lecturn Connect · Not added · Relay online"
+            ? `Lecturn Connect · ${notAdded} · Relay online`
             : availability === "offline"
-              ? "Lecturn Connect · Not added · Relay offline"
+              ? `Lecturn Connect · ${notAdded} · Relay offline`
               : availability === "checking"
-                ? "Lecturn Connect · Not added · Checking relay status…"
+                ? `Lecturn Connect · ${notAdded} · Checking relay status…`
                 : (Option.getOrNull(error)?.message ??
-                  "Lecturn Connect · Not added · Relay status unavailable");
+                  `Lecturn Connect · ${notAdded} · Relay status unavailable`);
     if (selection) {
       return (
         <label
@@ -521,7 +543,11 @@ export function CloudEnvironmentConnectRows({
                 if (discovered) void connectEnvironment(discovered.environment);
               }}
             >
-              {connectingEnvironmentIds.has(environment.environmentId) ? "Adding…" : "Add"}
+              {connectingEnvironmentIds.has(environment.environmentId)
+                ? "Adding…"
+                : savedWithoutRelay.has(environment.environmentId)
+                  ? "Add route"
+                  : "Add"}
             </Button>
           )}
         </div>

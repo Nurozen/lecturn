@@ -1244,32 +1244,30 @@ describe("relay request tracing", () => {
       }),
   );
 
-  for (const [method, path] of [
+  it.effect.each([
     ["POST", "/v1/client/environment-links"],
     ["DELETE", "/v1/client/environment-links/env_a"],
     ["DELETE", "/v1/client/environment-links/env_a/tunnel"],
-  ] as const) {
-    it.effect(
-      `allows bounded provider work beyond the ordinary deadline for ${method} ${path}`,
-      () =>
-        Effect.gen(function* () {
-          const request = HttpServerRequest.fromWeb(
-            new Request(`https://relay.test${path}`, { method }),
-          );
-          const fiber = yield* traceRelayHttpRequestWith(
-            Effect.sleep(Duration.seconds(20)).pipe(
-              Effect.as(HttpServerResponse.empty({ status: 204 })),
-            ),
-            Layer.empty,
-          ).pipe(
-            Effect.provideService(HttpServerRequest.HttpServerRequest, request),
-            Effect.forkChild,
-          );
-          yield* TestClock.adjust(Duration.millis(RELAY_LIFECYCLE_REQUEST_DEADLINE_MS));
-          expect((yield* Fiber.join(fiber)).status).toBe(204);
-        }),
-    );
-  }
+  ] as const)(
+    "allows bounded provider work beyond the ordinary deadline for %s %s",
+    ([method, path]) =>
+      Effect.gen(function* () {
+        const request = HttpServerRequest.fromWeb(
+          new Request(`https://relay.test${path}`, { method }),
+        );
+        const fiber = yield* traceRelayHttpRequestWith(
+          Effect.sleep(Duration.seconds(20)).pipe(
+            Effect.as(HttpServerResponse.empty({ status: 204 })),
+          ),
+          Layer.empty,
+        ).pipe(
+          Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+          Effect.forkChild,
+        );
+        yield* TestClock.adjust(Duration.millis(RELAY_LIFECYCLE_REQUEST_DEADLINE_MS));
+        expect((yield* Fiber.join(fiber)).status).toBe(204);
+      }),
+  );
 
   it.effect("still bounds a hung environment provision request", () =>
     Effect.gen(function* () {
@@ -1441,7 +1439,7 @@ describe("relay routing fallback", () => {
   );
 });
 
-for (const [method, path, origin, preflightMethod, expectedOrigin] of [
+it.effect.each([
   ["GET", "/v1/billing/status", "lecturn://app", "", "lecturn://app"],
   [
     "OPTIONS",
@@ -1475,27 +1473,25 @@ for (const [method, path, origin, preflightMethod, expectedOrigin] of [
     "",
     "https://lecturn.cloudgatherer.net",
   ],
-] as const) {
-  it.effect(`billing CORS ${method} ${path} ${origin} ${preflightMethod}`, () =>
-    Effect.gen(function* () {
-      const httpEffect = yield* HttpRouter.toHttpEffect(Layer.merge(relayNotFoundRoute, relayCors));
-      const response = yield* httpEffect.pipe(
-        Effect.provideService(
-          HttpServerRequest.HttpServerRequest,
-          HttpServerRequest.fromWeb(
-            new Request(`https://relay.cloudgatherer.net${path}`, {
-              method,
-              headers: { origin, "access-control-request-method": preflightMethod },
-            }),
-          ),
+] as const)("billing CORS %s %s %s %s", ([method, path, origin, preflightMethod, expectedOrigin]) =>
+  Effect.gen(function* () {
+    const httpEffect = yield* HttpRouter.toHttpEffect(Layer.merge(relayNotFoundRoute, relayCors));
+    const response = yield* httpEffect.pipe(
+      Effect.provideService(
+        HttpServerRequest.HttpServerRequest,
+        HttpServerRequest.fromWeb(
+          new Request(`https://relay.cloudgatherer.net${path}`, {
+            method,
+            headers: { origin, "access-control-request-method": preflightMethod },
+          }),
         ),
-      );
-      expect(response.headers["access-control-allow-origin"]).toBe(expectedOrigin);
-      if (method === "OPTIONS") expect(response.status).toBe(expectedOrigin ? 204 : 403);
-      if (origin === "lecturn://app" && expectedOrigin && method === "OPTIONS") {
-        expect(response.headers["access-control-allow-methods"]).toBe(`${preflightMethod},OPTIONS`);
-        expect(response.headers["access-control-allow-headers"]).toContain("authorization");
-      }
-    }).pipe(Effect.scoped),
-  );
-}
+      ),
+    );
+    expect(response.headers["access-control-allow-origin"]).toBe(expectedOrigin);
+    if (method === "OPTIONS") expect(response.status).toBe(expectedOrigin ? 204 : 403);
+    if (origin === "lecturn://app" && expectedOrigin && method === "OPTIONS") {
+      expect(response.headers["access-control-allow-methods"]).toBe(`${preflightMethod},OPTIONS`);
+      expect(response.headers["access-control-allow-headers"]).toContain("authorization");
+    }
+  }).pipe(Effect.scoped),
+);

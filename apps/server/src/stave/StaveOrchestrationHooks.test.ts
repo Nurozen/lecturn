@@ -205,8 +205,9 @@ it.layer(NodeServices.layer)("StaveOrchestrationHooks", (it) => {
     ),
   );
 
-  for (const type of ["thread.pin", "thread.unarchive"] as const)
-    it.effect(`resolves ${type} through the thread's project and refuses while transitioning`, () =>
+  it.effect.each(["thread.pin", "thread.unarchive"] as const)(
+    "resolves %s through the thread's project and refuses while transitioning",
+    (type) =>
       withHarness([projectRow(PROJECT, "/spaces/reactivation")], (harness, hooks) =>
         Effect.gen(function* () {
           const command = { type, commandId: CommandId.make("reactivate"), threadId: THREAD };
@@ -225,7 +226,7 @@ it.layer(NodeServices.layer)("StaveOrchestrationHooks", (it) => {
           );
         }),
       ),
-    );
+  );
 
   it.effect(
     "admits V2 thread-creating commands (delegated task, merge-back) like create/fork",

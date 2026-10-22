@@ -258,8 +258,9 @@ function makeLinks(
 }
 
 describe("EnvironmentConnector", () => {
-  for (const operation of ["connect", "status"] as const) {
-    it.effect(`rejects unpaid managed ${operation} before contacting the environment`, () =>
+  it.effect.each(["connect", "status"] as const)(
+    "rejects unpaid managed %s before contacting the environment",
+    (operation) =>
       Effect.gen(function* () {
         const connector = yield* EnvironmentConnector.EnvironmentConnector;
         const result = yield* Effect.result(
@@ -292,8 +293,7 @@ describe("EnvironmentConnector", () => {
           }),
         ),
       ),
-    );
-  }
+  );
   it.effect("withholds minted credentials if access expires during the environment request", () => {
     let eligible = true;
     const execute = (request: HttpClientRequest.HttpClientRequest) =>

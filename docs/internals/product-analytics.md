@@ -44,6 +44,13 @@ stays `unavailable` until their ACP token fields and scope are verified. Partial
 cannot establish a whole-turn total. Keep these distinctions when changing token
 normalization or building reports.
 
+## Delivery
+
+A send can fail after PostHog has stored the batch, so every retry is a copy.
+[Delivery](../../apps/server/src/telemetry/AnalyticsService.ts) gives each event a
+uuid when it is recorded, backs off after a failed send, and drops a batch after a
+few tries. Without these limits, one stuck batch was sent every second for days.
+
 ## Collection boundary
 
 Keep analytics payloads to product metadata and normalized measurements. Do not

@@ -78,6 +78,8 @@ function registryLayer(reconciles: Ref.Ref<ReadonlyArray<Reconcile>>) {
         registerPlatform: () => Effect.die("unused"),
         reconcilePlatform: () => Effect.die("unused"),
         remove: () => Effect.die("unused"),
+        removeRoute: () => Effect.die("unused"),
+        reorderRoutes: () => Effect.die("unused"),
         setEnabled: () => Effect.die("unused"),
         removeRelayEnvironments: () => Effect.die("unused"),
         reconcileRelayEnvironments: (accountId, environmentIds) =>

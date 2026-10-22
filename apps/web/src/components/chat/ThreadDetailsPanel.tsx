@@ -9,7 +9,11 @@ import { AlertTriangleIcon, XIcon } from "lucide-react";
 
 import type { DraftId } from "../../composerDraftStore";
 import { useLecturnProjectFileScripts } from "../../hooks/useLecturnProjectFileScripts";
-import type { EnvMode, EnvironmentOption } from "../BranchToolbar.logic";
+import {
+  shouldShowEnvironmentIndicator,
+  type EnvMode,
+  type EnvironmentOption,
+} from "../BranchToolbar.logic";
 import { BranchToolbar } from "../BranchToolbar";
 import { BranchToolbarEnvironmentSelector } from "../BranchToolbarEnvironmentSelector";
 import GitActionsControl from "../GitActionsControl";
@@ -95,6 +99,14 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
     props.environmentId,
     props.activeProjectScripts ? props.gitCwd : null,
   );
+  // Same rule as the composer strip: a lone remote machine still gets a row,
+  // shown as a static label because there is nothing to pick.
+  const canPickEnvironment = props.availableEnvironments.length > 1;
+  const showEnvironment = shouldShowEnvironmentIndicator({
+    activeEnvironment:
+      props.availableEnvironments.find((env) => env.environmentId === props.environmentId) ?? null,
+    canPickEnvironment,
+  });
   const branchToolbarProps = {
     showGitControls: props.isGitRepo,
     environmentId: props.environmentId,
@@ -131,7 +143,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             headingId="thread-details-workspace-heading"
             title="Workspace"
             separated={false}
-            showHeading={density === "full"}
+            showHeading={false}
           >
             {props.versionMismatch ? (
               <div className="mx-1 mb-2 flex gap-2 rounded-xl border border-warning/30 bg-warning/6 p-3">
@@ -155,7 +167,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             ) : null}
 
             <div className="flex flex-col">
-              {density === "full" && props.availableEnvironments.length > 1 ? (
+              {density === "full" && showEnvironment ? (
                 <BranchToolbarEnvironmentSelector
                   displayMode="panel"
                   autoEnvironmentLabel={props.autoEnvironmentLabel}
@@ -163,7 +175,9 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   envLocked={props.envLocked}
                   environmentId={props.environmentId}
                   availableEnvironments={props.availableEnvironments}
-                  onEnvironmentChange={props.onEnvironmentChange}
+                  {...(canPickEnvironment
+                    ? { onEnvironmentChange: props.onEnvironmentChange }
+                    : {})}
                 />
               ) : null}
 
@@ -201,7 +215,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             <ThreadDetailsSection
               headingId="thread-details-version-control-heading"
               title="Version Control"
-              showHeading={density === "full"}
+              showHeading={false}
               separated={density === "full"}
             >
               <div className="flex flex-col">

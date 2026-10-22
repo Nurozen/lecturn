@@ -118,56 +118,56 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
   });
 
   describe("candidate order", () => {
-    for (const source of ["settings", "env", "bootstrap"] as const) {
-      for (const candidate of ["stave", "tools/stave"]) {
-        it.effect(`executes and refreshes the local ${source} candidate ${candidate}`, () =>
-          Effect.gen(function* () {
-            const fs = yield* FileSystem.FileSystem;
-            const path = yield* Path.Path;
-            const root = yield* withTempDir();
-            const selected = yield* writeExecutable(path.join(root, candidate));
-            const pathDir = path.join(root, "path-bin");
-            yield* writeExecutable(path.join(pathDir, "stave"));
-            let localVersion = "0.4.0";
-            const runner = makeFakeRunner((input) =>
-              versionOutput(`stave v${input.command === selected ? localVersion : "9.9.9"}\n`),
-            );
-            const { service } = yield* makeHarness(root, {
-              workingDirectory: root,
-              ...(source === "settings" ? { settingsBinaryPath: candidate } : {}),
-              ...(source === "bootstrap" ? { stavePath: candidate } : {}),
-              env: {
-                PATH: pathDir,
-                ...(source === "env" ? { LECTURN_STAVE_PATH: candidate } : {}),
-              },
-              bundledBaseDir: path.join(root, "dist"),
-              runner,
-            });
-
-            const first = yield* service.resolve;
-            assert.deepEqual(first, {
-              path: selected,
-              source,
-              version: "0.4.0",
-              commit: null,
-            });
-            yield* service.featuresFor(first);
-            const firstCallCount = runner.calls.length;
-            assert.isAbove(firstCallCount, 1);
-            assert.strictEqual(yield* service.resolve, first);
-            yield* service.features;
-            assert.equal(runner.calls.length, firstCallCount);
-
-            localVersion = "0.5.0";
-            yield* fs.writeFileString(selected, "replacement executable of a different size");
-            assert.equal((yield* service.resolve).version, "0.5.0");
-            yield* service.features;
-            assert.equal(runner.calls.length, firstCallCount * 2);
-            assert.isTrue(runner.calls.every((call) => call.command === selected));
-          }).pipe(Effect.scoped),
+    it.effect.each(
+      (["settings", "env", "bootstrap"] as const).flatMap((source) =>
+        ["stave", "tools/stave"].map((candidate) => [source, candidate] as const),
+      ),
+    )("executes and refreshes the local %s candidate %s", ([source, candidate]) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* withTempDir();
+        const selected = yield* writeExecutable(path.join(root, candidate));
+        const pathDir = path.join(root, "path-bin");
+        yield* writeExecutable(path.join(pathDir, "stave"));
+        let localVersion = "0.4.0";
+        const runner = makeFakeRunner((input) =>
+          versionOutput(`stave v${input.command === selected ? localVersion : "9.9.9"}\n`),
         );
-      }
-    }
+        const { service } = yield* makeHarness(root, {
+          workingDirectory: root,
+          ...(source === "settings" ? { settingsBinaryPath: candidate } : {}),
+          ...(source === "bootstrap" ? { stavePath: candidate } : {}),
+          env: {
+            PATH: pathDir,
+            ...(source === "env" ? { LECTURN_STAVE_PATH: candidate } : {}),
+          },
+          bundledBaseDir: path.join(root, "dist"),
+          runner,
+        });
+
+        const first = yield* service.resolve;
+        assert.deepEqual(first, {
+          path: selected,
+          source,
+          version: "0.4.0",
+          commit: null,
+        });
+        yield* service.featuresFor(first);
+        const firstCallCount = runner.calls.length;
+        assert.isAbove(firstCallCount, 1);
+        assert.strictEqual(yield* service.resolve, first);
+        yield* service.features;
+        assert.equal(runner.calls.length, firstCallCount);
+
+        localVersion = "0.5.0";
+        yield* fs.writeFileString(selected, "replacement executable of a different size");
+        assert.equal((yield* service.resolve).version, "0.5.0");
+        yield* service.features;
+        assert.equal(runner.calls.length, firstCallCount * 2);
+        assert.isTrue(runner.calls.every((call) => call.command === selected));
+      }).pipe(Effect.scoped),
+    );
 
     it.effect("settings.binaryPath wins over every other source", () =>
       Effect.gen(function* () {

@@ -12,65 +12,63 @@ import { displacedTokenRows, displacedDeviceActivities } from "./PushTokenClaims
 const isDeviceRegistration = Schema.is(RelayDeviceRegistrationRequest);
 const isActivityRegistration = Schema.is(RelayLiveActivityRegistrationRequest);
 
-for (const [table, tokenColumn, tokenName] of [
-  [relayMobileDevices, relayMobileDevices.pushToken, "push_token"],
-  [relayMobileDevices, relayMobileDevices.pushToStartToken, "push_to_start_token"],
-  [relayLiveActivities, relayLiveActivities.activityPushToken, "activity_push_token"],
-] as const) {
-  describe(tokenName, () => {
-    for (const [label, list, expected] of [
-      [
-        "retains only existing same-device listed accounts",
-        ["A", "B", "unregistered"],
-        ["A", "B", "different-token"],
-      ],
-      ["clears same-device unlisted accounts", ["B"], ["B", "different-token"]],
-      ["legacy registration remains exclusive", undefined, ["different-token"]],
-      [
-        "deduplicates and retains caller even if omitted",
-        ["A", "A"],
-        ["A", "B", "different-token"],
-      ],
-    ] as const) {
-      it(label, () => {
-        const db = new NodeSqlite.DatabaseSync(":memory:");
-        try {
-          const tableName =
-            table === relayMobileDevices ? "relay_mobile_devices" : "relay_live_activities";
-          db.exec(`CREATE TABLE ${tableName}(user_id TEXT, device_id TEXT, ${tokenName} TEXT)`);
-          const insert = db.prepare(`INSERT INTO ${tableName} VALUES (?, ?, ?)`);
-          insert.run("A", "phone", "token");
-          insert.run("B", "phone", "token");
-          insert.run("C", "phone", "token");
-          insert.run("other-device", "tablet", "token");
-          insert.run("different-token", "phone", "other");
-          const condition = new PgDialect().sqlToQuery(
-            displacedTokenRows({
-              tokenColumn,
-              userColumn: table.userId,
-              deviceColumn: table.deviceId,
-              token: "token",
-              userId: "B",
-              deviceId: "phone",
-              ...(list ? { deviceAccountIds: list } : {}),
-            }),
-          );
-          db.prepare(
-            `UPDATE ${tableName} SET ${tokenName}=NULL WHERE ${condition.sql.replace(/\$\d+/g, "?")}`,
-          ).run(...(condition.params as string[]));
-          const rows = db
-            .prepare(
-              `SELECT user_id FROM ${tableName} WHERE ${tokenName} IS NOT NULL ORDER BY user_id`,
-            )
-            .all();
-          expect(rows.map((row) => row.user_id)).toEqual(expected);
-        } finally {
-          db.close();
-        }
-      });
+describe.each([
+  { table: relayMobileDevices, tokenColumn: relayMobileDevices.pushToken, tokenName: "push_token" },
+  {
+    table: relayMobileDevices,
+    tokenColumn: relayMobileDevices.pushToStartToken,
+    tokenName: "push_to_start_token",
+  },
+  {
+    table: relayLiveActivities,
+    tokenColumn: relayLiveActivities.activityPushToken,
+    tokenName: "activity_push_token",
+  },
+] as const)("$tokenName", ({ table, tokenColumn, tokenName }) => {
+  it.each([
+    [
+      "retains only existing same-device listed accounts",
+      ["A", "B", "unregistered"],
+      ["A", "B", "different-token"],
+    ],
+    ["clears same-device unlisted accounts", ["B"], ["B", "different-token"]],
+    ["legacy registration remains exclusive", undefined, ["different-token"]],
+    ["deduplicates and retains caller even if omitted", ["A", "A"], ["A", "B", "different-token"]],
+  ] as const)("%s", (_label, list, expected) => {
+    const db = new NodeSqlite.DatabaseSync(":memory:");
+    try {
+      const tableName =
+        table === relayMobileDevices ? "relay_mobile_devices" : "relay_live_activities";
+      db.exec(`CREATE TABLE ${tableName}(user_id TEXT, device_id TEXT, ${tokenName} TEXT)`);
+      const insert = db.prepare(`INSERT INTO ${tableName} VALUES (?, ?, ?)`);
+      insert.run("A", "phone", "token");
+      insert.run("B", "phone", "token");
+      insert.run("C", "phone", "token");
+      insert.run("other-device", "tablet", "token");
+      insert.run("different-token", "phone", "other");
+      const condition = new PgDialect().sqlToQuery(
+        displacedTokenRows({
+          tokenColumn,
+          userColumn: table.userId,
+          deviceColumn: table.deviceId,
+          token: "token",
+          userId: "B",
+          deviceId: "phone",
+          ...(list ? { deviceAccountIds: list } : {}),
+        }),
+      );
+      db.prepare(
+        `UPDATE ${tableName} SET ${tokenName}=NULL WHERE ${condition.sql.replace(/\$\d+/g, "?")}`,
+      ).run(...(condition.params as string[]));
+      const rows = db
+        .prepare(`SELECT user_id FROM ${tableName} WHERE ${tokenName} IS NOT NULL ORDER BY user_id`)
+        .all();
+      expect(rows.map((row) => row.user_id)).toEqual(expected);
+    } finally {
+      db.close();
     }
   });
-}
+});
 
 it("rejects more than five retained accounts on both wire requests", () => {
   const deviceAccountIds = ["A", "B", "C", "D", "E", "F"];

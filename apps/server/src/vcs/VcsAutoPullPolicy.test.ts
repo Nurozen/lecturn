@@ -252,8 +252,9 @@ it.layer(NodeServices.layer)("VcsAutoPullPolicy ownership cache", (it) => {
     }),
   );
 
-  for (const operation of ["realPath", "exists"] as const) {
-    it.effect(`fails closed on a fresh candidate ${operation} error after warming the cache`, () =>
+  it.effect.each(["realPath", "exists"] as const)(
+    "fails closed on a fresh candidate %s error after warming the cache",
+    (operation) =>
       Effect.gen(function* () {
         const fixture = yield* makeFixture();
         const cwd = fixture.state.projects[0]!.workspaceRoot;
@@ -267,8 +268,7 @@ it.layer(NodeServices.layer)("VcsAutoPullPolicy ownership cache", (it) => {
           assert.isTrue(yield* policy.isEnabled(cwd));
         }).pipe(Effect.provide(fixture.policyLayer));
       }),
-    );
-  }
+  );
 
   it.effect("fails closed when a TTL refresh cannot read a registered ownership manifest", () =>
     Effect.gen(function* () {
@@ -288,31 +288,27 @@ it.layer(NodeServices.layer)("VcsAutoPullPolicy ownership cache", (it) => {
     }),
   );
 
-  for (const content of [
+  it.effect.each([
     "version: [invalid",
     "version: 2\nid: owner\nrepos: wrong\n",
     "version: 2\nid: \nrepos: []\n",
-  ]) {
-    it.effect(
-      `fails closed when a registered ownership manifest cannot be decoded: ${content}`,
-      () =>
-        Effect.gen(function* () {
-          const fixture = yield* makeFixture();
-          const cwd = fixture.state.projects[0]!.workspaceRoot;
-          const ownerManifest = fixture.manifest(fixture.state.projects[PROJECT_COUNT - 1]!);
-          yield* Effect.gen(function* () {
-            const policy = yield* VcsStatusBroadcaster.VcsAutoPullPolicy;
-            assert.isTrue(yield* policy.isEnabled(cwd));
-            yield* fixture.fs.writeFileString(ownerManifest, content);
-            yield* TestClock.adjust(Duration.seconds(30));
-            assert.isFalse(yield* policy.isEnabled(cwd));
-            yield* fixture.fs.remove(ownerManifest);
-            yield* TestClock.adjust(Duration.seconds(30));
-            assert.isTrue(yield* policy.isEnabled(cwd));
-          }).pipe(Effect.provide(fixture.policyLayer));
-        }),
-    );
-  }
+  ])("fails closed when a registered ownership manifest cannot be decoded: %s", (content) =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture();
+      const cwd = fixture.state.projects[0]!.workspaceRoot;
+      const ownerManifest = fixture.manifest(fixture.state.projects[PROJECT_COUNT - 1]!);
+      yield* Effect.gen(function* () {
+        const policy = yield* VcsStatusBroadcaster.VcsAutoPullPolicy;
+        assert.isTrue(yield* policy.isEnabled(cwd));
+        yield* fixture.fs.writeFileString(ownerManifest, content);
+        yield* TestClock.adjust(Duration.seconds(30));
+        assert.isFalse(yield* policy.isEnabled(cwd));
+        yield* fixture.fs.remove(ownerManifest);
+        yield* TestClock.adjust(Duration.seconds(30));
+        assert.isTrue(yield* policy.isEnabled(cwd));
+      }).pipe(Effect.provide(fixture.policyLayer));
+    }),
+  );
 
   it.effect("recognizes external membership manifest creation, edits, and removal by the TTL", () =>
     Effect.gen(function* () {
@@ -460,13 +456,14 @@ function makeBroadcasterFixture(remote: VcsStatusRemoteResult | null) {
 }
 
 describe("VcsStatusBroadcaster automatic pull eligibility", () => {
-  for (const [name, remote] of [
+  it.effect.each([
     ["null remote", null],
     ["no upstream", { ...currentRemote, hasUpstream: false, behindCount: 2 }],
     ["ahead branch", { ...currentRemote, aheadCount: 1, behindCount: 2 }],
     ["already-current branch", currentRemote],
-  ] as const) {
-    it.effect(`skips ownership policy on repeated explicit and recurring ${name} passes`, () => {
+  ] as const)(
+    "skips ownership policy on repeated explicit and recurring %s passes",
+    ([, remote]) => {
       const { state, testLayer } = makeBroadcasterFixture(remote);
       return Effect.gen(function* () {
         const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
@@ -501,8 +498,8 @@ describe("VcsStatusBroadcaster automatic pull eligibility", () => {
           assert.equal(state.pulls, 0);
         }
       }).pipe(Effect.provide(testLayer));
-    });
-  }
+    },
+  );
 
   it.effect("consults policy and pulls an eligible default branch during a recurring pass", () => {
     const { state, testLayer } = makeBroadcasterFixture({ ...currentRemote, behindCount: 2 });

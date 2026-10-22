@@ -373,7 +373,7 @@ it.layer(SqlitePersistenceMemory)("Decision intake relationships", (it) => {
         assert.equal(restored.revision, before.revision);
       }),
   );
-  for (const reason of [
+  it.effect.each([
     "conflict",
     "unknown-conflict",
     "model",
@@ -382,38 +382,36 @@ it.layer(SqlitePersistenceMemory)("Decision intake relationships", (it) => {
     "dismissed",
     "shared-origin",
     "alias",
-  ] as const) {
-    it.effect(`qualified consolidation refuses ${reason}`, () =>
-      Effect.gen(function* () {
-        const f = yield* relationsFixture;
-        f.qualify();
-        f.setConflict(reason === "conflict");
-        if (reason === "unknown-conflict") f.setFailure();
-        if (reason === "model") f.setModel("changed-model");
-        if (reason === "edited")
-          yield* f.sql`UPDATE thread_decisions SET user_edited=1 WHERE id='other-decision'`;
-        if (reason === "revision" || reason === "dismissed")
-          f.afterEvaluation(
-            (reason === "revision"
-              ? f.sql`UPDATE thread_decisions SET revision=revision+1 WHERE id='other-decision'`
-              : f.sql`UPDATE thread_decisions SET review_state='dismissed' WHERE id='decision'`
-            ).pipe(Effect.asVoid, Effect.orDie),
-          );
-        if (reason === "shared-origin")
-          yield* f.sql`UPDATE decision_evidence SET message_id='message' WHERE decision_id='other-decision'`;
-        if (reason === "alias") {
-          yield* f.sql`INSERT INTO contextual_decision_groups(id,project_id,canonical_decision_id,revision,updated_at) VALUES('existing',${projectId},'uncompared-canonical',0,'now')`;
-          yield* f.sql`INSERT INTO contextual_group_members(decision_id,group_id,occurrence_revision,merge_id) VALUES('decision','existing',0,'original')`;
-        }
-        yield* f.relations.drive;
-        assert.equal(
-          (yield* f.sql`SELECT 1 FROM contextual_group_members WHERE merge_id LIKE 'automatic:%'`)
-            .length,
-          0,
+  ] as const)("qualified consolidation refuses %s", (reason) =>
+    Effect.gen(function* () {
+      const f = yield* relationsFixture;
+      f.qualify();
+      f.setConflict(reason === "conflict");
+      if (reason === "unknown-conflict") f.setFailure();
+      if (reason === "model") f.setModel("changed-model");
+      if (reason === "edited")
+        yield* f.sql`UPDATE thread_decisions SET user_edited=1 WHERE id='other-decision'`;
+      if (reason === "revision" || reason === "dismissed")
+        f.afterEvaluation(
+          (reason === "revision"
+            ? f.sql`UPDATE thread_decisions SET revision=revision+1 WHERE id='other-decision'`
+            : f.sql`UPDATE thread_decisions SET review_state='dismissed' WHERE id='decision'`
+          ).pipe(Effect.asVoid, Effect.orDie),
         );
-      }),
-    );
-  }
+      if (reason === "shared-origin")
+        yield* f.sql`UPDATE decision_evidence SET message_id='message' WHERE decision_id='other-decision'`;
+      if (reason === "alias") {
+        yield* f.sql`INSERT INTO contextual_decision_groups(id,project_id,canonical_decision_id,revision,updated_at) VALUES('existing',${projectId},'uncompared-canonical',0,'now')`;
+        yield* f.sql`INSERT INTO contextual_group_members(decision_id,group_id,occurrence_revision,merge_id) VALUES('decision','existing',0,'original')`;
+      }
+      yield* f.relations.drive;
+      assert.equal(
+        (yield* f.sql`SELECT 1 FROM contextual_group_members WHERE merge_id LIKE 'automatic:%'`)
+          .length,
+        0,
+      );
+    }),
+  );
   it.effect(
     "A-B and B-C equivalence never implies A-C, but a direct canonical comparison can join C",
     () =>

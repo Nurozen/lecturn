@@ -758,8 +758,9 @@ it.layer(testLayer)("Decision worker", (it) => {
       );
     }),
   );
-  for (const action of ["duplicate", "propose_replacement"] as const) {
-    it.effect(`retrieves a related decision from another project thread for ${action}`, () =>
+  it.effect.each(["duplicate", "propose_replacement"] as const)(
+    "retrieves a related decision from another project thread for %s",
+    (action) =>
       Effect.gen(function* () {
         const f = yield* fixture({
           writer: (input, attempt) =>
@@ -830,8 +831,7 @@ it.layer(testLayer)("Decision worker", (it) => {
         if (action === "duplicate") assert.equal(persisted.evidence.length, 1);
         else assert.equal(persisted.relationships[0]?.state, "proposed");
       }),
-    );
-  }
+  );
   it.effect("processes every qualifying localization branch", () =>
     Effect.gen(function* () {
       const { sql, jobs, worker, repository, requests } = yield* fixture();

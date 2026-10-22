@@ -132,8 +132,9 @@ describe("activity indicator contrast", () => {
       });
     return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
   }
-  for (const appearance of ["light", "dark"] as const) {
-    it(`keeps ${appearance} status icons at least 3:1 against activity surfaces`, () => {
+  it.each(["light", "dark"] as const)(
+    "keeps %s status icons at least 3:1 against activity surfaces",
+    (appearance) => {
       const surfaces = appearance === "light" ? ["#ffffff", "#f4eedf"] : ["#061622", "#102a39"];
       for (const state of Object.keys(
         activityVisualPresentation,
@@ -146,6 +147,6 @@ describe("activity indicator contrast", () => {
           expect(contrast, `${state} on ${surface}`).toBeGreaterThanOrEqual(3);
         }
       }
-    });
-  }
+    },
+  );
 });

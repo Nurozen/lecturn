@@ -22,8 +22,9 @@ const seedThread = Effect.gen(function* () {
 });
 
 describe("065 collision compatibility", () => {
-  for (const upstreamId of [48, 49]) {
-    it.effect(`upgrades upstream ${upstreamId} without replaying historical deletion intents`, () =>
+  it.effect.each([48, 49])(
+    "upgrades upstream %s without replaying historical deletion intents",
+    (upstreamId) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         yield* runMigrations({ toMigrationInclusive: 47 });
@@ -72,10 +73,10 @@ describe("065 collision compatibility", () => {
         assert.deepEqual(yield* sql`SELECT * FROM stave_lifecycle_policy`, []);
         assert.deepEqual(yield* runMigrations({ toMigrationInclusive: 69 }), []);
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
-    );
-  }
-  for (const forkId of [49, 63, 64]) {
-    it.effect(`preserves published fork ${forkId} lifecycle leases, journal and lineage`, () =>
+  );
+  it.effect.each([49, 63, 64])(
+    "preserves published fork %s lifecycle leases, journal and lineage",
+    (forkId) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         yield* runMigrations({ toMigrationInclusive: forkId });
@@ -125,6 +126,5 @@ describe("065 collision compatibility", () => {
         );
         assert.deepEqual(yield* runMigrations({ toMigrationInclusive: 69 }), []);
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
-    );
-  }
+  );
 });

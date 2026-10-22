@@ -4,8 +4,9 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { layer } from "@lecturn/shared/nodeSqliteClient";
 import { runMigrations } from "../Migrations.ts";
 
-for (const keepRow of [true, false]) {
-  it.effect(`preserves outbox cursors across upgrade with retained rows: ${keepRow}`, () =>
+it.effect.each([true, false])(
+  "preserves outbox cursors across upgrade with retained rows: %s",
+  (keepRow) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* runMigrations({ toMigrationInclusive: 61 });
@@ -28,5 +29,4 @@ for (const keepRow of [true, false]) {
       assert.equal(rows[0]?.sequence, 51);
       assert.deepEqual(yield* runMigrations({ toMigrationInclusive: 62 }), []);
     }).pipe(Effect.provide(layer({ filename: ":memory:" }))),
-  );
-}
+);

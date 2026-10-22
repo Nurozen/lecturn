@@ -117,6 +117,7 @@ const makeHarness = Effect.fn("TestDiscoveryRegistry.makeHarness")(function* () 
               ? new Map(current).set(registration.target.environmentId, registration.target)
               : current,
           ),
+        setRoutes: () => unused("Route storage"),
         remove: () => deleted("registration"),
       }),
     ),
@@ -145,7 +146,11 @@ const makeHarness = Effect.fn("TestDiscoveryRegistry.makeHarness")(function* () 
     ),
     Layer.succeed(
       ConnectionDriver.ConnectionDriver,
-      ConnectionDriver.ConnectionDriver.of({ connect: () => unused("The connection driver") }),
+      ConnectionDriver.ConnectionDriver.of({
+        connect: () => unused("The connection driver"),
+        checkRoute: () => unused("The connection driver"),
+        preflight: () => unused("The connection driver"),
+      }),
     ),
     Layer.succeed(
       ClientCapabilities.SshEnvironmentGateway,

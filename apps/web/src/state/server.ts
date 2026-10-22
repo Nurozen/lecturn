@@ -10,6 +10,7 @@ import {
   type ServerSettings,
 } from "@lecturn/contracts";
 import { createServerEnvironmentAtoms } from "@lecturn/client-runtime/state/server";
+import { createOutdatedServerUpdateCommand } from "@lecturn/client-runtime/state/outdatedServerUpdate";
 import { createEnvironmentServerConfigsAtom } from "@lecturn/client-runtime/state/shell";
 import { mergeWithDefaultKeybindings } from "@lecturn/shared/keybindings";
 import * as Option from "effect/Option";
@@ -32,6 +33,8 @@ export const serverEnvironment = createServerEnvironmentAtoms(connectionAtomRunt
   usageLimitSources: true,
   usageLimitsCommand: true,
 });
+/** Updates a host whose protocol is too old for this client to connect to. */
+export const updateOutdatedServer = createOutdatedServerUpdateCommand(connectionAtomRuntime);
 export const environmentServerConfigsAtom = createEnvironmentServerConfigsAtom({
   catalogValueAtom: environmentCatalog.catalogValueAtom,
   serverConfigValueAtom: serverEnvironment.configValueAtom,

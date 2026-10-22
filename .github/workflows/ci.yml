@@ -494,6 +494,7 @@ jobs:
         test,
         test_web,
         test_server,
+        transfer-report,
         rust,
         mobile_native_changes,
         release_smoke,

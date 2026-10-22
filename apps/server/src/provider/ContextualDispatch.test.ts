@@ -84,15 +84,15 @@ it.effect(
       expect(receipt?.evidenceIncluded).toBe(true);
     }),
 );
-for (const disposition of ["steered", "provider-queued", "skipped"] as const) {
-  it.effect(`contextual ${disposition} never appends evidence`, () =>
+it.effect.each(["steered", "provider-queued", "skipped"] as const)(
+  "contextual %s never appends evidence",
+  (disposition) =>
     Effect.gen(function* () {
       const dispatch = prepareContextualDispatch(input, disposition, instanceId, "native");
       expect(dispatch.text).toBeUndefined();
       expect(decode(yield* dispatch.receipt("unknown", null, null)).evidenceIncluded).toBe(false);
     }),
-  );
-}
+);
 it("contextual evidence respects the complete wrapper byte budget and native identity", () => {
   expect(contextualEvidenceFits("😀".repeat(400))).toBe(false);
   const overhead = new TextEncoder().encode(renderContextualEvidence("")).length;

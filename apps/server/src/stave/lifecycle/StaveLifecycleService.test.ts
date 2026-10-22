@@ -297,14 +297,23 @@ const harness = Effect.fn(function* (
   };
 });
 
-const test = <E>(
-  name: string,
-  body: Effect.Effect<
-    void,
-    E,
-    StaveLifecycleRepository | SqlClient.SqlClient | import("effect/Scope").Scope
-  >,
-) => it.effect(name, () => body.pipe(Effect.provide(persistence), Effect.scoped));
+type LifecycleTestBody<E> = Effect.Effect<
+  void,
+  E,
+  StaveLifecycleRepository | SqlClient.SqlClient | import("effect/Scope").Scope
+>;
+const provideLifecycleTest = <E>(body: LifecycleTestBody<E>) =>
+  body.pipe(Effect.provide(persistence), Effect.scoped);
+const test = Object.assign(
+  <E>(name: string, body: LifecycleTestBody<E>) =>
+    it.effect(name, () => provideLifecycleTest(body)),
+  {
+    each:
+      <T>(cases: ReadonlyArray<T>) =>
+      <E>(name: string, body: (testCase: T) => LifecycleTestBody<E>) =>
+        it.effect.each(cases)(name, (testCase) => provideLifecycleTest(body(testCase))),
+  },
+);
 
 /** A finished (non-streaming) V2 message: user-visible thread activity. */
 const messageEvent = (sequence: number, streaming: boolean): ApplicationStoredEvent => ({
@@ -509,9 +518,9 @@ describe("StaveLifecycle event journal", () => {
 });
 
 describe("StaveLifecycleService", () => {
-  for (const disabled of [{ serverEnabled: false }, { enabled: false }]) {
-    test(
-      `disabled startup and event bursts leave lifecycle journals untouched for ${JSON.stringify(disabled)}`,
+  test.each([{ serverEnabled: false }, { enabled: false }])(
+    "disabled startup and event bursts leave lifecycle journals untouched for %j",
+    (disabled) =>
       Effect.gen(function* () {
         const ready = yield* Deferred.make<void>();
         const consumed = yield* Deferred.make<void>();
@@ -546,8 +555,7 @@ describe("StaveLifecycleService", () => {
         assert.deepEqual(yield* Ref.get(h.storageCalls), ["observe-policy"]);
         assert.deepEqual(yield* h.row, before);
       }),
-    );
-  }
+  );
   test(
     "streaming assistant deltas do not request lifecycle sweeps",
     Effect.gen(function* () {
@@ -650,29 +658,30 @@ describe("StaveLifecycleService", () => {
       assert.equal((yield* Ref.get(h.calls)).filter((call) => call === "reconcile").length, 2);
     }),
   );
-  for (const activeAnchors of [[], [{ ...ANCHOR, settledOverride: "active" as const }]])
-    test(
-      `releases abandoned nontransitional leases with ${activeAnchors.length === 0 ? "no" : "active"} threads`,
-      Effect.gen(function* () {
-        const h = yield* harness();
-        yield* Ref.set(h.anchors, activeAnchors);
-        yield* h.repo.acquireLease({
-          projectId: ID,
-          expectedEpoch: 0,
-          ownerToken: "crashed",
-          now: NOW,
-          leaseUntil: "2026-09-01T00:01:00.000Z",
-        });
-        yield* TestClock.adjust("2 minutes");
-        yield* h.service.sweep;
-        assert.isNull((yield* h.row).ownerToken);
-        assert.isNull((yield* h.row).leaseUntil);
-      }),
-    );
+  test.each([
+    { activeAnchors: [], label: "no" },
+    { activeAnchors: [{ ...ANCHOR, settledOverride: "active" as const }], label: "active" },
+  ])("releases abandoned nontransitional leases with $label threads", ({ activeAnchors }) =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      yield* Ref.set(h.anchors, activeAnchors);
+      yield* h.repo.acquireLease({
+        projectId: ID,
+        expectedEpoch: 0,
+        ownerToken: "crashed",
+        now: NOW,
+        leaseUntil: "2026-09-01T00:01:00.000Z",
+      });
+      yield* TestClock.adjust("2 minutes");
+      yield* h.service.sweep;
+      assert.isNull((yield* h.row).ownerToken);
+      assert.isNull((yield* h.row).leaseUntil);
+    }),
+  );
 
-  for (const options of [{ serverEnabled: false }, { enabled: false }, { binaryAvailable: false }])
-    test(
-      `is inert for ${JSON.stringify(options)}`,
+  test.each([{ serverEnabled: false }, { enabled: false }, { binaryAvailable: false }])(
+    "is inert for %j",
+    (options) =>
       Effect.gen(function* () {
         const h = yield* harness({ ...options, deleted: true });
         const before = yield* h.row;
@@ -683,7 +692,7 @@ describe("StaveLifecycleService", () => {
           options.binaryAvailable === false ? ["resolve"] : [],
         );
       }),
-    );
+  );
   test(
     "recovers a durable delete intent after reprovision and drains deleted threads before cleanup",
     Effect.gen(function* () {
@@ -713,20 +722,21 @@ describe("StaveLifecycleService", () => {
       assert.isFalse((yield* Ref.get(h.calls)).some((call) => call.startsWith("disk:")));
     }),
   );
-  for (const anchors of [[], [{ ...ANCHOR, settledOverride: "active" as const }]])
-    test(
-      `cancels pending archives for ${anchors.length === 0 ? "no threads" : "active threads"}`,
-      Effect.gen(function* () {
-        const h = yield* harness();
-        yield* h.service.sweep;
-        yield* Ref.set(h.anchors, anchors);
-        yield* h.service.sweep;
-        const row = yield* h.row;
-        assert.equal(row.disposition, "live");
-        assert.equal(row.scheduledAt, null);
-        assert.equal(row.archiveDeadlineAt, null);
-      }),
-    );
+  test.each([
+    { anchors: [], label: "no threads" },
+    { anchors: [{ ...ANCHOR, settledOverride: "active" as const }], label: "active threads" },
+  ])("cancels pending archives for $label", ({ anchors }) =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      yield* h.service.sweep;
+      yield* Ref.set(h.anchors, anchors);
+      yield* h.service.sweep;
+      const row = yield* h.row;
+      assert.equal(row.disposition, "live");
+      assert.equal(row.scheduledAt, null);
+      assert.equal(row.archiveDeadlineAt, null);
+    }),
+  );
   test(
     "suggests without automatic disk work even at zero grace",
     Effect.gen(function* () {
@@ -762,9 +772,12 @@ describe("StaveLifecycleService", () => {
       assert.equal((yield* h.row).scheduledAt, "2026-09-09T00:00:00.000Z");
     }),
   );
-  for (const legacyAnchor of [false, true])
-    test(
-      `passive session shutdown preserves durable Keep across restart with ${legacyAnchor ? "legacy" : "activity"} anchor`,
+  test.each([
+    { legacyAnchor: false, label: "activity" },
+    { legacyAnchor: true, label: "legacy" },
+  ])(
+    "passive session shutdown preserves durable Keep across restart with $label anchor",
+    ({ legacyAnchor }) =>
       Effect.gen(function* () {
         const h = yield* harness();
         yield* h.service.sweep;
@@ -796,10 +809,13 @@ describe("StaveLifecycleService", () => {
         assert.equal((yield* h.row).disposition, "pending_archive");
         assert.equal((yield* h.row).scheduledAt, "2026-09-09T00:00:00.000Z");
       }),
-    );
-  for (const legacyAnchor of [false, true])
-    test(
-      `automatic archive survives provider shutdown during quiescence with ${legacyAnchor ? "legacy" : "activity"} anchor`,
+  );
+  test.each([
+    { legacyAnchor: false, label: "activity" },
+    { legacyAnchor: true, label: "legacy" },
+  ])(
+    "automatic archive survives provider shutdown during quiescence with $label anchor",
+    ({ legacyAnchor }) =>
       Effect.gen(function* () {
         const h = yield* harness();
         yield* h.service.sweep;
@@ -814,7 +830,7 @@ describe("StaveLifecycleService", () => {
         assert.equal((yield* h.row).disposition, "archived");
         assert.isNull((yield* h.row).refusalCode);
       }),
-    );
+  );
   test(
     "revalidates activity under the operation lease before touching disk",
     Effect.gen(function* () {

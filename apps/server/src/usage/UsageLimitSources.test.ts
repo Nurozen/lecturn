@@ -135,8 +135,9 @@ describe("usage source reset credits", () => {
     }).pipe(Effect.scoped),
   );
 
-  for (const state of ["missing", "disabled", "no-key"] as const) {
-    it.effect(`rejects a ${state} source without forwarding a redemption`, () =>
+  it.effect.each(["missing", "disabled", "no-key"] as const)(
+    "rejects a %s source without forwarding a redemption",
+    (state) =>
       Effect.gen(function* () {
         const test = fixture();
         const sources =
@@ -156,6 +157,5 @@ describe("usage source reset credits", () => {
         expect(result._tag).toBe("Failure");
         expect(test.requests).toEqual([]);
       }).pipe(Effect.scoped),
-    );
-  }
+  );
 });

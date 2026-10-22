@@ -148,34 +148,32 @@ describe("ElectronDialog", () => {
   );
 });
 
-for (const canceled of [false, true]) {
-  it.effect(`native save respects user choice (canceled=${canceled})`, () =>
-    Effect.gen(function* () {
-      const owner = { id: 7 } as BrowserWindow;
-      showSaveDialogMock.mockReset();
-      showSaveDialogMock.mockResolvedValue({ canceled, filePath: "/chosen/decision.md" });
-      const dialog = yield* ElectronDialog.ElectronDialog;
-      const result = yield* dialog.saveFile({
-        owner: Option.some(owner),
-        defaultPath: "decisions.md",
-        filters: [{ name: "Markdown", extensions: ["md"] }],
-      });
-      assert.deepEqual(result, canceled ? Option.none() : Option.some("/chosen/decision.md"));
-      assert.deepEqual(showSaveDialogMock.mock.calls, [
-        [
-          owner,
-          {
-            title: "Export decisions",
-            buttonLabel: "Save",
-            defaultPath: "decisions.md",
-            filters: [{ name: "Markdown", extensions: ["md"] }],
-            properties: ["createDirectory", "showOverwriteConfirmation"],
-          },
-        ],
-      ]);
-    }).pipe(Effect.provide(ElectronDialog.layer)),
-  );
-}
+it.effect.each([false, true])("native save respects user choice (canceled=%s)", (canceled) =>
+  Effect.gen(function* () {
+    const owner = { id: 7 } as BrowserWindow;
+    showSaveDialogMock.mockReset();
+    showSaveDialogMock.mockResolvedValue({ canceled, filePath: "/chosen/decision.md" });
+    const dialog = yield* ElectronDialog.ElectronDialog;
+    const result = yield* dialog.saveFile({
+      owner: Option.some(owner),
+      defaultPath: "decisions.md",
+      filters: [{ name: "Markdown", extensions: ["md"] }],
+    });
+    assert.deepEqual(result, canceled ? Option.none() : Option.some("/chosen/decision.md"));
+    assert.deepEqual(showSaveDialogMock.mock.calls, [
+      [
+        owner,
+        {
+          title: "Export decisions",
+          buttonLabel: "Save",
+          defaultPath: "decisions.md",
+          filters: [{ name: "Markdown", extensions: ["md"] }],
+          properties: ["createDirectory", "showOverwriteConfirmation"],
+        },
+      ],
+    ]);
+  }).pipe(Effect.provide(ElectronDialog.layer)),
+);
 it.effect("native save failure is sanitized", () =>
   Effect.gen(function* () {
     showSaveDialogMock.mockRejectedValue(new Error("private sentinel"));

@@ -128,22 +128,22 @@ describe("StaveMergeSignal", () => {
       expect([...(yield* signal.candidates([project]))]).toEqual([project.id]);
     }).pipe(Effect.provide(harness())),
   );
-  for (const [name, options] of Object.entries({
-    partial: { repos: ["merged", "ok"] as ("merged" | "ok")[] },
-    empty: { repos: [] },
-    reused: { stamp: "2026-09-09T00:00:00.123456788Z" },
-    missing: { state: "missing" as const },
-    degraded: { degraded: true },
-    disabled: { enabled: false },
-    killSwitch: { killSwitch: false },
-    mergeOff: { merge: false },
-    binaryMissing: { binaryMissing: true },
-  })) {
-    it.effect(`does not signal ${name}`, () =>
-      Effect.gen(function* () {
-        const signal = yield* make;
-        expect([...(yield* signal.candidates([project]))]).toEqual([]);
-      }).pipe(Effect.provide(harness(options))),
-    );
-  }
+  it.effect.each(
+    Object.entries({
+      partial: { repos: ["merged", "ok"] as ("merged" | "ok")[] },
+      empty: { repos: [] },
+      reused: { stamp: "2026-09-09T00:00:00.123456788Z" },
+      missing: { state: "missing" as const },
+      degraded: { degraded: true },
+      disabled: { enabled: false },
+      killSwitch: { killSwitch: false },
+      mergeOff: { merge: false },
+      binaryMissing: { binaryMissing: true },
+    }),
+  )("does not signal %s", ([, options]) =>
+    Effect.gen(function* () {
+      const signal = yield* make;
+      expect([...(yield* signal.candidates([project]))]).toEqual([]);
+    }).pipe(Effect.provide(harness(options))),
+  );
 });

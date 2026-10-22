@@ -174,98 +174,94 @@ function testLayer(input?: {
 }
 
 describe("EnvironmentLinker", () => {
-  for (const supportsPolicy of [false, true]) {
-    it.effect(
-      `company links ${supportsPolicy ? "accept" : "reject"} a host ${supportsPolicy ? "with" : "without"} signed policy support`,
-      () => {
-        let prepared = 0;
-        let persisted = 0;
-        const teams: TeamRuntime["Service"] = {
-          prepareLink: () =>
+  it.effect.each([
+    { supportsPolicy: false, outcome: "reject", support: "without" },
+    { supportsPolicy: true, outcome: "accept", support: "with" },
+  ])("company links $outcome a host $support signed policy support", ({ supportsPolicy }) => {
+    let prepared = 0;
+    let persisted = 0;
+    const teams: TeamRuntime["Service"] = {
+      prepareLink: () =>
+        Effect.sync(() => {
+          prepared++;
+          return undefined;
+        }),
+      access: () => Effect.succeed(undefined),
+      funding: () => Effect.succeed(undefined),
+      unlinked: () => Effect.void,
+      policy: () => Effect.succeed(null),
+    };
+    return Effect.gen(function* () {
+      const { request, payload } = yield* makeRequest;
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const proof = signTestJwt(
+        { ...payload, ...(supportsPolicy ? { teamPolicyVersion: 1 } : {}) },
+        RELAY_LINK_PROOF_TYP,
+        environmentKeyPair.privateKey,
+      );
+      const result = yield* Effect.result(
+        linker.link({
+          userId: "user_123",
+          request: { ...request, proof, organizationId: "org_company" },
+        }),
+      );
+      expect(result._tag).toBe(supportsPolicy ? "Success" : "Failure");
+      expect(prepared).toBe(supportsPolicy ? 1 : 0);
+      expect(persisted).toBe(supportsPolicy ? 1 : 0);
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          teams,
+          upsert: () =>
             Effect.sync(() => {
-              prepared++;
-              return undefined;
+              persisted++;
             }),
-          access: () => Effect.succeed(undefined),
-          funding: () => Effect.succeed(undefined),
-          unlinked: () => Effect.void,
-          policy: () => Effect.succeed(null),
-        };
-        return Effect.gen(function* () {
-          const { request, payload } = yield* makeRequest;
-          const linker = yield* EnvironmentLinker.EnvironmentLinker;
-          const proof = signTestJwt(
-            { ...payload, ...(supportsPolicy ? { teamPolicyVersion: 1 } : {}) },
-            RELAY_LINK_PROOF_TYP,
-            environmentKeyPair.privateKey,
-          );
-          const result = yield* Effect.result(
-            linker.link({
-              userId: "user_123",
-              request: { ...request, proof, organizationId: "org_company" },
-            }),
-          );
-          expect(result._tag).toBe(supportsPolicy ? "Success" : "Failure");
-          expect(prepared).toBe(supportsPolicy ? 1 : 0);
-          expect(persisted).toBe(supportsPolicy ? 1 : 0);
-        }).pipe(
-          Effect.provide(
-            testLayer({
-              teams,
-              upsert: () =>
-                Effect.sync(() => {
-                  persisted++;
-                }),
-            }),
-          ),
-        );
-      },
+        }),
+      ),
     );
-  }
+  });
 
-  for (const feature of [
+  it.effect.each([
     "managedTunnelsEnabled",
     "notificationsEnabled",
     "liveActivitiesEnabled",
-  ] as const) {
-    it.effect(`rejects unpaid ${feature} before updating the link`, () => {
-      let upserts = 0;
-      return Effect.gen(function* () {
-        const { request } = yield* makeRequest;
-        const linker = yield* EnvironmentLinker.EnvironmentLinker;
-        const result = yield* Effect.result(
-          linker.link({
-            userId: "user_123",
-            request: {
-              ...request,
-              managedTunnelsEnabled: false,
-              notificationsEnabled: false,
-              liveActivitiesEnabled: false,
-              [feature]: true,
-            },
-          }),
-        );
-        expect(result._tag).toBe("Failure");
-        if (result._tag === "Failure") expect(result.failure._tag).toBe("ManagedAccessRequired");
-        expect(upserts).toBe(0);
-      }).pipe(
-        Effect.provide(
-          testLayer({
-            access: {
-              check: () =>
-                Effect.fail(
-                  new ManagedAccess.ManagedAccessRequired({ message: "Subscription required" }),
-                ),
-            },
-            upsert: () =>
-              Effect.sync(() => {
-                upserts++;
-              }),
-          }),
-        ),
+  ] as const)("rejects unpaid %s before updating the link", (feature) => {
+    let upserts = 0;
+    return Effect.gen(function* () {
+      const { request } = yield* makeRequest;
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const result = yield* Effect.result(
+        linker.link({
+          userId: "user_123",
+          request: {
+            ...request,
+            managedTunnelsEnabled: false,
+            notificationsEnabled: false,
+            liveActivitiesEnabled: false,
+            [feature]: true,
+          },
+        }),
       );
-    });
-  }
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") expect(result.failure._tag).toBe("ManagedAccessRequired");
+      expect(upserts).toBe(0);
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          access: {
+            check: () =>
+              Effect.fail(
+                new ManagedAccess.ManagedAccessRequired({ message: "Subscription required" }),
+              ),
+          },
+          upsert: () =>
+            Effect.sync(() => {
+              upserts++;
+            }),
+        }),
+      ),
+    );
+  });
   it.effect("allows disabling all hosted features without a subscription", () => {
     let cleanups = 0;
     return Effect.gen(function* () {
@@ -324,7 +320,7 @@ describe("EnvironmentLinker", () => {
     );
   });
 
-  for (const invalid of [
+  it.effect.each([
     { label: "legacy JWT type", typ: "t3-env-link+jwt", issuer: "lecturn-env:env-link-test" },
     { label: "legacy issuer", typ: "lecturn-env-link+jwt", issuer: "t3-env:env-link-test" },
     {
@@ -332,49 +328,44 @@ describe("EnvironmentLinker", () => {
       typ: "lecturn-env-link+jwt",
       issuer: "lecturn-env:other",
     },
-  ]) {
-    it.effect(
-      `rejects a correctly signed link proof with ${invalid.label} before persistence`,
-      () => {
-        let persisted = false;
-        return Effect.gen(function* () {
-          const { request, payload } = yield* makeRequest;
-          const linker = yield* EnvironmentLinker.EnvironmentLinker;
-          const result = yield* Effect.result(
-            linker.link({
-              userId: "user_123",
-              request: {
-                ...request,
-                proof: signTestJwt(
-                  { ...payload, iss: invalid.issuer },
-                  invalid.typ,
-                  environmentKeyPair.privateKey,
-                ),
-              },
+  ])("rejects a correctly signed link proof with $label before persistence", (invalid) => {
+    let persisted = false;
+    return Effect.gen(function* () {
+      const { request, payload } = yield* makeRequest;
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const result = yield* Effect.result(
+        linker.link({
+          userId: "user_123",
+          request: {
+            ...request,
+            proof: signTestJwt(
+              { ...payload, iss: invalid.issuer },
+              invalid.typ,
+              environmentKeyPair.privateKey,
+            ),
+          },
+        }),
+      );
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure).toMatchObject({
+          _tag: "EnvironmentLinkProofInvalid",
+          reason: "invalid_signature_or_scope",
+          stage: "verify_proof",
+        });
+      }
+      expect(persisted).toBe(false);
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          upsert: () =>
+            Effect.sync(() => {
+              persisted = true;
             }),
-          );
-          expect(result._tag).toBe("Failure");
-          if (result._tag === "Failure") {
-            expect(result.failure).toMatchObject({
-              _tag: "EnvironmentLinkProofInvalid",
-              reason: "invalid_signature_or_scope",
-              stage: "verify_proof",
-            });
-          }
-          expect(persisted).toBe(false);
-        }).pipe(
-          Effect.provide(
-            testLayer({
-              upsert: () =>
-                Effect.sync(() => {
-                  persisted = true;
-                }),
-            }),
-          ),
-        );
-      },
+        }),
+      ),
     );
-  }
+  });
 
   it.effect("links a publish-only environment with a non-secure nominal endpoint", () => {
     let persistedEndpoint: string | null = null;

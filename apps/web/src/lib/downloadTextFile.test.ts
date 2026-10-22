@@ -32,25 +32,23 @@ it("keeps a requested export alive through asynchronous save handoff and then re
   expect(revoke).toHaveBeenCalledExactlyOnceWith("blob:lecturn://app/export");
 });
 
-for (const result of [
+it.each([
   { status: "saved", filePath: "/chosen/decisions.json" },
   { status: "canceled" },
   { status: "error", message: "Permission denied" },
-]) {
-  it(`desktop export reports ${result.status} without starting a blob download`, async () => {
-    const saveTextFile = vi.fn().mockResolvedValue(result);
-    vi.stubGlobal("window", { desktopBridge: { saveTextFile } });
-    const blob = vi.spyOn(URL, "createObjectURL");
-    expect(
-      await downloadTextFile('{"decisions":[]}', "decisions.json", "application/json"),
-    ).toEqual(result);
-    expect(saveTextFile).toHaveBeenCalledExactlyOnceWith({
-      format: "json",
-      content: '{"decisions":[]}',
-    });
-    expect(blob).not.toHaveBeenCalled();
+])("desktop export reports $status without starting a blob download", async (result) => {
+  const saveTextFile = vi.fn().mockResolvedValue(result);
+  vi.stubGlobal("window", { desktopBridge: { saveTextFile } });
+  const blob = vi.spyOn(URL, "createObjectURL");
+  expect(await downloadTextFile('{"decisions":[]}', "decisions.json", "application/json")).toEqual(
+    result,
+  );
+  expect(saveTextFile).toHaveBeenCalledExactlyOnceWith({
+    format: "json",
+    content: '{"decisions":[]}',
   });
-}
+  expect(blob).not.toHaveBeenCalled();
+});
 it("desktop IPC failure and older shells do not claim a successful export", async () => {
   vi.stubGlobal("window", {
     desktopBridge: { saveTextFile: vi.fn().mockRejectedValue(new Error("private sentinel")) },

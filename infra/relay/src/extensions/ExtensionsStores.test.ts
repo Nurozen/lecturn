@@ -179,8 +179,9 @@ const contextualRequest = (environmentId: string) => ({
   ],
 });
 describe.skipIf(!url)("Extensions PostgreSQL consent and shared ledger", () => {
-  for (const schemaState of ["phase-0", "phase-1", "missing-row", "missing-table"] as const) {
-    it.live(`checks Contextual readiness before funding with ${schemaState}`, () =>
+  it.live.each(["phase-0", "phase-1", "missing-row", "missing-table"] as const)(
+    "checks Contextual readiness before funding with %s",
+    (schemaState) =>
       run(
         Effect.gen(function* () {
           const f = yield* schemaState === "phase-1" ? fixture : unpromotedFixture;
@@ -263,8 +264,7 @@ describe.skipIf(!url)("Extensions PostgreSQL consent and shared ledger", () => {
           expect(dispatches).toBe(0);
         }),
       ),
-    );
-  }
+  );
 
   it.live(
     "releases the entire reservation when bounded evaluation completes without upstream usage",

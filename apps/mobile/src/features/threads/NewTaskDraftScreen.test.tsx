@@ -151,7 +151,11 @@ vi.mock("../../state/queries", () => ({
   usePaginatedBranches: () => native.branches,
 }));
 vi.mock("../../state/projects", () => ({
-  projectEnvironment: { readFile: vi.fn(), delete: { label: "project.delete" } },
+  projectEnvironment: {
+    readFile: vi.fn(),
+    delete: { label: "project.delete" },
+    openScratch: { label: "project.openScratch" },
+  },
 }));
 vi.mock("../../state/vcs", () => ({ vcsEnvironment: { status: vi.fn() } }));
 vi.mock("../../state/sourceControl", () => ({

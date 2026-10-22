@@ -51,6 +51,9 @@ const provider: ServerProvider = {
   slashCommands: [],
 };
 
+// The first release that runs the V2 orchestrator.
+const V2_RELEASE = "0.0.46";
+
 describe("provider compatibility", () => {
   it("bundles a compatibility policy for every built-in harness", () => {
     for (const builtIn of BUILT_IN_DRIVERS) {
@@ -61,6 +64,7 @@ describe("provider compatibility", () => {
           ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
           builtIn.driverKind,
           null,
+          V2_RELEASE,
         ),
         `Missing bundled compatibility policy for ${builtIn.driverKind}`,
       );
@@ -97,13 +101,16 @@ describe("provider compatibility", () => {
       ["1.14.19", "graceful"],
       ["1.14.18", "broken"],
     ] as const) {
-      const advisory = resolveProviderCompatibility(
-        ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
-        opencode,
-        version,
-      );
-      assert.strictEqual(advisory?.status, expected, `OpenCode ${version}`);
-      assert.strictEqual(advisory?.recommendedRange, ">=2.0.18");
+      for (const lecturnVersion of [V2_RELEASE, "0.0.46-preview.20261002.2598"]) {
+        const advisory = resolveProviderCompatibility(
+          ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
+          opencode,
+          version,
+          lecturnVersion,
+        );
+        assert.strictEqual(advisory?.status, expected, `OpenCode ${version} on ${lecturnVersion}`);
+        assert.strictEqual(advisory?.recommendedRange, ">=2.0.18");
+      }
     }
     // The advisory rides beside the probe: a ready 1.x instance stays ready and selectable.
     const ready = applyProviderCompatibility(
@@ -112,7 +119,14 @@ describe("provider compatibility", () => {
       ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
     );
     assert.strictEqual(ready.status, "ready");
-    assert.strictEqual(ready.compatibilityAdvisory?.status, "graceful");
+    assert.strictEqual(
+      ready.compatibilityAdvisory?.status,
+      resolveProviderCompatibility(
+        ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
+        opencode,
+        "1.18.33",
+      )?.status,
+    );
   });
 
   it("compares Cursor build dates without treating semver prereleases as stable", () => {

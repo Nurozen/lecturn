@@ -57,40 +57,38 @@ it.effect("creates a fresh schema with fork lineage and branch PR discovery", ()
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
-for (const throughId of [48, 49, 63, 64]) {
-  it.effect(
-    `upgrades published Lecturn migration ${throughId} without rewriting its ledger or data`,
-    () =>
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        yield* runMigrations({ toMigrationInclusive: throughId });
-        yield* seedThread;
-        yield* sql`UPDATE projection_threads SET forked_from_json = ${lineage}, fork_source_json = ${forkSource}`;
-        yield* sql`UPDATE projection_turns SET provider_turn_ref = 'provider-anchor'`;
-        const ledgerBefore = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
+it.effect.each([48, 49, 63, 64])(
+  "upgrades published Lecturn migration %s without rewriting its ledger or data",
+  (throughId) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: throughId });
+      yield* seedThread;
+      yield* sql`UPDATE projection_threads SET forked_from_json = ${lineage}, fork_source_json = ${forkSource}`;
+      yield* sql`UPDATE projection_turns SET provider_turn_ref = 'provider-anchor'`;
+      const ledgerBefore = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
 
-        yield* runMigrations({ toMigrationInclusive: 69 });
-        const ledgerAfter =
-          yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= ${throughId} ORDER BY migration_id`;
-        assert.deepStrictEqual(ledgerAfter, ledgerBefore);
-        assert.deepStrictEqual(
-          yield* sql`SELECT title, forked_from_json, fork_source_json, branch_pull_request_json FROM projection_threads`,
-          [
-            {
-              title: "Preserved thread",
-              forked_from_json: lineage,
-              fork_source_json: forkSource,
-              branch_pull_request_json: null,
-            },
-          ],
-        );
-        assert.deepStrictEqual(yield* sql`SELECT provider_turn_ref FROM projection_turns`, [
-          { provider_turn_ref: "provider-anchor" },
-        ]);
-        yield* assertCompatible;
-      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
-  );
-}
+      yield* runMigrations({ toMigrationInclusive: 69 });
+      const ledgerAfter =
+        yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= ${throughId} ORDER BY migration_id`;
+      assert.deepStrictEqual(ledgerAfter, ledgerBefore);
+      assert.deepStrictEqual(
+        yield* sql`SELECT title, forked_from_json, fork_source_json, branch_pull_request_json FROM projection_threads`,
+        [
+          {
+            title: "Preserved thread",
+            forked_from_json: lineage,
+            fork_source_json: forkSource,
+            branch_pull_request_json: null,
+          },
+        ],
+      );
+      assert.deepStrictEqual(yield* sql`SELECT provider_turn_ref FROM projection_turns`, [
+        { provider_turn_ref: "provider-anchor" },
+      ]);
+      yield* assertCompatible;
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+);
 
 it.effect(
   "upgrades upstream's published migration 48 while preserving its identity and PR data",

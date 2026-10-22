@@ -1,8 +1,19 @@
 import * as Effect from "effect/Effect";
 
+import type { ServerInstallation } from "@lecturn/contracts";
 import { HostProcessArguments } from "@lecturn/shared/hostProcess";
 
 import packageJson from "../../package.json" with { type: "json" };
+
+/**
+ * Upstream proves npm-global and package-runner (`npx`, `pnpm dlx`, `bunx`)
+ * ownership so clients can suggest a manual update command. Lecturn has no
+ * public npm distribution yet, so every install stays unknown: clients must not
+ * suggest an update that could download the upstream app or an unrelated
+ * package with the same name.
+ */
+export const resolveServerInstallation: Effect.Effect<ServerInstallation | null> =
+  Effect.succeed(null);
 
 /**
  * Render a `lecturn <subcommand>` suggestion. Upstream derives a package

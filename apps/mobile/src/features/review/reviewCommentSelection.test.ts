@@ -221,7 +221,9 @@ describe("Stave repository comment isolation", () => {
     expect(render(repoA.id).rows.filter((row) => row.kind === "comment")).toHaveLength(1);
     expect(render(repoB.id).rows.filter((row) => row.kind === "comment")).toHaveLength(0);
     expect(render("git:working-tree").rows.filter((row) => row.kind === "comment")).toHaveLength(0);
-    // A refresh's loading placeholder retains the checkout identity and selection.
-    expect(sectionFor('/spaces/test/nested/api "one"', true).id).toBe(repoA.id);
+    // The loading placeholder (Changes) keeps the checkout identity.
+    expect(sectionFor('/spaces/test/nested/api "one"', true).id).toBe(
+      `git:${JSON.stringify(['/spaces/test/nested/api "one"', "branch-range"])}`,
+    );
   });
 });

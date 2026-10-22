@@ -136,6 +136,16 @@ vi.mock("./UsageLimitsPooled", () => ({ UsageLimitsSection: () => null }));
 vi.mock("./usageProviders", () => ({
   PROVIDER_LABEL: { codex: "Codex" },
   useProviderColors: () => ({ codex: "#ffffff" }),
+  useUsageMixColors: () => ({
+    input: "#000000",
+    cacheRead: "#000000",
+    cacheWrite: "#000000",
+    output: "#000000",
+    other: "#000000",
+    standard: "#000000",
+    fast: "#000000",
+    ultrafast: "#000000",
+  }),
 }));
 
 const backend = vi.hoisted(() => ({

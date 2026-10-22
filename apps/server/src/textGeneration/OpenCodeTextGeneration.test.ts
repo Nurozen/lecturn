@@ -278,59 +278,57 @@ const advanceIdleClock = Effect.gen(function* () {
 });
 
 it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
-  for (const hangAbort of [false, true]) {
-    it.effect(
-      `times out inference and releases the queue when cancellation hangs=${hangAbort}`,
-      () =>
-        withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
-          Effect.gen(function* () {
-            const fs = yield* FileSystem.FileSystem;
-            const started = Promise.withResolvers<void>();
-            const lock = yield* Semaphore.make(1);
-            runtimeMock.state.hangPromptCount = 1;
-            runtimeMock.state.hangAbort = hangAbort;
-            runtimeMock.state.promptStarted = () => started.resolve();
-            runtimeMock.state.promptResult = {
-              data: {
-                parts: [
-                  {
-                    type: "text",
-                    text: '{"summary":"Implementing the API.","stage":"build","confidence":0.8}',
-                  },
-                ],
-              },
-            };
-            const request = lock.withPermits(1)(
-              textGeneration.generateWorkflowSummary({
-                cwd: process.cwd(),
-                message:
-                  '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"Implementation is underway."}]}',
-                modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-              }),
-            );
-            const first = yield* request.pipe(Effect.result, Effect.forkScoped);
-            yield* Effect.promise(() => started.promise);
-            const second = yield* request.pipe(Effect.forkScoped);
-            yield* TestClock.adjust(Duration.millis(180_000));
-            yield* TestClock.adjust(Duration.millis(5_000));
-            const failed = yield* Fiber.join(first);
-            expect(Result.isFailure(failed)).toBe(true);
-            if (Result.isFailure(failed)) {
-              expect(failed.failure.operation).toBe("generateWorkflowSummary");
-              expect(failed.failure.detail).toContain("timed out");
-            }
-            expect((yield* Fiber.join(second)).stage).toBe("build");
-            expect(runtimeMock.state.requestSignals[0]?.aborted).toBe(true);
-            expect(runtimeMock.state.abortCalls).toHaveLength(1);
-            if (hangAbort) expect(runtimeMock.state.abortSignals[0]?.aborted).toBe(true);
-            for (const directory of runtimeMock.state.directories) {
-              expect(yield* fs.exists(directory)).toBe(false);
-            }
-          }),
-        ),
-    );
-  }
-  for (const [label, output] of [
+  it.effect.each([false, true])(
+    "times out inference and releases the queue when cancellation hangs=%s",
+    (hangAbort) =>
+      withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const started = Promise.withResolvers<void>();
+          const lock = yield* Semaphore.make(1);
+          runtimeMock.state.hangPromptCount = 1;
+          runtimeMock.state.hangAbort = hangAbort;
+          runtimeMock.state.promptStarted = () => started.resolve();
+          runtimeMock.state.promptResult = {
+            data: {
+              parts: [
+                {
+                  type: "text",
+                  text: '{"summary":"Implementing the API.","stage":"build","confidence":0.8}',
+                },
+              ],
+            },
+          };
+          const request = lock.withPermits(1)(
+            textGeneration.generateWorkflowSummary({
+              cwd: process.cwd(),
+              message:
+                '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"Implementation is underway."}]}',
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            }),
+          );
+          const first = yield* request.pipe(Effect.result, Effect.forkScoped);
+          yield* Effect.promise(() => started.promise);
+          const second = yield* request.pipe(Effect.forkScoped);
+          yield* TestClock.adjust(Duration.millis(180_000));
+          yield* TestClock.adjust(Duration.millis(5_000));
+          const failed = yield* Fiber.join(first);
+          expect(Result.isFailure(failed)).toBe(true);
+          if (Result.isFailure(failed)) {
+            expect(failed.failure.operation).toBe("generateWorkflowSummary");
+            expect(failed.failure.detail).toContain("timed out");
+          }
+          expect((yield* Fiber.join(second)).stage).toBe("build");
+          expect(runtimeMock.state.requestSignals[0]?.aborted).toBe(true);
+          expect(runtimeMock.state.abortCalls).toHaveLength(1);
+          if (hangAbort) expect(runtimeMock.state.abortSignals[0]?.aborted).toBe(true);
+          for (const directory of runtimeMock.state.directories) {
+            expect(yield* fs.exists(directory)).toBe(false);
+          }
+        }),
+      ),
+  );
+  it.effect.each([
     ["malformed JSON", "not JSON"],
     ["missing stage", JSON.stringify({ summary: "Working", confidence: 0.8 })],
     ["missing confidence", JSON.stringify({ summary: "Working", stage: "build" })],
@@ -343,24 +341,22 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
       "negative confidence",
       JSON.stringify({ summary: "Working", stage: "build", confidence: -0.1 }),
     ],
-  ]) {
-    it.effect(`rejects workflow inference with ${label}`, () =>
-      withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
-        Effect.gen(function* () {
-          runtimeMock.state.promptResult = { data: { parts: [{ type: "text", text: output }] } };
-          const failure = yield* textGeneration
-            .generateWorkflowSummary({
-              cwd: process.cwd(),
-              message:
-                '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
-              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-            })
-            .pipe(Effect.flip);
-          expect(failure.operation).toBe("generateWorkflowSummary");
-        }),
-      ),
-    );
-  }
+  ])("rejects workflow inference with %s", ([, output]) =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptResult = { data: { parts: [{ type: "text", text: output }] } };
+        const failure = yield* textGeneration
+          .generateWorkflowSummary({
+            cwd: process.cwd(),
+            message:
+              '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          })
+          .pipe(Effect.flip);
+        expect(failure.operation).toBe("generateWorkflowSummary");
+      }),
+    ),
+  );
   it.effect("generates a bounded workflow summary through the configured provider", () =>
     withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
       Effect.gen(function* () {

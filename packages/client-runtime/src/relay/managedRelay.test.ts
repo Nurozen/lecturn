@@ -745,8 +745,10 @@ describe("ManagedRelayClient", () => {
     }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managedRelayTestLayer(fetchFn))));
   });
 
-  for (const operation of ["challenge", "link", "unlink"] as const) {
-    it.effect(`allows ${operation} to finish after the ordinary request timeout`, () => {
+  const linkOperations = ["challenge", "link", "unlink"] as const;
+  it.effect.each(linkOperations)(
+    "allows %s to finish after the ordinary request timeout",
+    (operation) => {
       let respond!: (response: Response) => void;
       const response = new Promise<Response>((resolve) => {
         respond = resolve;
@@ -807,66 +809,66 @@ describe("ManagedRelayClient", () => {
           operation === "challenge" ? { challenge: "signed-challenge" } : { ok: true },
         );
       }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managedRelayTestLayer(fetchFn))));
-    });
-    it.effect(`bounds stalled ${operation} requests at 35 seconds`, () => {
-      const fetchFn = (() =>
-        new Promise<Response>(() => undefined)) satisfies typeof globalThis.fetch;
-      return Effect.gen(function* () {
-        const client = yield* ManagedRelay.ManagedRelayClient;
-        const request: Effect.Effect<unknown, ManagedRelay.ManagedRelayClientError> =
-          operation === "challenge"
-            ? client.createEnvironmentLinkChallenge({
+    },
+  );
+  it.effect.each(linkOperations)("bounds stalled %s requests at 35 seconds", (operation) => {
+    const fetchFn = (() =>
+      new Promise<Response>(() => undefined)) satisfies typeof globalThis.fetch;
+    return Effect.gen(function* () {
+      const client = yield* ManagedRelay.ManagedRelayClient;
+      const request: Effect.Effect<unknown, ManagedRelay.ManagedRelayClientError> =
+        operation === "challenge"
+          ? client.createEnvironmentLinkChallenge({
+              clerkToken: "clerk-token",
+              payload: {
+                notificationsEnabled: false,
+                liveActivitiesEnabled: false,
+                managedTunnelsEnabled: true,
+              },
+            })
+          : operation === "link"
+            ? client.linkEnvironment({
                 clerkToken: "clerk-token",
                 payload: {
+                  proof: "link-proof",
                   notificationsEnabled: false,
                   liveActivitiesEnabled: false,
                   managedTunnelsEnabled: true,
                 },
               })
-            : operation === "link"
-              ? client.linkEnvironment({
-                  clerkToken: "clerk-token",
-                  payload: {
-                    proof: "link-proof",
-                    notificationsEnabled: false,
-                    liveActivitiesEnabled: false,
-                    managedTunnelsEnabled: true,
-                  },
-                })
-              : client.unlinkEnvironment({
-                  clerkToken: "clerk-token",
-                  environmentId: EnvironmentId.make("env-1"),
-                });
-        let finished = false;
-        const fiber = yield* request.pipe(
-          Effect.result,
-          Effect.onExit(() =>
-            Effect.sync(() => {
-              finished = true;
-            }),
-          ),
-          Effect.forkScoped,
-        );
-        yield* Effect.yieldNow;
-        yield* TestClock.adjust("10 seconds");
-        expect(finished).toBe(false);
-        yield* TestClock.adjust("25 seconds");
-        const result = yield* Fiber.join(fiber);
-        expect(result._tag).toBe("Failure");
-        if (result._tag === "Failure")
-          expect(result.failure).toMatchObject({
-            _tag: "ManagedRelayRequestTimeoutError",
-            timeoutMs: 35000,
-            activity:
-              operation === "challenge"
-                ? "Relay environment link challenge"
-                : operation === "link"
-                  ? "Relay environment linking"
-                  : "Relay environment unlinking",
-          });
-      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managedRelayTestLayer(fetchFn))));
-    });
-  }
+            : client.unlinkEnvironment({
+                clerkToken: "clerk-token",
+                environmentId: EnvironmentId.make("env-1"),
+              });
+      let finished = false;
+      const fiber = yield* request.pipe(
+        Effect.result,
+        Effect.onExit(() =>
+          Effect.sync(() => {
+            finished = true;
+          }),
+        ),
+        Effect.forkScoped,
+      );
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust("10 seconds");
+      expect(finished).toBe(false);
+      yield* TestClock.adjust("25 seconds");
+      const result = yield* Fiber.join(fiber);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure")
+        expect(result.failure).toMatchObject({
+          _tag: "ManagedRelayRequestTimeoutError",
+          timeoutMs: 35000,
+          activity:
+            operation === "challenge"
+              ? "Relay environment link challenge"
+              : operation === "link"
+                ? "Relay environment linking"
+                : "Relay environment unlinking",
+        });
+    }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managedRelayTestLayer(fetchFn))));
+  });
 
   it.effect("suggests checking network filtering when fetch fails without a response", () => {
     const fetchFn = (() =>

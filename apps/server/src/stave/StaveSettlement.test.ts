@@ -59,32 +59,37 @@ describe("aggregateSpacePullRequests", () => {
     assert.isNull(aggregateSpacePullRequests([member("merged", LATEST), null]));
     assert.isNull(aggregateSpacePullRequests([]));
   });
-  for (const scenario of [
-    { members: ["closed", "closed", "closed"], latest: 1, expected: "closed" },
-    { members: ["merged", "closed", "merged"], latest: 1, expected: "merged" },
-    { members: ["merged", "merged", "closed"], latest: 2, expected: "merged" },
-    { members: ["merged", "merged", "merged"], latest: 0, expected: "merged" },
-  ] as const)
-    it(`settles ${scenario.members.join("/")} at the latest terminal time`, () => {
-      const result = aggregateSpacePullRequests(
-        scenario.members.map((state, index) =>
-          member(state, index === scenario.latest ? LATEST : OLDER),
-        ),
-      );
-      assert.deepEqual(
-        result,
-        scenario.expected === "closed"
-          ? { state: "closed", closedAt: LATEST }
-          : { state: "merged", mergedAt: LATEST },
-      );
-    });
-  for (const invalid of [undefined, null, "invalid"])
-    it(`has no terminal time when a member's time is ${String(invalid)}`, () => {
+  it.each(
+    (
+      [
+        { members: ["closed", "closed", "closed"], latest: 1, expected: "closed" },
+        { members: ["merged", "closed", "merged"], latest: 1, expected: "merged" },
+        { members: ["merged", "merged", "closed"], latest: 2, expected: "merged" },
+        { members: ["merged", "merged", "merged"], latest: 0, expected: "merged" },
+      ] as const
+    ).map((scenario) => ({ ...scenario, label: scenario.members.join("/") })),
+  )("settles $label at the latest terminal time", (scenario) => {
+    const result = aggregateSpacePullRequests(
+      scenario.members.map((state, index) =>
+        member(state, index === scenario.latest ? LATEST : OLDER),
+      ),
+    );
+    assert.deepEqual(
+      result,
+      scenario.expected === "closed"
+        ? { state: "closed", closedAt: LATEST }
+        : { state: "merged", mergedAt: LATEST },
+    );
+  });
+  it.each([undefined, null, "invalid"])(
+    "has no terminal time when a member's time is %s",
+    (invalid) => {
       assert.deepEqual(
         aggregateSpacePullRequests([member("merged", LATEST), member("merged", invalid)]),
         { state: "merged", mergedAt: null },
       );
-    });
+    },
+  );
 });
 
 describe("linkedHostMatchesMerge", () => {

@@ -147,6 +147,58 @@ it.layer(TestLayer)("effect worker deferral (Lecturn)", (it) => {
       }),
   );
 
+  it.effect("a retry backoff keeps per-thread order; a held turn does not block", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`DELETE FROM orchestration_v2_effect_outbox`;
+      const outbox = yield* EffectOutbox.EffectOutboxV2;
+      const workerId = "order-test";
+      const claim = outbox
+        .claimNext({ workerId, leaseDurationMs: 30_000 })
+        .pipe(Effect.map((claimed) => Option.getOrUndefined(claimed)?.id));
+      const cleanup = (name: string): EffectOutbox.PendingOrchestrationEffectV2 => ({
+        id: `effect:cleanup:${name}`,
+        commandId: CommandId.make(`command:cleanup:${name}`),
+        threadId: ThreadId.make(`thread:${name}`),
+        request: { type: "terminal.cleanup" },
+      });
+
+      // Upstream ordering: a start waiting out a retry backoff blocks the
+      // thread's later effects.
+      yield* outbox.enqueue([startEffect("retrying")]);
+      assert.equal(yield* claim, "effect:start:retrying");
+      yield* outbox.retry({
+        effectId: "effect:start:retrying",
+        workerId,
+        error: "failed once",
+        delayMs: 60_000,
+      });
+      yield* outbox.enqueue([cleanup("retrying")]);
+      assert.isUndefined(yield* claim);
+
+      // Lecturn hold: a deferred start leaves the thread's later effects free.
+      yield* outbox.enqueue([startEffect("held")]);
+      assert.equal(yield* claim, "effect:start:held");
+      yield* outbox.defer({
+        effectId: "effect:start:held",
+        workerId,
+        reason: "Contextual conflict awaits review",
+        delayMs: 60_000,
+      });
+      yield* outbox.enqueue([cleanup("held")]);
+      assert.equal(yield* claim, "effect:cleanup:held");
+      assert.isUndefined(yield* claim);
+      yield* outbox.succeed({ effectId: "effect:cleanup:held", workerId });
+
+      // Once the held start is claimed again it is an ordinary row: a later
+      // effect waits for it while it runs.
+      assert.isTrue(yield* outbox.expedite("effect:start:held"));
+      assert.equal(yield* claim, "effect:start:held");
+      yield* outbox.enqueue([{ ...cleanup("held"), id: "effect:cleanup:held-2" }]);
+      assert.isUndefined(yield* claim);
+    }),
+  );
+
   it.effect("cancelling a held turn removes it without blocking the others", () =>
     Effect.gen(function* () {
       const h = yield* harness;
