@@ -568,8 +568,19 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   ) {
     const leased = lease.prepared.target;
     const next = currentRelayTarget();
-    if (leased._tag !== "RelayConnectionTarget" || next === undefined) {
-      // A direct or SSH session holds no relay credential.
+    if (next === undefined) return false;
+    if (leased._tag !== "RelayConnectionTarget") {
+      // A route learned through Lecturn Connect authorizes as the relay
+      // route's account; other direct and SSH sessions hold no relay credential.
+      if (lease.prepared.httpAuthorization?._tag !== "Dpop") return false;
+      const accountId = lease.prepared.accountId;
+      if (accountId !== undefined && accountId !== next.accountId) return true;
+      if (accountId === undefined && next.accountId !== undefined) {
+        yield* SubscriptionRef.set(
+          prepared,
+          Option.some({ ...lease.prepared, accountId: next.accountId }),
+        );
+      }
       return false;
     }
     if (leased.accountId !== undefined && leased.accountId !== next.accountId) {

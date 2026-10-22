@@ -733,6 +733,78 @@ describe("EnvironmentSupervisor", () => {
     }).pipe(Effect.provide(TestClock.layer())),
   );
 
+  it.effect(
+    "replaces a learned Lecturn Connect session when another account owns the relay route",
+    () =>
+      Effect.gen(function* () {
+        // The server reported a LAN address, learned ahead of Lecturn Connect.
+        const learnedEntry = (accountId: string | undefined) => {
+          const relay = new RelayConnectionTarget({
+            ...RELAY_TARGET,
+            ...(accountId === undefined ? {} : { accountId }),
+          });
+          const relayEntry: ConnectionCatalogEntry = {
+            target: relay,
+            profile: Option.none(),
+            enabled: true,
+          };
+          return entryWithRoutes(
+            relayEntry,
+            mergeLearnedRoutes({
+              entry: relayEntry,
+              activeRoute: { target: relay, profile: Option.none() },
+              reported: [{ httpBaseUrl: "http://192.168.1.10:3773/" }],
+              allowInsecure: true,
+            })!,
+          );
+        };
+        let owner: string | undefined;
+        const harness = yield* makeHarness({
+          prepare: (_attempt, target) =>
+            Effect.succeed({
+              ...preparedFor(target),
+              httpAuthorization: {
+                _tag: "Dpop" as const,
+                accessToken: "dpop-access-token",
+                expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+              },
+              ...(owner === undefined ? {} : { accountId: owner }),
+            }),
+        });
+        const supervisor = yield* EnvironmentSupervisor.make(learnedEntry(undefined), {
+          initiallyDesired: true,
+        }).pipe(Effect.provide(harness.dependencies));
+        yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+        expect(supervisor.target._tag).toBe("BearerConnectionTarget");
+
+        // Tagging the owner keeps the session and stamps its account for HTTP renewal.
+        yield* supervisor.retarget(learnedEntry("account-a"));
+        yield* TestClock.adjust("1 minute");
+        expect(yield* Ref.get(harness.sessionCount)).toBe(1);
+        expect(Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).accountId).toBe(
+          "account-a",
+        );
+
+        // A session opened as an account that no longer owns the environment is replaced.
+        owner = "account-a";
+        yield* supervisor.disconnect;
+        yield* supervisor.connect;
+        yield* awaitState(
+          supervisor.state,
+          (state) => state.phase === "connected" && state.generation === 2,
+        );
+        owner = "account-b";
+        yield* supervisor.retarget(learnedEntry("account-b"));
+        yield* awaitState(
+          supervisor.state,
+          (state) => state.phase === "connected" && state.generation === 3,
+        );
+        expect(Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).accountId).toBe(
+          "account-b",
+        );
+      }).pipe(Effect.provide(TestClock.layer())),
+  );
+
   it.effect("uses the retagged target for the reconnect after a live session closes", () =>
     Effect.gen(function* () {
       const targets: Array<ConnectionTarget> = [];

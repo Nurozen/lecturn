@@ -38,6 +38,7 @@ import {
   gitHubRoutingConnectionKey,
   makeGitHubRoutingPermissions,
 } from "./githubRoutingPermissions.ts";
+import { connectionRoutes, entryWithRoutes, mergeLearnedRoutes, routeEntry } from "./routes.ts";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
 const ENDPOINT = {
@@ -389,6 +390,64 @@ describe("ConnectionResolver", () => {
       yield* prepare();
 
       expect(yield* Ref.get(owners)).toEqual(["account-b", undefined]);
+    }),
+  );
+
+  it.effect("authorizes a route learned through Lecturn Connect as the relay route's account", () =>
+    Effect.gen(function* () {
+      const inputs = yield* Ref.make<
+        ReadonlyArray<{ accountId: string | undefined; direct: string | undefined }>
+      >([]);
+      const brokerLayer = yield* makeDependencies({
+        authorizeDpop: (input) =>
+          Ref.update(inputs, (values) => [
+            ...values,
+            { accountId: input.accountId, direct: input.directEndpoint?.httpBaseUrl },
+          ]).pipe(
+            Effect.as({
+              environmentId: input.expectedEnvironmentId,
+              label: "Cloud",
+              httpBaseUrl: input.directEndpoint?.httpBaseUrl ?? ENDPOINT.httpBaseUrl,
+              socketUrl: "wss://environment.example.test/ws?wsTicket=dpop",
+              httpAuthorization: {
+                _tag: "Dpop" as const,
+                accessToken: "dpop-access-token",
+                expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+              },
+            }),
+          ),
+      });
+      const broker = yield* ConnectionResolver.ConnectionResolver.pipe(Effect.provide(brokerLayer));
+      // The server reported a LAN address, learned ahead of Lecturn Connect.
+      const prepareLearned = (accountId?: string) => {
+        const relay = new RelayConnectionTarget({
+          environmentId: ENVIRONMENT_ID,
+          label: "Cloud",
+          ...(accountId === undefined ? {} : { accountId }),
+        });
+        const entry = entryWithRoutes(
+          catalogEntry(relay),
+          mergeLearnedRoutes({
+            entry: catalogEntry(relay),
+            activeRoute: { target: relay, profile: Option.none() },
+            reported: [{ httpBaseUrl: "http://192.168.1.10:3773/" }],
+            allowInsecure: true,
+          })!,
+        );
+        expect(entry.target._tag).toBe("BearerConnectionTarget");
+        return broker.prepare(routeEntry(entry, connectionRoutes(entry)[0]!));
+      };
+
+      const owned = yield* prepareLearned("account-b");
+      const untagged = yield* prepareLearned();
+
+      expect(owned.target._tag).toBe("BearerConnectionTarget");
+      expect(owned.accountId).toBe("account-b");
+      expect(untagged.accountId).toBeUndefined();
+      expect(yield* Ref.get(inputs)).toEqual([
+        { accountId: "account-b", direct: "http://192.168.1.10:3773/" },
+        { accountId: undefined, direct: "http://192.168.1.10:3773/" },
+      ]);
     }),
   );
 

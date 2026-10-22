@@ -81,7 +81,7 @@ layer("NodeSqliteClient", (it) => {
 const makeTempDatabase = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-sqlite-transaction-" });
+  const directory = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-sqlite-transaction-" });
   const filename = path.join(directory, "state.sqlite");
   // node:sqlite connections fail a busy statement at once unless given a timeout.
   const other = yield* Effect.acquireRelease(

@@ -1,5 +1,6 @@
 import { useAuth, useClerk } from "@clerk/expo";
 import { useAtomValue } from "@effect/atom-react";
+import { accountOwnerTarget } from "@lecturn/client-runtime/connection";
 import { decideAddAccountGate } from "@lecturn/client-runtime/relay";
 import { Platform } from "react-native";
 import { environmentCatalog } from "../../connection/catalog";
@@ -23,7 +24,7 @@ export function useAddConnectAccountGate() {
   const mode = environment?.authConfig?.singleSessionMode;
   const gate = decideAddAccountGate({
     clerkSingleSessionMode: isLoaded && typeof mode === "boolean" ? mode : undefined,
-    targets: [...catalog.entries.values()].map((entry) => entry.target),
+    targets: [...catalog.entries.values()].map(accountOwnerTarget),
     unlistedRelayEnvironmentIds: unlisted,
     knownAccountCount: accounts.length,
   });

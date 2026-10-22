@@ -139,7 +139,9 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
           });
         }
         const target = input.prepared.target;
-        const accountId = target._tag === "RelayConnectionTarget" ? target.accountId : undefined;
+        // A direct route learned through Lecturn Connect carries the relay route's account.
+        const accountId =
+          target._tag === "RelayConnectionTarget" ? target.accountId : input.prepared.accountId;
         const current = yield* remote.value
           .authorizeDpopHttp({
             expectedEnvironmentId: input.prepared.environmentId,

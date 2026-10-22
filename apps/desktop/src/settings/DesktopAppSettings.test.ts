@@ -364,7 +364,7 @@ describe("DesktopSettings", () => {
         const fileSystem = yield* FileSystem.FileSystem;
         const settings = yield* DesktopAppSettings.DesktopAppSettings;
         const dotfiles = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "t3-desktop-settings-dotfiles-",
+          prefix: "lecturn-desktop-settings-dotfiles-",
         });
         const linkedSettingsPath = `${dotfiles}/desktop-settings.json`;
         yield* fileSystem.writeFileString(linkedSettingsPath, "{}\n");

@@ -10,14 +10,18 @@ import {
 import { gitHubRoutingConnectionKey } from "./githubRoutingPermissions.ts";
 import { BearerConnectionTarget, RelayConnectionTarget } from "./model.ts";
 import {
+  accountOwnerTarget,
   connectionRouteId,
+  connectionRoutes,
   connectionRouteKind,
   connectionRouteLabel,
   credentialConnectionId,
   insertRoute,
   entryWithRoutes,
   mergeLearnedRoutes,
+  relayRouteTarget,
   removedWithRelay,
+  routeEntry,
   routesAfterRemoving,
   upsertRoute,
 } from "./routes.ts";
@@ -312,5 +316,50 @@ describe("learned routes", () => {
     });
     expect(moved).not.toBeNull();
     expect(profileOf(moved![0]!)).toMatchObject({ httpBaseUrl: "https://desk.local:3773/" });
+  });
+});
+
+describe("Lecturn Connect account across routes", () => {
+  const relayB = new RelayConnectionTarget({
+    environmentId: ENVIRONMENT_ID,
+    label: "Desk",
+    accountId: "user_b",
+  });
+  const relayRoute: ConnectionRoute = { target: relayB, profile: Option.none() };
+  const relayEntry: ConnectionCatalogEntry = {
+    target: relayB,
+    profile: Option.none(),
+    enabled: true,
+  };
+  const learnedLan = () =>
+    mergeLearnedRoutes({
+      entry: relayEntry,
+      activeRoute: relayRoute,
+      reported: [{ httpBaseUrl: "http://192.168.1.10:3773/" }],
+      allowInsecure: true,
+    })!;
+
+  it("finds the Lecturn Connect route behind a learned LAN route", () => {
+    const entry = entryWithRoutes(relayEntry, learnedLan());
+    expect(entry.target._tag).toBe("BearerConnectionTarget");
+    expect(relayRouteTarget(entry)).toBe(relayB);
+    expect(accountOwnerTarget(entry)).toBe(relayB);
+  });
+
+  it("reads the preferred route when there is no Lecturn Connect route", () => {
+    const entry = entryWithRoutes(relayEntry, [LAN, TAILNET]);
+    expect(relayRouteTarget(entry)).toBeUndefined();
+    expect(accountOwnerTarget(entry)).toBe(LAN.target);
+    expect(accountOwnerTarget(relayEntry)).toBe(relayB);
+  });
+
+  it("keeps the Lecturn Connect route behind a learned route it authorizes", () => {
+    const routes = learnedLan();
+    const entry = entryWithRoutes(relayEntry, [LAN, ...routes]);
+    const learned = routes[0]!;
+    expect(connectionRoutes(routeEntry(entry, learned))).toEqual([learned, relayRoute]);
+    // Routes with their own credential connect alone.
+    expect(connectionRoutes(routeEntry(entry, LAN))).toEqual([LAN]);
+    expect(connectionRoutes(routeEntry(entry, relayRoute))).toEqual([relayRoute]);
   });
 });

@@ -2,7 +2,7 @@ import type {
   EnvironmentPresentation,
   PreparedConnection,
 } from "@lecturn/client-runtime/connection";
-import { connectionCatalogDisplayUrl } from "@lecturn/client-runtime/connection";
+import { connectionCatalogDisplayUrl, relayRouteTarget } from "@lecturn/client-runtime/connection";
 import type { EnvironmentId, ServerConfig } from "@lecturn/contracts";
 import * as Option from "effect/Option";
 import { Atom } from "effect/unstable/reactivity";
@@ -53,6 +53,7 @@ export function createRemoteEnvironmentProjectionAtoms(input: {
           : new URL(socketUrl).origin;
       const authorization = prepared?.httpAuthorization ?? null;
       // Credentials follow the route in use, which may not be the preferred one.
+      const relayAccountId = relayRouteTarget(presentation.entry)?.accountId;
       const relayManaged = prepared
         ? prepared.target._tag === "RelayConnectionTarget"
         : presentation.entry.target._tag === "RelayConnectionTarget";
@@ -71,10 +72,7 @@ export function createRemoteEnvironmentProjectionAtoms(input: {
           ? {
               authenticationMethod: "dpop" as const,
               relayManaged: true as const,
-              ...(presentation.entry.target._tag === "RelayConnectionTarget" &&
-              presentation.entry.target.accountId
-                ? { accountId: presentation.entry.target.accountId }
-                : {}),
+              ...(relayAccountId ? { accountId: relayAccountId } : {}),
               ...(authorization?._tag === "Dpop"
                 ? { dpopAccessToken: authorization.accessToken }
                 : {}),

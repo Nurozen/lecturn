@@ -11,7 +11,11 @@ import {
   type ConnectionCatalogEntry,
   type ConnectionRoute,
 } from "./catalog.ts";
-import { BearerConnectionTarget, type ConnectionTarget } from "./model.ts";
+import {
+  BearerConnectionTarget,
+  type ConnectionTarget,
+  type RelayConnectionTarget,
+} from "./model.ts";
 
 /**
  * A saved environment can hold several routes: Lecturn Connect, direct URLs (LAN,
@@ -60,12 +64,49 @@ export function entryWithRoutes(
   };
 }
 
-/** The entry a single route connects with. */
+/**
+ * The entry a single route connects with. A route learned through Lecturn
+ * Connect keeps the Lecturn Connect route behind it: it authorizes as the
+ * account that owns that route.
+ */
 export function routeEntry(
   entry: ConnectionCatalogEntry,
   route: ConnectionRoute,
 ): ConnectionCatalogEntry {
-  return entryWithRoutes(entry, [route]);
+  const relay = usesRelayCredential(route)
+    ? connectionRoutes(entry).find((candidate) => candidate.target._tag === "RelayConnectionTarget")
+    : undefined;
+  return entryWithRoutes(entry, relay === undefined ? [route] : [route, relay]);
+}
+
+/** Whether a direct route authorizes with the Lecturn Connect credential. */
+function usesRelayCredential(route: ConnectionRoute): boolean {
+  const profile = Option.getOrNull(route.profile);
+  return profile?._tag === "BearerConnectionProfile" && profile.authorization === "lecturn-connect";
+}
+
+/**
+ * The environment's Lecturn Connect target, wherever its route sits. Learned
+ * and added routes usually come first, so the preferred target is not it.
+ */
+export function relayRouteTarget(
+  entry: Pick<ConnectionCatalogEntry, "target" | "alternateRoutes">,
+): RelayConnectionTarget | undefined {
+  for (const target of [entry.target, ...(entry.alternateRoutes ?? []).map((r) => r.target)]) {
+    if (target._tag === "RelayConnectionTarget") return target;
+  }
+  return undefined;
+}
+
+/**
+ * The target that says which Connect account owns the environment: the
+ * Lecturn Connect route's, since route order does not change the owner, else
+ * the preferred route's.
+ */
+export function accountOwnerTarget(
+  entry: Pick<ConnectionCatalogEntry, "target" | "alternateRoutes">,
+): ConnectionTarget {
+  return relayRouteTarget(entry) ?? entry.target;
 }
 
 /** The base URL of a direct route, or null for Lecturn Connect and SSH. */
@@ -201,9 +242,7 @@ export function connectionRouteAddress(route: ConnectionRoute): string | null {
 export function hasRelayRoute(
   entry: Pick<ConnectionCatalogEntry, "target" | "alternateRoutes">,
 ): boolean {
-  return [entry.target, ...(entry.alternateRoutes ?? []).map((route) => route.target)].some(
-    (target) => target._tag === "RelayConnectionTarget",
-  );
+  return relayRouteTarget(entry) !== undefined;
 }
 
 /**

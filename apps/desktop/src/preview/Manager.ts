@@ -1576,7 +1576,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
                 // Cancelling an Effect does not cancel the CDP promise. Release
                 // after it settles, even if the caller has already left, so a
                 // late result cannot recreate handles after an early cleanup.
-                if (typeof objectGroup === "string" && objectGroup.startsWith("t3-evaluation-")) {
+                if (
+                  typeof objectGroup === "string" &&
+                  objectGroup.startsWith("lecturn-evaluation-")
+                ) {
                   const params = { objectGroup };
                   await (
                     sessionId === undefined
@@ -1658,7 +1661,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     awaitPromise = true,
   ): Effect.Effect<A, PreviewManagerError> =>
     Effect.suspend(() => {
-      const objectGroup = `t3-evaluation-${NodeCrypto.randomUUID()}`;
+      const objectGroup = `lecturn-evaluation-${NodeCrypto.randomUUID()}`;
       return send("Runtime.evaluate", {
         expression,
         awaitPromise,

@@ -21,6 +21,7 @@ import type { HttpClient } from "effect/unstable/http";
 
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import {
+  BearerConnectionTarget,
   ConnectionTransientError,
   RelayConnectionTarget,
   type PreparedConnection,
@@ -285,6 +286,32 @@ describe("authenticated environment HTTP requests", () => {
         expect(url.searchParams.get("cursor")).toBe("older-page");
       }
       expect(PREPARED.httpAuthorization).toMatchObject({ accessToken: "expired-token" });
+    }),
+  );
+
+  it.effect("renews a learned Lecturn Connect route as its account, on its own origin", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness(() => Response.json(SESSION));
+      const learnedOrigin = "http://192.168.1.10:3773";
+      const result = yield* fetchEnvironmentSessionState({
+        ...harness.input,
+        prepared: {
+          ...PREPARED,
+          httpBaseUrl: learnedOrigin,
+          target: new BearerConnectionTarget({
+            environmentId: TARGET.environmentId,
+            label: TARGET.label,
+            connectionId: `learned:${TARGET.environmentId}:${learnedOrigin}`,
+          }),
+          accountId: "account-b",
+        },
+      }).pipe(Effect.provide(harness.httpLayer));
+
+      expect(result).toEqual(SESSION);
+      expect(harness.authorizations).toEqual([
+        { expectedEnvironmentId: TARGET.environmentId, accountId: "account-b" },
+      ]);
+      expect(new URL(harness.calls[0]!.url).origin).toBe(learnedOrigin);
     }),
   );
 

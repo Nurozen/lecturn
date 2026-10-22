@@ -1,5 +1,6 @@
 import { useAuth, useClerk } from "@clerk/react";
 import { useAtomValue } from "@effect/atom-react";
+import { accountOwnerTarget } from "@lecturn/client-runtime/connection";
 import { decideAddAccountGate } from "@lecturn/client-runtime/relay";
 import { useEffect } from "react";
 
@@ -121,7 +122,7 @@ export function useConnectSignIn() {
 
   const gate = decideAddAccountGate({
     clerkSingleSessionMode: isLoaded ? readClerkSingleSessionMode(clerk) : undefined,
-    targets: [...catalog.entries.values()].map((entry) => entry.target),
+    targets: [...catalog.entries.values()].map(accountOwnerTarget),
     unlistedRelayEnvironmentIds: unlisted,
     knownAccountCount: known.accountIds.length,
   });

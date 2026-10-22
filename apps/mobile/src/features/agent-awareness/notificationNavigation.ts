@@ -1,5 +1,6 @@
 import { expandMobileAccountSection } from "../home/accountSectionExpansion";
 import { useAtomValue } from "@effect/atom-react";
+import { accountOwnerTarget } from "@lecturn/client-runtime/connection";
 import { relayAccountByEnvironmentId } from "@lecturn/client-runtime/relay";
 import { environmentCatalog } from "../../connection/catalog";
 import { appAtomRegistry } from "../../state/atom-registry";
@@ -69,7 +70,7 @@ export function useAgentNotificationNavigation(pathname: string): void {
             .map((account) => account.accountId),
           accountByEnvironmentId: relayAccountByEnvironmentId(
             [...appAtomRegistry.get(environmentCatalog.catalogValueAtom).entries.values()].map(
-              (entry) => entry.target,
+              accountOwnerTarget,
             ),
           ),
           expandAccount: expandMobileAccountSection,

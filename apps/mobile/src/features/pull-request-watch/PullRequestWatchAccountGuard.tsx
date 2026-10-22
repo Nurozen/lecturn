@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { accountOwnerTarget } from "@lecturn/client-runtime/connection";
 import { useNavigation } from "@react-navigation/native";
 import { useEffect, type ReactNode } from "react";
 import { View } from "react-native";
@@ -19,9 +20,10 @@ export function PullRequestWatchAccountGuard(props: {
   const accountsReady = useAtomValue(connectAccountsReadyAtom);
   const accounts = useConnectAccounts();
   const navigation = useNavigation();
-  const target = [...catalog.entries.values()].find(
-    (entry) => entry.target.environmentId === props.environmentId,
-  )?.target;
+  const entry = [...catalog.entries.values()].find(
+    (candidate) => candidate.target.environmentId === props.environmentId,
+  );
+  const target = entry === undefined ? undefined : accountOwnerTarget(entry);
   const decision = resolveThreadAccountRoute({
     catalogReady: catalog.isReady,
     accountsReady,

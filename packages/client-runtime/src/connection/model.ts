@@ -128,6 +128,11 @@ export interface PreparedConnection {
   readonly socketUrl: string;
   readonly httpAuthorization: PreparedHttpAuthorization | null;
   readonly target: ConnectionTarget;
+  /**
+   * The Connect account a direct route learned through Lecturn Connect
+   * authorizes as. A relay target carries its own account.
+   */
+  readonly accountId?: string;
 }
 
 export type SupervisorConnectionPhase =

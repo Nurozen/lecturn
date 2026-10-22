@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useAtomValue } from "@effect/atom-react";
+import { relayRouteTarget } from "@lecturn/client-runtime/connection";
 import type { EnvironmentId } from "@lecturn/contracts";
 import { environmentCatalog } from "../connection/catalog";
 import { useConnectAccounts } from "../features/cloud/knownAccounts";
@@ -15,8 +16,8 @@ export function AccountTintScope({
 }) {
   const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
   const accounts = useConnectAccounts();
-  const target = catalog.entries.get(environmentId)?.target;
-  const id = target?._tag === "RelayConnectionTarget" ? target.accountId : undefined;
+  const entry = catalog.entries.get(environmentId);
+  const id = entry === undefined ? undefined : relayRouteTarget(entry)?.accountId;
   return (
     <AccountSurfaceKeyContext.Provider value={accounts.length > 1 ? id : undefined}>
       <AccountSurfaceColorContext.Provider value={mobileAccountSurfaceColor(id, accounts)}>
