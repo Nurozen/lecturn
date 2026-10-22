@@ -309,14 +309,28 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
     // for distinct threads without allowing notifications to grow unbounded.
     const available = yield* Queue.dropping<void>(64);
     const cancellationSignals = new Map<string, Deferred.Deferred<void>>();
+    // Lecturn: pending rows returned by defer() (held turns). A held row waits
+    // on a hook, not on a failure, so it must not block the thread's later
+    // effects the way a retry backoff does. Deferrals only come from
+    // process-bound provider-turn effects, which reconcileAfterProcessLoss
+    // cancels on restart, so this process-local set needs no schema column.
+    const deferredEffectIds = new Set<string>();
     const notifyAvailable = (count = 1) =>
       Queue.offerAll(
         available,
         Array.from({ length: Math.min(64, Math.max(0, Math.floor(count))) }, () => undefined),
       ).pipe(Effect.asVoid);
+    // Each thread runs its effects one at a time, in enqueue (rowid) order. An earlier
+    // effect waiting out a retry backoff still blocks later ones, so a turn
+    // cannot start while a failed rollback is about to restore files. A claim
+    // that skips restart continuations is not blocked by them either, and a
+    // held (deferred) row blocks nothing.
     // Title generation is correlated metadata work, so it has its own
     // per-thread lane and cannot delay provider lifecycle effects.
-    const claimableCandidatePredicate = (availableBefore?: string) =>
+    const claimableCandidatePredicate = (
+      availableBefore?: string,
+      excludeRestartContinuations = false,
+    ) =>
       sql`
         ${
           availableBefore === undefined
@@ -328,7 +342,23 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
           SELECT 1
           FROM orchestration_v2_effect_outbox AS active
           WHERE active.thread_id = candidate.thread_id
-            AND active.status = 'running'
+            AND (
+              active.status = 'running'
+              OR (
+                active.status = 'pending'
+                AND active.rowid < candidate.rowid
+                AND ${
+                  excludeRestartContinuations
+                    ? sql`active.effect_type != 'provider-runtime.continue'`
+                    : sql`1 = 1`
+                }
+                AND ${
+                  deferredEffectIds.size === 0
+                    ? sql`1 = 1`
+                    : sql`active.effect_id NOT IN ${sql.in(Array.from(deferredEffectIds))}`
+                }
+              )
+            )
             AND (
               (
                 candidate.effect_type = 'thread-title.generate'
@@ -445,6 +475,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
               AND effect_type IN ${sql.in(effectTypes)}
             RETURNING effect_id
           `;
+          for (const { effect_id } of rows) deferredEffectIds.delete(effect_id);
           return rows.map(({ effect_id }) => effect_id);
         }).pipe(
           Effect.mapError(
@@ -528,7 +559,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
             WHERE effect_id = (
               SELECT candidate.effect_id
               FROM orchestration_v2_effect_outbox AS candidate
-              WHERE ${claimableCandidatePredicate(nowIso)}
+              WHERE ${claimableCandidatePredicate(nowIso, excludeRestartContinuations)}
                 AND ${excludeRestartContinuations ? sql`candidate.effect_type != 'provider-runtime.continue'` : sql`1 = 1`}
               ORDER BY candidate.available_at ASC, candidate.created_at ASC, candidate.effect_id ASC
               LIMIT 1
@@ -538,6 +569,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
           const rows = yield* claimStatement.pipe(Effect.withTracerEnabled(false));
           const row = rows[0];
           if (row === undefined) return Option.none();
+          deferredEffectIds.delete(row.effect_id);
           cancellationSignals.set(row.effect_id, Deferred.makeUnsafe<void>());
           return Option.some(yield* rowToEffect(row));
         }).pipe(Effect.mapError((cause) => new EffectOutboxError({ operation: "claim", cause }))),
@@ -671,6 +703,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
           `;
           if (rows.length === 1) {
             cancellationSignals.delete(effectId);
+            deferredEffectIds.add(effectId);
             // The thread's other effects were waiting on this running row.
             yield* notifyAvailable();
           }

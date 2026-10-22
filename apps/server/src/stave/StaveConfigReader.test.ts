@@ -119,57 +119,55 @@ const load = Effect.gen(function* () {
 });
 
 it.layer(NodeServices.layer)("StaveConfigReader", (it) => {
-  for (const enabled of [false, true]) {
-    it.effect(
-      `filesystem-only config loading never resolves or invokes Stave when enabled=${enabled}`,
-      () =>
-        Effect.gen(function* () {
-          const path = yield* Path.Path;
-          const homeDir = yield* makeTempHome;
-          const configPath = path.join(homeDir, "custom.yaml");
-          yield* writeConfig(configPath, "root: ~/guard-root\n");
-          const forbidden = Effect.die("Filesystem-only Git guard must never invoke Stave");
-          const binary = Layer.mock(StaveBinary.StaveBinary)({
-            resolve: forbidden,
-            resolveForPath: () => forbidden,
-            resolveRunnable: forbidden,
-            features: forbidden,
-            featuresFor: () => forbidden,
-          });
-          yield* Effect.gen(function* () {
-            const reader = yield* StaveConfigReader.StaveConfigReader;
-            const roots = yield* StaveRoots.StaveRootsProvider;
-            expect(yield* roots.agentWorkDir).toEqual(
-              Option.some(path.join(homeDir, "guard-root", "agent-work")),
-            );
-            const snapshot = yield* (
-              reader.loadFilesystem ?? Effect.die("Missing filesystem-only loader")
-            );
-            expect(snapshot.source).toBe("fs-fallback");
-            expect(snapshot.agentWorkDir).toBe(path.join(homeDir, "guard-root", "agent-work"));
-            yield* writeConfig(configPath, "root: ~/changed-root\n");
-            const changed = yield* (
-              reader.loadFilesystem ?? Effect.die("Missing filesystem-only loader")
-            );
-            expect(changed.agentWorkDir).toBe(path.join(homeDir, "changed-root", "agent-work"));
-          }).pipe(
-            Effect.provide(
-              StaveRoots.layer.pipe(
-                Layer.provideMerge(
-                  makeReaderLayer({
-                    homeDir,
-                    configPath,
-                    enabled,
-                    binary,
-                    cli: cliLayer(forbidden),
-                  }),
-                ),
+  it.effect.each([false, true])(
+    "filesystem-only config loading never resolves or invokes Stave when enabled=%s",
+    (enabled) =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const homeDir = yield* makeTempHome;
+        const configPath = path.join(homeDir, "custom.yaml");
+        yield* writeConfig(configPath, "root: ~/guard-root\n");
+        const forbidden = Effect.die("Filesystem-only Git guard must never invoke Stave");
+        const binary = Layer.mock(StaveBinary.StaveBinary)({
+          resolve: forbidden,
+          resolveForPath: () => forbidden,
+          resolveRunnable: forbidden,
+          features: forbidden,
+          featuresFor: () => forbidden,
+        });
+        yield* Effect.gen(function* () {
+          const reader = yield* StaveConfigReader.StaveConfigReader;
+          const roots = yield* StaveRoots.StaveRootsProvider;
+          expect(yield* roots.agentWorkDir).toEqual(
+            Option.some(path.join(homeDir, "guard-root", "agent-work")),
+          );
+          const snapshot = yield* (
+            reader.loadFilesystem ?? Effect.die("Missing filesystem-only loader")
+          );
+          expect(snapshot.source).toBe("fs-fallback");
+          expect(snapshot.agentWorkDir).toBe(path.join(homeDir, "guard-root", "agent-work"));
+          yield* writeConfig(configPath, "root: ~/changed-root\n");
+          const changed = yield* (
+            reader.loadFilesystem ?? Effect.die("Missing filesystem-only loader")
+          );
+          expect(changed.agentWorkDir).toBe(path.join(homeDir, "changed-root", "agent-work"));
+        }).pipe(
+          Effect.provide(
+            StaveRoots.layer.pipe(
+              Layer.provideMerge(
+                makeReaderLayer({
+                  homeDir,
+                  configPath,
+                  enabled,
+                  binary,
+                  cli: cliLayer(forbidden),
+                }),
               ),
             ),
-          );
-        }),
-    );
-  }
+          ),
+        );
+      }),
+  );
 
   describe("stave config show", () => {
     it.effect("mirrors the config show payload with repos sorted by name", () =>

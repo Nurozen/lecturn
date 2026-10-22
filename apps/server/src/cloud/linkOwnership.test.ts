@@ -113,56 +113,55 @@ it.effect("an unlink waits for a pending publish then clears its credentials and
   }),
 );
 
-for (const alreadyLinked of [false, true]) {
-  it.effect(
-    `rolls back a failed credential write (${alreadyLinked ? "existing" : "new"} publication)`,
-    () =>
-      Effect.gen(function* () {
-        const store = makeStore();
-        let failWrite = false;
-        const secrets: ServerSecretStore.ServerSecretStore["Service"] = {
-          ...store.secrets,
-          set: (name, value) =>
-            Effect.suspend(() => {
-              if (failWrite && name === RELAY_ENVIRONMENT_CREDENTIAL_SECRET) {
-                failWrite = false;
-                return Effect.fail(
-                  new ServerSecretStore.SecretStorePersistError({
-                    resource: "test credential",
-                    cause: new Error("disk full"),
-                  }),
-                );
-              }
-              return store.secrets.set(name, value);
-            }),
-        };
-        const published: boolean[] = [];
-        const endpointRuntime: CloudManagedEndpointRuntime["Service"] = {
-          applyConfig: (_, options) =>
-            Effect.sync(() => {
-              published.push(options?.published ?? false);
-              return { status: "disabled" };
-            }),
-          recoveryRequests: Stream.empty,
-          requestRecovery: () => Effect.void,
-          withLinkStateLock: (effect) => effect,
-        };
-        const dependencies = { secrets, endpointRuntime };
-        if (alreadyLinked) yield* applyCloudRelayConfig(dependencies, payload("account-a"));
-        const before = new Map(store.values);
-        failWrite = true;
-        const result = yield* Effect.result(
-          applyCloudRelayConfig(dependencies, {
-            ...payload("account-a"),
-            environmentCredential: "replacement",
-          }),
-        );
-        expect(Result.isFailure(result)).toBe(true);
-        expect(store.values).toEqual(before);
-        expect(published.at(-1)).toBe(alreadyLinked);
+it.effect.each([
+  { alreadyLinked: false, label: "new" },
+  { alreadyLinked: true, label: "existing" },
+])("rolls back a failed credential write ($label publication)", ({ alreadyLinked }) =>
+  Effect.gen(function* () {
+    const store = makeStore();
+    let failWrite = false;
+    const secrets: ServerSecretStore.ServerSecretStore["Service"] = {
+      ...store.secrets,
+      set: (name, value) =>
+        Effect.suspend(() => {
+          if (failWrite && name === RELAY_ENVIRONMENT_CREDENTIAL_SECRET) {
+            failWrite = false;
+            return Effect.fail(
+              new ServerSecretStore.SecretStorePersistError({
+                resource: "test credential",
+                cause: new Error("disk full"),
+              }),
+            );
+          }
+          return store.secrets.set(name, value);
+        }),
+    };
+    const published: boolean[] = [];
+    const endpointRuntime: CloudManagedEndpointRuntime["Service"] = {
+      applyConfig: (_, options) =>
+        Effect.sync(() => {
+          published.push(options?.published ?? false);
+          return { status: "disabled" };
+        }),
+      recoveryRequests: Stream.empty,
+      requestRecovery: () => Effect.void,
+      withLinkStateLock: (effect) => effect,
+    };
+    const dependencies = { secrets, endpointRuntime };
+    if (alreadyLinked) yield* applyCloudRelayConfig(dependencies, payload("account-a"));
+    const before = new Map(store.values);
+    failWrite = true;
+    const result = yield* Effect.result(
+      applyCloudRelayConfig(dependencies, {
+        ...payload("account-a"),
+        environmentCredential: "replacement",
       }),
-  );
-}
+    );
+    expect(Result.isFailure(result)).toBe(true);
+    expect(store.values).toEqual(before);
+    expect(published.at(-1)).toBe(alreadyLinked);
+  }),
+);
 
 it.effect("a losing same-home installation cannot clear the owner's stored credentials", () =>
   Effect.gen(function* () {

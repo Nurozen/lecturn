@@ -215,82 +215,88 @@ const readStatus = (runtime: StaveRpcRuntimeShape, method: "spaceStatus" | "saga
     ? runtime.spaceStatus(root).pipe(Effect.asVoid)
     : runtime.sagaStatus(root).pipe(Effect.asVoid);
 
-for (const method of ["spaceStatus", "sagaStatus"] as const) {
-  for (const mismatch of ["root", "incarnation"] as const) {
-    it.effect(`${method} refuses a same-ID ${mismatch} from another configuration`, () =>
-      Effect.gen(function* () {
-        let sagaReads = 0;
-        yield* Effect.gen(function* () {
-          const runtime = yield* makeRuntime();
-          const failure = yield* Effect.flip(readStatus(runtime, method));
-          expect(failure).toMatchObject({ code: "incarnation_mismatch" });
-          expect(sagaReads).toBe(0);
-        }).pipe(
-          Effect.provide(
-            Layer.mergeAll(
-              readerLayer,
-              Layer.mock(StaveCli)({
-                spaceStatus: () =>
-                  Effect.succeed(
-                    rawStatus(
-                      mismatch === "root" ? "/other/s" : root,
-                      mismatch === "incarnation" ? "2026-09-02T00:00:00Z" : stamp,
-                    ),
-                  ),
-                sagaStatus: () =>
-                  Effect.sync(() => {
-                    sagaReads++;
-                    return { sagaId: "s", members: [], notes: [] };
-                  }),
-                sagaList: Effect.succeed([]),
+const statusMethods = ["spaceStatus", "sagaStatus"] as const;
+
+it.effect.each(
+  statusMethods.flatMap((method) =>
+    (["root", "incarnation"] as const).map((mismatch) => [method, mismatch] as const),
+  ),
+)("%s refuses a same-ID %s from another configuration", ([method, mismatch]) =>
+  Effect.gen(function* () {
+    let sagaReads = 0;
+    yield* Effect.gen(function* () {
+      const runtime = yield* makeRuntime();
+      const failure = yield* Effect.flip(readStatus(runtime, method));
+      expect(failure).toMatchObject({ code: "incarnation_mismatch" });
+      expect(sagaReads).toBe(0);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          readerLayer,
+          Layer.mock(StaveCli)({
+            spaceStatus: () =>
+              Effect.succeed(
+                rawStatus(
+                  mismatch === "root" ? "/other/s" : root,
+                  mismatch === "incarnation" ? "2026-09-02T00:00:00Z" : stamp,
+                ),
+              ),
+            sagaStatus: () =>
+              Effect.sync(() => {
+                sagaReads++;
+                return { sagaId: "s", members: [], notes: [] };
               }),
-            ),
-          ),
-        );
-      }),
+            sagaList: Effect.succeed([]),
+          }),
+        ),
+      ),
     );
-  }
-  for (const changedSetting of ["configPath", "binaryPath"] as const) {
-    it.effect(`${method} invalidates cached identity when ${changedSetting} changes`, () =>
-      Effect.gen(function* () {
-        const current = yield* Ref.make<ServerSettings>({
-          ...DEFAULT_SERVER_SETTINGS,
-          stave: {
-            ...DEFAULT_SERVER_SETTINGS.stave,
-            configPath: "/config/a",
-            binaryPath: "/binary/a",
-          },
-        });
-        let reads = 0;
-        yield* Effect.gen(function* () {
-          const runtime = yield* makeRuntime();
-          yield* readStatus(runtime, method);
-          yield* readStatus(runtime, method);
-          expect(reads).toBe(1);
-          yield* Ref.update(current, (value) => ({
-            ...value,
-            stave: { ...value.stave, [changedSetting]: "/selected/b" },
-          }));
-          const failure = yield* Effect.flip(readStatus(runtime, method));
-          expect(failure).toMatchObject({ code: "incarnation_mismatch" });
-          expect(reads).toBe(2);
-        }).pipe(
-          Effect.provide(
-            Layer.mergeAll(
-              readerLayer,
-              Layer.mock(ServerSettingsService)({ getSettings: Ref.get(current) }),
-              Layer.mock(StaveCli)({
-                spaceStatus: () => Effect.sync(() => rawStatus(++reads === 1 ? root : "/other/s")),
-                sagaStatus: () => Effect.succeed({ sagaId: "s", members: [], notes: [] }),
-                sagaList: Effect.succeed([]),
-              }),
-            ),
-          ),
-        );
-      }),
+  }),
+);
+it.effect.each(
+  statusMethods.flatMap((method) =>
+    (["configPath", "binaryPath"] as const).map(
+      (changedSetting) => [method, changedSetting] as const,
+    ),
+  ),
+)("%s invalidates cached identity when %s changes", ([method, changedSetting]) =>
+  Effect.gen(function* () {
+    const current = yield* Ref.make<ServerSettings>({
+      ...DEFAULT_SERVER_SETTINGS,
+      stave: {
+        ...DEFAULT_SERVER_SETTINGS.stave,
+        configPath: "/config/a",
+        binaryPath: "/binary/a",
+      },
+    });
+    let reads = 0;
+    yield* Effect.gen(function* () {
+      const runtime = yield* makeRuntime();
+      yield* readStatus(runtime, method);
+      yield* readStatus(runtime, method);
+      expect(reads).toBe(1);
+      yield* Ref.update(current, (value) => ({
+        ...value,
+        stave: { ...value.stave, [changedSetting]: "/selected/b" },
+      }));
+      const failure = yield* Effect.flip(readStatus(runtime, method));
+      expect(failure).toMatchObject({ code: "incarnation_mismatch" });
+      expect(reads).toBe(2);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          readerLayer,
+          Layer.mock(ServerSettingsService)({ getSettings: Ref.get(current) }),
+          Layer.mock(StaveCli)({
+            spaceStatus: () => Effect.sync(() => rawStatus(++reads === 1 ? root : "/other/s")),
+            sagaStatus: () => Effect.succeed({ sagaId: "s", members: [], notes: [] }),
+            sagaList: Effect.succeed([]),
+          }),
+        ),
+      ),
     );
-  }
-}
+  }),
+);
 
 it.effect("saga status uses fresh manifest identity after invalidating the workspace reader", () =>
   Effect.gen(function* () {
@@ -430,49 +436,50 @@ const makeCacheRaceFixture = Effect.fn("staveRpcHandlers.test.makeCacheRaceFixtu
   };
 });
 
-for (const method of ["spaceStatus", "sagaStatus"] as const) {
-  it.effect(
-    `${method} keys cached status by captured config when settings change before the first lookup`,
-    () =>
-      Effect.gen(function* () {
-        const fixture = yield* makeCacheRaceFixture();
-        const reads: string[] = [];
-        yield* Effect.gen(function* () {
-          const execution = yield* StaveExecution;
-          const runtime = yield* makeRuntime().pipe(
-            Effect.provideService(StaveExecution, {
-              withExecution: (body, options) =>
-                execution.withExecution(fixture.switchToB.pipe(Effect.andThen(body)), options),
-            }),
-          );
-          yield* readStatus(runtime, method);
-          const failure = yield* Effect.flip(readStatus(runtime, method));
-          expect(failure).toMatchObject({ code: "incarnation_mismatch" });
-          expect(reads).toEqual([fixture.configA, fixture.configB]);
-        }).pipe(
-          Effect.provide(
-            Layer.mergeAll(
-              fixture.layer,
-              Layer.mock(StaveCli)({
-                spaceStatus: () =>
-                  StaveExecutionContext.pipe(
-                    Effect.map((context) => {
-                      expect(context?.configurationIdentity).toEqual(expect.any(String));
-                      reads.push(context!.sourceConfigPath);
-                      return rawStatus(
-                        context!.sourceConfigPath === fixture.configA ? root : "/other/s",
-                      );
-                    }),
-                  ),
-                sagaStatus: () => Effect.succeed({ sagaId: "s", members: [], notes: [] }),
-                sagaList: Effect.succeed([]),
-              }),
-            ),
-          ),
+it.effect.each(statusMethods)(
+  "%s keys cached status by captured config when settings change before the first lookup",
+  (method) =>
+    Effect.gen(function* () {
+      const fixture = yield* makeCacheRaceFixture();
+      const reads: string[] = [];
+      yield* Effect.gen(function* () {
+        const execution = yield* StaveExecution;
+        const runtime = yield* makeRuntime().pipe(
+          Effect.provideService(StaveExecution, {
+            withExecution: (body, options) =>
+              execution.withExecution(fixture.switchToB.pipe(Effect.andThen(body)), options),
+          }),
         );
-      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
-  );
-  it.effect(`${method} does not share an in-flight A lookup with a concurrent B capture`, () =>
+        yield* readStatus(runtime, method);
+        const failure = yield* Effect.flip(readStatus(runtime, method));
+        expect(failure).toMatchObject({ code: "incarnation_mismatch" });
+        expect(reads).toEqual([fixture.configA, fixture.configB]);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            fixture.layer,
+            Layer.mock(StaveCli)({
+              spaceStatus: () =>
+                StaveExecutionContext.pipe(
+                  Effect.map((context) => {
+                    expect(context?.configurationIdentity).toEqual(expect.any(String));
+                    reads.push(context!.sourceConfigPath);
+                    return rawStatus(
+                      context!.sourceConfigPath === fixture.configA ? root : "/other/s",
+                    );
+                  }),
+                ),
+              sagaStatus: () => Effect.succeed({ sagaId: "s", members: [], notes: [] }),
+              sagaList: Effect.succeed([]),
+            }),
+          ),
+        ),
+      );
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+it.effect.each(statusMethods)(
+  "%s does not share an in-flight A lookup with a concurrent B capture",
+  (method) =>
     Effect.gen(function* () {
       const fixture = yield* makeCacheRaceFixture();
       const aStarted = yield* Deferred.make<void>();
@@ -516,8 +523,7 @@ for (const method of ["spaceStatus", "sagaStatus"] as const) {
         ),
       );
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
-  );
-}
+);
 
 it.effect("enriches saga members only with a uniquely verified enrolled incarnation", () =>
   Effect.gen(function* () {

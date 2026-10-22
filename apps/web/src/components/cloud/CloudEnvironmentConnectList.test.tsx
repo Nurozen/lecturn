@@ -202,6 +202,7 @@ describe("cloud onboarding discovery", () => {
         environmentId: newMachineId,
         label: "Saved work laptop",
         connection: { phase: "available", error: null, traceId: null } as const,
+        relayManaged: true,
       };
       discovery.accountIds = ["first-account", "expired-account"];
       discovery.profiles = new Map([
@@ -482,6 +483,7 @@ describe("cloud onboarding discovery", () => {
               environmentId: newMachineId,
               label: "Work laptop",
               connection: { phase: "connected", error: null, traceId: null },
+              relayManaged: true,
             },
           ]}
           showSavedEnvironments

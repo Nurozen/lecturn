@@ -93,38 +93,38 @@ describe("web remote HTTP transport", () => {
     }),
   );
 
-  for (const surface of ["phone", "web", "desktop"] as const) {
-    it.effect(
-      `preserves explicit Accept and ${surface === "phone" ? "defaults JSON on phone" : `leaves ${surface} defaults unchanged`}`,
-      () =>
-        Effect.gen(function* () {
-          vi.stubGlobal(
-            "window",
-            surface === "phone"
-              ? { symbaHost: {} }
-              : surface === "desktop"
-                ? { desktopBridge: {} }
-                : {},
-          );
-          const requests: Array<Request> = [];
-          const fetcher: typeof fetch = async (input, init) => {
-            requests.push(new Request(input, init));
-            return Response.json({});
-          };
-          yield* Effect.gen(function* () {
-            const client = yield* HttpClient.HttpClient;
-            yield* client.get("https://api.example.test/default");
-            yield* client.get("https://api.example.test/explicit", {
-              headers: { Accept: "text/plain" },
-            });
-            yield* client.get("https://api.example.test/wildcard", { headers: { ACCEPT: "*/*" } });
-          }).pipe(Effect.provide(makeWebRemoteHttpClientLayer(fetcher)));
-          expect(requests.map((request) => request.headers.get("accept"))).toEqual([
-            surface === "phone" ? "application/json" : null,
-            "text/plain",
-            "*/*",
-          ]);
-        }),
-    );
-  }
+  it.effect.each([
+    { surface: "phone", outcome: "defaults JSON on phone" },
+    { surface: "web", outcome: "leaves web defaults unchanged" },
+    { surface: "desktop", outcome: "leaves desktop defaults unchanged" },
+  ] as const)("preserves explicit Accept and $outcome", ({ surface }) =>
+    Effect.gen(function* () {
+      vi.stubGlobal(
+        "window",
+        surface === "phone"
+          ? { symbaHost: {} }
+          : surface === "desktop"
+            ? { desktopBridge: {} }
+            : {},
+      );
+      const requests: Array<Request> = [];
+      const fetcher: typeof fetch = async (input, init) => {
+        requests.push(new Request(input, init));
+        return Response.json({});
+      };
+      yield* Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient;
+        yield* client.get("https://api.example.test/default");
+        yield* client.get("https://api.example.test/explicit", {
+          headers: { Accept: "text/plain" },
+        });
+        yield* client.get("https://api.example.test/wildcard", { headers: { ACCEPT: "*/*" } });
+      }).pipe(Effect.provide(makeWebRemoteHttpClientLayer(fetcher)));
+      expect(requests.map((request) => request.headers.get("accept"))).toEqual([
+        surface === "phone" ? "application/json" : null,
+        "text/plain",
+        "*/*",
+      ]);
+    }),
+  );
 });

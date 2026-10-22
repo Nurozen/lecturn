@@ -267,8 +267,9 @@ describe("CursorTextGeneration", () => {
     }).pipe(Effect.provide(fsLayer)),
   );
 
-  for (const status of ["error", "cancelled"] as const) {
-    it.effect(`rejects a ${status} Cursor SDK run that includes valid title JSON`, () =>
+  it.effect.each(["error", "cancelled"] as const)(
+    "rejects a %s Cursor SDK run that includes valid title JSON",
+    (status) =>
       Effect.gen(function* () {
         const promptResult = {
           id: "run-cursor-partial-title-test",
@@ -298,8 +299,7 @@ describe("CursorTextGeneration", () => {
         );
         expect(cursorSdkMock.close).toHaveBeenCalledOnce();
       }).pipe(Effect.provide(fsLayer)),
-    );
-  }
+  );
 
   it.effect("fails closed when ambient sandbox policy can expand write access", () =>
     Effect.gen(function* () {
@@ -343,8 +343,9 @@ describe("CursorTextGeneration", () => {
     }).pipe(Effect.provide(fsLayer), Effect.scoped),
   );
 
-  for (const phase of ["create", "send"] as const) {
-    it.effect(`times out pending ${phase} and releases its late SDK resource`, () =>
+  it.effect.each(["create", "send"] as const)(
+    "times out pending %s and releases its late SDK resource",
+    (phase) =>
       Effect.gen(function* () {
         let started!: () => void;
         const called = new Promise<void>((resolve) => {
@@ -402,8 +403,7 @@ describe("CursorTextGeneration", () => {
         expect(wait).not.toHaveBeenCalled();
         if (phase === "send") expect(cursorSdkMock.cancel).toHaveBeenCalledOnce();
       }).pipe(Effect.provide(fsLayer), Effect.scoped),
-    );
-  }
+  );
 
   it.effect("requires CURSOR_API_KEY before calling the SDK", () =>
     Effect.gen(function* () {
@@ -433,29 +433,27 @@ describe("CursorTextGeneration", () => {
     modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "composer-2" },
   };
 
-  for (const [label, output] of [
+  it.effect.each([
     ["malformed JSON", "not JSON"],
     ["missing stage", '{"summary":"Working","confidence":0.8}'],
     ["missing confidence", '{"summary":"Working","stage":"build"}'],
     ["invalid stage", '{"summary":"Working","stage":"completed","confidence":0.8}'],
     ["confidence above one", '{"summary":"Working","stage":"build","confidence":1.1}'],
     ["negative confidence", '{"summary":"Working","stage":"build","confidence":-0.1}'],
-  ] as const) {
-    it.effect(`rejects workflow inference with ${label}`, () =>
-      Effect.gen(function* () {
-        cursorSdkMock.prompt.mockResolvedValueOnce({
-          id: "run-cursor-workflow-invalid",
-          status: "finished",
-          result: output,
-        });
-        const generation = yield* makeCursorTextGeneration(cursorSettings, {
-          CURSOR_API_KEY: "key",
-        });
-        const failure = yield* Effect.flip(generation.generateWorkflowSummary(workflowInput));
-        expect(failure.operation).toBe("generateWorkflowSummary");
-      }).pipe(Effect.provide(fsLayer)),
-    );
-  }
+  ] as const)("rejects workflow inference with %s", ([, output]) =>
+    Effect.gen(function* () {
+      cursorSdkMock.prompt.mockResolvedValueOnce({
+        id: "run-cursor-workflow-invalid",
+        status: "finished",
+        result: output,
+      });
+      const generation = yield* makeCursorTextGeneration(cursorSettings, {
+        CURSOR_API_KEY: "key",
+      });
+      const failure = yield* Effect.flip(generation.generateWorkflowSummary(workflowInput));
+      expect(failure.operation).toBe("generateWorkflowSummary");
+    }).pipe(Effect.provide(fsLayer)),
+  );
 
   it.effect("discards workflow inference when the run uses a tool", () =>
     Effect.gen(function* () {

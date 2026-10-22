@@ -97,6 +97,8 @@ export class ConnectionBlockedError extends Schema.TaggedError<ConnectionBlocked
     reason: ConnectionBlockedReason,
     detail: Schema.String,
     traceId: Schema.optionalKey(Schema.String),
+    /** The host speaks an older orchestration protocol; updating it restores the connection. */
+    serverUpdateRequired: Schema.optionalKey(Schema.Boolean),
   },
 ) {
   override get message(): string {
@@ -126,6 +128,11 @@ export interface PreparedConnection {
   readonly socketUrl: string;
   readonly httpAuthorization: PreparedHttpAuthorization | null;
   readonly target: ConnectionTarget;
+  /**
+   * The Connect account a direct route learned through Lecturn Connect
+   * authorizes as. A relay target carries its own account.
+   */
+  readonly accountId?: string;
 }
 
 export type SupervisorConnectionPhase =

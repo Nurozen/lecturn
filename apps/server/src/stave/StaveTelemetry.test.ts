@@ -99,8 +99,9 @@ const cases: ReadonlyArray<readonly [StaveOperation, string | null]> = [
 ];
 
 describe("Stave telemetry privacy boundary", () => {
-  for (const [operation, event] of cases) {
-    it(`maps ${operation.kind} using only the allowlisted properties`, () => {
+  it.each(cases.map(([operation, event]) => ({ operation, event, kind: operation.kind })))(
+    "maps $kind using only the allowlisted properties",
+    ({ operation, event }) => {
       for (const trigger of ["interactive", "automatic"] as const) {
         expect(staveTelemetryEvent(operation, trigger, { state: "success" })).toEqual(
           event === null
@@ -114,18 +115,19 @@ describe("Stave telemetry privacy boundary", () => {
           properties: { operationKind: operation.kind, trigger, count: 1, code: "dirty_worktrees" },
         });
       }
-    });
-  }
+    },
+  );
 
-  for (const [action, target, event] of [
+  it.each([
     ["archiveNow", undefined, "stave.space.archived"],
     ["retry", "archive", "stave.space.archived"],
     ["retry", "destroy", "stave.space.destroyed"],
     ["retry", undefined, null],
     ["keep", "destroy", null],
     ["dismiss", "archive", null],
-  ] as const) {
-    it(`maps automatic lifecycle ${action}/${target} without leaking project identifiers`, () => {
+  ] as const)(
+    "maps automatic lifecycle %s/%s without leaking project identifiers",
+    (action, target, event) => {
       expect(
         staveTelemetryEvent({ ...lifecycle, action, ...(target ? { target } : {}) }, "automatic", {
           state: "success",
@@ -138,8 +140,8 @@ describe("Stave telemetry privacy boundary", () => {
               properties: { operationKind: "lifecycleAction", trigger: "automatic", count: 1 },
             },
       );
-    });
-  }
+    },
+  );
 
   it("drops extra command, environment, output and error fields and normalizes future error codes", () => {
     const operation = {
@@ -171,8 +173,9 @@ describe("Stave telemetry privacy boundary", () => {
     });
   });
 
-  for (const kind of [secret, "__proto__", "constructor"]) {
-    it(`normalizes an unexpected operation kind (${kind})`, () => {
+  it.each([secret, "__proto__", "constructor"])(
+    "normalizes an unexpected operation kind (%s)",
+    (kind) => {
       const operation = { ...createSpace, kind } as unknown as StaveOperation;
       expect(
         staveTelemetryEvent(operation, "automatic", { state: "failure", code: secret }),
@@ -181,6 +184,6 @@ describe("Stave telemetry privacy boundary", () => {
         properties: { operationKind: "unknown", trigger: "automatic", count: 1, code: "unknown" },
       });
       expect(staveTelemetryEvent(operation, "automatic", { state: "success" })).toBeNull();
-    });
-  }
+    },
+  );
 });

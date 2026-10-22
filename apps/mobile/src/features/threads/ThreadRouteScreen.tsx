@@ -7,6 +7,7 @@ import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
 import { buildProjectThreadStartTurnInput } from "../../lib/projectThreadStartTurn";
 import { useWorktreeSetup } from "./use-worktree-setup";
 import { worktreeSetupAgentStarted } from "@lecturn/client-runtime/worktree-setup";
+import { accountOwnerTarget } from "@lecturn/client-runtime/connection";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import { ScreenHeaderButton } from "../../components/ScreenHeaderButton";
 import type { ScreenHeaderAction } from "../../components/ScreenHeader.types";
@@ -286,9 +287,10 @@ function AccountScopedThreadRouteScreen(props: ThreadRouteScreenProps) {
   const accountsReady = useAtomValue(connectAccountsReadyAtom);
   const accounts = useConnectAccounts();
   const navigation = useNavigation();
-  const target = [...catalog.entries.values()].find(
-    (entry) => entry.target.environmentId === props.route.params.environmentId,
-  )?.target;
+  const entry = [...catalog.entries.values()].find(
+    (candidate) => candidate.target.environmentId === props.route.params.environmentId,
+  );
+  const target = entry === undefined ? undefined : accountOwnerTarget(entry);
   const decision = resolveThreadAccountRoute({
     catalogReady: catalog.isReady,
     accountsReady,

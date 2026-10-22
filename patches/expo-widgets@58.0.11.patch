@@ -68,9 +68,18 @@ diff --git a/ios/LiveActivityFactory.swift b/ios/LiveActivityFactory.swift
 index 29e4f15..6720bff 100644
 --- a/ios/LiveActivityFactory.swift
 +++ b/ios/LiveActivityFactory.swift
-@@ -20,9 +20,10 @@ final class LiveActivityFactory: SharedObject {
+@@ -19,10 +19,19 @@ final class LiveActivityFactory: SharedObject {
+       throw LiveActivitiesNotSupportedException()
      }
  
++    // iOS ends an activity after 8 hours but leaves it frozen on the Lock Screen for up to
++    // 4 more. getInstances() can't see it, so a caller starting a replacement would leave
++    // both cards visible. Dismiss the ended ones now.
++    for activity in Activity<LiveActivityAttributes>.activities
++    where activity.content.state.name == name && activity.activityState == .ended {
++      Task { await activity.end(nil, dismissalPolicy: .immediate) }
++    }
++
      do {
 +      let accountId = props.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } as? [String: Any]
        let initialState = LiveActivityAttributes.ContentState(name: name, props: props)

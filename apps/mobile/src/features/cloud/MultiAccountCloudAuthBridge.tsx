@@ -1,6 +1,7 @@
 import { Alert, Platform } from "react-native";
 import { environmentCatalog } from "../../connection/catalog";
 import { rejectedMobileAccountIds } from "./mobileAccountAdmission";
+import { accountOwnerTarget } from "@lecturn/client-runtime/connection";
 import { useAuth, useClerk, useSessionList } from "@clerk/expo";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -108,7 +109,7 @@ export function MultiAccountCloudAuthBridge({ children }: { readonly children: R
           platform: Platform.OS,
           multiAccountPush: getMultiAccountPushSupported(),
           clerkSingleSessionMode: typeof mode === "boolean" ? mode : undefined,
-          targets: [...catalog.entries.values()].map((entry) => entry.target),
+          targets: [...catalog.entries.values()].map(accountOwnerTarget),
           unlistedRelayEnvironmentIds: unlisted,
         });
         const rejectedSessions = signedIn.filter(

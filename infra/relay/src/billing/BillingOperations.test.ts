@@ -83,14 +83,12 @@ describe("missed Clerk deletion compensation", () => {
       expect(tombstones).toBe(0);
     }),
   );
-  for (const status of [401, 403, 429, 500, 502]) {
-    it.effect(`treats Clerk HTTP ${status} as uncertainty`, () =>
-      Effect.gen(function* () {
-        const lookup = clerkIdentityLookup("sk_test", async () => new Response("{}", { status }));
-        expect((yield* lookup("user").pipe(Effect.result))._tag).toBe("Failure");
-      }),
-    );
-  }
+  it.effect.each([401, 403, 429, 500, 502])("treats Clerk HTTP %s as uncertainty", (status) =>
+    Effect.gen(function* () {
+      const lookup = clerkIdentityLookup("sk_test", async () => new Response("{}", { status }));
+      expect((yield* lookup("user").pipe(Effect.result))._tag).toBe("Failure");
+    }),
+  );
   it.effect("requires a Clerk-shaped 404 and validates successful identity responses", () =>
     Effect.gen(function* () {
       expect(

@@ -35,6 +35,7 @@ import type {
   ProviderInstanceEnvironment,
   ProviderInstanceId,
   ServerProvider,
+  ServerProviderWorkspaceSnapshot,
   ToolLifecycleItemType,
 } from "@lecturn/contracts";
 import type * as Effect from "effect/Effect";
@@ -63,6 +64,9 @@ export interface ProviderDriverMetadata {
    */
   readonly supportsMultipleInstances?: boolean;
 }
+
+export type ProviderWorkspaceSnapshot = ServerProvider &
+  Pick<ServerProviderWorkspaceSnapshot, "slashCommandsPending">;
 
 /**
  * One session a provider's own tooling created outside Lecturn. The service
@@ -163,7 +167,9 @@ export interface ProviderInstance {
   readonly accentColor?: string | undefined;
   readonly enabled: boolean;
   readonly snapshot: ServerProviderShape;
-  readonly snapshotForCwd?: (cwd: string) => Effect.Effect<ServerProvider, ProviderDriverError>;
+  readonly snapshotForCwd?: (
+    cwd: string,
+  ) => Effect.Effect<ProviderWorkspaceSnapshot, ProviderDriverError>;
   readonly refreshModels?: () => Effect.Effect<void, ProviderDriverError>;
   /** Invalidate Lecturn-owned discovery caches before an explicit provider refresh. */
   readonly invalidateCaches?: Effect.Effect<void>;

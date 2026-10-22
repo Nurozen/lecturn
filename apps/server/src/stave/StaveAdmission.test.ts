@@ -49,39 +49,37 @@ const archivedRow: StaveLifecycleRow = {
   refreshedAt: null,
 };
 
-for (const withProjectId of [false, true]) {
-  it.effect(
-    `refuses an archived space whose old manifest is missing (project id: ${withProjectId})`,
-    () =>
-      Effect.gen(function* () {
-        const error = yield* check({
-          projectRoot: SPACE_ROOT,
-          intent: "thread.turn.start",
-          lockHeld: true,
-          ...(withProjectId ? { projectId: archivedRow.projectId } : {}),
-        }).pipe(Effect.flip);
-        expect(error._tag).toBe("StaveArchivedProjectError");
-      }).pipe(
-        Effect.provide(
-          StaveAdmission.layer.pipe(
-            Layer.provide(
-              Layer.mergeAll(
-                Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
-                  invalidate: () => Effect.void,
-                  load: () => Effect.succeed(Option.none()),
-                }),
-                Layer.mock(StaveLifecycleRepository)({
-                  getByWorkspaceRoot: () =>
-                    Effect.succeed(withProjectId ? Option.none() : Option.some(archivedRow)),
-                  getByProjectId: () => Effect.succeed(Option.some(archivedRow)),
-                }),
-              ),
+it.effect.each([false, true])(
+  "refuses an archived space whose old manifest is missing (project id: %s)",
+  (withProjectId) =>
+    Effect.gen(function* () {
+      const error = yield* check({
+        projectRoot: SPACE_ROOT,
+        intent: "thread.turn.start",
+        lockHeld: true,
+        ...(withProjectId ? { projectId: archivedRow.projectId } : {}),
+      }).pipe(Effect.flip);
+      expect(error._tag).toBe("StaveArchivedProjectError");
+    }).pipe(
+      Effect.provide(
+        StaveAdmission.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
+                invalidate: () => Effect.void,
+                load: () => Effect.succeed(Option.none()),
+              }),
+              Layer.mock(StaveLifecycleRepository)({
+                getByWorkspaceRoot: () =>
+                  Effect.succeed(withProjectId ? Option.none() : Option.some(archivedRow)),
+                getByProjectId: () => Effect.succeed(Option.some(archivedRow)),
+              }),
             ),
           ),
         ),
       ),
-  );
-}
+    ),
+);
 
 it.effect("admits a live manifest restored externally despite its stale archived row", () =>
   check({
@@ -462,120 +460,123 @@ it.effect(
   },
 );
 
-for (const disposition of ["live", "pending_evaluation", "archiving"] as const) {
-  for (const projectId of [undefined, ProjectId.make("new-project")])
-    it.effect(
-      `expires abandoned owner tokens while preserving ${disposition} transition state (project: ${projectId ?? "root"})`,
-      () => {
-        const row = {
-          ...archivedRow,
-          workspaceRoot: SPACE_ROOT,
-          disposition,
-          ownerToken: "dead-owner",
-          leaseUntil: "1969-12-31T23:59:59Z",
-        };
-        return Effect.gen(function* () {
-          const result = yield* Effect.exit(
-            check({
-              projectRoot: SPACE_ROOT,
-              intent: "thread.create",
-              ...(projectId ? { projectId } : {}),
-            }),
-          );
-          expect(result._tag).toBe(disposition === "archiving" ? "Failure" : "Success");
-        }).pipe(
-          Effect.provide(
-            StaveAdmission.layer.pipe(
-              Layer.provide(
-                Layer.mergeAll(
-                  Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
-                    invalidate: () => Effect.void,
-                    load: () => Effect.succeed(Option.some(spaceInfo)),
-                  }),
-                  Layer.mock(StaveLifecycleRepository)({
-                    getByWorkspaceRoot: () => Effect.succeed(Option.some(row)),
-                    getByProjectId: () => Effect.succeedNone,
-                  }),
-                ),
-              ),
+it.effect.each(
+  (["live", "pending_evaluation", "archiving"] as const).flatMap((disposition) =>
+    [undefined, ProjectId.make("new-project")].map((projectId) => ({
+      disposition,
+      projectId,
+      project: projectId ?? "root",
+    })),
+  ),
+)(
+  "expires abandoned owner tokens while preserving $disposition transition state (project: $project)",
+  ({ disposition, projectId }) => {
+    const row = {
+      ...archivedRow,
+      workspaceRoot: SPACE_ROOT,
+      disposition,
+      ownerToken: "dead-owner",
+      leaseUntil: "1969-12-31T23:59:59Z",
+    };
+    return Effect.gen(function* () {
+      const result = yield* Effect.exit(
+        check({
+          projectRoot: SPACE_ROOT,
+          intent: "thread.create",
+          ...(projectId ? { projectId } : {}),
+        }),
+      );
+      expect(result._tag).toBe(disposition === "archiving" ? "Failure" : "Success");
+    }).pipe(
+      Effect.provide(
+        StaveAdmission.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
+                invalidate: () => Effect.void,
+                load: () => Effect.succeed(Option.some(spaceInfo)),
+              }),
+              Layer.mock(StaveLifecycleRepository)({
+                getByWorkspaceRoot: () => Effect.succeed(Option.some(row)),
+                getByProjectId: () => Effect.succeedNone,
+              }),
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
-}
+  },
+);
 
-for (const disposition of ["live", "refused", "destroyed"] as const) {
-  it.effect(
-    `refuses a recreated incarnation in the existing ${disposition} project but admits an explicit re-import`,
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const root = yield* fs.realPath(yield* fs.makeTempDirectoryScoped());
-        const oldStamp = "2026-09-01T00:00:00.000000001Z";
-        const newStamp = "2026-09-01T00:00:00.000000002Z";
-        const manifest = (stamp: string) =>
-          `version: 2\nid: same-space\ncreatedAt: '${stamp}'\nrepos: []\nmemories: []\n`;
-        yield* fs.writeFileString(path.join(root, STAVE_MANIFEST_FILE_NAME), manifest(oldStamp));
-        const row: StaveLifecycleRow = {
-          ...archivedRow,
-          projectId: ProjectId.make("surviving-project"),
-          workspaceRoot: root,
-          spaceId: "same-space",
-          manifestCreatedAt: oldStamp,
-          disposition,
-        };
-        yield* Effect.gen(function* () {
-          const reader = yield* StaveWorkspaceReader.StaveWorkspaceReader;
-          const admission = yield* StaveAdmission.StaveAdmission;
-          // Prime the cache with the doomed incarnation, then recreate it at
-          // the same path without a Stave operation/cache invalidation event.
-          expect(Option.getOrThrow(yield* reader.load(root)).createdAt).toBe(oldStamp);
-          yield* fs.writeFileString(path.join(root, STAVE_MANIFEST_FILE_NAME), manifest(newStamp));
-          for (const intent of [
-            "thread.create",
-            "thread.turn.start",
-            "thread.fork",
-            "thread.pin",
-            "thread.unarchive",
-            "thread.unsettle",
-          ] as const) {
-            const refused = yield* admission
-              .check({ projectRoot: root, projectId: row.projectId, intent })
-              .pipe(Effect.flip);
-            expect(refused._tag).toBe("StaveProjectIncarnationMismatchError");
-            expect(refused.message).toContain("Re-import");
-            expect(StaveAdmission.isStaveAdmissionError(refused)).toBe(true);
-          }
-          yield* admission.check({
-            projectRoot: root,
-            projectId: ProjectId.make("explicit-reimport"),
-            intent: "thread.create",
-          });
-          expect(Option.getOrThrow(yield* reader.load(root)).createdAt).toBe(newStamp);
-        }).pipe(
-          Effect.provide(
-            StaveAdmission.layer.pipe(
-              Layer.provideMerge(StaveWorkspaceReader.layer),
-              Layer.provide(
-                Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-                  resolve: () => Effect.succeed(null),
-                }),
-              ),
-              Layer.provide(
-                Layer.mock(StaveLifecycleRepository)({
-                  getByWorkspaceRoot: () => Effect.succeed(Option.some(row)),
-                  getByProjectId: (id) =>
-                    Effect.succeed(id === row.projectId ? Option.some(row) : Option.none()),
-                }),
-              ),
+it.effect.each(["live", "refused", "destroyed"] as const)(
+  "refuses a recreated incarnation in the existing %s project but admits an explicit re-import",
+  (disposition) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.realPath(yield* fs.makeTempDirectoryScoped());
+      const oldStamp = "2026-09-01T00:00:00.000000001Z";
+      const newStamp = "2026-09-01T00:00:00.000000002Z";
+      const manifest = (stamp: string) =>
+        `version: 2\nid: same-space\ncreatedAt: '${stamp}'\nrepos: []\nmemories: []\n`;
+      yield* fs.writeFileString(path.join(root, STAVE_MANIFEST_FILE_NAME), manifest(oldStamp));
+      const row: StaveLifecycleRow = {
+        ...archivedRow,
+        projectId: ProjectId.make("surviving-project"),
+        workspaceRoot: root,
+        spaceId: "same-space",
+        manifestCreatedAt: oldStamp,
+        disposition,
+      };
+      yield* Effect.gen(function* () {
+        const reader = yield* StaveWorkspaceReader.StaveWorkspaceReader;
+        const admission = yield* StaveAdmission.StaveAdmission;
+        // Prime the cache with the doomed incarnation, then recreate it at
+        // the same path without a Stave operation/cache invalidation event.
+        expect(Option.getOrThrow(yield* reader.load(root)).createdAt).toBe(oldStamp);
+        yield* fs.writeFileString(path.join(root, STAVE_MANIFEST_FILE_NAME), manifest(newStamp));
+        for (const intent of [
+          "thread.create",
+          "thread.turn.start",
+          "thread.fork",
+          "thread.pin",
+          "thread.unarchive",
+          "thread.unsettle",
+        ] as const) {
+          const refused = yield* admission
+            .check({ projectRoot: root, projectId: row.projectId, intent })
+            .pipe(Effect.flip);
+          expect(refused._tag).toBe("StaveProjectIncarnationMismatchError");
+          expect(refused.message).toContain("Re-import");
+          expect(StaveAdmission.isStaveAdmissionError(refused)).toBe(true);
+        }
+        yield* admission.check({
+          projectRoot: root,
+          projectId: ProjectId.make("explicit-reimport"),
+          intent: "thread.create",
+        });
+        expect(Option.getOrThrow(yield* reader.load(root)).createdAt).toBe(newStamp);
+      }).pipe(
+        Effect.provide(
+          StaveAdmission.layer.pipe(
+            Layer.provideMerge(StaveWorkspaceReader.layer),
+            Layer.provide(
+              Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+                resolve: () => Effect.succeed(null),
+              }),
+            ),
+            Layer.provide(
+              Layer.mock(StaveLifecycleRepository)({
+                getByWorkspaceRoot: () => Effect.succeed(Option.some(row)),
+                getByProjectId: (id) =>
+                  Effect.succeed(id === row.projectId ? Option.some(row) : Option.none()),
+              }),
             ),
           ),
-        );
-      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-}
+        ),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
 
 it.effect(
   "accepts equivalent nanosecond stamps and an explicit retarget to a different root",

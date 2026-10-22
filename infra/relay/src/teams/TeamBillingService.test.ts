@@ -117,21 +117,22 @@ function harness() {
   };
 }
 describe("Teams seat billing", () => {
-  for (const invalid of [true, false]) {
-    it.effect(`classifies webhook ${invalid ? "validation" : "provider"} errors separately`, () =>
-      Effect.gen(function* () {
-        const h = harness();
-        h.stripe.webhook = async () => {
-          throw invalid
-            ? new InvalidTeamWebhookError("Invalid signature")
-            : new Error("Stripe unavailable");
-        };
-        const error = yield* Effect.flip(h.service.receiveWebhook(new Uint8Array(), "signature"));
-        expect(error.code).toBe(invalid ? "forbidden" : "unavailable");
-        expect(h.calls).toEqual([]);
-      }),
-    );
-  }
+  it.effect.each([
+    { invalid: true, kind: "validation" },
+    { invalid: false, kind: "provider" },
+  ])("classifies webhook $kind errors separately", ({ invalid }) =>
+    Effect.gen(function* () {
+      const h = harness();
+      h.stripe.webhook = async () => {
+        throw invalid
+          ? new InvalidTeamWebhookError("Invalid signature")
+          : new Error("Stripe unavailable");
+      };
+      const error = yield* Effect.flip(h.service.receiveWebhook(new Uint8Array(), "signature"));
+      expect(error.code).toBe(invalid ? "forbidden" : "unavailable");
+      expect(h.calls).toEqual([]);
+    }),
+  );
   it.effect("failed prorated payment preserves old capacity until canonical payment settles", () =>
     Effect.gen(function* () {
       const h = harness();
@@ -311,8 +312,9 @@ describe("Teams seat billing", () => {
       expect(h.account().billing_state.operation).toBeUndefined();
     }),
   );
-  for (const scenario of ["expired", "replacement", "renewed", "suspended"] as const) {
-    it.effect(`does not replay a confirmation when its subscription is ${scenario}`, () =>
+  it.effect.each(["expired", "replacement", "renewed", "suspended"] as const)(
+    "does not replay a confirmation when its subscription is %s",
+    (scenario) =>
       Effect.gen(function* () {
         const h = harness();
         const p = yield* h.service.preview("org_one", "owner", 8);
@@ -338,8 +340,7 @@ describe("Teams seat billing", () => {
         expect(h.account().billing_state.operation?.id).toBe(p.id);
         expect(h.account().purchased_seats).toBe(5);
       }),
-    );
-  }
+  );
   it.effect("a scheduled decrease can be canceled while retaining the paid seats", () =>
     Effect.gen(function* () {
       const h = harness();

@@ -44,11 +44,20 @@ it.effect("starts without scanning or rebuilding projection history", () =>
     const result = yield* ServerRuntimeStartup.runOrderedV2StartupPhases({
       importLegacyShells: record("import"),
       recover: record("recover").pipe(Effect.as({ closedRequests: 2 })),
+      recoverDelegatedTasks: record("delegated"),
       startEffectWorker: record("worker"),
       autoBootstrap: record("bootstrap").pipe(Effect.as({ projectId: "project-1" })),
     });
 
-    assert.deepEqual(yield* Ref.get(calls), ["import", "recover", "worker", "bootstrap"]);
+    // Delegated recovery reads the runs recovery terminalizes, and settles them
+    // before the worker runs restart continuations that would otherwise race it.
+    assert.deepEqual(yield* Ref.get(calls), [
+      "import",
+      "recover",
+      "delegated",
+      "worker",
+      "bootstrap",
+    ]);
     assert.deepEqual(result, {
       recovery: { closedRequests: 2 },
       bootstrap: { projectId: "project-1" },
@@ -215,91 +224,86 @@ it.effect("automatic pull only updates enabled, behind, clean default-branch che
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-for (const [projectCount, enabledCount] of [
-  [10, 10],
-  [10, 1],
-  [20, 10],
-  [10, 0],
-] as const) {
-  it.effect(
-    `startup ownership filesystem reads stay bounded (${enabledCount}/${projectCount} enabled)`,
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped().pipe(Effect.flatMap(fs.realPath));
-        const projects = Array.from({ length: projectCount }, (_, index) => {
-          const workspaceRoot = path.join(root, `project-${index}`);
-          return {
-            id: ProjectId.make(workspaceRoot),
-            title: workspaceRoot,
-            workspaceRoot,
-            defaultModelSelection: null,
-            scripts: [],
-            autoPull: index < enabledCount,
-            stave: null,
-            createdAt: "2026-01-01T00:00:00.000Z",
-            updatedAt: "2026-01-01T00:00:00.000Z",
-          } satisfies OrchestrationProjectShell;
-        });
-        yield* Effect.forEach(projects, (project) => fs.makeDirectory(project.workspaceRoot));
-        const manifestReads: string[] = [];
-        let canonicalReads = 0;
-        let ceilingReads = 0;
-        const checked: string[] = [];
-        yield* ServerRuntimeStartup.autoPullProjects(
-          projects,
-          autoPullOverrides(
-            Object.fromEntries(
-              projects.map((project) => [project.workspaceRoot, project.autoPull]),
+it.effect.each([
+  { projectCount: 10, enabledCount: 10 },
+  { projectCount: 10, enabledCount: 1 },
+  { projectCount: 20, enabledCount: 10 },
+  { projectCount: 10, enabledCount: 0 },
+] as const)(
+  "startup ownership filesystem reads stay bounded ($enabledCount/$projectCount enabled)",
+  ({ projectCount, enabledCount }) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped().pipe(Effect.flatMap(fs.realPath));
+      const projects = Array.from({ length: projectCount }, (_, index) => {
+        const workspaceRoot = path.join(root, `project-${index}`);
+        return {
+          id: ProjectId.make(workspaceRoot),
+          title: workspaceRoot,
+          workspaceRoot,
+          defaultModelSelection: null,
+          scripts: [],
+          autoPull: index < enabledCount,
+          stave: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        } satisfies OrchestrationProjectShell;
+      });
+      yield* Effect.forEach(projects, (project) => fs.makeDirectory(project.workspaceRoot));
+      const manifestReads: string[] = [];
+      let canonicalReads = 0;
+      let ceilingReads = 0;
+      const checked: string[] = [];
+      yield* ServerRuntimeStartup.autoPullProjects(
+        projects,
+        autoPullOverrides(
+          Object.fromEntries(projects.map((project) => [project.workspaceRoot, project.autoPull])),
+        ),
+      ).pipe(
+        Effect.provideService(FileSystem.FileSystem, {
+          ...fs,
+          readFileString: (file, encoding) =>
+            Effect.sync(() => manifestReads.push(file)).pipe(
+              Effect.andThen(fs.readFileString(file, encoding)),
             ),
-          ),
-        ).pipe(
-          Effect.provideService(FileSystem.FileSystem, {
-            ...fs,
-            readFileString: (file, encoding) =>
-              Effect.sync(() => manifestReads.push(file)).pipe(
-                Effect.andThen(fs.readFileString(file, encoding)),
-              ),
-            realPath: (file) =>
-              Effect.sync(() => canonicalReads++).pipe(Effect.andThen(fs.realPath(file))),
-            exists: (file) =>
-              Effect.sync(() => ceilingReads++).pipe(Effect.andThen(fs.exists(file))),
+          realPath: (file) =>
+            Effect.sync(() => canonicalReads++).pipe(Effect.andThen(fs.realPath(file))),
+          exists: (file) => Effect.sync(() => ceilingReads++).pipe(Effect.andThen(fs.exists(file))),
+        }),
+        Effect.provide(
+          Layer.mock(GitVcsDriver.GitVcsDriver)({
+            statusDetails: (cwd) =>
+              Effect.sync(() => {
+                checked.push(cwd);
+                return {
+                  isRepo: true,
+                  hasOriginRemote: true,
+                  isDefaultBranch: true,
+                  branch: "main",
+                  upstreamRef: "origin/main",
+                  hasUpstream: true,
+                  hasWorkingTreeChanges: false,
+                  workingTree: { files: [], insertions: 0, deletions: 0 },
+                  aheadCount: 0,
+                  behindCount: 0,
+                  aheadOfDefaultCount: 0,
+                };
+              }),
           }),
-          Effect.provide(
-            Layer.mock(GitVcsDriver.GitVcsDriver)({
-              statusDetails: (cwd) =>
-                Effect.sync(() => {
-                  checked.push(cwd);
-                  return {
-                    isRepo: true,
-                    hasOriginRemote: true,
-                    isDefaultBranch: true,
-                    branch: "main",
-                    upstreamRef: "origin/main",
-                    hasUpstream: true,
-                    hasWorkingTreeChanges: false,
-                    workingTree: { files: [], insertions: 0, deletions: 0 },
-                    aheadCount: 0,
-                    behindCount: 0,
-                    aheadOfDefaultCount: 0,
-                  };
-                }),
-            }),
-          ),
-        );
-        assert.deepStrictEqual(
-          manifestReads,
-          enabledCount === 0
-            ? []
-            : projects.map((project) => path.join(project.workspaceRoot, ".stave.yaml")),
-        );
-        assert.strictEqual(canonicalReads, enabledCount === 0 ? 0 : projectCount + enabledCount);
-        assert.strictEqual(checked.length, enabledCount);
-        assert.isAtMost(ceilingReads, enabledCount * (root.split(path.sep).length + 1));
-      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-}
+        ),
+      );
+      assert.deepStrictEqual(
+        manifestReads,
+        enabledCount === 0
+          ? []
+          : projects.map((project) => path.join(project.workspaceRoot, ".stave.yaml")),
+      );
+      assert.strictEqual(canonicalReads, enabledCount === 0 ? 0 : projectCount + enabledCount);
+      assert.strictEqual(checked.length, enabledCount);
+      assert.isAtMost(ceilingReads, enabledCount * (root.split(path.sep).length + 1));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
 
 it.effect("startup automatic pulls fail closed when the manifest ceiling cannot be checked", () =>
   Effect.gen(function* () {
@@ -347,119 +351,117 @@ it.effect("startup automatic pulls fail closed when the manifest ceiling cannot 
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
-for (const ownerMetadata of [true, false, null]) {
-  it.effect(
-    `inherited startup pulls respect separately registered Stave ownership (metadata: ${ownerMetadata})`,
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped();
-        const space = path.join(root, "space");
-        const ownerAlias = path.join(root, "aliases", "space");
-        const repo = path.join(space, "repo");
-        const alias = path.join(root, "alias");
-        const ordinary = path.join(root, "space-other");
-        const external = path.join(root, "external");
-        const externalAlias = path.join(root, "external-alias");
-        const unrelated = path.join(root, "aliases", "external");
-        yield* fs.makeDirectory(unrelated, { recursive: true });
-        yield* fs.makeDirectory(external);
-        yield* fs.makeDirectory(path.join(repo, "src"), { recursive: true });
-        yield* fs.makeDirectory(ordinary);
-        if (symlinksSupported) {
-          yield* fs.makeDirectory(path.dirname(ownerAlias), { recursive: true });
-          yield* fs.symlink(space, ownerAlias);
-          yield* fs.symlink(repo, alias);
-          yield* fs.symlink(external, externalAlias);
-        }
-        if (!ownerMetadata) {
-          yield* fs.writeFileString(
-            path.join(space, ".stave.yaml"),
-            "version: 2\nid: space\nrepos:\n  - name: repo\n    path: repo\n    mode: edit\n  - name: external\n    path: ../external\n    mode: edit\nmemories: []\n",
-          );
-        }
-        const project = (workspaceRoot: string): OrchestrationProjectShell => ({
-          id: ProjectId.make(workspaceRoot),
-          title: workspaceRoot,
-          workspaceRoot,
-          defaultModelSelection: null,
-          scripts: [],
-          autoPull: false,
-          stave: null,
-          createdAt: "2026-01-01T00:00:00.000Z",
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        });
-        const checked: string[] = [];
-        const pulled: string[] = [];
-        yield* ServerRuntimeStartup.autoPullProjects(
-          [
-            project(repo),
-            project(path.join(repo, "src")),
-            ...(ownerMetadata === null ? [] : [project(external)]),
-            ...(symlinksSupported
-              ? [
-                  project(alias),
-                  project(path.join(alias, "missing")),
-                  ...(ownerMetadata === null ? [] : [project(externalAlias)]),
-                ]
-              : []),
-            ...(ownerMetadata === null
-              ? []
-              : [
-                  {
-                    ...project(symlinksSupported ? ownerAlias : space),
-                    stave: ownerMetadata
-                      ? {
-                          spaceId: "space",
-                          isSaga: false,
-                          repos: [
-                            { name: "external", path: "../external", mode: "edit" },
-                            { name: "repo", path: "repo", mode: "edit" },
-                          ],
-                          memories: [],
-                          primaryRepoPath: symlinksSupported ? unrelated : external,
-                        }
-                      : null,
-                  } satisfies OrchestrationProjectShell,
-                ]),
-            project(ordinary),
-            project(unrelated),
-          ],
-          { ...DEFAULT_SERVER_SETTINGS, defaultAutoPull: true },
-        ).pipe(
-          Effect.provide(
-            Layer.mock(GitVcsDriver.GitVcsDriver)({
-              statusDetails: (cwd) =>
-                Effect.sync(() => {
-                  checked.push(cwd);
-                  return {
-                    isRepo: true,
-                    hasOriginRemote: true,
-                    isDefaultBranch: true,
-                    branch: "main",
-                    upstreamRef: "origin/main",
-                    hasUpstream: true,
-                    hasWorkingTreeChanges: false,
-                    workingTree: { files: [], insertions: 0, deletions: 0 },
-                    aheadCount: 0,
-                    behindCount: 1,
-                    aheadOfDefaultCount: 0,
-                  };
-                }),
-              pullCurrentBranch: (cwd) =>
-                Effect.sync(() => {
-                  pulled.push(cwd);
-                  return { status: "pulled" as const, refName: "main", upstreamRef: "origin/main" };
-                }),
-            }),
-          ),
+it.effect.each([{ ownerMetadata: true }, { ownerMetadata: false }, { ownerMetadata: null }])(
+  "inherited startup pulls respect separately registered Stave ownership (metadata: $ownerMetadata)",
+  ({ ownerMetadata }) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const space = path.join(root, "space");
+      const ownerAlias = path.join(root, "aliases", "space");
+      const repo = path.join(space, "repo");
+      const alias = path.join(root, "alias");
+      const ordinary = path.join(root, "space-other");
+      const external = path.join(root, "external");
+      const externalAlias = path.join(root, "external-alias");
+      const unrelated = path.join(root, "aliases", "external");
+      yield* fs.makeDirectory(unrelated, { recursive: true });
+      yield* fs.makeDirectory(external);
+      yield* fs.makeDirectory(path.join(repo, "src"), { recursive: true });
+      yield* fs.makeDirectory(ordinary);
+      if (symlinksSupported) {
+        yield* fs.makeDirectory(path.dirname(ownerAlias), { recursive: true });
+        yield* fs.symlink(space, ownerAlias);
+        yield* fs.symlink(repo, alias);
+        yield* fs.symlink(external, externalAlias);
+      }
+      if (!ownerMetadata) {
+        yield* fs.writeFileString(
+          path.join(space, ".stave.yaml"),
+          "version: 2\nid: space\nrepos:\n  - name: repo\n    path: repo\n    mode: edit\n  - name: external\n    path: ../external\n    mode: edit\nmemories: []\n",
         );
-        assert.deepStrictEqual(checked, [ordinary, unrelated]);
-        assert.deepStrictEqual(pulled, [ordinary, unrelated]);
-      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-}
+      }
+      const project = (workspaceRoot: string): OrchestrationProjectShell => ({
+        id: ProjectId.make(workspaceRoot),
+        title: workspaceRoot,
+        workspaceRoot,
+        defaultModelSelection: null,
+        scripts: [],
+        autoPull: false,
+        stave: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      const checked: string[] = [];
+      const pulled: string[] = [];
+      yield* ServerRuntimeStartup.autoPullProjects(
+        [
+          project(repo),
+          project(path.join(repo, "src")),
+          ...(ownerMetadata === null ? [] : [project(external)]),
+          ...(symlinksSupported
+            ? [
+                project(alias),
+                project(path.join(alias, "missing")),
+                ...(ownerMetadata === null ? [] : [project(externalAlias)]),
+              ]
+            : []),
+          ...(ownerMetadata === null
+            ? []
+            : [
+                {
+                  ...project(symlinksSupported ? ownerAlias : space),
+                  stave: ownerMetadata
+                    ? {
+                        spaceId: "space",
+                        isSaga: false,
+                        repos: [
+                          { name: "external", path: "../external", mode: "edit" },
+                          { name: "repo", path: "repo", mode: "edit" },
+                        ],
+                        memories: [],
+                        primaryRepoPath: symlinksSupported ? unrelated : external,
+                      }
+                    : null,
+                } satisfies OrchestrationProjectShell,
+              ]),
+          project(ordinary),
+          project(unrelated),
+        ],
+        { ...DEFAULT_SERVER_SETTINGS, defaultAutoPull: true },
+      ).pipe(
+        Effect.provide(
+          Layer.mock(GitVcsDriver.GitVcsDriver)({
+            statusDetails: (cwd) =>
+              Effect.sync(() => {
+                checked.push(cwd);
+                return {
+                  isRepo: true,
+                  hasOriginRemote: true,
+                  isDefaultBranch: true,
+                  branch: "main",
+                  upstreamRef: "origin/main",
+                  hasUpstream: true,
+                  hasWorkingTreeChanges: false,
+                  workingTree: { files: [], insertions: 0, deletions: 0 },
+                  aheadCount: 0,
+                  behindCount: 1,
+                  aheadOfDefaultCount: 0,
+                };
+              }),
+            pullCurrentBranch: (cwd) =>
+              Effect.sync(() => {
+                pulled.push(cwd);
+                return { status: "pulled" as const, refName: "main", upstreamRef: "origin/main" };
+              }),
+          }),
+        ),
+      );
+      assert.deepStrictEqual(checked, [ordinary, unrelated]);
+      assert.deepStrictEqual(pulled, [ordinary, unrelated]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
 
 it.effect("starts the Lecturn background roots that are wired, in dependency order", () =>
   Effect.gen(function* () {

@@ -93,8 +93,9 @@ it.layer(SqlitePersistenceMemory)("Decision Contextual lineage", (it) => {
       }),
   );
 
-  for (const change of ["thread", "project", "policy", "purge"] as const) {
-    it.effect(`rejects a writer result after ${change} scope changes`, () =>
+  it.effect.each(["thread", "project", "policy", "purge"] as const)(
+    "rejects a writer result after %s scope changes",
+    (change) =>
       Effect.gen(function* () {
         const sql = yield* fixture;
         const snapshot = yield* readContextualOrigins(sql, threadId, "job");
@@ -117,6 +118,5 @@ it.layer(SqlitePersistenceMemory)("Decision Contextual lineage", (it) => {
             assert.equal(result.failure.code, "stale-source");
         }
       }),
-    );
-  }
+  );
 });

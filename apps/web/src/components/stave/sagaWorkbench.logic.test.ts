@@ -173,9 +173,17 @@ describe("saga agent activity", () => {
     expect(
       sagaThreadActivity({
         ...idle,
-        pendingBackgroundTasks: [{ kind: "command", taskId: "task-1" }],
+        pendingBackgroundTasks: [{ kind: "background_task", taskId: "task-1" }],
       }),
     ).toEqual({ kind: "running", label: "Background tasks" });
+  });
+  it("does not count a command left running, like a dev server, as agent activity", () => {
+    expect(
+      sagaThreadActivity({
+        ...idle,
+        pendingBackgroundTasks: [{ kind: "command", taskId: "task-1" }],
+      }).kind,
+    ).toBe("idle");
   });
 });
 

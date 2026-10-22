@@ -132,8 +132,9 @@ it.layer(SqlitePersistenceMemory)("Contextual settings", (it) => {
 });
 
 it.layer(SqlitePersistenceMemory)("Contextual removed project sources", (it) => {
-  for (const operation of ["disable", "change-sources"] as const) {
-    it.effect(`normalizes a removed selection when the client requests ${operation}`, () =>
+  it.effect.each(["disable", "change-sources"] as const)(
+    "normalizes a removed selection when the client requests %s",
+    (operation) =>
       Effect.gen(function* () {
         const { sql, repo } = yield* fixture;
         const removed = "slack:removed";
@@ -190,13 +191,13 @@ it.layer(SqlitePersistenceMemory)("Contextual removed project sources", (it) => 
         assert.isTrue(Result.isFailure(widened));
         assert.deepEqual(yield* repo.thread(threadId), next);
       }),
-    );
-  }
+  );
 });
 
 it.layer(SqlitePersistenceMemory)("Contextual removed host sources", (it) => {
-  for (const client of ["web", "mobile"] as const) {
-    it.effect(`keeps ${client} project controls usable after host source removal`, () =>
+  it.effect.each(["web", "mobile"] as const)(
+    "keeps %s project controls usable after host source removal",
+    (client) =>
       Effect.gen(function* () {
         const { sql, repo } = yield* fixture;
         const removed =
@@ -255,6 +256,5 @@ it.layer(SqlitePersistenceMemory)("Contextual removed host sources", (it) => {
         assert.isTrue(Result.isFailure(restoredWithoutPermission));
         assert.deepEqual(yield* repo.project(projectId), next);
       }),
-    );
-  }
+  );
 });

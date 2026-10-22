@@ -397,16 +397,16 @@ test("Saga workbench fresh acceptance evidence", (it) => {
     }).pipe(Effect.scoped),
   );
 
-  for (const options of [{ offline: true }, { truncated: true }]) {
-    it.effect(`incomplete discovery never exempts a clean repo: ${JSON.stringify(options)}`, () =>
+  it.effect.each([{ offline: true }, { truncated: true }])(
+    "incomplete discovery never exempts a clean repo: %j",
+    (options) =>
       Effect.gen(function* () {
         const f = yield* fixture(options);
         const result = yield* f.service.read({ identity: f.identity });
         expect(result.complete).toBe(false);
         expect(result.requirements[0]?.kind).toBe("unknown");
       }).pipe(Effect.scoped),
-    );
-  }
+  );
 
   it.effect(
     "display may tolerate PR base advance while publication and no-change proof remain strict",

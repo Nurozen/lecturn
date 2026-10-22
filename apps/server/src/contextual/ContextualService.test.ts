@@ -1142,52 +1142,50 @@ it.layer(SqlitePersistenceMemory)("Contextual crash recovery", (it) => {
 });
 
 it.layer(SqlitePersistenceMemory)("Contextual stale conflict choices", (it) => {
-  for (const escape of ["skip-context", "cancel-turn"] as const) {
-    it.effect(
-      `rejects a choice when only the discarded occurrence changed and still permits ${escape}`,
-      () =>
-        Effect.gen(function* () {
-          const f = yield* fixture();
-          f.setCandidates([savedCandidate("a"), savedCandidate("b", 1, "Use Postgres")]);
-          f.setConflict();
-          const prepared = yield* f.service.prepare(yield* f.task(), "{}");
-          assert.equal(prepared.state, "awaiting-conflict-review");
-          const conflict = (yield* f.service.conflicts({ threadId, preparationId: prepared.id }))
-            .items[0]!;
-          const packet = yield* f.repository.packet(prepared.packetId!, threadId);
-          assert.equal(packet?.groups[0]?.occurrenceId, conflict.pair.left.occurrenceId);
-          f.invalidateOccurrence(conflict.pair.right.occurrenceId);
-          const request: C.ContextualConflictResolution = {
-            actionId: "stale-choice",
-            conflictId: conflict.id,
-            expectedRevision: conflict.revision,
-            leftRevision: conflict.pair.left.revision,
-            rightRevision: conflict.pair.right.revision,
-            threadId,
-            taskFingerprint: conflict.taskFingerprint,
-            action: "use-left",
-            clarification: null,
-          };
-          const result = yield* f.service.resolveConflict(request).pipe(Effect.result);
-          assert.isTrue(Result.isFailure(result));
-          if (Result.isFailure(result)) assert.equal(result.failure.code, "stale-revision");
-          assert.equal((yield* f.repository.get(prepared.id)).state, "awaiting-conflict-review");
-          assert.equal(
-            (yield* f.service.conflicts({ threadId, preparationId: prepared.id })).items[0]?.state,
-            "awaiting-review",
-          );
-          yield* f.service.resolveConflict({
-            ...request,
-            actionId: `recover-${escape}`,
-            action: escape,
-          });
-          assert.equal(
-            (yield* f.repository.get(prepared.id)).state,
-            escape === "skip-context" ? "skipped" : "canceled",
-          );
-        }),
-    );
-  }
+  it.effect.each(["skip-context", "cancel-turn"] as const)(
+    "rejects a choice when only the discarded occurrence changed and still permits %s",
+    (escape) =>
+      Effect.gen(function* () {
+        const f = yield* fixture();
+        f.setCandidates([savedCandidate("a"), savedCandidate("b", 1, "Use Postgres")]);
+        f.setConflict();
+        const prepared = yield* f.service.prepare(yield* f.task(), "{}");
+        assert.equal(prepared.state, "awaiting-conflict-review");
+        const conflict = (yield* f.service.conflicts({ threadId, preparationId: prepared.id }))
+          .items[0]!;
+        const packet = yield* f.repository.packet(prepared.packetId!, threadId);
+        assert.equal(packet?.groups[0]?.occurrenceId, conflict.pair.left.occurrenceId);
+        f.invalidateOccurrence(conflict.pair.right.occurrenceId);
+        const request: C.ContextualConflictResolution = {
+          actionId: "stale-choice",
+          conflictId: conflict.id,
+          expectedRevision: conflict.revision,
+          leftRevision: conflict.pair.left.revision,
+          rightRevision: conflict.pair.right.revision,
+          threadId,
+          taskFingerprint: conflict.taskFingerprint,
+          action: "use-left",
+          clarification: null,
+        };
+        const result = yield* f.service.resolveConflict(request).pipe(Effect.result);
+        assert.isTrue(Result.isFailure(result));
+        if (Result.isFailure(result)) assert.equal(result.failure.code, "stale-revision");
+        assert.equal((yield* f.repository.get(prepared.id)).state, "awaiting-conflict-review");
+        assert.equal(
+          (yield* f.service.conflicts({ threadId, preparationId: prepared.id })).items[0]?.state,
+          "awaiting-review",
+        );
+        yield* f.service.resolveConflict({
+          ...request,
+          actionId: `recover-${escape}`,
+          action: escape,
+        });
+        assert.equal(
+          (yield* f.repository.get(prepared.id)).state,
+          escape === "skip-context" ? "skipped" : "canceled",
+        );
+      }),
+  );
 });
 
 it.layer(SqlitePersistenceMemory)("Contextual incremental corrections", (it) => {
@@ -1623,80 +1621,80 @@ it.layer(SqlitePersistenceMemory)("Contextual visible preparation wait", (it) =>
 });
 
 it.layer(SqlitePersistenceMemory)("Contextual native generation boundary", (it) => {
-  for (const scenario of [
-    {
-      name: "admits sufficient partial-cache evidence",
-      gap: false,
-      truncated: false,
-      score: 1,
-      calls: 1,
-      state: "prepared",
-    },
-    {
-      name: "omits semantically insufficient partial-cache evidence",
-      gap: false,
-      truncated: false,
-      score: 0.2,
-      calls: 1,
-      state: "no-useful-context",
-    },
-    {
-      name: "rejects missing antecedents before evaluation",
-      gap: true,
-      truncated: false,
-      score: 1,
-      calls: 0,
-      state: "no-useful-context",
-    },
-    {
-      name: "rejects truncated exchanges before evaluation",
-      gap: false,
-      truncated: true,
-      score: 1,
-      calls: 0,
-      state: "no-useful-context",
-    },
-  ]) {
-    it.effect(scenario.name, () =>
-      Effect.gen(function* () {
-        const f = yield* fixture();
-        f.setCandidates([]);
-        f.setNativeGenerations();
-        f.setSufficientContext(scenario.score);
-        const partial = {
-          ...candidate(),
-          coverage: {
-            complete: false,
-            missingAntecedents: scenario.gap,
-            truncated: scenario.truncated,
-            unexaminedCount: 0,
-          },
-        };
-        f.setHelperCandidates([partial]);
-        yield* f.sql`UPDATE contextual_host_state SET source_policy_json=${encode({ ...emptyPolicy, allowedSourceIds: [sourceId] })} WHERE singleton=1`;
-        yield* f.settings.updateProject({
-          projectId,
-          expectedRevision: 1,
-          defaultEnabled: true,
-          sourceIds: [sourceId],
-        });
-        yield* f.settings.updateThread({
-          threadId,
-          expectedRevision: 1,
-          enabled: true,
-          sourceIds: [sourceId],
-        });
-        const preparation = yield* f.service.prepare(yield* f.task(), "{}");
-        assert.equal(preparation.state, scenario.state);
-        assert.isFalse(preparation.coverage.complete);
-        assert.equal(f.calls().evaluateCalls, scenario.calls);
-        if (preparation.packetId) {
-          const packet = yield* f.repository.packet(preparation.packetId, threadId);
-          assert.deepEqual(packet?.groups[0]?.evidence, partial.evidence);
-        }
-      }),
-    );
-  }
+  it.effect.each(
+    [
+      {
+        name: "admits sufficient partial-cache evidence",
+        gap: false,
+        truncated: false,
+        score: 1,
+        calls: 1,
+        state: "prepared",
+      },
+      {
+        name: "omits semantically insufficient partial-cache evidence",
+        gap: false,
+        truncated: false,
+        score: 0.2,
+        calls: 1,
+        state: "no-useful-context",
+      },
+      {
+        name: "rejects missing antecedents before evaluation",
+        gap: true,
+        truncated: false,
+        score: 1,
+        calls: 0,
+        state: "no-useful-context",
+      },
+      {
+        name: "rejects truncated exchanges before evaluation",
+        gap: false,
+        truncated: true,
+        score: 1,
+        calls: 0,
+        state: "no-useful-context",
+      },
+    ].map((scenario) => [scenario.name, scenario] as const),
+  )("%s", ([, scenario]) =>
+    Effect.gen(function* () {
+      const f = yield* fixture();
+      f.setCandidates([]);
+      f.setNativeGenerations();
+      f.setSufficientContext(scenario.score);
+      const partial = {
+        ...candidate(),
+        coverage: {
+          complete: false,
+          missingAntecedents: scenario.gap,
+          truncated: scenario.truncated,
+          unexaminedCount: 0,
+        },
+      };
+      f.setHelperCandidates([partial]);
+      yield* f.sql`UPDATE contextual_host_state SET source_policy_json=${encode({ ...emptyPolicy, allowedSourceIds: [sourceId] })} WHERE singleton=1`;
+      yield* f.settings.updateProject({
+        projectId,
+        expectedRevision: 1,
+        defaultEnabled: true,
+        sourceIds: [sourceId],
+      });
+      yield* f.settings.updateThread({
+        threadId,
+        expectedRevision: 1,
+        enabled: true,
+        sourceIds: [sourceId],
+      });
+      const preparation = yield* f.service.prepare(yield* f.task(), "{}");
+      assert.equal(preparation.state, scenario.state);
+      assert.isFalse(preparation.coverage.complete);
+      assert.equal(f.calls().evaluateCalls, scenario.calls);
+      if (preparation.packetId) {
+        const packet = yield* f.repository.packet(preparation.packetId, threadId);
+        assert.deepEqual(packet?.groups[0]?.evidence, partial.evidence);
+      }
+    }),
+  );
   it.effect(
     "uses helper generations for retrieval and inspection while retaining host task fences",
     () =>
@@ -1906,117 +1904,112 @@ it.layer(SqlitePersistenceMemory)("Contextual actual native helper admission", (
 });
 
 it.layer(SqlitePersistenceMemory)("Contextual remaining pool", (it) => {
-  for (const acceptance of ["accepted", "unknown"] as const) {
-    it.effect(
-      `reassesses unsupplied evidence after known context changes with ${acceptance} supply`,
-      () =>
-        Effect.gen(function* () {
-          const f = yield* fixture();
-          f.setCandidates([savedCandidate("a"), savedCandidate("b", 1, "Enable backups")]);
-          const task = (submission: string, recentContext: string) =>
-            f.service.taskSnapshot({
-              threadId,
-              submissionId: submission,
-              messageId: C.MessageId.make(submission),
-              providerInstanceId: "provider",
-              newestMessage: "Implement database storage",
-              recentContext,
-            });
-          const deliver = Effect.fn("test.deliverRemainingPool")(function* (
-            p: C.ContextualPreparation,
-          ) {
-            const packet = yield* f.repository.packet(p.packetId!, threadId);
-            yield* f.repository.update(
-              { ...p, state: "dispatching", dispatchId: p.id, revision: p.revision + 1 },
-              p.revision,
-            );
-            yield* f.repository.receipt({
-              id: `receipt:${p.id}`,
-              preparationId: p.id,
-              packetId: p.packetId,
-              dispatchId: p.id,
-              threadId,
-              submissionId: p.task.submissionId,
-              turnId: acceptance === "accepted" ? C.TurnId.make(`turn:${p.id}`) : null,
-              providerInstanceId: p.task.providerInstanceId,
-              providerContextEpoch: p.task.providerContextEpoch,
-              providerReceiptId: acceptance === "accepted" ? `provider:${p.id}` : null,
-              disposition: "fresh",
-              acceptance,
-              evidenceIncluded: true,
-              suppliedEvidenceIds:
-                acceptance === "accepted"
-                  ? packet!.groups.flatMap((g) => g.evidence.map((e) => e.id))
-                  : [],
-              receivedAt: at,
-            });
+  it.effect.each(["accepted", "unknown"] as const)(
+    "reassesses unsupplied evidence after known context changes with %s supply",
+    (acceptance) =>
+      Effect.gen(function* () {
+        const f = yield* fixture();
+        f.setCandidates([savedCandidate("a"), savedCandidate("b", 1, "Enable backups")]);
+        const task = (submission: string, recentContext: string) =>
+          f.service.taskSnapshot({
+            threadId,
+            submissionId: submission,
+            messageId: C.MessageId.make(submission),
+            providerInstanceId: "provider",
+            newestMessage: "Implement database storage",
+            recentContext,
           });
-          const originalTask = yield* task("first", "Build the initial database");
-          const first = yield* f.service.prepare(originalTask, "{}");
-          assert.equal(first.state, "prepared");
-          assert.deepEqual(
-            (yield* f.repository.packet(first.packetId!, threadId))?.groups.map(
-              (g) => g.occurrenceId,
-            ),
-            ["a"],
+        const deliver = Effect.fn("test.deliverRemainingPool")(function* (
+          p: C.ContextualPreparation,
+        ) {
+          const packet = yield* f.repository.packet(p.packetId!, threadId);
+          yield* f.repository.update(
+            { ...p, state: "dispatching", dispatchId: p.id, revision: p.revision + 1 },
+            p.revision,
           );
-          yield* deliver(first);
-          const calls = f.calls().evaluateCalls;
-          const thanks = yield* f.service.prepare(yield* f.task("thanks", "thanks"), "{}");
-          assert.equal(thanks.state, "no-useful-context");
-          assert.equal(f.calls().evaluateCalls, calls);
+          yield* f.repository.receipt({
+            id: `receipt:${p.id}`,
+            preparationId: p.id,
+            packetId: p.packetId,
+            dispatchId: p.id,
+            threadId,
+            submissionId: p.task.submissionId,
+            turnId: acceptance === "accepted" ? C.TurnId.make(`turn:${p.id}`) : null,
+            providerInstanceId: p.task.providerInstanceId,
+            providerContextEpoch: p.task.providerContextEpoch,
+            providerReceiptId: acceptance === "accepted" ? `provider:${p.id}` : null,
+            disposition: "fresh",
+            acceptance,
+            evidenceIncluded: true,
+            suppliedEvidenceIds:
+              acceptance === "accepted"
+                ? packet!.groups.flatMap((g) => g.evidence.map((e) => e.id))
+                : [],
+            receivedAt: at,
+          });
+        });
+        const originalTask = yield* task("first", "Build the initial database");
+        const first = yield* f.service.prepare(originalTask, "{}");
+        assert.equal(first.state, "prepared");
+        assert.deepEqual(
+          (yield* f.repository.packet(first.packetId!, threadId))?.groups.map(
+            (g) => g.occurrenceId,
+          ),
+          ["a"],
+        );
+        yield* deliver(first);
+        const calls = f.calls().evaluateCalls;
+        const thanks = yield* f.service.prepare(yield* f.task("thanks", "thanks"), "{}");
+        assert.equal(thanks.state, "no-useful-context");
+        assert.equal(f.calls().evaluateCalls, calls);
 
-          // Changed context permits reconsideration, not automatic delivery of old material.
-          f.setUseful(0);
-          const irrelevantTask = yield* task(
-            "irrelevant",
-            "Only update the database status display",
-          );
-          assert.equal(irrelevantTask.taskFingerprint, originalTask.taskFingerprint);
-          assert.notEqual(
-            irrelevantTask.knownContextFingerprint,
-            originalTask.knownContextFingerprint,
-          );
-          const irrelevant = yield* f.service.prepare(irrelevantTask, "{}");
-          assert.equal(irrelevant.state, "no-useful-context");
-          assert.equal(f.calls().evaluateCalls, calls + 1);
-          const repeated = yield* f.service.prepare(
-            yield* task("repeat", irrelevantTask.recentContext),
-            "{}",
-          );
-          assert.equal(repeated.state, "no-useful-context");
-          assert.equal(f.calls().evaluateCalls, calls + 1);
+        // Changed context permits reconsideration, not automatic delivery of old material.
+        f.setUseful(0);
+        const irrelevantTask = yield* task("irrelevant", "Only update the database status display");
+        assert.equal(irrelevantTask.taskFingerprint, originalTask.taskFingerprint);
+        assert.notEqual(
+          irrelevantTask.knownContextFingerprint,
+          originalTask.knownContextFingerprint,
+        );
+        const irrelevant = yield* f.service.prepare(irrelevantTask, "{}");
+        assert.equal(irrelevant.state, "no-useful-context");
+        assert.equal(f.calls().evaluateCalls, calls + 1);
+        const repeated = yield* f.service.prepare(
+          yield* task("repeat", irrelevantTask.recentContext),
+          "{}",
+        );
+        assert.equal(repeated.state, "no-useful-context");
+        assert.equal(f.calls().evaluateCalls, calls + 1);
 
-          f.setUseful(1);
-          const relevant = yield* f.service.prepare(
-            yield* task("relevant", "Prepare database recovery and backup handling"),
-            "{}",
-          );
-          assert.equal(relevant.state, "prepared");
-          assert.equal(f.calls().evaluateCalls, calls + 2);
-          assert.deepEqual(
-            (yield* f.repository.packet(relevant.packetId!, threadId))?.groups.map(
-              (g) => g.occurrenceId,
-            ),
-            ["b"],
-          );
-          yield* deliver(relevant);
-          const exhausted = yield* f.service.prepare(
-            yield* task("exhausted", "Finish the database recovery work"),
-            "{}",
-          );
-          assert.equal(exhausted.state, "no-useful-context");
-          assert.equal(f.calls().evaluateCalls, calls + 2);
-          const supply = yield* f.sql<{
-            guidance_id: string;
-          }>`SELECT guidance_id FROM contextual_supply WHERE thread_id=${threadId} ORDER BY guidance_id`;
-          assert.deepEqual(
-            supply.map((row) => row.guidance_id),
-            ["a", "b"],
-          );
-        }),
-    );
-  }
+        f.setUseful(1);
+        const relevant = yield* f.service.prepare(
+          yield* task("relevant", "Prepare database recovery and backup handling"),
+          "{}",
+        );
+        assert.equal(relevant.state, "prepared");
+        assert.equal(f.calls().evaluateCalls, calls + 2);
+        assert.deepEqual(
+          (yield* f.repository.packet(relevant.packetId!, threadId))?.groups.map(
+            (g) => g.occurrenceId,
+          ),
+          ["b"],
+        );
+        yield* deliver(relevant);
+        const exhausted = yield* f.service.prepare(
+          yield* task("exhausted", "Finish the database recovery work"),
+          "{}",
+        );
+        assert.equal(exhausted.state, "no-useful-context");
+        assert.equal(f.calls().evaluateCalls, calls + 2);
+        const supply = yield* f.sql<{
+          guidance_id: string;
+        }>`SELECT guidance_id FROM contextual_supply WHERE thread_id=${threadId} ORDER BY guidance_id`;
+        assert.deepEqual(
+          supply.map((row) => row.guidance_id),
+          ["a", "b"],
+        );
+      }),
+  );
 });
 
 it.layer(SqlitePersistenceMemory)("Contextual remote invalidation", (it) => {
@@ -2128,8 +2121,9 @@ it.layer(SqlitePersistenceMemory)("Contextual exhausted allowance", (it) => {
 });
 
 it.layer(SqlitePersistenceMemory)("Contextual prior guidance comparisons and restoration", (it) => {
-  for (const mode of ["conflict", "excluded", "source-removed", "stale"] as const)
-    it.effect(`checks prior Decision against independent Slack with ${mode} source state`, () =>
+  it.effect.each(["conflict", "excluded", "source-removed", "stale"] as const)(
+    "checks prior Decision against independent Slack with %s source state",
+    (mode) =>
       Effect.gen(function* () {
         const f = yield* fixture();
         const prior = savedCandidate("prior");
@@ -2215,7 +2209,7 @@ it.layer(SqlitePersistenceMemory)("Contextual prior guidance comparisons and res
           );
         } else assert.isFalse(comparisons.some((pair) => pair.right.candidateId === prior.id));
       }),
-    );
+  );
 
   it.effect(
     "restores each item once per confirmed epoch after acknowledgments and no-match turns",

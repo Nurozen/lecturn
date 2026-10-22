@@ -1,4 +1,8 @@
-import { EnvironmentRegistry } from "@lecturn/client-runtime/connection";
+import {
+  connectionRoutes,
+  EnvironmentRegistry,
+  removedWithRelay,
+} from "@lecturn/client-runtime/connection";
 import { createRuntimeCommand } from "@lecturn/client-runtime/state/runtime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -29,9 +33,15 @@ export const removeCloudEnvironments = createRuntimeCommand(connectionAtomRuntim
     const entries = yield* SubscriptionRef.get(registry.entries);
     const environmentIds = new Set(
       [...entries.values()]
+        // Only this account's environments that sign-out removes entirely
+        // (no LAN, tailnet, or other direct route left) lose their drafts.
         .filter(
           (entry) =>
-            entry.target._tag === "RelayConnectionTarget" && entry.target.accountId === accountId,
+            connectionRoutes(entry).some(
+              (route) =>
+                route.target._tag === "RelayConnectionTarget" &&
+                route.target.accountId === accountId,
+            ) && removedWithRelay(entry),
         )
         .map((entry) => entry.target.environmentId),
     );

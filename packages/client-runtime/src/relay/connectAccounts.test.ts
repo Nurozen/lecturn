@@ -1,4 +1,10 @@
+import { EnvironmentId } from "@lecturn/contracts";
+import * as Option from "effect/Option";
 import { describe, expect, it } from "vite-plus/test";
+
+import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
+import { RelayConnectionTarget } from "../connection/model.ts";
+import { accountOwnerTarget, entryWithRoutes, mergeLearnedRoutes } from "../connection/routes.ts";
 
 import {
   MAX_CONNECT_ACCOUNTS,
@@ -88,6 +94,54 @@ describe("relayAccountByEnvironmentId", () => {
       ["env-a", "account-a"],
       ["env-b", "account-b"],
     ]);
+  });
+});
+
+describe("account ownership with several routes", () => {
+  // A relay environment whose server reported a LAN address, learned ahead of Lecturn Connect.
+  const relayWithLearnedLan = (environmentId: string, accountId?: string) => {
+    const target = new RelayConnectionTarget({
+      environmentId: EnvironmentId.make(environmentId),
+      label: environmentId,
+      ...(accountId === undefined ? {} : { accountId }),
+    });
+    const entry: ConnectionCatalogEntry = { target, profile: Option.none(), enabled: true };
+    const routes = mergeLearnedRoutes({
+      entry,
+      activeRoute: { target, profile: Option.none() },
+      reported: [{ httpBaseUrl: "http://192.168.1.10:3773/" }],
+      allowInsecure: true,
+    })!;
+    const learned = entryWithRoutes(entry, routes);
+    expect(learned.target._tag).toBe("BearerConnectionTarget");
+    return learned;
+  };
+  const relayOnly = (environmentId: string, accountId: string): ConnectionCatalogEntry => ({
+    target: new RelayConnectionTarget({
+      environmentId: EnvironmentId.make(environmentId),
+      label: environmentId,
+      accountId,
+    }),
+    profile: Option.none(),
+    enabled: true,
+  });
+
+  it("keeps each environment's account when Lecturn Connect is not the preferred route", () => {
+    const entries = [relayOnly("env-a", "account-a"), relayWithLearnedLan("env-b", "account-b")];
+    expect([...relayAccountByEnvironmentId(entries.map(accountOwnerTarget))]).toEqual([
+      ["env-a", "account-a"],
+      ["env-b", "account-b"],
+    ]);
+  });
+
+  it("still blocks a second account on an untagged Lecturn Connect route behind LAN", () => {
+    expect(
+      decide({
+        targets: [relayOnly("env-a", "account-a"), relayWithLearnedLan("env-b")].map(
+          accountOwnerTarget,
+        ),
+      }),
+    ).toEqual(blocked("unowned-environments"));
   });
 });
 

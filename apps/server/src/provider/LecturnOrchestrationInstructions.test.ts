@@ -13,6 +13,11 @@ describe("Lecturn orchestration provider instructions", () => {
     assert.include(LECTURN_ORCHESTRATION_INSTRUCTIONS, "ordinary top-level Lecturn conversations");
     assert.include(LECTURN_ORCHESTRATION_INSTRUCTIONS, "Never use them merely");
     assert.include(LECTURN_ORCHESTRATION_INSTRUCTIONS, "cross-provider");
+    assert.include(LECTURN_ORCHESTRATION_INSTRUCTIONS, "call `delegate_task` again");
+    assert.include(
+      LECTURN_ORCHESTRATION_INSTRUCTIONS,
+      "Do not use `lecturn_thread_send` on `childThreadId`",
+    );
   });
 
   it("documents structured schedules instead of JSON strings", () => {

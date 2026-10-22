@@ -253,23 +253,21 @@ function withFakeCodexEnv<A, E, R>(
 }
 
 it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
-  for (const [version, supported] of [
-    ["0.156.1", true],
-    ["0.157.0", false],
-  ] as const) {
-    it.effect(`isolated writer capability for Codex ${version}`, () =>
-      withFakeCodexEnv({ output: "must not be parsed", codexVersion: version }, (service) =>
-        Effect.gen(function* () {
-          const result = yield* service.checkDecisionWriter!({
-            cwd: process.cwd(),
-            modelSelection: decisionWriterInputFixture.modelSelection,
-          });
-          expect(result.supported).toBe(supported);
-          if (!supported) expect(result.reason).toContain("requires verification");
-        }),
-      ),
-    );
-  }
+  it.effect.each([
+    { version: "0.156.1", supported: true },
+    { version: "0.157.0", supported: false },
+  ] as const)("isolated writer capability for Codex $version", ({ version, supported }) =>
+    withFakeCodexEnv({ output: "must not be parsed", codexVersion: version }, (service) =>
+      Effect.gen(function* () {
+        const result = yield* service.checkDecisionWriter!({
+          cwd: process.cwd(),
+          modelSelection: decisionWriterInputFixture.modelSelection,
+        });
+        expect(result.supported).toBe(supported);
+        if (!supported) expect(result.reason).toContain("requires verification");
+      }),
+    ),
+  );
   it.effect("preflights Decisions without generating text", () =>
     withFakeCodexEnv({ output: "must not be parsed" }, (service) =>
       Effect.gen(function* () {
@@ -318,123 +316,124 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
         }),
     ),
   );
-  for (const [label, output] of [
-    [
-      "too many notes",
-      {
+  it.effect.each([
+    {
+      label: "too many notes",
+      output: {
         ...decisionWriterOutputFixture,
         actions: Array.from({ length: 9 }, () => decisionWriterOutputFixture.actions[0]),
       },
-    ],
-    [
-      "inconsistent completion",
-      { ...decisionWriterOutputFixture, unresolvedCandidateIds: ["candidate-1"] },
-    ],
-    [
-      "unsolicited review authorization",
-      { ...decisionWriterOutputFixture, reviewState: "confirmed" },
-    ],
-  ]) {
-    it.effect(`rejects Decisions output with ${label}`, () =>
-      withFakeCodexEnv({ output: encodeTestJson(output) }, (service) =>
-        Effect.gen(function* () {
-          const failure = yield* service.generateDecisionNotes!({
-            ...decisionWriterInputFixture,
+    },
+    {
+      label: "inconsistent completion",
+      output: { ...decisionWriterOutputFixture, unresolvedCandidateIds: ["candidate-1"] },
+    },
+    {
+      label: "unsolicited review authorization",
+      output: { ...decisionWriterOutputFixture, reviewState: "confirmed" },
+    },
+  ])("rejects Decisions output with $label", ({ output }) =>
+    withFakeCodexEnv({ output: encodeTestJson(output) }, (service) =>
+      Effect.gen(function* () {
+        const failure = yield* service.generateDecisionNotes!({
+          ...decisionWriterInputFixture,
+          cwd: process.cwd(),
+        }).pipe(Effect.flip);
+        expect(failure.detail).toBe("Codex returned invalid structured output.");
+        expect(failure.cause).toBeUndefined();
+      }),
+    ),
+  );
+  it.effect.each([
+    { label: "malformed JSON", output: "not JSON" },
+    { label: "missing stage", output: JSON.stringify({ summary: "Working", confidence: 0.8 }) },
+    { label: "missing confidence", output: JSON.stringify({ summary: "Working", stage: "build" }) },
+    {
+      label: "invalid stage",
+      output: JSON.stringify({ summary: "Working", stage: "completed", confidence: 0.8 }),
+    },
+    {
+      label: "confidence above one",
+      output: JSON.stringify({ summary: "Working", stage: "build", confidence: 1.1 }),
+    },
+    {
+      label: "negative confidence",
+      output: JSON.stringify({ summary: "Working", stage: "build", confidence: -0.1 }),
+    },
+  ])("rejects workflow inference with $label", ({ output }) =>
+    withFakeCodexEnv({ output }, (textGeneration) =>
+      Effect.gen(function* () {
+        const failure = yield* textGeneration
+          .generateWorkflowSummary({
             cwd: process.cwd(),
-          }).pipe(Effect.flip);
-          expect(failure.detail).toBe("Codex returned invalid structured output.");
-          expect(failure.cause).toBeUndefined();
-        }),
-      ),
-    );
-  }
-  for (const [label, output] of [
-    ["malformed JSON", "not JSON"],
-    ["missing stage", JSON.stringify({ summary: "Working", confidence: 0.8 })],
-    ["missing confidence", JSON.stringify({ summary: "Working", stage: "build" })],
-    ["invalid stage", JSON.stringify({ summary: "Working", stage: "completed", confidence: 0.8 })],
-    [
-      "confidence above one",
-      JSON.stringify({ summary: "Working", stage: "build", confidence: 1.1 }),
-    ],
-    [
-      "negative confidence",
-      JSON.stringify({ summary: "Working", stage: "build", confidence: -0.1 }),
-    ],
-  ]) {
-    it.effect(`rejects workflow inference with ${label}`, () =>
-      withFakeCodexEnv({ output: output! }, (textGeneration) =>
-        Effect.gen(function* () {
-          const failure = yield* textGeneration
-            .generateWorkflowSummary({
-              cwd: process.cwd(),
-              message:
-                '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
-              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-            })
-            .pipe(Effect.flip);
-          expect(failure.operation).toBe("generateWorkflowSummary");
-        }),
-      ),
-    );
-  }
-  for (const [label, configSnapshot] of [
-    ["unreadable effective configuration", { unexpected: true }],
-    [
-      "managed config without file fingerprints",
-      { config: {}, layers: [{ name: { type: "mdm" } }] },
-    ],
-    ["unrepresentable MCP key", { config: { mcp_servers: { "nested.name": {} } }, layers: [] }],
-  ] as const) {
-    it.effect(`fails closed for ${label}`, () =>
-      withFakeCodexEnv({ output: "{}", configSnapshot }, (textGeneration) =>
-        Effect.gen(function* () {
-          const failure = yield* textGeneration
-            .generateWorkflowSummary({
-              cwd: process.cwd(),
-              message: '{"priorSummary":null,"turns":[{"question":"Work","response":"Done"}]}',
-              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-            })
-            .pipe(Effect.flip);
-          expect(failure.operation).toBe("generateWorkflowSummary");
-          expect(failure.detail).toMatch(/isolat/);
-          expect(failure.cause).toBeUndefined();
-        }),
-      ),
-    );
-  }
-  for (const [label, fixture] of [
-    ["provider stderr", { output: "", exitCode: 1, stderr: "PRIVATE_CONVERSATION_SENTINEL" }],
-    [
-      "invalid structured response",
-      {
+            message:
+              '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          })
+          .pipe(Effect.flip);
+        expect(failure.operation).toBe("generateWorkflowSummary");
+      }),
+    ),
+  );
+  it.effect.each([
+    { label: "unreadable effective configuration", configSnapshot: { unexpected: true } },
+    {
+      label: "managed config without file fingerprints",
+      configSnapshot: { config: {}, layers: [{ name: { type: "mdm" } }] },
+    },
+    {
+      label: "unrepresentable MCP key",
+      configSnapshot: { config: { mcp_servers: { "nested.name": {} } }, layers: [] },
+    },
+  ] as const)("fails closed for $label", ({ configSnapshot }) =>
+    withFakeCodexEnv({ output: "{}", configSnapshot }, (textGeneration) =>
+      Effect.gen(function* () {
+        const failure = yield* textGeneration
+          .generateWorkflowSummary({
+            cwd: process.cwd(),
+            message: '{"priorSummary":null,"turns":[{"question":"Work","response":"Done"}]}',
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          })
+          .pipe(Effect.flip);
+        expect(failure.operation).toBe("generateWorkflowSummary");
+        expect(failure.detail).toMatch(/isolat/);
+        expect(failure.cause).toBeUndefined();
+      }),
+    ),
+  );
+  it.effect.each([
+    {
+      label: "provider stderr",
+      fixture: { output: "", exitCode: 1, stderr: "PRIVATE_CONVERSATION_SENTINEL" },
+    },
+    {
+      label: "invalid structured response",
+      fixture: {
         output: JSON.stringify({
           summary: "PRIVATE_CONVERSATION_SENTINEL",
           stage: "build",
           confidence: 5,
         }),
       },
-    ],
-  ] as const) {
-    it.effect(`redacts ${label} before the auxiliary failure escapes`, () =>
-      withFakeCodexEnv(fixture, (textGeneration) =>
-        Effect.gen(function* () {
-          const failure = yield* textGeneration
-            .generateWorkflowSummary({
-              cwd: process.cwd(),
-              message: encodeTestJson({
-                priorSummary: null,
-                turns: [{ question: "PRIVATE_CONVERSATION_SENTINEL", response: "Working" }],
-              }),
-              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-            })
-            .pipe(Effect.flip);
-          expect(encodeTestJson(failure)).not.toContain("PRIVATE_CONVERSATION_SENTINEL");
-          expect(failure.cause).toBeUndefined();
-        }),
-      ),
-    );
-  }
+    },
+  ] as const)("redacts $label before the auxiliary failure escapes", ({ fixture }) =>
+    withFakeCodexEnv(fixture, (textGeneration) =>
+      Effect.gen(function* () {
+        const failure = yield* textGeneration
+          .generateWorkflowSummary({
+            cwd: process.cwd(),
+            message: encodeTestJson({
+              priorSummary: null,
+              turns: [{ question: "PRIVATE_CONVERSATION_SENTINEL", response: "Working" }],
+            }),
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          })
+          .pipe(Effect.flip);
+        expect(encodeTestJson(failure)).not.toContain("PRIVATE_CONVERSATION_SENTINEL");
+        expect(failure.cause).toBeUndefined();
+      }),
+    ),
+  );
   it.effect(
     "isolates workflow instructions while preserving the account profile and provider",
     () =>
@@ -488,8 +487,9 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
         }),
     ),
   );
-  for (const selectedModel of ["gpt-5.6-luna", "openai.gpt-5.6-luna"]) {
-    it.effect(`dispatches the qualified live model for ${selectedModel}`, () =>
+  it.effect.each(["gpt-5.6-luna", "openai.gpt-5.6-luna"])(
+    "dispatches the qualified live model for %s",
+    (selectedModel) =>
       withFakeCodexEnv(
         {
           output: JSON.stringify({ title: "Bedrock title" }),
@@ -507,8 +507,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             expect(result.title).toBe("Bedrock title");
           }),
       ),
-    );
-  }
+  );
   it.effect("generates and sanitizes commit messages without branch by default", () =>
     withFakeCodexEnv(
       {
@@ -729,7 +728,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
     ),
   );
 
-  for (const example of [
+  it.effect.each([
     {
       mode: "static",
       output: "Add Search",
@@ -748,30 +747,28 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
       expected: "Julius/ABC-123.v2",
       instruction: "Preserve the issue ID and capitalization.",
     },
-  ] as const) {
-    it.effect(`generates a branch using ${example.mode} naming`, () =>
-      withFakeCodexEnv(
-        {
-          output: JSON.stringify({ branch: example.output }),
-          stdinMustContain: example.instruction,
-        },
-        (textGeneration) =>
-          Effect.gen(function* () {
-            const generated = yield* textGeneration.generateBranchName({
-              cwd: process.cwd(),
-              message: "Add search",
-              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-              naming: {
-                mode: example.mode,
-                prefix: "team/",
-                instructions: "Preserve the issue ID and capitalization.",
-              },
-            });
-            expect(generated.branch).toBe(example.expected);
-          }),
-      ),
-    );
-  }
+  ] as const)("generates a branch using $mode naming", (example) =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ branch: example.output }),
+        stdinMustContain: example.instruction,
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateBranchName({
+            cwd: process.cwd(),
+            message: "Add search",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            naming: {
+              mode: example.mode,
+              prefix: "team/",
+              instructions: "Preserve the issue ID and capitalization.",
+            },
+          });
+          expect(generated.branch).toBe(example.expected);
+        }),
+    ),
+  );
 
   it.effect("generates branch names even when the ambient scope is already closed", () =>
     withFakeCodexEnv(

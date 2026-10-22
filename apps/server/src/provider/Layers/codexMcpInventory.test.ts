@@ -79,7 +79,7 @@ it.effect("lists with the session's exact binary, args, home, cwd and explicit e
   }),
 );
 
-for (const [name, result, reason] of [
+it.effect.each([
   [
     "unsupported CLI",
     { ...output("secret output"), code: ChildProcessSpawner.ExitCode(2) },
@@ -90,18 +90,16 @@ for (const [name, result, reason] of [
   ["invalid UTF8", { ...output("[]"), stdoutInvalidUtf8: true }, "output"],
   ["invalid JSON", output("secret output"), "invalid_response"],
   ["invalid inventory", output('[{"enabled":true}]'), "invalid_response"],
-] as const) {
-  it.effect(`fails closed for ${name} without exposing CLI output`, () =>
-    Effect.gen(function* () {
-      const error = yield* hasCanonicalMarmotServer(launch, {
-        run: () => Effect.succeed(result),
-      }).pipe(Effect.flip);
-      assert.equal(error.reason, reason);
-      assert.include(error.message, "mcp list --json");
-      assert.notInclude(encodeJson(error), "secret output");
-    }),
-  );
-}
+] as const)("fails closed for %s without exposing CLI output", ([, result, reason]) =>
+  Effect.gen(function* () {
+    const error = yield* hasCanonicalMarmotServer(launch, {
+      run: () => Effect.succeed(result),
+    }).pipe(Effect.flip);
+    assert.equal(error.reason, reason);
+    assert.include(error.message, "mcp list --json");
+    assert.notInclude(encodeJson(error), "secret output");
+  }),
+);
 
 it.effect("maps unreadable binary errors without retaining their cause", () =>
   Effect.gen(function* () {

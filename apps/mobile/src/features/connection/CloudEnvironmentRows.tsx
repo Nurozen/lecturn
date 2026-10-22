@@ -3,6 +3,7 @@ import { ConnectionTraceId } from "./ConnectionTraceId";
 import { SymbolView } from "../../components/AppSymbol";
 import {
   connectionStatusText,
+  relayRouteTarget,
   type EnvironmentConnectionPhase,
 } from "@lecturn/client-runtime/connection";
 import {
@@ -135,8 +136,8 @@ function CloudEnvironmentRowsContent(
           ).map((accountId) => {
             const account = accounts.find((entry) => entry.accountId === accountId);
             const owns = (environmentId: EnvironmentId) => {
-              const target = catalog.entries.get(environmentId)?.target;
-              return target?._tag === "RelayConnectionTarget" ? (target.accountId ?? null) : null;
+              const entry = catalog.entries.get(environmentId);
+              return entry === undefined ? null : (relayRouteTarget(entry)?.accountId ?? null);
             };
             const connected = props.connectedCloudEnvironments.filter(
               (entry) => owns(entry.environmentId) === accountId,

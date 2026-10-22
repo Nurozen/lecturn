@@ -97,16 +97,9 @@ describe("classifyModels", () => {
 });
 
 describe("discovered model classification across providers", () => {
-  for (const driver of [
-    "codex",
-    "claudeAgent",
-    "cursor",
-    "grok",
-    "githubCopilot",
-    "opencode",
-    "antigravity",
-  ]) {
-    it(`keeps ${driver} discoveries visible with an older manifest`, () => {
+  it.each(["codex", "claudeAgent", "cursor", "grok", "githubCopilot", "opencode", "antigravity"])(
+    "keeps %s discoveries visible with an older manifest",
+    (driver) => {
       const manifest: ModelManifestData = {
         version: 1,
         currentModels: { [driver]: ["previous-current"] },
@@ -116,8 +109,8 @@ describe("discovered model classification across providers", () => {
         classifyModels([discovered], manifest, ProviderDriverKind.make(driver)),
         [model({ slug: "new-release" })],
       );
-    });
-  }
+    },
+  );
 });
 
 describe("applyManifestDefault", () => {

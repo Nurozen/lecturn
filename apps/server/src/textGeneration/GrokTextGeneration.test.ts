@@ -77,7 +77,7 @@ function readJsonRpcRequests(
 }
 
 it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
-  for (const [label, output] of [
+  it.effect.each([
     ["malformed JSON", "not JSON"],
     ["missing stage", JSON.stringify({ summary: "Working", confidence: 0.8 })],
     ["missing confidence", JSON.stringify({ summary: "Working", stage: "build" })],
@@ -90,23 +90,21 @@ it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
       "negative confidence",
       JSON.stringify({ summary: "Working", stage: "build", confidence: -0.1 }),
     ],
-  ]) {
-    it.effect(`rejects workflow inference with ${label}`, () =>
-      withFakeAcpGrok({ LECTURN_ACP_PROMPT_RESPONSE_TEXT: output! }, (textGeneration) =>
-        Effect.gen(function* () {
-          const failure = yield* textGeneration
-            .generateWorkflowSummary({
-              cwd: process.cwd(),
-              message:
-                '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
-              modelSelection: { instanceId: ProviderInstanceId.make("grok"), model: "grok-build" },
-            })
-            .pipe(Effect.flip);
-          expect(failure.operation).toBe("generateWorkflowSummary");
-        }),
-      ),
-    );
-  }
+  ])("rejects workflow inference with %s", ([, output]) =>
+    withFakeAcpGrok({ LECTURN_ACP_PROMPT_RESPONSE_TEXT: output! }, (textGeneration) =>
+      Effect.gen(function* () {
+        const failure = yield* textGeneration
+          .generateWorkflowSummary({
+            cwd: process.cwd(),
+            message:
+              '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
+            modelSelection: { instanceId: ProviderInstanceId.make("grok"), model: "grok-build" },
+          })
+          .pipe(Effect.flip);
+        expect(failure.operation).toBe("generateWorkflowSummary");
+      }),
+    ),
+  );
   it.effect("discards inference when the harness emits tool activity", () =>
     withFakeAcpGrok(
       {

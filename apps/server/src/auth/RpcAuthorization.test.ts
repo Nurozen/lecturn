@@ -1,17 +1,24 @@
 import {
+  AuthEnvironmentScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthRelayReadScope,
   AuthRelayWriteScope,
+  RpcScopeAuthorization,
   WS_METHODS,
   WsRpcGroup,
 } from "@lecturn/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as RpcTest from "effect/unstable/rpc/RpcTest";
 
 import {
   RPC_REQUIRED_SCOPES,
   requiredScopeForRpcMethod,
   requiredScopeForDeviceList,
+  rpcAuthorizationError,
+  rpcScopeAuthorizationLayer,
 } from "./RpcAuthorization.ts";
 
 describe("RPC authorization scopes", () => {
@@ -190,4 +197,66 @@ it("requires operate permission for tool updates even alongside a read-only chec
     AuthOrchestrationOperateScope,
   );
   expect(requiredScopeForDeviceList({ updateTool: "hub" })).toBe(AuthOrchestrationOperateScope);
+});
+
+describe("RPC scope middleware", () => {
+  // Covers every RPC in the group, including Lecturn-only ones (Stave, saga
+  // workbench, Contextual, devices, decisions, notes, pull requests): each one
+  // carries the middleware, which admits its declared scope and no other.
+  it.effect("admits each RPC with only its declared scope", () =>
+    Effect.gen(function* () {
+      expect(WsRpcGroup.requests.size).toBe(Object.keys(RPC_REQUIRED_SCOPES).length);
+      for (const [tag, rpc] of WsRpcGroup.requests) {
+        expect(rpc.middlewares.has(RpcScopeAuthorization), tag).toBe(true);
+        const required = requiredScopeForRpcMethod(tag);
+        for (const scope of AuthEnvironmentScope.literals) {
+          const middleware = yield* Effect.service(RpcScopeAuthorization).pipe(
+            Effect.provide(rpcScopeAuthorizationLayer([scope])),
+          );
+          type MiddlewareArgs = Parameters<typeof middleware>;
+          const handler = Effect.succeed("handled") as unknown as MiddlewareArgs[0];
+          const outcome = yield* middleware(handler, { rpc } as unknown as MiddlewareArgs[1]).pipe(
+            Effect.catch((error) => Effect.succeed(error)),
+          );
+          expect(outcome, `${tag} with ${scope}`).toEqual(
+            scope === required ? "handled" : rpcAuthorizationError(required),
+          );
+        }
+      }
+    }),
+  );
+
+  const tested = [WS_METHODS.serverProbe, WS_METHODS.serverRetryResourceTelemetry] as const;
+  const group = WsRpcGroup.omit(
+    ...[...WsRpcGroup.requests.keys()].filter(
+      (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, (typeof tested)[number]> =>
+        !(tested as ReadonlyArray<string>).includes(tag),
+    ),
+  );
+
+  it.effect("checks each RPC's declared scope before its handler runs", () =>
+    Effect.gen(function* () {
+      const handled: Array<string> = [];
+      const client = yield* RpcTest.makeClient(group).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            group.toLayerHandler(WS_METHODS.serverProbe, () => Effect.succeed({})),
+            group.toLayerHandler(WS_METHODS.serverRetryResourceTelemetry, () =>
+              Effect.sync(() => handled.push("retry")).pipe(Effect.andThen(Effect.never)),
+            ),
+            rpcScopeAuthorizationLayer([AuthOrchestrationReadScope]),
+          ),
+        ),
+      );
+
+      expect(yield* client[WS_METHODS.serverProbe]({})).toEqual({});
+      expect(
+        yield* client[WS_METHODS.serverRetryResourceTelemetry]({}).pipe(Effect.flip),
+      ).toMatchObject({
+        _tag: "EnvironmentAuthorizationError",
+        requiredScope: AuthOrchestrationOperateScope,
+      });
+      expect(handled).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
 });

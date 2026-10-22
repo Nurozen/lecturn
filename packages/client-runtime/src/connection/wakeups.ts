@@ -7,6 +7,9 @@ export type ConnectionWakeup =
   | "application-active-probe"
   | "application-active-reconnect"
   | "credentials-changed"
+  // The device moved to a different network (another Wi-Fi, Wi-Fi to
+  // cellular) while staying online. Saved routes may have changed reach.
+  | "network-changed"
   | AccountCredentialsChanged;
 
 /**
@@ -44,7 +47,7 @@ export function isCredentialsChangeFor(
   return accountId === undefined || reason.accountIds.has(accountId);
 }
 
-export function isApplicationActiveWakeup(reason: ConnectionWakeup): boolean {
+function isApplicationActiveWakeup(reason: ConnectionWakeup): boolean {
   return (
     reason === "application-active" ||
     reason === "application-active-probe" ||
@@ -52,6 +55,12 @@ export function isApplicationActiveWakeup(reason: ConnectionWakeup): boolean {
   );
 }
 
+/** Conditions changed enough that a pending retry should run now, from the first rung. */
+export function resetsRetryBackoff(reason: ConnectionWakeup): boolean {
+  return isApplicationActiveWakeup(reason) || reason === "network-changed";
+}
+
+// A long resume replaces the session, and the new session subscribes on its own.
 export function shouldResubscribeAfterWakeup(reason: ConnectionWakeup): boolean {
   return reason === "application-active" || reason === "application-active-probe";
 }

@@ -139,20 +139,18 @@ const spawnEnvironment = (
   );
 
 describe("ACP agent-device environment", () => {
-  for (const provider of Object.keys(makeAdapters) as Array<keyof typeof makeAdapters>) {
-    it.effect(
-      `puts the agent-device CLI on the ${provider} process PATH only for device sessions`,
-      () =>
-        Effect.gen(function* () {
-          const deviceEnv = yield* spawnEnvironment(provider, AGENT_DEVICE_ENVIRONMENT);
-          assert.equal(deviceEnv?.PATH, "/state/device/bin:/usr/bin");
-          assert.equal(deviceEnv?.AGENT_DEVICE_NO_UPDATE_NOTIFIER, "1");
-          assert.isUndefined(deviceEnv?.PATH_SEPARATOR);
+  it.effect.each(Object.keys(makeAdapters) as Array<keyof typeof makeAdapters>)(
+    "puts the agent-device CLI on the %s process PATH only for device sessions",
+    (provider) =>
+      Effect.gen(function* () {
+        const deviceEnv = yield* spawnEnvironment(provider, AGENT_DEVICE_ENVIRONMENT);
+        assert.equal(deviceEnv?.PATH, "/state/device/bin:/usr/bin");
+        assert.equal(deviceEnv?.AGENT_DEVICE_NO_UPDATE_NOTIFIER, "1");
+        assert.isUndefined(deviceEnv?.PATH_SEPARATOR);
 
-          const plainEnv = yield* spawnEnvironment(provider, undefined);
-          assert.equal(plainEnv?.PATH, "/usr/bin");
-          assert.isUndefined(plainEnv?.AGENT_DEVICE_NO_UPDATE_NOTIFIER);
-        }),
-    );
-  }
+        const plainEnv = yield* spawnEnvironment(provider, undefined);
+        assert.equal(plainEnv?.PATH, "/usr/bin");
+        assert.isUndefined(plainEnv?.AGENT_DEVICE_NO_UPDATE_NOTIFIER);
+      }),
+  );
 });

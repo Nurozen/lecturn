@@ -1167,15 +1167,22 @@ export function extractMcpToolCallIdentity(
       }
     }
   }
-  // A present-but-foreign origin assertion marks the whole call as another
-  // server's MCP call, so no loose name matching (meta or title) may brand it.
   const gooseExtension =
     typeof gooseToolCall?.extensionName === "string" ? gooseToolCall.extensionName.trim() : "";
   const assertsForeignOrigin =
     (metaServerId.length > 0 && !/^lecturn$/i.test(metaServerId)) ||
     (gooseExtension.length > 0 && !/^lecturn$/i.test(gooseExtension));
+  // A foreign origin never brands as Lecturn. qwen's serverId marks a real MCP
+  // server, but goose reports its built-in extensions (developer__shell,
+  // edits) the same way as user MCP servers, so goose stays unclassified and
+  // keeps its command and file-change projections.
   if (assertsForeignOrigin) {
-    return undefined;
+    if (metaServerId.length === 0 || metaToolName.length === 0) return undefined;
+    const prefix = [`mcp__${metaServerId}__`, `mcp::${metaServerId}::`].find((prefix) =>
+      metaToolName.startsWith(prefix),
+    );
+    const tool = prefix === undefined ? metaToolName : metaToolName.slice(prefix.length);
+    return tool ? { server: metaServerId, tool } : undefined;
   }
   const candidates = [
     meta?.toolName,
@@ -1185,6 +1192,9 @@ export function extractMcpToolCallIdentity(
   ].filter((value): value is string => typeof value === "string");
   for (const candidate of candidates) {
     const trimmed = candidate.trim();
+    const qualified = /^mcp__(.+?)__(.+)$/i.exec(trimmed);
+    if (qualified?.[1] && qualified[2] && !/^lecturn$/i.test(qualified[1]))
+      return { server: qualified[1], tool: qualified[2] };
     // The server id "lecturn" is also the tool-name prefix ("lecturn_<x>"), so
     // a prefix pattern can match a bare or tool-first name while capturing an
     // unknown tool; take the first pattern whose capture is a known tool.

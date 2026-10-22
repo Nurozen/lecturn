@@ -1100,8 +1100,9 @@ it.layer(TestLayer)("Lecturn fork behavior on the V2 orchestrator", (it) => {
     }),
   );
 
-  for (const release of ["thread.unsettle", "thread.pin"] as const) {
-    it.effect(`holds the queue of a settled thread until ${release} releases it`, () =>
+  it.effect.each(["thread.unsettle", "thread.pin"] as const)(
+    "holds the queue of a settled thread until %s releases it",
+    (release) =>
       Effect.gen(function* () {
         const orchestrator = yield* Orchestrator.OrchestratorV2;
         const eventSink = yield* EventSink.EventSinkV2;
@@ -1182,8 +1183,7 @@ it.layer(TestLayer)("Lecturn fork behavior on the V2 orchestrator", (it) => {
         assert.notEqual(released.thread.settledOverride, "settled");
         assert.notEqual(released.runs.find((run) => run.id === queued.runId)?.status, "queued");
       }),
-    );
-  }
+  );
 
   it.effect("lets a fork contribution reject a command without recording a receipt", () =>
     Effect.gen(function* () {

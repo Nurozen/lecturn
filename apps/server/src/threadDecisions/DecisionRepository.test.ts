@@ -230,46 +230,48 @@ it.layer(SqlitePersistenceMemory)("DecisionRepository", (it) => {
       );
     }),
   );
-  for (const editCanonical of [false, true])
-    it.effect(
-      `detaches a changed ${editCanonical ? "canonical" : "member"} occurrence without hiding its new commitment`,
-      () =>
-        Effect.gen(function* () {
-          const { sql, service } = yield* fixture;
-          const first = (yield* service.createFromWriter(input))!;
-          const second = (yield* service.createFromWriter({
-            ...input,
-            id: DecisionId.make("second"),
-            actionKey: "second",
-          }))!;
-          yield* sql`INSERT OR REPLACE INTO contextual_decision_groups VALUES('merged',${projectId},${first.id},0,'now')`;
-          yield* sql`INSERT OR REPLACE INTO contextual_group_members VALUES(${first.id},'merged',1,'original'),(${second.id},'merged',1,'merge-action')`;
-          assert.lengthOf((yield* service.list({ projectId })).decisions, 1);
-          const target = editCanonical ? first : second;
-          const untouched = editCanonical ? second : first;
-          const edited = (yield* service.mutate({
-            operation: "edit",
-            projectId,
-            id: target.id,
-            expectedRevision: 1,
-            title: "Use SQLite",
-            body: "Use SQLite for local persistence",
-            rationale: null,
-          })).decision!;
-          assert.lengthOf((yield* service.list({ projectId })).decisions, 2);
-          assert.deepEqual(
-            (yield* service.list({ projectId, search: "SQLite" })).decisions.map((d) => d.id),
-            [target.id],
-          );
-          assert.equal(edited.consolidation?.canonicalDecisionId, target.id);
-          assert.equal(edited.consolidation?.occurrenceCount, 1);
-          assert.isUndefined(edited.consolidation?.undo);
-          const remaining = yield* service.get({ projectId, id: untouched.id });
-          assert.equal(remaining.body, input.body);
-          assert.equal(remaining.consolidation?.canonicalDecisionId, untouched.id);
-          assert.equal(remaining.consolidation?.revision, 1);
-        }),
-    );
+  it.effect.each([
+    { editCanonical: false, occurrence: "member" },
+    { editCanonical: true, occurrence: "canonical" },
+  ])(
+    "detaches a changed $occurrence occurrence without hiding its new commitment",
+    ({ editCanonical }) =>
+      Effect.gen(function* () {
+        const { sql, service } = yield* fixture;
+        const first = (yield* service.createFromWriter(input))!;
+        const second = (yield* service.createFromWriter({
+          ...input,
+          id: DecisionId.make("second"),
+          actionKey: "second",
+        }))!;
+        yield* sql`INSERT OR REPLACE INTO contextual_decision_groups VALUES('merged',${projectId},${first.id},0,'now')`;
+        yield* sql`INSERT OR REPLACE INTO contextual_group_members VALUES(${first.id},'merged',1,'original'),(${second.id},'merged',1,'merge-action')`;
+        assert.lengthOf((yield* service.list({ projectId })).decisions, 1);
+        const target = editCanonical ? first : second;
+        const untouched = editCanonical ? second : first;
+        const edited = (yield* service.mutate({
+          operation: "edit",
+          projectId,
+          id: target.id,
+          expectedRevision: 1,
+          title: "Use SQLite",
+          body: "Use SQLite for local persistence",
+          rationale: null,
+        })).decision!;
+        assert.lengthOf((yield* service.list({ projectId })).decisions, 2);
+        assert.deepEqual(
+          (yield* service.list({ projectId, search: "SQLite" })).decisions.map((d) => d.id),
+          [target.id],
+        );
+        assert.equal(edited.consolidation?.canonicalDecisionId, target.id);
+        assert.equal(edited.consolidation?.occurrenceCount, 1);
+        assert.isUndefined(edited.consolidation?.undo);
+        const remaining = yield* service.get({ projectId, id: untouched.id });
+        assert.equal(remaining.body, input.body);
+        assert.equal(remaining.consolidation?.canonicalDecisionId, untouched.id);
+        assert.equal(remaining.consolidation?.revision, 1);
+      }),
+  );
   it.effect(
     "preserves edits and comments on writer replay and handles independent review state",
     () =>

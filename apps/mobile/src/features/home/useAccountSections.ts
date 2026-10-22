@@ -1,6 +1,7 @@
 import { useListedThreadShells } from "../../state/entities";
 import { accountAttention } from "./accountSections";
 import { useAtomValue } from "@effect/atom-react";
+import { accountOwnerTarget } from "@lecturn/client-runtime/connection";
 import { relayAccountByEnvironmentId } from "@lecturn/client-runtime/relay";
 import { useMemo } from "react";
 import { environmentCatalog } from "../../connection/catalog";
@@ -15,7 +16,7 @@ export function useAccountSections(): AccountSectionContext | undefined {
         ? {
             accounts,
             owners: relayAccountByEnvironmentId(
-              [...catalog.entries.values()].map((entry) => entry.target),
+              [...catalog.entries.values()].map(accountOwnerTarget),
             ),
           }
         : undefined,

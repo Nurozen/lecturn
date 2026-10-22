@@ -366,30 +366,28 @@ describe("saveTextFile", () => {
       });
     }),
   );
-  for (const input of [
+  it.effect.each([
     { format: "html", content: "text" },
     { format: "markdown", content: "text", path: "/arbitrary/path" },
     { format: "json", content: "x".repeat(32 * 1024 * 1024 + 1) },
-  ]) {
-    it.effect("rejects invalid export input before opening a dialog", () =>
-      Effect.gen(function* () {
-        const dialog = vi.fn(() => Effect.succeed(Option.none<string>()));
-        const result = yield* saveTextFile.handler(input).pipe(
-          Effect.provide(
-            Layer.mergeAll(
-              Layer.mock(ElectronDialog.ElectronDialog)({ saveFile: dialog }),
-              Layer.mock(ElectronWindow.ElectronWindow)({
-                focusedMainOrFirst: Effect.succeed(Option.none()),
-              }),
-              FileSystem.layerNoop({}),
-            ),
+  ])("rejects invalid export input before opening a dialog", (input) =>
+    Effect.gen(function* () {
+      const dialog = vi.fn(() => Effect.succeed(Option.none<string>()));
+      const result = yield* saveTextFile.handler(input).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.mock(ElectronDialog.ElectronDialog)({ saveFile: dialog }),
+            Layer.mock(ElectronWindow.ElectronWindow)({
+              focusedMainOrFirst: Effect.succeed(Option.none()),
+            }),
+            FileSystem.layerNoop({}),
           ),
-        );
-        assert.strictEqual(result.status, "error");
-        assert.strictEqual(dialog.mock.calls.length, 0);
-      }),
-    );
-  }
+        ),
+      );
+      assert.strictEqual(result.status, "error");
+      assert.strictEqual(dialog.mock.calls.length, 0);
+    }),
+  );
 });
 
 it.effect.skipIf(HostProcessPlatform.defaultValue() === "win32")(

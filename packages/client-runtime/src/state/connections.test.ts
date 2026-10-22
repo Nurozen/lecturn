@@ -45,9 +45,10 @@ function makeCatalog(initialTargets: ReadonlyArray<ConnectionTarget>) {
             Effect.sync(() => {
               storedTargets.set(registration.target.environmentId, registration.target);
             }),
-          remove: (target) =>
+          setRoutes: () => Effect.void,
+          remove: (environmentId) =>
             Effect.sync(() => {
-              storedTargets.delete(target.environmentId);
+              storedTargets.delete(environmentId);
             }),
         }),
         Layer.succeed(Persistence.EnvironmentCacheStore, {
@@ -95,7 +96,11 @@ function makeCatalog(initialTargets: ReadonlyArray<ConnectionTarget>) {
           changes: Stream.never,
         }),
         Layer.succeed(ConnectionWakeups.ConnectionWakeups, { changes: Stream.never }),
-        Layer.succeed(ConnectionDriver.ConnectionDriver, { connect: () => Effect.never }),
+        Layer.succeed(ConnectionDriver.ConnectionDriver, {
+          connect: () => Effect.never,
+          checkRoute: () => Effect.never,
+          preflight: () => Effect.succeed(false),
+        }),
       ),
     ),
   );

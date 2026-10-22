@@ -2,7 +2,7 @@ import type {
   EnvironmentPresentation,
   PreparedConnection,
 } from "@lecturn/client-runtime/connection";
-import { connectionCatalogDisplayUrl } from "@lecturn/client-runtime/connection";
+import { connectionCatalogDisplayUrl, relayRouteTarget } from "@lecturn/client-runtime/connection";
 import type { EnvironmentId, ServerConfig } from "@lecturn/contracts";
 import * as Option from "effect/Option";
 import { Atom } from "effect/unstable/reactivity";
@@ -52,7 +52,19 @@ export function createRemoteEnvironmentProjectionAtoms(input: {
             : displayUrl.replace(/^http:/, "ws:")
           : new URL(socketUrl).origin;
       const authorization = prepared?.httpAuthorization ?? null;
-      const relayManaged = presentation.entry.target._tag === "RelayConnectionTarget";
+      // Credentials follow the route in use, which may not be the preferred one.
+      // A direct route learned through Lecturn Connect authorizes with DPoP as
+      // the account the prepared connection names, not with a bearer token.
+      const learnedConnectRoute =
+        prepared !== null &&
+        prepared.target._tag !== "RelayConnectionTarget" &&
+        authorization?._tag === "Dpop";
+      const relayAccountId = learnedConnectRoute
+        ? prepared.accountId
+        : relayRouteTarget(presentation.entry)?.accountId;
+      const relayManaged = prepared
+        ? prepared.target._tag === "RelayConnectionTarget" || learnedConnectRoute
+        : presentation.entry.target._tag === "RelayConnectionTarget";
 
       previousEntry = presentation.entry;
       previousPrepared = prepared;
@@ -68,10 +80,7 @@ export function createRemoteEnvironmentProjectionAtoms(input: {
           ? {
               authenticationMethod: "dpop" as const,
               relayManaged: true as const,
-              ...(presentation.entry.target._tag === "RelayConnectionTarget" &&
-              presentation.entry.target.accountId
-                ? { accountId: presentation.entry.target.accountId }
-                : {}),
+              ...(relayAccountId ? { accountId: relayAccountId } : {}),
               ...(authorization?._tag === "Dpop"
                 ? { dpopAccessToken: authorization.accessToken }
                 : {}),

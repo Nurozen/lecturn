@@ -86,8 +86,9 @@ describe("V2 preview upgrade", () => {
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
-  for (const withIndexes of [false, true]) {
-    it.effect(`upgrades preview migration 54 with index cleanup ${withIndexes}`, () =>
+  it.effect.each([false, true])(
+    "upgrades preview migration 54 with index cleanup %s",
+    (withIndexes) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         yield* seedUpstreamThrough52;
@@ -115,8 +116,7 @@ describe("V2 preview upgrade", () => {
         }>`PRAGMA table_info(projection_threads)`;
         assert.ok(columns.some((column) => column.name === "auto_settle_disabled_at"));
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
-    );
-  }
+  );
 
   it.effect("rolls back schema and ledger together on failure and can retry", () =>
     Effect.gen(function* () {
@@ -158,20 +158,18 @@ describe("V2 preview upgrade", () => {
 });
 
 describe("V2 preview reconcile on Lecturn ledgers", () => {
-  for (const throughId of [53, 54, 63, 69, 71]) {
-    it.effect(`stays inert on a Lecturn ledger at ${throughId}`, () =>
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        yield* runMigrations({ toMigrationInclusive: throughId });
-        const history = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
-        assert.deepStrictEqual(yield* reconcileV2PreviewMigration(), []);
-        assert.deepStrictEqual(
-          yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`,
-          history,
-        );
-      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
-    );
-  }
+  it.effect.each([53, 54, 63, 69, 71])("stays inert on a Lecturn ledger at %s", (throughId) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: throughId });
+      const history = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
+      assert.deepStrictEqual(yield* reconcileV2PreviewMigration(), []);
+      assert.deepStrictEqual(
+        yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`,
+        history,
+      );
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
 
   it.effect("stays inert on a fresh database", () =>
     Effect.gen(function* () {

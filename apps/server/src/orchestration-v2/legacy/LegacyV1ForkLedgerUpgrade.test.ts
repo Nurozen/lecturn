@@ -200,8 +200,9 @@ const v2Layer = (dbPath: string) => {
 };
 
 describe("Lecturn fork ledger upgrade to orchestration V2", () => {
-  for (const variant of ["fork names", "upstream names at 48-54"] as const) {
-    it.effect(`migrates a ${variant} ledger at 069 to 071 and imports fork lineage`, () =>
+  it.effect.each(["fork names", "upstream names at 48-54"] as const)(
+    "migrates a %s ledger at 069 to 071 and imports fork lineage",
+    (variant) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -334,6 +335,5 @@ describe("Lecturn fork ledger upgrade to orchestration V2", () => {
           [69, "ProjectionThreadsAutoSettleDisabledAtCompatibility"],
         ]);
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-    );
-  }
+  );
 });

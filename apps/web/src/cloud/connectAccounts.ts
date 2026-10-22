@@ -3,6 +3,7 @@ import {
   resolveAccountTintPreset,
   type AccountTintPresetId,
 } from "@lecturn/shared/accountTint";
+import { accountOwnerTarget } from "@lecturn/client-runtime/connection";
 import { relayAccountByEnvironmentId } from "@lecturn/client-runtime/relay";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -138,7 +139,7 @@ export function keepUnchangedAccountOwners<Owners extends ReadonlyMap<string, st
 export const accountByEnvironmentIdAtom = Atom.make((get) => {
   const owners = withPrimaryPublisher(
     relayAccountByEnvironmentId(
-      [...get(environmentCatalog.catalogValueAtom).entries.values()].map((entry) => entry.target),
+      [...get(environmentCatalog.catalogValueAtom).entries.values()].map(accountOwnerTarget),
     ),
     get(primaryCloudPublisherAtom),
   );

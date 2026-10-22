@@ -892,56 +892,53 @@ describe("StaveOperations space lock", () => {
 });
 
 describe("StaveOperations pre-flight", () => {
-  for (const kind of ["createSpace", "createSaga"] as const) {
-    for (const collision of ["case-alias", "dangling-link"] as const) {
-      it.effect(
-        `${kind} refuses a filesystem-resolved ${collision} candidate before CLI mutation`,
-        () =>
-          scenario(
-            (roots) =>
-              Effect.gen(function* () {
-                const candidate = roots.path.join(roots.agentWorkDir, SPACE_ID);
-                const differentlyCased = roots.path.join(roots.agentWorkDir, "DeMo");
-                if (collision === "dangling-link") {
-                  yield* roots.fs.symlink(roots.path.join(roots.agentWorkDir, "absent"), candidate);
-                } else {
-                  yield* roots.fs.makeDirectory(differentlyCased);
-                  // On case-sensitive volumes this exercises the ordinary collision path;
-                  // on case-insensitive volumes only the differently spelled entry exists.
-                  if (!(yield* roots.fs.exists(candidate)))
-                    yield* roots.fs.rename(differentlyCased, candidate);
-                }
-                const sagaCalls = yield* Ref.make(0);
-                return {
-                  candidate,
-                  sagaCalls,
-                  cliExtra: {
-                    sagaCreate: () =>
-                      Ref.update(sagaCalls, (count) => count + 1).pipe(Effect.as(PLAN)),
-                  },
-                };
-              }).pipe(Effect.orDie),
-            (harness, options) =>
-              Effect.gen(function* () {
-                const ops = yield* StaveOperations;
-                const operation: StaveOperation =
-                  kind === "createSpace"
-                    ? createSpaceOperation()
-                    : { kind, sagaId: SPACE_ID, references: [], memory: [] };
-                expect(
-                  failedError(yield* runToEnd(ops, `${kind}-${collision}`, operation)).code,
-                ).toBe("space_exists");
-                expect(yield* Ref.get(options.sagaCalls)).toBe(0);
-                expect(yield* Ref.get(harness.cliCalls)).toEqual([]);
-                expect(yield* Ref.get(harness.dispatched)).toEqual([]);
-                if (collision === "dangling-link")
-                  expect(yield* harness.fs.readLink(options.candidate)).toContain("absent");
-                else expect(yield* harness.fs.readDirectory(options.candidate)).toEqual([]);
-              }),
-          ),
-      );
-    }
-  }
+  it.effect.each(
+    (["createSpace", "createSaga"] as const).flatMap((kind) =>
+      (["case-alias", "dangling-link"] as const).map((collision) => [kind, collision] as const),
+    ),
+  )("%s refuses a filesystem-resolved %s candidate before CLI mutation", ([kind, collision]) =>
+    scenario(
+      (roots) =>
+        Effect.gen(function* () {
+          const candidate = roots.path.join(roots.agentWorkDir, SPACE_ID);
+          const differentlyCased = roots.path.join(roots.agentWorkDir, "DeMo");
+          if (collision === "dangling-link") {
+            yield* roots.fs.symlink(roots.path.join(roots.agentWorkDir, "absent"), candidate);
+          } else {
+            yield* roots.fs.makeDirectory(differentlyCased);
+            // On case-sensitive volumes this exercises the ordinary collision path;
+            // on case-insensitive volumes only the differently spelled entry exists.
+            if (!(yield* roots.fs.exists(candidate)))
+              yield* roots.fs.rename(differentlyCased, candidate);
+          }
+          const sagaCalls = yield* Ref.make(0);
+          return {
+            candidate,
+            sagaCalls,
+            cliExtra: {
+              sagaCreate: () => Ref.update(sagaCalls, (count) => count + 1).pipe(Effect.as(PLAN)),
+            },
+          };
+        }).pipe(Effect.orDie),
+      (harness, options) =>
+        Effect.gen(function* () {
+          const ops = yield* StaveOperations;
+          const operation: StaveOperation =
+            kind === "createSpace"
+              ? createSpaceOperation()
+              : { kind, sagaId: SPACE_ID, references: [], memory: [] };
+          expect(failedError(yield* runToEnd(ops, `${kind}-${collision}`, operation)).code).toBe(
+            "space_exists",
+          );
+          expect(yield* Ref.get(options.sagaCalls)).toBe(0);
+          expect(yield* Ref.get(harness.cliCalls)).toEqual([]);
+          expect(yield* Ref.get(harness.dispatched)).toEqual([]);
+          if (collision === "dangling-link")
+            expect(yield* harness.fs.readLink(options.candidate)).toContain("absent");
+          else expect(yield* harness.fs.readDirectory(options.candidate)).toEqual([]);
+        }),
+    ),
+  );
 
   it.effect("refuses when something already sits at the candidate path", () =>
     scenario(
@@ -1419,8 +1416,9 @@ const listRow = (root: string) => ({
   memories: [],
 });
 
-for (const transient of ["configuration", "inventory"] as const) {
-  it.effect(`retries moved-space recovery after correcting a transient ${transient} refusal`, () =>
+it.effect.each(["configuration", "inventory"] as const)(
+  "retries moved-space recovery after correcting a transient %s refusal",
+  (transient) =>
     scenario(
       (roots) =>
         Effect.gen(function* () {
@@ -1493,41 +1491,38 @@ for (const transient of ["configuration", "inventory"] as const) {
           expect(options.fixture.history.filter((value) => value === "lease")).toHaveLength(2);
         }),
     ),
-  );
-}
+);
 
-for (const disposition of ["destroying", "destroyed"] as const) {
-  it.effect(
-    `${disposition} recovery retains a surviving manifestless directory and its project`,
-    () =>
-      scenario(
-        (roots) =>
-          Effect.gen(function* () {
-            const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
-            yield* roots.fs.makeDirectory(root);
-            yield* roots.fs.writeFileString(roots.path.join(root, "work.txt"), "preserve my work");
-            const fixture = lifecycleFixture(root, disposition);
-            return {
-              root,
-              fixture,
-              activeProject: project("p", root),
-              lifecycle: fixture.service,
-              cliExtra: { spaceList: () => Effect.succeed([]) },
-            };
-          }).pipe(Effect.orDie),
-        (harness, options) =>
-          Effect.gen(function* () {
-            yield* (yield* StaveOperations).reconcileIncomplete;
-            expect(options.fixture.row().disposition).toBe(disposition);
-            expect(options.fixture.row().refusalCode).toBe("unreadable");
-            expect(yield* Ref.get(harness.dispatched)).toEqual([]);
-            expect(
-              yield* harness.fs.readFileString(harness.path.join(options.root, "work.txt")),
-            ).toBe("preserve my work");
-          }),
-      ),
-  );
-}
+it.effect.each(["destroying", "destroyed"] as const)(
+  "%s recovery retains a surviving manifestless directory and its project",
+  (disposition) =>
+    scenario(
+      (roots) =>
+        Effect.gen(function* () {
+          const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+          yield* roots.fs.makeDirectory(root);
+          yield* roots.fs.writeFileString(roots.path.join(root, "work.txt"), "preserve my work");
+          const fixture = lifecycleFixture(root, disposition);
+          return {
+            root,
+            fixture,
+            activeProject: project("p", root),
+            lifecycle: fixture.service,
+            cliExtra: { spaceList: () => Effect.succeed([]) },
+          };
+        }).pipe(Effect.orDie),
+      (harness, options) =>
+        Effect.gen(function* () {
+          yield* (yield* StaveOperations).reconcileIncomplete;
+          expect(options.fixture.row().disposition).toBe(disposition);
+          expect(options.fixture.row().refusalCode).toBe("unreadable");
+          expect(yield* Ref.get(harness.dispatched)).toEqual([]);
+          expect(
+            yield* harness.fs.readFileString(harness.path.join(options.root, "work.txt")),
+          ).toBe("preserve my work");
+        }),
+    ),
+);
 
 it.effect("terminal recovery refuses a recreated incarnation at the same project root", () =>
   scenario(
@@ -2808,62 +2803,61 @@ it.effect("restore reuses the project that owned the archived incarnation", () =
   }),
 );
 
-for (const retained of [true, false]) {
-  it.effect(
-    `startup reconciliation ${retained ? "renews its lease while CLI reads run" : "stops without project mutation after lease loss"}`,
-    () =>
-      scenario(
-        (roots) =>
-          Effect.gen(function* () {
-            const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
-            yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
-            const fixture = lifecycleFixture(root, "archiving");
-            const started = yield* Deferred.make<void>();
-            const finish = yield* Deferred.make<void>();
-            const renewed = yield* Deferred.make<void>();
-            return {
-              root,
-              fixture,
-              started,
-              finish,
-              renewed,
-              activeProject: project("p", root),
-              readerLoad: () => Effect.succeed(Option.some(infoFor())),
-              lifecycle: {
-                ...fixture.service,
-                renewLease: () => Deferred.succeed(renewed, undefined).pipe(Effect.as(retained)),
-              },
-              cliExtra: {
-                spaceList: (input?: { archived?: boolean | undefined }) =>
-                  input?.archived
-                    ? Effect.succeed([])
-                    : Deferred.succeed(started, undefined).pipe(
-                        Effect.andThen(Deferred.await(finish)),
-                        Effect.as([listRow(root)]),
-                      ),
-              },
-            };
-          }),
-        (harness, options) =>
-          Effect.gen(function* () {
-            const ops = yield* StaveOperations;
-            const fiber = yield* ops.reconcileIncomplete.pipe(Effect.forkChild);
-            yield* Deferred.await(options.started);
-            yield* TestClock.adjust("20 seconds");
-            yield* Deferred.await(options.renewed);
-            if (retained) {
-              yield* Deferred.succeed(options.finish, undefined);
-              yield* Fiber.join(fiber);
-              expect(options.fixture.row().disposition).toBe("live");
-            } else {
-              yield* Fiber.join(fiber);
-              expect(options.fixture.row().disposition).toBe("archiving");
-              expect(yield* Ref.get(harness.dispatched)).toEqual([]);
-            }
-          }),
-      ),
-  );
-}
+it.effect.each([
+  ["renews its lease while CLI reads run", true],
+  ["stops without project mutation after lease loss", false],
+] as const)("startup reconciliation %s", ([, retained]) =>
+  scenario(
+    (roots) =>
+      Effect.gen(function* () {
+        const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+        yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
+        const fixture = lifecycleFixture(root, "archiving");
+        const started = yield* Deferred.make<void>();
+        const finish = yield* Deferred.make<void>();
+        const renewed = yield* Deferred.make<void>();
+        return {
+          root,
+          fixture,
+          started,
+          finish,
+          renewed,
+          activeProject: project("p", root),
+          readerLoad: () => Effect.succeed(Option.some(infoFor())),
+          lifecycle: {
+            ...fixture.service,
+            renewLease: () => Deferred.succeed(renewed, undefined).pipe(Effect.as(retained)),
+          },
+          cliExtra: {
+            spaceList: (input?: { archived?: boolean | undefined }) =>
+              input?.archived
+                ? Effect.succeed([])
+                : Deferred.succeed(started, undefined).pipe(
+                    Effect.andThen(Deferred.await(finish)),
+                    Effect.as([listRow(root)]),
+                  ),
+          },
+        };
+      }),
+    (harness, options) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const fiber = yield* ops.reconcileIncomplete.pipe(Effect.forkChild);
+        yield* Deferred.await(options.started);
+        yield* TestClock.adjust("20 seconds");
+        yield* Deferred.await(options.renewed);
+        if (retained) {
+          yield* Deferred.succeed(options.finish, undefined);
+          yield* Fiber.join(fiber);
+          expect(options.fixture.row().disposition).toBe("live");
+        } else {
+          yield* Fiber.join(fiber);
+          expect(options.fixture.row().disposition).toBe("archiving");
+          expect(yield* Ref.get(harness.dispatched)).toEqual([]);
+        }
+      }),
+  ),
+);
 
 const sagaFixture = (roots: Roots) =>
   Effect.gen(function* () {
@@ -3367,89 +3361,93 @@ describe("StaveOperations sagas", () => {
   );
 });
 
-for (const lost of [null, "a", "b", "story"]) {
-  it.effect(
-    lost === null
-      ? "renews every saga participant during a long teardown"
-      : `interrupts teardown when participant ${lost} loses its lease`,
-    () =>
-      scenario(
-        (roots) =>
-          Effect.gen(function* () {
-            const fixture = yield* sagaFixture(roots);
-            const gates = yield* makeGates;
-            const renewed = yield* Deferred.make<void>();
-            return {
-              ...fixture,
-              gates,
-              renewed,
-              lifecycle: {
-                ...fixture.lifecycle,
-                renewLease: (input) =>
-                  Effect.gen(function* () {
-                    if (input.projectId === lost) {
-                      fixture.rows.set(input.projectId, {
-                        ...fixture.rows.get(input.projectId)!,
-                        ownerToken: "replacement-owner",
-                      });
-                      yield* Deferred.succeed(renewed, undefined);
-                      return false;
-                    }
-                    const ok = yield* fixture.lifecycle.renewLease!(input);
-                    if (input.projectId === "story") yield* Deferred.succeed(renewed, undefined);
-                    return ok;
-                  }),
-              },
-              cliExtra: {
-                ...fixture.cliExtra,
-                sagaArchive: (input) =>
-                  input.dryRun
-                    ? Effect.succeed(PLAN)
-                    : Deferred.succeed(gates.reached, undefined).pipe(
-                        Effect.andThen(Deferred.await(gates.gate)),
-                        Effect.andThen(fixture.cliExtra.sagaArchive!(input)),
-                      ),
-              },
-            };
-          }),
-        (harness, fixture) =>
-          Effect.gen(function* () {
-            const ops = yield* StaveOperations;
-            const running = yield* Effect.forkChild(
-              runToEnd(ops, "long", {
-                kind: "sagaArchive",
-                sagaRoot: fixture.rootsById.get("story")!,
-                expectedManifestCreatedAt: CREATED_AT,
-                force: false,
-                memory: "keep",
+it.effect.each(
+  [null, "a", "b", "story"].map(
+    (lost) =>
+      [
+        lost === null
+          ? "renews every saga participant during a long teardown"
+          : `interrupts teardown when participant ${lost} loses its lease`,
+        lost,
+      ] as const,
+  ),
+)("%s", ([, lost]) =>
+  scenario(
+    (roots) =>
+      Effect.gen(function* () {
+        const fixture = yield* sagaFixture(roots);
+        const gates = yield* makeGates;
+        const renewed = yield* Deferred.make<void>();
+        return {
+          ...fixture,
+          gates,
+          renewed,
+          lifecycle: {
+            ...fixture.lifecycle,
+            renewLease: (input) =>
+              Effect.gen(function* () {
+                if (input.projectId === lost) {
+                  fixture.rows.set(input.projectId, {
+                    ...fixture.rows.get(input.projectId)!,
+                    ownerToken: "replacement-owner",
+                  });
+                  yield* Deferred.succeed(renewed, undefined);
+                  return false;
+                }
+                const ok = yield* fixture.lifecycle.renewLease!(input);
+                if (input.projectId === "story") yield* Deferred.succeed(renewed, undefined);
+                return ok;
               }),
-            );
-            yield* Deferred.await(fixture.gates.reached);
-            yield* TestClock.adjust("20 seconds");
-            yield* Deferred.await(fixture.renewed);
-            if (lost === null) {
-              expect(fixture.history.filter((value) => value.startsWith("renew:"))).toEqual([
-                "renew:a",
-                "renew:b",
-                "renew:story",
-              ]);
-              yield* Deferred.succeed(fixture.gates.gate, undefined);
-              expect(finishedResult(yield* Fiber.join(running)).kind).toBe("sagaArchive");
-            } else {
-              expect(failedError(yield* Fiber.join(running)).code).toBe("space_transitioning");
-              expect(fixture.history).not.toContain("cli");
-              expect(
-                (yield* Ref.get(harness.dispatched)).filter(
-                  (command) =>
-                    command.type === "project.delete" || command.type === "project.meta.update",
-                ),
-              ).toEqual([]);
-              expect(fixture.rows.get(ProjectId.make(lost))?.ownerToken).toBe("replacement-owner");
-            }
+          },
+          cliExtra: {
+            ...fixture.cliExtra,
+            sagaArchive: (input) =>
+              input.dryRun
+                ? Effect.succeed(PLAN)
+                : Deferred.succeed(gates.reached, undefined).pipe(
+                    Effect.andThen(Deferred.await(gates.gate)),
+                    Effect.andThen(fixture.cliExtra.sagaArchive!(input)),
+                  ),
+          },
+        };
+      }),
+    (harness, fixture) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const running = yield* Effect.forkChild(
+          runToEnd(ops, "long", {
+            kind: "sagaArchive",
+            sagaRoot: fixture.rootsById.get("story")!,
+            expectedManifestCreatedAt: CREATED_AT,
+            force: false,
+            memory: "keep",
           }),
-      ),
-  );
-}
+        );
+        yield* Deferred.await(fixture.gates.reached);
+        yield* TestClock.adjust("20 seconds");
+        yield* Deferred.await(fixture.renewed);
+        if (lost === null) {
+          expect(fixture.history.filter((value) => value.startsWith("renew:"))).toEqual([
+            "renew:a",
+            "renew:b",
+            "renew:story",
+          ]);
+          yield* Deferred.succeed(fixture.gates.gate, undefined);
+          expect(finishedResult(yield* Fiber.join(running)).kind).toBe("sagaArchive");
+        } else {
+          expect(failedError(yield* Fiber.join(running)).code).toBe("space_transitioning");
+          expect(fixture.history).not.toContain("cli");
+          expect(
+            (yield* Ref.get(harness.dispatched)).filter(
+              (command) =>
+                command.type === "project.delete" || command.type === "project.meta.update",
+            ),
+          ).toEqual([]);
+          expect(fixture.rows.get(ProjectId.make(lost))?.ownerToken).toBe("replacement-owner");
+        }
+      }),
+  ),
+);
 
 it.effect(
   "refuses a symlink alias for a later saga member before leasing or invoking teardown",
@@ -4329,45 +4327,44 @@ it.effect("saga review binds archived member conversations and survives coordina
   ),
 );
 
-for (const moved of [false, true]) {
-  it.effect(
-    `recovers archive completion ${moved ? "after" : "before"} the project path update`,
-    () =>
-      scenario(
-        (roots) =>
-          Effect.gen(function* () {
-            const live = roots.path.join(roots.agentWorkDir, SPACE_ID);
-            const archive = roots.path.join(roots.agentWorkDir, ".archive", SPACE_ID);
-            yield* roots.fs.makeDirectory(archive, { recursive: true }).pipe(Effect.orDie);
-            const fixture = lifecycleFixture(live, "archiving");
-            return {
-              live,
-              archive,
-              fixture,
-              activeProject: project("p", moved ? archive : live),
-              lifecycle: fixture.service,
-              readerLoad: (root: string) =>
-                Effect.succeed(root === archive ? Option.some(infoFor("archived")) : Option.none()),
-              cliExtra: {
-                spaceList: (input) => Effect.succeed(input?.archived ? [listRow(archive)] : []),
-              } satisfies Partial<StaveCliShape>,
-            };
-          }),
-        (harness, options) =>
-          Effect.gen(function* () {
-            const ops = yield* StaveOperations;
-            yield* ops.reconcileIncomplete;
-            expect(options.fixture.row().disposition).toBe("archived");
-            expect(options.fixture.row().workspaceRoot).toBe(options.archive);
-            expect(
-              (yield* Ref.get(harness.dispatched)).filter(
-                (command) => command.type === "project.meta.update",
-              ),
-            ).toHaveLength(moved ? 0 : 1);
-          }),
-      ),
-  );
-}
+it.effect.each([
+  { moved: false, order: "before" },
+  { moved: true, order: "after" },
+])("recovers archive completion $order the project path update", ({ moved }) =>
+  scenario(
+    (roots) =>
+      Effect.gen(function* () {
+        const live = roots.path.join(roots.agentWorkDir, SPACE_ID);
+        const archive = roots.path.join(roots.agentWorkDir, ".archive", SPACE_ID);
+        yield* roots.fs.makeDirectory(archive, { recursive: true }).pipe(Effect.orDie);
+        const fixture = lifecycleFixture(live, "archiving");
+        return {
+          live,
+          archive,
+          fixture,
+          activeProject: project("p", moved ? archive : live),
+          lifecycle: fixture.service,
+          readerLoad: (root: string) =>
+            Effect.succeed(root === archive ? Option.some(infoFor("archived")) : Option.none()),
+          cliExtra: {
+            spaceList: (input) => Effect.succeed(input?.archived ? [listRow(archive)] : []),
+          } satisfies Partial<StaveCliShape>,
+        };
+      }),
+    (harness, options) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        yield* ops.reconcileIncomplete;
+        expect(options.fixture.row().disposition).toBe("archived");
+        expect(options.fixture.row().workspaceRoot).toBe(options.archive);
+        expect(
+          (yield* Ref.get(harness.dispatched)).filter(
+            (command) => command.type === "project.meta.update",
+          ),
+        ).toHaveLength(moved ? 0 : 1);
+      }),
+  ),
+);
 
 it.effect("restore recovery clears the previous expired archive schedule", () =>
   scenario(
@@ -4503,38 +4500,36 @@ it.effect(
     ),
 );
 
-for (const disabled of ["settings", "server"] as const) {
-  it.effect(
-    `production operation layer leaves recovery to the worker with ${disabled} disabled`,
-    () =>
-      scenario(
-        (roots) =>
-          Effect.gen(function* () {
-            const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
-            const recoveryReads: string[] = [];
-            const fixture = lifecycleFixture(root, "archiving");
-            return {
-              productionLayer: true,
-              settingsEnabled: disabled !== "settings",
-              serverEnabled: disabled !== "server",
-              recoveryReads,
-              lifecycle: {
-                ...fixture.service,
-                listIncomplete: () =>
-                  Effect.sync(() => {
-                    recoveryReads.push("read");
-                    return [fixture.row()];
-                  }),
-              },
-            };
-          }),
-        (harness, options) =>
-          Effect.gen(function* () {
-            yield* StaveOperations;
-            expect(options.recoveryReads).toEqual([]);
-            expect(yield* Ref.get(harness.cliCalls)).toEqual([]);
-            expect(yield* Ref.get(harness.dispatched)).toEqual([]);
-          }),
-      ),
-  );
-}
+it.effect.each(["settings", "server"] as const)(
+  "production operation layer leaves recovery to the worker with %s disabled",
+  (disabled) =>
+    scenario(
+      (roots) =>
+        Effect.gen(function* () {
+          const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+          const recoveryReads: string[] = [];
+          const fixture = lifecycleFixture(root, "archiving");
+          return {
+            productionLayer: true,
+            settingsEnabled: disabled !== "settings",
+            serverEnabled: disabled !== "server",
+            recoveryReads,
+            lifecycle: {
+              ...fixture.service,
+              listIncomplete: () =>
+                Effect.sync(() => {
+                  recoveryReads.push("read");
+                  return [fixture.row()];
+                }),
+            },
+          };
+        }),
+      (harness, options) =>
+        Effect.gen(function* () {
+          yield* StaveOperations;
+          expect(options.recoveryReads).toEqual([]);
+          expect(yield* Ref.get(harness.cliCalls)).toEqual([]);
+          expect(yield* Ref.get(harness.dispatched)).toEqual([]);
+        }),
+    ),
+);

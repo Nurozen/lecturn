@@ -472,8 +472,8 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
           title="Review changes"
           subtitle={
             worktreesSupported
-              ? "Inspect turn diffs, worktree changes, and base branch diff"
-              : "Inspect working tree changes and base branch diff"
+              ? "Inspect changes, uncommitted edits, and turn diffs"
+              : "Inspect changes and uncommitted edits"
           }
           disabled={busy || !isRepo}
           onPress={() => {
@@ -533,7 +533,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
                   <SheetListRow
                     icon="arrow.triangle.pull"
                     title={`#${link.number} ${link.snapshot?.title ?? "Pull request"}`}
-                    subtitle={`${link.repository} · ${link.snapshot === null ? "Status pending" : link.snapshot.isDraft && link.snapshot.state === "open" ? "Draft" : link.snapshot.state}`}
+                    subtitle={`${link.repository} · ${link.snapshot === null ? "Status pending" : link.snapshot.isDraft && link.snapshot.state === "open" ? "Draft" : link.snapshot.state}${link.watch === undefined ? "" : " · Watching"}`}
                     onPress={() => {
                       void tryOpenExternalUrl(link.url, "pull-request").then((opened) => {
                         if (!opened)

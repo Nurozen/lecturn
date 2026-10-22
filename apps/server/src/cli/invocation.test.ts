@@ -1,6 +1,16 @@
-import { assert, it } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { assert, expect, it } from "@effect/vitest";
+import {
+  HostProcessArguments,
+  HostProcessExecutablePath,
+  HostProcessIsExecutable,
+  HostProcessPlatform,
+} from "@lecturn/shared/hostProcess";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 
-import { formatCliCommand } from "./invocation.ts";
+import { formatCliCommand, resolveServerInstallation } from "./invocation.ts";
 
 it("never suggests package runner commands from cache entry paths", () => {
   for (const entryPath of [
@@ -60,5 +70,34 @@ it("formats the requested subcommand", () => {
       version: "0.0.31",
     }),
     "lecturn connect",
+  );
+});
+
+it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
+  it.effect("leaves every install unknown until Lecturn publishes an npm distribution", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped();
+      for (const relative of [
+        "npm/_npx/hash/node_modules/lecturn/dist/bin.mjs",
+        "pnpm/dlx/hash/node_modules/lecturn/dist/bin.mjs",
+        ".bun/install/cache/lecturn/dist/bin.mjs",
+        "prefix/lib/node_modules/lecturn/dist/bin.mjs",
+        "project/apps/server/dist/bin.mjs",
+        ".lecturn/runtime/0.0.45/lecturn",
+      ]) {
+        const entry = path.join(root, relative);
+        yield* fs.makeDirectory(path.dirname(entry), { recursive: true });
+        yield* fs.writeFileString(entry, "");
+        const installation = yield* resolveServerInstallation.pipe(
+          Effect.provideService(HostProcessArguments, ["node", entry]),
+          Effect.provideService(HostProcessExecutablePath, entry),
+          Effect.provideService(HostProcessIsExecutable, entry.endsWith("/lecturn")),
+          Effect.provideService(HostProcessPlatform, "linux"),
+        );
+        expect(installation).toBeNull();
+      }
+    }),
   );
 });
