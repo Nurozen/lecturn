@@ -1,7 +1,7 @@
 import { fileBasename } from "@lecturn/shared/path";
 import type { ThreadId } from "@lecturn/contracts";
-import { resolveMarkdownLinkPresentation } from "@lecturn/mobile-markdown-text/links";
-import type { MarkdownFileContextMenu } from "@lecturn/mobile-markdown-text/types";
+import { resolveMarkdownLinkPresentation } from "../../lib/markdownLinks";
+import type { MarkdownFileContextMenu } from "../../native/SelectableMarkdownText.types";
 import { hostPreviewMimeTypeFromExtension } from "@lecturn/shared/filePreview";
 
 import {
