@@ -115,9 +115,7 @@ export class MigrateDevDbPhaseError extends Schema.TaggedError<MigrateDevDbPhase
 }
 
 export interface RunMigrateDevDbInput {
-  /** Isolated .lecturn directory. Defaults to `<worktree>/.lecturn` of the cwd. */
   readonly baseDir?: string | undefined;
-  /** Source database. Defaults to `~/.lecturn/userdata/statev2.sqlite`. */
   readonly source?: string | undefined;
   readonly projects: number;
   readonly threadsPerProject: number;

@@ -17,14 +17,12 @@ type ProcessIdentity = typeof ProcessIdentity.Type;
 
 const OpenCodeServerEntry = Schema.Struct({
   version: Schema.Literal(1),
-  /** The spawned group. Its id is the pid Lecturn spawned, which also names the entry file. */
   pgid: Schema.Int,
   pid: Schema.Int,
   startTime: Schema.String,
   command: Schema.String,
   port: Schema.Int,
   stateDir: Schema.String,
-  /** The Lecturn server that spawned it. Entries of a live owner are never touched. */
   owner: ProcessIdentity,
 });
 type OpenCodeServerEntry = typeof OpenCodeServerEntry.Type;
@@ -282,7 +280,6 @@ export const make = Effect.fn("OpenCodeServerLedger.make")(function* (input: {
       ),
     );
 
-  /** Stops recorded servers whose owning Lecturn server is gone and drops stale entries. */
   const reapOrphans = Effect.gen(function* () {
     const names = yield* fs.readDirectory(directory).pipe(Effect.orElseSucceed(() => []));
     yield* Effect.forEach(

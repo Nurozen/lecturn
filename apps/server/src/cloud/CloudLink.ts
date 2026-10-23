@@ -188,7 +188,6 @@ export class CloudLinkAccountMismatchError extends Schema.TaggedError<CloudLinkA
   }
 }
 
-/** Linking from the CLI needs the authorization `lecturn connect link` stores. */
 export class CloudLinkAuthorizationMissingError extends Schema.TaggedError<CloudLinkAuthorizationMissingError>()(
   "CloudLinkAuthorizationMissingError",
   {},
@@ -601,7 +600,6 @@ export const applyCloudRelayConfig = Effect.fn("environment.cloud.applyRelayConf
           RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
           stringToBytes(payload.environmentCredential),
         );
-        // The relay accepted this link, so an earlier rejection no longer holds.
         yield* secrets.remove(CLOUD_LINK_REVOKED);
         yield* secrets.set(CLOUD_MINT_PUBLIC_KEY, stringToBytes(payload.cloudMintPublicKey));
         if (endpointRuntimeJson !== null) {
@@ -657,10 +655,7 @@ export const applyCloudRelayConfig = Effect.fn("environment.cloud.applyRelayConf
   return yield* options?.lockHeld ? apply : endpointRuntime.withLinkStateLock(apply);
 });
 
-/**
- * Stops the tunnel and forgets the link, including the CLI's wish to keep it.
- * A losing installation on this device may not clear the owner's link.
- */
+/** A losing installation on this device may not clear the owner's link. */
 export const unlinkCloudRelayConfig = Effect.fn("environment.cloud.unlinkConfig")(function* (
   dependencies: Pick<CloudRelayConfigDependencies, "secrets" | "endpointRuntime">,
 ) {

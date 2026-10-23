@@ -59,8 +59,6 @@ const configuredHostedAppUrl = (() => {
 })();
 const sourcemapEnv = process.env.LECTURN_WEB_SOURCEMAP?.trim().toLowerCase();
 
-// as hot patches. Opt-in while experimental: LECTURN_BUNDLED_DEV=1 pnpm dev:web
-// round trip per import level in unbundled dev); LECTURN_BUNDLED_DEV=0 opts out.
 const bundledDevEnv = process.env.LECTURN_BUNDLED_DEV?.trim().toLowerCase();
 const bundledDev = bundledDevEnv === "1" || bundledDevEnv === "true";
 
@@ -86,7 +84,6 @@ function resolveDevProxyTarget(
   backendPort: string | undefined,
   wsUrl: string | undefined,
 ): string | undefined {
-  // LECTURN_PORT is set by scripts/dev-runner.ts for every non-desktop mode.
   const port = Number(backendPort?.trim());
   if (Number.isInteger(port) && port > 0) {
     return `http://localhost:${port}/`;

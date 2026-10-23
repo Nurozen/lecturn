@@ -57,7 +57,6 @@ export type BrowserImportSource = typeof BrowserImportSource.Type;
 export const BrowserImportInput = Schema.Struct({
   sourceId: BrowserImportSourceId,
   sourceProfileDirectory: TrimmedNonEmptyString,
-  /** Lecturn profile the cookies are written into. */
   targetProfileId: BrowserProfileId,
 });
 export type BrowserImportInput = typeof BrowserImportInput.Type;

@@ -22,7 +22,6 @@ describe("default theme adoption", () => {
     expect(defaultThemeToApply({ ...BASE, appliedGeneration: generation })).toBe(null);
   });
 
-  // `lecturn theme set` of a theme this client already wears must still act, which
   it("applies the same theme again when the environment re-sets it", () => {
     const applied = defaultThemeGeneration(BASE.defaultTheme, "2026-08-28T00:00:00.000Z");
     const next = defaultThemeToApply({

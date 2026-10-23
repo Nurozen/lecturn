@@ -250,7 +250,6 @@ function getThemeEditorColorFamily(role: ThemeColorRole): ThemeEditorColorFamily
 type ThemeEditorColors = ThemeColors;
 type ThemeEditorColorsByAppearance = Record<ThemeAppearance, ThemeEditorColors>;
 
-// A draft with no source theme starts as the standard Lecturn look — the
 function getThemeEditorDefaults(appearance: ThemeAppearance): ThemeEditorColors {
   return { ...getStandardThemeColors(appearance) };
 }

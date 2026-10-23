@@ -4,7 +4,6 @@ import { isLocalLoopbackHost } from "@lecturn/shared/hostClassification";
 export interface WebhookAddress {
   readonly address: string;
   readonly copyable: boolean;
-  /** One line on who can reach `address`; null for a Lecturn Connect URL. */
   readonly note: string | null;
 }
 

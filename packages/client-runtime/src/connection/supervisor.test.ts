@@ -105,7 +105,6 @@ const LAN_ROUTE: ConnectionRoute = {
     }),
   ),
 };
-// LAN first, Lecturn Connect as the fallback.
 const LAN_THEN_RELAY_ENTRY: ConnectionCatalogEntry = {
   target: LAN_ROUTE.target,
   profile: LAN_ROUTE.profile,
@@ -2260,7 +2259,6 @@ describe("EnvironmentSupervisor routes", () => {
         const harness = yield* makeHarness({
           checkRoute: () => Effect.succeed("answered"),
           prepare: (_attempt, target) => Effect.succeed(preparedFor(target)),
-          // The LAN session fails 50 seconds into its snapshot; Lecturn Connect needs 40.
           ready: (attempt) =>
             attempt === 1
               ? Effect.sleep("50 seconds").pipe(Effect.andThen(Effect.fail(transient())))
@@ -2290,7 +2288,6 @@ describe("EnvironmentSupervisor routes", () => {
       const harness = yield* makeHarness({
         checkRoute: (route) =>
           Effect.succeed(route.target._tag === "BearerConnectionTarget" ? "silent" : "unchecked"),
-        // Signed out of Lecturn Connect; the LAN is up but its check timed out.
         prepare: (_attempt, target) =>
           target._tag === "RelayConnectionTarget"
             ? Effect.fail(blocked("Sign in to Lecturn Connect."))
@@ -2420,7 +2417,6 @@ describe("EnvironmentSupervisor routes", () => {
       );
       yield* Ref.set(lanAnswers, true);
       yield* TestClock.adjust("60 seconds");
-      // The switch lands back on Lecturn Connect.
       yield* awaitState(
         supervisor.state,
         (state) => state.phase === "connected" && state.generation === 2,

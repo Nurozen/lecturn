@@ -429,7 +429,6 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     });
   };
   const { onSendMessage, onChangeDraftMessage, onShowUsageLimits } = props;
-  // Lecturn owns /usage-limits only where Limits has data for the selected provider;
   const usageLimitsOffered =
     selectedProviderStatus !== null &&
     hasProviderUsageLimits(

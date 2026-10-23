@@ -92,7 +92,6 @@ const readField = (stdout: string, field: string) => {
   return line.slice(field.length + 1).trim();
 };
 
-// Stands in for the release's self-contained `lecturn` executable: the install
 const SERVER_ENTRY_SOURCE = '#!/bin/sh\necho "lecturn wsl runtime test server 0.0.0"\n';
 
 const makeDistroListSpawner = (result: { readonly stdout?: string; readonly exitCode?: number }) =>
@@ -278,7 +277,6 @@ describe("WSL runtime cache", () => {
     expect(readinessDefined).toBeLessThan(readyShortCircuit);
   });
 
-  // A swapped or half-written `lecturn` can still exist and even still answer
   it("re-hashes the executable against the digest the install recorded", () => {
     const script = buildWslRuntimeInstallScript(
       "/mnt/c/Program Files/Lecturn/wsl-runtime.tar.gz",
@@ -345,7 +343,6 @@ describe("WSL runtime cache", () => {
   it("never deletes a runtime another backend is running from", () => {
     const script = buildWslRuntimePruneScript("1.2.3/x64");
 
-    // The running backend's argv holds `<runtime>/lecturn`, so
     expect(script).toContain('  grep -qF -- "$1/" /proc/[0-9]*/cmdline 2>/dev/null');
     expect(script).toContain('  ! runtime_in_use "$candidate" || continue');
 

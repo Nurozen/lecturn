@@ -162,7 +162,6 @@ function authSupportError(detail: string) {
   return new AcpErrors.AcpTransportError({ detail, cause: undefined });
 }
 
-/** Recognizes native auth failures and interactive login blocked by Lecturn. */
 export function isAntigravitySignInRequiredError(error: unknown): boolean {
   return (
     (isAcpRequestError(error) && error.code === -32000) ||
@@ -536,7 +535,6 @@ export function makeAntigravityStdoutTransform(
     });
 }
 
-/** Receives native 1.1.1 sign-in URLs and Lecturn browser-helper URLs without logging stderr. */
 export function makeAntigravityStderrHandler(
   input: {
     readonly onAuthorizationUrl?: (

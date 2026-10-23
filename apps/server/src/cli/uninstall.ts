@@ -30,7 +30,6 @@ export class CliUninstallError extends Schema.TaggedError<CliUninstallError>()(
 
 export interface UninstallPlan {
   readonly service: boolean;
-  /** The `lecturn` launcher (symlink or `.cmd` shim) that points into this home's runtime tree. */
   readonly launcher: string | undefined;
   readonly runtimeDir: string | undefined;
   readonly userdataDir: string;

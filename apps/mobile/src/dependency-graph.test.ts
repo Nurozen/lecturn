@@ -7,8 +7,6 @@ import { describe, expect, it } from "vite-plus/test";
  *    they are the deliberate async escape hatch (e.g. composer-draft cleanup
  *    reaching `lib/attachmentUpload`), and Metro resolves them after both
  *    modules have initialized, so they cannot create an initialization cycle.
- * Runs in CI as part of the `Test` job (`vp run --filter '!lecturn' test` picks up
- * the `@lecturn/mobile` package test task).
  */
 
 const SOURCE_ROOT = __dirname;
@@ -233,10 +231,9 @@ describe("mobile dependency graph", () => {
       });
 
     const ceilings: ReadonlyArray<readonly [Layer, Layer, number, string]> = [
-      // (Lecturn's contextual-draft model is pure model logic and lives in lib/.)
       ["state", "features", 6, "state must not add imports from features"],
-      // Lecturn adds two: account tint reading known Connect accounts and the
-      // glass palette reading appearance preferences.
+      // Two of these are Lecturn's: account tint reading known Connect accounts and
+      // the glass palette reading appearance preferences.
       ["lib", "features", 9, "lib must not add imports from features"],
       // components -> features: mostly the appearance preferences provider
       // and the layout toolbar bridges.

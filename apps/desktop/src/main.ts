@@ -104,10 +104,6 @@ const layerDesktopEnvironment = Layer.unwrap(
   }),
 );
 
-// archive where a release publishes one for the remote's platform (no Node or
-// npm needed), and otherwise from the npm package through npx. Development
-// points the remote at a source checkout instead so the two sides can be
-// iterated together.
 const resolveDesktopSshCliRunner = (
   environment: DesktopEnvironment.DesktopEnvironment["Service"],
   settings: DesktopAppSettings.DesktopSettings,

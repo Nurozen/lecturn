@@ -28,10 +28,6 @@ import { StaveSpaceLock } from "./StaveSpaceLock.ts";
 import { StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
 import { sameManifestIncarnation } from "./staveIncarnation.ts";
 
-// One class per refusal so callers (and clients matching on `_tag`) can tell
-// them apart. Worktree, archived and transitioning refusals share a closed
-// error channel.
-
 export const StaveAdmissionIntent = Schema.Literals([
   "thread.create",
   "thread.meta.update",
@@ -48,6 +44,9 @@ export type StaveAdmissionIntent = typeof StaveAdmissionIntent.Type;
 export const STAVE_WORKTREE_FORBIDDEN_MESSAGE =
   "Stave spaces run threads in the space root; worktrees are not used";
 
+// One class per refusal so callers (and clients matching on `_tag`) can tell
+// them apart. Worktree, archived and transitioning refusals share a closed
+// error channel.
 export class StaveWorktreeForbiddenError extends Schema.TaggedError<StaveWorktreeForbiddenError>()(
   "StaveWorktreeForbiddenError",
   {

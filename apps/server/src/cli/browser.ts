@@ -40,8 +40,8 @@ const runStep = Effect.fn("browserSetup.runStep")(function* (
 });
 
 /**
- * The Lecturn home to check. Under `sudo` the process home is root's, so an
- * unspecified home falls back to the invoking user's `~/.lecturn`.
+ * Under `sudo` the process home is root's, so an unspecified home falls back to
+ * the invoking user's `~/.lecturn`.
  */
 const setupBaseDir = Effect.fn("browserSetup.baseDir")(function* (explicit: Option.Option<string>) {
   const env = yield* HostProcess.Environment;
@@ -67,7 +67,6 @@ const aptOffers = Effect.fn("browserSetup.aptOffers")(function* (name: string) {
   return candidate !== undefined && candidate !== "(none)";
 });
 
-/** The installed browser in this Lecturn home, if any, to check its libraries. */
 const installedBrowser = Effect.fn("browserSetup.installedBrowser")(function* (baseDir: string) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;

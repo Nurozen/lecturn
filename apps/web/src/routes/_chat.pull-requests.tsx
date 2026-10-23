@@ -1747,8 +1747,6 @@ function PullRequestsRouteView() {
                         environmentLabels.get(entry.environmentId) !== undefined
                           ? { environmentLabel: environmentLabels.get(entry.environmentId)! }
                           : {})}
-                        // Ten is the floor the ranking gives a row whose own fields say nothing
-                        // about the search: the host matched something this row cannot show.
                         matchedElsewhere={
                           typedParsed.text.length > 0 &&
                           scorePullRequestMatch(entry, typedParsed.text) <= MATCHED_ELSEWHERE_SCORE

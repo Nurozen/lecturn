@@ -407,7 +407,7 @@ export const make = Effect.gen(function* () {
       return false;
     }).pipe(Effect.repeat({ until: (connected) => connected }));
 
-  // Only an explicit 503 counts: a failed request says nothing about the
+  // Only an explicit 503 counts: a failed request says nothing about the tunnel.
   const watchConnectorReadiness = (connector: ActiveConnector) =>
     Effect.gen(function* () {
       const readyUrl = `http://${yield* Deferred.await(connector.metricsAddress)}/ready`;

@@ -5,10 +5,8 @@ import { ThreadEnvMode, WorktreeSubmodules } from "./environment.ts";
 import { ProjectScriptIcon } from "./project.ts";
 import type { ProjectScopedServerSettingKey, ServerSettings } from "./settings.ts";
 
-/** File name of the checked-in Lecturn project file, resolved at the workspace root. */
 export const LECTURN_PROJECT_FILE_NAME = "lecturn.json";
 
-/** Public URL of the published JSON Schema for {@link LecturnProjectFile}. */
 export const LECTURN_PROJECT_FILE_SCHEMA_URL =
   "https://lecturn.cloudgatherer.net/schema/lecturn.json";
 

@@ -285,7 +285,6 @@ export function unpublishPrimaryEnvironmentBeforeSignOut(input: {
   });
 }
 
-// independently of Lecturn Connect while clients reach the environment out of band.
 export type CloudLinkMode = "managed" | "publish_only" | "decisions";
 
 const PUBLISH_ONLY_PROVIDER_KIND = "manual" satisfies RelayManagedEndpointProviderKind;

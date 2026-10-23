@@ -130,7 +130,6 @@ function makeRecordingCreateHost(
       entries.push({ type, ...(label === undefined ? {} : { label }), frame });
     };
     record("expect_outbound", { type: "host_start", args });
-    // The binary named by LECTURN_MUSE_BIN, so the recorded version matches what ran.
     const child = NodeChildProcess.spawn(museStart.command, [...museStart.args, ...args], {
       cwd: options.cwd,
       env: options.environment ?? makeMuseEnvironment(),

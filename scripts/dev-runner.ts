@@ -298,8 +298,6 @@ export function createDevRunnerEnv({
   return Effect.gen(function* () {
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
     const webPort = BASE_WEB_PORT + webOffset;
-    // Precedence (--home-dir > worktree .lecturn > ambient LECTURN_HOME) is resolved
-    // by the caller; an unset lecturnHome here genuinely means "use the default".
     const configuredBaseDir = lecturnHome?.trim() || undefined;
     const resolvedBaseDir = yield* resolveBaseDir(configuredBaseDir);
     const isDesktopMode = mode === "dev:desktop";

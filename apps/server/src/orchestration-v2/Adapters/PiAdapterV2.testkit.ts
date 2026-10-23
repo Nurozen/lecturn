@@ -112,7 +112,6 @@ function replayValueMatches(expected: unknown, actual: unknown): boolean {
   return Object.is(expected, actual);
 }
 
-/** PiRpc numbers its correlated requests `lecturn-N` per process. */
 const ADAPTER_REQUEST_ID = /^lecturn-\d+$/u;
 
 function adapterRequestId(frame: unknown): string | undefined {

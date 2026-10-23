@@ -1,5 +1,3 @@
-// This file mostly exists because we want dev mode to say "Lecturn (Dev)" instead of "electron"
-
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeModule from "node:module";

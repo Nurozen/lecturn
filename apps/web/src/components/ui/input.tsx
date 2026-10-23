@@ -7,10 +7,7 @@ import { cn } from "~/lib/utils";
 
 type InputProps = Omit<InputPrimitive.Props & React.RefAttributes<HTMLInputElement>, "size"> & {
   size?: "sm" | "compact" | "default" | "lg" | number;
-  /**
-   * "mono": monospace with tabular digits, for paths, commands, colors and numbers.
-   * "touch": 16px text at every width, so phone browsers do not zoom in on focus.
-   */
+  /** "touch": 16px text at every width, so phone browsers do not zoom in on focus. */
   font?: "default" | "mono" | "touch";
   unstyled?: boolean;
   nativeInput?: boolean;

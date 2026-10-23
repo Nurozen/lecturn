@@ -226,7 +226,6 @@ interface PendingRequest {
   request: OrchestrationV2RuntimeRequest;
   node: OrchestrationV2ExecutionNode;
   item: OrchestrationV2TurnItem;
-  /** What Lecturn answered, recorded on the request once Muse confirms it. */
   response?: Pick<OrchestrationV2RuntimeRequest, "decision" | "answers">;
 }
 
@@ -338,7 +337,6 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
       const childrenByItemId = new Map<string, ChildContext>();
       const agentTitles = new Map<string, string>();
       const finishedBackground: Array<BackgroundWorkReport> = [];
-      // A turn Muse started on its own, held until the continuation run Lecturn opens for it takes it.
       let wake:
         | { readonly nativeId: string; readonly events: Array<[string, unknown]> }
         | undefined;
@@ -1035,7 +1033,6 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
       });
       const owns = (turn: ActiveTurn, turnId: string) =>
         turnId === turn.nativeId || turn.joined.has(turnId);
-      /** Sends Lecturn's decision for a pending approval to Muse. */
       const decideApproval = Effect.fnUntraced(function* (
         entry: PendingRequest,
         decision: ProviderApprovalDecision | undefined,
@@ -1235,7 +1232,6 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
               (candidate) => candidate.request.nativeRequestRef?.nativeId === id,
             );
             if (entry) {
-              // An approval settled outside Lecturn still shows Muse's own decision.
               const native =
                 method === "approval/resolved" && typeof params.decision === "string"
                   ? museApprovalDecision({ decision: params.decision, scope: "once" })
@@ -2011,7 +2007,6 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
           }),
         );
       });
-      // Only messages are read back; Lecturn owns turn and item history.
       const snapshot = Effect.fnUntraced(function* (
         current: OrchestrationV2ProviderThread,
       ): Effect.fn.Return<

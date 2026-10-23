@@ -864,11 +864,6 @@ const enrichProjectShells = Effect.fn("ws.orchestrationV2.enrichProjectShells")(
           Effect.forEach(
             decorated,
             (project) =>
-              // Non-blocking: emit with cached identity (or null) and schedule
-              // background resolution. subscribeChanges is attached before
-              // loadSnapshot, so later identity completions push refreshed
-              // shells for multi-env grouping without blocking the initial
-              // snapshot or completion marker on slow git probes.
               projectEnrichment.getAvailable(project.workspaceRoot).pipe(
                 Effect.map((enrichment) => ({
                   project: {
@@ -1359,9 +1354,6 @@ const makeWsRpcHandlers = (
     const providerSessionsV2 = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const mcpAppRequests = yield* McpAppRequests.McpAppRequests;
     const analytics = yield* AnalyticsService.AnalyticsService;
-    // Client-origin attribution (#7774): every thread/turn the connecting
-    // client starts is credited to its surface + app version. Best-effort:
-    // attribution must never fail the user's command.
     const originProps = clientAnalyticsProps;
     const recordClientCommandAnalytics = (command: OrchestrationV2Command) => {
       switch (command.type) {
@@ -1501,8 +1493,6 @@ const makeWsRpcHandlers = (
         : {
             tasks: result.tasks.map(({ webhook: _webhook, ...task }) => task),
           };
-    // RpcScopeAuthorization checks each RPC's declared scope before its handler
-    // runs. This covers the one RPC whose scope depends on its input.
     const authorizeEffect = <A, E, R>(
       requiredScope: AuthEnvironmentScope,
       effect: Effect.Effect<A, E, R>,
@@ -1883,8 +1873,6 @@ const makeWsRpcHandlers = (
           issues: keybindingsConfig.issues,
           providers,
           ...editorConfig,
-          // Same discovery-with-timeout treatment as editors: a slow probe
-          // must not stall server.getConfig, so it degrades to no targets.
           remoteOpenTargets: discovered.remoteOpenTargets,
           directEndpoints: resolvedDirectEndpoints,
           observability: {
@@ -2120,7 +2108,6 @@ const makeWsRpcHandlers = (
               Effect.andThen(
                 startup
                   .enqueueCommand(
-                    // A retry also restarts the preparation work the launch owns.
                     (command.type === "prepared-run.retry"
                       ? threadLaunch.retryPreparation(command)
                       : ThreadMessageIntake.dispatchCommand(
@@ -2486,8 +2473,6 @@ const makeWsRpcHandlers = (
         ),
       [WS_METHODS.serverRefreshProviders]: (input) =>
         Effect.gen(function* () {
-          // Only explicit catalog refreshes bypass Lecturn's caches. Workspace
-          // discovery and background status checks retain their timers.
           if (input.refreshModels) {
             yield* modelManifest.forceRefresh;
             const instances = yield* providerInstances.listInstances;
@@ -2508,9 +2493,7 @@ const makeWsRpcHandlers = (
               { concurrency: "unbounded", discard: true },
             );
           }
-          // An untargeted refresh is "re-read everything's status", which
-          // includes quota from configured usage-limit sources. Awaited,
-          // not forked: the RPC scope closes on return and would
+          // Awaited, not forked: the RPC scope closes on return and would
           // interrupt a fork before the hub answered.
           if (input.instanceId === undefined) {
             yield* usageLimitSources.refresh;
@@ -2611,7 +2594,6 @@ const makeWsRpcHandlers = (
         Effect.gen(function* () {
           if ("sourceId" in input) return yield* usageLimitSources.consumeResetCredit(input);
           const instance = yield* providerInstances.getInstance(input.instanceId);
-          // A disabled instance must not spend anything on its account.
           if (instance === undefined || !instance.enabled) {
             return yield* new ProviderSetupError({
               instanceId: input.instanceId,
@@ -2914,9 +2896,6 @@ const makeWsRpcHandlers = (
       [WS_METHODS.subscribeProjectClones]: () => projectCloneTracker.stream,
       [WS_METHODS.sourceControlPublishRepository]: (input) =>
         sourceControlRepositories.publishRepository(input).pipe(
-          // A new remote can change the cached identity. Only the `cwd` entry
-          // refreshes, so after a publish from a linked worktree the project
-          // root entry waits for its TTL.
           Effect.tap(() => repositoryIdentityResolver.resolve(input.cwd, { refresh: true })),
           Effect.tap(() => refreshGitStatus(input.cwd)),
         ),
@@ -3015,20 +2994,16 @@ const makeWsRpcHandlers = (
       [WS_METHODS.assetsCreateUrl]: (input) =>
         Effect.gen(function* () {
           const path = yield* Path.Path;
-          // An absolute media path can be linked from a thread on another environment.
           if (
             input.resource._tag === "attachment" ||
             input.resource._tag === "native-app-icon" ||
             input.resource._tag === "tool-output-image" ||
-            // GitHub media names the repository it authenticates through itself.
             input.resource._tag === "github-media" ||
             (input.resource._tag === "media-file" && path.isAbsolute(input.resource.path))
           ) {
             return yield* issueAssetUrl({ resource: input.resource });
           }
           if (input.resource._tag === "draft-workspace-file") {
-            // A project draft names its workspace directly; there is no
-            // thread to resolve one from.
             return yield* issueAssetUrl({
               resource: input.resource,
               workspaceRoot: input.resource.cwd,
@@ -3303,8 +3278,6 @@ const makeWsRpcHandlers = (
               // still pairs up and reaches the client.
               Stream.concat(Stream.fromEffect(providerRegistry.getProviders), providerChanges),
               usageLimitSources.streamChanges.pipe(
-                // Quota updates already have their own stream. Republish the model
-                // catalog only when the set of providers offered the command changes.
                 Stream.changesWith(usageLimitsCommand ? sameUsageLimitCommandCoverage : () => true),
               ),
               (providers, sources) =>
@@ -3326,9 +3299,6 @@ const makeWsRpcHandlers = (
               })),
               Stream.debounce(Duration.millis(PROVIDER_STATUS_DEBOUNCE_MS)),
             );
-            // The only source of published themes: the stream emits the
-            // current set before any change, so the snapshot carrying it too
-            // would just send every client the same array twice per connect.
             // Gated on the subscriber's capability flag because an
             // already-shipped client decodes this stream against the old
             // event union and its whole config subscription dies on an

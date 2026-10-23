@@ -468,7 +468,6 @@ describe("findProjectForChangeRequest", () => {
     ({ id: "p1", workspaceRoot: "/repo", repositoryIdentity: identity }) as never;
 
   it("matches a nested GitLab group by the whole path below the host", () => {
-    // two-segment owner/name form would look for `nurozen/lecturn` and find nothing.
     const projects = [
       project({
         canonicalKey: "gitlab.com/nurozen/platform/lecturn",

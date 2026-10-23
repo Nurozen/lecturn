@@ -145,6 +145,11 @@ export class EnvironmentRegistry extends Context.Service<
       | PlatformEnvironmentRemovalError
       | ConnectionBlockedError
     >;
+    /**
+     * Returns the IDs of environments removed because Lecturn Connect was their
+     * last route. Without a scope every relay route goes; with one, only routes
+     * tagged to that account.
+     */
     readonly removeRelayEnvironments: (scope?: {
       readonly accountId: string;
     }) => Effect.Effect<

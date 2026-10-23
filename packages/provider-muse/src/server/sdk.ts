@@ -150,7 +150,6 @@ export function museServeArgs(
   return args;
 }
 
-/** What Lecturn sends in MSP `initialize`; only full hosts ask for session MCP servers. */
 export function museInitializeParams(readOnly = false) {
   return {
     clientInfo: { name: "lecturn", title: "Lecturn", version: "1" },

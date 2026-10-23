@@ -26,7 +26,6 @@ export interface SignalExport {
   readonly exportIntervalMs: number;
 }
 
-/** What Lecturn exports with when nothing configured a signal. */
 export const DEFAULT_SIGNAL_EXPORT: SignalExport = {
   protocol: "http/json",
   headers: undefined,

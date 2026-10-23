@@ -39,7 +39,6 @@ const mintKeys = NodeCrypto.generateKeyPairSync("ed25519", {
   privateKeyEncoding: { format: "pem", type: "pkcs8" },
   publicKeyEncoding: { format: "pem", type: "spki" },
 });
-/** The secrets a Lecturn Connect-linked environment holds, keyed by name. */
 const linkedSecrets: ReadonlyMap<string, string> = new Map([
   [CLOUD_MINT_PUBLIC_KEY, mintKeys.publicKey],
   [RELAY_ISSUER_SECRET, relayIssuer],

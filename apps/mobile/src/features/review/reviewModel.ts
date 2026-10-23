@@ -470,10 +470,7 @@ export function buildReviewSectionItems(input: {
   return [...turnItems, ...scopedGitItems];
 }
 
-/**
- * Prefers Changes, then the first section (a turn when the project is not a git repo).
- * Matches by kind: Lecturn scopes git section ids to the Stave checkout (`gitCwd`).
- */
+/** Matches by kind: Lecturn scopes git section ids to the Stave checkout (`gitCwd`). */
 export function getDefaultReviewSectionId(
   sections: ReadonlyArray<ReviewSectionItem>,
 ): string | null {

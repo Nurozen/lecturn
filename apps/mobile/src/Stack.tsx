@@ -631,7 +631,6 @@ function RootStackLayout(props: {
   const pathname = path.startsWith("/") ? path : `/${path}`;
   const workspaceLocation = workspaceLocationFromState(props.state);
   useAgentNotificationNavigation(workspaceLocation.pathname);
-  // Presents the Lecturn Connect onboarding sheet after an in-session sign-in.
   useConnectOnboardingNavigation();
   useAppShortcuts(props.state);
   useEffect(() => {

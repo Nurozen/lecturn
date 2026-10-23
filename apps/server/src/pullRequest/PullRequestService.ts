@@ -992,8 +992,6 @@ export const make = Effect.gen(function* () {
                 new PullRequestUnavailableError({ reason: "provider-unsupported" }),
               );
             }
-            // The repository travels through the client, so it is checked against the project's
-            // own remotes rather than being handed to a provider verbatim.
             return Effect.fail(
               new PullRequestOperationError({
                 operation: "resolveRepository",
@@ -1040,9 +1038,6 @@ export const make = Effect.gen(function* () {
                 onHost.find((candidate) => candidate.repositoryKey === null);
               if (route === undefined) {
                 return Effect.gen(function* () {
-                  // These providers target the repository explicitly and authenticate by host;
-                  // a linked PR in a non-repository project still needs its snapshot refreshed.
-                  // GitLab still selects its host from the checkout or CLI configuration.
                   const provider = ["github.com", "bitbucket.org", "codeberg.org"].includes(host)
                     ? detectSourceControlProviderFromRemoteUrl(`https://${host}/${repository}.git`)
                     : null;
@@ -2074,8 +2069,6 @@ export const make = Effect.gen(function* () {
               }),
             );
           }
-          // The surface hides what a host cannot do, and this refuses it as well: a request that
-          // reached here anyway must not be handed to a provider that never claimed the action.
           if (!project.api.capabilities.actions.includes(input.action)) {
             return Effect.fail(
               new PullRequestOperationError({
@@ -2098,8 +2091,6 @@ export const make = Effect.gen(function* () {
               }),
             );
           }
-          // The same for the way a stale branch is brought up to date: a host that only merges
-          // must not be asked to rebase and left to pick something else.
           if (
             input.updateMethod !== undefined &&
             !(project.api.capabilities.updateMethods ?? []).includes(input.updateMethod)
@@ -2111,9 +2102,6 @@ export const make = Effect.gen(function* () {
               }),
             );
           }
-          // What the host can do and what this account may ask of it are two questions, and both
-          // have to say yes. The second is asked last, because it costs a request and the checks
-          // above do not.
           const operation = viewerPermissionsOf(
             project,
             input,
@@ -2193,8 +2181,6 @@ export const make = Effect.gen(function* () {
                           : { updateMethod: input.updateMethod }),
                       })
                       .pipe(
-                        // Once the authorized provider action starts, a failure may leave partial
-                        // remote updates. Validation and permission failures above changed nothing.
                         Effect.ensuring(
                           input.stackNumber === undefined
                             ? Effect.void

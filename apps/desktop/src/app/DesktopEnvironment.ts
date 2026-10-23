@@ -57,7 +57,6 @@ export class DesktopEnvironment extends Context.Service<
     readonly appRoot: string;
     readonly serverRoot: string;
     readonly backendEntryPath: string;
-    // Built web client the packaged renderer is served from over lecturn://app.
     readonly clientAssetsDir: string;
     readonly backendCwd: string;
     readonly preloadPath: string;

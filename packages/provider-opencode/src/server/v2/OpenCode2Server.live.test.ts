@@ -24,7 +24,6 @@ import * as OpenCode2Server from "./OpenCode2Server.ts";
 
 const binaryPath = process.env.OPENCODE2_BIN;
 
-// A negative pid probes the whole process group, which Lecturn stops as one unit.
 const isAlive = (pid: number) => {
   try {
     process.kill(pid, 0);
@@ -97,7 +96,6 @@ describe.runIf(binaryPath !== undefined)("OpenCode2Server live", () => {
           XDG_DATA_HOME: path.join(root, "data"),
           XDG_STATE_HOME: path.join(root, "state"),
           XDG_CACHE_HOME: path.join(root, "cache"),
-          // Ignored: the Lecturn password is the only one the server sees.
           OPENCODE_SERVER_PASSWORD: "ambient-password",
         };
 

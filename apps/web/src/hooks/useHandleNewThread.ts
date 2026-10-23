@@ -162,10 +162,6 @@ export function useNewThreadHandler() {
             currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
           destinationDraftId,
         });
-      // The shared resolver owns the priority order. The lecturn.json read is
-      // skipped entirely when a higher-priority source decides (a Stave
-      // space forces its mode, then the project and environment settings),
-      // and its query atom caches per project after the first call.
       const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
         const { forcedMode } = resolveNewThreadEnvModeSources(project);
         if (forcedMode !== undefined) return forcedMode;

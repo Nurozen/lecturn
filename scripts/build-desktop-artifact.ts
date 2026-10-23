@@ -3070,7 +3070,6 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     };
     buildConfig.deb = {
       // FPM runs outside the staged app directory, so source paths must be absolute.
-      // AppStream consumers associate this metadata with our lecturn.desktop entry.
       fpm: [
         `${path.join(repoRoot, "apps/desktop/resources/linux/com.cloudgatherer.lecturn.metainfo.xml")}=/usr/share/metainfo/com.cloudgatherer.lecturn.metainfo.xml`,
         `${path.join(repoRoot, "LICENSE")}=/usr/share/doc/lecturn/copyright`,

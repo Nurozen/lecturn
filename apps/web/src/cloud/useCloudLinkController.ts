@@ -62,6 +62,10 @@ function isManagedTunnelActive(
   );
 }
 
+/**
+ * Acts as `accountId`, with that account's own token, or as Clerk's active
+ * account when none is given. `onSelectAccount` is the surface's picker.
+ */
 export function useCloudLinkController(
   options: {
     readonly accountId?: string | null | undefined;
@@ -145,7 +149,6 @@ export function useCloudLinkController(
   const linkData = primaryCloudLinkState.data;
   const linkRevoked = linkData?.linkRevoked ?? false;
   const managedTunnelActive = linkData ? isManagedTunnelActive(linkData, relayProviderKind) : false;
-  // Lecturn Connect on relinks as managed, which repairs it.
   const managedTunnelOutOfSync =
     linkData !== null && !managedTunnelActive && isManagedTunnelActive(linkData, undefined);
   const publishAgentActivity = primaryCloudLinkState.data?.publishAgentActivity ?? false;

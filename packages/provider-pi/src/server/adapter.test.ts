@@ -86,7 +86,6 @@ interface FakePi {
   readonly queueMessages: (data: unknown) => void;
   readonly vetoNextSwitch: () => void;
   readonly queueState: (data: Record<string, unknown>) => void;
-  /** Change Pi's streaming state before its agent_start event reaches Lecturn. */
   readonly setStreaming: (streaming: boolean) => void;
   readonly deferNextState: () => void;
   readonly resolveDeferredState: (data: unknown) => Effect.Effect<void>;

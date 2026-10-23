@@ -109,7 +109,6 @@ it.effect("dispatches exactly the rendered prompt and logs the delivery", () =>
       assert.equal(task.nextRunAt, null);
       assert.isDefined(task.webhook);
       assert.isTrue(task.webhook!.path.startsWith("/api/hooks/scheduled-task%3Ahook/"));
-      // Not linked to Lecturn Connect in tests.
       assert.equal(task.webhook!.url, null);
 
       const result = yield* service.triggerWebhook(requestFor(task));
@@ -806,7 +805,6 @@ it.effect("a signature without any secret is refused", () =>
 const signatureFor = (secret: string) =>
   `sha256=${NodeCrypto.createHmac("sha256", secret).update(pullRequestBody).digest("hex")}`;
 
-/** Count recorded by `lecturn_webhook_deliveries_total` for one outcome and source. */
 const deliveriesCounted = (outcome: string, source: "relay" | "direct") =>
   Metric.snapshot.pipe(
     Effect.map((snapshots) => {

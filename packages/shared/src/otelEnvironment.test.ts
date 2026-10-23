@@ -40,7 +40,6 @@ describe("OtelEnvironment", () => {
       disabled: false,
       warnings: [specIgnored("yes")],
     },
-    // LECTURN_OTEL_SDK_DISABLED takes Config.Boolean's values, case-insensitively.
     {
       name: "lecturn 1",
       env: { LECTURN_OTEL_SDK_DISABLED: "1" },

@@ -530,8 +530,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       : workingLabel) ?? (isUnread ? DONE_STATUS_LABEL : undefined);
   const visibleStatusLabel = status === "working" ? undefined : statusLabel;
   const recede = shouldRecedeThreadRow({ status, selected });
-  // tail sorts by) so a minute tick only re-renders rows that draw it. The
-  // item blanks it for status-labelled cards; Lecturn hides the "Working"
+  // The item blanks the time for status-labelled cards; Lecturn hides the "Working"
   // label behind the active border, so working cards draw their activity time.
   const timeLabel =
     props.timeLabel === "" && status === "working"
@@ -923,11 +922,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       </View>
       {!props.nested ? (
         <Text
-          className={cn(
-            "mt-1 text-base text-foreground",
-            // Background work recedes to regular weight, matching web.
-            !recede && "font-lecturn-medium",
-          )}
+          className={cn("mt-1 text-base text-foreground", !recede && "font-lecturn-medium")}
           numberOfLines={2}
         >
           {thread.title}
@@ -1089,7 +1084,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         style={{ borderRadius: SIDEBAR_V2_ROW_RADIUS, borderCurve: "continuous" }}
       >
         <GlassCard tone={selected ? "accent" : "default"} radius={SIDEBAR_V2_ROW_RADIUS}>
-          {/* Settled history recedes: dimmed favicon + muted title. */}
           <View
             className={cn(
               "min-h-[44px] flex-row items-center gap-2.5 py-2",

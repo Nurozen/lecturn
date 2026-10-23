@@ -113,10 +113,7 @@ export function presentThreadLinkedPullRequests(
   };
 }
 
-/**
- * Only the array capability replaces legacy references with persisted snapshots.
- * Branch fallback and legacy references still require one editable Stave checkout.
- */
+/** Branch fallback and legacy references still require one editable Stave checkout. */
 export function resolveThreadPrSource(
   thread: Pick<EnvironmentThreadShell, "pullRequests" | "linkedPullRequest" | "branchPullRequest">,
   capabilities:

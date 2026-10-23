@@ -231,7 +231,6 @@ type ProviderSessionEventSignal =
 export interface ProviderSessionManagerV2LayerOptions {
   readonly idleTimeoutMs?: number;
   readonly maxIdlePinMs?: number;
-  /** Test replay harnesses can omit Lecturn's MCP server from provider protocol fixtures. */
   readonly configureMcp?: boolean;
 }
 

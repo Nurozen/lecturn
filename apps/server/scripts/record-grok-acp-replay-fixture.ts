@@ -37,7 +37,6 @@ const wallClock = Clock.Clock.defaultValue();
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
-// Broadcasts Lecturn never reads: account tier, marketing, and client UI settings.
 const DROPPED_INBOUND_METHODS = new Set(["_x.ai/settings/update", "_x.ai/announcements/update"]);
 const HOME_PLACEHOLDER = "/home/grok-replay";
 
@@ -210,7 +209,6 @@ function wireToEntries(wire: ReadonlyArray<WireMessage>): {
 
 const LECTURN_INSTRUCTIONS_BODY = /<lecturn_instructions>\n[\s\S]*?\n<\/lecturn_instructions>/u;
 
-/** Replaces Lecturn-owned request content so prompt wording changes do not invalidate recordings. */
 function normalizeOutboundFrame(frame: Record<string, unknown>, runtimeInstructions: string) {
   const params = isRecord(frame.params) ? frame.params : undefined;
   if (params === undefined) return frame;

@@ -111,7 +111,6 @@ export class DesktopWslEnvironment extends Context.Service<
     ) => Effect.Effect<PrepareWslRuntimeResult>;
     readonly pruneRuntimes: (distro: string | null, runtimeId: string) => Effect.Effect<void>;
     readonly invalidateRuntime: (distro: string | null, runtimeId: string) => Effect.Effect<void>;
-    // Proves a staged self-contained runtime can run (`<root>/lecturn --version`)
     readonly probeRuntime: (
       distro: string | null,
       linuxAppRoot: string,
@@ -257,7 +256,6 @@ const runWslShell = (
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 
-// Holds the sha256 of the runtime's `lecturn` executable, written when the install
 const WSL_RUNTIME_READY_MARKER = ".lecturn-wsl-runtime-ready";
 const WSL_RUNTIME_SELECTED_MARKER = ".lecturn-wsl-runtime-selected";
 const WSL_RUNTIME_SELECTION_GRACE_MINUTES = 5;
@@ -275,8 +273,6 @@ export const buildWslRuntimeInstallScript = (
     'runtime_parent="$HOME/.lecturn/wsl-runtime"',
     `runtime_root="$runtime_parent/${safeRuntimeId}"`,
     `ready_marker="$runtime_root/${WSL_RUNTIME_READY_MARKER}"`,
-    // The runtime is a self-contained `lecturn` executable with Node inside, so the
-    // use: the file is executable and `lecturn --version` exits 0. That covers the
     "runtime_entry_runs() {",
     '  [ -x "$1/lecturn" ] && "$1/lecturn" --version >/dev/null 2>&1',
     "}",
@@ -339,8 +335,6 @@ export const buildWslRuntimeInstallScript = (
     `runtime_tmp=$(mktemp -d "$runtime_parent/.${safeRuntimeId}.tmp.XXXXXX")`,
     'cleanup_runtime_install() { rm -rf "$runtime_tmp"; }',
     "trap cleanup_runtime_install EXIT",
-    // The release archive has one top-level `lecturn-<version>-linux-<arch>/`
-    // directory; strip it so the executable lands at `$runtime_root/lecturn`.
     `tar -xzf ${shellQuote(linuxArchivePath)} -C "$runtime_tmp" --strip-components=1`,
     // The archive carries the Linux Stave CLI at stave/<platformKey>/stave.
     // Restore its exec bit in case the archive passed through a host that

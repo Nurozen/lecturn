@@ -95,7 +95,6 @@ import {
 import { clearThreadComposerError, setThreadComposerError } from "./thread-composer-error";
 import { useRemoteConnectionStatus } from "./use-remote-environment-registry";
 
-// retry; it goes to the filterable `[lecturn-thread-outbox]` debug log instead.
 const threadOutboxDebug = createDebugLogger("thread-outbox");
 
 function isRpcClientDecodeDefect(error: unknown): boolean {

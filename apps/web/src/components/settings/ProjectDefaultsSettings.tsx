@@ -88,7 +88,6 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   // A Stave space's repos are already worktrees, so every checkout in the
   // project runs threads in the space root and the workspace default is fixed.
   const isStaveGroup = isProjectScope && scope.members.some((member) => isStaveProject(member));
-  // the checkout's lecturn.json, and a null file here only fills the built-in.
   const effective = target
     ? resolveProjectSettings(target.settings, null, null, null).settings
     : null;

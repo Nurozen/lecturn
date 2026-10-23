@@ -82,7 +82,6 @@ function removeRouteMetadata(
     ...document,
     profiles: document.profiles.filter((value) => !connectionIds.has(value.connectionId)),
     credentials: document.credentials.filter((value) => !connectionIds.has(value.connectionId)),
-    // The DPoP token belongs to the Lecturn Connect route.
     remoteDpopTokens: relayRemoved
       ? document.remoteDpopTokens.filter((value) => !environmentIds.has(value.environmentId))
       : document.remoteDpopTokens,

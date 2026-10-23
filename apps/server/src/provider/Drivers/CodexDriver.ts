@@ -309,7 +309,6 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv, Path.Pat
           binaryPath: effectiveConfig.binaryPath,
           homePath: effectiveConfig.homePath,
           launchArgs: resolveCodexLaunchArgs(effectiveConfig.launchArgs, processEnv),
-          // Home-level requests; any directory serves, same as the status probe.
           cwd: process.cwd(),
           environment: processEnv,
         }),

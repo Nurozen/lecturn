@@ -48,7 +48,6 @@ export const WorktreeSetupSnapshot = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   baseRef: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
-  /** Display name plus command of the setup script from lecturn.json, when one runs. */
   setupScript: Schema.NullOr(
     Schema.Struct({
       name: TrimmedNonEmptyString,

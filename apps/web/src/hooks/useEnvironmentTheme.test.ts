@@ -76,7 +76,6 @@ describe("environment themes", () => {
     expect(theme.variants?.light?.canvas).not.toBe(theme.colors.canvas);
   });
 
-  // A published `lecturn-iris.json` would show its palette on a card that applies
   it("drops published themes with reserved ids", () => {
     const definitions = publishedThemeDefinitions([
       NIGHTFALL_THEME,

@@ -26,7 +26,6 @@ const writeExecutable = (path: string, content: string) => {
   NodeFS.writeFileSync(path, content, { mode: 0o755 });
 };
 
-/** Writes the launcher for `target` at `<root>/bin/lecturn`, with `<root>/home` as its Lecturn home. */
 const writeShim = (root: string, target: CliShimTarget) => {
   const shim = NodePath.join(root, "bin", "lecturn");
   writeExecutable(shim, renderCliShim({ target, shimPath: shim, lecturnHome: `${root}/home` }));

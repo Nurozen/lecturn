@@ -81,7 +81,6 @@ export interface ScopedSettingsTarget {
 export function resolveScopedSettingsTargets(
   scope: ResolvedSettingsScope,
   connectedEnvironments: readonly ScopedSettingsEnvironment[],
-  // Each member's decoded lecturn.json, keyed by physical project key, once read.
   // A member absent here has no file tier yet; null is a missing or invalid file.
   projectFiles?: ReadonlyMap<string, LecturnProjectFile | null>,
 ): readonly ScopedSettingsTarget[] {

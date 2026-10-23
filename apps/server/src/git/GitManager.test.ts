@@ -1364,12 +1364,10 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         );
         expect(reread?.number).toBe(236);
 
-        // Lecturn's own git actions end in invalidateStatus.
         yield* runGit(repoDir, ["branch", "--set-upstream-to=origin/feature/moving-upstream"]);
         yield* manager.invalidateStatus(repoDir);
         expect((yield* lookup)?.number).toBe(235);
 
-        // A change made outside Lecturn shows once the remembered state expires.
         yield* runGit(repoDir, ["branch", "--set-upstream-to=origin/feature/other-head"]);
         yield* TestClock.adjust("5 minutes");
         expect((yield* lookup)?.number).toBe(236);

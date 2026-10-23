@@ -892,8 +892,6 @@ describe("terminatePosixOwnedProcessTree", () => {
           }),
         );
 
-        // PID 110 morphs to a new identity under the owned root and never exits, so
-        // teardown fails closed after re-admitting and re-signalling the live child.
         expect(Exit.isFailure(result)).toBe(true);
         expect(fixture.processes.get(110)).toEqual(reused);
         expect(

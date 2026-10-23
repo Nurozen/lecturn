@@ -5,7 +5,6 @@ import * as Schema from "effect/Schema";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-/** The subcommand that sets the host up; callers render it, with `sudo`, for how Lecturn was launched. */
 export const SETUP_SUBCOMMAND = "browser setup";
 
 export const NO_SANDBOX_SIGNATURE = "No usable sandbox";

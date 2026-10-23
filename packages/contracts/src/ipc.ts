@@ -317,10 +317,8 @@ export const DesktopUpdateStateSchema = Schema.Struct({
   notAppliedVersion: Schema.optionalKey(Schema.String),
 });
 
-/** The desktop app's `lecturn` command on PATH, managed from Settings. */
 export const DesktopCliCommandStateSchema = Schema.Struct({
   supported: Schema.Boolean,
-  /** The `lecturn` the app installed, or null when it is not installed. */
   installedPath: Schema.NullOr(Schema.String),
   onPath: Schema.Boolean,
   shadowedBy: Schema.optionalKey(Schema.String),
@@ -665,7 +663,6 @@ export interface DesktopPreviewRecordingInputEvent {
 }
 
 export interface DesktopPreviewWebviewConfig {
-  /** `persist:lecturn-preview` (or whatever the desktop chose). */
   partition: string;
   /**
    * Encodes the security posture (sandboxed but contextIsolation off so the
@@ -1256,7 +1253,6 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
-  /** Settings → `lecturn` command. Optional: older desktop builds lack it. */
   cliCommand?: {
     getState: () => Promise<DesktopCliCommandState>;
     install: () => Promise<DesktopCliCommandState>;
@@ -1266,7 +1262,6 @@ export interface DesktopBridge {
     setReady: (ready: boolean) => Promise<void>;
     onOpen: (listener: (url: string) => void) => () => void;
   };
-  /** Present when the desktop shell accepts `lecturn app` activation requests. */
   appActivation?: {
     setReady: (ready: boolean) => Promise<void>;
     complete: (response: DesktopAppActivationResponse) => Promise<void>;

@@ -417,7 +417,6 @@ function resolveLecturnMcpToolName(value: string): string | null {
   return longest;
 }
 
-/** The bare Lecturn tool name (`html_render`) for any provider's spelling of it. */
 export function resolveLecturnMcpToolId(toolName: string | null | undefined): string | null {
   const name = toolName == null ? null : resolveLecturnMcpToolName(toolName);
   return name !== null && Object.hasOwn(LECTURN_MCP_TOOLS, name) ? name : null;

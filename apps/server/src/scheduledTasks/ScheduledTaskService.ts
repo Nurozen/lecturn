@@ -100,7 +100,6 @@ export interface WebhookTriggerRequest extends WebhookRequest {
   readonly hookId: string;
   readonly token: string;
   readonly body: Uint8Array;
-  /** Set by Lecturn Connect; the same id is never dispatched twice. */
   readonly relayDeliveryId?: string;
   readonly receivedAt?: string;
 }

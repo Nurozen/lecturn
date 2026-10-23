@@ -3024,7 +3024,6 @@ export function ConnectionsSettings() {
       </div>
     </div>
   );
-  // Lecturn Connect is offered as a route when this account can reach the machine
   const relayRouteOffer =
     routeTarget !== null &&
     !routeTarget.relayManaged &&

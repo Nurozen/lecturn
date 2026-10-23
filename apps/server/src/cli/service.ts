@@ -134,8 +134,6 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
   ),
 );
 
-// Kept one release for muscle memory and old docs. It did what `lecturn service
-// install` does; the way to move to a newer release is `lecturn update`.
 const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
   Command.withDescription("Deprecated. Run `lecturn update` to move to a newer release."),
   Command.unlisted,

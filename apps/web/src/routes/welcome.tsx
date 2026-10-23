@@ -32,7 +32,6 @@ function WelcomeRouteView() {
   const isWelcomeRoute = useLocation({ select: (location) => location.pathname === "/welcome" });
   const [dismissed, setDismissed] = useState(false);
   const openNewThread = useNewThreadHandler();
-  // desktop, `npx lecturn`, or a dev server — and that server is "this machine"
   const localAvailable = authGateState.status === "authenticated";
   return (
     <>

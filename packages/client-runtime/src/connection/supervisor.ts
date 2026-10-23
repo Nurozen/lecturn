@@ -913,8 +913,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     );
   });
 
-  // True when the signal should also restart the retry ladder. A better
-  // route only matters to a live session, so idle states ignore it.
+  // True when the signal should also restart the retry ladder.
   const waitForSignal = Queue.take(signals).pipe(
     Effect.repeat({ while: (next) => next._tag === "BetterRouteAvailable" }),
     Effect.map(

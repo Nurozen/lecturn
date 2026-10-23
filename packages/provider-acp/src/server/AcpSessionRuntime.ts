@@ -354,7 +354,6 @@ function defaultReadCgroupPopulated(siblingPath: string): "0" | "1" | undefined 
   return state === "0" || state === "1" ? state : undefined;
 }
 
-/** Best-effort removal of empty `lecturn-acp-<dead-pid>-*` sibling leases under a parent cgroup. */
 export function sweepStaleLinuxCgroupSiblings(
   parentPath: string,
   options: SweepStaleLinuxCgroupSiblingsOptions = {},

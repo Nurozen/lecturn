@@ -536,7 +536,6 @@ describe("V2 thread find", () => {
         (yield* projection.searchThread({ ...input, query: "$test-lecturn-app" })).totalMatches,
         1,
       );
-      // The message label "Lecturn App Testing" plus the plan's literal "$test-lecturn-app".
       assert.equal((yield* projection.searchThread({ ...input, query: "App" })).totalMatches, 2);
     }).pipe(Effect.provide(layerTest)),
   );

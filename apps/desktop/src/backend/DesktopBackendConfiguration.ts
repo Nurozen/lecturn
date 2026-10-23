@@ -270,7 +270,6 @@ const readPersistedBackendObservabilitySettings = Effect.gen(function* () {
   };
 });
 
-// child that lacks the variables. The LECTURN_OTLP_* URLs also travel as variables in
 const readBackendObservabilitySettings = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const persisted = yield* readPersistedBackendObservabilitySettings;
@@ -287,7 +286,6 @@ interface SharedBootstrapInput {
   readonly observabilitySettings: BackendObservabilitySettings;
 }
 
-// self-contained `lecturn` executable (Node inside); the mounted server tree is a
 type WslPreflightRuntime =
   | {
       readonly kind: "executable";
@@ -640,7 +638,6 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
         ELECTRON_RUN_AS_NODE: "1",
         LECTURN_CLI_PATH: Option.getOrUndefined(input.cliPath),
       },
-      // Primary wants process.env (PATH, dev-runner's LECTURN_HOME, etc.).
       extendEnv: true,
       bootstrap,
       bootstrapDelivery: "fd3",
@@ -720,18 +717,12 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     host: wslBindHost,
     desktopBootstrapToken: input.bootstrapToken,
     desktopBootstrapSecret: input.bootstrapSecret,
-    // PortSchema rejects 0, so when tailscale serve is disabled we still
-    // need a valid number in this slot. The backend reads tailscaleServePort
-    // only when tailscaleServeEnabled is true, so the actual value here is
-    // inert.
+    // PortSchema rejects 0, so when tailscale serve is disabled we still need a
+    // valid number in this slot.
     tailscaleServeEnabled: false,
     tailscaleServePort: 443,
-    // The packaged sidecar is a Windows executable and cannot run inside the
-    // Linux WSL backend. Keep the field absent instead of passing an unusable
-    // `/mnt/.../*.exe` path; WSL resource telemetry is reported unavailable.
-    // See docs/internals/resource-telemetry.md.
-    // stavePath, by contrast, is a Linux path inside the chosen runtime root
-    // (the server tree carries a Linux Stave binary), so it is safe to pass.
+    // stavePath is a Linux path inside the chosen runtime root (the server tree
+    // carries a Linux Stave binary), so it is safe to pass to the WSL backend.
     ...(preflight._tag === "Ready" && preflight.linuxStavePath !== null
       ? { stavePath: preflight.linuxStavePath }
       : {}),
@@ -765,8 +756,6 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     }
   }
 
-  // Build an explicit copy of process.env minus LECTURN_HOME (dev-runner
-  // the WSL backend the Linux side ends up sharing C:\Users\...\.lecturn via
   const parentEnvWithoutLecturnHome: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (key === "LECTURN_HOME") continue;

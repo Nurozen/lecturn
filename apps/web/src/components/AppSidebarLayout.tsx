@@ -330,7 +330,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
               storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
               onResize: setSidebarWidth,
             }}
-            // The narrow-window sidebar is a sheet, portaled outside the provider's styles.
             style={windowControlsInsetStyle}
           >
             {isOnSettings ? (

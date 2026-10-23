@@ -1,6 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - setup-script bootstrap, runs before any Effect runtime exists.
 /**
- * load on a full optimize pass. Run by the lecturn.json worktree setup script;
  * The cache cannot be shared between worktrees: Vite's config hash includes
  * the absolute project root, so each worktree must warm its own.
  */

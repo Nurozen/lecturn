@@ -192,7 +192,6 @@ export const make = Effect.gen(function* () {
         );
         return true;
       };
-      // Prompt links and thread links (`lecturn://new?…`, `lecturn://threads/…`) reach the
       const openAppLink = (value: string | undefined) => {
         if (!value || promptLinkAppPath(value) === null) return false;
         void runPromise(webLinks.receive(value));
@@ -200,7 +199,6 @@ export const make = Effect.gen(function* () {
       };
       const args = yield* HostProcess.Arguments;
       args.some((value) => startProviderAuthHandoff(value) || openAppLink(value));
-      // As the default browser, macOS hands Lecturn every web link through the same event.
       const openWebLink = (url: string) => {
         if (!DesktopWebLinks.isWebLink(url)) return false;
         void runPromise(webLinks.receive(url));

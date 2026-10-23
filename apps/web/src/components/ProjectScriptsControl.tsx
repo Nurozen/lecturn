@@ -65,7 +65,6 @@ interface ProjectScriptsControlProps {
   onRequestMenuClose?: () => void;
   environmentId: EnvironmentId;
   scripts: ReadonlyArray<ProjectScript>;
-  /** Scripts declared in the project's checked-in lecturn.json, offered for import. */
   fileScripts?: ReadonlyArray<LecturnProjectFileScript>;
   preferredScriptId?: string | null;
   onRunScript?: ((script: ProjectScript) => void) | undefined;
@@ -368,7 +367,6 @@ export default function ProjectScriptsControl({
           </Menu>
         </ActionGroup>
       ) : scripts.length > 0 || importableScripts.length > 0 ? (
-        // No one-click action (only a settle action, or only lecturn.json imports),
         isPanel ? (
           <div
             role="group"

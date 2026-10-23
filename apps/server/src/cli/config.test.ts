@@ -1240,8 +1240,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           ),
         );
 
-        // LECTURN_OTLP_TRACES_URL wins over the OTEL variable for the same
-        // signal, and keeps Lecturn's own headers since Lecturn still owns it.
         expect(resolved.otlpTracesUrl).toBe("http://lecturn:4318/v1/traces");
         expect(resolved.otlpTracesExport.headers).toEqual({ "x-key": "secret" });
         expect(resolved.otlpMetricsUrl).toBe("http://otel-metrics:4318/custom");
@@ -1300,7 +1298,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           ),
         );
 
-        // LECTURN_OTLP_TRACES_URL still wins outright.
         expect(resolved.otlpTracesUrl).toBe("http://lecturn:4318/v1/traces");
         expect(resolved.otlpMetricsUrl).toBeUndefined();
         expect(resolved.otlpLogsUrl).toBeUndefined();

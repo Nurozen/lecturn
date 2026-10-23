@@ -157,7 +157,6 @@ export const layerCorsFor = (
       >,
     ) {
       const request = yield* HttpServerRequest.HttpServerRequest;
-      // Public webhook forwarding is server-to-server: no preflight, no CORS grants.
       if (isRelayHookPath(request.url)) {
         return yield* httpEffect;
       }

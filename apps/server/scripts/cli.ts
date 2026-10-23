@@ -345,8 +345,6 @@ const publishPlatformTarballs = Effect.fn("publishPlatformTarballs")(function* (
 ) {
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
-  // npm runs with cwd set to the packages dir below, so tarball paths are
-  // resolved once here rather than joined twice.
   const packagesDir = path.resolve(packagesDirInput);
   const scopeDir = path.join(packagesDir, NPM_PLATFORM_PACKAGE_SCOPE);
   const launcherTarball = path.join(packagesDir, `${NPM_LAUNCHER_PACKAGE_NAME}.tgz`);
@@ -383,7 +381,6 @@ const publishPlatformTarballs = Effect.fn("publishPlatformTarballs")(function* (
     );
   });
 
-  // Each publish takes about 17s, so the platform packages go at once.
   yield* publishPlatformsThenLauncher({ platformTarballs, launcherTarball, publish });
 });
 

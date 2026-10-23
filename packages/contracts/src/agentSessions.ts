@@ -27,11 +27,6 @@ export const AgentSessionProjectGit = Schema.Struct({
 });
 export type AgentSessionProjectGit = typeof AgentSessionProjectGit.Type;
 
-/**
- * A directory that at least one agent CLI has run in, suitable for import as a
- * Lecturn project. `alreadyImported` marks candidates that already have an
- * active project rooted at the same path.
- */
 export const AgentSessionProjectCandidate = Schema.Struct({
   path: TrimmedNonEmptyString,
   title: TrimmedNonEmptyString,

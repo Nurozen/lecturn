@@ -79,7 +79,6 @@ export function ProjectActionsSettings() {
     }),
   );
 
-  // A project's lecturn.json can declare actions to import. Read it from the
   const representativeMember = target?.projectId ? memberById.get(target.projectId) : undefined;
   const lecturnFile = useLecturnProjectFileState(
     representativeMember?.environmentId ?? EnvironmentId.make("none"),

@@ -2779,8 +2779,7 @@ export default function Sidebar() {
   } = useMemo(() => {
     void snoozeWakeTick;
     const preciseNow = new Date().toISOString();
-    // sidebar roster (v2 models them as real threads with lineage). Archived
-    // Stave spaces keep their threads out of the live list.
+    // Archived Stave spaces keep their threads out of the live list.
     const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys).filter(
       (thread) => !archivedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
     );
@@ -3457,8 +3456,6 @@ export default function Sidebar() {
   }, [activeThreads, pinnedThreads, settledThreads, snoozedThreads, workingThreads]);
   const sectionByThreadKeyRef = useRef(sectionByThreadKey);
   sectionByThreadKeyRef.current = sectionByThreadKey;
-  // owns its own pointer sensor, separate from the row drag scope, and
-  // unmounting the sidebar cancels it.
   const sweepSensorRef = useRef<SidebarPointerSensor | null>(null);
   useEffect(() => () => sweepSensorRef.current?.cancel(), []);
   const [actionSweep, setActionSweep] = useState<{
@@ -4624,9 +4621,6 @@ export default function Sidebar() {
                 role={sidebarSegments.segments === null ? "presentation" : "list"}
                 className={cn(
                   "flex flex-col gap-px",
-                  // An action sweep owns the pointer: rows it passes over
-                  // neither show hover actions nor open tooltips, even
-                  // controls that opt back in, like the Woke pill.
                   actionSweep !== null && "**:pointer-events-none",
                   // One flat list grows to the sidebar's height so its shelves
                   // can sit at the bottom when the inbox is sparse.
@@ -4655,11 +4649,6 @@ export default function Sidebar() {
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
                     );
-                    // Settled and snoozed are the ONLY things that collapse a
-                    // row: every other thread is a full card. Density comes
-                    // from users (or the auto rules) actually parking work,
-                    // not from the sidebar second-guessing what still matters.
-                    // Working rows stay cards so their live status shows.
                     const isCard =
                       section === "active" || section === "pinned" || section === "working";
                     const rowVariant = isCard ? "card" : "slim";

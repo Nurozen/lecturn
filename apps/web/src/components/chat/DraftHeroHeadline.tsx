@@ -153,8 +153,6 @@ export function DraftHeroHeadline({
   const hasResolvedProject = activeProjectTitle !== null;
   const canChooseProject = projectPickerEntries.length > 0;
   const shouldShowProjectMenu = canChooseProject;
-  // The project that hosts threads without a project appears once, as the
-  // "No project" item, not as a project row.
   const menuEntries = useMemo(
     () =>
       projectPickerEntries.filter(
@@ -178,9 +176,6 @@ export function DraftHeroHeadline({
   const isScratchDraft =
     activeProject !== null && isScratchProject(activeProject, scratchWorkspaceRoot);
 
-  // popup search filters the same collection. "No project" leads whenever
-  // threads can skip a project. "Add project" is an action, not a project, so
-  // it only trails the unfiltered list.
   const pickerItems = useMemo<readonly PickerItem[]>(
     () => [
       ...(scratchWorkspaceRoot === null ? [] : [{ value: NO_PROJECT_VALUE, label: "No project" }]),

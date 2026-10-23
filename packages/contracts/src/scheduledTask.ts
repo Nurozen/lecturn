@@ -159,7 +159,6 @@ export type ScheduledTaskRunStatus = typeof ScheduledTaskRunStatus.Type;
 
 export const ScheduledTaskWebhookEndpoint = Schema.Struct({
   path: TrimmedNonEmptyString,
-  /** Public Lecturn Connect URL, or null when the environment is not linked to Lecturn Connect. */
   url: Schema.NullOr(TrimmedNonEmptyString),
   hasSecret: Schema.Boolean,
 });

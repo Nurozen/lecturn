@@ -170,7 +170,6 @@ export function describeMcpElicitation(
   };
 }
 
-/** Converts a Lecturn approval decision into the MCP elicitation wire response. */
 export function toMcpElicitationResponse(
   payload: EffectCodexSchema.McpServerElicitationRequestParams,
   decision: ProviderApprovalDecision,

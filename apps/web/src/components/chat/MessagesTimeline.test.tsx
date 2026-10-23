@@ -2655,7 +2655,6 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    // The Lecturn wordmark replaces the generic tool icon for Lecturn MCP calls.
     expect(markup).toContain('viewBox="0 0 1024 1024"');
     expect(markup).toContain("Read a Lecturn thread");
     expect(markup).not.toContain("mcp__lecturn__lecturn_thread_read");

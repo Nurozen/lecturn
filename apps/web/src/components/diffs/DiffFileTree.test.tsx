@@ -66,7 +66,6 @@ describe("diff tree file activation", () => {
     });
   }
 
-  // Exercise Lecturn's capture handler before the real Pierre model's selection transition.
   async function activate(path: string, modifiers: Partial<MouseEvent<HTMLElement>> = {}) {
     const event = {
       button: 0,

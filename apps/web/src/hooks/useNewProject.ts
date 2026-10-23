@@ -93,7 +93,6 @@ export function useNewProject() {
       }
 
       const { projectId, workspaceRoot, commitError } = result.value;
-      // The folder sits in Lecturn's data directory, so always say where.
       toastManager.add(
         stackedThreadToast(
           commitError === undefined

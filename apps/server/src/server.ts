@@ -812,7 +812,6 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // The relay publishes PR watch activity (resolved once at construction).
   AgentAwarenessRelay.layer.pipe(Layer.provide(layerPullRequestWatch)),
   layerLecturnRuntimeServices,
-  // Asks Lecturn Connect to deliver webhooks it held while this environment was offline.
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
   StorageCleanup.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
@@ -855,7 +854,6 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
 )
   .pipe(
-    // Core Services
     Layer.provideMerge(layerOrchestrationApplication),
     // Lecturn: Contextual turn hooks and the provider work admission the V2
     // hook registrations and decisions share (one instance each).
@@ -865,23 +863,15 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
       Layer.mergeAll(ProjectStore.layer, ThreadSearch.layer, ProjectionStoreV2.layer),
     ),
     Layer.provideMerge(layerServerSettings),
-    // The asset route uses the registry's GitHub credential for private PR media, which the
-    // built-in drivers' layer provides alongside the registry.
     Layer.provideMerge(layerSourceControlProviderRegistry),
     Layer.provideMerge(layerGit),
     Layer.provideMerge(layerVcs),
     Layer.provideMerge(Layer.mergeAll(layerTerminal, layerPreview, layerDevice)),
     Layer.provideMerge(layerPersistence),
-    // Both read a user-owned file out of the state directory and stream changes
-    // to clients; neither depends on the other.
     Layer.provideMerge(
       Layer.mergeAll(Keybindings.layer, EnvironmentTheme.layer, UsageLimitSources.layer),
     ),
     Layer.provideMerge(ProviderRegistry.layer),
-    // The instance registry is the new routing keystone — text generation,
-    // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`
-    // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
-    // hydration adds their default instances to `providerInstances` on boot.
     Layer.provideMerge(ProviderInstanceRegistryHydration.layer),
   )
   .pipe(

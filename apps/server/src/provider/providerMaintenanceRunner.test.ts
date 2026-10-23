@@ -261,7 +261,6 @@ const makeTestRunner = (
                 forceRefresh: Effect.succeed(manifest),
                 refreshInBackground: Effect.void,
               }),
-              // Fresh per runner so a version cached by one test cannot leak into another.
               ProviderLatestVersions.layer,
               Layer.succeed(ProviderMaintenanceLockDirectory, lockDirectory),
               FileLockServices,

@@ -1441,7 +1441,6 @@ export function deriveThreadFeedPresentation(
     if (importDivider?.beforeEntryId === entry.id) {
       result.push(importDivider.row);
     }
-    // live only while that runless work is active. Imported history is never live.
     const isActiveTailGroup =
       isWorking &&
       (activeRunId !== null || runlessWorkActive) &&

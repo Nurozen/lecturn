@@ -1156,9 +1156,6 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
           const configBaseDir = yield* makeTempDir("lecturn-scanner-base-");
           const fileSystem = yield* FileSystem.FileSystem;
 
-          // worktreesDir derives as `<baseDir>/worktrees`, and the temp base
-          // dir contains no `.lecturn` segment — only the config-based prefix match
-          // can exclude this one.
           const worktreeCwd = path.join(configBaseDir, "worktrees", "lecturn", "wt-2");
           yield* fileSystem.makeDirectory(worktreeCwd, { recursive: true });
           yield* writeTranscript({

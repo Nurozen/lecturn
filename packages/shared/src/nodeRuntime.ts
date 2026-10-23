@@ -27,7 +27,6 @@ export class NodeRuntimeUnavailableError extends Schema.TaggedError<NodeRuntimeU
 }
 
 export interface SelfInvocation {
-  /** The binary to spawn: Node, Electron (with `ELECTRON_RUN_AS_NODE`), or the packaged Lecturn binary. */
   readonly command: string;
   /**
    * The absolute entrypoint script to place before the subcommand, or
@@ -55,14 +54,12 @@ export const resolveSelfInvocation = Effect.fn("nodeRuntime.resolveSelfInvocatio
   } satisfies SelfInvocation;
 });
 
-/** `[entrypoint?, ...args]`: the argv that runs `args` against this Lecturn install. */
 export const selfInvocationArgs = (
   invocation: SelfInvocation,
   args: ReadonlyArray<string>,
 ): ReadonlyArray<string> =>
   invocation.entrypoint === undefined ? args : [invocation.entrypoint, ...args];
 
-/** A standalone Lecturn binary runs its embedded CLI, regardless of script arguments. */
 export const resolveNodeExecutable = Effect.fn("nodeRuntime.resolveNodeExecutable")(function* (
   feature: typeof NodeRuntimeFeature.Type,
   environment?: NodeJS.ProcessEnv,

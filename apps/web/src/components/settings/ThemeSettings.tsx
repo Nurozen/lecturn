@@ -673,7 +673,6 @@ export function ThemeLibrary({
     assignHalf(mode, cardId);
   };
 
-  // shows Lecturn selected instead of nothing.
   const pickedModesFor = (cardId: string | null): ThemeMode[] => {
     const rings: ThemeMode[] = [];
     if (lightOwner === cardId) rings.push("light");

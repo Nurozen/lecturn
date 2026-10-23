@@ -1244,7 +1244,6 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
           method !== "input" &&
           method !== "editor"
         ) {
-          // Terminal decoration has no matching Lecturn surface.
           yield* Effect.logDebug("Ignoring pi extension UI update.", { method });
           return;
         }

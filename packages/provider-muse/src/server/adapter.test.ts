@@ -830,7 +830,6 @@ describe("MuseAdapterV2", () => {
         runtimePolicy,
         { continuationRequests: { offer: (request) => Effect.sync(() => offers.push(request)) } },
       );
-      // A finished workflow's report turn starts while Lecturn runs nothing: it is held.
       yield* fake.emit("turn/started", { turnId: "report-1" });
       yield* Effect.yieldNow;
       assert.lengthOf(offers, 1);

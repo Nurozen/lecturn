@@ -99,7 +99,6 @@ const agentInfo = (id: string, description: string, permissions: ReadonlyArray<u
   hidden: false,
   permissions,
 });
-/** `/api/agent` trimmed to the two agents a Lecturn session runs. */
 const agentList = (directory: string) => ({
   location: { directory },
   data: [
@@ -159,7 +158,6 @@ const sessionInfo = (directory: string, permissions: ReadonlyArray<unknown>, tit
     permissions,
   },
 });
-/** Lecturn's instructions entry, written before a thread's first prompt and whenever it changes. */
 const instructionsWritten: ReadonlyArray<ProviderReplayEntry> = [
   out("session.instructions.entry.put", { sessionID: SESSION, key: "lecturn", value: "<any>" }),
   reply("session.instructions.entry.put", null),

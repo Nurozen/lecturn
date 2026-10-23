@@ -1051,7 +1051,6 @@ function WebhookScheduleDetails({
   const httpBaseUrl =
     preparedConnection._tag === "Some" ? preparedConnection.value.httpBaseUrl : null;
   const webhook = task?.schedule.type === "webhook" ? task.webhook : undefined;
-  // Without Lecturn Connect, the path is resolved on the address this phone uses.
   const resolved = webhook ? webhookAddress(webhook, httpBaseUrl) : null;
   return (
     <View className="gap-2 border-t border-border-subtle px-4 py-3">

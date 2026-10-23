@@ -25,7 +25,6 @@ const Tunnel = Schema.Struct({
 type Tunnel = typeof Tunnel.Type;
 const TunnelPage = Schema.Struct({ result: Schema.Array(Tunnel) });
 
-// "lecturnrelay-managedendpoint-<stage>-<16 hex>"; stages may contain hyphens.
 const stageOf = (name: string | null | undefined) =>
   name ? name.slice(PREFIX.length).replace(/-[a-f0-9]{16}$/u, "") : "unknown";
 

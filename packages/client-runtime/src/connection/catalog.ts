@@ -43,7 +43,6 @@ export class SshConnectionProfile extends Schema.TaggedClass<SshConnectionProfil
 export const ConnectionProfile = Schema.Union([BearerConnectionProfile, SshConnectionProfile]);
 export type ConnectionProfile = typeof ConnectionProfile.Type;
 
-/** One way to reach an environment: Lecturn Connect, a direct URL, or SSH. */
 export interface ConnectionRoute {
   readonly target: ConnectionTarget;
   readonly profile: Option.Option<ConnectionProfile>;

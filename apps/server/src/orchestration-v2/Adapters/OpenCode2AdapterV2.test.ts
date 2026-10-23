@@ -76,7 +76,6 @@ const event = (
 });
 const durable = { durable: { aggregateID: SESSION, seq: 1, version: 1 } };
 
-/** The rules Lecturn gives every session it runs, with only this thread's own Lecturn MCP server allowed. */
 const mcpRules = [
   { action: "lecturn-*", resource: "*", effect: "deny" },
   { action: "lecturn-thread_opencode2-adapter_*", resource: "*", effect: "allow" },
@@ -118,7 +117,6 @@ const modelCatalog = {
   ],
 };
 
-/** The prompt id the recorded answer carries; a replay maps it to the one Lecturn chose. */
 const PROMPT_ID = "msg_0eb735d41001NJee1EvVePJAK5";
 const promptAccepted = replyData("session.prompt", {
   id: PROMPT_ID,
@@ -153,7 +151,6 @@ const withInstructions = (
         "skill.list",
       ].includes(String(entry.frame.type)),
   );
-  // Lecturn's MCP server is added before the entry that describes it.
   const after = entries.findIndex(
     (entry, index) =>
       index < first &&
@@ -855,7 +852,6 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
         reply("agent.list", agentList),
         out("session.update", { sessionID: SESSION, permissions: supervisedRules }),
         reply("session.update", null),
-        // A subagent's session may use its thread's Lecturn MCP server.
         out("session.update", {
           sessionID: CHILD,
           permissions: [...supervisedRules.slice(0, 3), ...mcpRules],
@@ -2269,7 +2265,6 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
 
   it.effect("stops the requests a session still waits on when a restarted Lecturn loads it", () =>
     Effect.gen(function* () {
-      // Lecturn restarted while the server kept waiting on an ask Lecturn no longer shows.
       const runtime = yield* openCode2ReplayRuntimeWithInstructions(
         [
           ...opening,
@@ -2377,7 +2372,6 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
       yield* runtime.startTurn(turnInput(thread, bigPickle, "approval-required"));
       const request = yield* Fiber.join(requested);
       yield* runtime.respondToRuntimeRequest({ requestId: request!.id, decision: "accept" });
-      // Not "waiting on a request Lecturn couldn't answer": nothing waits on it.
       assert.equal((yield* Fiber.join(terminal))?.status, "completed");
     }).pipe(Effect.scoped),
   );
@@ -2500,7 +2494,6 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
             permissions: [
               ...supervisedRules.slice(0, 3),
               { action: "shell", resource: "echo *", effect: "allow" },
-              // A subagent's session may use its thread's Lecturn MCP server.
               ...mcpRules,
             ],
           }),
@@ -4196,7 +4189,6 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
       const { runtime, thread } = yield* resumed([
         out("session.fork", { sessionID: SESSION }),
         replyData("session.fork", sessionInfo({ id: FORK })),
-        // The fork's Lecturn MCP server is the target thread's.
         out("session.update", {
           sessionID: FORK,
           permissions: [
@@ -4516,7 +4508,6 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
           requestRuntimeRestart: true,
         });
       }
-      // The stopped subagent's report wakes nothing Lecturn runs.
       yield* Effect.promise(() => gate.waitForReached("settled"));
       gate.release("settled");
       assert.lengthOf(offers, 1);
@@ -4557,7 +4548,6 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
           }),
           event("session.execution.succeeded", { sessionID: SESSION }),
           event("session.execution.started", { sessionID: CHILD_B }),
-          // The first subagent's report wakes the parent into a reply Lecturn holds.
           event("session.execution.succeeded", { sessionID: CHILD }),
           event("session.inbox.enqueued", {
             inboxID: "msg_report",
@@ -4886,7 +4876,6 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
             delivery: "steer",
           },
         }),
-        // OpenCode starts the follow-up on its own; Lecturn holds it for its turn.
         event("session.execution.started", { sessionID: SESSION }),
         event("session.inbox.delivered", { sessionID: SESSION, inboxID: "msg_report" }),
         out("session.prompt", {

@@ -5,7 +5,6 @@ export interface DebugLogger {
 
 export interface DebugLoggerOptions {
   readonly enabledInDev?: boolean;
-  /** Name of a legacy subsystem-specific global boolean, e.g. `"__LECTURN_CLOUD_DEBUG__"`. */
   readonly legacyGlobalFlag?: string;
 }
 

@@ -154,7 +154,6 @@ export type PreviewRuntime = typeof PreviewRuntime.Type;
  */
 export const PreviewStreamHostSetup = Schema.Struct({
   need: Schema.Literals(["sandbox", "libraries"]),
-  /** For example `sudo npx lecturn browser setup`, matching how the server was launched. */
   command: Schema.String,
 });
 export type PreviewStreamHostSetup = typeof PreviewStreamHostSetup.Type;

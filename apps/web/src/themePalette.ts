@@ -282,8 +282,6 @@ export function subscribeToCustomThemes(listener: () => void): () => void {
   };
 }
 
-// Earlier builds shipped every maintainer theme under a lecturn- prefix; only the
-// genuinely Lecturn-branded palette keeps it. Stored preferences and mixes with the
 const LEGACY_THEME_ID_ALIASES: Readonly<Record<string, string>> = {
   [LEGACY_LECTURN_CHAT_DARK_THEME_ID]: LECTURN_CHAT_THEME_ID,
   "lecturn-grove": GROVE_THEME_ID,
@@ -304,7 +302,6 @@ function themeIdFromPreference(theme: ThemePreference): string {
   return normalizeThemeId(theme);
 }
 
-// Older builds stored the dark Lecturn Chat palette as a separate theme. Keep
 function legacyThemeMode(theme: ThemePreference): ThemeAppearance | null {
   return theme === LEGACY_LECTURN_CHAT_DARK_THEME_ID ? "dark" : null;
 }

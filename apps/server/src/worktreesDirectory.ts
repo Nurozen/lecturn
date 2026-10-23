@@ -25,7 +25,6 @@ export function isFilesystemRoot(directory: string, path: Path.Path): boolean {
   return path.dirname(directory) === directory;
 }
 
-/** Every directory that holds Lecturn-managed worktrees on this machine. */
 export function managedWorktreesDirectories(
   settings: {
     readonly worktreesDirectory: string;

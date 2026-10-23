@@ -164,8 +164,6 @@ const traceSummaryCommand = Command.make("summary", {
   Command.withHandler(
     Effect.fn("cli.trace.summary")(function* (flags) {
       const fs = yield* FileSystem.FileSystem;
-      // LECTURN_TRACE_FILE, else the userdata trace file for --base-dir or
-      // LECTURN_HOME. Implicit dev runs write elsewhere; set LECTURN_TRACE_FILE.
       const envHome = yield* Config.String("LECTURN_HOME").pipe(Config.option);
       const baseDir = yield* resolveBaseDir(
         Option.getOrUndefined(Option.orElse(flags.baseDir, () => envHome)),

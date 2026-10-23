@@ -14,9 +14,7 @@ import type { ProviderCredentialError } from "./errors.ts";
 
 export interface ProviderHostPaths {
   readonly cwd: string;
-  /** Lecturn home. */
   readonly baseDir: string;
-  /** Server-owned state directory under the Lecturn home. */
   readonly stateDir: string;
   readonly providerStatusCacheDir: string;
   /** Where chat attachments are stored; agents that sandbox file reads must be granted it. */

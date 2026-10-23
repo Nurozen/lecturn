@@ -24,7 +24,6 @@ export class DesktopLegacyLocalStorage extends Context.Service<
 >()("@lecturn/desktop/app/DesktopLegacyLocalStorage") {}
 
 const MARKER_FILE_NAME = "v1-local-storage-imported";
-// V1 used "Lecturn (Alpha)" when that folder existed and "lecturn" otherwise.
 const V1_PROFILE_NAMES = ["Lecturn (Alpha)", "lecturn"];
 
 const make = Effect.gen(function* () {

@@ -476,7 +476,6 @@ export function NewTaskDraftScreen(props: {
     [environments.length],
   );
   useHardwareKeyboardCommand(cycleEnvironmentCommands, cycleEnvironment);
-  // Lecturn owns /usage-limits only where Limits has data for the selected provider.
   const offersUsageLimits =
     flow.selectedProviderStatus !== null &&
     hasProviderUsageLimits(

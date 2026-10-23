@@ -34,7 +34,6 @@ export interface UpstreamHook {
 export interface UpstreamResponse {
   readonly status: number;
   readonly contentType: string | undefined;
-  /** What the environment did with the request (`x-lecturn-hook-outcome`). */
   readonly outcome: string | undefined;
   readonly body: Uint8Array;
 }

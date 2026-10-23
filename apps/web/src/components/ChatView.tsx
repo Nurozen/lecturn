@@ -4543,7 +4543,6 @@ export default function ChatView(props: ChatViewProps) {
               targetEnvironmentId: candidate.environmentId,
               accountByEnvironmentId,
               selectedProvider: activeProviderStatus,
-              // The destination project may override the machine switch.
               providers: (environment.serverConfig?.providers ?? []).map((provider) =>
                 environmentSettings
                   ? {
@@ -7625,12 +7624,8 @@ export default function ChatView(props: ChatViewProps) {
     isStoppingBackgroundWork,
     onOpenRelatedThreadStable,
   ]);
-  // Snoozed and woke are thread state, not composer actions: each gets one
-  // quiet line after the last message instead of a banner. A woken thread
-  // announces itself here, not just in the sidebar pill. Dismissing marks the
-  // wake as seen (same acknowledgment as the pill); sending a message clears
-  // it as a side effect of the send path. Lecturn: a settled thread keeps its
-  // settled surface in place of the composer, so it gets no line here.
+  // A settled thread keeps its settled surface in place of the composer, so it
+  // gets no status line here.
   const threadStatusLine = useMemo(() => {
     void nowMinute;
     if (activeThreadSettled) return null;
@@ -11356,7 +11351,6 @@ export default function ChatView(props: ChatViewProps) {
           )}
           data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
         >
-          {/* Top bar */}
           <header
             ref={threadPanelPopoverAnchorRef}
             data-chat-header
@@ -11404,9 +11398,7 @@ export default function ChatView(props: ChatViewProps) {
             />
           ) : null}
 
-          {/* Main content area with optional plan sidebar */}
           <div className="relative flex min-h-0 min-w-0 flex-1">
-            {/* Chat column */}
             <ThreadFindCanvas
               findOptions={{
                 skills: timelineSkills,
@@ -11443,7 +11435,6 @@ export default function ChatView(props: ChatViewProps) {
                   </div>
                 </div>
               ) : null}
-              {/* Banners overlay the timeline without changing its content height. */}
               <div className="chat-banner-lane pointer-events-none absolute top-0 z-20 flex flex-col">
                 <ProviderStatusBanner
                   status={visibleProviderStatus}
@@ -11466,12 +11457,10 @@ export default function ChatView(props: ChatViewProps) {
                   }}
                 />
               </div>
-              {/* Messages Wrapper */}
               <div
                 className="relative flex min-h-0 flex-1 flex-col"
                 data-timeline-loading={threadDetailLoading || undefined}
               >
-                {/* Messages — LegendList handles virtualization and scrolling internally */}
                 <MessagesTimeline
                   citationRequest={paintOnlyDisplayedTimeline ? null : citationRequest}
                   citationHistoryLoading={threadDetailLoading}
@@ -11615,7 +11604,6 @@ export default function ChatView(props: ChatViewProps) {
                     : { historyControls: threadHistoryControls })}
                 />
 
-                {/* scroll to end pill — shown when user has scrolled away from the live edge */}
                 {showScrollToBottom && !isThreadFindActive && (
                   <div
                     className="chat-scroll-to-bottom pointer-events-none absolute z-30 flex justify-center py-1.5"
@@ -11639,7 +11627,6 @@ export default function ChatView(props: ChatViewProps) {
                 )}
               </div>
 
-              {/* Input bar — centered for an empty draft, docked after sending. */}
               <div
                 ref={setComposerOverlayElement}
                 inert={isRevertingCheckpoint}
@@ -11833,8 +11820,6 @@ export default function ChatView(props: ChatViewProps) {
                                   resumeCompactionTokens={resumeCompactionTokens}
                                   keepFullHistory={keepFullHistory}
                                   onToggleKeepFullHistory={toggleKeepFullHistoryStable}
-                                  // With attachments or contexts aboard the pick just inserts the
-                                  // text, so it sends as a prompt like the typed path would.
                                   onUsageLimitsCommand={
                                     usageLimitsOffered &&
                                     usageLimitsKey !== null &&
@@ -12101,9 +12086,7 @@ export default function ChatView(props: ChatViewProps) {
                 />
               ) : null}
             </ThreadFindCanvas>
-            {/* end chat column */}
           </div>
-          {/* end horizontal flex container */}
 
           {mountedTerminalThreadRefs.map(
             ({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
@@ -12189,10 +12172,6 @@ export default function ChatView(props: ChatViewProps) {
               keybindings={keybindings}
               getShortcutContext={getShortcutContextStable}
               inlineSize={previewPanelInlineSize}
-              // Same effective inset as the closed-state titlebar controls
-              // (pr-3 in the tab bar plus this pixel equals the absolute
-              // right inset plus mr-px), so the cluster does not creep when
-              // the sheet opens.
               layoutControls={
                 rightPanelOpen ? (
                   <div className="mr-px flex items-center">{panelToggleControls}</div>

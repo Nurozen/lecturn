@@ -6,6 +6,10 @@ const FONT_FAMILIES = {
   bold: "DMSans-Bold",
 } as const;
 
+/**
+ * iOS uses the system family for every weight: style objects must also set
+ * fontWeight (500 for medium, 700 for bold), or use the native API's weight prop.
+ */
 export function useFontFamily(weight: keyof typeof FONT_FAMILIES): string {
   return Platform.OS === "ios" ? "System" : FONT_FAMILIES[weight];
 }

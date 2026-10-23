@@ -207,7 +207,6 @@ export function promptLinkAppPath(
   return thread ? `/${thread[1]}/${thread[2]}${url.search}` : null;
 }
 
-/** The `lecturn://` link that hands an in-app path to an installed desktop or mobile app. */
 export function promptLinkDeepLink(appPath: string, scheme = "lecturn"): string {
   const url = new URL(appPath, "https://app.invalid");
   const host = url.pathname === "/new" ? "new" : `threads${url.pathname}`;

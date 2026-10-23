@@ -513,8 +513,6 @@ it.layer(Layer.merge(NodeServices.layer, Layer.succeed(RuntimeReleaseArchivesPub
             (command) => command.startsWith("systemctl ") && !command.includes("show-environment"),
           ),
         ).toEqual([]);
-        // The files say 1.2.4 but the process is still 1.2.3: not current, and
-        // the reason is named so `lecturn service status` can point at restart.
         const status = yield* newer.status;
         expect(status.current).toBe(false);
         expect(status.problems).toContain("restart-pending");
@@ -532,8 +530,6 @@ it.layer(Layer.merge(NodeServices.layer, Layer.succeed(RuntimeReleaseArchivesPub
         const path = yield* Path.Path;
         yield* service.install();
         const newer = yield* makeService(undefined, "1.2.4");
-        // A non-empty directory in the unit's place: it still counts as an
-        // installed unit, and the rename that writes the new unit fails.
         const unitPath = (yield* service.status).unitPath;
         yield* fs.remove(unitPath);
         yield* fs.makeDirectory(unitPath);

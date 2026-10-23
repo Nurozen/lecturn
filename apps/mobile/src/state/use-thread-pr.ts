@@ -42,6 +42,10 @@ export {
 
 export type ThreadPrProject = Pick<OrchestrationProjectShell, "workspaceRoot" | "stave">;
 
+/**
+ * Stave spaces with several editable repos keep explicit links without showing
+ * one inferred repo as the whole space.
+ */
 export function useThreadPr(
   thread: EnvironmentThreadShell,
   project: ThreadPrProject | null,

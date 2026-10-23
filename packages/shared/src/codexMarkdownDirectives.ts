@@ -209,7 +209,6 @@ function renderFileCitation(node: MarkdownAstNode, source: string, insideLink: b
   delete node.value;
 }
 
-/** Shows only the label. Lecturn has no suggestion UI, so the hidden prompt is not shown. */
 function renderFollowUp(node: MarkdownAstNode, source: string): void {
   if (!node.attributes?.prompt?.trim() || !textContent(node).trim()) {
     restoreTextDirective(node, source);

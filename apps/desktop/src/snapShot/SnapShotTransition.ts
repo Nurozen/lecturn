@@ -17,7 +17,6 @@ type SnapShotAnimationDetails = {
 
 export type SnapShotAnimationDestination = {
   readonly frame: Electron.Rectangle;
-  /** Unit coordinates in Lecturn's content area; GNOME supplies the real compositor origin. */
   readonly relativeFrame?: Electron.Rectangle | undefined;
   readonly backgroundColor: string;
   readonly borderColor: string;

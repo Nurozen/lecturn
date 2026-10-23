@@ -77,7 +77,6 @@ describe("connection routes", () => {
   });
 
   it("keeps a user's order when a saved route is replaced", () => {
-    // The user preferred Lecturn Connect over the LAN; re-pairing the LAN keeps that.
     const repaired = direct("lan", "http://192.168.1.11:3773/");
     expect(upsertRoute([RELAY, LAN], repaired)).toEqual([RELAY, repaired]);
   });
@@ -138,7 +137,6 @@ describe("learned routes", () => {
       reported: [lan],
       allowInsecure: true,
     })!;
-    // The user prefers Lecturn Connect over the learned LAN address.
     const reordered = entryWithRoutes(relayOnly, [first[1]!, first[0]!]);
     expect(
       mergeLearnedRoutes({
@@ -278,7 +276,6 @@ describe("learned routes", () => {
       allowInsecure: true,
     })!;
     expect(ids(routesAfterRemoving(overLan, "lan"))).toEqual(["relay"]);
-    // Removing Lecturn Connect keeps the paired LAN and what it learned.
     expect(ids(routesAfterRemoving(overLan, "relay"))).toHaveLength(2);
   });
 

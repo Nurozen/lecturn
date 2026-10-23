@@ -75,7 +75,6 @@ const layerTestPortDiscovery = PortScanner.layer.pipe(
 
 const LSOF_TEST_PORT = 43_123;
 
-/** The scanner with `processIds` registered to a Lecturn terminal, so their listeners get probes. */
 const ownedScanner = (processIds: ReadonlyArray<number> = [1234]) =>
   Effect.tap(PortScanner.PortDiscovery, (scanner) =>
     scanner.registerTerminalProcesses({

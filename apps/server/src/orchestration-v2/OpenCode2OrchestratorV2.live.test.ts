@@ -1017,7 +1017,6 @@ describe.runIf(binaryPath !== undefined && ROOT !== "")("OpenCode 2 live orchest
         const runs = (count: number) => (projection: OrchestrationV2ThreadProjection) =>
           projection.runs.length === count && settled(projection);
 
-        // Lecturn's MCP server for this thread: the stand-in's one tool answers a marker.
         if (process.env.OPENCODE2_MCP_URL !== undefined) {
           yield* send(
             threadId,
@@ -1031,7 +1030,6 @@ describe.runIf(binaryPath !== undefined && ROOT !== "")("OpenCode 2 live orchest
         }
         const before = (yield* orchestrator.getThreadProjection(threadId)).runs.length;
 
-        // The spawned server dies mid-command; Lecturn restarts it and settles the turn.
         yield* send(
           threadId,
           "restart-killed",
@@ -1109,7 +1107,6 @@ describe.runIf(binaryPath !== undefined && ROOT !== "")("OpenCode 2 live orchest
         assert.equal(shell?.status, "completed");
         const reply = done.turnItems.findLast((item) => item.type === "assistant_message");
         assert.include(reply?.type === "assistant_message" ? reply.text : "", "AFTER_DROP");
-        // The thread's Lecturn MCP server is registered on the external server for now.
         const opencode = yield* OpenCode2Client.make.pipe(Effect.provide(FetchHttpClient.layer));
         const api = yield* opencode.connect({
           baseUrl: process.env.OPENCODE2_SERVER_URL!,

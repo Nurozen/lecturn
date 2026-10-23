@@ -467,10 +467,6 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   const selectedProjectDraft = useComposerDraft(selectedProjectDraftKey);
   const prompt = selectedProjectDraft.text;
   const attachments = selectedProjectDraft.attachments;
-  // uses for new draft threads: forced by the environment (Stave), then the
-  // per-project setting, then the repo's checked-in lecturn.json, then the
-  // server's configured default (which a new project with no threads yet
-  // replaces with its checkout). A forced mode makes the file read moot.
   const fileAccessSession = useEnvironmentQuery(
     selectedProject !== null && selectedProject.workspaceRoot !== ""
       ? environmentSession.sessionStateAtom(selectedProject.environmentId)
@@ -505,7 +501,6 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         : parseLecturnProjectFile(lecturnProjectFileData.contents),
     [lecturnProjectFileData],
   );
-  // Environment settings with the project's overrides and its lecturn.json
   const projectSettings = useMemo(
     () =>
       resolveProjectSettings(

@@ -6,7 +6,6 @@ import {
 
 type InteractionModeProvider = Pick<ServerProvider, "showInteractionModeToggle">;
 
-/** Normalize saved Lecturn mode choices without changing native slash commands. */
 export function resolveProviderInteractionMode(
   provider: InteractionModeProvider | null | undefined,
   interactionMode: ProviderInteractionMode | null | undefined,

@@ -27,7 +27,6 @@ export type ConnectionRouteKind =
   | "public"
   | "ssh";
 
-/** An environment has at most one Lecturn Connect route, so it needs no per-route id. */
 export const RELAY_ROUTE_ID = "relay";
 
 export function connectionRouteId(target: ConnectionTarget): string {
@@ -108,7 +107,6 @@ export function accountOwnerTarget(
   return relayRouteTarget(entry) ?? entry.target;
 }
 
-/** The base URL of a direct route, or null for Lecturn Connect and SSH. */
 export function routeHttpBaseUrl(route: ConnectionRoute): string | null {
   if (route.target._tag === "PrimaryConnectionTarget") return route.target.httpBaseUrl;
   const profile = Option.getOrNull(route.profile);
@@ -199,7 +197,6 @@ function routeAddressKey(route: ConnectionRoute): string | null {
   }
 }
 
-/** Short user-facing route description: "LAN", "Tailscale", "VPN", "Lecturn Connect", a URL, or an SSH host. */
 export function connectionRouteLabel(route: ConnectionRoute): string {
   switch (connectionRouteKind(route)) {
     case "relay":
@@ -223,7 +220,6 @@ export function connectionRouteLabel(route: ConnectionRoute): string {
   }
 }
 
-/** The address shown under a route, or null for Lecturn Connect. */
 export function connectionRouteAddress(route: ConnectionRoute): string | null {
   if (route.target._tag === "SshConnectionTarget") {
     const profile = Option.getOrNull(route.profile);
@@ -232,7 +228,6 @@ export function connectionRouteAddress(route: ConnectionRoute): string | null {
   return routeHttpBaseUrl(route);
 }
 
-/** Whether the environment can be reached through Lecturn Connect. */
 export function hasRelayRoute(
   entry: Pick<ConnectionCatalogEntry, "target" | "alternateRoutes">,
 ): boolean {
