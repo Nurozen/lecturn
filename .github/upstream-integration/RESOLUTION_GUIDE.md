@@ -370,8 +370,18 @@ from upstream's side.
   `@58.0.18` patch also renames the `io.github.jakex7.peek` imports in
   `android/.../notifications/*.kt` to `io.github.expo.peek`: published 58.0.18
   imports a package that its `peek-emittables:0.3.2` dependency does not ship,
-  so the Android build fails. 58.0.20 fixes the imports upstream, so drop these
-  hunks when the fork moves to 58.0.20 or later.
+  so the Android build fails. It also carries upstream's #20131 hunk that gives
+  the Android `CustomNotification` class a throwing `Constructor`:
+  expo-modules-core 58.0.19 rejects a SharedObject `Class` without one, so
+  `WidgetsModule.definition` throws "constructor cannot be null" while the
+  module registry is built and the Android app never starts. 58.0.20 fixes the
+  imports and the constructor upstream, so drop these hunks when the fork
+  moves to 58.0.20 or later.
+- **`@react-navigation/core` override.** Keep the `pnpm-workspace.yaml` pin at
+  or above the core range that `@react-navigation/native` requires (7.5.1
+  needs `^7.24.0`; upstream #20131). An older pinned core makes every native
+  stack throw "undefined is not a function" in `NativeStackNavigator` at
+  launch, which shows up only at runtime (tsc and the bundle are clean).
 - **Mobile release versions.** EAS keeps one production profile and the
   literal `version` in `app.config.ts` (read by `fingerprint.config.js`);
   upstream's TestFlight/store version split (#20060) and its
