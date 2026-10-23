@@ -366,7 +366,12 @@ from upstream's side.
   overrides. On each Expo bump, diff the patched files across versions and
   drop a patch only when upstream ships the fix. `expo-widgets` uses upstream's
   patch plus the fork hunks (Live Activity `accountId`/`getAccountId`, ended
-  activity dismissal); rebase those hunks onto upstream's next patch.
+  activity dismissal); rebase those hunks onto upstream's next patch. The
+  `@58.0.18` patch also renames the `io.github.jakex7.peek` imports in
+  `android/.../notifications/*.kt` to `io.github.expo.peek`: published 58.0.18
+  imports a package that its `peek-emittables:0.3.2` dependency does not ship,
+  so the Android build fails. 58.0.20 fixes the imports upstream, so drop these
+  hunks when the fork moves to 58.0.20 or later.
 - **Mobile release versions.** EAS keeps one production profile and the
   literal `version` in `app.config.ts` (read by `fingerprint.config.js`);
   upstream's TestFlight/store version split (#20060) and its
