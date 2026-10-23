@@ -9,7 +9,7 @@ import {
 } from "@lecturn/client-runtime/state/stave-archive";
 import type { EnvironmentId } from "@lecturn/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { addProjectAndOpenThread, openExistingProjectAndThread } from "../../lib/addProject";
@@ -118,10 +118,7 @@ export function ExistingStaveSpacePicker(props: {
   const handleNewThread = useNewThreadHandler();
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
   const allProjects = useProjects();
-  const projects = useMemo(
-    () => allProjects.filter((project) => project.environmentId === environmentId),
-    [allProjects, environmentId],
-  );
+  const projects = allProjects.filter((project) => project.environmentId === environmentId);
   const spaces = useEnvironmentQuery(
     staveSpaces({ environmentId, input: { includeArchived: true } }),
   );
@@ -144,10 +141,7 @@ export function ExistingStaveSpacePicker(props: {
 
   const [showArchived, setShowArchived] = useState(false);
   const rows = spaces.data ?? EMPTY;
-  const { entries, archivedCount } = useMemo(
-    () => existingStaveSpaces({ rows, projects, kind, showArchived }),
-    [rows, projects, kind, showArchived],
-  );
+  const { entries, archivedCount } = existingStaveSpaces({ rows, projects, kind, showArchived });
   const [task, setTask] = useState<PickerTask | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // The entry outlives `confirmingDelete` so the dialog keeps its copy while closing.

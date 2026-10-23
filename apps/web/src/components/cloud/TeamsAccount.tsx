@@ -1,6 +1,6 @@
 import { providerClients } from "../settings/providerDriverMeta";
 import { useAuth } from "@clerk/react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { selectTeam, type TeamDetail, type TeamSeatPreview } from "@lecturn/client-runtime/relay";
 import { configuredHostedAppUrl, isHostedStaticApp } from "../../hostedPairing";
 import { Button } from "../ui/button";
@@ -67,7 +67,9 @@ function HostedTeamsAccount({
   const organizationId = useSelectedTeam(accountId);
   const context = `${userId}:${organizationId}`;
   const currentContext = useRef(context);
-  currentContext.current = context;
+  useLayoutEffect(() => {
+    currentContext.current = context;
+  }, [context]);
   const [detail, setDetail] = useState<{ context: string; value: TeamDetail } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -81,6 +83,7 @@ function HostedTeamsAccount({
   const [publish, setPublish] = useState(true);
   useEffect(() => {
     let disposed = false;
+    // oxlint-disable-next-line react/set-state-in-effect -- A new team or reload clears the last load's failure and seat preview as its request starts.
     setError(null);
     setPreview(null);
     if (organizationId)
@@ -100,6 +103,7 @@ function HostedTeamsAccount({
     return () => {
       disposed = true;
     };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- An action bumps version to load the team again.
   }, [client, context, organizationId, version]);
   const data = detail?.context === context ? detail.value : null;
   async function run(action: () => Promise<unknown>, refresh = true) {
@@ -113,9 +117,8 @@ function HostedTeamsAccount({
     } catch (cause) {
       if (currentContext.current === expected)
         setError(cause instanceof Error ? cause.message : "Could not complete action.");
-    } finally {
-      setBusy(false);
     }
+    setBusy(false);
   }
   if (!isSignedIn || !userId) return <p className="p-6">Sign in to manage a team.</p>;
   const admin = data?.organization.role === "owner" || data?.organization.role === "admin";

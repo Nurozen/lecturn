@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@lecturn/contracts";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useNavigate } from "@tanstack/react-router";
 import { useNewThreadHandler } from "../../../hooks/useHandleNewThread";
@@ -109,7 +109,7 @@ export function SagaCreateForm(props: {
   }
 
   const dryRun = useAtomCommand(staveDryRun, { reportFailure: false });
-  const payload = useMemo(() => buildCreateSagaOperation(state), [state]);
+  const payload = buildCreateSagaOperation(state);
   const payloadKey = JSON.stringify([environmentId, payload]);
   const [preview, setPreview] = useState<{
     key: string;

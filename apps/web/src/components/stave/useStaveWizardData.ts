@@ -1,6 +1,6 @@
 import type { EnvironmentId } from "@lecturn/contracts";
 import { subscribeStaveMutation } from "../../staveMutation";
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 
 import { useEnvironmentQuery } from "../../state/query";
 import { staveMemoryProviders, staveRepos, staveSagas, staveSpaces } from "../../state/stave";
@@ -58,12 +58,14 @@ export function useStaveWizardData(environmentId: EnvironmentId | null): StaveWi
 
   const repoRows = repos.data ?? EMPTY;
   const spaceRows = spaces.data ?? EMPTY;
-  const sagaRows = useMemo(() => joinableSagas(sagas.data ?? EMPTY), [sagas.data]);
+  const sagaRows = joinableSagas(sagas.data ?? EMPTY);
   const memoryAvailable = memoryAvailableFrom(providers.data);
-  const context = useMemo<StaveWizardContext>(
-    () => ({ repos: repoRows, spaces: spaceRows, sagas: sagaRows, memoryAvailable }),
-    [memoryAvailable, repoRows, sagaRows, spaceRows],
-  );
+  const context: StaveWizardContext = {
+    repos: repoRows,
+    spaces: spaceRows,
+    sagas: sagaRows,
+    memoryAvailable,
+  };
 
   return {
     context,

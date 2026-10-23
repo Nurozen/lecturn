@@ -9,7 +9,6 @@ import type {
   ScopedProjectRef,
 } from "@lecturn/contracts";
 import { FolderIcon, FolderSearchIcon, GitBranchIcon, MessageSquareIcon } from "lucide-react";
-import { useMemo } from "react";
 
 import { externalSessionListNotes, useExternalSessionList } from "../hooks/useExternalSessionList";
 import { useImportThread } from "../hooks/useImportThread";
@@ -150,7 +149,7 @@ export function useImportSessionPalette(input: {
     cwd: listCwd,
   });
 
-  const sessionGroups = useMemo((): ReadonlyArray<CommandPaletteGroup> => {
+  const sessionGroups = ((): ReadonlyArray<CommandPaletteGroup> => {
     if (merged === null || scope === null || merged.sessions.length === 0) return [];
     const environmentProjects = projects.filter(
       (project) => project.environmentId === scope.projectRef.environmentId,
@@ -201,9 +200,9 @@ export function useImportSessionPalette(input: {
       };
     });
     return [{ value: "import-sessions", label: "Sessions", items }];
-  }, [importThread, merged, projects, providerEntries, scope, scopeProject, threads]);
+  })();
 
-  const trailingGroups = useMemo((): ReadonlyArray<CommandPaletteGroup> => {
+  const trailingGroups = ((): ReadonlyArray<CommandPaletteGroup> => {
     if (merged === null || scope === null) return [];
     return [
       {
@@ -226,9 +225,9 @@ export function useImportSessionPalette(input: {
         ],
       },
     ];
-  }, [merged, onToggleAllFolders, scope, scopeProject?.title]);
+  })();
 
-  const notes = useMemo(() => {
+  const notes = (() => {
     if (merged === null || scope === null) return [];
     return [
       ...(merged.sessions.length === 0
@@ -240,7 +239,7 @@ export function useImportSessionPalette(input: {
         truncatedNote: IMPORT_SESSION_TRUNCATED_NOTE,
       }),
     ];
-  }, [merged, providerEntries, scope]);
+  })();
 
   return { isLoading, sessionGroups, trailingGroups, notes };
 }
@@ -311,7 +310,7 @@ export function useImportFolderPalette(input: {
     cwd: null,
   });
 
-  const folderGroups = useMemo((): ReadonlyArray<CommandPaletteGroup> => {
+  const folderGroups = ((): ReadonlyArray<CommandPaletteGroup> => {
     if (merged === null || environmentId === null || merged.sessions.length === 0) return [];
     const folders = groupExternalSessionsByFolder({
       sessions: merged.sessions,
@@ -330,9 +329,9 @@ export function useImportFolderPalette(input: {
       run: () => onPickFolder(folder),
     }));
     return [{ value: "import-folders", label: "Folders", items }];
-  }, [environmentId, merged, onPickFolder, projects, providerEntries]);
+  })();
 
-  const notes = useMemo(() => {
+  const notes = (() => {
     if (merged === null || environmentId === null) return [];
     return [
       ...(merged.sessions.length === 0 ? ["No sessions found."] : []),
@@ -342,7 +341,7 @@ export function useImportFolderPalette(input: {
         truncatedNote: IMPORT_FOLDERS_TRUNCATED_NOTE,
       }),
     ];
-  }, [environmentId, merged, providerEntries]);
+  })();
 
   return { isLoading, folderGroups, notes };
 }

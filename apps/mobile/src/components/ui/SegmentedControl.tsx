@@ -1,84 +1,79 @@
-import { useEffect, useState } from "react";
-import { I18nManager, Platform, Pressable } from "react-native";
-import Animated, {
-  Easing,
-  ReduceMotion,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from "react-native-reanimated";
-import { AppText as Text } from "./AppText";
-import { GlassCard } from "../GlassCard";
-import { cn } from "../../lib/cn";
+import { useState } from "react";
+import { I18nManager, Platform, Pressable, View } from "react-native";
+import Animated, { useAnimatedStyle, useReducedMotion, withTiming } from "react-native-reanimated";
+
+import { AppText } from "./AppText";
+import { useControlTheme } from "./useControlTheme";
 import type { SegmentedControlProps } from "./SegmentedControl.types";
 
 export type { SegmentedControlProps } from "./SegmentedControl.types";
 
-/** Lecturn keeps its glass segmented pill on iOS; Android uses the shared capsule in SegmentedControl.android. */
-export function SegmentedControl<Value extends number | string>(
+/** Shared capsule control with native press targets and a flat, themed selection. */
+export function SegmentedControl<Value extends string | number>(
   props: SegmentedControlProps<Value>,
 ) {
-  const compact = props.size === "compact";
-  const [width, setWidth] = useState(0);
-  const index = Math.max(
-    0,
-    props.options.findIndex((option) => option.value === props.selected),
-  );
-  const position = useSharedValue(index);
-  useEffect(() => {
-    position.set(
-      withTiming(index, {
-        duration: 200,
-        easing: Easing.out(Easing.cubic),
-        reduceMotion: ReduceMotion.System,
-      }),
-    );
-  }, [index, position]);
-  const indicatorStyle = useAnimatedStyle(() => ({
-    transform: [
-      {
-        translateX:
-          ((position.value * width) / props.options.length) * (I18nManager.isRTL ? -1 : 1),
-      },
-    ],
+  const { colorScheme, colors } = useControlTheme();
+  const [layout, setLayout] = useState({ width: 0, height: 0 });
+  const { width } = layout;
+  const reduceMotion = useReducedMotion();
+  const selectedIndex = props.options.findIndex((option) => option.value === props.selected);
+  const segmentWidth = props.options.length ? Math.max(0, width - 6) / props.options.length : 0;
+  const selectionOffset = selectedIndex * segmentWidth * (I18nManager.isRTL ? -1 : 1);
+  const selectionStyle = useAnimatedStyle(() => ({
+    width: segmentWidth,
+    transform: [{ translateX: withTiming(selectionOffset, { duration: reduceMotion ? 0 : 160 }) }],
   }));
+  const dark = colorScheme === "dark";
+  const minHeight = props.size === "compact" ? 32 : Platform.OS === "android" ? 40 : 36;
+
   return (
-    <GlassCard
-      radius={28}
-      accessible={false}
-      onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
-      className={cn("flex-row overflow-hidden", props.className)}
-    >
-      <Animated.View
-        pointerEvents="none"
-        className="absolute inset-y-0 rounded-full bg-subtle-strong"
-        style={[{ width: `${100 / props.options.length}%`, start: 0 }, indicatorStyle]}
-      />
-      {props.options.map((option) => {
-        const active = option.value === props.selected;
-        return (
-          <Pressable
-            key={String(option.value)}
-            accessibilityRole={Platform.OS === "ios" ? "button" : (props.role ?? "button")}
-            accessibilityLabel={option.accessibilityLabel ?? option.label}
-            accessibilityState={{ selected: active }}
-            onPress={() => props.onSelect(option.value)}
-            className={cn(
-              "flex-1 items-center justify-center rounded-full",
-              compact ? "h-9" : "h-11",
-            )}
-          >
-            <Text
-              className={cn(
-                compact ? "text-xs" : "text-sm",
-                active ? "font-lecturn-medium text-foreground" : "text-foreground-muted",
-              )}
+    <View collapsable={false} className={props.className}>
+      <View
+        onLayout={(event) => setLayout(event.nativeEvent.layout)}
+        className="flex-row rounded-full p-[3px]"
+        style={{
+          minHeight,
+          backgroundColor: colors[dark ? "--color-screen" : "--color-grouped-card"],
+        }}
+      >
+        {selectedIndex >= 0 && width > 0 ? (
+          <Animated.View
+            pointerEvents="none"
+            className="absolute bottom-[3px] start-[3px] top-[3px] rounded-full"
+            style={[
+              {
+                backgroundColor: colors[dark ? "--color-secondary" : "--color-screen"],
+              },
+              selectionStyle,
+            ]}
+          />
+        ) : null}
+        {props.options.map((option) => {
+          const selected = option.value === props.selected;
+          return (
+            <Pressable
+              key={`${typeof option.value}:${option.value}`}
+              accessibilityRole={props.role ?? "button"}
+              accessibilityLabel={option.accessibilityLabel ?? option.label}
+              accessibilityState={{ selected }}
+              onPress={() => props.onSelect(option.value)}
+              className="flex-1 items-center justify-center rounded-full px-2 py-1 active:opacity-70"
+              style={{ minHeight: minHeight - 6 }}
             >
-              {option.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </GlassCard>
+              <AppText
+                textRole="footnote"
+                className={selected ? "font-lecturn-bold" : "font-lecturn-medium"}
+                style={{
+                  color:
+                    colors[selected ? "--color-secondary-foreground" : "--color-foreground-muted"],
+                }}
+              >
+                {option.label}
+              </AppText>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
   );
 }

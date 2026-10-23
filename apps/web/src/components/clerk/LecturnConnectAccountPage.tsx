@@ -1,5 +1,5 @@
 import { useAuth, useClerk } from "@clerk/react";
-import { useCallback, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { CONNECT_PROFILE_PAGES } from "./connectProfilePages";
@@ -18,7 +18,7 @@ export function useLecturnConnectAccountPage(): {
   const { isSignedIn } = useAuth();
   const [targets, setTargets] = useState<PortalTargets>({});
 
-  const open = useCallback(() => {
+  const open = () => {
     const setTarget = (key: string, element: HTMLDivElement | undefined) =>
       setTargets((current) => ({ ...current, [key]: element }));
     clerk.openUserProfile({
@@ -32,7 +32,7 @@ export function useLecturnConnectAccountPage(): {
         unmountIcon: () => setTarget(`icon:${page.url}`, undefined),
       })),
     });
-  }, [clerk]);
+  };
 
   const portals = CONNECT_PROFILE_PAGES.flatMap(({ url, Icon, render }) => {
     const content = targets[`content:${url}`];

@@ -13,7 +13,7 @@ import {
   Trash2Icon,
   UserIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useComposerHandleContext } from "../composerHandleContext";
 import { assistantCitationNavigation } from "../lib/assistantCitationNavigation";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
@@ -128,14 +128,10 @@ function SavedNotesPanel({
   const composer = useComposerHandleContext();
   const navigate = useNavigate();
   const messages = detail?.projection.messages;
-  const messageOrder = useMemo(
-    () => new Map<string, number>((messages ?? []).map((message, index) => [message.id, index])),
-    [messages],
+  const messageOrder = new Map<string, number>(
+    (messages ?? []).map((message, index) => [message.id, index]),
   );
-  const groups = useMemo(
-    () => groupThreadNotes(data.notes, threadRef.threadId, scope, filter, messageOrder),
-    [data.notes, threadRef.threadId, scope, filter, messageOrder],
-  );
+  const groups = groupThreadNotes(data.notes, threadRef.threadId, scope, filter, messageOrder);
   const rows = groups.flatMap((group) => group.notes);
   const activeId = active?.key === threadNoteScopeKey(threadRef) ? active.id : undefined;
   useEffect(() => {

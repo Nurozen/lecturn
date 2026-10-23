@@ -1,5 +1,9 @@
 import { useComposerHandleContext } from "../composerHandleContext";
-import { useAtomValue } from "@effect/atom-react";
+import {
+  scopedProjectKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "@lecturn/client-runtime/environment";
 import {
   isStaveProject,
   normalizeProjectThreadWorkspace,
@@ -7,14 +11,8 @@ import {
 } from "@lecturn/client-runtime/state/projectGit";
 import { withoutArchivedStaveProjects } from "@lecturn/client-runtime/state/stave-archive";
 import { toastManager } from "../components/ui/toast";
-import {
-  scopedProjectKey,
-  scopeProjectRef,
-  scopeThreadRef,
-} from "@lecturn/client-runtime/environment";
 import { DEFAULT_SERVER_SETTINGS, type ScopedProjectRef, type ThreadId } from "@lecturn/contracts";
-import { useParams, useRouter } from "@tanstack/react-router";
-import { useCallback, useMemo } from "react";
+import { useRouter } from "@tanstack/react-router";
 import {
   composerDraftHasUserContent,
   markPromotedDraftThreadByRef,
@@ -37,7 +35,7 @@ import {
   readThreadShell,
   readThreadShells,
   useProjects,
-  useThreadShell,
+  useQuietThreadShell,
 } from "../state/entities";
 import {
   hasExplicitComposerModelSelection,
@@ -47,10 +45,12 @@ import {
   resolveNewThreadModelSelectionOverride,
 } from "../lib/chatThreadActions";
 import { readLecturnProjectFile } from "../lib/lecturnProjectFileDefaults";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentServerConfigsAtom } from "../state/server";
 import { resolveThreadRouteTarget, type ThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
+import { useThreadRouteTarget } from "./useThreadRouteTarget";
 
 interface NewThreadWorkspaceOptions {
   branch?: string | null;
@@ -88,373 +88,363 @@ export function readThreadCarrySources(routeTarget: ThreadRouteTarget | null) {
 
 export function useNewThreadHandler() {
   const composerHandleRef = useComposerHandleContext();
-  const environmentServerConfigs = useAtomValue(environmentServerConfigsAtom);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const router = useRouter();
-  const getCurrentRouteTarget = useCallback(() => {
+  const getCurrentRouteTarget = () => {
     const currentRouteParams = router.state.matches[router.state.matches.length - 1]?.params ?? {};
     return resolveThreadRouteTarget(currentRouteParams);
-  }, [router]);
+  };
 
-  return useCallback(
-    async (
-      projectRef: ScopedProjectRef,
-      options?: {
-        branch?: string | null;
-        worktreePath?: string | null;
-        envMode?: DraftThreadEnvMode;
-        startFromOrigin?: boolean;
-        replace?: boolean;
-      },
-    ): Promise<{ draftId: DraftId; threadId: ThreadId } | null> => {
-      const projects = readProjects();
-      const targetServerSettings =
-        environmentServerConfigs.get(projectRef.environmentId)?.settings ?? DEFAULT_SERVER_SETTINGS;
-      const {
-        getComposerDraft,
-        getDraftSessionByLogicalProjectKey,
-        getDraftSession,
-        getDraftThread,
-        applyStickyState,
-        setDraftThreadContext,
-        setLogicalProjectDraftThreadId,
-        setModelSelection,
-      } = useComposerDraftStore.getState();
-      const requestingRouteHref = router.state.location.href;
-      const routeChangedSinceRequest = () => router.state.location.href !== requestingRouteHref;
-      const currentRouteTarget = getCurrentRouteTarget();
-      const carrySources = readThreadCarrySources(currentRouteTarget);
-      const composerActiveProvider = carrySources.composer?.activeProvider ?? null;
-      const composerModelSelection = composerActiveProvider
-        ? (carrySources.composer?.modelSelectionByProvider[composerActiveProvider] ?? null)
+  return (
+    projectRef: ScopedProjectRef,
+    options?: {
+      branch?: string | null;
+      worktreePath?: string | null;
+      envMode?: DraftThreadEnvMode;
+      startFromOrigin?: boolean;
+      replace?: boolean;
+    },
+  ): Promise<{ draftId: DraftId; threadId: ThreadId } | null> => {
+    const projects = readProjects();
+    // Read at call time: every provider status push replaces the config map, and
+    // subscribing would hand every sidebar row a new handler.
+    const environmentServerConfigs = appAtomRegistry.get(environmentServerConfigsAtom);
+    const targetServerSettings =
+      environmentServerConfigs.get(projectRef.environmentId)?.settings ?? DEFAULT_SERVER_SETTINGS;
+    const {
+      getComposerDraft,
+      getDraftSessionByLogicalProjectKey,
+      getDraftSession,
+      getDraftThread,
+      applyStickyState,
+      setDraftThreadContext,
+      setLogicalProjectDraftThreadId,
+      setModelSelection,
+    } = useComposerDraftStore.getState();
+    const requestingRouteHref = router.state.location.href;
+    const routeChangedSinceRequest = () => router.state.location.href !== requestingRouteHref;
+    const currentRouteTarget = getCurrentRouteTarget();
+    const carrySources = readThreadCarrySources(currentRouteTarget);
+    const composerActiveProvider = carrySources.composer?.activeProvider ?? null;
+    const composerModelSelection = composerActiveProvider
+      ? (carrySources.composer?.modelSelectionByProvider[composerActiveProvider] ?? null)
+      : null;
+    const carryModelSelection =
+      composerModelSelection ?? carrySources.shell?.modelSelection ?? null;
+    const { interactionMode: carryInteractionMode } = resolveCarriedThreadModes(carrySources);
+    const project = projects.find(
+      (candidate) =>
+        candidate.id === projectRef.projectId &&
+        candidate.environmentId === projectRef.environmentId,
+    );
+    const staveStartMessage = staveThreadStartMessage(project);
+    if (staveStartMessage !== null) {
+      toastManager.add({
+        type: "warning",
+        title: "This Stave space is archived",
+        description: staveStartMessage,
+      });
+      return Promise.resolve(null);
+    }
+    const abandonedSinceRequest = () =>
+      routeChangedSinceRequest() || (project !== undefined && readProject(projectRef) === null);
+    const projectSettings = resolveProjectSettings(
+      targetServerSettings,
+      project?.id ?? null,
+      project,
+    );
+    const projectDefaultModelSelection = projectSettings.settings.defaultModelSelection;
+    const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;
+    const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
+      resolveNewThreadModelSelectionOverride({
+        projectDefaultSelection: projectDefaultModelSelection ?? null,
+        carrySelection: carryModelSelection,
+        carrySourceDraftId:
+          currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
+        destinationDraftId,
+      });
+    const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
+      const { forcedMode } = resolveNewThreadEnvModeSources(project);
+      if (forcedMode !== undefined) return forcedMode;
+      const consultProjectFile =
+        project !== undefined && projectSettings.settings.defaultThreadEnvMode === null;
+      const projectFile = consultProjectFile
+        ? await readLecturnProjectFile(project.environmentId, project.workspaceRoot)
         : null;
-      const carryModelSelection =
-        composerModelSelection ?? carrySources.shell?.modelSelection ?? null;
-      const { interactionMode: carryInteractionMode } = resolveCarriedThreadModes(carrySources);
-      const project = projects.find(
-        (candidate) =>
-          candidate.id === projectRef.projectId &&
-          candidate.environmentId === projectRef.environmentId,
-      );
-      const staveStartMessage = staveThreadStartMessage(project);
-      if (staveStartMessage !== null) {
-        toastManager.add({
-          type: "warning",
-          title: "This Stave space is archived",
-          description: staveStartMessage,
-        });
-        return Promise.resolve(null);
-      }
-      const abandonedSinceRequest = () =>
-        routeChangedSinceRequest() || (project !== undefined && readProject(projectRef) === null);
-      const projectSettings = resolveProjectSettings(
-        targetServerSettings,
-        project?.id ?? null,
-        project,
-      );
-      const projectDefaultModelSelection = projectSettings.settings.defaultModelSelection;
-      const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;
-      const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
-        resolveNewThreadModelSelectionOverride({
-          projectDefaultSelection: projectDefaultModelSelection ?? null,
-          carrySelection: carryModelSelection,
-          carrySourceDraftId:
-            currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
-          destinationDraftId,
-        });
-      const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
-        const { forcedMode } = resolveNewThreadEnvModeSources(project);
-        if (forcedMode !== undefined) return forcedMode;
-        const consultProjectFile =
-          project !== undefined && projectSettings.settings.defaultThreadEnvMode === null;
-        const projectFile = consultProjectFile
-          ? await readLecturnProjectFile(project.environmentId, project.workspaceRoot)
-          : null;
-        return resolveNewThreadEnvMode({
-          projectSettings: resolveProjectSettings(
-            targetServerSettings,
-            project?.id ?? null,
-            project,
-            projectFile,
-          ),
-          workspaceRoot: project?.workspaceRoot ?? null,
-          newProjectsRoot: environmentServerConfigs.get(projectRef.environmentId)?.newProjectsRoot,
-          projectHasThreads: readThreadShells().some(
-            (thread) =>
-              thread.environmentId === projectRef.environmentId &&
-              thread.projectId === projectRef.projectId,
-          ),
-        });
-      };
-      const logicalProjectKey = project
-        ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
-        : scopedProjectKey(projectRef);
-      const workspaceOptionsForDraft = (draft?: NewThreadWorkspaceOptions) =>
-        normalizeProjectThreadWorkspace(project, {
-          ...(isStaveProject(project) && draft
-            ? {
-                branch: draft.branch,
-                worktreePath: draft.worktreePath,
-                envMode: draft.envMode,
-                startFromOrigin: draft.startFromOrigin,
-              }
-            : {}),
-          ...pickExplicitWorkspaceOptions(options),
-        });
-      const hasBranchOption = options?.branch !== undefined;
-      const hasWorktreePathOption = options?.worktreePath !== undefined;
-      const hasEnvModeOption = options?.envMode !== undefined;
-      const hasStartFromOriginOption = options?.startFromOrigin !== undefined;
-      const storedDraftThread = getDraftSessionByLogicalProjectKey(logicalProjectKey);
-      const storedDraftThreadRef = storedDraftThread
-        ? scopeThreadRef(storedDraftThread.environmentId, storedDraftThread.threadId)
+      return resolveNewThreadEnvMode({
+        projectSettings: resolveProjectSettings(
+          targetServerSettings,
+          project?.id ?? null,
+          project,
+          projectFile,
+        ),
+        workspaceRoot: project?.workspaceRoot ?? null,
+        newProjectsRoot: environmentServerConfigs.get(projectRef.environmentId)?.newProjectsRoot,
+        projectHasThreads: readThreadShells().some(
+          (thread) =>
+            thread.environmentId === projectRef.environmentId &&
+            thread.projectId === projectRef.projectId,
+        ),
+      });
+    };
+    const logicalProjectKey = project
+      ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
+      : scopedProjectKey(projectRef);
+    const workspaceOptionsForDraft = (draft?: NewThreadWorkspaceOptions) =>
+      normalizeProjectThreadWorkspace(project, {
+        ...(isStaveProject(project) && draft
+          ? {
+              branch: draft.branch,
+              worktreePath: draft.worktreePath,
+              envMode: draft.envMode,
+              startFromOrigin: draft.startFromOrigin,
+            }
+          : {}),
+        ...pickExplicitWorkspaceOptions(options),
+      });
+    const hasBranchOption = options?.branch !== undefined;
+    const hasWorktreePathOption = options?.worktreePath !== undefined;
+    const hasEnvModeOption = options?.envMode !== undefined;
+    const hasStartFromOriginOption = options?.startFromOrigin !== undefined;
+    const storedDraftThread = getDraftSessionByLogicalProjectKey(logicalProjectKey);
+    const storedDraftThreadRef = storedDraftThread
+      ? scopeThreadRef(storedDraftThread.environmentId, storedDraftThread.threadId)
+      : null;
+    const reusableStoredDraftThread =
+      storedDraftThread !== null &&
+      storedDraftThread.promotedTo == null &&
+      storedDraftThreadRef !== null &&
+      readThreadShell(storedDraftThreadRef) === null
+        ? storedDraftThread
         : null;
-      const reusableStoredDraftThread =
-        storedDraftThread !== null &&
-        storedDraftThread.promotedTo == null &&
-        storedDraftThreadRef !== null &&
-        readThreadShell(storedDraftThreadRef) === null
-          ? storedDraftThread
-          : null;
-      if (storedDraftThreadRef && reusableStoredDraftThread === null) {
-        markPromotedDraftThreadByRef(storedDraftThreadRef);
-      }
-      const emptyStoredDraftThread =
-        reusableStoredDraftThread &&
-        !composerDraftHasUserContent(getComposerDraft(reusableStoredDraftThread.draftId))
-          ? reusableStoredDraftThread
-          : null;
-      const latestActiveDraftThread: DraftThreadState | null = currentRouteTarget
-        ? currentRouteTarget.kind === "server"
-          ? getDraftThread(currentRouteTarget.threadRef)
-          : getDraftSession(currentRouteTarget.draftId)
+    if (storedDraftThreadRef && reusableStoredDraftThread === null) {
+      markPromotedDraftThreadByRef(storedDraftThreadRef);
+    }
+    const emptyStoredDraftThread =
+      reusableStoredDraftThread &&
+      !composerDraftHasUserContent(getComposerDraft(reusableStoredDraftThread.draftId))
+        ? reusableStoredDraftThread
         : null;
-      const threadId = newThreadId();
-      if (emptyStoredDraftThread) {
-        return (async () => {
-          const isDraftAlreadyOpen =
-            currentRouteTarget?.kind === "draft" &&
-            currentRouteTarget.draftId === emptyStoredDraftThread.draftId;
-          const hasExplicitWorkspaceOption =
-            isStaveProject(project) ||
-            hasBranchOption ||
-            hasWorktreePathOption ||
-            hasEnvModeOption ||
-            hasStartFromOriginOption;
-          let workspaceContext: NewThreadWorkspaceOptions | null = null;
-          if (hasExplicitWorkspaceOption) {
-            workspaceContext = workspaceOptionsForDraft(emptyStoredDraftThread);
-          } else if (!isDraftAlreadyOpen) {
-            const defaultEnvMode = await resolveDefaultEnvMode();
-            if (abandonedSinceRequest()) {
-              return null;
-            }
-            // If the draft was opened (a concurrent invocation's navigation
-            // landed), promoted to a real thread, remapped away (a concurrent
-            // invocation registered a fresh draft — remapping back would evict
-            // the winner and let the store GC it), or gained content (no longer
-            // a reusable empty draft) in the meantime, this invocation is a
-            // stale loser: resetting context, remapping, or navigating would
-            // all clobber state written after the snapshot above.
-            const routeTargetNow = getCurrentRouteTarget();
-            const openedMeanwhile =
-              routeTargetNow?.kind === "draft" &&
-              routeTargetNow.draftId === emptyStoredDraftThread.draftId;
-            const promotedMeanwhile =
-              storedDraftThreadRef !== null && readThreadShell(storedDraftThreadRef) !== null;
-            const remappedMeanwhile =
-              getDraftSessionByLogicalProjectKey(logicalProjectKey)?.draftId !==
-              emptyStoredDraftThread.draftId;
-            const investedMeanwhile = composerDraftHasUserContent(
-              getComposerDraft(emptyStoredDraftThread.draftId),
-            );
-            if (openedMeanwhile || promotedMeanwhile || remappedMeanwhile || investedMeanwhile) {
-              return null;
-            }
-            workspaceContext = {
-              branch: null,
-              worktreePath: null,
-              envMode: defaultEnvMode,
-              startFromOrigin: resolveNewDraftStartFromOrigin({
-                envMode: defaultEnvMode,
-                newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
-              }),
-            };
-          }
-          if (workspaceContext) {
-            setDraftThreadContext(emptyStoredDraftThread.draftId, {
-              ...workspaceContext,
-              ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
-              ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
-            });
-          }
-          const storedDraft = getComposerDraft(emptyStoredDraftThread.draftId);
-          const storedDraftHasExplicitModelPick = hasExplicitComposerModelSelection(storedDraft);
-          if (!storedDraftHasExplicitModelPick) {
-            applyStickyState(emptyStoredDraftThread.draftId);
-            const modelSelectionOverride = resolveModelSelectionOverride(
-              emptyStoredDraftThread.draftId,
-            );
-            if (modelSelectionOverride) {
-              setModelSelection(emptyStoredDraftThread.draftId, modelSelectionOverride, {
-                replaceOptions: true,
-              });
-            }
-          }
-          // The workspace context must also ride along here: when projectRef
-          // targets a different physical member of the logical project,
-          // createDraftThreadState treats the remap as a project change and
-          // would otherwise wipe branch/worktree, undoing the write above.
-          setLogicalProjectDraftThreadId(
-            logicalProjectKey,
-            projectRef,
-            emptyStoredDraftThread.draftId,
-            {
-              threadId: emptyStoredDraftThread.threadId,
-              ...workspaceContext,
-              ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
-              ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
-            },
-          );
-          const opened = {
-            draftId: emptyStoredDraftThread.draftId,
-            threadId: emptyStoredDraftThread.threadId,
-          };
-          const routeTargetAfterWrites = getCurrentRouteTarget();
-          if (
-            routeTargetAfterWrites?.kind === "draft" &&
-            routeTargetAfterWrites.draftId === emptyStoredDraftThread.draftId
-          ) {
-            // Reusing the visible empty draft should still put the user back
-            // into the composer instead of leaving focus on the New button.
-            composerHandleRef?.current?.focusAtEnd();
-            return opened;
-          }
-          await router.navigate({
-            to: "/draft/$draftId",
-            params: { draftId: emptyStoredDraftThread.draftId },
-            replace: options?.replace ?? false,
-          });
-          return opened;
-        })();
-      }
-
-      if (
-        latestActiveDraftThread &&
-        currentRouteTarget?.kind === "draft" &&
-        latestActiveDraftThread.logicalProjectKey === logicalProjectKey &&
-        latestActiveDraftThread.promotedTo == null &&
-        !composerDraftHasUserContent(getComposerDraft(currentRouteTarget.draftId))
-      ) {
-        if (
+    const latestActiveDraftThread: DraftThreadState | null = currentRouteTarget
+      ? currentRouteTarget.kind === "server"
+        ? getDraftThread(currentRouteTarget.threadRef)
+        : getDraftSession(currentRouteTarget.draftId)
+      : null;
+    const threadId = newThreadId();
+    if (emptyStoredDraftThread) {
+      return (async () => {
+        const isDraftAlreadyOpen =
+          currentRouteTarget?.kind === "draft" &&
+          currentRouteTarget.draftId === emptyStoredDraftThread.draftId;
+        const hasExplicitWorkspaceOption =
           isStaveProject(project) ||
           hasBranchOption ||
           hasWorktreePathOption ||
           hasEnvModeOption ||
-          hasStartFromOriginOption
-        ) {
-          setDraftThreadContext(
-            currentRouteTarget.draftId,
-            workspaceOptionsForDraft(latestActiveDraftThread),
+          hasStartFromOriginOption;
+        let workspaceContext: NewThreadWorkspaceOptions | null = null;
+        if (hasExplicitWorkspaceOption) {
+          workspaceContext = workspaceOptionsForDraft(emptyStoredDraftThread);
+        } else if (!isDraftAlreadyOpen) {
+          const defaultEnvMode = await resolveDefaultEnvMode();
+          if (abandonedSinceRequest()) {
+            return null;
+          }
+          // If the draft was opened (a concurrent invocation's navigation
+          // landed), promoted to a real thread, remapped away (a concurrent
+          // invocation registered a fresh draft — remapping back would evict
+          // the winner and let the store GC it), or gained content (no longer
+          // a reusable empty draft) in the meantime, this invocation is a
+          // stale loser: resetting context, remapping, or navigating would
+          // all clobber state written after the snapshot above.
+          const routeTargetNow = getCurrentRouteTarget();
+          const openedMeanwhile =
+            routeTargetNow?.kind === "draft" &&
+            routeTargetNow.draftId === emptyStoredDraftThread.draftId;
+          const promotedMeanwhile =
+            storedDraftThreadRef !== null && readThreadShell(storedDraftThreadRef) !== null;
+          const remappedMeanwhile =
+            getDraftSessionByLogicalProjectKey(logicalProjectKey)?.draftId !==
+            emptyStoredDraftThread.draftId;
+          const investedMeanwhile = composerDraftHasUserContent(
+            getComposerDraft(emptyStoredDraftThread.draftId),
           );
+          if (openedMeanwhile || promotedMeanwhile || remappedMeanwhile || investedMeanwhile) {
+            return null;
+          }
+          workspaceContext = {
+            branch: null,
+            worktreePath: null,
+            envMode: defaultEnvMode,
+            startFromOrigin: resolveNewDraftStartFromOrigin({
+              envMode: defaultEnvMode,
+              newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
+            }),
+          };
         }
-        setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, currentRouteTarget.draftId, {
-          threadId: latestActiveDraftThread.threadId,
-          createdAt: latestActiveDraftThread.createdAt,
-          runtimeMode: latestActiveDraftThread.runtimeMode,
-          interactionMode: latestActiveDraftThread.interactionMode,
-          ...workspaceOptionsForDraft(latestActiveDraftThread),
-        });
-        composerHandleRef?.current?.focusAtEnd();
-        return Promise.resolve({
-          draftId: currentRouteTarget.draftId,
-          threadId: latestActiveDraftThread.threadId,
-        });
-      }
-
-      const draftId = newDraftId();
-      const createdAt = new Date().toISOString();
-      return (async () => {
-        const initialEnvMode = options?.envMode ?? (await resolveDefaultEnvMode());
-        if (abandonedSinceRequest()) {
-          return null;
-        }
-        // The await yields, so a concurrent invocation may have registered a
-        // draft for this logical project in the meantime. Registering ours
-        // too would evict that draft while its navigation is in flight —
-        // reuse the winner instead, like the synchronous path above does.
-        const racedDraft = getDraftSessionByLogicalProjectKey(logicalProjectKey);
-        if (
-          racedDraft &&
-          racedDraft.draftId !== storedDraftThread?.draftId &&
-          readThreadShell(scopeThreadRef(racedDraft.environmentId, racedDraft.threadId)) === null
-        ) {
-          setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, racedDraft.draftId, {
-            threadId: racedDraft.threadId,
-            createdAt: racedDraft.createdAt,
-            runtimeMode: racedDraft.runtimeMode,
-            interactionMode: racedDraft.interactionMode,
-            ...workspaceOptionsForDraft(racedDraft),
+        if (workspaceContext) {
+          setDraftThreadContext(emptyStoredDraftThread.draftId, {
+            ...workspaceContext,
+            ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
+            ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
           });
-          await router.navigate({
-            to: "/draft/$draftId",
-            params: { draftId: racedDraft.draftId },
-            replace: options?.replace ?? false,
-          });
-          return { draftId: racedDraft.draftId, threadId: racedDraft.threadId };
         }
+        const storedDraft = getComposerDraft(emptyStoredDraftThread.draftId);
+        const storedDraftHasExplicitModelPick = hasExplicitComposerModelSelection(storedDraft);
+        if (!storedDraftHasExplicitModelPick) {
+          applyStickyState(emptyStoredDraftThread.draftId);
+          const modelSelectionOverride = resolveModelSelectionOverride(
+            emptyStoredDraftThread.draftId,
+          );
+          if (modelSelectionOverride) {
+            setModelSelection(emptyStoredDraftThread.draftId, modelSelectionOverride, {
+              replaceOptions: true,
+            });
+          }
+        }
+        // The workspace context must also ride along here: when projectRef
+        // targets a different physical member of the logical project,
+        // createDraftThreadState treats the remap as a project change and
+        // would otherwise wipe branch/worktree, undoing the write above.
         setLogicalProjectDraftThreadId(
           logicalProjectKey,
           projectRef,
-          draftId,
-          normalizeProjectThreadWorkspace(project, {
-            threadId,
-            createdAt,
-            branch: options?.branch ?? null,
-            worktreePath: options?.worktreePath ?? null,
-            envMode: initialEnvMode,
-            startFromOrigin:
-              options?.startFromOrigin ??
-              resolveNewDraftStartFromOrigin({
-                envMode: initialEnvMode,
-                newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
-              }),
-            runtimeMode: defaultRuntimeMode,
+          emptyStoredDraftThread.draftId,
+          {
+            threadId: emptyStoredDraftThread.threadId,
+            ...workspaceContext,
+            ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
             ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
-          }),
+          },
         );
-        applyStickyState(draftId);
-        const modelSelectionOverride = resolveModelSelectionOverride(draftId);
-        if (modelSelectionOverride) {
-          setModelSelection(draftId, modelSelectionOverride, { replaceOptions: true });
+        const opened = {
+          draftId: emptyStoredDraftThread.draftId,
+          threadId: emptyStoredDraftThread.threadId,
+        };
+        const routeTargetAfterWrites = getCurrentRouteTarget();
+        if (
+          routeTargetAfterWrites?.kind === "draft" &&
+          routeTargetAfterWrites.draftId === emptyStoredDraftThread.draftId
+        ) {
+          // Reusing the visible empty draft should still put the user back
+          // into the composer instead of leaving focus on the New button.
+          composerHandleRef?.current?.focusAtEnd();
+          return opened;
         }
         await router.navigate({
           to: "/draft/$draftId",
-          params: { draftId },
+          params: { draftId: emptyStoredDraftThread.draftId },
           replace: options?.replace ?? false,
         });
-        return { draftId, threadId };
+        return opened;
       })();
-    },
-    [
-      composerHandleRef,
-      environmentServerConfigs,
-      getCurrentRouteTarget,
-      projectGroupingSettings,
-      router,
-    ],
-  );
+    }
+
+    if (
+      latestActiveDraftThread &&
+      currentRouteTarget?.kind === "draft" &&
+      latestActiveDraftThread.logicalProjectKey === logicalProjectKey &&
+      latestActiveDraftThread.promotedTo == null &&
+      !composerDraftHasUserContent(getComposerDraft(currentRouteTarget.draftId))
+    ) {
+      if (
+        isStaveProject(project) ||
+        hasBranchOption ||
+        hasWorktreePathOption ||
+        hasEnvModeOption ||
+        hasStartFromOriginOption
+      ) {
+        setDraftThreadContext(
+          currentRouteTarget.draftId,
+          workspaceOptionsForDraft(latestActiveDraftThread),
+        );
+      }
+      setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, currentRouteTarget.draftId, {
+        threadId: latestActiveDraftThread.threadId,
+        createdAt: latestActiveDraftThread.createdAt,
+        runtimeMode: latestActiveDraftThread.runtimeMode,
+        interactionMode: latestActiveDraftThread.interactionMode,
+        ...workspaceOptionsForDraft(latestActiveDraftThread),
+      });
+      composerHandleRef?.current?.focusAtEnd();
+      return Promise.resolve({
+        draftId: currentRouteTarget.draftId,
+        threadId: latestActiveDraftThread.threadId,
+      });
+    }
+
+    const draftId = newDraftId();
+    const createdAt = new Date().toISOString();
+    return (async () => {
+      const initialEnvMode = options?.envMode ?? (await resolveDefaultEnvMode());
+      if (abandonedSinceRequest()) {
+        return null;
+      }
+      // The await yields, so a concurrent invocation may have registered a
+      // draft for this logical project in the meantime. Registering ours
+      // too would evict that draft while its navigation is in flight —
+      // reuse the winner instead, like the synchronous path above does.
+      const racedDraft = getDraftSessionByLogicalProjectKey(logicalProjectKey);
+      if (
+        racedDraft &&
+        racedDraft.draftId !== storedDraftThread?.draftId &&
+        readThreadShell(scopeThreadRef(racedDraft.environmentId, racedDraft.threadId)) === null
+      ) {
+        setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, racedDraft.draftId, {
+          threadId: racedDraft.threadId,
+          createdAt: racedDraft.createdAt,
+          runtimeMode: racedDraft.runtimeMode,
+          interactionMode: racedDraft.interactionMode,
+          ...workspaceOptionsForDraft(racedDraft),
+        });
+        await router.navigate({
+          to: "/draft/$draftId",
+          params: { draftId: racedDraft.draftId },
+          replace: options?.replace ?? false,
+        });
+        return { draftId: racedDraft.draftId, threadId: racedDraft.threadId };
+      }
+      setLogicalProjectDraftThreadId(
+        logicalProjectKey,
+        projectRef,
+        draftId,
+        normalizeProjectThreadWorkspace(project, {
+          threadId,
+          createdAt,
+          branch: options?.branch ?? null,
+          worktreePath: options?.worktreePath ?? null,
+          envMode: initialEnvMode,
+          startFromOrigin:
+            options?.startFromOrigin ??
+            resolveNewDraftStartFromOrigin({
+              envMode: initialEnvMode,
+              newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
+            }),
+          runtimeMode: defaultRuntimeMode,
+          ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
+        }),
+      );
+      applyStickyState(draftId);
+      const modelSelectionOverride = resolveModelSelectionOverride(draftId);
+      if (modelSelectionOverride) {
+        setModelSelection(draftId, modelSelectionOverride, { replaceOptions: true });
+      }
+      await router.navigate({
+        to: "/draft/$draftId",
+        params: { draftId },
+        replace: options?.replace ?? false,
+      });
+      return { draftId, threadId };
+    })();
+  };
 }
 
 export function useHandleNewThread() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const routeTarget = useParams({
-    strict: false,
-    select: (params) => resolveThreadRouteTarget(params),
-  });
+  const routeTarget = useThreadRouteTarget();
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
   const routeDraftId = routeTarget?.kind === "draft" ? routeTarget.draftId : null;
-  const activeThread = useThreadShell(routeThreadRef);
+  const activeThread = useQuietThreadShell(routeThreadRef);
   const getDraftThread = useComposerDraftStore((store) => store.getDraftThread);
   const activeDraftThread = useComposerDraftStore(() =>
     routeTarget
@@ -464,26 +454,25 @@ export function useHandleNewThread() {
       : null,
   );
   const projects = useProjects();
-  // The default target is a listed project: an archived Stave space starts no threads.
-  const orderedProjects = useMemo(() => {
-    return orderItemsByPreferredIds({
-      items: withoutArchivedStaveProjects(projects),
-      preferredIds: projectOrder,
-      getId: getProjectOrderKey,
-      getPreferenceIds: (project) => [
-        getProjectOrderKey(project),
-        legacyProjectCwdPreferenceKey(project.workspaceRoot),
-      ],
-    });
-  }, [projectOrder, projects]);
   const handleNewThread = useNewThreadHandler();
+  // The default target is a listed project: an archived Stave space starts no threads.
+  const [defaultProject] = orderItemsByPreferredIds({
+    items: withoutArchivedStaveProjects(projects),
+    preferredIds: projectOrder,
+    getId: getProjectOrderKey,
+    getPreferenceIds: (project) => [
+      getProjectOrderKey(project),
+      legacyProjectCwdPreferenceKey(project.workspaceRoot),
+    ],
+  });
+  const defaultProjectRef = defaultProject
+    ? scopeProjectRef(defaultProject.environmentId, defaultProject.id)
+    : null;
 
   return {
     activeDraftThread,
     activeThread,
-    defaultProjectRef: orderedProjects[0]
-      ? scopeProjectRef(orderedProjects[0].environmentId, orderedProjects[0].id)
-      : null,
+    defaultProjectRef,
     handleNewThread,
     routeDraftId,
     routeThreadRef,

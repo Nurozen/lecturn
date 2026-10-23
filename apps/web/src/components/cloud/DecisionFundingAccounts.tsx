@@ -1,5 +1,6 @@
 import type { DecisionFundedEnvironment } from "@lecturn/contracts";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { settlePromise } from "@lecturn/client-runtime/state/runtime";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { decisionFundingAccountsClient } from "../../cloud/decisionFundingAccounts";
 import { Button } from "../ui/button";
 
@@ -15,54 +16,49 @@ function AccountFunding({ accountId }: { accountId: string }) {
   const [confirm, setConfirm] = useState<DecisionFundedEnvironment | null>(null);
   const controller = useRef<AbortController | null>(null);
   const active = useRef(true);
-  const load = useCallback(
-    async (next?: string) => {
-      controller.current?.abort();
-      const operation = new AbortController();
-      controller.current = operation;
-      setPending(true);
-      setError(null);
-      setConfirm(null);
-      try {
-        const result = await decisionFundingAccountsClient().list(
-          accountId,
-          next,
-          operation.signal,
-        );
-        if (!active.current || operation.signal.aborted) return;
-        setRows((previous) =>
-          next
-            ? [
-                ...previous,
-                ...result.environments.filter(
-                  (row) => !previous.some((item) => item.environmentId === row.environmentId),
-                ),
-              ]
-            : result.environments,
-        );
-        setCursor(result.nextCursor);
-        setLoaded(true);
-      } catch {
-        if (active.current && !operation.signal.aborted)
-          setError("Funded hosts could not be loaded. Refresh or sign in again.");
-      } finally {
-        if (active.current && !operation.signal.aborted) setPending(false);
-      }
-    },
-    [accountId],
-  );
+  const load = async (next?: string) => {
+    controller.current?.abort();
+    const operation = new AbortController();
+    controller.current = operation;
+    setPending(true);
+    setError(null);
+    setConfirm(null);
+    const settled = await settlePromise(() =>
+      decisionFundingAccountsClient().list(accountId, next, operation.signal),
+    );
+    if (!active.current || operation.signal.aborted) return;
+    if (settled._tag === "Success") {
+      const result = settled.value;
+      setRows((previous) =>
+        next
+          ? [
+              ...previous,
+              ...result.environments.filter(
+                (row) => !previous.some((item) => item.environmentId === row.environmentId),
+              ),
+            ]
+          : result.environments,
+      );
+      setCursor(result.nextCursor);
+      setLoaded(true);
+    } else {
+      setError("Funded hosts could not be loaded. Refresh or sign in again.");
+    }
+    setPending(false);
+  };
+  const loadOnMount = useEffectEvent(() => void load());
   useEffect(() => {
     active.current = true;
     // Defer the external request so Strict Mode cleanup can cancel its first mount.
     queueMicrotask(() => {
-      if (active.current) void load();
+      if (active.current) loadOnMount();
     });
     return () => {
       active.current = false;
       controller.current?.abort();
     };
     // The keyed child is recreated for every selected account.
-  }, [load]);
+  }, []);
   async function revoke() {
     if (!confirm || pending) return;
     const target = confirm;
@@ -70,23 +66,23 @@ function AccountFunding({ accountId }: { accountId: string }) {
     controller.current = operation;
     setPending(true);
     setError(null);
-    try {
-      await decisionFundingAccountsClient().revoke(
+    const settled = await settlePromise(() =>
+      decisionFundingAccountsClient().revoke(
         accountId,
         { environmentId: target.environmentId, expectedGeneration: target.generation },
         operation.signal,
-      );
-      if (!active.current || operation.signal.aborted) return;
+      ),
+    );
+    if (!active.current || operation.signal.aborted) return;
+    if (settled._tag === "Success") {
       setRows((previous) => previous.filter((row) => row.environmentId !== target.environmentId));
       setConfirm(null);
-    } catch {
-      if (active.current && !operation.signal.aborted)
-        setError(
-          "Funding could not be revoked. Refresh to check whether it changed, then try again.",
-        );
-    } finally {
-      if (active.current && !operation.signal.aborted) setPending(false);
+    } else {
+      setError(
+        "Funding could not be revoked. Refresh to check whether it changed, then try again.",
+      );
     }
+    setPending(false);
   }
   return (
     <section className="space-y-3 rounded-xl border p-4" aria-label="Decisions funding">

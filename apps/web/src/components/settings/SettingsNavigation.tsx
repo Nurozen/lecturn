@@ -1,5 +1,6 @@
 import { useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
-import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
+import { useStableCallback } from "../../hooks/useStableCallback";
 import { useSidebar } from "../ui/sidebar";
 
 const ChatReturnContext = createContext<() => void>(() => undefined);
@@ -27,7 +28,7 @@ export function SettingsNavigationProvider({ children }: { children: ReactNode }
     if (isChat) chatReturn.current = { pathname, index: historyIndex, remembered: true };
     setOpenMobile(false);
   }, [isChat, pathname, historyIndex, setOpenMobile]);
-  const backToChat = useCallback(() => {
+  const backToChat = useStableCallback(() => {
     setOpenMobile(false);
     const destination = chatReturn.current;
     const delta = destination.index - router.history.location.state.__TSR_index;
@@ -45,7 +46,7 @@ export function SettingsNavigationProvider({ children }: { children: ReactNode }
     } else {
       void navigate({ to: destination.pathname, replace: true });
     }
-  }, [navigate, router, setOpenMobile]);
+  });
   useEffect(() => {
     if (pathname !== "/settings" && !pathname.startsWith("/settings/")) return;
     const nativeBack = (event: Event) => {

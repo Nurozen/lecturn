@@ -198,20 +198,22 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
         return;
       }
       cleanupFailuresRef.current += 1;
-      cleanupToastRef.current ??= toastManager.add({
-        type: "error",
-        title: "Could not clear the previous account's data",
-        description: "Connect stays off for the new account until this is cleared.",
-        timeout: 0,
-        actionProps: {
-          children: "Retry",
-          onClick: () => {
-            closeCleanupToast();
-            cleanupFailuresRef.current = 0;
-            setRevision((revision) => revision + 1);
+      if (cleanupToastRef.current === null) {
+        cleanupToastRef.current = toastManager.add({
+          type: "error",
+          title: "Could not clear the previous account's data",
+          description: "Connect stays off for the new account until this is cleared.",
+          timeout: 0,
+          actionProps: {
+            children: "Retry",
+            onClick: () => {
+              closeCleanupToast();
+              cleanupFailuresRef.current = 0;
+              setRevision((revision) => revision + 1);
+            },
           },
-        },
-      });
+        });
+      }
       if (cleanupFailuresRef.current <= CLEANUP_MAX_RETRIES) {
         retryTimer = setTimeout(
           () => setRevision((revision) => revision + 1),

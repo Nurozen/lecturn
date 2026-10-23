@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { AuthEnvironmentMaintainScope } from "@lecturn/contracts";
 
@@ -22,73 +21,72 @@ import {
 
 export function useAvailableSettingsSearchItems(scopeSearch: SettingsScopeSearch = {}) {
   const { environments } = useEnvironments();
+  // The filtered list must be cached on boolean flags so it stays stable for the search and
+  // the command palette while environments update. The compiler cannot tell that `.some()`
+  // and other plain calls return primitives, so `=== true` marks each flag as one; without
+  // it the flags join the filter's cache scope and the list is rebuilt every render.
+  const hasEnvironment =
+    environments.some((environment) => environment.serverConfig !== null) === true;
+  const hasProviderSettingsEnvironment =
+    environments.some((environment) =>
+      isProviderSettingsEnvironmentAvailable({
+        connectionPhase: environment.connection.phase,
+        hasServerConfig: environment.serverConfig !== null,
+      }),
+    ) === true;
+  const hasMacProviderSettingsEnvironment =
+    environments.some(
+      (environment) =>
+        (scopeSearch.machine === undefined || environment.environmentId === scopeSearch.machine) &&
+        environment.serverConfig?.environment.platform.os === "darwin" &&
+        isProviderSettingsEnvironmentAvailable({
+          connectionPhase: environment.connection.phase,
+          hasServerConfig: true,
+        }),
+    ) === true;
+  const hasThreadAutoSettlement =
+    getThreadAutoSettlementSearchAvailability(environments).eligibleEnvironmentIds.length > 0;
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   // Stave settings live on the primary server, so its rows follow that config.
   const primaryServerConfig = useAtomValue(primaryServerConfigAtom);
+  const hasStave = primaryServerConfig?.environment.capabilities.stave !== undefined;
+  const hasStaveLifecycle = primaryServerConfig?.settings.stave.enabled === true;
+  const hasStaveGrace =
+    hasStaveLifecycle &&
+    primaryServerConfig?.settings.stave.lifecycle.onAllThreadsSettled === "archive-after-grace";
+  const hasStaveDestroy =
+    hasStaveLifecycle &&
+    primaryServerConfig?.settings.stave.lifecycle.onProjectDelete === "destroy";
   const hasConnectAccountMenu = useAtomValue(knownConnectAccountsAtom).accountIds.length > 0;
-  const localEnvironmentDisabled = isLocalEnvironmentDisabled();
   const canMaintain = useEnvironmentScope(primaryEnvironmentId, AuthEnvironmentMaintainScope);
-  const canManageLocalBackend = !localEnvironmentDisabled && canMaintain;
-  const desktopWsl = useEnvironmentQuery(
-    isElectron && canManageLocalBackend ? desktopWslStateAtom : null,
-  );
   const cloudLinkState = usePrimaryCloudLinkState().data;
   // Same fallback as the Relay publishing row: older servers imply a tunnel from `linked`.
   const managedTunnelActive =
     cloudLinkState?.linkRevoked !== true &&
-    (cloudLinkState?.managedTunnelActive ?? cloudLinkState?.linked ?? false);
-
-  return useMemo(
-    () =>
-      filterAvailableSettingsSearchItems({
-        localEnvironmentDisabled,
-        hasCloudPublicConfig: hasCloudPublicConfig(),
-        hasEnvironment: environments.some((environment) => environment.serverConfig !== null),
-        hasProviderSettingsEnvironment: environments.some((environment) =>
-          isProviderSettingsEnvironmentAvailable({
-            connectionPhase: environment.connection.phase,
-            hasServerConfig: environment.serverConfig !== null,
-          }),
-        ),
-        hasMacProviderSettingsEnvironment: environments.some(
-          (environment) =>
-            (scopeSearch.machine === undefined ||
-              environment.environmentId === scopeSearch.machine) &&
-            environment.serverConfig?.environment.platform.os === "darwin" &&
-            isProviderSettingsEnvironmentAvailable({
-              connectionPhase: environment.connection.phase,
-              hasServerConfig: true,
-            }),
-        ),
-        canManageLocalBackend,
-        isWslSettingsRowVisible: isWslSettingsRowVisible({
-          state: desktopWsl.data,
-          error: desktopWsl.error,
-        }),
-        hasThreadAutoSettlement:
-          getThreadAutoSettlementSearchAvailability(environments).eligibleEnvironmentIds.length > 0,
-        hasStave: primaryServerConfig?.environment.capabilities.stave !== undefined,
-        hasConnectAccountMenu,
-        hasStaveLifecycle: primaryServerConfig?.settings.stave.enabled === true,
-        hasStaveGrace:
-          primaryServerConfig?.settings.stave.enabled === true &&
-          primaryServerConfig.settings.stave.lifecycle.onAllThreadsSettled ===
-            "archive-after-grace",
-        hasStaveDestroy:
-          primaryServerConfig?.settings.stave.enabled === true &&
-          primaryServerConfig.settings.stave.lifecycle.onProjectDelete === "destroy",
-        managedTunnelActive,
-      }),
-    [
-      managedTunnelActive,
-      canManageLocalBackend,
-      desktopWsl.data,
-      desktopWsl.error,
-      environments,
-      hasConnectAccountMenu,
-      localEnvironmentDisabled,
-      primaryServerConfig,
-      scopeSearch.machine,
-    ],
+    (cloudLinkState?.managedTunnelActive ?? cloudLinkState?.linked ?? false) === true;
+  const localEnvironmentDisabled = isLocalEnvironmentDisabled() === true;
+  const canManageLocalBackend = !localEnvironmentDisabled && canMaintain;
+  const desktopWsl = useEnvironmentQuery(
+    isElectron && canManageLocalBackend ? desktopWslStateAtom : null,
   );
+  const cloudPublicConfig = hasCloudPublicConfig() === true;
+  const wslSettingsRowVisible =
+    isWslSettingsRowVisible({ state: desktopWsl.data, error: desktopWsl.error }) === true;
+
+  return filterAvailableSettingsSearchItems({
+    localEnvironmentDisabled,
+    hasCloudPublicConfig: cloudPublicConfig,
+    hasEnvironment,
+    hasProviderSettingsEnvironment,
+    hasMacProviderSettingsEnvironment,
+    canManageLocalBackend,
+    isWslSettingsRowVisible: wslSettingsRowVisible,
+    hasThreadAutoSettlement,
+    hasStave,
+    hasConnectAccountMenu,
+    hasStaveLifecycle,
+    hasStaveGrace,
+    hasStaveDestroy,
+    managedTunnelActive,
+  });
 }

@@ -14,7 +14,6 @@ import {
   type TerminalAttachInput,
   type TerminalSummary,
 } from "@lecturn/contracts";
-import { useMemo } from "react";
 
 import { useEnvironmentQuery } from "./query";
 import { terminalEnvironment } from "./terminal";
@@ -153,23 +152,21 @@ export function useAttachedTerminalSession(input: {
         }),
   );
 
-  return useMemo(() => {
-    if (input.environmentId === null || input.terminal === null) {
-      return EMPTY_TERMINAL_SESSION_STATE;
-    }
-    const summary =
-      (metadata.data === null
-        ? null
-        : terminalMetadataIndex(metadata.data)
-            .byThreadId.get(input.terminal.threadId)
-            ?.find((terminal) => terminal.terminalId === input.terminal?.terminalId)) ?? null;
-    const state = combineTerminalSessionState(summary, attach.data ?? EMPTY_TERMINAL_BUFFER_STATE);
-    if (attach.error !== null) return { ...state, error: attach.error, status: "error" };
-    // A reconnect seed has no server observation yet. Treating it as closed
-    // makes terminal owners destroy a live sign-in before the snapshot arrives.
-    if (summary === null && state.version === 0) return { ...state, status: "starting" };
-    return state;
-  }, [attach.data, attach.error, input.environmentId, input.terminal, metadata.data]);
+  if (input.environmentId === null || input.terminal === null) {
+    return EMPTY_TERMINAL_SESSION_STATE;
+  }
+  const summary =
+    (metadata.data === null
+      ? null
+      : terminalMetadataIndex(metadata.data)
+          .byThreadId.get(input.terminal.threadId)
+          ?.find((terminal) => terminal.terminalId === input.terminal?.terminalId)) ?? null;
+  const state = combineTerminalSessionState(summary, attach.data ?? EMPTY_TERMINAL_BUFFER_STATE);
+  if (attach.error !== null) return { ...state, error: attach.error, status: "error" };
+  // A reconnect seed has no server observation yet. Treating it as closed
+  // makes terminal owners destroy a live sign-in before the snapshot arrives.
+  if (summary === null && state.version === 0) return { ...state, status: "starting" };
+  return state;
 }
 
 export function useKnownTerminalSessions(input: {
@@ -185,13 +182,9 @@ export function useKnownTerminalSessions(input: {
           input: null,
         }),
   );
-  return useMemo(
-    () =>
-      metadata.data === null || metadata.error !== null
-        ? null
-        : selectKnownTerminalSessions(metadata.data, input.environmentId, input.threadId),
-    [input.environmentId, input.threadId, metadata.data, metadata.error],
-  );
+  return metadata.data === null || metadata.error !== null
+    ? null
+    : selectKnownTerminalSessions(metadata.data, input.environmentId, input.threadId);
 }
 
 export function useThreadRunningTerminalIds(input: {
@@ -199,5 +192,5 @@ export function useThreadRunningTerminalIds(input: {
   readonly threadId: ThreadId | null;
 }): ReadonlyArray<string> {
   const sessions = useKnownTerminalSessions(input);
-  return useMemo(() => selectRunningSubprocessTerminalIds(sessions ?? []), [sessions]);
+  return selectRunningSubprocessTerminalIds(sessions ?? []);
 }

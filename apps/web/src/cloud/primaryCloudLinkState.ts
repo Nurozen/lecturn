@@ -11,7 +11,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { HttpClient } from "effect/http";
-import { useCallback, useMemo } from "react";
 
 import { connectedGenerationSignal } from "./primaryCloudLinkRefresh";
 
@@ -103,27 +102,24 @@ export function readCachedPrimaryCloudLinkState(target: CloudLinkTarget) {
 export function usePrimaryCloudLinkState() {
   const primary = usePrimaryEnvironment();
   const canReadRelay = useEnvironmentScope(primary?.environmentId ?? null, AuthRelayReadScope);
-  const target = useMemo(
-    () =>
-      primary?.entry.target._tag === "PrimaryConnectionTarget"
-        ? {
-            environmentId: primary.environmentId,
-            label: primary.label,
-            httpBaseUrl: primary.entry.target.httpBaseUrl,
-            wsBaseUrl: primary.entry.target.wsBaseUrl,
-          }
-        : null,
-    [primary],
-  );
+  const target =
+    primary?.entry.target._tag === "PrimaryConnectionTarget"
+      ? {
+          environmentId: primary.environmentId,
+          label: primary.label,
+          httpBaseUrl: primary.entry.target.httpBaseUrl,
+          wsBaseUrl: primary.entry.target.wsBaseUrl,
+        }
+      : null;
   // Builds without Lecturn Connect have no link to read; skip the request.
   const atom =
     target && hasCloudPublicConfig() && canReadRelay
       ? primaryCloudLinkStateAtom(targetKey(target))
       : EMPTY_PRIMARY_CLOUD_LINK_STATE_ATOM;
   const result = useAtomValue(atom);
-  const refresh = useCallback(() => {
+  const refresh = () => {
     refreshPrimaryCloudLinkState(target);
-  }, [target]);
+  };
   let error: string | null = null;
   if (result._tag === "Failure") {
     const cause = Cause.squash(result.cause);

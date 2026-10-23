@@ -122,10 +122,9 @@ export function useConnectSignOut(redirectUrl?: string, accountId?: string) {
       setError(
         cause instanceof Error ? cause.message : "Could not complete sign out. Please retry.",
       );
-    } finally {
-      busy.current = false;
-      setPending(false);
     }
+    busy.current = false;
+    setPending(false);
   };
   return {
     requestSignOut: () => request(targetAccountId === null ? "all" : [targetAccountId]),

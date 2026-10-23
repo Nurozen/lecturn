@@ -14,6 +14,8 @@ import * as Path from "effect/Path";
 
 import * as ProcessRunner from "../processRunner.ts";
 import { STAVE_MANIFEST_FILE_NAME } from "../stave/staveManifest.ts";
+import { explicitBareRepositoryEnv } from "../vcs/VcsProcess.ts";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 
 const DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY = 512;
 // Background sweeps resolve every project each minute. A long TTL keeps them
@@ -127,6 +129,7 @@ const resolveRepositoryIdentityCacheKey = Effect.fn("RepositoryIdentityResolver.
       .run({
         command: "git",
         args: ["-C", cwd, "rev-parse", "--show-toplevel"],
+        env: explicitBareRepositoryEnv(process.env, yield* HostProcess.Platform),
         timeoutBehavior: "timedOutResult",
       })
       .pipe(Effect.option);
@@ -149,6 +152,7 @@ const resolveRepositoryIdentityFromCacheKey = Effect.fn(
     .run({
       command: "git",
       args: ["-C", cacheKey, "remote", "-v"],
+      env: explicitBareRepositoryEnv(process.env, yield* HostProcess.Platform),
       timeoutBehavior: "timedOutResult",
     })
     .pipe(Effect.option);

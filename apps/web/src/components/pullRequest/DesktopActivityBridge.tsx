@@ -18,7 +18,7 @@ import { environmentShell } from "../../state/shell";
 import { useThreadShells, useProjects } from "../../state/entities";
 import { DESKTOP_ACTIVITY_ENABLED_EVENT } from "./DesktopActivityToggle";
 import { randomUUID } from "../../lib/utils";
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type {
   DesktopActivityAction,
@@ -43,48 +43,44 @@ import { useQuickSteer } from "./useQuickSteer";
 import { toastManager } from "../ui/toast";
 import { formatEnvironmentQueryError } from "../../state/query";
 
+// Keyed by serialized ids so atom identity is stable across renders.
+const liveShellIdsAtom = Atom.family((environmentKey: string) =>
+  Atom.make((get) =>
+    (JSON.parse(environmentKey) as EnvironmentId[]).filter(
+      (id) => get(environmentShell.stateValueAtom(id)).status === "live",
+    ),
+  ),
+);
+
+const contextDetailsAtom = Atom.family((contextRefs: string) =>
+  Atom.make((get) =>
+    (JSON.parse(contextRefs) as [EnvironmentId, ThreadId][]).map(([environmentId, threadId]) =>
+      get(environmentThreadDetails.threadAtom({ environmentId, threadId })),
+    ),
+  ),
+);
+
 function EnabledActivityBridge() {
   const accountMarks = useAtomValue(accountMarkByEnvironmentIdAtom);
   const viewedThread = useParams({ strict: false, select: resolveThreadRouteRef });
   const { environments } = useEnvironments();
-  const ids = useMemo(
-    () =>
-      environments
-        .filter((environment) => environment.serverConfig?.environment.capabilities.pullRequests)
-        .map((environment) => environment.environmentId),
-    [environments],
-  );
-  const connectedIds = useMemo(
-    () =>
-      new Set(
-        environments
-          .filter((environment) => environment.connection.phase === "connected")
-          .map((environment) => environment.environmentId),
-      ),
-    [environments],
+  const ids = environments
+    .filter((environment) => environment.serverConfig?.environment.capabilities.pullRequests)
+    .map((environment) => environment.environmentId);
+  const connectedIds = new Set(
+    environments
+      .filter((environment) => environment.connection.phase === "connected")
+      .map((environment) => environment.environmentId),
   );
   const { values, failedEnvironmentIds } = usePullRequestWatches(ids);
   const environmentKey = JSON.stringify(environments.map((item) => item.environmentId));
-  const liveShellsAtom = useMemo(
-    () =>
-      Atom.make((get) =>
-        (JSON.parse(environmentKey) as EnvironmentId[]).filter(
-          (id) => get(environmentShell.stateValueAtom(id)).status === "live",
-        ),
-      ),
-    [environmentKey],
-  );
-  const liveShellIds = useAtomValue(liveShellsAtom);
-  const readyEnvironmentIds = useMemo(
-    () =>
-      liveShellIds.filter(
-        (id) =>
-          connectedIds.has(id) &&
-          (!ids.includes(id) ||
-            values.some(([valueId]) => valueId === id) ||
-            failedEnvironmentIds.includes(id)),
-      ),
-    [liveShellIds, connectedIds, ids, values, failedEnvironmentIds],
+  const liveShellIds = useAtomValue(liveShellIdsAtom(environmentKey));
+  const readyEnvironmentIds = liveShellIds.filter(
+    (id) =>
+      connectedIds.has(id) &&
+      (!ids.includes(id) ||
+        values.some(([valueId]) => valueId === id) ||
+        failedEnvironmentIds.includes(id)),
   );
   const threads = useThreadShells();
   const projects = useProjects();
@@ -109,17 +105,8 @@ function EnabledActivityBridge() {
       )
       .slice(0, 12),
   );
-  const contextAtom = useMemo(
-    () =>
-      Atom.make((get) =>
-        (JSON.parse(contextRefs) as [EnvironmentId, ThreadId][]).map(([environmentId, threadId]) =>
-          get(environmentThreadDetails.threadAtom({ environmentId, threadId })),
-        ),
-      ),
-    [contextRefs],
-  );
-  const contextDetails = useAtomValue(contextAtom);
-  const rows = useMemo(() => {
+  const contextDetails = useAtomValue(contextDetailsAtom(contextRefs));
+  const rows = (() => {
     const watches = watchActivityRows(values, threads, contextDetails, projects, sagaIndex);
     const active = threadActivityRows(threads, connectedIds, interactions);
     return contextualActivityRows(
@@ -178,20 +165,7 @@ function EnabledActivityBridge() {
       projects,
       contextDetails,
     );
-  }, [
-    values,
-    threads,
-    connectedIds,
-    pending,
-    failures,
-    acknowledged,
-    failedEnvironmentIds,
-    contextDetails,
-    projects,
-    sagaIndex,
-    interactions,
-    localIntents,
-  ]);
+  })();
   const iconRequests = JSON.stringify(
     [
       ...new Set(
@@ -221,14 +195,10 @@ function EnabledActivityBridge() {
       disposed = true;
     };
   }, [iconRequests]);
-  const publishedRows = useMemo(
-    () =>
-      rows.map((row) => {
-        const url = row.projectIcon ? iconImages.get(JSON.stringify(row.projectIcon)) : undefined;
-        return url ? { ...row, projectIconDataUrl: url } : row;
-      }),
-    [rows, iconImages],
-  );
+  const publishedRows = rows.map((row) => {
+    const url = row.projectIcon ? iconImages.get(JSON.stringify(row.projectIcon)) : undefined;
+    return url ? { ...row, projectIconDataUrl: url } : row;
+  });
   const command = useAtomCommand(pullRequestWatchEnvironment.command, { reportFailure: false });
   const navigate = useNavigate();
   const steer = useQuickSteer();
@@ -255,7 +225,7 @@ function EnabledActivityBridge() {
       return next;
     });
     const environmentId = row.environmentId as EnvironmentId;
-    try {
+    const attempt = async () => {
       if (action.kind === "open" || (action.kind === "merge" && !row.threadId)) {
         if (row.threadId && !row.watchId)
           await navigate({
@@ -338,28 +308,33 @@ function EnabledActivityBridge() {
         });
         if (result._tag === "Failure") throw new Error(formatEnvironmentQueryError(result.cause));
       }
-    } catch (cause) {
-      setFailures((current) => ({
-        ...current,
-        [row.id]:
-          cause instanceof Error
-            ? cause.message
-            : "Action failed. Your steering draft is retained.",
-      }));
-      toastManager.add({
-        type: "error",
-        title: "Activity action failed",
-        description:
-          cause instanceof Error ? cause.message : "The environment could not complete the action.",
+    };
+    return await attempt()
+      .catch((cause: unknown) => {
+        setFailures((current) => ({
+          ...current,
+          [row.id]:
+            cause instanceof Error
+              ? cause.message
+              : "Action failed. Your steering draft is retained.",
+        }));
+        toastManager.add({
+          type: "error",
+          title: "Activity action failed",
+          description:
+            cause instanceof Error
+              ? cause.message
+              : "The environment could not complete the action.",
+        });
+      })
+      .finally(() => {
+        inFlight.current.delete(row.id);
+        setPending((current) => {
+          const next = new Map(current);
+          next.delete(row.id);
+          return next;
+        });
       });
-    } finally {
-      inFlight.current.delete(row.id);
-      setPending((current) => {
-        const next = new Map(current);
-        next.delete(row.id);
-        return next;
-      });
-    }
   });
   useEffect(() => window.desktopBridge?.activity?.onAction((action) => void onAction(action)), []);
   const publicationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

@@ -20,7 +20,7 @@ import {
   threadActivityExcerpt,
 } from "@lecturn/client-runtime/state/activityContext";
 import { ActivityWatchFrame, ActivityWatchState, ActivityCheckBar } from "./ActivityWatchVisual";
-import { useEnvironment } from "../../state/environments";
+import { useEnvironment, useEnvironmentProviders } from "../../state/environments";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { PullRequestGlyph } from "./pullRequestIcons";
 import { StaveIcon } from "../StaveIcon";
@@ -124,7 +124,7 @@ export function PullRequestWatchButton({
       disabled={pending}
       onClick={async () => {
         setPending(true);
-        try {
+        const attempt = async () => {
           if (watch)
             await command({
               environmentId,
@@ -143,9 +143,10 @@ export function PullRequestWatchButton({
                 ...(threadId ? { threadId, manage: true } : {}),
               },
             });
-        } finally {
+        };
+        return await attempt().finally(() => {
           setPending(false);
-        }
+        });
       }}
     >
       {watch?.watching ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
@@ -162,6 +163,7 @@ function WatchCard({
 }) {
   const projects = useProjects();
   const environment = useEnvironment(environmentId);
+  const environmentProviders = useEnvironmentProviders().get(environmentId);
   const sagaIndex = useSagaRepositoryIndex(projects);
   const allThreads = useThreadShells();
   const threads = allThreads.filter(
@@ -187,15 +189,16 @@ function WatchCard({
     if (busy) return;
     setBusy(true);
     setError(null);
-    try {
+    const attempt = async () => {
       const result = await command({
         environmentId,
         input: { requestId: randomUUID(), watchId: watch.id, action, ...extra },
       });
       if (result._tag === "Failure") setError(formatEnvironmentQueryError(result.cause));
-    } finally {
+    };
+    return await attempt().finally(() => {
       setBusy(false);
-    }
+    });
   };
   const manager = allThreads.find(
     (thread) => thread.environmentId === environmentId && thread.id === watch.managerThreadId,
@@ -208,7 +211,7 @@ function WatchCard({
       candidate.environmentId === environmentId &&
       candidate.id === (manager?.projectId ?? watch.reference.projectId),
   );
-  const provider = environment?.serverConfig?.providers.find(
+  const provider = environmentProviders?.find(
     (candidate) => candidate.instanceId === manager?.modelSelection.instanceId,
   );
   const model = provider?.models.find(
@@ -283,7 +286,7 @@ function WatchCard({
                     displayName={provider.displayName ?? provider.instanceId}
                     accentColor={provider.accentColor}
                     showBadge={
-                      (environment?.serverConfig?.providers.filter(
+                      (environmentProviders?.filter(
                         (candidate) => candidate.driver === provider.driver,
                       ).length ?? 0) > 1
                     }
@@ -402,7 +405,7 @@ function WatchCard({
                 if (!recipient || busy) return;
                 setBusy(true);
                 setError(null);
-                try {
+                const attempt = async () => {
                   if (!watch.managerThreadId) {
                     const assigned = await command({
                       environmentId,
@@ -419,13 +422,16 @@ function WatchCard({
                   }
                   await steer(environmentId, recipient.id, mergeHandoffMessage(watch));
                   setSentTo(recipient.title);
-                } catch (cause) {
-                  setError(
-                    cause instanceof Error ? cause.message : "Could not send merge instructions.",
-                  );
-                } finally {
-                  setBusy(false);
-                }
+                };
+                return await attempt()
+                  .catch((cause: unknown) => {
+                    setError(
+                      cause instanceof Error ? cause.message : "Could not send merge instructions.",
+                    );
+                  })
+                  .finally(() => {
+                    setBusy(false);
+                  });
               }}
             >
               <PullRequestGlyph.merged className="size-3.5" /> Merge when ready
@@ -512,16 +518,19 @@ function WatchCard({
               setBusy(true);
               setError(null);
               const submitted = text;
-              try {
+              const attempt = async () => {
                 await steer(environmentId, manager.id, submitted);
                 setText((current) => (current === submitted ? "" : current));
-              } catch (cause) {
-                setError(
-                  cause instanceof Error ? cause.message : "Could not send steering message.",
-                );
-              } finally {
-                setBusy(false);
-              }
+              };
+              return await attempt()
+                .catch((cause: unknown) => {
+                  setError(
+                    cause instanceof Error ? cause.message : "Could not send steering message.",
+                  );
+                })
+                .finally(() => {
+                  setBusy(false);
+                });
             }}
           >
             <input

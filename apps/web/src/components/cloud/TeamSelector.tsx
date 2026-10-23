@@ -1,7 +1,7 @@
 import { useConnectAccountAuth } from "../../cloud/useConnectAccountAuth";
 import { selectTeam, selectedTeam, subscribeTeamSelection } from "@lecturn/client-runtime/relay";
 import type { RelayTeamOrganization } from "@lecturn/contracts";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { createAccountTeamsClient } from "../../cloud/accountRelayClients";
 
 /**
@@ -16,7 +16,7 @@ function useTeamAccount(accountId: string | null | undefined) {
 }
 export function useTeamClient(accountId?: string | null | undefined) {
   const { userId } = useTeamAccount(accountId);
-  return useMemo(() => createAccountTeamsClient(userId), [userId]);
+  return createAccountTeamsClient(userId);
 }
 export function useSelectedTeam(accountId?: string | null | undefined) {
   const { userId } = useTeamAccount(accountId);
@@ -39,6 +39,7 @@ export function TeamSelector({
   const [error, setError] = useState(false);
   useEffect(() => {
     let disposed = false;
+    // oxlint-disable-next-line react/set-state-in-effect -- A new account or client clears the last load's failure as its teams request starts.
     setError(false);
     if (isSignedIn && userId) {
       try {

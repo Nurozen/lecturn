@@ -15,7 +15,6 @@ import {
   type ScopedThreadRef,
 } from "@lecturn/contracts";
 import { useRouter } from "@tanstack/react-router";
-import { useCallback } from "react";
 
 import { waitForThreadShell } from "../components/ChatView.logic";
 import {
@@ -62,77 +61,72 @@ export function useDispatchThreadImport() {
   const importThreadCommand = useAtomCommand(threadEnvironment.import, { reportFailure: false });
   const router = useRouter();
 
-  return useCallback(
-    async (input: ImportThreadInput): Promise<ThreadImportDispatchResult> => {
-      const { project, session } = input;
-      const modelSelection = resolveImportModelSelection({
-        instanceId: session.providerInstanceId,
-        providers: readEnvironmentProviders(project.environmentId),
-        projectDefault: project.defaultModelSelection,
-        stickySelection:
-          useComposerDraftStore.getState().stickyModelSelectionByProvider[
-            session.providerInstanceId
-          ],
-      });
-      if (modelSelection === null) {
+  return async (input: ImportThreadInput): Promise<ThreadImportDispatchResult> => {
+    const { project, session } = input;
+    const modelSelection = resolveImportModelSelection({
+      instanceId: session.providerInstanceId,
+      providers: readEnvironmentProviders(project.environmentId),
+      projectDefault: project.defaultModelSelection,
+      stickySelection:
+        useComposerDraftStore.getState().stickyModelSelectionByProvider[session.providerInstanceId],
+    });
+    if (modelSelection === null) {
+      return {
+        ok: false,
+        message: threadImportFailureMessage("provider-unavailable"),
+        tone: "warning",
+        interrupted: false,
+      };
+    }
+    const carried = resolveCarriedThreadModes(
+      readThreadCarrySources(resolveThreadRouteTarget(router.state.matches.at(-1)?.params ?? {})),
+    );
+    const threadId = newThreadId();
+    const threadRef = scopeThreadRef(project.environmentId, threadId);
+    const importResult = await importThreadCommand({
+      environmentId: project.environmentId,
+      input: {
+        threadId,
+        projectId: project.id,
+        providerInstanceId: session.providerInstanceId,
+        sessionId: session.sessionId,
+        modelSelection,
+        runtimeMode: carried.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+        interactionMode: carried.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
+        branch: input.branch,
+        worktreePath: input.worktreePath,
+        createdAt: new Date().toISOString(),
+      },
+    });
+    if (importResult._tag === "Failure") {
+      if (isAtomCommandInterrupted(importResult)) {
         return {
           ok: false,
-          message: threadImportFailureMessage("provider-unavailable"),
-          tone: "warning",
-          interrupted: false,
-        };
-      }
-      const carried = resolveCarriedThreadModes(
-        readThreadCarrySources(resolveThreadRouteTarget(router.state.matches.at(-1)?.params ?? {})),
-      );
-      const threadId = newThreadId();
-      const threadRef = scopeThreadRef(project.environmentId, threadId);
-      const importResult = await importThreadCommand({
-        environmentId: project.environmentId,
-        input: {
-          threadId,
-          projectId: project.id,
-          providerInstanceId: session.providerInstanceId,
-          sessionId: session.sessionId,
-          modelSelection,
-          runtimeMode: carried.runtimeMode ?? DEFAULT_RUNTIME_MODE,
-          interactionMode: carried.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
-          branch: input.branch,
-          worktreePath: input.worktreePath,
-          createdAt: new Date().toISOString(),
-        },
-      });
-      if (importResult._tag === "Failure") {
-        if (isAtomCommandInterrupted(importResult)) {
-          return {
-            ok: false,
-            message: "The import was interrupted.",
-            tone: "error",
-            interrupted: true,
-          };
-        }
-        const error = squashAtomCommandFailure(importResult);
-        const reason = threadImportFailureReason(error);
-        return {
-          ok: false,
-          message:
-            reason !== null
-              ? threadImportFailureMessage(reason)
-              : (staveAdmissionErrorMessage(error) ??
-                (error instanceof Error
-                  ? error.message
-                  : "An error occurred while importing the session.")),
+          message: "The import was interrupted.",
           tone: "error",
-          interrupted: false,
+          interrupted: true,
         };
       }
-      // A timed-out wait still resolves: the thread route renders a loading
-      // state until its shell arrives, matching the fork flow.
-      await waitForThreadShell(threadRef);
-      return { ok: true, value: threadRef };
-    },
-    [importThreadCommand, router],
-  );
+      const error = squashAtomCommandFailure(importResult);
+      const reason = threadImportFailureReason(error);
+      return {
+        ok: false,
+        message:
+          reason !== null
+            ? threadImportFailureMessage(reason)
+            : (staveAdmissionErrorMessage(error) ??
+              (error instanceof Error
+                ? error.message
+                : "An error occurred while importing the session.")),
+        tone: "error",
+        interrupted: false,
+      };
+    }
+    // A timed-out wait still resolves: the thread route renders a loading
+    // state until its shell arrives, matching the fork flow.
+    await waitForThreadShell(threadRef);
+    return { ok: true, value: threadRef };
+  };
 }
 
 /**
@@ -144,30 +138,27 @@ export function useImportThread() {
   const dispatchImport = useDispatchThreadImport();
   const router = useRouter();
 
-  return useCallback(
-    async (input: ImportThreadInput): Promise<boolean> => {
-      const result = await dispatchImport(input);
-      if (!result.ok) {
-        if (!result.interrupted) {
-          toastManager.add(
-            stackedThreadToast({
-              type: result.tone,
-              title: "Could not import session",
-              description: result.message,
-            }),
-          );
-        }
-        return false;
+  return async (input: ImportThreadInput): Promise<boolean> => {
+    const result = await dispatchImport(input);
+    if (!result.ok) {
+      if (!result.interrupted) {
+        toastManager.add(
+          stackedThreadToast({
+            type: result.tone,
+            title: "Could not import session",
+            description: result.message,
+          }),
+        );
       }
-      const threadRef = result.value;
-      const navigateResult = await settlePromise(() =>
-        router.navigate({
-          to: "/$environmentId/$threadId",
-          params: { environmentId: threadRef.environmentId, threadId: threadRef.threadId },
-        }),
-      );
-      return navigateResult._tag === "Success";
-    },
-    [dispatchImport, router],
-  );
+      return false;
+    }
+    const threadRef = result.value;
+    const navigateResult = await settlePromise(() =>
+      router.navigate({
+        to: "/$environmentId/$threadId",
+        params: { environmentId: threadRef.environmentId, threadId: threadRef.threadId },
+      }),
+    );
+    return navigateResult._tag === "Success";
+  };
 }

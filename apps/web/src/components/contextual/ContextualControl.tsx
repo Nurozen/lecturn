@@ -59,33 +59,39 @@ export function ContextualControl({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const data = status.data;
-  async function toggle(enabled: boolean, sourceIds = data?.thread.sourceIds) {
+  async function toggle(
+    enabled: boolean,
+    sourceIdsOverride?: NonNullable<typeof data>["thread"]["sourceIds"],
+  ) {
+    const sourceIds = sourceIdsOverride === undefined ? data?.thread.sourceIds : sourceIdsOverride;
     if (!data || !sourceIds || !access.operate || busy) return;
     setBusy(true);
     setError(null);
-    try {
+    const attempt = async () => {
       const r = await update({
         environmentId,
         input: { threadId, expectedRevision: data.thread.revision, enabled, sourceIds },
       });
       if (r._tag === "Failure") setError(contextualErrorMessage(squashAtomCommandFailure(r)));
-    } finally {
+    };
+    return await attempt().finally(() => {
       setBusy(false);
-    }
+    });
   }
   async function refreshContext() {
     if (!data || !access.operate || busy) return;
     setBusy(true);
     setError(null);
-    try {
+    const attempt = async () => {
       const r = await refresh({
         environmentId,
         input: { threadId, expectedRevision: data.thread.revision, actionId: randomUUID() },
       });
       if (r._tag === "Failure") setError(contextualErrorMessage(squashAtomCommandFailure(r)));
-    } finally {
+    };
+    return await attempt().finally(() => {
       setBusy(false);
-    }
+    });
   }
   if (!available) return null;
   return (

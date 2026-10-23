@@ -48,24 +48,28 @@ function HostSettings({ environmentId }: { environmentId: EnvironmentId }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function changeCollection() {
-    if (!capture.data || !access.administer || busy) return;
+    const captured = capture.data;
+    if (!captured || !access.administer || busy) return;
     setBusy(true);
     setError(null);
-    try {
+    const attempt = async () => {
       const result = await setCapture({
         environmentId,
         input: {
-          state: capture.data.state === "running" ? "paused" : "running",
-          expectedGeneration: capture.data.generation,
+          state: captured.state === "running" ? "paused" : "running",
+          expectedGeneration: captured.generation,
         },
       });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       capture.refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Collection could not be changed.");
-    } finally {
-      setBusy(false);
-    }
+    };
+    return await attempt()
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : "Collection could not be changed.");
+      })
+      .finally(() => {
+        setBusy(false);
+      });
   }
   const collection = contextualCollectionPresentation({
     capture: capture.data,
@@ -237,7 +241,7 @@ function SourceSelection({ environmentId }: { environmentId: EnvironmentId }) {
     setBusy(true);
     setError(null);
     setSaved(false);
-    try {
+    const attempt = async () => {
       const result = await configure({
         environmentId,
         input: {
@@ -249,11 +253,14 @@ function SourceSelection({ environmentId }: { environmentId: EnvironmentId }) {
       setDraft(null);
       setSaved(true);
       sources.refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Source selection could not be saved.");
-    } finally {
-      setBusy(false);
-    }
+    };
+    return await attempt()
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : "Source selection could not be saved.");
+      })
+      .finally(() => {
+        setBusy(false);
+      });
   }
   const groups = new Map<string, ContextualSource[]>();
   for (const source of sources.data?.sources ?? []) {

@@ -1,6 +1,5 @@
 import type { DiscoveredLocalServer } from "@lecturn/contracts";
 import { isLoopbackHost } from "@lecturn/shared/preview";
-import { useMemo } from "react";
 
 import type { EnvironmentId } from "@lecturn/contracts";
 import { resolveDiscoveredServerUrl } from "~/browser/browserTargetResolver";
@@ -25,19 +24,15 @@ export function useDiscoveredLocalServers(
 ): ReadonlyArray<PreviewableServer> {
   const scannerState = useDiscoveredPortsState(input.environmentId, input.configuredUrls);
 
-  return useMemo(
-    () =>
-      mergeServers({
-        scanner: scannerState.servers.map((server) => ({
-          ...server,
-          url: resolveDiscoveredServerUrl(input.environmentId, server.url),
-          requestedUrl: server.url,
-        })),
-        configuredUrls: input.configuredUrls ?? [],
-        configuredUrlProbing: scannerState.configuredUrlProbing,
-      }),
-    [input.environmentId, scannerState, input.configuredUrls],
-  );
+  return mergeServers({
+    scanner: scannerState.servers.map((server) => ({
+      ...server,
+      url: resolveDiscoveredServerUrl(input.environmentId, server.url),
+      requestedUrl: server.url,
+    })),
+    configuredUrls: input.configuredUrls ?? [],
+    configuredUrlProbing: scannerState.configuredUrlProbing,
+  });
 }
 
 export function mergeServers(input: {

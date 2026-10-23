@@ -89,16 +89,14 @@ function ConfiguredConnectOnboardingDialog() {
   const [publishAgentActivity, setPublishAgentActivity] = useState(true);
   const [dontShowAgain, setDontShowAgain] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
-  const prefilledFromLinkStateRef = useRef(false);
+  const [prefilledFromLinkState, setPrefilledFromLinkState] = useState(false);
   const knownAccounts = useAtomValue(knownConnectAccountsAtom);
   const namedAccount = useAccountEmailWhenSeveral(account.visible ? account.accountId : userId);
   const observedKnownAccountsRef = useRef(knownAccounts);
 
-  useEffect(() => {
-    if (step === "publish" && sessionScopesKnown && !showPublishStep && !isApplying) {
-      setStep("devices");
-    }
-  }, [isApplying, sessionScopesKnown, showPublishStep, step]);
+  if (step === "publish" && sessionScopesKnown && !showPublishStep && !isApplying) {
+    setStep("devices");
+  }
 
   const optOutAccounts = optOutState.optOutAccounts;
 
@@ -125,6 +123,13 @@ function ConfiguredConnectOnboardingDialog() {
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- userId only re-runs it, so a switch drops lapsed requests
   }, [knownAccounts, optOutAccounts, userId]);
 
+  if (openForAccount !== null && (!isSignedIn || userId !== openForAccount)) {
+    setOpenForAccount(null);
+  }
+  if (requests.length > 0 && isLoaded && !isSignedIn) {
+    setRequests([]);
+  }
+
   // A manageable session implies a primary environment, so when the scopes
   // allow publishing, wait for the connection target too — otherwise the
   // wizard could open on the devices step moments before the publish step
@@ -143,8 +148,9 @@ function ConfiguredConnectOnboardingDialog() {
     }).find((entry) => entry.accountId === userId);
     if (request === undefined) return;
     if (!sessionScopesKnown || !publishStepDecided) return;
+    // oxlint-disable-next-line react/set-state-in-effect -- A request lapses after a while, so whether it still opens the wizard depends on the current time, which render must not read.
     setRequests((current) => current.filter((entry) => entry !== request));
-    prefilledFromLinkStateRef.current = false;
+    setPrefilledFromLinkState(false);
     setExposeEnvironment(true);
     setPublishAgentActivity(true);
     setDontShowAgain(false);
@@ -163,21 +169,9 @@ function ConfiguredConnectOnboardingDialog() {
     userId,
   ]);
 
-  useEffect(() => {
-    if (openForAccount !== null && (!isSignedIn || userId !== openForAccount)) {
-      setOpenForAccount(null);
-    }
-    if (requests.length > 0 && isLoaded && !isSignedIn) {
-      setRequests([]);
-    }
-  }, [isLoaded, isSignedIn, openForAccount, requests, userId]);
-
   const linkStateData = controller.linkState.data;
-  useEffect(() => {
-    if (openForAccount === null || prefilledFromLinkStateRef.current || linkStateData === null) {
-      return;
-    }
-    prefilledFromLinkStateRef.current = true;
+  if (openForAccount !== null && !prefilledFromLinkState && linkStateData !== null) {
+    setPrefilledFromLinkState(true);
     if (
       linkStateData.linked &&
       linkStateData.linkRevoked !== true &&
@@ -186,7 +180,7 @@ function ConfiguredConnectOnboardingDialog() {
       setExposeEnvironment(linkStateData.managedTunnelActive ?? linkStateData.linked);
       setPublishAgentActivity(linkStateData.publishAgentActivity);
     }
-  }, [linkStateData, openForAccount]);
+  }
 
   const complete = () => {
     if (isApplying) return;

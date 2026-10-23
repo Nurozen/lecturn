@@ -14,10 +14,9 @@ export function ActivityWatchFrame(props: { state: ActivityVisualState; children
   const [element, setElement] = useState<HTMLElement | null>(null);
   const [moving, setMoving] = useState(false);
   useEffect(() => {
-    if (!element || !["active", "attention"].includes(props.state)) {
-      setMoving(false);
-      return;
-    }
+    // Inactive frames never subscribe; the active subscription's cleanup
+    // stops the motion when the state or element changes.
+    if (!element || !["active", "attention"].includes(props.state)) return;
     let visible = false;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
     const sync = () => setMoving(visible && !document.hidden && !reduced.matches);
@@ -32,6 +31,7 @@ export function ActivityWatchFrame(props: { state: ActivityVisualState; children
       observer.disconnect();
       document.removeEventListener("visibilitychange", sync);
       reduced.removeEventListener("change", sync);
+      setMoving(false);
     };
   }, [element, props.state]);
   return (

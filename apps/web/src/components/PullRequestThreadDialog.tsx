@@ -11,7 +11,7 @@ import {
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
 import { useDebouncedValue } from "@tanstack/react-pacer";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   readCachedPullRequestResolution,
@@ -49,6 +49,19 @@ interface PullRequestThreadDialogProps {
   onPrepared: (input: { branch: string; worktreePath: string | null }) => Promise<void> | void;
 }
 
+function pullRequestStatusTone(state: string | undefined): string {
+  switch (state) {
+    case "merged":
+      return "text-violet-600 dark:text-violet-300/90";
+    case "closed":
+      return "text-zinc-500 dark:text-zinc-400/80";
+    case "open":
+      return "text-emerald-600 dark:text-emerald-300/90";
+    default:
+      return "text-muted-foreground";
+  }
+}
+
 export function PullRequestThreadDialog({
   open,
   environmentId,
@@ -61,10 +74,7 @@ export function PullRequestThreadDialog({
   // Git and PR lookups must address the project's primary repo when it is a
   // Stave space (the space root is not a repository). The project is resolved
   // from the thread here so the parent keeps passing the workspace root.
-  const threadRef = useMemo(
-    () => scopeThreadRef(environmentId, threadId),
-    [environmentId, threadId],
-  );
+  const threadRef = scopeThreadRef(environmentId, threadId);
   const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
   const serverThread = useThreadShell(threadRef);
   const projectRef = serverThread
@@ -93,10 +103,7 @@ export function PullRequestThreadDialog({
           input: { cwd },
         }),
   );
-  const sourceControlPresentation = useMemo(
-    () => getSourceControlPresentation(gitStatus?.sourceControlProvider),
-    [gitStatus?.sourceControlProvider],
-  );
+  const sourceControlPresentation = getSourceControlPresentation(gitStatus?.sourceControlProvider);
   const terminology = sourceControlPresentation.terminology;
   const SourceControlIcon = sourceControlPresentation.Icon;
 
@@ -113,26 +120,19 @@ export function PullRequestThreadDialog({
 
   const parsedReference = parsePullRequestReference(reference);
   const parsedDebouncedReference = parsePullRequestReference(debouncedReference);
-  const sourceControlScope = useMemo(
-    () => ({
-      environmentId,
-      cwd,
-    }),
-    [cwd, environmentId],
-  );
   const pullRequestResolution = usePullRequestResolution({
-    ...sourceControlScope,
+    environmentId,
+    cwd,
     reference: open && canPrepare ? parsedDebouncedReference : null,
   });
-  const cachedPullRequest = useMemo(() => {
-    return (
-      readCachedPullRequestResolution({
-        ...sourceControlScope,
-        reference: parsedReference,
-      })?.pullRequest ?? null
-    );
-  }, [parsedReference, sourceControlScope]);
-  const preparePullRequestThreadAction = usePreparePullRequestThreadAction(sourceControlScope);
+  const cachedPullRequest =
+    readCachedPullRequestResolution({
+      environmentId,
+      cwd,
+      reference: parsedReference,
+    })?.pullRequest ?? null;
+  // The prepare action keys on this scope object, so it only ever reaches the hook.
+  const preparePullRequestThreadAction = usePreparePullRequestThreadAction({ environmentId, cwd });
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
 
   const liveResolvedPullRequest =
@@ -148,76 +148,51 @@ export function PullRequestThreadDialog({
       parsedReference !== parsedDebouncedReference ||
       pullRequestResolution.isPending ||
       pullRequestResolution.isFetching);
-  const statusTone = useMemo(() => {
-    switch (resolvedPullRequest?.state) {
-      case "merged":
-        return "text-violet-600 dark:text-violet-300/90";
-      case "closed":
-        return "text-zinc-500 dark:text-zinc-400/80";
-      case "open":
-        return "text-emerald-600 dark:text-emerald-300/90";
-      default:
-        return "text-muted-foreground";
-    }
-  }, [resolvedPullRequest?.state]);
+  const statusTone = pullRequestStatusTone(resolvedPullRequest?.state);
 
-  const handleConfirm = useCallback(
-    async (mode: "local" | "worktree") => {
-      if (!canPrepare) return;
-      if (!preparePullRequestThreadAction.isAllowed) return;
-      if (
-        mode === "worktree" &&
-        !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)
-      ) {
-        return;
+  const handleConfirm = async (mode: "local" | "worktree") => {
+    if (!canPrepare) return;
+    if (!preparePullRequestThreadAction.isAllowed) return;
+    if (
+      mode === "worktree" &&
+      !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)
+    ) {
+      return;
+    }
+    if (!parsedReference) {
+      setReferenceDirty(true);
+      return;
+    }
+    if (!parsedReference || !resolvedPullRequest || !cwd) {
+      return;
+    }
+    setPrepareErrorMessage(null);
+    setPreparingMode(mode);
+    const result = await preparePullRequestThreadAction.run({
+      reference: parsedReference,
+      mode,
+      ...(mode === "worktree" ? { threadId } : {}),
+    });
+    setPreparingMode(null);
+    if (result._tag === "Failure") {
+      if (isAtomCommandInterrupted(result)) {
+        preparePullRequestThreadAction.resetError();
+      } else {
+        const error = squashAtomCommandFailure(result);
+        setPrepareErrorMessage(
+          error instanceof Error
+            ? error.message
+            : `Failed to prepare ${terminology.singular} thread.`,
+        );
       }
-      if (!parsedReference) {
-        setReferenceDirty(true);
-        return;
-      }
-      if (!parsedReference || !resolvedPullRequest || !cwd) {
-        return;
-      }
-      setPrepareErrorMessage(null);
-      setPreparingMode(mode);
-      const result = await preparePullRequestThreadAction.run({
-        reference: parsedReference,
-        mode,
-        ...(mode === "worktree" ? { threadId } : {}),
-      });
-      setPreparingMode(null);
-      if (result._tag === "Failure") {
-        if (isAtomCommandInterrupted(result)) {
-          preparePullRequestThreadAction.resetError();
-        } else {
-          const error = squashAtomCommandFailure(result);
-          setPrepareErrorMessage(
-            error instanceof Error
-              ? error.message
-              : `Failed to prepare ${terminology.singular} thread.`,
-          );
-        }
-        return;
-      }
-      await onPrepared({
-        branch: result.value.branch,
-        worktreePath: result.value.worktreePath,
-      });
-      onOpenChange(false);
-    },
-    [
-      canPrepare,
-      cwd,
-      environmentId,
-      onOpenChange,
-      onPrepared,
-      parsedReference,
-      preparePullRequestThreadAction,
-      resolvedPullRequest,
-      terminology.singular,
-      threadId,
-    ],
-  );
+      return;
+    }
+    await onPrepared({
+      branch: result.value.branch,
+      worktreePath: result.value.worktreePath,
+    });
+    onOpenChange(false);
+  };
 
   const validationMessage = !referenceDirty
     ? null

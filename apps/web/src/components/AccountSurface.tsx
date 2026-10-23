@@ -114,8 +114,9 @@ export function AccountSurface({
       clearKnock = knock.cancel;
       window.clearTimeout(timeout);
       const painted = getComputedStyle(host);
+      sequence += 1;
       setReveal({
-        id: ++sequence,
+        id: sequence,
         startedAt: knock.startedAt,
         originY: cardRect.top + cardRect.height / 2 - surfaceRect.top,
         cardHeight: cardRect.height,

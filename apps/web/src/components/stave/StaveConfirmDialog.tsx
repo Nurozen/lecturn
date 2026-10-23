@@ -8,7 +8,7 @@ import type {
   StaveSagaMembership,
   StaveSagaReview,
 } from "@lecturn/contracts";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { notifyStaveMutation } from "../../staveMutation";
 import { staveSagaReviewLines } from "../../lib/staveProjectDeletion.logic";
@@ -83,7 +83,7 @@ export function StaveConfirmDialog({
   const [preview, setPreview] = useState<Preview | null>(null);
   const [operationId, setOperationId] = useState(randomUUID);
   const [started, setStarted] = useState(false);
-  const operation = useMemo((): StaveOperation => {
+  const operation = ((): StaveOperation => {
     let next = initial;
     if (
       (next.kind === "destroySpace" ||
@@ -113,7 +113,7 @@ export function StaveConfirmDialog({
       };
     }
     return forced ? forceStaveOperation(next) : next;
-  }, [initial, memory, forced, sagaConfirmed]);
+  })();
   const status = useStaveStatus(environmentId);
   const unavailableReason = staveOperationUnavailableReason(
     status.data,
@@ -207,6 +207,7 @@ export function StaveConfirmDialog({
     return () => {
       stale = true;
     };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A retry (attempt bump) re-reads the saga membership the refusal is about.
   }, [environmentId, initial, readStatus, refusal, attempt, membershipWorkspaceRoot]);
   const forceAvailable = canForceStaveOperation(operation, refusal);
   const changesMemory =

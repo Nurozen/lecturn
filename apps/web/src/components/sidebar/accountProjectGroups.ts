@@ -1,6 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
 import { accountScopedKey, parseAccountScopedKey } from "@lecturn/client-runtime/relay";
-import { useMemo } from "react";
 
 import {
   accountByEnvironmentIdAtom,
@@ -25,16 +24,12 @@ function useKnownSidebarSegmentation(): SidebarSegmentation | null {
   const { accountIds } = useAtomValue(knownConnectAccountsAtom);
   const accountByEnvironmentId = useAtomValue(accountByEnvironmentIdAtom);
   const profiles = useAtomValue(connectAccountProfilesAtom);
-  const accountLabels = useMemo(() => accountMarkLabels(profiles), [profiles]);
-  return useMemo(
-    () =>
-      resolveSidebarSegmentation({
-        knownAccountIds: accountIds,
-        accountByEnvironmentId,
-        accountLabels,
-      }),
-    [accountByEnvironmentId, accountIds, accountLabels],
-  );
+  const accountLabels = accountMarkLabels(profiles);
+  return resolveSidebarSegmentation({
+    knownAccountIds: accountIds,
+    accountByEnvironmentId,
+    accountLabels,
+  });
 }
 
 /**
@@ -99,10 +94,7 @@ function useKnownProjectAccountScope(projectKey: string): ProjectAccountScope | 
   const profiles = useAtomValue(connectAccountProfilesAtom);
   const { accountId } = parseAccountScopedKey(projectKey);
   const email = accountId === null ? null : (profiles.get(accountId)?.email ?? null);
-  return useMemo(
-    () => (accountId === null ? null : { accountId, email, accountByEnvironmentId }),
-    [accountByEnvironmentId, accountId, email],
-  );
+  return accountId === null ? null : { accountId, email, accountByEnvironmentId };
 }
 
 /**

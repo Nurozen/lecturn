@@ -1,7 +1,7 @@
 import { resolveEnvironmentMachineKind } from "@lecturn/contracts";
 import { useLocation } from "@tanstack/react-router";
 import { CheckIcon, ChevronDownIcon, LayersIcon } from "lucide-react";
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import { useEnvironments, type EnvironmentPresentation } from "../../state/environments";
@@ -65,16 +65,13 @@ export function SettingsScopeSentence() {
   // An account-scoped key narrows the groups to that account's, named with its email.
   const accountEmail = useProjectAccountScope(scope?.search.project ?? "")?.email;
   const scopeGroups = scope?.groups;
-  const groups = useMemo(
-    () =>
-      accountEmail && scopeGroups
-        ? scopeGroups.map((group) => ({
-            ...group,
-            displayName: `${group.displayName} · ${accountEmail}`,
-          }))
-        : (scopeGroups ?? []),
-    [accountEmail, scopeGroups],
-  );
+  const groups =
+    accountEmail && scopeGroups
+      ? scopeGroups.map((group) => ({
+          ...group,
+          displayName: `${group.displayName} · ${accountEmail}`,
+        }))
+      : (scopeGroups ?? []);
   if (scope === null || SETTINGS_DEVICE_ONLY_PATHS.has(pathname)) return null;
   const props: SettingsScopeMenuProps = {
     value: scope.search,

@@ -1,6 +1,6 @@
 import { useAuth, useClerk, useUser } from "@clerk/react";
 import type { RelayBillingStatus } from "@lecturn/contracts";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { rememberBillingCheckoutAccount } from "../../cloud/accountPicker";
 import { createAccountBillingClient } from "../../cloud/accountRelayClients";
 import { openConnectSignIn } from "../../cloud/connectAuthCompatibility";
@@ -95,7 +95,7 @@ function SignedBillingAccount({
   const mounted = useRef(true);
   const busy = useRef(false);
   const statusLoader = useRef<ReturnType<typeof createBillingStatusLoader> | null>(null);
-  const client = useMemo(() => createAccountBillingClient(userId), [userId]);
+  const client = createAccountBillingClient(userId);
 
   useEffect(() => {
     mounted.current = true;
@@ -132,18 +132,18 @@ function SignedBillingAccount({
     setError(null);
     try {
       const result = await action();
-      if (!mounted.current) return;
-      if (typeof result === "string") {
-        if (picker && userId) rememberBillingCheckoutAccount(userId);
-        window.location.assign(result);
-      } else if (result) setStatus(result);
+      if (mounted.current) {
+        if (typeof result === "string") {
+          if (picker && userId) rememberBillingCheckoutAccount(userId);
+          window.location.assign(result);
+        } else if (result) setStatus(result);
+      }
     } catch {
       if (mounted.current)
         setError("The billing request could not be completed. Refresh your status and try again.");
-    } finally {
-      busy.current = false;
-      if (mounted.current) setPending(false);
     }
+    busy.current = false;
+    if (mounted.current) setPending(false);
   }
   return (
     <section className="mx-auto w-full max-w-2xl space-y-7 px-6 py-8 sm:px-8">

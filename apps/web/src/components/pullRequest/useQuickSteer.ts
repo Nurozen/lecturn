@@ -1,4 +1,3 @@
-import { useCallback } from "react";
 import {
   ChatAttachment,
   CommandId,
@@ -88,46 +87,43 @@ export function sendQuickSteerIntent(input: {
 /** A distinct message leaves the chat composer's unsent draft intact. */
 export function useQuickSteer() {
   const start = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
-  return useCallback(
-    async (environmentId: EnvironmentId, threadId: ThreadId, text: string) => {
-      if (!text.trim()) throw new Error("Enter a steering message.");
-      if (text.length > 8000) throw new Error("Steering messages are limited to 8,000 characters.");
-      await sendQuickSteerIntent({
-        storage: window.localStorage,
-        environmentId,
-        threadId,
-        text,
-        createCommand: () => {
-          const thread = readThreadShell({ environmentId, threadId });
-          if (!thread || thread.archivedAt)
-            throw new Error("The managing thread is no longer available.");
-          return {
-            commandId: CommandId.make(randomUUID()),
-            threadId,
-            message: { messageId: newMessageId(), role: "user", text, attachments: [] },
-            modelSelection: thread.modelSelection,
-            runtimeMode: thread.runtimeMode,
-            interactionMode: thread.interactionMode,
-            createdAt: new Date().toISOString(),
-          };
-        },
-        send: async (command) => {
-          const result = await start({
-            environmentId,
-            input: {
-              commandId: command.commandId,
-              threadId: command.threadId,
-              message: command.message,
-              ...(command.modelSelection ? { modelSelection: command.modelSelection } : {}),
-              runtimeMode: command.runtimeMode,
-              interactionMode: command.interactionMode,
-              createdAt: command.createdAt,
-            },
-          });
-          if (result._tag === "Failure") throw new Error(formatEnvironmentQueryError(result.cause));
-        },
-      });
-    },
-    [start],
-  );
+  return async (environmentId: EnvironmentId, threadId: ThreadId, text: string) => {
+    if (!text.trim()) throw new Error("Enter a steering message.");
+    if (text.length > 8000) throw new Error("Steering messages are limited to 8,000 characters.");
+    await sendQuickSteerIntent({
+      storage: window.localStorage,
+      environmentId,
+      threadId,
+      text,
+      createCommand: () => {
+        const thread = readThreadShell({ environmentId, threadId });
+        if (!thread || thread.archivedAt)
+          throw new Error("The managing thread is no longer available.");
+        return {
+          commandId: CommandId.make(randomUUID()),
+          threadId,
+          message: { messageId: newMessageId(), role: "user", text, attachments: [] },
+          modelSelection: thread.modelSelection,
+          runtimeMode: thread.runtimeMode,
+          interactionMode: thread.interactionMode,
+          createdAt: new Date().toISOString(),
+        };
+      },
+      send: async (command) => {
+        const result = await start({
+          environmentId,
+          input: {
+            commandId: command.commandId,
+            threadId: command.threadId,
+            message: command.message,
+            ...(command.modelSelection ? { modelSelection: command.modelSelection } : {}),
+            runtimeMode: command.runtimeMode,
+            interactionMode: command.interactionMode,
+            createdAt: command.createdAt,
+          },
+        });
+        if (result._tag === "Failure") throw new Error(formatEnvironmentQueryError(result.cause));
+      },
+    });
+  };
 }

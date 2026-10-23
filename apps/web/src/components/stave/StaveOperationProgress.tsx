@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@lecturn/contracts";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { staveOperations } from "../../state/staveOperations";
 import { Button } from "../ui/button";
 import { StaveConfirmDialog } from "./StaveConfirmDialog";
@@ -17,15 +17,10 @@ export function StaveOperationProgress(props: {
   const state = useAtomValue(staveOperations.stateAtom(props.operationId));
   const [confirming, setConfirming] = useState(false);
   const [removed, setRemoved] = useState(false);
-  const availability = useMemo(
-    () =>
-      props.spaceId === undefined ? null : removePartialSpaceAvailability(state, props.spaceId),
-    [state, props.spaceId],
-  );
-  const removal = useMemo(
-    () => (availability?.kind === "available" ? { ...availability.operation, force: false } : null),
-    [availability],
-  );
+  const availability =
+    props.spaceId === undefined ? null : removePartialSpaceAvailability(state, props.spaceId);
+  const removal =
+    availability?.kind === "available" ? { ...availability.operation, force: false } : null;
   const partial = partialSpaceFromError(state.error, props.spaceId ?? "");
   return (
     <div className="flex flex-col gap-3">

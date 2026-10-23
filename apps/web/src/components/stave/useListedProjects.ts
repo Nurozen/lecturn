@@ -1,5 +1,4 @@
 import { withoutArchivedStaveProjects } from "@lecturn/client-runtime/state/stave-archive";
-import { useMemo } from "react";
 
 import { useProjects } from "../../state/entities";
 import { archivedStaveProjectKeys } from "./listedProjects.logic";
@@ -11,11 +10,8 @@ import { archivedStaveProjectKeys } from "./listedProjects.logic";
  */
 export function useListedProjects() {
   const allProjects = useProjects();
-  return useMemo(
-    () => ({
-      projects: withoutArchivedStaveProjects(allProjects),
-      archivedProjectKeys: archivedStaveProjectKeys(allProjects),
-    }),
-    [allProjects],
-  );
+  return {
+    projects: withoutArchivedStaveProjects(allProjects),
+    archivedProjectKeys: archivedStaveProjectKeys(allProjects),
+  };
 }

@@ -49,16 +49,17 @@ export function ContextualArchive({ environmentId }: { environmentId: Environmen
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function manage(operation: "export" | "forget", selection: ContextualDataSelection) {
-    if (!capture.data || busy) return;
+    const captured = capture.data;
+    if (!captured || busy) return;
     setBusy(true);
     setError(null);
     setReceipt(null);
-    try {
+    const attempt = async () => {
       const input = {
         actionId: randomUUID(),
         selection,
-        expectedSourceGeneration: inspect.data?.sourceGeneration ?? capture.data.sourceGeneration,
-        expectedPurgeGeneration: inspect.data?.purgeGeneration ?? capture.data.purgeGeneration,
+        expectedSourceGeneration: inspect.data?.sourceGeneration ?? captured.sourceGeneration,
+        expectedPurgeGeneration: inspect.data?.purgeGeneration ?? captured.purgeGeneration,
       };
       const result =
         operation === "export"
@@ -72,21 +73,24 @@ export function ContextualArchive({ environmentId }: { environmentId: Environmen
       }
       capture.refresh();
       sources.refresh();
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : `The archive could not ${operation} this selection.`,
-      );
-    } finally {
-      setBusy(false);
-    }
+    };
+    return await attempt()
+      .catch((cause: unknown) => {
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : `The archive could not ${operation} this selection.`,
+        );
+      })
+      .finally(() => {
+        setBusy(false);
+      });
   }
   async function saveExport(artifactId: string) {
     if (busy) return;
     setBusy(true);
     setError(null);
-    try {
+    const attempt = async () => {
       const result = await download({ environmentId, input: { artifactId } });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       const url = URL.createObjectURL(new Blob([result.value], { type: "application/x-ndjson" }));
@@ -95,11 +99,14 @@ export function ContextualArchive({ environmentId }: { environmentId: Environmen
       anchor.download = `lecturn-contextual-${artifactId}.ndjson`;
       anchor.click();
       setTimeout(() => URL.revokeObjectURL(url), 30_000);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The export could not be downloaded.");
-    } finally {
-      setBusy(false);
-    }
+    };
+    return await attempt()
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : "The export could not be downloaded.");
+      })
+      .finally(() => {
+        setBusy(false);
+      });
   }
   return (
     <div className="space-y-4 rounded-xl border border-border/60 p-3 text-xs">

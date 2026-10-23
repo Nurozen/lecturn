@@ -6,7 +6,7 @@ import {
   type AtomCommandResult,
   runAtomCommand,
 } from "@lecturn/client-runtime/state/runtime";
-import { useCallback, useContext } from "react";
+import { useContext } from "react";
 
 export function useAtomCommand<A, E, W>(
   command: AtomCommand<W, A, E>,
@@ -17,22 +17,19 @@ export function useAtomCommand<A, E, W>(
   const reportFailure = typeof options === "string" ? true : (options?.reportFailure ?? true);
   const reportDefect = typeof options === "string" ? true : (options?.reportDefect ?? true);
 
-  return useCallback(
-    async (value: W) => {
-      const intent = localThreadActivityIntents.begin(command.label, value);
-      try {
-        const result = await runAtomCommand(registry, command, value, {
-          label,
-          reportFailure,
-          reportDefect,
-        });
-        if (result._tag === "Failure") localThreadActivityIntents.cancel(intent);
-        return result;
-      } catch (error) {
-        localThreadActivityIntents.cancel(intent);
-        throw error;
-      }
-    },
-    [command, label, registry, reportDefect, reportFailure],
-  );
+  return async (value: W) => {
+    const intent = localThreadActivityIntents.begin(command.label, value);
+    try {
+      const result = await runAtomCommand(registry, command, value, {
+        label,
+        reportFailure,
+        reportDefect,
+      });
+      if (result._tag === "Failure") localThreadActivityIntents.cancel(intent);
+      return result;
+    } catch (error) {
+      localThreadActivityIntents.cancel(intent);
+      throw error;
+    }
+  };
 }

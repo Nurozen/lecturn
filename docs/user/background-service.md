@@ -134,3 +134,8 @@ database through a temporary copy, so it needs free space of about the
 database's size twice over: once in the system temporary directory (`TMPDIR`
 or `/tmp` on Linux and macOS) and once next to the database for its
 write-ahead log.
+
+If you upgraded from Lecturn V1, its database (`state.sqlite`) is still kept
+next to the current one so you can roll back. `lecturn doctor` offers to delete
+it, but never selects that repair for you and `--fix` skips it: once it is
+gone, Lecturn V1 starts with no threads or settings.

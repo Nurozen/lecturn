@@ -1,6 +1,6 @@
 import { useAuth, useClerk } from "@clerk/react";
 import { readConnectAuthorizeRequest } from "@lecturn/shared/connectAuth";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import {
   buildConnectCliClerkAuthorizeUrl,
@@ -66,7 +66,7 @@ export function ConnectCliAuthorizeSurface() {
   const stepTag = step._tag;
   const redirectAccountId = step._tag === "redirect" ? step.accountId : null;
 
-  const openSignIn = useCallback(() => {
+  const openSignIn = () => {
     if (!request) {
       return;
     }
@@ -77,7 +77,8 @@ export function ConnectCliAuthorizeSurface() {
         isElectron,
       ),
     );
-  }, [clerk, request]);
+  };
+  const openSignInOnLoad = useEffectEvent(openSignIn);
 
   useEffect(() => {
     if (!request || redirecting.current) {
@@ -86,7 +87,7 @@ export function ConnectCliAuthorizeSurface() {
     if (stepTag === "sign-in") {
       if (!signInOpened.current) {
         signInOpened.current = true;
-        openSignIn();
+        openSignInOnLoad();
       }
       return;
     }
@@ -108,7 +109,7 @@ export function ConnectCliAuthorizeSurface() {
       setConfirmedAccountId(null);
       setSwitchError(cause instanceof Error ? cause.message : "Could not switch accounts.");
     });
-  }, [openSignIn, redirectAccountId, request, stepTag]);
+  }, [redirectAccountId, request, stepTag]);
 
   if (!request) {
     return (

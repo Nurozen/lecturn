@@ -95,9 +95,8 @@ export function ConnectSubscriptionGate({
               await onRefresh();
             } catch {
               setActionError("Your access could not be checked. Refresh to try again.");
-            } finally {
-              setRefreshing(false);
             }
+            setRefreshing(false);
           }}
         >
           {refreshing ? "Checking…" : "Refresh access"}

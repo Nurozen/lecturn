@@ -1,8 +1,4 @@
-import {
-  AuthAdministrativeScopes,
-  AuthStandardClientScopes,
-  EnvironmentId,
-} from "@lecturn/contracts";
+import { AuthStandardClientScopes, EnvironmentId } from "@lecturn/contracts";
 import {
   RelayEnvironmentConnectScope,
   type RelayEnvironmentConnectResponse,
@@ -644,7 +640,7 @@ describe("RemoteEnvironmentAuthorization", () => {
 
   it.effect.each([
     { name: "read-only", grantScopes: ["orchestration:read"] },
-    { name: "administrative", grantScopes: AuthAdministrativeScopes },
+    { name: "default", grantScopes: AuthStandardClientScopes },
   ] as const)(
     "inherits $name pairing grant scopes for websocket authorization and HTTP renewal",
     ({ grantScopes }) =>

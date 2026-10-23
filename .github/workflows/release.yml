@@ -7,9 +7,9 @@
 # Self-contained CLI archives (lecturn-<version>-<platform>.tar.gz/.zip plus
 # SHA256SUMS) are built here and attached to the GitHub Release, which is what
 # install.sh, `lecturn update`, SSH remotes, and the desktop WSL backend
-# download. npm keeps receiving the single `lecturn` JS package: the upstream
-# launcher-over-platform-packages layout (@lecturn/lecturn-<platform>) needs npm
-# packages and trusted publishers the fork has not provisioned.
+# download. npm keeps receiving the single `lecturn` JS package. Upstream now
+# publishes only a small npm launcher that downloads the release archive; the
+# fork has not adopted it.
 # Never push upstream `v*` tags to this repo: a tag push here cuts a release.
 name: Release
 
@@ -286,6 +286,10 @@ jobs:
 
       - name: Install browser secret helper build libraries
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
+
+      # The web package's browser project runs React tests in headless Chromium.
+      - name: Install Chromium for web browser tests
+        run: node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
 
       - name: Install Chromium for server browser integration tests
         run: node apps/server/node_modules/playwright-core/cli.js install --with-deps --only-shell chromium

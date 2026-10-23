@@ -2,7 +2,7 @@ import {
   terminalOutputText,
   type TerminalOutputState,
 } from "@lecturn/client-runtime/state/terminal";
-import { useId, useMemo, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import { writeTextToClipboard } from "../../hooks/useCopyToClipboard";
 import {
@@ -32,10 +32,7 @@ export function PhoneAuthControls({
   readonly onRestart: () => void;
   readonly sessionEnded?: boolean;
 }) {
-  const prompt = useMemo(
-    () => readPhoneAuthPrompt(output === null ? "" : terminalOutputText(output), driver),
-    [driver, output],
-  );
+  const prompt = readPhoneAuthPrompt(output === null ? "" : terminalOutputText(output), driver);
   const [started, setStarted] = useState(false);
   const [busy, setBusy] = useState(false);
   const pendingRef = useRef(false);
@@ -53,10 +50,9 @@ export function PhoneAuthControls({
       }
     } catch {
       setNotice("Could not confirm input. Check the terminal, or close and retry sign-in.");
-    } finally {
-      pendingRef.current = false;
-      setBusy(false);
     }
+    pendingRef.current = false;
+    setBusy(false);
   };
 
   return (
@@ -107,10 +103,9 @@ export function PhoneAuthControls({
             );
           } catch {
             setNotice("Could not refresh sign-in status. Try again.");
-          } finally {
-            pendingRef.current = false;
-            setBusy(false);
           }
+          pendingRef.current = false;
+          setBusy(false);
         }}
       >
         {busy ? "Please wait…" : "Refresh sign-in status"}
@@ -235,10 +230,9 @@ function PhoneAuthCodeEntry({
           );
         } catch {
           setNotice("Could not confirm input. Check the terminal before trying again.");
-        } finally {
-          pendingRef.current = false;
-          setBusy(false);
         }
+        pendingRef.current = false;
+        setBusy(false);
       }}
     >
       <label htmlFor={id} className="block text-xs font-medium">
