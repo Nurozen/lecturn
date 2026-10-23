@@ -2813,12 +2813,16 @@ export default function Sidebar() {
       };
     });
 
+  // Keyed on the result list too, so a new list scrolls its highlighted (top)
+  // result back into view even when that row is unchanged.
   useEffect(() => {
     if (!isSearchingThreads) return;
+    const activeKey = threadSearchResultOrderKey.split("\0")[activeSearchResultIndex];
+    if (!activeKey) return;
     document
-      .getElementById(`sidebar-thread-search-result-${activeSearchResultIndex}`)
+      .querySelector(`[data-search-result-key="${globalThis.CSS.escape(activeKey)}"]`)
       ?.scrollIntoView({ block: "nearest" });
-  }, [activeSearchResultIndex, isSearchingThreads]);
+  }, [activeSearchResultIndex, isSearchingThreads, threadSearchResultOrderKey]);
 
   const nextSnoozeWakeAt = snoozedThreads[0]?.snoozedUntil ?? null;
   useEffect(

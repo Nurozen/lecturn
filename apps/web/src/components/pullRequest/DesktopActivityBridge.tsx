@@ -43,6 +43,23 @@ import { useQuickSteer } from "./useQuickSteer";
 import { toastManager } from "../ui/toast";
 import { formatEnvironmentQueryError } from "../../state/query";
 
+// Keyed by serialized ids so atom identity is stable across renders.
+const liveShellIdsAtom = Atom.family((environmentKey: string) =>
+  Atom.make((get) =>
+    (JSON.parse(environmentKey) as EnvironmentId[]).filter(
+      (id) => get(environmentShell.stateValueAtom(id)).status === "live",
+    ),
+  ),
+);
+
+const contextDetailsAtom = Atom.family((contextRefs: string) =>
+  Atom.make((get) =>
+    (JSON.parse(contextRefs) as [EnvironmentId, ThreadId][]).map(([environmentId, threadId]) =>
+      get(environmentThreadDetails.threadAtom({ environmentId, threadId })),
+    ),
+  ),
+);
+
 function EnabledActivityBridge() {
   const accountMarks = useAtomValue(accountMarkByEnvironmentIdAtom);
   const viewedThread = useParams({ strict: false, select: resolveThreadRouteRef });
@@ -57,12 +74,7 @@ function EnabledActivityBridge() {
   );
   const { values, failedEnvironmentIds } = usePullRequestWatches(ids);
   const environmentKey = JSON.stringify(environments.map((item) => item.environmentId));
-  const liveShellsAtom = Atom.make((get) =>
-    (JSON.parse(environmentKey) as EnvironmentId[]).filter(
-      (id) => get(environmentShell.stateValueAtom(id)).status === "live",
-    ),
-  );
-  const liveShellIds = useAtomValue(liveShellsAtom);
+  const liveShellIds = useAtomValue(liveShellIdsAtom(environmentKey));
   const readyEnvironmentIds = liveShellIds.filter(
     (id) =>
       connectedIds.has(id) &&
@@ -93,12 +105,7 @@ function EnabledActivityBridge() {
       )
       .slice(0, 12),
   );
-  const contextAtom = Atom.make((get) =>
-    (JSON.parse(contextRefs) as [EnvironmentId, ThreadId][]).map(([environmentId, threadId]) =>
-      get(environmentThreadDetails.threadAtom({ environmentId, threadId })),
-    ),
-  );
-  const contextDetails = useAtomValue(contextAtom);
+  const contextDetails = useAtomValue(contextDetailsAtom(contextRefs));
   const rows = (() => {
     const watches = watchActivityRows(values, threads, contextDetails, projects, sagaIndex);
     const active = threadActivityRows(threads, connectedIds, interactions);

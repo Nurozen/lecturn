@@ -148,8 +148,21 @@ function useChosenConnectAccount(
     setSelection(null);
   }
   const visible = context !== null;
-  const lastUsedAccountId =
+  // Read the remembered account once per open (scope/surface/visibility), not
+  // on every render, so it stays fixed while the picker is open.
+  const readLastUsed = () =>
     visible && scope !== null ? readAccountPickerLastUsed()[surface] : undefined;
+  const [lastUsed, setLastUsed] = useState(() => ({
+    scope,
+    surface,
+    visible,
+    accountId: readLastUsed(),
+  }));
+  let lastUsedAccountId = lastUsed.accountId;
+  if (lastUsed.scope !== scope || lastUsed.surface !== surface || lastUsed.visible !== visible) {
+    lastUsedAccountId = readLastUsed();
+    setLastUsed({ scope, surface, visible, accountId: lastUsedAccountId });
+  }
   if (context === null) {
     return FOLLOWS_ACTIVE_ACCOUNT;
   }

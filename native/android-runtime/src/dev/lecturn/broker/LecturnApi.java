@@ -37,7 +37,7 @@ final class LecturnApi {
         return id;
     }
     JSONObject bootstrap() throws Exception {
-        // Omitted scopes intentionally selects AuthStandardClientScopes, not administrative access.
+        // Omitted scopes selects AuthStandardClientScopes, which include access:write and relay:write.
         JSONObject result=request("/api/auth/pairing-token",new JSONObject().put("label","Lecturn Android host"),16384);
         String credential=Protocol.string(result,"credential");
         if (!credential.matches("[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{12}")) throw new IOException("invalid_pairing_credential");

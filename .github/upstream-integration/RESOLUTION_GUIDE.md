@@ -468,9 +468,21 @@ from upstream's side.
   fork id 78.
 - **Legacy database copy.** Upstream's "before 0.1.0" wording is "V1
   database"/"Lecturn V1" (fork versions are 0.0.x).
-- **bye npm (#20148).** The fork keeps publishing the single `lecturn` npm
-  package through `cli.ts` `publishNodePackage`; upstream's launcher and
-  platform packages are not taken.
+- **bye npm (#20148).** At 16918b57 upstream publishes only a small npm
+  launcher that downloads the release archive (no platform packages). The fork
+  keeps publishing the single `lecturn` npm package through `cli.ts`
+  `publishNodePackage`; the launcher is not taken.
+- **Default pairing scopes (#20432).** `AuthStandardClientScopes` now include
+  `access:write` and `relay:write`, so fork features gated on them (Contextual
+  evidence/export/forget, funding endpoints, the Android broker) are available
+  to every default pairing. Taken deliberately, for upstream's reason: terminal
+  and orchestration operate already reach that authority.
+- **Worktree folders (#20449).** A missing thread worktree is re-created only
+  inside managed worktree folders, so Stave-made worktrees outside them are
+  not re-created. File writes are limited to known workspaces
+  (`KnownWorkspaces`); a Stave worktree counts when git lists it as a worktree
+  of the thread's project, through the fork's Stave-aware `layerGitVcsDriver`
+  (`server.ts`).
 - **Fold posture.** Upstream's Android fold posture module lives in
   `lecturn-native-controls` as `LecturnFoldPosture*`.
 - **Identity.** The Connect route kind is `"lecturn-connect"`, webhook
