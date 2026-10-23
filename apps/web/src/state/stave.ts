@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { SagaProjectIndexEntry } from "@lecturn/client-runtime/state/project-grouping";
 import type { RepositoryScopeProject } from "@lecturn/client-runtime/state/repositoryScope";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
@@ -67,17 +67,13 @@ const sagaRepositoryIndex = Atom.family((key: string) =>
 
 /** Repository ownership uses verified rosters independently of sidebar nesting preferences. */
 export function useSagaRepositoryIndex(projects: readonly RepositoryScopeProject[]) {
-  const key = useMemo(
-    () =>
-      JSON.stringify(
-        projects
-          .filter((project) => project.stave?.isSaga && project.stave.state !== "archived")
-          .map((project) => ({
-            environmentId: project.environmentId,
-            sagaRoot: project.workspaceRoot,
-          })),
-      ),
-    [projects],
+  const key = JSON.stringify(
+    projects
+      .filter((project) => project.stave?.isSaga && project.stave.state !== "archived")
+      .map((project) => ({
+        environmentId: project.environmentId,
+        sagaRoot: project.workspaceRoot,
+      })),
   );
   const entries = useAtomValue(sagaRepositoryIndex(key));
   useEffect(

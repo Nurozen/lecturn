@@ -3,7 +3,7 @@ import { staveOperationUnavailableReason } from "./staveCompatibility.logic";
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@lecturn/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { notifyStaveMutation } from "../../staveMutation";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
@@ -185,7 +185,7 @@ function SpaceWizard(props: {
     setState((current) => preselectSaga(current, context.sagas, sagaRoot));
   }
 
-  const operation = useMemo(() => buildCreateSpaceOperation(state), [state]);
+  const operation = buildCreateSpaceOperation(state);
   const steps = wizardSteps(context);
   const gate = canAdvance(state, context);
   const previous = previousWizardStep(state.step, context);

@@ -47,7 +47,7 @@ This document covers the unified release workflow for stable and nightly desktop
 - Publishes the CLI package (`apps/server`, npm package `lecturn`) with OIDC trusted publishing from the same workflow file:
   - stable releases publish npm dist-tag `latest`
   - nightly releases publish npm dist-tag `nightly`
-  - Upstream's npm layout, a launcher over per-platform executable packages (`scripts/build-npm-platform-packages.ts`, which would publish `@lecturn/lecturn-<platform>-<arch>`), is not wired into the workflow: those packages and their trusted publishers do not exist yet.
+  - Upstream publishes only a download launcher to npm, which fetches the release's CLI archive on first run. Lecturn keeps publishing the full Node package instead: the launcher depends on release archives for every platform it serves, and the self-update path for those archives (`RuntimeReleaseArchivesPublished`) is not enabled yet.
 - Signing is optional and auto-detected per platform from secrets.
 
 ## Required release credentials
@@ -256,9 +256,9 @@ release boundaries.
 ## Android APK mirror
 
 `.github/workflows/mobile-android-apk.yml` can check the Google Play Alpha closed-testing
-track of `com.cloudgatherer.lecturn` hourly. A new beta gets an `android-beta-<build-number>`
-prerelease and updates the `android-beta` download page; both contain only the beta APK.
-Unchanged checks publish nothing, and interrupted draft uploads resume on the next check. The
+track of `com.cloudgatherer.lecturn` hourly. Each new beta gets one
+`android-beta-<build-number>` prerelease containing its APK. Unchanged checks publish nothing,
+and interrupted draft uploads resume on the next check. The
 APK is the universal APK Play generates and signs from the uploaded bundle, so no signing key
 lives in GitHub.
 

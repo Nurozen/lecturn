@@ -27,11 +27,9 @@ import {
   useStaveArchiveLanding,
   type StaveSpaceConfirmation,
 } from "./stave/staveSpaceLifecycle";
+import type { EnvironmentServerConfig } from "@lecturn/client-runtime/connection";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
-import {
-  setThreadChangeRequestSnapshot,
-  ThreadTerminalStatusButton,
-} from "./ThreadStatusIndicators";
+import { ThreadTerminalStatusButton } from "./ThreadStatusIndicators";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
 import { discardComposerDraft } from "../lib/discardComposerDraft";
 import { SidebarPointerSensor } from "./Sidebar.pointer";
@@ -39,12 +37,16 @@ import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@lecturn/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";
+import * as Option from "effect/Option";
+import { Atom } from "effect/reactivity";
 import { replaceComposerContextReferences } from "@lecturn/shared/composerContextReferences";
 import * as Schema from "effect/Schema";
 import { CSS } from "@dnd-kit/utilities";
 import {
   canSnooze,
   effectiveSnoozed,
+  hasQueuedTurnStart,
+  QUEUED_TURN_START_GRACE_MS,
   threadWokeAt,
 } from "@lecturn/client-runtime/state/thread-settled";
 import { createInboxReturnTracker } from "@lecturn/client-runtime/state/thread-inbox";
@@ -106,9 +108,8 @@ import {
 } from "lucide-react";
 import {
   memo,
-  useCallback,
   useEffect,
-  useMemo,
+  useLayoutEffect,
   useReducer,
   useRef,
   useState,
@@ -117,7 +118,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { useParams, useRouter } from "@tanstack/react-router";
+import { useRouter } from "@tanstack/react-router";
 
 import { useRightPanelStore } from "../rightPanelStore";
 import {
@@ -177,11 +178,13 @@ import {
   useProject,
   readThreadShell,
   useProjects,
+  useServerConfigs,
   useThreadShells,
 } from "../state/entities";
 import { resolveThreadGitTarget } from "../lib/threadGitTarget";
 import { readForkAtLatestTurn, useForkThread } from "../hooks/useForkThread";
-import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
+import { environmentPresentations } from "../state/presentation";
+import { primaryServerKeybindingsAtom } from "../state/server";
 import { environmentProjects } from "../state/projects";
 import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
@@ -189,11 +192,7 @@ import { useEnvironmentQuery } from "../state/query";
 import { useThreadSearch } from "../state/queries";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
-import {
-  buildThreadRouteParams,
-  resolveActiveThreadRouteRef,
-  resolveThreadRouteTarget,
-} from "../threadRoutes";
+import { buildThreadRouteParams, resolveActiveThreadRouteRef } from "../threadRoutes";
 import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
 import { isScratchProject } from "@lecturn/client-runtime/state/projects";
@@ -250,8 +249,6 @@ import {
   resolveThreadPullRequestBadge,
   type ThreadPr,
   terminalStatusFromRunningIds,
-  threadChangeRequestSnapshotsAtom,
-  type ThreadChangeRequestSnapshot,
   type TerminalStatusIndicator,
   useLinkedThreadPullRequest,
   ThreadSearchPullRequestNumber,
@@ -304,8 +301,73 @@ import {
   type ComposerThreadDraftState,
   type DraftSessionState,
 } from "../composerDraftStore";
+import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 
-const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, ProviderInstanceEntry> = new Map();
+// The fields thread rows show. Provider status pushes refresh `checkedAt`,
+// status and auth on every provider; leaving those out keeps each
+// environment's map, and every memoized row, stable across them.
+type SidebarProviderEntry = Pick<
+  ProviderInstanceEntry,
+  | "instanceId"
+  | "driverKind"
+  | "displayName"
+  | "accentColor"
+  | "acpRegistryAgentId"
+  | "acpRegistryIconUrl"
+  | "models"
+>;
+
+function sameSidebarProviderEntries(
+  left: ReadonlyMap<string, SidebarProviderEntry>,
+  right: ReadonlyMap<string, SidebarProviderEntry>,
+): boolean {
+  if (left.size !== right.size) return false;
+  for (const [instanceId, entry] of right) {
+    const other = left.get(instanceId);
+    if (
+      other === undefined ||
+      other.driverKind !== entry.driverKind ||
+      other.displayName !== entry.displayName ||
+      other.accentColor !== entry.accentColor ||
+      other.acpRegistryAgentId !== entry.acpRegistryAgentId ||
+      other.acpRegistryIconUrl !== entry.acpRegistryIconUrl ||
+      other.models !== entry.models
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Threads on non-primary environments (Lecturn Connect, hosted) resolve their
+// provider entry from their own environment's config: default instance ids
+// are driver slugs, so a flat map would collide across environments.
+const sidebarProviderEntriesAtom = Atom.make((get) => {
+  const providersByEnvironment = get(environmentPresentations.providersByEnvironmentAtom);
+  const derived = deriveProviderEntriesByEnvironment(
+    [...get(environmentPresentations.serverConfigsAtom)].map(
+      ([environmentId, config]) =>
+        [environmentId, providersByEnvironment.get(environmentId) ?? [], config.settings] as const,
+    ),
+  );
+  const previous = Option.getOrNull(
+    get.self<ReadonlyMap<string, ReadonlyMap<string, SidebarProviderEntry>>>(),
+  );
+  const next = new Map<string, ReadonlyMap<string, SidebarProviderEntry>>();
+  let changed = previous === null || previous.size !== derived.size;
+  for (const [environmentId, entries] of derived) {
+    const prior = previous?.get(environmentId);
+    if (prior !== undefined && sameSidebarProviderEntries(prior, entries)) {
+      next.set(environmentId, prior);
+    } else {
+      next.set(environmentId, entries);
+      changed = true;
+    }
+  }
+  return !changed && previous !== null ? previous : next;
+}).pipe(Atom.withLabel("sidebar-provider-entries"));
+
+const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, SidebarProviderEntry> = new Map();
 // Collapsed shelves share one empty list so a route change alone does not
 // give the sidebar list a new identity.
 const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
@@ -348,14 +410,19 @@ function compactSidebarTimeLabel(label: string): string {
   return label.endsWith(" ago") ? label.slice(0, -4) : label;
 }
 
-function threadTimeLabel(thread: SidebarThreadSummary): string {
-  const timestamp = thread.latestUserMessageAt ?? thread.updatedAt;
-  return compactSidebarTimeLabel(formatRelativeTimeLabel(timestamp));
+// Subscribes to the minute tick itself, so only the label re-renders each
+// minute. The minute is passed as the clock so it is the formatter's input.
+function RelativeTimeLabel(props: { timestamp: string | null }) {
+  const nowMinute = useNowMinute();
+  return props.timestamp === null
+    ? null
+    : compactSidebarTimeLabel(
+        formatRelativeTimeLabel(props.timestamp, Date.parse(`${nowMinute}:00.000Z`)),
+      );
 }
 
-function settledTimeLabel(thread: SidebarThreadSummary): string {
-  const timestamp = resolveSettledThreadTimestamp(thread);
-  return timestamp === null ? "" : compactSidebarTimeLabel(formatRelativeTimeLabel(timestamp));
+function threadTimeTimestamp(thread: SidebarThreadSummary): string {
+  return thread.latestUserMessageAt ?? thread.updatedAt;
 }
 
 function JumpHintBadge(props: { label: string }) {
@@ -375,7 +442,7 @@ function terminalProcessLabel(count: number): string {
 
 function SidebarProviderStack(props: {
   thread: SidebarThreadSummary;
-  providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
+  providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
 }) {
   const stack = resolveThreadProviderStack(props.thread);
   const currentInstanceId = stack[stack.length - 1]!;
@@ -446,8 +513,8 @@ function SidebarThreadTooltip({
   staveWorkspace: ReturnType<typeof describeStaveWorkspace>;
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
-  providerEntry: ProviderInstanceEntry | null;
-  providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
+  providerEntry: SidebarProviderEntry | null;
+  providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
   showInstanceBadge: boolean;
   modelInstanceId: string;
   modelLabel: string;
@@ -631,10 +698,7 @@ function SnoozeMenuButton(props: {
   timestampFormat: TimestampFormat;
 }) {
   const { open, onOpenChange, onSnooze, timestampFormat } = props;
-  const presets = useMemo(
-    () => (open ? resolveSnoozePresets(new Date(), timestampFormat) : []),
-    [open, timestampFormat],
-  );
+  const presets = open ? resolveSnoozePresets(new Date(), timestampFormat) : [];
   return (
     <Menu open={open} onOpenChange={onOpenChange}>
       <Tooltip>
@@ -727,39 +791,30 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
     projectDisplayName: props.projectDisplayName,
     isActive: props.isActive,
   });
-  const handleActivate = useCallback(() => onNavigate(draftId), [draftId, onNavigate]);
-  const handleKeyDown = useCallback(
-    (event: ReactKeyboardEvent) => {
-      // Keys targeting the nested discard button belong to the button:
-      // preventDefault here would swallow Space's synthesized click and
-      // navigate instead of discarding.
-      if ((event.target as HTMLElement).closest("button")) return;
-      if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
-        event.preventDefault();
-        const rect = event.currentTarget.getBoundingClientRect();
-        onContextMenu(draftId, { x: rect.left, y: rect.bottom });
-      } else if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        onNavigate(draftId);
-      }
-    },
-    [draftId, onContextMenu, onNavigate],
-  );
-  const handleContextMenu = useCallback(
-    (event: ReactMouseEvent) => {
+  const handleActivate = () => onNavigate(draftId);
+  const handleKeyDown = (event: ReactKeyboardEvent) => {
+    // Keys targeting the nested discard button belong to the button:
+    // preventDefault here would swallow Space's synthesized click and
+    // navigate instead of discarding.
+    if ((event.target as HTMLElement).closest("button")) return;
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
       event.preventDefault();
-      onContextMenu(draftId, { x: event.clientX, y: event.clientY });
-    },
-    [draftId, onContextMenu],
-  );
-  const handleDiscard = useCallback(
-    (event: ReactMouseEvent) => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      onContextMenu(draftId, { x: rect.left, y: rect.bottom });
+    } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      event.stopPropagation();
-      onDiscard(draftId);
-    },
-    [draftId, onDiscard],
-  );
+      onNavigate(draftId);
+    }
+  };
+  const handleContextMenu = (event: ReactMouseEvent) => {
+    event.preventDefault();
+    onContextMenu(draftId, { x: event.clientX, y: event.clientY });
+  };
+  const handleDiscard = (event: ReactMouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onDiscard(draftId);
+  };
   return (
     <li className="list-none py-0.5">
       <div
@@ -838,9 +893,8 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
     let row: SidebarDraftRowData | null = null;
     if (props.routeDraftId !== null) {
       const draftId = DraftId.make(props.routeDraftId);
-      const store = useComposerDraftStore.getState();
-      const session = store.getDraftSession(draftId);
-      const composer = store.getComposerDraft(draftId);
+      const session = draftThreadsByThreadKey[draftId];
+      const composer = draftsByThreadKey[draftId];
       row =
         session && session.promotedTo == null && composer && composerDraftHasUserContent(composer)
           ? { draftId, session, composer }
@@ -848,7 +902,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
     }
     setFrozenActive({ routeDraftId: props.routeDraftId, row });
   }
-  const drafts = useMemo(() => {
+  const drafts = (() => {
     const rows: SidebarDraftRowData[] = [];
     for (const [draftKey, session] of Object.entries(draftThreadsByThreadKey)) {
       if (session.promotedTo != null || !ownsEnvironment(session.environmentId)) {
@@ -874,14 +928,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
     }
     rows.sort((left, right) => right.session.createdAt.localeCompare(left.session.createdAt));
     return rows;
-  }, [
-    draftThreadsByThreadKey,
-    draftsByThreadKey,
-    frozenActive,
-    ownsEnvironment,
-    props.routeDraftId,
-    props.scopedProjectKeys,
-  ]);
+  })();
   if (drafts.length === 0) {
     return null;
   }
@@ -945,7 +992,7 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
   ),
 };
 
-const SidebarThreadRow = memo(function SidebarThreadRow(props: {
+type SidebarThreadRowProps = {
   thread: SidebarThreadSummary;
   variant: "card" | "slim";
   nested?: boolean;
@@ -969,7 +1016,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   scratchMachineLabel: string | null;
   project: EnvironmentProject | null;
   projectDisplayName: string | null;
-  providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
+  providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
   timestampFormat: TimestampFormat;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
   onThreadActivate: (threadRef: ScopedThreadRef) => void;
@@ -994,16 +1041,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
   onFileDropThreads?: ((threadRef: ScopedThreadRef, files: File[]) => void) | undefined;
-  changeRequestSnapshot: ThreadChangeRequestSnapshot | null;
-  onChangeRequestSnapshot: (
-    threadKey: string,
-    snapshot: ThreadChangeRequestSnapshot | null,
-  ) => void;
-}) {
+};
+
+const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
   const {
     isRenaming,
-    changeRequestSnapshot,
-    onChangeRequestSnapshot,
     onCancelRename,
     onCommitRename,
     onContextMenu,
@@ -1026,10 +1068,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     variant,
     variantAction,
   } = props;
-  const threadRef = useMemo(
-    () => scopeThreadRef(thread.environmentId, thread.id),
-    [thread.environmentId, thread.id],
-  );
+  const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
   const threadAccountId = useAtomValue(accountByEnvironmentIdAtom).get(thread.environmentId);
   const sidebarAccountStyle = useSidebarAccountStyle();
@@ -1041,13 +1080,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const [borderRow, setBorderRow] = useState<HTMLElement | null>(null);
   useRevealActiveThread(borderRow, props.isActive);
   const [borderVisible, setBorderVisible] = useState(false);
-  const attachRow = useCallback(
-    (node: HTMLElement | null) => {
-      rowRef(node);
-      setBorderRow(node);
-    },
-    [rowRef],
-  );
+  const attachRow = (node: HTMLElement | null) => {
+    rowRef(node);
+    setBorderRow(node);
+  };
   const isRegeneratingTitle = thread.titleRegeneration != null;
   const localLastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const lastVisitedAt = resolveThreadLastVisitedAt(thread.lastVisitedAt, localLastVisitedAt);
@@ -1060,24 +1096,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
   const terminalProcessCount = runningTerminalIds.length;
   const hasUnsentDraft = useThreadHasUnsentDraft(threadRef) && !props.isActive;
-  const handleDiscardDraftClick = useCallback(
-    (event: ReactMouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      discardComposerDraft(threadRef);
-    },
-    [threadRef],
-  );
+  const handleDiscardDraftClick = (event: ReactMouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    discardComposerDraft(threadRef);
+  };
 
   // The row's own project decides where git looks (a Stave space targets its
   // primary repo, not the space root); the project record's workspace root
   // only covers a project that has not loaded yet.
-  const threadProject = useProject(
-    useMemo(
-      () => scopeProjectRef(thread.environmentId, thread.projectId),
-      [thread.environmentId, thread.projectId],
-    ),
-  );
+  const threadProject = useProject(scopeProjectRef(thread.environmentId, thread.projectId));
   const gitTarget = resolveThreadGitTarget({
     project: threadProject,
     thread,
@@ -1159,8 +1187,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       setBorderVisible(false);
     };
   }, [borderRow, status]);
-  const isInFlight =
-    status === "working" || status === "waiting" || status === "approval" || status === "input";
   const lastVisitedDate = lastVisitedAt === undefined ? null : parseTimestampDate(lastVisitedAt);
   const wokeAtDate = props.wokeAt === null ? null : parseTimestampDate(props.wokeAt);
   const isWoke =
@@ -1271,69 +1297,50 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     />
   );
 
-  const handleClick = useCallback(
-    (event: ReactMouseEvent) => {
-      onThreadClick(event, threadRef);
-    },
-    [onThreadClick, threadRef],
-  );
-  const handleAcknowledgeWokeClick = useCallback(
-    (event: ReactMouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (props.wokeAt === null) return;
-      onAcknowledgeWoke(threadRef, props.wokeAt);
-    },
-    [onAcknowledgeWoke, props.wokeAt, threadRef],
-  );
-  const handleContextMenu = useCallback(
-    (event: ReactMouseEvent) => {
-      event.preventDefault();
-      onContextMenu(threadRef, { x: event.clientX, y: event.clientY });
-    },
-    [onContextMenu, threadRef],
-  );
-  const handleKeyDown = useCallback(
-    (event: ReactKeyboardEvent) => {
-      if (event.target !== event.currentTarget) return;
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      onThreadActivate(threadRef);
-    },
-    [onThreadActivate, threadRef],
-  );
-  const handleDoubleClick = useCallback(
-    (event: ReactMouseEvent) => {
-      if (
-        !readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope) ||
-        isRenaming ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey
-      ) {
-        return;
-      }
-      if ((event.target as HTMLElement).closest("button, a, input")) return;
-      event.preventDefault();
-      onStartRename(threadRef, thread.title);
-    },
-    [isRenaming, onStartRename, thread.title, threadRef],
-  );
+  const handleClick = (event: ReactMouseEvent) => {
+    onThreadClick(event, threadRef);
+  };
+  const handleAcknowledgeWokeClick = (event: ReactMouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (props.wokeAt === null) return;
+    onAcknowledgeWoke(threadRef, props.wokeAt);
+  };
+  const handleContextMenu = (event: ReactMouseEvent) => {
+    event.preventDefault();
+    onContextMenu(threadRef, { x: event.clientX, y: event.clientY });
+  };
+  const handleKeyDown = (event: ReactKeyboardEvent) => {
+    if (event.target !== event.currentTarget) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    onThreadActivate(threadRef);
+  };
+  const handleDoubleClick = (event: ReactMouseEvent) => {
+    if (
+      !readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope) ||
+      isRenaming ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    if ((event.target as HTMLElement).closest("button, a, input")) return;
+    event.preventDefault();
+    onStartRename(threadRef, thread.title);
+  };
   const [isFileDragOver, setIsFileDragOver] = useState(false);
-  const fileDropHandlers = useMemo(
-    () =>
-      onFileDropThreads
-        ? makeWorkspaceFileDropHandlers({
-            setDragActive: setIsFileDragOver,
-            addFiles: (files) => {
-              onFileDropThreads(threadRef, files);
-            },
-            addFolders: () => {},
-          })
-        : null,
-    [onFileDropThreads, threadRef],
-  );
+  const fileDropHandlers = onFileDropThreads
+    ? makeWorkspaceFileDropHandlers({
+        setDragActive: setIsFileDragOver,
+        addFiles: (files) => {
+          onFileDropThreads(threadRef, files);
+        },
+        addFolders: () => {},
+      })
+    : null;
   useEffect(() => {
     if (!isFileDragOver) return;
     const clearFileDrag = () => setIsFileDragOver(false);
@@ -1344,27 +1351,24 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   useEffect(() => {
     if (isRenaming) renameCommittedRef.current = false;
   }, [isRenaming]);
-  const handleRenameKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLInputElement>) => {
-      event.stopPropagation();
-      if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-      if (event.key === "Enter") {
-        event.preventDefault();
-        renameCommittedRef.current = true;
-        onCommitRename(threadRef, renamingTitle, thread.title);
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        renameCommittedRef.current = true;
-        onCancelRename();
-      }
-    },
-    [onCancelRename, onCommitRename, renamingTitle, thread.title, threadRef],
-  );
-  const handleRenameBlur = useCallback(() => {
+  const handleRenameKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    event.stopPropagation();
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      renameCommittedRef.current = true;
+      onCommitRename(threadRef, renamingTitle, thread.title);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      renameCommittedRef.current = true;
+      onCancelRename();
+    }
+  };
+  const handleRenameBlur = () => {
     if (!renameCommittedRef.current) {
       onCommitRename(threadRef, renamingTitle, thread.title);
     }
-  }, [onCommitRename, renamingTitle, thread.title, threadRef]);
+  };
   const [isForking, setIsForking] = useState(false);
   const forkInFlightRef = useRef(false);
   const handleForkClick = async (event: ReactMouseEvent) => {
@@ -1373,90 +1377,80 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     if (forkInFlightRef.current) return;
     forkInFlightRef.current = true;
     setIsForking(true);
-    try {
-      await onFork(threadRef);
-    } finally {
+    await onFork(threadRef).finally(() => {
       forkInFlightRef.current = false;
       setIsForking(false);
+    });
+  };
+  const handleSettleClick = (event: ReactMouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onSettle(threadRef);
+  };
+  const handleActionPointerDown = (event: ReactPointerEvent) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    event.stopPropagation();
+    onActionSweepStart(threadRef, variantAction, event.nativeEvent);
+  };
+  const handleUnsettleClick = (event: ReactMouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onUnsettle(threadRef);
+  };
+  const handleUnsnoozeClick = (event: ReactMouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onUnsnooze(threadRef);
+  };
+  const handleUnpinClick = (event: ReactMouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onUnpin(threadRef);
+  };
+  const handleSnoozePreset = (preset: Pick<SnoozePreset, "snoozedUntil">) => {
+    onSnooze(threadRef, preset);
+  };
+  const [snoozeMenuOpenRaw, setSnoozeMenuOpen] = useState(false);
+  // The React Compiler caches render results on their inputs, so a clock read
+  // here would stay frozen until `thread` changes and a queued-turn gate would
+  // never reopen. The gate's clock is state, reset with the thread.
+  const [snoozeGateClock, setSnoozeGateClock] = useState(() => ({
+    thread,
+    now: new Date().toISOString(),
+  }));
+  if (snoozeGateClock.thread !== thread) {
+    setSnoozeGateClock({ thread, now: new Date().toISOString() });
+  }
+  const snoozeGateNow = snoozeGateClock.now;
+  const snoozeGateExpiryMs = hasQueuedTurnStart(thread, { now: snoozeGateNow })
+    ? Date.parse(thread.latestUserMessageAt ?? "") + QUEUED_TURN_START_GRACE_MS
+    : Number.NaN;
+  useEffect(() => {
+    // A gate still closed past its expiry is held by runtime status, not time,
+    // so no clock tick can open it.
+    if (!Number.isFinite(snoozeGateExpiryMs) || snoozeGateExpiryMs <= Date.parse(snoozeGateNow)) {
+      return;
+    }
+    const id = window.setTimeout(
+      () => setSnoozeGateClock({ thread, now: new Date().toISOString() }),
+      Math.min(Math.max(0, snoozeGateExpiryMs - Date.now()) + 50, 2_147_483_647),
+    );
+    return () => window.clearTimeout(id);
+  }, [snoozeGateExpiryMs, snoozeGateNow, thread]);
+  const showSnoozeButton =
+    canOperateThread && props.snoozeSupported && canSnooze(thread, { now: snoozeGateNow });
+  // Closing here, not just masking, keeps the menu from reopening when the button returns.
+  if (snoozeMenuOpenRaw && !showSnoozeButton) setSnoozeMenuOpen(false);
+  const snoozeMenuOpen = snoozeMenuOpenRaw && showSnoozeButton;
+  const handlePrClick = (event: ReactMouseEvent<HTMLElement>, targetUrl?: string) => {
+    const url = targetUrl ?? pr?.url ?? currentLinkedPr?.url;
+    if (!url) return;
+    const showInRightPanel = targetUrl !== undefined || openPullRequestsInRightPanel;
+    const openedInRightPanel = openPrLink(event, url, showInRightPanel ? threadRef : undefined);
+    if (openedInRightPanel && showInRightPanel && !props.isActive) {
+      onThreadActivate(threadRef);
     }
   };
-  const handleSettleClick = useCallback(
-    (event: ReactMouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      onSettle(threadRef);
-    },
-    [onSettle, threadRef],
-  );
-  const handleActionPointerDown = useCallback(
-    (event: ReactPointerEvent) => {
-      if (!event.isPrimary || event.button !== 0) return;
-      event.stopPropagation();
-      onActionSweepStart(threadRef, variantAction, event.nativeEvent);
-    },
-    [onActionSweepStart, threadRef, variantAction],
-  );
-  const handleUnsettleClick = useCallback(
-    (event: ReactMouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      onUnsettle(threadRef);
-    },
-    [onUnsettle, threadRef],
-  );
-  const handleUnsnoozeClick = useCallback(
-    (event: ReactMouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      onUnsnooze(threadRef);
-    },
-    [onUnsnooze, threadRef],
-  );
-  const handleUnpinClick = useCallback(
-    (event: ReactMouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      onUnpin(threadRef);
-    },
-    [onUnpin, threadRef],
-  );
-  const handleSnoozePreset = useCallback(
-    (preset: Pick<SnoozePreset, "snoozedUntil">) => {
-      onSnooze(threadRef, preset);
-    },
-    [onSnooze, threadRef],
-  );
-  const [snoozeMenuOpenRaw, setSnoozeMenuOpen] = useState(false);
-  const showSnoozeButton =
-    canOperateThread &&
-    props.snoozeSupported &&
-    canSnooze(thread, { now: new Date().toISOString() });
-  const showHoverActions =
-    (canOperateThread && props.settlementSupported) || showSnoozeButton || hasUnsentDraft;
-  const snoozeMenuOpen = snoozeMenuOpenRaw && showSnoozeButton;
-  useEffect(() => {
-    if (!showSnoozeButton) setSnoozeMenuOpen(false);
-  }, [showSnoozeButton]);
-  const handlePrClick = useCallback(
-    (event: ReactMouseEvent<HTMLElement>, targetUrl?: string) => {
-      const url = targetUrl ?? pr?.url ?? currentLinkedPr?.url;
-      if (!url) return;
-      const showInRightPanel = targetUrl !== undefined || openPullRequestsInRightPanel;
-      const openedInRightPanel = openPrLink(event, url, showInRightPanel ? threadRef : undefined);
-      if (openedInRightPanel && showInRightPanel && !props.isActive) {
-        onThreadActivate(threadRef);
-      }
-    },
-    [
-      onThreadActivate,
-      openPrLink,
-      openPullRequestsInRightPanel,
-      pr,
-      currentLinkedPr,
-      props.isActive,
-      threadRef,
-    ],
-  );
 
   const rowSurfaceClassName = cn(
     "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
@@ -1578,10 +1572,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const prBadgeShape = supportsMultiplePullRequests
     ? resolveThreadPullRequestBadge(thread.pullRequests)
     : null;
-  const handlePrListClick = useCallback(() => {
+  const handlePrListClick = () => {
     useRightPanelStore.getState().open(threadRef, "pull-requests");
     if (!props.isActive) onThreadActivate(threadRef);
-  }, [onThreadActivate, props.isActive, threadRef]);
+  };
   const multiplePrRepositories =
     new Set(pullRequestLinks.map((request) => request.repository)).size > 1;
   const prBadge =
@@ -1791,9 +1785,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     </Tooltip>
                   ) : (
                     <span className="text-xs">
-                      {variantAction === "unsettle"
-                        ? settledTimeLabel(thread)
-                        : threadTimeLabel(thread)}
+                      <RelativeTimeLabel
+                        timestamp={
+                          variantAction === "unsettle"
+                            ? resolveSettledThreadTimestamp(thread)
+                            : threadTimeTimestamp(thread)
+                        }
+                      />
                     </span>
                   )}
                 </span>
@@ -1991,7 +1989,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                         </span>
                       )
                     ) : (
-                      threadTimeLabel(thread)
+                      <RelativeTimeLabel timestamp={threadTimeTimestamp(thread)} />
                     )}
                   </span>
                   {props.settlementSupported || showSnoozeButton || hasUnsentDraft ? (
@@ -2180,7 +2178,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   projectDisplayName: string | null;
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
-  providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
+  providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
   isHighlighted: boolean;
   isRouteActive: boolean;
   resultId: string;
@@ -2197,19 +2195,11 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
     projectDisplayName: props.projectDisplayName,
     isActive: props.isRouteActive,
   });
-  const threadRef = useMemo(
-    () => scopeThreadRef(thread.environmentId, thread.id),
-    [thread.environmentId, thread.id],
-  );
+  const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(
     props.isHighlighted || props.isRouteActive,
   );
-  const threadProject = useProject(
-    useMemo(
-      () => scopeProjectRef(thread.environmentId, thread.projectId),
-      [thread.environmentId, thread.projectId],
-    ),
-  );
+  const threadProject = useProject(scopeProjectRef(thread.environmentId, thread.projectId));
   const gitTarget = resolveThreadGitTarget({
     project: threadProject,
     thread,
@@ -2251,17 +2241,14 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   });
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
   const [isFileDragOver, setIsFileDragOver] = useState(false);
-  const fileDropHandlers = useMemo(
-    () =>
-      makeWorkspaceFileDropHandlers({
-        setDragActive: setIsFileDragOver,
-        addFiles: (files) => {
-          props.onFileDropThreads(threadRef, files);
-        },
-        addFolders: () => {},
-      }),
-    [props.onFileDropThreads, threadRef],
-  );
+  const onFileDropThreads = props.onFileDropThreads;
+  const fileDropHandlers = makeWorkspaceFileDropHandlers({
+    setDragActive: setIsFileDragOver,
+    addFiles: (files) => {
+      onFileDropThreads(threadRef, files);
+    },
+    addFolders: () => {},
+  });
   useEffect(() => {
     if (!isFileDragOver) return;
     const clearFileDrag = () => setIsFileDragOver(false);
@@ -2276,6 +2263,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
             <button
               ref={rowRef}
               id={props.resultId}
+              data-search-result-key={scopedThreadKey(threadRef)}
               type="button"
               role="option"
               tabIndex={-1}
@@ -2331,7 +2319,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
                 />
               </span>
               <span className="w-8 shrink-0 text-right text-xs text-muted-foreground/55 tabular-nums">
-                {threadTimeLabel(thread)}
+                <RelativeTimeLabel timestamp={threadTimeTimestamp(thread)} />
               </span>
             </span>
             {props.searchMatch ? (
@@ -2366,6 +2354,81 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   );
 });
 
+function scheduleSnoozeWake(wakeAt: string | null, onWake: () => void): (() => void) | undefined {
+  const wakeAtMs = wakeAt === null ? Number.NaN : Date.parse(wakeAt);
+  if (Number.isNaN(wakeAtMs)) return undefined;
+  // setTimeout delays are signed 32-bit: anything larger overflows and fires
+  // immediately, turning a far-future wake (event-condition snoozes synced
+  // from elsewhere) into a tight re-arm loop.
+  const delayMs = Math.min(Math.max(0, wakeAtMs - Date.now()) + 50, 2_147_483_647);
+  const id = window.setTimeout(onWake, delayMs);
+  return () => window.clearTimeout(id);
+}
+
+// Snooze wakes depend on the clock, so the minute tick and the precise wake
+// tick arrive as `clockKey`: a new key repartitions under the React Compiler.
+function partitionForkSidebarThreads(input: {
+  readonly threads: readonly EnvironmentThreadShell[];
+  readonly scopedProjectKeys: ReadonlySet<string> | null;
+  readonly archivedProjectKeys: ReadonlySet<string>;
+  readonly serverConfigs: ReadonlyMap<EnvironmentId, EnvironmentServerConfig>;
+  readonly workingShelfEnabled: boolean;
+  readonly clockKey: string;
+}) {
+  const { threads, scopedProjectKeys, archivedProjectKeys, serverConfigs, workingShelfEnabled } =
+    input;
+  const preciseNow = new Date().toISOString();
+  // Archived Stave spaces keep their threads out of the live list.
+  const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys).filter(
+    (thread) => !archivedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
+  );
+  inboxReturns.observe(workingShelfEnabled ? threads : null);
+  const pinned: EnvironmentThreadShell[] = [];
+  const active: EnvironmentThreadShell[] = [];
+  const working: EnvironmentThreadShell[] = [];
+  const inbox = (thread: EnvironmentThreadShell) =>
+    workingShelfEnabled && isSidebarThreadWorking(thread) ? working : active;
+  const snoozed: EnvironmentThreadShell[] = [];
+  const settled: EnvironmentThreadShell[] = [];
+  for (const thread of visible) {
+    const supportsSettlement =
+      serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement === true;
+    const supportsSnooze =
+      serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
+    // Snooze outranks settlement and pinning until the thread wakes.
+    const section = resolveSidebarThreadSection({
+      snoozed: supportsSnooze && effectiveSnoozed(thread, { now: preciseNow }),
+      settled: supportsSettlement && thread.settledOverride === "settled",
+      pinned: thread.pinnedAt != null,
+    });
+    (section === "snoozed"
+      ? snoozed
+      : section === "settled"
+        ? settled
+        : section === "pinned"
+          ? pinned
+          : inbox(thread)
+    ).push(thread);
+  }
+  // Server capability only gates DRAGGING — it must not influence the
+  // sort, or mixed-version fleets would render different pinned orders on
+  // web and mobile from the same data.
+  return {
+    pinnedThreads: sortPinnedThreadsForSidebar(pinned),
+    activeThreads: workingShelfEnabled
+      ? sortInboxForSidebar(active)
+      : sortThreadsForSidebar(active),
+    workingThreads: sortWorkingThreadsBySend(working),
+    snoozedThreads: snoozed.toSorted(
+      (left, right) =>
+        firstValidTimestampMs(left.snoozedUntil ?? null) -
+        firstValidTimestampMs(right.snoozedUntil ?? null),
+    ),
+    settledThreads: sortSettledThreads(settled),
+    snoozeNow: preciseNow,
+  };
+}
+
 export default function Sidebar() {
   const sidebarAccountStyle = useSidebarAccountStyle();
   // Archived Stave spaces (and their threads) leave the sidebar; they come
@@ -2373,23 +2436,20 @@ export default function Sidebar() {
   const { projects, archivedProjectKeys } = useListedProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
-  const reservedThreadOrderKeys = useMemo(
-    () => ({
-      pinned: new Map(
-        threads.map((thread) => [
-          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-          thread.pinOrderKey ?? null,
-        ]),
-      ),
-      active: new Map(
-        threads.map((thread) => [
-          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-          thread.activeOrderKey ?? null,
-        ]),
-      ),
-    }),
-    [threads],
-  );
+  const reservedThreadOrderKeys = {
+    pinned: new Map(
+      threads.map((thread) => [
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        thread.pinOrderKey ?? null,
+      ]),
+    ),
+    active: new Map(
+      threads.map((thread) => [
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        thread.activeOrderKey ?? null,
+      ]),
+    ),
+  };
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -2472,82 +2532,52 @@ export default function Sidebar() {
     },
   });
   const newThreadContext = useHandleNewThread();
-  const openAddProjectCommandPalette = useCallback(
-    () => openCommandPalette({ open: "add-project" }),
-    [],
-  );
+  const openAddProjectCommandPalette = () => openCommandPalette({ open: "add-project" });
   const environments = useEnvironmentIdentities();
-  const serverConfigs = useAtomValue(environmentServerConfigsAtom);
+  const serverConfigs = useServerConfigs();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const toggleThreadSelection = useThreadSelectionStore((s) => s.toggleThread);
   const rangeSelectTo = useThreadSelectionStore((s) => s.rangeSelectTo);
   const acknowledgeWoke = useAcknowledgeThreadWoke();
-  const routeTarget = useParams({
-    strict: false,
-    select: (params) => resolveThreadRouteTarget(params),
-  });
+  const routeTarget = useThreadRouteTarget();
   const routeDraftThread = useComposerDraftStore((store) =>
     routeTarget?.kind === "draft" ? store.getDraftSession(routeTarget.draftId) : null,
   );
-  const routeThreadRef = useMemo(
-    () => resolveActiveThreadRouteRef(routeTarget, routeDraftThread),
-    [routeDraftThread, routeTarget],
-  );
+  const routeThreadRef = resolveActiveThreadRouteRef(routeTarget, routeDraftThread);
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
   const routeTargetRef = useRef(routeTarget);
-  routeTargetRef.current = routeTarget;
   const routeThreadKeyRef = useRef(routeThreadKey);
-  routeThreadKeyRef.current = routeThreadKey;
 
-  const environmentLabelById = useMemo(
-    () =>
-      new Map(
-        environments.map((environment) => [environment.environmentId, environment.label] as const),
-      ),
-    [environments],
+  const environmentLabelById = new Map(
+    environments.map((environment) => [environment.environmentId, environment.label] as const),
   );
   const environmentMachineById = useEnvironmentMachines();
-  const orderedProjects = useMemo(
-    () =>
-      orderItemsByPreferredIds({
-        items: projects,
-        preferredIds: projectOrder,
-        getId: getProjectOrderKey,
-        getPreferenceIds: (project) => [
-          getProjectOrderKey(project),
-          legacyProjectCwdPreferenceKey(project.workspaceRoot),
-        ],
-      }),
-    [projectOrder, projects],
-  );
-  const sidebarSegmentation = useSidebarSegmentation();
-  const unsortedProjectGroups = useMemo(
-    () =>
-      snapshotsPerAccount(
-        sidebarSegmentation,
-        buildSidebarProjectSnapshots,
-      )({
-        projects: sidebarProjectSortOrder === "manual" ? orderedProjects : projects,
-        groupScratchProjects: true,
-        settings: projectGroupingSettings,
-        primaryEnvironmentId,
-        resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
-      }),
-    [
-      environmentLabelById,
-      orderedProjects,
-      primaryEnvironmentId,
-      projectGroupingSettings,
-      projects,
-      sidebarProjectSortOrder,
-      sidebarSegmentation,
+  const orderedProjects = orderItemsByPreferredIds({
+    items: projects,
+    preferredIds: projectOrder,
+    getId: getProjectOrderKey,
+    getPreferenceIds: (project) => [
+      getProjectOrderKey(project),
+      legacyProjectCwdPreferenceKey(project.workspaceRoot),
     ],
-  );
-  const projectGroups = useMemo(
-    () => sortSidebarV2ProjectGroups(unsortedProjectGroups, threads, sidebarProjectSortOrder),
-    [sidebarProjectSortOrder, threads, unsortedProjectGroups],
+  });
+  const sidebarSegmentation = useSidebarSegmentation();
+  const unsortedProjectGroups = snapshotsPerAccount(
+    sidebarSegmentation,
+    buildSidebarProjectSnapshots,
+  )({
+    projects: sidebarProjectSortOrder === "manual" ? orderedProjects : projects,
+    groupScratchProjects: true,
+    settings: projectGroupingSettings,
+    primaryEnvironmentId,
+    resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
+  });
+  const projectGroups = sortSidebarV2ProjectGroups(
+    unsortedProjectGroups,
+    threads,
+    sidebarProjectSortOrder,
   );
   const {
     tree: sagaTree,
@@ -2555,9 +2585,8 @@ export default function Sidebar() {
     nest: nestSagaProjects,
   } = useSagaSidebarTree(projectGroups);
   const [collapsedProjectKeys, setCollapsedProjectKeys] = useState<ReadonlySet<string>>(new Set());
-  const navigationProjectByKey = useMemo(
-    () => new Map(navigationProjects.map((project) => [project.projectKey, project])),
-    [navigationProjects],
+  const navigationProjectByKey = new Map(
+    navigationProjects.map((project) => [project.projectKey, project]),
   );
   const toggleProject = (key: string) =>
     setCollapsedProjectKeys((old) => {
@@ -2567,66 +2596,43 @@ export default function Sidebar() {
       return next;
     });
   const projectGroupsRef = useRef(projectGroups);
-  projectGroupsRef.current = projectGroups;
-  // Threads on non-primary environments (Lecturn Connect, hosted) resolve their
-  // provider entry from their own environment's config: default instance ids
-  // are driver slugs, so a flat map would collide across environments.
-  const providerEntriesByEnvironment = useMemo(
-    () =>
-      deriveProviderEntriesByEnvironment(
-        [...serverConfigs].map(
-          ([environmentId, config]) => [environmentId, config.providers, config.settings] as const,
-        ),
-      ),
-    [serverConfigs],
+  const providerEntriesByEnvironment = useAtomValue(sidebarProviderEntriesAtom);
+  const projectByKey = new Map(
+    projects.map((project) => [`${project.environmentId}:${project.id}`, project]),
   );
-  const projectByKey = useMemo(
-    () => new Map(projects.map((project) => [`${project.environmentId}:${project.id}`, project])),
-    [projects],
-  );
-  const projectDisplayNameByKey = useMemo(
-    () =>
-      new Map(
-        projectGroups.flatMap((group) =>
-          group.memberProjects.map(
-            (project) => [`${project.environmentId}:${project.id}`, group.displayName] as const,
-          ),
-        ),
+  const projectDisplayNameByKey = new Map(
+    projectGroups.flatMap((group) =>
+      group.memberProjects.map(
+        (project) => [`${project.environmentId}:${project.id}`, group.displayName] as const,
       ),
-    [projectGroups],
+    ),
   );
 
   const nowMinute = useNowMinute();
-  const changeRequestSnapshotByKey = useAtomValue(threadChangeRequestSnapshotsAtom);
   // Snooze wake times are second-precise, so classifying with the quantized
   // minute would hold a woken thread on the shelf for up to a minute.
   const [snoozeWakeTick, bumpSnoozeWakeTick] = useState(0);
 
   const persistedProjectScopeKey = useUiStateStore((store) => store.sidebarProjectScopeKey);
-  const setProjectScopeKey = useUiStateStore((store) => store.setSidebarProjectScopeKey);
-  const projectScopeKey = useMemo(
-    () =>
-      resolveSidebarProjectScopeKey({
-        groups: projectGroups,
-        key: persistedProjectScopeKey,
-        settings: projectGroupingSettings,
-      }),
-    [persistedProjectScopeKey, projectGroups, projectGroupingSettings],
-  );
-  const projectScopeItems = useMemo(
-    () => [
-      { value: "all", label: "All projects" },
-      ...nameGroupsByAccount(sidebarSegmentation, projectGroups).map((project) => ({
-        value: project.projectKey,
-        label: project.displayName,
-      })),
-    ],
-    [projectGroups, sidebarSegmentation],
-  );
-  const showProjectEnvironments = useMemo(
-    () => projectGroupsSpanEnvironments(projectGroups),
-    [projectGroups],
-  );
+  const setPersistedProjectScopeKey = useUiStateStore((store) => store.setSidebarProjectScopeKey);
+  // A selection made under one scope can hold threads the next scope hides.
+  const setProjectScopeKey = (key: string | null) => {
+    clearSelection();
+    setPersistedProjectScopeKey(key);
+  };
+  const projectScopeKey = resolveSidebarProjectScopeKey({
+    groups: projectGroups,
+    key: persistedProjectScopeKey,
+    settings: projectGroupingSettings,
+  });
+  const projectScopeItems = [
+    { value: "all", label: "All projects" },
+    ...nameGroupsByAccount(sidebarSegmentation, projectGroups).map((project) => ({
+      value: project.projectKey,
+      label: project.displayName,
+    })),
+  ];
+  const showProjectEnvironments = projectGroupsSpanEnvironments(projectGroups);
   const scratchMachineLabelFor = (
     thread: Pick<SidebarThreadSummary, "environmentId" | "projectId">,
   ) => {
@@ -2640,49 +2646,35 @@ export default function Sidebar() {
     }
     return environmentLabelById.get(thread.environmentId) ?? null;
   };
-  const projectGroupByScopeKey = useMemo(
-    () => new Map(projectGroups.map((project) => [project.projectKey, project] as const)),
-    [projectGroups],
+  const projectGroupByScopeKey = new Map(
+    projectGroups.map((project) => [project.projectKey, project] as const),
   );
-  const selectedProjectScopeItem = useMemo(
-    () =>
-      projectScopeItems.find((item) => item.value === (projectScopeKey ?? "all")) ??
-      projectScopeItems[0]!,
-    [projectScopeItems, projectScopeKey],
-  );
+  const selectedProjectScopeItem =
+    projectScopeItems.find((item) => item.value === (projectScopeKey ?? "all")) ??
+    projectScopeItems[0]!;
   const [projectScopeMenuState, dispatchProjectScopeMenu] = useReducer(
     reduceSidebarProjectScopeMenuState,
     { open: false, query: "" },
   );
   const projectScopeFilter = useComboboxFilter();
-  const filteredProjectScopeItems = useMemo(
-    () =>
-      filterSidebarProjectScopeItems({
-        items: projectScopeItems,
-        query: projectScopeMenuState.query,
-        matches: (item, query) =>
-          projectScopeFilter.contains(item, query, (candidate) => candidate.label),
-      }),
-    [projectScopeFilter, projectScopeItems, projectScopeMenuState.query],
-  );
-  const scopedProjectGroup = useMemo(
-    () =>
-      projectScopeKey === null
-        ? null
-        : (projectGroups.find((project) => project.projectKey === projectScopeKey) ?? null),
-    [projectGroups, projectScopeKey],
-  );
-  const scopedProjectKeys = useMemo(
-    () =>
-      scopedProjectGroup === null
-        ? null
-        : new Set(
-            scopedProjectGroup.memberProjectRefs.map(
-              (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
-            ),
+  const filteredProjectScopeItems = filterSidebarProjectScopeItems({
+    items: projectScopeItems,
+    query: projectScopeMenuState.query,
+    matches: (item, query) =>
+      projectScopeFilter.contains(item, query, (candidate) => candidate.label),
+  });
+  const scopedProjectGroup =
+    projectScopeKey === null
+      ? null
+      : (projectGroups.find((project) => project.projectKey === projectScopeKey) ?? null);
+  const scopedProjectKeys =
+    scopedProjectGroup === null
+      ? null
+      : new Set(
+          scopedProjectGroup.memberProjectRefs.map(
+            (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
           ),
-    [scopedProjectGroup],
-  );
+        );
   const allProjectSnapshotsReady = useAllEnvironmentProjectSnapshotsReady();
   const allProjectConfigsReady = useAtomValue(environmentProjects.projectConfigsReadyAtom);
   useEffect(() => {
@@ -2693,15 +2685,17 @@ export default function Sidebar() {
       canClearMissingScope: allProjectSnapshotsReady && allProjectConfigsReady,
     });
     if (nextKey !== persistedProjectScopeKey) {
-      setProjectScopeKey(nextKey);
+      clearSelection();
+      setPersistedProjectScopeKey(nextKey);
     }
   }, [
     allProjectConfigsReady,
     allProjectSnapshotsReady,
+    clearSelection,
     persistedProjectScopeKey,
     projectGroups,
     projectGroupingSettings,
-    setProjectScopeKey,
+    setPersistedProjectScopeKey,
   ]);
   const routeDraftIdForRows = routeTarget?.kind === "draft" ? routeTarget.draftId : null;
   const visibleDraftSessionCount = useComposerDraftStore((store) => {
@@ -2723,9 +2717,6 @@ export default function Sidebar() {
     }
     return count;
   });
-  useEffect(() => {
-    clearSelection();
-  }, [clearSelection, projectScopeKey]);
 
   const openProjectSettings = useStableCallback(
     (projectGroup: SidebarProjectSnapshot, projectRef?: ScopedProjectRef) => {
@@ -2776,135 +2767,77 @@ export default function Sidebar() {
     snoozedThreads,
     settledThreads,
     snoozeNow,
-  } = useMemo(() => {
-    void snoozeWakeTick;
-    const preciseNow = new Date().toISOString();
-    // Archived Stave spaces keep their threads out of the live list.
-    const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys).filter(
-      (thread) => !archivedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
-    );
-    inboxReturns.observe(workingShelfEnabled ? threads : null);
-    const pinned: EnvironmentThreadShell[] = [];
-    const active: EnvironmentThreadShell[] = [];
-    const working: EnvironmentThreadShell[] = [];
-    const inbox = (thread: EnvironmentThreadShell) =>
-      workingShelfEnabled && isSidebarThreadWorking(thread) ? working : active;
-    const snoozed: EnvironmentThreadShell[] = [];
-    const settled: EnvironmentThreadShell[] = [];
-    for (const thread of visible) {
-      const supportsSettlement =
-        serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement === true;
-      const supportsSnooze =
-        serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
-      // Snooze outranks settlement and pinning until the thread wakes.
-      const section = resolveSidebarThreadSection({
-        snoozed: supportsSnooze && effectiveSnoozed(thread, { now: preciseNow }),
-        settled: supportsSettlement && thread.settledOverride === "settled",
-        pinned: thread.pinnedAt != null,
-      });
-      (section === "snoozed"
-        ? snoozed
-        : section === "settled"
-          ? settled
-          : section === "pinned"
-            ? pinned
-            : inbox(thread)
-      ).push(thread);
-    }
-    // Server capability only gates DRAGGING — it must not influence the
-    // sort, or mixed-version fleets would render different pinned orders on
-    // web and mobile from the same data.
-    return {
-      pinnedThreads: sortPinnedThreadsForSidebar(pinned),
-      activeThreads: workingShelfEnabled
-        ? sortInboxForSidebar(active)
-        : sortThreadsForSidebar(active),
-      workingThreads: sortWorkingThreadsBySend(working),
-      snoozedThreads: snoozed.toSorted(
-        (left, right) =>
-          firstValidTimestampMs(left.snoozedUntil ?? null) -
-          firstValidTimestampMs(right.snoozedUntil ?? null),
-      ),
-      settledThreads: sortSettledThreads(settled),
-      snoozeNow: preciseNow,
-    };
-  }, [
-    archivedProjectKeys,
-    nowMinute,
-    scopedProjectKeys,
-    serverConfigs,
-    snoozeWakeTick,
+  } = partitionForkSidebarThreads({
     threads,
+    scopedProjectKeys,
+    archivedProjectKeys,
+    serverConfigs,
     workingShelfEnabled,
-  ]);
+    clockKey: `${nowMinute}:${snoozeWakeTick}`,
+  });
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
-  const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
+  const [searchHighlight, setSearchHighlight] = useState({ orderKey: "", index: 0 });
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
-  const searchableThreads = useMemo(
-    () => [
-      ...pinnedThreads,
-      ...activeThreads,
-      ...workingThreads,
-      ...snoozedThreads,
-      ...settledThreads,
-    ],
-    [activeThreads, pinnedThreads, settledThreads, snoozedThreads, workingThreads],
-  );
+  const searchableThreads = [
+    ...pinnedThreads,
+    ...activeThreads,
+    ...workingThreads,
+    ...snoozedThreads,
+    ...settledThreads,
+  ];
   const searchEnvironmentIds = useConnectedEnvironmentIds();
   const threadSearch = useThreadSearch(searchEnvironmentIds, threadSearchQuery);
-  const threadSearchMatchByKey = useMemo(
-    () =>
-      new Map(threadSearch.matches.map((match) => [threadSearchMatchKey(match), match] as const)),
-    [threadSearch.matches],
+  const threadSearchMatchByKey = new Map(
+    threadSearch.matches.map((match) => [threadSearchMatchKey(match), match] as const),
   );
-  const threadSearchResults = useMemo(
-    () =>
-      searchSidebarThreads(
-        searchableThreads,
-        threadSearchQuery,
-        new Set(threadSearchMatchByKey.keys()),
-      ),
-    [searchableThreads, threadSearchQuery, threadSearchMatchByKey],
+  const threadSearchResults = searchSidebarThreads(
+    searchableThreads,
+    threadSearchQuery,
+    new Set(threadSearchMatchByKey.keys()),
   );
   const threadSearchResultOrderKey = threadSearchResults
     .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
     .join("\0");
 
-  useEffect(() => {
-    setActiveSearchResultIndex(0);
-  }, [threadSearchResultOrderKey]);
+  // The highlight belongs to one result list; a new list starts at the top.
+  const activeSearchResultIndex =
+    searchHighlight.orderKey === threadSearchResultOrderKey ? searchHighlight.index : 0;
+  const setActiveSearchResultIndex = (index: number | ((index: number) => number)) =>
+    setSearchHighlight((current) => {
+      const currentIndex = current.orderKey === threadSearchResultOrderKey ? current.index : 0;
+      return {
+        orderKey: threadSearchResultOrderKey,
+        index: typeof index === "function" ? index(currentIndex) : index,
+      };
+    });
 
   useEffect(() => {
     if (!isSearchingThreads) return;
     document
       .getElementById(`sidebar-thread-search-result-${activeSearchResultIndex}`)
       ?.scrollIntoView({ block: "nearest" });
-  }, [activeSearchResultIndex, isSearchingThreads, threadSearchResultOrderKey]);
+  }, [activeSearchResultIndex, isSearchingThreads]);
 
-  useEffect(() => {
-    const nextWakeAtMs =
-      snoozedThreads.length > 0 && snoozedThreads[0]?.snoozedUntil != null
-        ? Date.parse(snoozedThreads[0].snoozedUntil)
-        : Number.NaN;
-    if (Number.isNaN(nextWakeAtMs)) return;
-    // setTimeout delays are signed 32-bit: anything larger overflows and fires
-    // immediately, turning a far-future wake (event-condition snoozes synced
-    // from elsewhere) into a tight re-arm loop.
-    const delayMs = Math.min(Math.max(0, nextWakeAtMs - Date.now()) + 50, 2_147_483_647);
-    const id = window.setTimeout(() => bumpSnoozeWakeTick((tick) => tick + 1), delayMs);
-    return () => window.clearTimeout(id);
-  }, [snoozedThreads]);
+  const nextSnoozeWakeAt = snoozedThreads[0]?.snoozedUntil ?? null;
+  useEffect(
+    () => scheduleSnoozeWake(nextSnoozeWakeAt, () => bumpSnoozeWakeTick((tick) => tick + 1)),
+    [nextSnoozeWakeAt],
+  );
 
-  const [settledVisibleCount, setSettledVisibleCount] = useState(SETTLED_TAIL_INITIAL_COUNT);
-  const settledResetKey = projectScopeKey ?? "all";
-  const lastSettledResetKeyRef = useRef(settledResetKey);
-  if (lastSettledResetKeyRef.current !== settledResetKey) {
-    lastSettledResetKeyRef.current = settledResetKey;
-    setSettledVisibleCount(SETTLED_TAIL_INITIAL_COUNT);
+  const [settledTail, setSettledTail] = useState({
+    scopeKey: projectScopeKey,
+    count: SETTLED_TAIL_INITIAL_COUNT,
+  });
+  if (settledTail.scopeKey !== projectScopeKey) {
+    setSettledTail({ scopeKey: projectScopeKey, count: SETTLED_TAIL_INITIAL_COUNT });
   }
-  const visibleSettledThreads = useMemo(() => {
+  const settledVisibleCount =
+    settledTail.scopeKey === projectScopeKey ? settledTail.count : SETTLED_TAIL_INITIAL_COUNT;
+  const setSettledVisibleCount = (update: (count: number) => number) =>
+    setSettledTail((current) => ({ scopeKey: current.scopeKey, count: update(current.count) }));
+  const visibleSettledThreads = (() => {
     if (settledThreads.length <= settledVisibleCount) return settledThreads;
     const visible = settledThreads.slice(0, settledVisibleCount);
     if (routeThreadKey !== null) {
@@ -2917,22 +2850,16 @@ export default function Sidebar() {
       if (routeThread !== undefined) visible.push(routeThread);
     }
     return visible;
-  }, [routeThreadKey, settledThreads, settledVisibleCount]);
+  })();
   const hiddenSettledCount = settledThreads.length - visibleSettledThreads.length;
-  const showMoreSettled = useCallback(
-    () => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT),
-    [],
-  );
+  const showMoreSettled = () => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT);
   const [settledShelfExpanded, setSettledShelfExpanded] = useLocalStorage(
     SETTLED_SHELF_EXPANDED_KEY,
     false,
     Schema.Boolean,
   );
-  const toggleSettledShelf = useCallback(
-    () => setSettledShelfExpanded((value) => !value),
-    [setSettledShelfExpanded],
-  );
-  const renderedSettledThreads = useMemo(() => {
+  const toggleSettledShelf = () => setSettledShelfExpanded((value) => !value);
+  const renderedSettledThreads = (() => {
     if (settledShelfExpanded) return visibleSettledThreads;
     if (routeThreadKey === null) return EMPTY_THREADS;
     const routeThread = visibleSettledThreads.find(
@@ -2940,18 +2867,15 @@ export default function Sidebar() {
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
     );
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
-  }, [routeThreadKey, settledShelfExpanded, visibleSettledThreads]);
+  })();
 
   const [snoozedShelfExpanded, setSnoozedShelfExpanded] = useLocalStorage(
     SNOOZED_SHELF_EXPANDED_KEY,
     false,
     Schema.Boolean,
   );
-  const toggleSnoozedShelf = useCallback(
-    () => setSnoozedShelfExpanded((value) => !value),
-    [setSnoozedShelfExpanded],
-  );
-  const visibleSnoozedThreads = useMemo(() => {
+  const toggleSnoozedShelf = () => setSnoozedShelfExpanded((value) => !value);
+  const visibleSnoozedThreads = (() => {
     if (snoozedShelfExpanded) return snoozedThreads;
     if (routeThreadKey === null) return EMPTY_THREADS;
     const routeThread = snoozedThreads.find(
@@ -2959,18 +2883,15 @@ export default function Sidebar() {
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
     );
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
-  }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
+  })();
 
   const [workingShelfExpanded, setWorkingShelfExpanded] = useLocalStorage(
     WORKING_SHELF_EXPANDED_KEY,
     false,
     Schema.Boolean,
   );
-  const toggleWorkingShelf = useCallback(
-    () => setWorkingShelfExpanded((value) => !value),
-    [setWorkingShelfExpanded],
-  );
-  const visibleWorkingThreads = useMemo(() => {
+  const toggleWorkingShelf = () => setWorkingShelfExpanded((value) => !value);
+  const visibleWorkingThreads = (() => {
     if (workingShelfExpanded) return workingThreads;
     if (routeThreadKey === null) return EMPTY_THREADS;
     const routeThread = workingThreads.find(
@@ -2978,9 +2899,9 @@ export default function Sidebar() {
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
     );
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
-  }, [routeThreadKey, workingShelfExpanded, workingThreads]);
+  })();
 
-  const scopedSagaTree = useMemo(() => {
+  const scopedSagaTree = (() => {
     if (!scopedProjectKeys) return sagaTree;
     const matches = (node: (typeof sagaTree)[number]) =>
       node.group.memberProjectRefs.some((ref) =>
@@ -2990,11 +2911,11 @@ export default function Sidebar() {
       const children = node.children.filter(matches);
       return matches(node) || children.length ? [{ ...node, children }] : [];
     });
-  }, [sagaTree, scopedProjectKeys]);
+  })();
   const [projectSettledShelves, setProjectSettledShelves] = useState<
     Readonly<Record<string, { expanded: boolean; limit: number }>>
   >({});
-  const settledByProject = useMemo(() => {
+  const settledByProject = (() => {
     const entries = new Map<
       string,
       ReturnType<typeof projectSettledPage<EnvironmentThreadShell>>
@@ -3016,11 +2937,8 @@ export default function Sidebar() {
       );
     }
     return entries;
-  }, [scopedSagaTree, settledThreads, projectSettledShelves, routeThreadKey]);
-  const nestedSettledThreads = useMemo(
-    () => [...settledByProject.values()].flatMap((page) => page.visible),
-    [settledByProject],
-  );
+  })();
+  const nestedSettledThreads = [...settledByProject.values()].flatMap((page) => page.visible);
   const sidebarSegments = useSidebarSegments({
     segmentation: sidebarSegmentation,
     projects,
@@ -3048,7 +2966,7 @@ export default function Sidebar() {
     showMoreSettled,
     routeThreadKey,
   });
-  const orderedThreads = useMemo(() => {
+  const orderedThreads = (() => {
     if (sidebarSegments.segments !== null) {
       return flattenSegmentsForNavigation(sidebarSegments.segments);
     }
@@ -3061,68 +2979,36 @@ export default function Sidebar() {
     ];
     if (!nestSagaProjects) return rows;
     return sagaSidebarThreadOrder(scopedSagaTree, collapsedProjectKeys, rows);
-  }, [
-    pinnedThreads,
-    activeThreads,
-    visibleWorkingThreads,
-    visibleSnoozedThreads,
-    renderedSettledThreads,
-    nestedSettledThreads,
-    nestSagaProjects,
-    scopedSagaTree,
-    collapsedProjectKeys,
-    sidebarSegments.segments,
-  ]);
-  const orderedThreadKeys = useMemo(
-    () =>
-      orderedThreads.map((thread) =>
-        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-      ),
-    [orderedThreads],
+  })();
+  const orderedThreadKeys = orderedThreads.map((thread) =>
+    scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
   );
   const orderedThreadKeysRef = useRef(orderedThreadKeys);
-  orderedThreadKeysRef.current = orderedThreadKeys;
-  const threadByKey = useMemo(
-    () =>
-      new Map(
-        orderedThreads.map(
-          (thread) =>
-            [scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)), thread] as const,
-        ),
-      ),
-    [orderedThreads],
+  const threadByKey = new Map(
+    orderedThreads.map(
+      (thread) =>
+        [scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)), thread] as const,
+    ),
   );
   // Handlers read these through refs: depending on per-update Map/Set
   // identities would give every row a fresh callback prop on each shell
   // event and defeat row memoization during streaming.
   const threadByKeyRef = useRef(threadByKey);
-  threadByKeyRef.current = threadByKey;
   const handleNewThreadRef = useRef(newThreadContext.handleNewThread);
-  handleNewThreadRef.current = newThreadContext.handleNewThread;
-  const settledThreadKeys = useMemo(
-    () =>
-      new Set(
-        settledThreads.map((thread) =>
-          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-        ),
-      ),
-    [settledThreads],
+  const settledThreadKeys = new Set(
+    settledThreads.map((thread) =>
+      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+    ),
   );
   const settledThreadKeysRef = useRef(settledThreadKeys);
-  settledThreadKeysRef.current = settledThreadKeys;
-  const snoozedThreadKeys = useMemo(
-    () =>
-      new Set(
-        snoozedThreads.map((thread) =>
-          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-        ),
-      ),
-    [snoozedThreads],
+  const snoozedThreadKeys = new Set(
+    snoozedThreads.map((thread) =>
+      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+    ),
   );
   const snoozedThreadKeysRef = useRef(snoozedThreadKeys);
-  snoozedThreadKeysRef.current = snoozedThreadKeys;
 
-  const jumpLabelByKey = useMemo(() => {
+  const jumpLabelByKey = (() => {
     const mapping = new Map<string, string>();
     for (const [index, threadKey] of orderedThreadKeys.entries()) {
       const jumpCommand = threadJumpCommandForIndex(index);
@@ -3131,209 +3017,182 @@ export default function Sidebar() {
       if (label) mapping.set(threadKey, label);
     }
     return mapping;
-  }, [keybindings, orderedThreadKeys]);
+  })();
   const { showThreadJumpHints: showJumpHints, updateThreadJumpHintsVisibility } =
     useThreadJumpHintVisibility();
 
-  const navigateToThread = useCallback(
-    (threadRef: ScopedThreadRef) => {
-      if (useThreadSelectionStore.getState().selectedThreadKeys.size > 0) {
-        clearSelection();
-      }
-      setSelectionAnchor(scopedThreadKey(threadRef));
-      if (isMobile) {
-        setOpenMobile(false);
-      }
-      return router.navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(threadRef),
-      });
-    },
-    [clearSelection, isMobile, router, setOpenMobile, setSelectionAnchor],
-  );
+  const navigateToThread = (threadRef: ScopedThreadRef) => {
+    if (useThreadSelectionStore.getState().selectedThreadKeys.size > 0) {
+      clearSelection();
+    }
+    setSelectionAnchor(scopedThreadKey(threadRef));
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    return router.navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(threadRef),
+    });
+  };
 
   const queuePendingFileDrop = useSidebarPendingFileDropStore((s) => s.queuePendingFileDrop);
   const clearPendingFileDrop = useSidebarPendingFileDropStore((s) => s.clearPendingFileDrop);
-  const handleThreadFileDrop = useCallback(
-    async (threadRef: ScopedThreadRef, files: File[]) => {
-      const dropId = queuePendingFileDrop({ threadRef, files });
-      const landedBefore =
+  const handleThreadFileDrop = async (threadRef: ScopedThreadRef, files: File[]) => {
+    const dropId = queuePendingFileDrop({ threadRef, files });
+    const landedBefore =
+      router.buildLocation({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(threadRef),
+      }).pathname === router.state.location.pathname;
+    if (landedBefore) return;
+
+    try {
+      await navigateToThread(threadRef);
+      const landed =
         router.buildLocation({
           to: "/$environmentId/$threadId",
           params: buildThreadRouteParams(threadRef),
         }).pathname === router.state.location.pathname;
-      if (landedBefore) return;
+      if (!landed) clearPendingFileDrop(dropId);
+    } catch {
+      clearPendingFileDrop(dropId);
+    }
+  };
 
-      try {
-        await navigateToThread(threadRef);
-        const landed =
-          router.buildLocation({
-            to: "/$environmentId/$threadId",
-            params: buildThreadRouteParams(threadRef),
-          }).pathname === router.state.location.pathname;
-        if (!landed) clearPendingFileDrop(dropId);
-      } catch {
-        clearPendingFileDrop(dropId);
-      }
-    },
-    [clearPendingFileDrop, navigateToThread, queuePendingFileDrop, router],
-  );
+  const navigateToDraft = (draftId: DraftId) => {
+    clearSelection();
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    void router.navigate({ to: "/draft/$draftId", params: { draftId } });
+  };
 
-  const navigateToDraft = useCallback(
-    (draftId: DraftId) => {
-      clearSelection();
-      if (isMobile) {
-        setOpenMobile(false);
-      }
-      void router.navigate({ to: "/draft/$draftId", params: { draftId } });
-    },
-    [clearSelection, isMobile, router, setOpenMobile],
-  );
-
-  const clearThreadSearch = useCallback(() => {
+  const clearThreadSearch = () => {
     setThreadSearchQuery("");
     setActiveSearchResultIndex(0);
-  }, []);
-  const selectThreadSearchResult = useCallback(
-    (thread: EnvironmentThreadShell) => {
+  };
+  const selectThreadSearchResult = (thread: EnvironmentThreadShell) => {
+    clearThreadSearch();
+    navigateToThread(scopeThreadRef(thread.environmentId, thread.id));
+  };
+  const handleThreadSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if (event.key === "Escape" && isSearchingThreads) {
+      event.preventDefault();
+      event.stopPropagation();
       clearThreadSearch();
-      navigateToThread(scopeThreadRef(thread.environmentId, thread.id));
-    },
-    [clearThreadSearch, navigateToThread],
-  );
-  const handleThreadSearchKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLInputElement>) => {
-      if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-      if (event.key === "Escape" && isSearchingThreads) {
-        event.preventDefault();
-        event.stopPropagation();
-        clearThreadSearch();
-        return;
-      }
-      if (threadSearchResults.length === 0) return;
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setActiveSearchResultIndex((index) => (index + 1) % threadSearchResults.length);
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setActiveSearchResultIndex(
-          (index) => (index - 1 + threadSearchResults.length) % threadSearchResults.length,
-        );
-        return;
-      }
-      if (event.key === "Enter") {
-        event.preventDefault();
-        const result = threadSearchResults[activeSearchResultIndex];
-        if (result) selectThreadSearchResult(result);
-      }
-    },
-    [
-      activeSearchResultIndex,
-      clearThreadSearch,
-      isSearchingThreads,
-      selectThreadSearchResult,
-      threadSearchResults,
-    ],
-  );
+      return;
+    }
+    if (threadSearchResults.length === 0) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveSearchResultIndex((index) => (index + 1) % threadSearchResults.length);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveSearchResultIndex(
+        (index) => (index - 1 + threadSearchResults.length) % threadSearchResults.length,
+      );
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const result = threadSearchResults[activeSearchResultIndex];
+      if (result) selectThreadSearchResult(result);
+    }
+  };
 
   const [renamingThreadKey, setRenamingThreadKey] = useState<string | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
-  const startThreadRename = useCallback((threadRef: ScopedThreadRef, title: string) => {
+  const startThreadRename = (threadRef: ScopedThreadRef, title: string) => {
     if (!readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope)) return;
     setRenamingThreadKey(scopedThreadKey(threadRef));
     setRenamingTitle(title);
-  }, []);
-  const cancelThreadRename = useCallback(() => setRenamingThreadKey(null), []);
-  const commitThreadRename = useCallback(
-    (threadRef: ScopedThreadRef, title: string, originalTitle: string) => {
-      void (async () => {
-        if (!readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope)) return;
-        const trimmed = title.trim();
-        setRenamingThreadKey(null);
-        if (trimmed.length === 0) {
-          toastManager.add({ type: "warning", title: "Thread title cannot be empty" });
-          return;
-        }
-        if (trimmed === originalTitle) return;
-        const result = await updateThreadMetadata({
-          environmentId: threadRef.environmentId,
-          input: { threadId: threadRef.threadId, title: trimmed },
-        });
-        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Failed to rename thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
-            }),
-          );
-        }
-      })();
-    },
-    [updateThreadMetadata],
-  );
+  };
+  const cancelThreadRename = () => setRenamingThreadKey(null);
+  const commitThreadRename = (threadRef: ScopedThreadRef, title: string, originalTitle: string) => {
+    void (async () => {
+      if (!readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope)) return;
+      const trimmed = title.trim();
+      setRenamingThreadKey(null);
+      if (trimmed.length === 0) {
+        toastManager.add({ type: "warning", title: "Thread title cannot be empty" });
+        return;
+      }
+      if (trimmed === originalTitle) return;
+      const result = await updateThreadMetadata({
+        environmentId: threadRef.environmentId,
+        input: { threadId: threadRef.threadId, title: trimmed },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to rename thread",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      }
+    })();
+  };
 
-  const handleThreadClick = useCallback(
-    (event: ReactMouseEvent, threadRef: ScopedThreadRef) => {
-      if (isSidebarNestedLinkClick(event.target)) return;
-      const isMac = isMacPlatform(navigator.platform);
-      const isModClick = isMac ? event.metaKey : event.ctrlKey;
-      const threadKey = scopedThreadKey(threadRef);
-      if (isModClick) {
-        event.preventDefault();
-        toggleThreadSelection(threadKey);
-        return;
-      }
-      if (event.shiftKey) {
-        event.preventDefault();
-        rangeSelectTo(threadKey, orderedThreadKeysRef.current);
-        return;
-      }
-      if (isTrailingDoubleClick(event.detail)) {
-        return;
-      }
-      navigateToThread(threadRef);
-    },
-    [navigateToThread, rangeSelectTo, toggleThreadSelection],
-  );
+  const handleThreadClick = (event: ReactMouseEvent, threadRef: ScopedThreadRef) => {
+    if (isSidebarNestedLinkClick(event.target)) return;
+    const isMac = isMacPlatform(navigator.platform);
+    const isModClick = isMac ? event.metaKey : event.ctrlKey;
+    const threadKey = scopedThreadKey(threadRef);
+    if (isModClick) {
+      event.preventDefault();
+      toggleThreadSelection(threadKey);
+      return;
+    }
+    if (event.shiftKey) {
+      event.preventDefault();
+      rangeSelectTo(threadKey, orderedThreadKeysRef.current);
+      return;
+    }
+    if (isTrailingDoubleClick(event.detail)) {
+      return;
+    }
+    navigateToThread(threadRef);
+  };
 
   const settlingThreadKeysRef = useRef(new Set<string>());
   // Callers snapshot the plan BEFORE the command mutates the partition;
   // background parks never navigate (null plan).
-  const planForwardNavigation = useCallback(
-    (threadKey: string, coParkingKeys?: ReadonlySet<string>): (() => void) | null => {
-      if (routeThreadKeyRef.current !== threadKey) return null;
-      const shell = threadByKeyRef.current.get(threadKey);
-      const orderedKeys = orderedThreadKeysRef.current;
-      const settledKeys = settledThreadKeysRef.current;
-      const snoozedKeys = snoozedThreadKeysRef.current;
-      const currentIndex = orderedKeys.indexOf(threadKey);
-      const nextCardKey =
-        currentIndex === -1
-          ? null
-          : ([...orderedKeys.slice(currentIndex + 1), ...orderedKeys.slice(0, currentIndex)].find(
-              (key) => !settledKeys.has(key) && !snoozedKeys.has(key) && !coParkingKeys?.has(key),
-            ) ?? null);
-      const nextThread = nextCardKey ? threadByKeyRef.current.get(nextCardKey) : null;
-      return nextThread
-        ? () => navigateToThread(scopeThreadRef(nextThread.environmentId, nextThread.id))
-        : shell
-          ? () =>
-              void handleNewThreadRef.current(scopeProjectRef(shell.environmentId, shell.projectId))
-          : () => void router.navigate({ to: "/" });
-    },
-    [navigateToThread, router],
-  );
+  const planForwardNavigation = (
+    threadKey: string,
+    coParkingKeys?: ReadonlySet<string>,
+  ): (() => void) | null => {
+    if (routeThreadKeyRef.current !== threadKey) return null;
+    const shell = threadByKeyRef.current.get(threadKey);
+    const orderedKeys = orderedThreadKeysRef.current;
+    const settledKeys = settledThreadKeysRef.current;
+    const snoozedKeys = snoozedThreadKeysRef.current;
+    const currentIndex = orderedKeys.indexOf(threadKey);
+    const nextCardKey =
+      currentIndex === -1
+        ? null
+        : ([...orderedKeys.slice(currentIndex + 1), ...orderedKeys.slice(0, currentIndex)].find(
+            (key) => !settledKeys.has(key) && !snoozedKeys.has(key) && !coParkingKeys?.has(key),
+          ) ?? null);
+    const nextThread = nextCardKey ? threadByKeyRef.current.get(nextCardKey) : null;
+    return nextThread
+      ? () => navigateToThread(scopeThreadRef(nextThread.environmentId, nextThread.id))
+      : shell
+        ? () =>
+            void handleNewThreadRef.current(scopeProjectRef(shell.environmentId, shell.projectId))
+        : () => void router.navigate({ to: "/" });
+  };
 
   const settleFromDrag = async (threadRef: ScopedThreadRef) => {
     const key = scopedThreadKey(threadRef);
     if (settlingThreadKeysRef.current.has(key)) return null;
     settlingThreadKeysRef.current.add(key);
     const navigate = planForwardNavigation(key);
-    try {
+    const settle = async () => {
       const result = await settleThread(threadRef);
       if (
         result._tag === "Success" &&
@@ -3347,100 +3206,93 @@ export default function Sidebar() {
       )
         navigate?.();
       return result;
-    } finally {
+    };
+    return await settle().finally(() => {
       settlingThreadKeysRef.current.delete(key);
+    });
+  };
+  const attemptSettle = (
+    threadRef: ScopedThreadRef,
+    opts: { coSettlingKeys?: ReadonlySet<string> } = {},
+  ) => {
+    void (async () => {
+      const threadKey = scopedThreadKey(threadRef);
+      if (settlingThreadKeysRef.current.has(threadKey)) return;
+      settlingThreadKeysRef.current.add(threadKey);
+      const settleAndAdvance = async () => {
+        const navigateAfterSettle = planForwardNavigation(threadKey, opts.coSettlingKeys);
+        const result = await settleThread(threadRef);
+        if (result._tag === "Failure") {
+          if (!isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Failed to settle thread",
+                description: error instanceof Error ? error.message : "An error occurred.",
+              }),
+            );
+          }
+          return;
+        }
+        if (
+          shouldNavigateAfterThreadPark({
+            threadKey,
+            currentThreadKey: routeThreadKeyRef.current,
+            action: "settle",
+            now: new Date().toISOString(),
+            thread: readThreadShell(threadRef),
+          })
+        ) {
+          navigateAfterSettle?.();
+        }
+      };
+      return await settleAndAdvance().finally(() => {
+        settlingThreadKeysRef.current.delete(threadKey);
+      });
+    })();
+  };
+  useEffect(() => registerSettleAndAdvance(attemptSettle), [attemptSettle]);
+  const settleThreads = (threadKeys: readonly string[]) => {
+    const coSettlingKeys = new Set(threadKeys);
+    for (const threadKey of threadKeys) {
+      const thread = threadByKeyRef.current.get(threadKey);
+      if (!thread || thread.settledOverride === "settled") continue;
+      attemptSettle(scopeThreadRef(thread.environmentId, thread.id), { coSettlingKeys });
     }
   };
-  const attemptSettle = useCallback(
-    (threadRef: ScopedThreadRef, opts: { coSettlingKeys?: ReadonlySet<string> } = {}) => {
-      void (async () => {
-        const threadKey = scopedThreadKey(threadRef);
-        if (settlingThreadKeysRef.current.has(threadKey)) return;
-        settlingThreadKeysRef.current.add(threadKey);
-        try {
-          const navigateAfterSettle = planForwardNavigation(threadKey, opts.coSettlingKeys);
-          const result = await settleThread(threadRef);
-          if (result._tag === "Failure") {
-            if (!isAtomCommandInterrupted(result)) {
-              const error = squashAtomCommandFailure(result);
-              toastManager.add(
-                stackedThreadToast({
-                  type: "error",
-                  title: "Failed to settle thread",
-                  description: error instanceof Error ? error.message : "An error occurred.",
-                }),
-              );
-            }
-            return;
-          }
-          if (
-            shouldNavigateAfterThreadPark({
-              threadKey,
-              currentThreadKey: routeThreadKeyRef.current,
-              action: "settle",
-              now: new Date().toISOString(),
-              thread: readThreadShell(threadRef),
-            })
-          ) {
-            navigateAfterSettle?.();
-          }
-        } finally {
-          settlingThreadKeysRef.current.delete(threadKey);
-        }
-      })();
-    },
-    [planForwardNavigation, settleThread],
-  );
-  useEffect(() => registerSettleAndAdvance(attemptSettle), [attemptSettle]);
-  const settleThreads = useCallback(
-    (threadKeys: readonly string[]) => {
-      const coSettlingKeys = new Set(threadKeys);
-      for (const threadKey of threadKeys) {
-        const thread = threadByKeyRef.current.get(threadKey);
-        if (!thread || thread.settledOverride === "settled") continue;
-        attemptSettle(scopeThreadRef(thread.environmentId, thread.id), { coSettlingKeys });
+  const attemptUnsettle = (threadRef: ScopedThreadRef) => {
+    void (async () => {
+      const result = await unsettleThread(threadRef);
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to un-settle thread",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
       }
-    },
-    [attemptSettle],
-  );
-  const attemptUnsettle = useCallback(
-    (threadRef: ScopedThreadRef) => {
-      void (async () => {
-        const result = await unsettleThread(threadRef);
-        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Failed to un-settle thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
-            }),
-          );
-        }
-      })();
-    },
-    [unsettleThread],
-  );
-  const attemptUnsnooze = useCallback(
-    (threadRef: ScopedThreadRef) => {
-      void (async () => {
-        const result = await unsnoozeThread(threadRef);
-        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Failed to wake thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
-            }),
-          );
-        }
-      })();
-    },
-    [unsnoozeThread],
-  );
+    })();
+  };
+  const attemptUnsnooze = (threadRef: ScopedThreadRef) => {
+    void (async () => {
+      const result = await unsnoozeThread(threadRef);
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to wake thread",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      }
+    })();
+  };
   const orderedPinnedThreads = pinnedThreads;
-  const sectionByThreadKey = useMemo(() => {
+  const sectionByThreadKey = (() => {
     const map = new Map<string, SidebarSection>();
     const add = (list: readonly EnvironmentThreadShell[], section: SidebarSection) => {
       for (const thread of list) {
@@ -3453,9 +3305,20 @@ export default function Sidebar() {
     add(snoozedThreads, "snoozed");
     add(settledThreads, "settled");
     return map;
-  }, [activeThreads, pinnedThreads, settledThreads, snoozedThreads, workingThreads]);
+  })();
   const sectionByThreadKeyRef = useRef(sectionByThreadKey);
-  sectionByThreadKeyRef.current = sectionByThreadKey;
+  // Handlers read the latest values through these refs; they update after commit.
+  useLayoutEffect(() => {
+    routeTargetRef.current = routeTarget;
+    routeThreadKeyRef.current = routeThreadKey;
+    projectGroupsRef.current = projectGroups;
+    orderedThreadKeysRef.current = orderedThreadKeys;
+    threadByKeyRef.current = threadByKey;
+    handleNewThreadRef.current = newThreadContext.handleNewThread;
+    settledThreadKeysRef.current = settledThreadKeys;
+    snoozedThreadKeysRef.current = snoozedThreadKeys;
+    sectionByThreadKeyRef.current = sectionByThreadKey;
+  });
   const sweepSensorRef = useRef<SidebarPointerSensor | null>(null);
   useEffect(() => () => sweepSensorRef.current?.cancel(), []);
   const [actionSweep, setActionSweep] = useState<{
@@ -3525,108 +3388,97 @@ export default function Sidebar() {
       });
     },
   );
-  const attemptPin = useCallback(
-    (threadRef: ScopedThreadRef) => {
-      void (async () => {
-        // Fresh pins take the top of the arranged run: pinThread computes a
-        // key before the smallest key across ALL pinned shells — including
-        // snoozed pins hidden from this list, whose keys are still part of
-        // the run — so the new pin can't land beneath a hidden head.
-        const result = await pinThread(threadRef);
-        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Failed to pin thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
-            }),
-          );
-        }
-      })();
-    },
-    [pinThread],
-  );
-  const attemptUnpin = useCallback(
-    (threadRef: ScopedThreadRef) => {
-      void (async () => {
-        const result = await confirmAndUnpinThread(threadRef);
-        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Failed to unpin thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
-            }),
-          );
-        }
-      })();
-    },
-    [confirmAndUnpinThread],
-  );
+  const attemptPin = (threadRef: ScopedThreadRef) => {
+    void (async () => {
+      // Fresh pins take the top of the arranged run: pinThread computes a
+      // key before the smallest key across ALL pinned shells — including
+      // snoozed pins hidden from this list, whose keys are still part of
+      // the run — so the new pin can't land beneath a hidden head.
+      const result = await pinThread(threadRef);
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to pin thread",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      }
+    })();
+  };
+  const attemptUnpin = (threadRef: ScopedThreadRef) => {
+    void (async () => {
+      const result = await confirmAndUnpinThread(threadRef);
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to unpin thread",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      }
+    })();
+  };
 
   const snoozingThreadKeysRef = useRef(new Set<string>());
-  const performSnooze = useCallback(
-    async (
-      threadRef: ScopedThreadRef,
-      preset: Pick<SnoozePreset, "snoozedUntil">,
-      opts: { coSnoozingKeys?: ReadonlySet<string> } = {},
-    ) => {
-      const threadKey = scopedThreadKey(threadRef);
-      if (snoozingThreadKeysRef.current.has(threadKey)) {
-        return { status: "skipped" } as const;
+  const performSnooze = async (
+    threadRef: ScopedThreadRef,
+    preset: Pick<SnoozePreset, "snoozedUntil">,
+    opts: { coSnoozingKeys?: ReadonlySet<string> } = {},
+  ) => {
+    const threadKey = scopedThreadKey(threadRef);
+    if (snoozingThreadKeysRef.current.has(threadKey)) {
+      return { status: "skipped" } as const;
+    }
+    snoozingThreadKeysRef.current.add(threadKey);
+    const snooze = async () => {
+      const navigateAfterSnooze = planForwardNavigation(threadKey, opts.coSnoozingKeys);
+      const result = await snoozeThread(threadRef, preset.snoozedUntil);
+      if (result._tag === "Failure") {
+        return isAtomCommandInterrupted(result)
+          ? ({ status: "interrupted" } as const)
+          : ({ status: "failure", error: squashAtomCommandFailure(result) } as const);
       }
-      snoozingThreadKeysRef.current.add(threadKey);
-      try {
-        const navigateAfterSnooze = planForwardNavigation(threadKey, opts.coSnoozingKeys);
-        const result = await snoozeThread(threadRef, preset.snoozedUntil);
-        if (result._tag === "Failure") {
-          return isAtomCommandInterrupted(result)
-            ? ({ status: "interrupted" } as const)
-            : ({ status: "failure", error: squashAtomCommandFailure(result) } as const);
-        }
-        if (
-          shouldNavigateAfterThreadPark({
-            threadKey,
-            currentThreadKey: routeThreadKeyRef.current,
-            action: "snooze",
-            now: new Date().toISOString(),
-            thread: readThreadShell(threadRef),
-          })
-        ) {
-          navigateAfterSnooze?.();
-        }
-        return { status: "success" } as const;
-      } finally {
-        snoozingThreadKeysRef.current.delete(threadKey);
+      if (
+        shouldNavigateAfterThreadPark({
+          threadKey,
+          currentThreadKey: routeThreadKeyRef.current,
+          action: "snooze",
+          now: new Date().toISOString(),
+          thread: readThreadShell(threadRef),
+        })
+      ) {
+        navigateAfterSnooze?.();
       }
-    },
-    [planForwardNavigation, snoozeThread],
-  );
-  const attemptSnooze = useCallback(
-    (
-      threadRef: ScopedThreadRef,
-      preset: Pick<SnoozePreset, "snoozedUntil">,
-      opts: { coSnoozingKeys?: ReadonlySet<string> } = {},
-    ) => {
-      void (async () => {
-        const outcome = await performSnooze(threadRef, preset, opts);
-        if (outcome.status === "failure") {
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Failed to snooze thread",
-              description:
-                outcome.error instanceof Error ? outcome.error.message : "An error occurred.",
-            }),
-          );
-          return;
-        }
-      })();
-    },
-    [performSnooze],
-  );
+      return { status: "success" } as const;
+    };
+    return await snooze().finally(() => {
+      snoozingThreadKeysRef.current.delete(threadKey);
+    });
+  };
+  const attemptSnooze = (
+    threadRef: ScopedThreadRef,
+    preset: Pick<SnoozePreset, "snoozedUntil">,
+    opts: { coSnoozingKeys?: ReadonlySet<string> } = {},
+  ) => {
+    void (async () => {
+      const outcome = await performSnooze(threadRef, preset, opts);
+      if (outcome.status === "failure") {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to snooze thread",
+            description:
+              outcome.error instanceof Error ? outcome.error.message : "An error occurred.",
+          }),
+        );
+        return;
+      }
+    })();
+  };
 
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
   const handleMultiSelectContextMenu = useStableCallback(
@@ -4211,55 +4063,55 @@ export default function Sidebar() {
     | null
   >(null);
   const landAfterStaveArchive = useStaveArchiveLanding();
-  const handleProjectHeaderContextMenu = useCallback(
-    (event: ReactMouseEvent, project: SidebarProjectSnapshot) => {
-      const entries = project.memberProjects.flatMap((member) => {
-        const entry = readStaveSpaceLifecycleMenuEntry(member);
-        return entry ? [{ member, entry }] : [];
+  const handleProjectHeaderContextMenu = (
+    event: ReactMouseEvent,
+    project: SidebarProjectSnapshot,
+  ) => {
+    const entries = project.memberProjects.flatMap((member) => {
+      const entry = readStaveSpaceLifecycleMenuEntry(member);
+      return entry ? [{ member, entry }] : [];
+    });
+    if (entries.length === 0) return;
+    event.preventDefault();
+    const position = { x: event.clientX, y: event.clientY };
+    void (async () => {
+      const api = readLocalApi();
+      if (!api) return;
+      const items: ContextMenuItem[] = [
+        { id: "settings", label: "Space settings", icon: "settings" },
+        ...entries.map(({ member, entry }, index) => ({
+          id: `lifecycle:${index}`,
+          label:
+            entries.length > 1
+              ? `${entry.title} (${member.environmentLabel ?? member.workspaceRoot})`
+              : entry.title,
+          icon: "archive",
+          disabled: entry.disabled,
+          ...(index === 0 ? { separatorBefore: true } : {}),
+        })),
+      ];
+      const clicked = await settlePromise(() => api.contextMenu.show(items, position));
+      if (clicked._tag === "Failure" || !clicked.value) return;
+      if (clicked.value === "settings") {
+        openProjectSettings(project);
+        return;
+      }
+      const chosen = entries[Number(clicked.value.slice("lifecycle:".length))];
+      if (!chosen || chosen.entry.disabled) return;
+      setSpaceConfirmation({
+        title: chosen.entry.title,
+        operation: chosen.entry.operation,
+        sagaId: chosen.entry.sagaId,
+        environmentId: chosen.member.environmentId,
+        projectId: chosen.member.id,
       });
-      if (entries.length === 0) return;
-      event.preventDefault();
-      const position = { x: event.clientX, y: event.clientY };
-      void (async () => {
-        const api = readLocalApi();
-        if (!api) return;
-        const items: ContextMenuItem[] = [
-          { id: "settings", label: "Space settings", icon: "settings" },
-          ...entries.map(({ member, entry }, index) => ({
-            id: `lifecycle:${index}`,
-            label:
-              entries.length > 1
-                ? `${entry.title} (${member.environmentLabel ?? member.workspaceRoot})`
-                : entry.title,
-            icon: "archive",
-            disabled: entry.disabled,
-            ...(index === 0 ? { separatorBefore: true } : {}),
-          })),
-        ];
-        const clicked = await settlePromise(() => api.contextMenu.show(items, position));
-        if (clicked._tag === "Failure" || !clicked.value) return;
-        if (clicked.value === "settings") {
-          openProjectSettings(project);
-          return;
-        }
-        const chosen = entries[Number(clicked.value.slice("lifecycle:".length))];
-        if (!chosen || chosen.entry.disabled) return;
-        setSpaceConfirmation({
-          title: chosen.entry.title,
-          operation: chosen.entry.operation,
-          sagaId: chosen.entry.sagaId,
-          environmentId: chosen.member.environmentId,
-          projectId: chosen.member.id,
-        });
-      })();
-    },
-    [openProjectSettings],
-  );
+    })();
+  };
   // An archived space leaves the sidebar, so leave a route inside it for the
   // saga it left, or home (as settings does). Runs on the operation's
   // success; the dialog then closes itself. The route's thread is read from
   // the store: the sidebar's own list no longer holds an archived space's threads.
-  const handleSpaceConfirmationFinished = useCallback(() => {
+  const handleSpaceConfirmationFinished = () => {
     if (spaceConfirmation?.operation.kind !== "archiveSpace") return;
     const route = routeTargetRef.current;
     const location =
@@ -4274,7 +4126,7 @@ export default function Sidebar() {
     )
       return;
     landAfterStaveArchive(spaceConfirmation);
-  }, [landAfterStaveArchive, spaceConfirmation]);
+  };
 
   const routeTerminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
@@ -4351,23 +4203,20 @@ export default function Sidebar() {
     updateThreadJumpHintsVisibility(shouldShowJumpHintsNow);
   }, [shouldShowJumpHintsNow, updateThreadJumpHintsVisibility]);
 
-  const handleNewThreadClick = useCallback(
-    (event?: ReactMouseEvent) => {
-      if (shouldCreateNewThreadInCurrentProject(event?.shiftKey ?? false, projectGroups.length)) {
-        if (isMobile) setOpenMobile(false);
-        void startNewThreadFromContext({
-          activeDraftThread: newThreadContext.activeDraftThread,
-          activeThread: newThreadContext.activeThread ?? undefined,
-          defaultProjectRef: newThreadContext.defaultProjectRef,
-          handleNewThread: newThreadContext.handleNewThread,
-        });
-        return;
-      }
+  const handleNewThreadClick = (event?: ReactMouseEvent) => {
+    if (shouldCreateNewThreadInCurrentProject(event?.shiftKey ?? false, projectGroups.length)) {
       if (isMobile) setOpenMobile(false);
-      openCommandPalette({ open: "new-thread-in" });
-    },
-    [isMobile, newThreadContext, projectGroups.length, setOpenMobile],
-  );
+      void startNewThreadFromContext({
+        activeDraftThread: newThreadContext.activeDraftThread,
+        activeThread: newThreadContext.activeThread ?? undefined,
+        defaultProjectRef: newThreadContext.defaultProjectRef,
+        handleNewThread: newThreadContext.handleNewThread,
+      });
+      return;
+    }
+    if (isMobile) setOpenMobile(false);
+    openCommandPalette({ open: "new-thread-in" });
+  };
 
   const newThreadShortcutLabel =
     shortcutLabelForCommand(keybindings, "chat.new") ??
@@ -4755,10 +4604,6 @@ export default function Sidebar() {
                             onUnpin={attemptUnpin}
                             onAcknowledgeWoke={acknowledgeWoke}
                             onFileDropThreads={handleThreadFileDrop}
-                            changeRequestSnapshot={
-                              changeRequestSnapshotByKey.get(threadKey) ?? null
-                            }
-                            onChangeRequestSnapshot={setThreadChangeRequestSnapshot}
                           />
                         )}
                       </ScopedSortableThreadRow>

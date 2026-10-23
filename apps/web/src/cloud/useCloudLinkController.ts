@@ -200,8 +200,13 @@ export function useCloudLinkController(
       }
       const status = await createAccountBillingClient(account, clerkToken || undefined).getStatus();
       if (!account || accountRef.current !== account) return false;
-      if (status.state === "unavailable")
-        throw new Error("Your subscription could not be checked. Refresh to try again.");
+      if (status.state === "unavailable") {
+        // Reported here rather than thrown: the compiler skips a hook with `throw` inside `try`.
+        reportUpdateFailure(
+          new Error("Your subscription could not be checked. Refresh to try again."),
+        );
+        return false;
+      }
       // A disabled billing service does not impose a purchase requirement.
       const allowed = status.state === "disabled" || status.hasAccess;
       setSubscriptionRequiredFor(allowed ? null : account);

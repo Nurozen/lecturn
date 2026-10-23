@@ -43,9 +43,8 @@ export function AccountAppearanceDialog({
       onClose();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save the account appearance.");
-    } finally {
-      setSaving(false);
     }
+    setSaving(false);
   }
   return (
     <Dialog

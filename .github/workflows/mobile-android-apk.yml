@@ -1,10 +1,9 @@
 name: Mobile Android APK
 
-# Checks the Google Play Alpha closed-testing track hourly. New beta builds get
-# a versioned android-beta-<build> prerelease and update the rolling
-# android-beta download page. Unchanged checks publish nothing. Play re-signs
-# uploaded bundles with the app signing key, so its universal APK matches the
-# Play install and needs no signing secrets here.
+# Checks the Google Play Alpha closed-testing track hourly. Each new beta gets
+# one versioned android-beta-<build> prerelease. Unchanged checks publish
+# nothing. Play re-signs uploaded bundles with the app signing key, so its
+# universal APK matches the Play install and needs no signing secrets here.
 #
 # Inactive in Lecturn: the fork has no GOOGLE_PLAY_SERVICE_ACCOUNT_JSON secret
 # and no Play distribution yet, so the job skips itself. See
@@ -28,7 +27,6 @@ jobs:
       contents: write
     env:
       PACKAGE_NAME: com.cloudgatherer.lecturn
-      RELEASE_TAG: android-beta
     steps:
       - id: credentials
         name: Check for Play credentials

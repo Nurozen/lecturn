@@ -42,25 +42,27 @@ export function ContextualDecisionGroupCard({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   async function undoMerge() {
-    if (!metadata?.undo || !access.operate || busy) return;
+    const pendingUndo = metadata?.undo;
+    if (!metadata || !pendingUndo || !access.operate || busy) return;
     setBusy(true);
     setError(null);
-    try {
+    const attempt = async () => {
       const r = await undo({
         environmentId,
         input: {
           actionId: randomUUID(),
           groupId: metadata.groupId,
-          mergeId: metadata.undo.mergeId,
+          mergeId: pendingUndo.mergeId,
           expectedRevision: metadata.revision,
-          expectedOccurrenceRevision: metadata.undo.expectedOccurrenceRevision,
+          expectedOccurrenceRevision: pendingUndo.expectedOccurrenceRevision,
         },
       });
       if (r._tag === "Failure") setError(contextualErrorMessage(squashAtomCommandFailure(r)));
       else onChange?.();
-    } finally {
+    };
+    return await attempt().finally(() => {
       setBusy(false);
-    }
+    });
   }
   if (!metadata) return null;
   return (

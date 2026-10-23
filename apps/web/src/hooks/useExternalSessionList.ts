@@ -1,5 +1,5 @@
 import type { EnvironmentId } from "@lecturn/contracts";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   type ExternalSessionsInstanceResult,
@@ -33,18 +33,15 @@ export function useExternalSessionList(input: {
     reportFailure: false,
     reportDefect: false,
   });
-  const providerEntries = useMemo(
-    () =>
-      environmentId === null
-        ? []
-        : deriveProviderInstanceEntries(
-            listImportCapableProviders({
-              supportsForking: readEnvironmentSupportsForking(environmentId),
-              providers: readEnvironmentProviders(environmentId),
-            }),
-          ),
-    [environmentId],
-  );
+  const providerEntries =
+    environmentId === null
+      ? []
+      : deriveProviderInstanceEntries(
+          listImportCapableProviders({
+            supportsForking: readEnvironmentSupportsForking(environmentId),
+            providers: readEnvironmentProviders(environmentId),
+          }),
+        );
   const requestKey =
     environmentId === null
       ? null

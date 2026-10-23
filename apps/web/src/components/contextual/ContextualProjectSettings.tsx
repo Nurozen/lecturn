@@ -45,16 +45,17 @@ export function ContextualProjectSettings({
     if (!settings || !access.operate || busy) return;
     setBusy(true);
     setError(null);
-    try {
+    const attempt = async () => {
       const result = await save({
         environmentId,
         input: { projectId, expectedRevision: settings.revision, defaultEnabled, sourceIds },
       });
       if (result._tag === "Failure")
         setError(contextualErrorMessage(squashAtomCommandFailure(result)));
-    } finally {
+    };
+    return await attempt().finally(() => {
       setBusy(false);
-    }
+    });
   }
   if (!available) return null;
   return (

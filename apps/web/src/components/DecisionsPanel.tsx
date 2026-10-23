@@ -1,7 +1,7 @@
 import { DecisionRelationSuggestions } from "./contextual/DecisionRelationSuggestions";
 import { ContextualDecisionGroupCard } from "./contextual/ContextualDecisionGroupCard";
 import { DecisionAttributionChip } from "./DecisionAttributionChip";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { downloadTextFile } from "../lib/downloadTextFile";
@@ -97,18 +97,15 @@ function AvailableDecisionsPanel({
     [lifecycle, setLifecycle] = useState<"current" | "superseded" | "all">("current");
   const [cursor, setCursor] = useState<string | undefined>(),
     [history, setHistory] = useState<(string | undefined)[]>([]);
-  const input = useMemo<ThreadDecisionListInput>(
-    () => ({
-      projectId,
-      ...(threadId ? { threadId } : {}),
-      ...(search.trim() ? { search: search.trim() } : {}),
-      ...(attribution === "all" ? {} : { attribution }),
-      ...(review === "active" ? {} : { reviewState: review }),
-      lifecycle,
-      ...(cursor ? { cursor } : {}),
-    }),
-    [projectId, threadId, search, review, attribution, lifecycle, cursor],
-  );
+  const input: ThreadDecisionListInput = {
+    projectId,
+    ...(threadId ? { threadId } : {}),
+    ...(search.trim() ? { search: search.trim() } : {}),
+    ...(attribution === "all" ? {} : { attribution }),
+    ...(review === "active" ? {} : { reviewState: review }),
+    lifecycle,
+    ...(cursor ? { cursor } : {}),
+  };
   const list = useEnvironmentQuery(threadDecisionEnvironment.list({ environmentId, input }));
   const status = useEnvironmentQuery(
     threadDecisionEnvironment.status({
@@ -165,7 +162,7 @@ function AvailableDecisionsPanel({
     setBusy(true);
     setError(null);
     setNotice(null);
-    try {
+    const attempt = async () => {
       const result = await execute();
       if (result._tag === "Failure") {
         const cause = squashAtomCommandFailure(result);
@@ -175,12 +172,15 @@ function AvailableDecisionsPanel({
         return null;
       }
       return result.value;
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The request failed.");
-      return null;
-    } finally {
-      setBusy(false);
-    }
+    };
+    return await attempt()
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : "The request failed.");
+        return null;
+      })
+      .finally(() => {
+        setBusy(false);
+      });
   }
   async function mutate(input: ThreadDecisionMutateInput) {
     const result = await perform(() => mutateCommand({ environmentId, input }));
@@ -197,7 +197,7 @@ function AvailableDecisionsPanel({
   ) {
     setBusy(true);
     setError(null);
-    try {
+    const attempt = async () => {
       const [before, after] = await Promise.all(
         [relation.predecessorId, relation.successorId].map((id) =>
           executeAtomQuery(
@@ -214,16 +214,17 @@ function AvailableDecisionsPanel({
         return;
       }
       setRelationshipReview({ action, relation, before: before.value, after: after.value });
-    } finally {
+    };
+    return await attempt().finally(() => {
       setBusy(false);
-    }
+    });
   }
   async function exportNotes(format: "markdown" | "json") {
     const revision = list.data?.projectRevision;
     if (revision === undefined) return;
     setBusy(true);
     setError(null);
-    try {
+    const attempt = async () => {
       let next: string | null = null;
       const pages: string[] = [];
       const exportPages: ThreadDecisionExportResult[] = [];
@@ -266,11 +267,14 @@ function AvailableDecisionsPanel({
               ? "Export canceled."
               : "Download requested. Complete the save dialog if prompted.",
         );
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Export failed. Refresh and try again.");
-    } finally {
-      setBusy(false);
-    }
+    };
+    return await attempt()
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : "Export failed. Refresh and try again.");
+      })
+      .finally(() => {
+        setBusy(false);
+      });
   }
   const settings = status.data?.settings,
     processing = status.data?.processing;

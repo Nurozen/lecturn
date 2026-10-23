@@ -2,7 +2,7 @@ import type { EnvironmentId, ServerProvider } from "@lecturn/contracts";
 import { Link } from "@tanstack/react-router";
 import { CheckCircle2Icon, RotateCwIcon, XIcon } from "lucide-react";
 import { useRef, useState } from "react";
-import { useEnvironments } from "../state/environments";
+import { useEnvironmentProviders, useEnvironments } from "../state/environments";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
@@ -34,15 +34,18 @@ export function ProviderDetectionRecovery({
     pending.current = true;
     setRetrying(true);
     setRetryError(false);
-    try {
+    const attempt = async () => {
       const result = await refresh({ environmentId, input: { instanceId: provider.instanceId } });
       setRetryError(result._tag === "Failure");
-    } catch {
-      setRetryError(true);
-    } finally {
-      pending.current = false;
-      setRetrying(false);
-    }
+    };
+    return await attempt()
+      .catch((_error: unknown) => {
+        setRetryError(true);
+      })
+      .finally(() => {
+        pending.current = false;
+        setRetrying(false);
+      });
   };
   return (
     <div className="flex items-start gap-3" role={detecting || ready ? "status" : "alert"}>
@@ -108,13 +111,14 @@ export function ProviderDetectionRecovery({
 /** Lives above routes so settings and navigation remain available during discovery. */
 export function ProviderDetectionProgress() {
   const { environments } = useEnvironments();
+  const providersByEnvironment = useEnvironmentProviders();
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set());
   // A retry or reconnect is still the same unresolved problem. Re-arm only
   // after recovery or disabling the provider.
   if (dismissed.size > 0) {
     const resolved = new Set(
       environments.flatMap((environment) =>
-        (environment.serverConfig?.providers ?? [])
+        (providersByEnvironment.get(environment.environmentId) ?? [])
           .filter((provider) => !provider.enabled || provider.discovery?.status === "ready")
           .map((provider) => JSON.stringify([environment.environmentId, provider.instanceId])),
       ),
@@ -123,7 +127,7 @@ export function ProviderDetectionProgress() {
     if (remaining.size !== dismissed.size) setDismissed(remaining);
   }
   const rows = environments.flatMap((environment) =>
-    (environment.serverConfig?.providers ?? [])
+    (providersByEnvironment.get(environment.environmentId) ?? [])
       .filter((provider) =>
         shouldShowProviderDetection(provider, environment.connection.phase === "connected"),
       )

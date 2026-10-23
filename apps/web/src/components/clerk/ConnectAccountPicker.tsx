@@ -2,7 +2,7 @@ import { useProfileStableAccountId } from "../../cloud/useProfileStableAccountId
 import { useConnectAccountAuth } from "../../cloud/useConnectAccountAuth";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
-import { useMemo, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import {
   accountPickerScope,
@@ -148,10 +148,8 @@ function useChosenConnectAccount(
     setSelection(null);
   }
   const visible = context !== null;
-  const lastUsedAccountId = useMemo(
-    () => (visible && scope !== null ? readAccountPickerLastUsed()[surface] : undefined),
-    [scope, surface, visible],
-  );
+  const lastUsedAccountId =
+    visible && scope !== null ? readAccountPickerLastUsed()[surface] : undefined;
   if (context === null) {
     return FOLLOWS_ACTIVE_ACCOUNT;
   }

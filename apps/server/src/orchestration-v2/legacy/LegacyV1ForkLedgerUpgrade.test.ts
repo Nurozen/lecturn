@@ -201,7 +201,7 @@ const v2Layer = (dbPath: string) => {
 
 describe("Lecturn fork ledger upgrade to orchestration V2", () => {
   it.effect.each(["fork names", "upstream names at 48-54"] as const)(
-    "migrates a %s ledger at 069 to 077 and imports fork lineage",
+    "migrates a %s ledger at 069 to 078 and imports fork lineage",
     (variant) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
@@ -228,8 +228,9 @@ describe("Lecturn fork ledger upgrade to orchestration V2", () => {
             SELECT name FROM sqlite_master
             WHERE type = 'table' AND name LIKE 'orchestration_v2_%'
           `;
-          const turnColumns = yield* sql<{ readonly name: string }>`
-            PRAGMA table_info(projection_turns)
+          const v1Tables = yield* sql<{ readonly name: string }>`
+            SELECT name FROM sqlite_master
+            WHERE type = 'table' AND name IN ('projection_threads', 'projection_turns')
           `;
           yield* importer.reconcileShells;
           yield* importer.ensureTranscript(ThreadId.make(CHILD_THREAD));
@@ -244,7 +245,7 @@ describe("Lecturn fork ledger upgrade to orchestration V2", () => {
           return {
             ledger: yield* ledgerFrom(64),
             tableNames: new Set(tables.map((table) => table.name)),
-            turnColumnNames: turnColumns.map((column) => column.name),
+            v1TableNames: v1Tables.map((table) => table.name),
             root,
             child,
             grandchild,
@@ -270,6 +271,7 @@ describe("Lecturn fork ledger upgrade to orchestration V2", () => {
           [75, "ThreadSnapshotWindowIndexes"],
           [76, "PullRequestReviewGuides"],
           [77, "ThreadFailureLookupIndex"],
+          [78, "DropUnusedV1Projections"],
         ]);
         for (const table of [
           "orchestration_v2_events",
@@ -284,8 +286,8 @@ describe("Lecturn fork ledger upgrade to orchestration V2", () => {
           messages.some((message) => message.includes("migration history diverges")),
           messages.join("\n"),
         );
-        // provider_turn_ref is obsolete in V2 but the column stays.
-        assert.include(result.turnColumnNames, "provider_turn_ref");
+        // V1 turns are dropped; the import still reads the V1 threads it carries lineage on.
+        assert.deepStrictEqual(result.v1TableNames, ["projection_threads"]);
 
         assert.deepStrictEqual(result.root.thread.lineage, {
           parentThreadId: null,

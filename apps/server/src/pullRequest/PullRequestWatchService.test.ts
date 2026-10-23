@@ -356,7 +356,7 @@ it.layer(SqlitePersistence.layerMemory)("durable PR watch", (it) => {
           f.watch.id,
         );
         const sql = yield* SqlClient.SqlClient;
-        yield* sql`DELETE FROM projection_state`;
+        yield* sql`DELETE FROM orchestration_v2_projection_metadata`;
         assert.equal((yield* restarted.list({})).watches.length, 1);
         const conflict = yield* restarted
           .track({ requestId: "track", reference: { ...reference, number: 2 } }, "user")

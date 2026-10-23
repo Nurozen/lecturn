@@ -539,7 +539,7 @@ it.layer(
           defaultCodexSettings,
           () => Effect.never,
         ).pipe(Effect.forkChild);
-        yield* TestClock.adjust("10 seconds");
+        yield* TestClock.adjust("20 seconds");
         const status = yield* Fiber.join(check);
 
         assert.strictEqual(status.installed, true);
@@ -600,6 +600,22 @@ it.layer(
       }),
     );
 
+    it.effect(
+      "does not time out a healthy probe slower than the shared 10s auth-probe timeout (#7513)",
+      () =>
+        Effect.gen(function* () {
+          const statusFiber = yield* checkCodexProviderStatus(defaultCodexSettings, () =>
+            Effect.sleep("15 seconds").pipe(Effect.as(makeCodexProbeSnapshot())),
+          ).pipe(Effect.forkChild);
+
+          yield* Effect.yieldNow;
+          yield* TestClock.adjust("15 seconds");
+
+          const status = yield* Fiber.join(statusFiber);
+          assert.strictEqual(status.status, "ready");
+        }),
+    );
+
     it.effect("closes the app-server probe scope when provider status times out", () =>
       Effect.gen(function* () {
         const killCalls = yield* Ref.make(0);
@@ -609,7 +625,7 @@ it.layer(
         );
 
         yield* Effect.yieldNow;
-        yield* TestClock.adjust("11 seconds");
+        yield* TestClock.adjust("21 seconds");
         yield* Effect.yieldNow;
 
         const status = yield* Fiber.join(statusFiber);

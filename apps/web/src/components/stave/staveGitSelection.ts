@@ -1,5 +1,4 @@
 import { selectStaveGitTarget } from "./staveGitSelection.logic";
-import { useMemo } from "react";
 import { create } from "zustand";
 import { resolveProjectGitTargets } from "@lecturn/client-runtime/state/projectGit";
 import type { EnvironmentId, OrchestrationProjectShell } from "@lecturn/contracts";
@@ -20,10 +19,9 @@ export function useStaveGitSelection(
   const space = JSON.stringify([environmentId, project?.id, project?.workspaceRoot]);
   const key = useSelection((state) => state.bySpace[space]);
   const select = useSelection((state) => state.select);
-  const targets = useMemo(
-    () => (project?.stave ? resolveProjectGitTargets({ project, includeReferences: true }) : []),
-    [project],
-  );
+  const targets = project?.stave
+    ? resolveProjectGitTargets({ project, includeReferences: true })
+    : [];
   const selected = selectStaveGitTarget(targets, key);
   return { targets, selected, select: (repoKey: string) => select(space, repoKey) };
 }

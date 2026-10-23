@@ -5,7 +5,6 @@ import {
   type LecturnProjectFileScript,
 } from "@lecturn/contracts";
 import { parseLecturnProjectFile } from "@lecturn/shared/lecturnProjectFile";
-import { useMemo } from "react";
 
 import { useProjectFileQuery } from "~/components/files/projectFilesQueryState";
 
@@ -29,20 +28,18 @@ export function useLecturnProjectFileState(
   );
   const contents = query.data && !query.data.truncated ? query.data.contents : null;
   const isPending = query.isPending;
-  return useMemo(() => {
-    if (contents === null) {
-      return {
-        status: isPending ? "loading" : "missing",
-        file: null,
-        scripts: NO_SCRIPTS,
-      } as const;
-    }
-    const file = parseLecturnProjectFile(contents);
-    if (file === null) {
-      return { status: "invalid", file: null, scripts: NO_SCRIPTS } as const;
-    }
-    return { status: "valid", file, scripts: file.scripts ?? NO_SCRIPTS } as const;
-  }, [contents, isPending]);
+  if (contents === null) {
+    return {
+      status: isPending ? "loading" : "missing",
+      file: null,
+      scripts: NO_SCRIPTS,
+    } as const;
+  }
+  const file = parseLecturnProjectFile(contents);
+  if (file === null) {
+    return { status: "invalid", file: null, scripts: NO_SCRIPTS } as const;
+  }
+  return { status: "valid", file, scripts: file.scripts ?? NO_SCRIPTS } as const;
 }
 
 export function useLecturnProjectFileScripts(

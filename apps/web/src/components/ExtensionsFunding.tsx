@@ -157,12 +157,12 @@ function FundingControls({
   const waiting =
     pending?.state === "awaiting-approval" || pending?.state === "approved-awaiting-host";
 
-  useEffect(() => {
-    if (!challenge || funding.error || !fundingSupersedesChallenge(challenge, state)) return;
+  // A confirmed newer funding status retires the pending challenge during render.
+  if (challenge && !funding.error && fundingSupersedesChallenge(challenge, state)) {
     setPending(null);
     setError(null);
     setCheckingStopped(false);
-  }, [challenge, state, funding.error]);
+  }
 
   useEffect(() => {
     if (!challenge || !waiting || !canFund || busy) return;
@@ -180,7 +180,7 @@ function FundingControls({
         setCheckingStopped(true);
         return;
       }
-      try {
+      const attempt = async () => {
         const observed = await command({
           environmentId,
           input: {
@@ -240,12 +240,13 @@ function FundingControls({
           return;
         }
         timer = setTimeout(() => void observe(), FUNDING_OBSERVATION_INTERVAL_MS);
-      } catch (cause) {
+      };
+      return await attempt().catch((cause: unknown) => {
         if (canceled) return;
         refreshFunding();
         setError(cause instanceof Error ? cause.message : "Could not check approval. Try again.");
         setCheckingStopped(true);
-      }
+      });
     };
     void observe();
     return () => {
@@ -268,7 +269,7 @@ function FundingControls({
     if (!state || busy || !canFund) return;
     setBusy(true);
     setError(null);
-    try {
+    const attempt = async () => {
       if (operation === "create" && ensureLink && !(await ensureLink()))
         throw new Error(
           "Sign in to Lecturn and link this host before requesting membership approval.",
@@ -305,14 +306,17 @@ function FundingControls({
       }
       refreshFunding();
       changed.current?.();
-    } catch (cause) {
-      if (mounted.current)
-        setError(
-          cause instanceof Error ? cause.message : "Funding could not be updated. Try again.",
-        );
-    } finally {
-      if (mounted.current) setBusy(false);
-    }
+    };
+    return await attempt()
+      .catch((cause: unknown) => {
+        if (mounted.current)
+          setError(
+            cause instanceof Error ? cause.message : "Funding could not be updated. Try again.",
+          );
+      })
+      .finally(() => {
+        if (mounted.current) setBusy(false);
+      });
   }
   const denial =
     state &&

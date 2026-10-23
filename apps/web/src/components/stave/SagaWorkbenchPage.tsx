@@ -1,5 +1,5 @@
 import { AccountSurface } from "../AccountSurface";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
@@ -57,14 +57,8 @@ export function SagaWorkbenchPage({
   const threads = useThreadShells();
   const threadShellState = useEnvironmentQuery(environmentShell.stateAtom(environmentId));
   const threadFactsAvailable = threadShellState.data?.snapshot._tag === "Some";
-  const activities = useMemo(
-    () => sagaProjectActivities(threads, environmentId),
-    [threads, environmentId],
-  );
-  const runningProjects = useMemo(
-    () => sagaRunningProjects(threads, environmentId),
-    [threads, environmentId],
-  );
+  const activities = sagaProjectActivities(threads, environmentId);
+  const runningProjects = sagaRunningProjects(threads, environmentId);
   const environment = useEnvironment(environmentId);
   const disconnected = environment?.connection.phase !== "connected";
   const settingsGroups = useSettingsProjectGroups();
@@ -139,7 +133,7 @@ export function SagaWorkbenchPage({
   const run = async (operation: ReturnType<typeof setStage>) => {
     setBusy(true);
     setError(null);
-    try {
+    const attempt = async () => {
       const result = await operation;
       if (result._tag === "Failure") {
         const failure = squashAtomCommandFailure(result);
@@ -170,12 +164,13 @@ export function SagaWorkbenchPage({
             : old,
         );
       }
-    } finally {
+    };
+    return await attempt().finally(() => {
       setBusy(false);
       refresh();
       refreshEvidence();
       refreshActivity();
-    }
+    });
   };
   const input = workflow
     ? { identity: workflow.identity, expectedRevision: workflow.revision, requestId: randomUUID() }
@@ -197,10 +192,7 @@ export function SagaWorkbenchPage({
     ),
   );
   const counts = snapshot ? countSagaWorkbenchStages(snapshot) : null;
-  const dependencies = useMemo(
-    () => buildSagaDependencyWaves(snapshot?.members ?? []),
-    [snapshot?.members],
-  );
+  const dependencies = buildSagaDependencyWaves(snapshot?.members ?? []);
   const select = (member?: string) =>
     void navigate({
       to: "/sagas/$environmentId/$projectId",

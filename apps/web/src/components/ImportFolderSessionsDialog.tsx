@@ -12,7 +12,7 @@ import {
 import type { ExternalSessionSummary, ScopedThreadRef } from "@lecturn/contracts";
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { externalSessionListNotes, useExternalSessionList } from "../hooks/useExternalSessionList";
@@ -103,34 +103,21 @@ function ImportFolderSessionsContent(props: {
   const navigate = useNavigate();
   const handleNewThread = useNewThreadHandler();
   const dispatchImport = useDispatchThreadImport();
-  const projectRef = useMemo(
-    () => scopeProjectRef(request.environmentId, request.projectId),
-    [request.environmentId, request.projectId],
-  );
+  const projectRef = scopeProjectRef(request.environmentId, request.projectId);
   const project = useProject(projectRef);
   const threads = useThreadShells();
   const { merged, providerEntries, isLoading } = useExternalSessionList({
     environmentId: request.environmentId,
     cwd: request.folder,
   });
-  const sessions = useMemo(
-    () => (merged === null ? [] : sessionsInFolder(merged.sessions, request.folder)),
-    [merged, request.folder],
-  );
-  const importedSessionIds = useMemo(
-    () =>
-      collectImportedSessionIds(
-        threads.filter((thread) => thread.environmentId === request.environmentId),
-      ),
-    [request.environmentId, threads],
+  const sessions = merged === null ? [] : sessionsInFolder(merged.sessions, request.folder);
+  const importedSessionIds = collectImportedSessionIds(
+    threads.filter((thread) => thread.environmentId === request.environmentId),
   );
   const [openedAt] = useState(() => Date.now());
   // Null until the user edits it, so the default follows the list as it loads.
   const [editedSelection, setEditedSelection] = useState<ReadonlySet<string> | null>(null);
-  const defaultSelection = useMemo(
-    () => defaultImportSelection({ sessions, importedSessionIds, now: openedAt }),
-    [importedSessionIds, openedAt, sessions],
-  );
+  const defaultSelection = defaultImportSelection({ sessions, importedSessionIds, now: openedAt });
   const selection = editedSelection ?? defaultSelection;
   const selectedSessions = sessions.filter((session) => selection.has(externalSessionKey(session)));
   const [phase, setPhase] = useState<ImportPhase>({ kind: "choosing" });

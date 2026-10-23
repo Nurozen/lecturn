@@ -3,7 +3,6 @@ import type { EnvironmentId, StaveOperation, StaveProjectInfo } from "@lecturn/c
 import { useNavigate } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";
-import { useCallback } from "react";
 
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { readProjects } from "../../state/entities";
@@ -49,20 +48,20 @@ export function staveArchiveSpaceConfirmation(
  */
 export function useStaveArchiveLanding() {
   const navigate = useNavigate();
-  return useCallback(
-    (space: { readonly environmentId: EnvironmentId; readonly sagaId?: string | undefined }) => {
-      const saga = staveArchiveLandingSaga(readProjects(), space);
-      if (saga)
-        void navigate({
-          to: "/sagas/$environmentId/$projectId",
-          params: { environmentId: saga.environmentId, projectId: saga.id },
-          search: { view: "board" },
-          replace: true,
-        });
-      else void navigate({ to: "/", replace: true });
-    },
-    [navigate],
-  );
+  return (space: {
+    readonly environmentId: EnvironmentId;
+    readonly sagaId?: string | undefined;
+  }) => {
+    const saga = staveArchiveLandingSaga(readProjects(), space);
+    if (saga)
+      void navigate({
+        to: "/sagas/$environmentId/$projectId",
+        params: { environmentId: saga.environmentId, projectId: saga.id },
+        search: { view: "board" },
+        replace: true,
+      });
+    else void navigate({ to: "/", replace: true });
+  };
 }
 
 /**

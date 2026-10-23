@@ -29,11 +29,9 @@ import {
 } from "@lecturn/contracts";
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -121,34 +119,19 @@ function SidebarDragProvider(props: SidebarDragContext & { children: ReactNode }
     registerNode,
     contextDrag,
   } = props;
-  const value = useMemo(
-    () => ({
-      enabledKeys,
-      draggableKeys,
-      from,
-      destination,
-      suspend,
-      dragging,
-      baselineKey,
-      activeCount,
-      settledCount,
-      registerNode,
-      contextDrag,
-    }),
-    [
-      enabledKeys,
-      draggableKeys,
-      from,
-      destination,
-      suspend,
-      dragging,
-      baselineKey,
-      activeCount,
-      settledCount,
-      registerNode,
-      contextDrag,
-    ],
-  );
+  const value = {
+    enabledKeys,
+    draggableKeys,
+    from,
+    destination,
+    suspend,
+    dragging,
+    baselineKey,
+    activeCount,
+    settledCount,
+    registerNode,
+    contextDrag,
+  };
   return <DragScope value={value}>{props.children}</DragScope>;
 }
 
@@ -194,27 +177,21 @@ export function SidebarDragScope(props: {
   ]
     .toSorted()
     .join("\n");
-  const environments = useMemo(
-    () =>
-      environmentKey === ""
-        ? []
-        : environmentKey.split("\n").map((id) => ({ environmentId: id as EnvironmentId })),
-    [environmentKey],
-  );
+  const environments =
+    environmentKey === ""
+      ? []
+      : environmentKey.split("\n").map((id) => ({ environmentId: id as EnvironmentId }));
   const operable = useEnvironmentsWithScope(environments, AuthOrchestrationOperateScope);
   // A drop writes every reassigned row, so a row is only movable when its account is signed in
   // and its connection may change threads. Checked again before each write.
-  const canAccess = useCallback(
-    (thread: EnvironmentThreadShell) => {
-      const account = accounts.get(thread.environmentId);
-      return (
-        (!account || !known.needsSignIn.includes(account)) &&
-        operable.has(thread.environmentId) &&
-        readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope)
-      );
-    },
-    [accounts, known, operable],
-  );
+  const canAccess = (thread: EnvironmentThreadShell) => {
+    const account = accounts.get(thread.environmentId);
+    return (
+      (!account || !known.needsSignIn.includes(account)) &&
+      operable.has(thread.environmentId) &&
+      readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope)
+    );
+  };
   const { actions } = props;
   const [hold, setHold] = useSidebarDropHold(props.lists, props.enabled);
   const [drag, setDrag] = useState<{
@@ -238,23 +215,23 @@ export function SidebarDragScope(props: {
     release: () => void;
     bounds: () => Pick<DOMRect, "top" | "bottom" | "left" | "right">;
   } | null>(null);
-  const registerNode = useCallback((id: string, node: HTMLElement | null) => {
+  const registerNode = (id: string, node: HTMLElement | null) => {
     if (node) sortableNodes.current.set(id, node);
     else sortableNodes.current.delete(id);
-  }, []);
-  const scopeBounds = useCallback(() => reservation.current?.bounds() ?? null, []);
+  };
+  const scopeBounds = () => reservation.current?.bounds() ?? null;
   const sensorRef = useRef<SidebarPointerSensor | null>(null);
   const labelTopRef = useRef<number | null>(null);
   const labelOffsetRef = useRef<number | null>(null);
-  const restrictBelowPins = useCallback<Modifier>((args) => {
+  const restrictBelowPins: Modifier = (args) => {
     if (labelOffsetRef.current === null && args.containerNodeRect && labelTopRef.current !== null)
       labelOffsetRef.current = labelTopRef.current - args.containerNodeRect.top;
     return restrictBelowSidebarLabel(args, labelOffsetRef.current ?? 0);
-  }, []);
+  };
   const suspend = () => {
     for (const controller of controllers.current) controller.suspend();
   };
-  const finishDrag = useCallback((started: boolean) => {
+  const finishDrag = (started: boolean) => {
     sensorRef.current = null;
     contextDragRef.current = null;
     endThreadContextDrag();
@@ -265,11 +242,11 @@ export function SidebarDragScope(props: {
     reservation.current = null;
     setDrag(null);
     setDestination(null);
-  }, []);
-  const attachSensor = useCallback((sensor: SidebarPointerSensor) => {
+  };
+  const attachSensor = (sensor: SidebarPointerSensor) => {
     sensorRef.current = sensor;
-  }, []);
-  const cancelDrag = useCallback(() => sensorRef.current?.cancel(), []);
+  };
+  const cancelDrag = () => sensorRef.current?.cancel();
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -277,46 +254,27 @@ export function SidebarDragScope(props: {
       mounted.current = false;
     };
   }, []);
-  const canonical = useMemo(
-    () =>
-      new Map(
-        Object.values(props.lists)
-          .flat()
-          .map((thread) => [keyOf(thread), thread]),
-      ),
-    [props.lists],
+  const canonical = new Map(
+    Object.values(props.lists)
+      .flat()
+      .map((thread) => [keyOf(thread), thread]),
   );
   const live = useRef({ props, configs, canAccess, canonical });
   useLayoutEffect(() => {
     live.current = { props, configs, canAccess, canonical };
   });
   const { sortInbox } = props;
-  const lists = useMemo(
-    () => projectSidebarDrop(props.lists, hold, sortInbox),
-    [props.lists, hold, sortInbox],
-  );
-  const items = useMemo(
-    () =>
-      buildScopedSidebarItems(lists, {
-        workingExpanded: props.workingExpanded === true,
-        snoozedExpanded: props.snoozedExpanded,
-        settledExpanded: props.settledExpanded,
-        settledLimit: props.settledLimit,
-        routeThreadKey: props.routeThreadKey,
-        ...(props.retainCurrentSettled === undefined
-          ? {}
-          : { retainCurrentSettled: props.retainCurrentSettled }),
-      }),
-    [
-      lists,
-      props.workingExpanded,
-      props.snoozedExpanded,
-      props.settledExpanded,
-      props.settledLimit,
-      props.routeThreadKey,
-      props.retainCurrentSettled,
-    ],
-  );
+  const lists = projectSidebarDrop(props.lists, hold, sortInbox);
+  const items = buildScopedSidebarItems(lists, {
+    workingExpanded: props.workingExpanded === true,
+    snoozedExpanded: props.snoozedExpanded,
+    settledExpanded: props.settledExpanded,
+    settledLimit: props.settledLimit,
+    routeThreadKey: props.routeThreadKey,
+    ...(props.retainCurrentSettled === undefined
+      ? {}
+      : { retainCurrentSettled: props.retainCurrentSettled }),
+  });
   useEffect(() => {
     if (
       drag &&
@@ -324,88 +282,61 @@ export function SidebarDragScope(props: {
     )
       cancelDrag();
   }, [cancelDrag, drag, items, props.enabled]);
-  const draggableKeys = useMemo(
-    () =>
-      new Set(
-        [...canonical.values()]
-          .filter((thread) => {
-            const c = configs.get(thread.environmentId)?.environment.capabilities;
-            return canAccess(thread) && c?.threadPinning === true && c.threadPinReorder === true;
-          })
-          .map(keyOf),
-      ),
-    [canonical, configs, canAccess],
+  const draggableKeys = new Set(
+    [...canonical.values()]
+      .filter((thread) => {
+        const c = configs.get(thread.environmentId)?.environment.capabilities;
+        return canAccess(thread) && c?.threadPinning === true && c.threadPinReorder === true;
+      })
+      .map(keyOf),
   );
-  const activeReorderableKeys = useMemo(
-    () =>
-      new Set(
-        [...canonical.values()]
-          .filter(
-            (thread) =>
-              draggableKeys.has(keyOf(thread)) &&
-              configs.get(thread.environmentId)?.environment.capabilities.threadActiveReorder ===
-                true,
-          )
-          .map(keyOf),
-      ),
-    [canonical, draggableKeys, configs],
+  const activeReorderableKeys = new Set(
+    [...canonical.values()]
+      .filter(
+        (thread) =>
+          draggableKeys.has(keyOf(thread)) &&
+          configs.get(thread.environmentId)?.environment.capabilities.threadActiveReorder === true,
+      )
+      .map(keyOf),
   );
   const pinnedKeysById = props.reservedKeys.pinned;
   const activeKeysById = props.reservedKeys.active;
-  const sectionOf = useCallback(
-    (key: string) =>
-      (Object.keys(props.lists) as SidebarSection[]).find((section) =>
-        props.lists[section]?.some((thread) => keyOf(thread) === key),
-      ),
-    [props.lists],
-  );
-  const planFor = useCallback(
-    (activeKey: string, overId: string): SidebarThreadDropPlan => {
-      const source = canonical.get(activeKey);
-      const section = sectionOf(activeKey);
-      const target = resolveSidebarDropTarget(items, activeKey, overId);
-      if (
-        !props.enabled ||
-        !source ||
-        source.archivedAt !== null ||
-        !section ||
-        !target ||
-        !draggableKeys.has(activeKey)
-      )
-        return { kind: "none" };
-      return planSidebarThreadDrop({
-        activeKey,
-        activeSection: section,
-        activePinned: source.pinnedAt != null,
-        activeSettled: source.settledOverride === "settled",
-        supportsSettlement:
-          configs.get(source.environmentId)?.environment.capabilities.threadSettlement === true,
-        target,
-        pinnedOrder: lists.pinned.map(keyOf),
-        activeOrder: lists.active.map(keyOf),
-        pinnedKeysById,
-        activeKeysById,
-        reorderableKeys: draggableKeys,
-        activeReorderableKeys,
-        activeTimeOrdered: sortInbox !== undefined,
-      });
-    },
-    [
-      canonical,
-      sectionOf,
-      items,
-      props.enabled,
-      draggableKeys,
-      configs,
-      lists,
+  const sectionOf = (key: string) =>
+    (Object.keys(props.lists) as SidebarSection[]).find((section) =>
+      props.lists[section]?.some((thread) => keyOf(thread) === key),
+    );
+  const planFor = (activeKey: string, overId: string): SidebarThreadDropPlan => {
+    const source = canonical.get(activeKey);
+    const section = sectionOf(activeKey);
+    const target = resolveSidebarDropTarget(items, activeKey, overId);
+    if (
+      !props.enabled ||
+      !source ||
+      source.archivedAt !== null ||
+      !section ||
+      !target ||
+      !draggableKeys.has(activeKey)
+    )
+      return { kind: "none" };
+    return planSidebarThreadDrop({
+      activeKey,
+      activeSection: section,
+      activePinned: source.pinnedAt != null,
+      activeSettled: source.settledOverride === "settled",
+      supportsSettlement:
+        configs.get(source.environmentId)?.environment.capabilities.threadSettlement === true,
+      target,
+      pinnedOrder: lists.pinned.map(keyOf),
+      activeOrder: lists.active.map(keyOf),
       pinnedKeysById,
       activeKeysById,
+      reorderableKeys: draggableKeys,
       activeReorderableKeys,
-      sortInbox,
-    ],
-  );
+      activeTimeOrdered: sortInbox !== undefined,
+    });
+  };
   // Dragged threads: the multi-selection when the picked-up row is part of it.
-  const contextDragThreads = useCallback((): ReadonlyArray<ScopedThreadRef> => {
+  const contextDragThreads = (): ReadonlyArray<ScopedThreadRef> => {
     const key = contextDragRef.current?.key ?? null;
     if (key === null) return [];
     const selected = useThreadSelectionStore.getState().selectedThreadKeys;
@@ -414,36 +345,30 @@ export function SidebarDragScope(props: {
       const ref = parseScopedThreadKey(candidate);
       return ref ? [ref] : [];
     });
-  }, []);
-  const pointerOutsideList = useCallback((point: { x: number; y: number }) => {
+  };
+  const pointerOutsideList = (point: { x: number; y: number }) => {
     const bounds = contextDragRef.current;
     return bounds !== null && (point.x < bounds.left || point.x > bounds.right);
-  }, []);
-  const moveContextDrag = useCallback(
-    (point: { x: number; y: number }) => {
-      const outside = pointerOutsideList(point);
-      setContextDrag(outside);
-      if (!outside) {
-        endThreadContextDrag();
-        return false;
-      }
-      const threads = contextDragThreads();
-      const title =
-        live.current.canonical.get(contextDragRef.current?.key ?? "")?.title.trim() || "Thread";
-      moveThreadContextDragGhost(point, { title, count: threads.length });
-      return true;
-    },
-    [contextDragThreads, pointerOutsideList],
-  );
-  const dropContextDrag = useCallback(
-    (point: { x: number; y: number }) => {
-      if (!pointerOutsideList(point)) return false;
-      dropThreadContext(point, contextDragThreads());
-      // Releasing outside the list never reorders, whether or not a composer took the drop.
-      return true;
-    },
-    [contextDragThreads, pointerOutsideList],
-  );
+  };
+  const moveContextDrag = (point: { x: number; y: number }) => {
+    const outside = pointerOutsideList(point);
+    setContextDrag(outside);
+    if (!outside) {
+      endThreadContextDrag();
+      return false;
+    }
+    const threads = contextDragThreads();
+    const title =
+      live.current.canonical.get(contextDragRef.current?.key ?? "")?.title.trim() || "Thread";
+    moveThreadContextDragGhost(point, { title, count: threads.length });
+    return true;
+  };
+  const dropContextDrag = (point: { x: number; y: number }) => {
+    if (!pointerOutsideList(point)) return false;
+    dropThreadContext(point, contextDragThreads());
+    // Releasing outside the list never reorders, whether or not a composer took the drop.
+    return true;
+  };
   const sensors = useSensors(
     useSensor(SidebarPointerSensor, {
       distance: 6,
@@ -591,25 +516,19 @@ export function SidebarDragScope(props: {
       }
     })();
   };
-  const detectCollision = useMemo(
-    () =>
-      createSidebarCollisionDetection((id) => !!drag && planFor(drag.key, id).kind !== "none", {
-        items,
-        activationY: drag?.activationY ?? null,
-      }),
-    [items, drag, planFor],
-  );
-  const collisionDetection = useCallback<CollisionDetection>(
-    (args) => limitSidebarCollisionToScope(detectCollision, scopeBounds)(args),
-    [detectCollision, scopeBounds],
-  );
-  const registerMotion = useCallback(
-    (controller: ReturnType<typeof createSidebarListMotion>, add: boolean) => {
-      if (add) controllers.current.add(controller);
-      else controllers.current.delete(controller);
+  const detectCollision = createSidebarCollisionDetection(
+    (id) => !!drag && planFor(drag.key, id).kind !== "none",
+    {
+      items,
+      activationY: drag?.activationY ?? null,
     },
-    [],
   );
+  const collisionDetection: CollisionDetection = (args) =>
+    limitSidebarCollisionToScope(detectCollision, scopeBounds)(args);
+  const registerMotion = (controller: ReturnType<typeof createSidebarListMotion>, add: boolean) => {
+    if (add) controllers.current.add(controller);
+    else controllers.current.delete(controller);
+  };
   const baselineKey = `${props.enabled}:${props.workingExpanded === true}:${props.snoozedExpanded}:${props.settledExpanded}:${props.settledLimit}:${props.routeThreadKey}`;
   const from = contextDrag ? null : (drag?.section ?? null);
   const dragging = drag !== null;
@@ -770,26 +689,20 @@ export function ScopedSortableThreadRow(props: {
   });
   const { listeners, setNodeRef, transform, transition, isDragging } = sortable;
   const registerNode = scope?.registerNode;
-  const attach = useCallback(
-    (node: HTMLElement | null) => {
-      setNodeRef(node);
-      registerNode?.(key, node);
-    },
-    [setNodeRef, registerNode, key],
-  );
+  const attach = (node: HTMLElement | null) => {
+    setNodeRef(node);
+    registerNode?.(key, node);
+  };
   const contextDrag = scope?.contextDrag === true;
-  const bag = useMemo(
-    () => ({
-      listeners,
-      setNodeRef: attach,
-      transform: contextDrag ? null : transform,
-      // The lifted row normally follows the pointer without a transition.
-      // When it becomes a context ghost, glide its sidebar copy back home.
-      transition: contextDrag && isDragging ? "transform 150ms ease-out" : transition,
-      isDragging: isDragging && !contextDrag,
-    }),
-    [listeners, attach, transform, transition, isDragging, contextDrag],
-  );
+  const bag = {
+    listeners,
+    setNodeRef: attach,
+    transform: contextDrag ? null : transform,
+    // The lifted row normally follows the pointer without a transition.
+    // When it becomes a context ghost, glide its sidebar copy back home.
+    transition: contextDrag && isDragging ? "transform 150ms ease-out" : transition,
+    isDragging: isDragging && !contextDrag,
+  };
   return props.children(
     scope ? bag : undefined,
     scope?.from ? resolveSidebarDropVerb(scope.from, scope.destination) : null,
@@ -812,13 +725,10 @@ export function SidebarDragBoundary(props: {
     animateLayoutChanges: animateSidebarLayoutChanges,
   });
   const registerNode = scope?.registerNode;
-  const attach = useCallback(
-    (node: HTMLElement | null) => {
-      setNodeRef(node);
-      registerNode?.(id, node);
-    },
-    [setNodeRef, registerNode, id],
-  );
+  const attach = (node: HTMLElement | null) => {
+    setNodeRef(node);
+    registerNode?.(id, node);
+  };
   const section =
     props.marker === "pinned-header"
       ? "pinned"
@@ -931,17 +841,14 @@ export function SidebarMotionList(props: { children: ReactNode; className?: stri
     scopeRef.current = scope;
   });
   const controller = useRef<ReturnType<typeof createSidebarListMotion> | null>(null);
-  const attach = useMemo(
-    () => (node: HTMLUListElement | null) => {
-      if (controller.current) {
-        scopeRef.current?.suspend(controller.current, false);
-        controller.current.dispose();
-      }
-      controller.current = node ? createSidebarListMotion(node) : null;
-      if (controller.current) scopeRef.current?.suspend(controller.current, true);
-    },
-    [],
-  );
+  const attach = (node: HTMLUListElement | null) => {
+    if (controller.current) {
+      scopeRef.current?.suspend(controller.current, false);
+      controller.current.dispose();
+    }
+    controller.current = node ? createSidebarListMotion(node) : null;
+    if (controller.current) scopeRef.current?.suspend(controller.current, true);
+  };
   const baseline = useRef(scope?.baselineKey);
   useLayoutEffect(() => {
     if (baseline.current !== scope?.baselineKey) controller.current?.suspend();

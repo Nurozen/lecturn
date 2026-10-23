@@ -32,7 +32,6 @@ import {
   ServerCliPublishIconSourceMissingError,
   ServerCliPublishIconTargetMissingError,
 } from "./cliErrors.ts";
-import { publishPlatformsThenLauncher } from "./publishOrder.ts";
 
 interface PackageJson {
   license: string;
@@ -321,68 +320,12 @@ export const buildPublishManifest = (input: PublishManifestInput): PackageJson =
   };
 };
 
-/** npm scope and launcher name scripts/build-npm-platform-packages.ts emits. */
-const NPM_PLATFORM_PACKAGE_SCOPE = "@lecturn";
-const NPM_LAUNCHER_PACKAGE_NAME = "lecturn";
-
 interface PublishFlags extends PublishCommandConfig {
   readonly appVersion: Option.Option<string>;
   readonly binName: Option.Option<string>;
   readonly requireStave: boolean;
   readonly verbose: boolean;
 }
-
-/**
- * Publishes the tarballs scripts/build-npm-platform-packages.ts produced:
- * every `@lecturn/lecturn-<platform>.tgz` first (concurrently), `lecturn.tgz`
- * (the launcher) last, so the launcher is never installable before the executables it
- * depends on. Tarballs rather than directories because `npm publish <dir>`
- * strips the `node_modules/` the executable loads its native addons from.
- */
-const publishPlatformTarballs = Effect.fn("publishPlatformTarballs")(function* (
-  packagesDirInput: string,
-  config: PublishFlags,
-) {
-  const path = yield* Path.Path;
-  const fs = yield* FileSystem.FileSystem;
-  const packagesDir = path.resolve(packagesDirInput);
-  const scopeDir = path.join(packagesDir, NPM_PLATFORM_PACKAGE_SCOPE);
-  const launcherTarball = path.join(packagesDir, `${NPM_LAUNCHER_PACKAGE_NAME}.tgz`);
-  const platformPrefix = `${NPM_LAUNCHER_PACKAGE_NAME}-`;
-  const platformTarballs = (yield* fs
-    .readDirectory(scopeDir)
-    .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => [])))
-    .filter((entry) => entry.startsWith(platformPrefix) && entry.endsWith(".tgz"))
-    .sort()
-    .map((entry) => path.join(scopeDir, entry));
-  if (platformTarballs.length === 0) {
-    return yield* new ServerCliBuildAssetMissingError({
-      assetPath: path.join(scopeDir, `${platformPrefix}<platform>.tgz`),
-    });
-  }
-  if (!(yield* fs.exists(launcherTarball))) {
-    return yield* new ServerCliBuildAssetMissingError({ assetPath: launcherTarball });
-  }
-
-  const args = ["publish", "--access", config.access, "--tag", config.tag];
-  if (config.provenance) args.push("--provenance");
-  if (config.dryRun) args.push("--dry-run");
-
-  const publish = Effect.fn("publish")(function* (tarball: string) {
-    const spawnCommand = yield* resolveSpawnCommand("npm", [...args, tarball]);
-    yield* Effect.log(`[cli] npm ${args.join(" ")} ${path.basename(tarball)}`);
-    yield* runCommand(
-      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        cwd: packagesDir,
-        stdout: config.verbose ? "inherit" : "ignore",
-        stderr: "inherit",
-        shell: spawnCommand.shell,
-      }),
-    );
-  });
-
-  yield* publishPlatformsThenLauncher({ platformTarballs, launcherTarball, publish });
-});
 
 /**
  * Publishes apps/server itself as the Node-script `lecturn` package: rewrites
@@ -464,12 +407,6 @@ const publishNodePackage = Effect.fn("publishNodePackage")(function* (config: Pu
 const publishCmd = Command.make(
   "publish",
   {
-    packagesDir: Flag.String("packages-dir").pipe(
-      Flag.withDescription(
-        "Output dir of scripts/build-npm-platform-packages.ts. When set, publishes the per-platform executable tarballs and then the launcher; otherwise publishes apps/server as the Node package.",
-      ),
-      Flag.optional,
-    ),
     tag: Flag.String("tag").pipe(Flag.withDefault("latest")),
     access: Flag.String("access").pipe(Flag.withDefault("public")),
     appVersion: Flag.String("app-version").pipe(Flag.optional),
@@ -480,16 +417,8 @@ const publishCmd = Command.make(
     requireStave: Flag.Boolean("require-stave").pipe(Flag.withDefault(false)),
     verbose: Flag.Boolean("verbose").pipe(Flag.withDefault(false)),
   },
-  (config) =>
-    Option.match(config.packagesDir, {
-      onNone: () => publishNodePackage(config),
-      onSome: (packagesDir) => publishPlatformTarballs(packagesDir, config),
-    }),
-).pipe(
-  Command.withDescription(
-    "Publish to npm: the @lecturn/lecturn-<platform> tarballs and then the lecturn launcher with --packages-dir, otherwise the apps/server Node package.",
-  ),
-);
+  publishNodePackage,
+).pipe(Command.withDescription("Publish apps/server to npm as the lecturn Node package."));
 
 const cli = Command.make("cli").pipe(
   Command.withDescription("Lecturn server build & publish CLI."),

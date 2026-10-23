@@ -1,6 +1,6 @@
 import { AccountSurface } from "../components/AccountSurface";
 import { Outlet, createFileRoute, redirect, useLocation } from "@tanstack/react-router";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ArrowLeftIcon, RotateCcwIcon } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
@@ -122,10 +122,10 @@ function SettingsContentLayout() {
       : JSON.stringify(search);
   // Phones unwind to the chat they came from; wider layouts return to the
   // last main app page however many utility pages were visited since.
-  const navigateBackWithinApp = useCallback(() => {
+  const navigateBackWithinApp = () => {
     if (isMobile) backToChat();
     else void navigateToMainApp();
-  }, [backToChat, isMobile, navigateToMainApp]);
+  };
   const viewportRef = usePhoneAuthViewport(!isElectron);
   const [restoreSignal, setRestoreSignal] = useState(0);
   const showRestoreDefaults = location.pathname === "/settings/general";

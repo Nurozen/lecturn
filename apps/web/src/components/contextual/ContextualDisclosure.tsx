@@ -47,10 +47,11 @@ export function ContextualDisclosureCard({
   const { receipt, packet } = disclosure;
   const delivered = receipt.acceptance === "accepted" && receipt.evidenceIncluded;
   async function suppress(guidanceId: string, excluded: boolean) {
-    if (!access.operate || !status.data || busy) return;
+    const statusData = status.data;
+    if (!access.operate || !statusData || busy) return;
     setBusy(true);
     setError(null);
-    try {
+    const attempt = async () => {
       const r = await exclude({
         environmentId,
         input: {
@@ -58,13 +59,14 @@ export function ContextualDisclosureCard({
           threadId,
           guidanceId,
           excluded,
-          expectedRevision: status.data.thread.exclusionRevision,
+          expectedRevision: statusData.thread.exclusionRevision,
         },
       });
       if (r._tag === "Failure") setError(contextualErrorMessage(squashAtomCommandFailure(r)));
-    } finally {
+    };
+    return await attempt().finally(() => {
       setBusy(false);
-    }
+    });
   }
   const groups =
     packet?.groups.filter((group) =>

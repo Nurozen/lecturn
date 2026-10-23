@@ -71,7 +71,7 @@ function RelationSuggestion({
     if (!canOperate || busy || stale) return;
     setBusy(true);
     setError(null);
-    try {
+    const attempt = async () => {
       let result;
       if (action === "combine") {
         if (!other.data) return;
@@ -109,11 +109,14 @@ function RelationSuggestion({
           cause instanceof Error ? cause.message : "The decisions changed. Refresh and try again.",
         );
       } else onChange();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not update this suggestion.");
-    } finally {
-      setBusy(false);
-    }
+    };
+    return await attempt()
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : "Could not update this suggestion.");
+      })
+      .finally(() => {
+        setBusy(false);
+      });
   }
   return (
     <section className="mt-3 rounded-lg border border-border p-3 text-xs">

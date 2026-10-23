@@ -11,7 +11,8 @@
     "modules": [
       "expo.modules.lecturnnativecontrols.LecturnNativeControlsModule",
       "expo.modules.lecturnnativecontrols.LecturnWorkspaceNavigationModule",
-      "expo.modules.lecturnnativecontrols.LecturnKeyboardCommandsModule"
+      "expo.modules.lecturnnativecontrols.LecturnKeyboardCommandsModule",
+      "expo.modules.lecturnnativecontrols.LecturnFoldPostureModule"
     ]
   }
 }

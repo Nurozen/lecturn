@@ -20,6 +20,18 @@ public final class LecturnNativeControlsModule: Module {
       }
       return ["supportsWorkspaceColumns": false]
     }
+    View(LecturnSegmentedControlView.self) {
+      ViewName("SegmentedControl")
+      Events("onSelectionChange")
+      Prop("labels") { (view: LecturnSegmentedControlView, value: [String]) in view.labels = value }
+      Prop("selectedIndex") { (view: LecturnSegmentedControlView, value: Int) in view.selectedIndex = value }
+      Prop("trackColor") { (view: LecturnSegmentedControlView, value: UIColor) in view.trackColor = value }
+      Prop("selectedColor") { (view: LecturnSegmentedControlView, value: UIColor) in view.selectedColor = value }
+      Prop("textColor") { (view: LecturnSegmentedControlView, value: UIColor) in view.textColor = value }
+      Prop("mutedColor") { (view: LecturnSegmentedControlView, value: UIColor) in view.mutedColor = value }
+      Prop("appearance") { (view: LecturnSegmentedControlView, value: String) in view.appearance = value }
+    }
+
     View(LecturnLayoutMetricsView.self) {
       ViewName("LayoutMetrics")
       Events("onMetricsChange")

@@ -9,7 +9,7 @@ import {
   type ThreadNoteListItem,
   type ThreadNoteCreateInput,
 } from "@lecturn/contracts";
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { create } from "zustand";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -173,10 +173,7 @@ export function useThreadNotes(ref: ScopedThreadRef | null) {
   const query = useEnvironmentQuery(atom);
   const pending = useThreadNoteUI((state) => state.pending);
   const saved = query.data?.notes ?? EMPTY_NOTES;
-  const notes = useMemo(
-    () => overlayThreadNotes(saved, pending, environmentId, projectId),
-    [saved, pending, environmentId, projectId],
-  );
+  const notes = overlayThreadNotes(saved, pending, environmentId, projectId);
   useEffect(() => {
     if (!environmentId || !projectId || query.error || query.isPending || !query.data) return;
     const acknowledged = acknowledgedThreadNoteWrites(pending, saved, environmentId, projectId);

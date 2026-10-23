@@ -90,6 +90,9 @@ import Migration0076 from "./Migrations/061_PullRequestReviewGuides.ts";
 // Upstream published this as 62, which Lecturn's ledger already used
 // (ContextualInvalidations), so it runs here as 77.
 import Migration0077 from "./Migrations/062_ThreadFailureLookupIndex.ts";
+// Upstream published this as 63, which Lecturn's ledger already used
+// (ContextualDisplaySummaries), so it runs here as 78.
+import Migration0078 from "./Migrations/063_DropUnusedV1Projections.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -209,6 +212,9 @@ export const migrationEntries = [
   [76, "PullRequestReviewGuides", Migration0076],
   // Upstream 62.
   [77, "ThreadFailureLookupIndex", ThreadFailureLookupIndexCompatibility],
+  // Upstream 63. Idempotent, so a database that already ran it under
+  // upstream's id is safe to run again here.
+  [78, "DropUnusedV1Projections", Migration0078],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

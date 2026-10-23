@@ -150,7 +150,10 @@ describe("runMigrations", () => {
         WHERE type = 'error' AND status = 'failed'
       `;
 
-      assert.deepStrictEqual(yield* runMigrations(), [[77, "ThreadFailureLookupIndex"]]);
+      assert.deepStrictEqual(yield* runMigrations(), [
+        [77, "ThreadFailureLookupIndex"],
+        [78, "DropUnusedV1Projections"],
+      ]);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );

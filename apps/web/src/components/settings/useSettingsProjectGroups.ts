@@ -1,7 +1,4 @@
-import { useMemo } from "react";
-
 import { useClientSettings } from "../../hooks/useSettings";
-import { selectProjectGroupingSettings } from "../../logicalProject";
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { useProjects } from "../../state/entities";
@@ -21,38 +18,27 @@ export function useSettingsProjectGroups(
   const accountScope = useProjectAccountScope(projectKey);
   const segmentation = useSidebarSegmentation();
   const projects = useProjects();
-  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
+  // Read the grouping fields one by one: a selector that builds an object hands back a new
+  // identity on every client settings write, which rebuilds every group and, through the
+  // settings scope, re-renders every settings row.
+  const sidebarProjectGroupingMode = useClientSettings(
+    (settings) => settings.sidebarProjectGroupingMode,
+  );
+  const sidebarProjectGroupingOverrides = useClientSettings(
+    (settings) => settings.sidebarProjectGroupingOverrides,
+  );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { environments } = useEnvironments();
-  const environmentLabelById = useMemo(
-    () =>
-      new Map(
-        environments.map((environment) => [environment.environmentId, environment.label] as const),
-      ),
-    [environments],
-  );
-  return useMemo(
-    () =>
-      buildSettingsProjectGroups({
-        accountScope,
-        segmentation,
-        segmentAccounts,
-        input: {
-          projects,
-          settings: projectGroupingSettings,
-          primaryEnvironmentId,
-          resolveEnvironmentLabel: (environmentId) =>
-            environmentLabelById.get(environmentId) ?? null,
-        },
-      }),
-    [
-      accountScope,
-      segmentAccounts,
-      segmentation,
-      environmentLabelById,
-      primaryEnvironmentId,
-      projectGroupingSettings,
+  const labels = new Map(environments.map((entry) => [entry.environmentId, entry.label]));
+  return buildSettingsProjectGroups({
+    accountScope,
+    segmentation,
+    segmentAccounts,
+    input: {
       projects,
-    ],
-  );
+      settings: { sidebarProjectGroupingMode, sidebarProjectGroupingOverrides },
+      primaryEnvironmentId,
+      resolveEnvironmentLabel: (environmentId) => labels.get(environmentId) ?? null,
+    },
+  });
 }

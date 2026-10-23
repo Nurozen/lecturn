@@ -70,7 +70,7 @@ export function ContextualConflictCard({
     if (!access.operate || busy) return;
     setBusy(true);
     setError(null);
-    try {
+    const attempt = async () => {
       const result = await resolve({
         environmentId,
         input: {
@@ -87,9 +87,10 @@ export function ContextualConflictCard({
       });
       if (result._tag === "Failure")
         setError(contextualErrorMessage(squashAtomCommandFailure(result)));
-    } finally {
+    };
+    return await attempt().finally(() => {
       setBusy(false);
-    }
+    });
   }
   const pending = conflict.state === "awaiting-review" || conflict.state === "possible";
   return (
@@ -198,7 +199,7 @@ export function ContextualPreparationPanel({
     if (!preparation || !access.operate || busy) return;
     setBusy(true);
     setError(null);
-    try {
+    const attempt = async () => {
       const result = await action({
         environmentId,
         input: {
@@ -210,9 +211,10 @@ export function ContextualPreparationPanel({
       });
       if (result._tag === "Failure")
         setError(contextualErrorMessage(squashAtomCommandFailure(result)));
-    } finally {
+    };
+    return await attempt().finally(() => {
       setBusy(false);
-    }
+    });
   }
   if (!available || !preparation) return null;
   const held = preparation.state === "awaiting-conflict-review";

@@ -101,7 +101,7 @@ it.layer(layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory)))(
           yield* repo.save(saveInput(revision, `bounded-${i}`));
           revision++;
         }
-        yield* sql`DELETE FROM projection_state`;
+        yield* sql`DELETE FROM orchestration_v2_projection_metadata`;
         assert.equal((yield* repo.get(identity)).revision, revision);
         assert.equal((yield* repo.activity(identity)).length, 200);
       }),

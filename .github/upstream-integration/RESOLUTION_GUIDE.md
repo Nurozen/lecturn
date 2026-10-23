@@ -356,27 +356,25 @@ from upstream's side.
   bar/toolbar/FAB APIs, text-role tokens and `Dialog.alert` presenter are
   adopted; fork-only screens use `Dialog.alert` too. `GlassSurface` keeps the
   fork's radius 28 continuous curve and glass palette (not `MOBILE_SHAPE.glass`
-  32). `SegmentedControl`: iOS keeps the fork glass pill
-  (`ui/SegmentedControl.tsx`); Android takes upstream's shared capsule
-  (`ui/SegmentedControl.android.tsx`, #20116). Upstream `font-t3-*` utility
+  32). `SegmentedControl` follows upstream's file layout (sync to 16918b57):
+  iOS keeps the fork glass pill in `ui/SegmentedControl.ios.tsx`; the shared
+  `ui/SegmentedControl.tsx` (used by Android) is upstream's flattened capsule
+  (#20163); `ui/SegmentedControl.android.tsx` is gone. Upstream's native iOS
+  view is `LecturnSegmentedControlView`, registered in
+  `lecturn-native-controls` but unused by JS. Upstream `font-t3-*` utility
   classes map to `font-lecturn-*`.
 - **Expo patches.** The fork's `expo-modules-core` (permission registry lock)
   and `expo-notifications` (pending-response delivery) patches move to the
-  versions upstream's Expo resolves (58.0.19 / 58.1.4 at this sync), pinned by
-  overrides. On each Expo bump, diff the patched files across versions and
-  drop a patch only when upstream ships the fix. `expo-widgets` uses upstream's
-  patch plus the fork hunks (Live Activity `accountId`/`getAccountId`, ended
-  activity dismissal); rebase those hunks onto upstream's next patch. The
-  `@58.0.18` patch also renames the `io.github.jakex7.peek` imports in
-  `android/.../notifications/*.kt` to `io.github.expo.peek`: published 58.0.18
-  imports a package that its `peek-emittables:0.3.2` dependency does not ship,
-  so the Android build fails. It also carries upstream's #20131 hunk that gives
-  the Android `CustomNotification` class a throwing `Constructor`:
-  expo-modules-core 58.0.19 rejects a SharedObject `Class` without one, so
-  `WidgetsModule.definition` throws "constructor cannot be null" while the
-  module registry is built and the Android app never starts. 58.0.20 fixes the
-  imports and the constructor upstream, so drop these hunks when the fork
-  moves to 58.0.20 or later.
+  versions upstream's Expo resolves (58.0.22 / 58.1.5 at the 16918b57 sync),
+  pinned by overrides. On each Expo bump, diff the patched files across
+  versions and drop a patch only when upstream ships the fix.
+  `expo-widgets@58.0.20` is upstream's patch plus the fork's Live Activity
+  `accountId`/`getAccountId` hunks (ended-activity dismissal is upstream's own
+  hunk now); rebase those hunks onto upstream's next patch. 58.0.20 ships the
+  `io.github.expo.peek` imports, the `CustomNotification` `Constructor` and the
+  layout-registry realpath, so the fork's 58.0.18 hunks for them are dropped.
+  An override pins `@expo/fingerprint` to its patched version (0.21.5), or
+  Release Smoke's fresh resolution fails with `ERR_PNPM_UNUSED_PATCH`.
 - **`@react-navigation/core` override.** Keep the `pnpm-workspace.yaml` pin at
   or above the core range that `@react-navigation/native` requires (7.5.1
   needs `^7.24.0`; upstream #20131). An older pinned core makes every native
@@ -441,6 +439,44 @@ from upstream's side.
   about the tunnel."; `packages/provider-opencode/src/server/v2/adapter.ts` keeps its
   whole session-fork sentence).
 
+**Upstream changes taken in a Lecturn shape (sync to upstream 16918b57).**
+
+- **React Compiler.** Every file under `apps/web/src` compiles
+  (`reactCompilerCoverage.test.ts` fails on any skip). Fork code follows
+  `lecturn/no-manual-memo` (no `useMemo`/`useCallback`/`"use memo"`), uses
+  `useStableCallback` for handlers leaving large components, and
+  `attempt()...catch().finally()` instead of `try/finally`. Infer mode skips a
+  `use*` function that calls no hooks, so `usePhoneAuthViewport` returns
+  module-level ref callbacks instead of a memoized closure.
+- **Browser tests.** Fork React tests live in the vitest `browser` project
+  (`*.browser.test.tsx`); `react-test-renderer` and jsdom React tests are gone.
+  Mock modules partially with `vi.mock(import(...), original)` and never
+  partially mock `lib/utils` or `ui/*` (an import cycle hangs the page).
+- **ChatView revert.** The fork's inline revert dialog with its untracked-file
+  deletion preview stays; upstream's `RevertConfirmHost` is not taken.
+- **Sidebar drag.** Fork partition and drag stay in `sidebar/SidebarDragScope`;
+  upstream's `useSidebarThreads` and optimistic drop are not taken.
+- **ChatComposer.** The imported-thread provider lock
+  (`unsentImportInstanceId`, `requireExactInstance`) lives inside upstream's
+  `useComposerProviderModel`.
+- **MessagesTimeline.** `CollapsibleUserMessageBody` stays controlled by its
+  parent so citations can expand it.
+- **ConnectOnboardingDialog.** The multi-account request queue stays in effects
+  (time-stamped); the rest is render-phase like upstream.
+- **Mobile app store row (#20422).** Not taken until Lecturn store links exist.
+- **Migrations.** Upstream migration 63 (`DropUnusedV1Projections`) runs as
+  fork id 78.
+- **Legacy database copy.** Upstream's "before 0.1.0" wording is "V1
+  database"/"Lecturn V1" (fork versions are 0.0.x).
+- **bye npm (#20148).** The fork keeps publishing the single `lecturn` npm
+  package through `cli.ts` `publishNodePackage`; upstream's launcher and
+  platform packages are not taken.
+- **Fold posture.** Upstream's Android fold posture module lives in
+  `lecturn-native-controls` as `LecturnFoldPosture*`.
+- **Identity.** The Connect route kind is `"lecturn-connect"`, webhook
+  redaction covers `x-lecturn-relay-*`, and the desktop CLI launcher env is
+  `LECTURN_DESKTOP_CLI_LAUNCHER`.
+
 ## Recurring mechanical conflicts
 
 **Published migration identities are persistent data.** The fork's
@@ -472,7 +508,9 @@ the fork's expected strings. Files:
 then regenerate the lockfile with the repository's package manager. Preserve the
 alchemy patch and fork-pinned dependencies. Inspect incoming scripts before
 execution and use separate worktree dependencies. A stale lockfile is not ready
-for publication.
+for publication. After a lock union, check for a second copy of an Effect
+package (for example `@effect/sql-d1` under alchemy): `infra/relay` typecheck
+fails on the `duplicatePackage` diagnostic.
 
 **Generated files.** Regenerate from resolved source rather than hand-resolving:
 `apps/web/src/routeTree.gen.ts`,

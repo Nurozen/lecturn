@@ -26,21 +26,24 @@ export function DesktopActivityToggle() {
       disabled={pending}
       onClick={async () => {
         setPending(true);
-        try {
+        const attempt = async () => {
           await activity.setEnabled(!enabled);
           setEnabled(!enabled);
           window.dispatchEvent(
             new CustomEvent(DESKTOP_ACTIVITY_ENABLED_EVENT, { detail: !enabled }),
           );
-        } catch (cause) {
-          toastManager.add({
-            type: "error",
-            title: "Could not change activity panel",
-            description: cause instanceof Error ? cause.message : "Try again.",
+        };
+        return await attempt()
+          .catch((cause: unknown) => {
+            toastManager.add({
+              type: "error",
+              title: "Could not change activity panel",
+              description: cause instanceof Error ? cause.message : "Try again.",
+            });
+          })
+          .finally(() => {
+            setPending(false);
           });
-        } finally {
-          setPending(false);
-        }
       }}
     >
       {enabled ? "Hide activity notch" : "Show activity notch"}

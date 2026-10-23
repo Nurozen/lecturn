@@ -1,6 +1,6 @@
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/models";
 import { scopedThreadKey, scopeThreadRef } from "@lecturn/client-runtime/environment";
-import { useCallback, useMemo, useState } from "react";
+import { useState } from "react";
 
 import { composerDraftHasUserContent, useComposerDraftStore } from "../../composerDraftStore";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
@@ -76,11 +76,8 @@ const useAccountSidebarSegments: UseSidebarSegments = <Node extends SegmentSagaN
     NO_SEGMENTS_COLLAPSED,
     SegmentCollapsedSchema,
   );
-  const toggleSegment = useCallback(
-    (segmentId: string) =>
-      setCollapsedSegmentIds((collapsed) => toggleSegmentCollapsed(collapsed, segmentId)),
-    [setCollapsedSegmentIds],
-  );
+  const toggleSegment = (segmentId: string) =>
+    setCollapsedSegmentIds((collapsed) => toggleSegmentCollapsed(collapsed, segmentId));
   const {
     segmentation,
     projects,
@@ -109,51 +106,40 @@ const useAccountSidebarSegments: UseSidebarSegments = <Node extends SegmentSagaN
     setLastScope(scopedProjectKeys);
     setShelves(resetSegmentSettledPages);
   }
-  const shelfActionsOf = useCallback(
-    (segmentId: string): SidebarShelfActions => ({
-      toggleWorkingShelf: () =>
-        setShelves((current) =>
-          changeSegmentShelf(current, segmentId, (shelf) => ({
-            ...shelf,
-            workingExpanded: !(shelf.workingExpanded ?? workingShelfExpanded),
-          })),
-        ),
-      toggleSnoozedShelf: () =>
-        setShelves((current) =>
-          changeSegmentShelf(current, segmentId, (shelf) => ({
-            ...shelf,
-            snoozedExpanded: !(shelf.snoozedExpanded ?? snoozedShelfExpanded),
-          })),
-        ),
-      toggleSettledShelf: () =>
-        setShelves((current) =>
-          changeSegmentShelf(current, segmentId, (shelf) => ({
-            ...shelf,
-            settledExpanded: !(shelf.settledExpanded ?? settledShelfExpanded),
-          })),
-        ),
-      showMoreSettled: () =>
-        setShelves((current) =>
-          changeSegmentShelf(current, segmentId, (shelf) => ({
-            ...shelf,
-            settledVisibleCount:
-              (shelf.settledVisibleCount ?? settledVisibleCount) + settledPageCount,
-          })),
-        ),
-    }),
-    [
-      settledPageCount,
-      settledShelfExpanded,
-      settledVisibleCount,
-      snoozedShelfExpanded,
-      workingShelfExpanded,
-    ],
-  );
+  const shelfActionsOf = (segmentId: string): SidebarShelfActions => ({
+    toggleWorkingShelf: () =>
+      setShelves((current) =>
+        changeSegmentShelf(current, segmentId, (shelf) => ({
+          ...shelf,
+          workingExpanded: !(shelf.workingExpanded ?? workingShelfExpanded),
+        })),
+      ),
+    toggleSnoozedShelf: () =>
+      setShelves((current) =>
+        changeSegmentShelf(current, segmentId, (shelf) => ({
+          ...shelf,
+          snoozedExpanded: !(shelf.snoozedExpanded ?? snoozedShelfExpanded),
+        })),
+      ),
+    toggleSettledShelf: () =>
+      setShelves((current) =>
+        changeSegmentShelf(current, segmentId, (shelf) => ({
+          ...shelf,
+          settledExpanded: !(shelf.settledExpanded ?? settledShelfExpanded),
+        })),
+      ),
+    showMoreSettled: () =>
+      setShelves((current) =>
+        changeSegmentShelf(current, segmentId, (shelf) => ({
+          ...shelf,
+          settledVisibleCount:
+            (shelf.settledVisibleCount ?? settledVisibleCount) + settledPageCount,
+        })),
+      ),
+  });
 
-  const environmentFilters = useMemo(
-    () => (segmentation === null ? null : buildSegmentEnvironmentFilters(segmentation)),
-    [segmentation],
-  );
+  const environmentFilters =
+    segmentation === null ? null : buildSegmentEnvironmentFilters(segmentation);
   // A boolean, so typing in a draft never re-renders the sidebar through here.
   const hasNoAccountDrafts = useComposerDraftStore(
     (store) =>
@@ -165,58 +151,33 @@ const useAccountSidebarSegments: UseSidebarSegments = <Node extends SegmentSagaN
           composerDraftHasUserContent(store.draftsByThreadKey[draftKey]),
       ),
   );
-  const segments = useMemo(
-    () =>
-      segmentation === null || environmentFilters === null
-        ? null
-        : buildSidebarSegmentViews({
-            segmentation,
-            collapsedSegmentIds,
-            projects,
-            pinnedThreads,
-            activeThreads,
-            workingThreads,
-            snoozedThreads,
-            settledThreads,
-            nestedSettledThreads,
-            scopedSagaTree,
-            scopedProjectKeys,
-            environmentFilters,
-            hasNoAccountDrafts,
-            nestSagaProjects,
-            collapsedProjectKeys,
-            settledVisibleCount,
-            workingShelfExpanded,
-            snoozedShelfExpanded,
-            settledShelfExpanded,
-            shelves,
-            isRouteThread: (thread) => threadKeyOf(thread) === routeThreadKey,
-            statusOf,
-          }),
-    [
-      activeThreads,
-      collapsedProjectKeys,
-      collapsedSegmentIds,
-      environmentFilters,
-      hasNoAccountDrafts,
-      nestSagaProjects,
-      nestedSettledThreads,
-      pinnedThreads,
-      projects,
-      routeThreadKey,
-      scopedProjectKeys,
-      scopedSagaTree,
-      segmentation,
-      settledShelfExpanded,
-      settledThreads,
-      settledVisibleCount,
-      shelves,
-      snoozedShelfExpanded,
-      snoozedThreads,
-      workingShelfExpanded,
-      workingThreads,
-    ],
-  );
+  const segments =
+    segmentation === null || environmentFilters === null
+      ? null
+      : buildSidebarSegmentViews({
+          segmentation,
+          collapsedSegmentIds,
+          projects,
+          pinnedThreads,
+          activeThreads,
+          workingThreads,
+          snoozedThreads,
+          settledThreads,
+          nestedSettledThreads,
+          scopedSagaTree,
+          scopedProjectKeys,
+          environmentFilters,
+          hasNoAccountDrafts,
+          nestSagaProjects,
+          collapsedProjectKeys,
+          settledVisibleCount,
+          workingShelfExpanded,
+          snoozedShelfExpanded,
+          settledShelfExpanded,
+          shelves,
+          isRouteThread: (thread) => threadKeyOf(thread) === routeThreadKey,
+          statusOf,
+        });
   return {
     segments,
     unsegmented: input,

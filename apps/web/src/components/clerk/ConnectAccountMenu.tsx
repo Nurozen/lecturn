@@ -5,7 +5,7 @@ import { useAuth, useClerk } from "@clerk/react";
 import { useAtomValue } from "@effect/atom-react";
 import { useLocation } from "@tanstack/react-router";
 import { CheckIcon, LogInIcon, LogOutIcon, PlusIcon, PaletteIcon, UserCogIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { connectAccountProfilesAtom } from "../../cloud/connectAccounts";
@@ -67,30 +67,28 @@ function AccountAvatar({
  */
 function useConnectProfilePages() {
   const [mounted, setMounted] = useState<ReadonlyMap<string, HTMLDivElement>>(new Map());
-  const customPages = useMemo(() => {
-    const slot = (key: string) => ({
-      mount: (element: HTMLDivElement) =>
-        setMounted((current) => new Map(current).set(key, element)),
-      unmount: () =>
-        setMounted((current) => {
-          const next = new Map(current);
-          next.delete(key);
-          return next;
-        }),
-    });
-    return CONNECT_PROFILE_PAGES.map(({ label, url }) => {
-      const page = slot(`page:${url}`);
-      const icon = slot(`icon:${url}`);
-      return {
-        label,
-        url,
-        mount: page.mount,
-        unmount: page.unmount,
-        mountIcon: icon.mount,
-        unmountIcon: icon.unmount,
-      };
-    });
-  }, []);
+  const slot = (key: string) => ({
+    mount: (element: HTMLDivElement) => setMounted((current) => new Map(current).set(key, element)),
+    unmount: () =>
+      setMounted((current) => {
+        const next = new Map(current);
+        next.delete(key);
+        return next;
+      }),
+  });
+  const customPages = CONNECT_PROFILE_PAGES.map(({ label, url }) => {
+    const page = slot(`page:${url}`);
+    const icon = slot(`icon:${url}`);
+    return {
+      label,
+      url,
+      mount: page.mount,
+      unmount: page.unmount,
+      mountIcon: icon.mount,
+      unmountIcon: icon.unmount,
+    };
+  });
+
   const portals = CONNECT_PROFILE_PAGES.flatMap(({ url, Icon, render }) => {
     const page = mounted.get(`page:${url}`);
     const icon = mounted.get(`icon:${url}`);

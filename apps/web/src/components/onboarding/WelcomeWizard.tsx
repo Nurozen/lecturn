@@ -33,7 +33,7 @@ import {
   MonitorIcon,
   TerminalIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isElectron } from "../../env";
 
 import { type TerminalOutputState } from "@lecturn/client-runtime/state/terminal";
@@ -131,7 +131,9 @@ export function WelcomeWizard({
   const [step, setStep] = useState<WizardStep>(resumeEnvironmentId ? "agents" : "connection");
   const { environments } = useEnvironments();
   const [selection, setSelection] = useState<ReadonlySet<EnvironmentId> | null>(null);
-  const autoSelectedComputers = useRef(new Set<EnvironmentId>());
+  // One registry for the wizard's lifetime, shared with the connect list, so a computer is
+  // auto-selected once even after the user unchecks it.
+  const [autoSelectedComputers] = useState(() => new Set<EnvironmentId>());
   const previousCatalogIds = useRef<ReadonlySet<EnvironmentId>>(new Set());
   const [setupIds, setSetupIds] = useState<readonly EnvironmentId[]>(
     resumeEnvironmentId ? [resumeEnvironmentId] : [],
@@ -143,7 +145,7 @@ export function WelcomeWizard({
   useEffect(() => {
     const catalogIds = new Set(environments.map((environment) => environment.environmentId));
     const previous = previousCatalogIds.current;
-    const seen = new Set(autoSelectedComputers.current);
+    const seen = new Set(autoSelectedComputers);
     for (const environment of environments) {
       if (!environment.entry.enabled) seen.add(environment.environmentId);
     }
@@ -151,8 +153,8 @@ export function WelcomeWizard({
       reconcileOnboardingComputers(current ?? new Set(), catalogIds, previous, seen),
     );
     previousCatalogIds.current = catalogIds;
-    for (const id of catalogIds) autoSelectedComputers.current.add(id);
-  }, [environments]);
+    for (const id of catalogIds) autoSelectedComputers.add(id);
+  }, [autoSelectedComputers, environments]);
   const selectedIds =
     selection ?? new Set(environments.map((environment) => environment.environmentId));
   const scans = useProjectScans(step === "import" ? setupIds : NO_ENVIRONMENTS);
@@ -166,59 +168,60 @@ export function WelcomeWizard({
     setStep("agents");
   };
   const stageIndex = step === "agents" ? 1 : step === "import" ? 2 : 0;
-  const finish = useCallback(
-    (projectRef?: ScopedProjectRef, importWarning?: string, importedThreadCount = 0) => {
-      if (finishingPromiseRef.current !== null) return finishingPromiseRef.current;
-      if (completionErrorToastIdRef.current !== null) {
-        toastManager.close(completionErrorToastIdRef.current);
-        completionErrorToastIdRef.current = null;
-      }
+  const finish = (
+    projectRef?: ScopedProjectRef,
+    importWarning?: string,
+    importedThreadCount = 0,
+  ) => {
+    if (finishingPromiseRef.current !== null) return finishingPromiseRef.current;
+    if (completionErrorToastIdRef.current !== null) {
+      toastManager.close(completionErrorToastIdRef.current);
+      completionErrorToastIdRef.current = null;
+    }
 
-      const completion = completeOnboarding()
-        .then(async () => {
-          if (completionErrorToastIdRef.current !== null) {
-            toastManager.close(completionErrorToastIdRef.current);
-            completionErrorToastIdRef.current = null;
-          }
-          await onDone(projectRef);
-          if (importWarning) {
-            toastManager.add({
-              type: "warning",
-              title: "Some history was not imported",
-              description: importWarning,
-              timeout: 0,
-            });
-          } else if (importedThreadCount > 0) {
-            toastManager.add({
-              type: "success",
-              title: `Imported ${importedThreadCount} ${importedThreadCount === 1 ? "thread" : "threads"}`,
-            });
-          }
-          return true;
-        })
-        .catch(() => {
-          const errorToast = {
-            type: "error",
-            title: "Could not finish setup",
-            description: "Your settings could not be saved. Try again.",
-          } as const;
-          if (completionErrorToastIdRef.current === null) {
-            completionErrorToastIdRef.current = toastManager.add(errorToast);
-          } else {
-            toastManager.update(completionErrorToastIdRef.current, errorToast);
-          }
-          return false;
-        })
-        .finally(() => {
-          if (finishingPromiseRef.current === completion) {
-            finishingPromiseRef.current = null;
-          }
-        });
-      finishingPromiseRef.current = completion;
-      return completion;
-    },
-    [completeOnboarding, onDone],
-  );
+    const completion = completeOnboarding()
+      .then(async () => {
+        if (completionErrorToastIdRef.current !== null) {
+          toastManager.close(completionErrorToastIdRef.current);
+          completionErrorToastIdRef.current = null;
+        }
+        await onDone(projectRef);
+        if (importWarning) {
+          toastManager.add({
+            type: "warning",
+            title: "Some history was not imported",
+            description: importWarning,
+            timeout: 0,
+          });
+        } else if (importedThreadCount > 0) {
+          toastManager.add({
+            type: "success",
+            title: `Imported ${importedThreadCount} ${importedThreadCount === 1 ? "thread" : "threads"}`,
+          });
+        }
+        return true;
+      })
+      .catch(() => {
+        const errorToast = {
+          type: "error",
+          title: "Could not finish setup",
+          description: "Your settings could not be saved. Try again.",
+        } as const;
+        if (completionErrorToastIdRef.current === null) {
+          completionErrorToastIdRef.current = toastManager.add(errorToast);
+        } else {
+          toastManager.update(completionErrorToastIdRef.current, errorToast);
+        }
+        return false;
+      })
+      .finally(() => {
+        if (finishingPromiseRef.current === completion) {
+          finishingPromiseRef.current = null;
+        }
+      });
+    finishingPromiseRef.current = completion;
+    return completion;
+  };
 
   return (
     <Dialog open disablePointerDismissal onOpenChange={(_, event) => event.cancel()}>
@@ -258,7 +261,7 @@ export function WelcomeWizard({
               <ConnectionStep
                 expandPairingInitially={!localAvailable && !hasCloudPublicConfig()}
                 selectedIds={selectedIds}
-                autoSelectedComputers={autoSelectedComputers.current}
+                autoSelectedComputers={autoSelectedComputers}
                 onSelectionChange={setSelection}
                 onToggleEnvironment={(environmentId, checked) =>
                   setSelection((current) => {
@@ -473,7 +476,7 @@ function ConnectAccountOption({
   const { openAuthPrompt } = useLecturnConnectAuthPrompt();
   const [expanded, setExpanded] = useState(true);
   const [discoveryReady, setDiscoveryReady] = useState(false);
-  const onDiscoveryReady = useCallback(() => setDiscoveryReady(true), []);
+  const onDiscoveryReady = () => setDiscoveryReady(true);
 
   return (
     <div className="rounded-lg border border-border bg-background">
@@ -742,7 +745,7 @@ function ConnectedAgentsStep({
     if (connected) void refreshProviders({ environmentId, input: {} });
   }, [connected, environmentId, refreshProviders]);
 
-  const byDriver = useMemo(() => selectOnboardingProvidersByDriver(providers), [providers]);
+  const byDriver = selectOnboardingProvidersByDriver(providers);
 
   const primaryAgents = PRIMARY_AGENT_DRIVERS.flatMap((driver) => {
     const instances =
@@ -1078,10 +1081,7 @@ function AgentInstallTerminal({
   const setupGenerationRef = useRef(0);
   const activeSetupGenerationRef = useRef<number | null>(null);
   const [terminalId] = useState(() => `onboarding-${driver}-${randomUUID()}`);
-  const threadRef = useMemo(
-    () => scopeThreadRef(environmentId, threadId),
-    [environmentId, threadId],
-  );
+  const threadRef = scopeThreadRef(environmentId, threadId);
   const [setupAttempt, setSetupAttempt] = useState(0);
   const [setupState, setSetupState] = useState<
     "preparing" | "ready" | "openFailed" | "writeFailed"
@@ -1095,6 +1095,7 @@ function AgentInstallTerminal({
     const generation = setupGenerationRef.current + 1;
     setupGenerationRef.current = generation;
     activeSetupGenerationRef.current = generation;
+    // oxlint-disable-next-line react/set-state-in-effect -- A retry or a new command reopens the terminal, which shows as preparing until the open settles.
     setSetupState("preparing");
     setSessionEnded(false);
     setOutput(null);
@@ -1156,6 +1157,7 @@ function AgentInstallTerminal({
     environmentId,
     openTerminal,
     providerInstanceId,
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Retry bumps setupAttempt to open the terminal again.
     setupAttempt,
     terminalId,
     threadId,
@@ -1310,6 +1312,7 @@ function ImportStep({
           project.environmentId === landingProject.environmentId,
       )
     ) {
+      // oxlint-disable-next-line react/set-state-in-effect -- The landing project is known only once the projects subscription delivers it.
       setLandingProject(null);
       void onDone(landingProject, importWarningRef.current, importedThreadCountRef.current).then(
         (completed) => {
@@ -1319,23 +1322,16 @@ function ImportStep({
     }
   }, [landingProject, onDone, projects, setIsImporting]);
 
-  const { available: candidates, recent } = useMemo(
-    () =>
-      partitionOnboardingProjects(
-        scans.flatMap((scan) =>
-          (scan.data?.candidates ?? []).map((candidate) => ({
-            ...candidate,
-            environmentId: scan.environmentId,
-            key: onboardingProjectKey(scan.environmentId, candidate.path),
-          })),
-        ),
-      ),
-    [scans],
+  const { available: candidates, recent } = partitionOnboardingProjects(
+    scans.flatMap((scan) =>
+      (scan.data?.candidates ?? []).map((candidate) => ({
+        ...candidate,
+        environmentId: scan.environmentId,
+        key: onboardingProjectKey(scan.environmentId, candidate.path),
+      })),
+    ),
   );
-  const selectedKeys = useMemo(
-    () => selectedPaths ?? new Set(recent.map((candidate) => candidate.key)),
-    [selectedPaths, recent],
-  );
+  const selectedKeys = selectedPaths ?? new Set(recent.map((candidate) => candidate.key));
   const selected = candidates.filter((candidate) => selectedKeys.has(candidate.key));
 
   const canImport = selected.every((candidate) =>
@@ -1633,7 +1629,7 @@ function ImportCandidateList({
   readonly selectedKeys: ReadonlySet<string>;
   readonly onSelectionChange: (next: ReadonlySet<string>) => void;
 }) {
-  const { repositories, other } = useMemo(() => groupOnboardingProjects(candidates), [candidates]);
+  const { repositories, other } = groupOnboardingProjects(candidates);
   const setKeys = (keys: ReadonlyArray<string>, checked: boolean) => {
     const next = new Set(selectedKeys);
     for (const key of keys) {

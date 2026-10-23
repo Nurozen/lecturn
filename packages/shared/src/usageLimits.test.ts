@@ -510,6 +510,7 @@ describe("pools", () => {
           serverConfig:
             i === 1
               ? {
+                  providers: [],
                   usageLimitSources: [
                     {
                       ...source,
@@ -593,6 +594,7 @@ describe("pools", () => {
         {
           ...laptop,
           serverConfig: {
+            providers: [],
             usageLimitSources: [{ ...source, accounts: [withoutEmail("a.json", "ws-1")] }],
           },
         },
@@ -602,6 +604,7 @@ describe("pools", () => {
         {
           ...laptop,
           serverConfig: {
+            providers: [],
             usageLimitSources: [{ ...source, accounts: [withoutEmail("a.json", "ws-2")] }],
           },
         },
@@ -692,6 +695,7 @@ describe("pools", () => {
         {
           ...laptop,
           serverConfig: {
+            providers: [],
             usageLimitSources: [
               { ...hub, accounts: [seat, { ...seat, driver: ProviderDriverKind.make("codex") }] },
             ],
@@ -703,6 +707,7 @@ describe("pools", () => {
         {
           entry: { target: { label: "Desktop" } },
           serverConfig: {
+            providers: [],
             usageLimitSources: [
               {
                 ...hub,
@@ -748,6 +753,7 @@ describe("pools", () => {
         {
           ...laptop,
           serverConfig: {
+            providers: [],
             usageLimitSources: [
               {
                 ...source,
@@ -791,13 +797,17 @@ describe("pools", () => {
     const input = new Map([
       [
         EnvironmentId.make("env-a"),
-        { ...laptop, serverConfig: { usageLimitSources: [{ ...source, accounts: [seat] }] } },
+        {
+          ...laptop,
+          serverConfig: { providers: [], usageLimitSources: [{ ...source, accounts: [seat] }] },
+        },
       ],
       [
         EnvironmentId.make("env-b"),
         {
           entry: { target: { label: "Desktop" } },
           serverConfig: {
+            providers: [],
             usageLimitSources: [
               {
                 ...source,
@@ -842,7 +852,10 @@ describe("pools", () => {
           new Map([
             [
               EnvironmentId.make("env-a"),
-              { ...laptop, serverConfig: { usageLimitSources: [{ ...source, accounts }] } },
+              {
+                ...laptop,
+                serverConfig: { providers: [], usageLimitSources: [{ ...source, accounts }] },
+              },
             ],
           ]),
         ),
@@ -1161,6 +1174,7 @@ describe("collectLimitNotices", () => {
           {
             ...laptop,
             serverConfig: {
+              providers: [],
               usageLimitSources: [
                 {
                   ...hub,
@@ -1202,6 +1216,7 @@ describe("collectLimitNotices", () => {
         {
           ...laptop,
           serverConfig: {
+            providers: [],
             usageLimitSources: [
               {
                 ...hub,
@@ -1235,7 +1250,10 @@ describe("collectLimitNotices", () => {
           },
         },
       ],
-      [EnvironmentId.make("env-b"), { entry: { target: { label: "Desktop" } }, serverConfig: {} }],
+      [
+        EnvironmentId.make("env-b"),
+        { entry: { target: { label: "Desktop" } }, serverConfig: { providers: [] } },
+      ],
     ]);
     expect(collectLimitAccounts(input)).toEqual([]);
     expect(collectLimitNotices(input)).toEqual([

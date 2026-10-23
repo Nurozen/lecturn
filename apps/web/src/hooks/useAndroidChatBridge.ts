@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { androidChatSnapshot, createAndroidChatPublisher } from "../lib/androidChatWidget";
 
 export function useAndroidChatBridge({
@@ -16,7 +16,7 @@ export function useAndroidChatBridge({
   } | null>(null);
   const pageActive = useRef(true);
   const current = useRef<{ scope: string; thread: typeof thread } | null>(null);
-  const publishCurrent = useCallback(() => {
+  const publishCurrent = () => {
     if (!pageActive.current || !current.current) return;
     const { scope, thread } = current.current;
     const host = window.symbaHost;
@@ -28,7 +28,7 @@ export function useAndroidChatBridge({
       client.update(null);
     }
     publisher.current.client.update(thread ? androidChatSnapshot(thread) : null);
-  }, []);
+  };
   useEffect(() => {
     current.current = { scope, thread };
     publishCurrent();

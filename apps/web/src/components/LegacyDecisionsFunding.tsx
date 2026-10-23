@@ -103,7 +103,7 @@ function FundingControls({
     if (!state) return;
     setBusy(true);
     setError(null);
-    try {
+    const attempt = async () => {
       if (operation === "challenge" && ensureLink && !(await ensureLink())) {
         setError(
           "Link this host to your signed-in Lecturn account before requesting funding. Check account settings if sign-in is needed.",
@@ -126,15 +126,18 @@ function FundingControls({
       setConfirmRevoke(false);
       funding.refresh();
       onChange();
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Funding could not be updated. Refresh and try again.",
-      );
-    } finally {
-      setBusy(false);
-    }
+    };
+    return await attempt()
+      .catch((cause: unknown) => {
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "Funding could not be updated. Refresh and try again.",
+        );
+      })
+      .finally(() => {
+        setBusy(false);
+      });
   }
   return (
     <div className="space-y-2 rounded-lg border border-border/60 p-3" aria-label="Decision funding">
