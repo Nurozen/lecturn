@@ -32,14 +32,10 @@ export function useAgentNotificationNavigation(pathname: string): void {
   const initialResponseRead = useRef(false);
   const notificationTapRevision = useRef(0);
   const observedLinkRevision = useRef(0);
-  // Read through a ref so the native handler registered once below sees the
-  // current route without re-registering on every navigation.
   const deepLinkOnScreen = useRef<string | null>(null);
   useLayoutEffect(() => {
     const thread = threadDeepLinkOnScreen(pathname);
     deepLinkOnScreen.current = thread;
-    // Android alerts are built natively from FCM data, so update the native
-    // route at commit time alongside the iOS handler's route reference.
     setAndroidThreadOnScreen(thread);
   }, [pathname]);
 

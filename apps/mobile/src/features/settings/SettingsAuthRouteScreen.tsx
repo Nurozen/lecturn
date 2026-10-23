@@ -7,7 +7,6 @@ import { SettingsAddAccountAuthContent } from "./SettingsAddAccountRouteScreen";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { LecturnConnectProfilePage } from "../cloud/LecturnConnectProfilePage";
 
-// Custom rows in Clerk's native profile. Mirrors the web UserButton pages.
 function userProfileCustomPages(accountId: string): UserProfileCustomPage[] {
   return [
     {

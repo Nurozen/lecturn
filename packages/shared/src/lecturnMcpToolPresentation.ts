@@ -84,7 +84,6 @@ function tool(
 
 const LECTURN_MCP_SERVER_ALIASES = new Set(["lecturn"]);
 
-// Cards, activity rows, summaries, and provider identity recovery share this inventory.
 const LECTURN_MCP_TOOLS: Readonly<Record<string, LecturnMcpToolDefinition>> = {
   link_pull_request: tool(
     ["Link", "Linking", "Linked", "a pull request"],
@@ -371,10 +370,6 @@ const LECTURN_MCP_TOOLS: Readonly<Record<string, LecturnMcpToolDefinition>> = {
   html_render: tool(["Render", "Rendering", "Rendered", "an HTML page"], "html-render"),
 };
 
-/**
- * The Lecturn orchestration tool inventory, used to gate loose name matching on
- * both the server (ACP MCP identity recovery) and the client (logo branding).
- */
 export const LECTURN_MCP_TOOL_NAMES: ReadonlySet<string> = new Set(Object.keys(LECTURN_MCP_TOOLS));
 
 function normalizeLecturnMcpToolLabel(value: string): string {
@@ -422,7 +417,6 @@ function resolveLecturnMcpToolName(value: string): string | null {
   return longest;
 }
 
-/** The bare Lecturn tool name (`html_render`) for any provider's spelling of it. */
 export function resolveLecturnMcpToolId(toolName: string | null | undefined): string | null {
   const name = toolName == null ? null : resolveLecturnMcpToolName(toolName);
   return name !== null && Object.hasOwn(LECTURN_MCP_TOOLS, name) ? name : null;

@@ -25,7 +25,6 @@ export function citationSourceReadiness(input: {
   return input.listReady ? "ready" : "wait";
 }
 
-/** Fetch, unfold, and mount the source before its measured quote owns scrolling. */
 export function useAssistantCitationTarget({
   request,
   entries,

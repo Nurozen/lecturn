@@ -22,8 +22,6 @@ const isShelfHeader = (item: SidebarListItem | undefined) =>
     item.marker === "snoozed-header" ||
     item.marker === "settled-header");
 
-/** Keep the lifted card below the Pins label, including when Pins is empty.
- * The container rect follows scrolling; the offset is measured once at pickup. */
 export function restrictBelowSidebarLabel(
   { transform, containerNodeRect, draggingNodeRect }: Parameters<Modifier>[0],
   offset: number,
@@ -33,8 +31,6 @@ export function restrictBelowSidebarLabel(
   return transform.y < minimumY ? { ...transform, y: minimumY } : transform;
 }
 
-/** Reject the nearest unsupported target without selecting another section.
- * Recreate this detector when drop eligibility changes. */
 export function createSidebarCollisionDetection(
   isValidTarget: (id: string) => boolean,
   options: {
@@ -121,14 +117,10 @@ export function limitSidebarCollisionToScope(
   };
 }
 
-/** Preview the committed section layout without moving or mounting DOM nodes.
- * A zero scaleY marks rows/markers to hide while retaining their measured nodes. */
 export function createSidebarSortingStrategy(input: {
   items: readonly SidebarListItem[];
-  /** Suspend the reorder preview while the thread is dragged out as context. */
   enabled?: boolean;
   settledOrder: readonly string[];
-  /** Time-ordered inbox (Working beta): where the lifted row would land. */
   activeOrder?: readonly string[];
   settledExpanded: boolean;
   settledVisibleCount?: number;
@@ -138,8 +130,6 @@ export function createSidebarSortingStrategy(input: {
   slimHeight?: number;
   scale?: number;
   gap?: number;
-  /** Space each pinned boundary opens for its label while dragging. The
-   * markers stay zero height at rest, so nothing is reserved until pickup. */
   boundaryLabelHeight?: number;
 }) {
   if (input.enabled === false) {
@@ -180,7 +170,6 @@ export function createSidebarSortingStrategy(input: {
       else slimHeight ??= rects[index]?.height;
       if (item.key !== active.key) groups[item.section].push(item);
     }
-    // Cards are 4.875rem + 0.25rem padding; slim rows/placeholders are h-9.
     const scale =
       input.scale ??
       (slimHeight !== undefined ? slimHeight / 36 : (headerScale ?? (cardHeight ?? 82) / 82));
@@ -258,8 +247,6 @@ export function createSidebarSortingStrategy(input: {
     const shelfRect = rects[firstShelf];
     const beforeShelf = rects[firstShelf - 1];
     const lastRect = rects.at(-1);
-    // Consume the shelf's auto margin as drag labels and resized rows need
-    // room, keeping the combined shelves at their measured bottom.
     let shelfSpace =
       shelfRect && beforeShelf && lastRect && shelfRect.top > beforeShelf.bottom + gap
         ? Math.max(

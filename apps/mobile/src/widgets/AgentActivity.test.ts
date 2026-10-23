@@ -344,9 +344,6 @@ describe("AgentActivity widget layout", () => {
     const layout = AgentActivity(
       {
         ...props,
-        // The server subtitle keys off the newest terminal row (completed
-        // here); the layout must still read Failed everywhere so the header
-        // text never disagrees with the tint, count slots, or minimal glyph.
         subtitle: "Agent work completed",
         activeCount: 0,
         activities: [

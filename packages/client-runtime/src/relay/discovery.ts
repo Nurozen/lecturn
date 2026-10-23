@@ -452,10 +452,6 @@ export const make = Effect.fn("RelayEnvironmentDiscovery.make")(function* () {
             const changed = typeof reason === "string" ? undefined : reason.accountIds;
             yield* Ref.set(offlineReportFingerprints, new Map());
             yield* forgetAccounts(changed);
-            // Refresh proactively — this wakeup fires when a session activates
-            // (sign-in or cold start), and the list should be populated before
-            // any screen asks for it. A signed-out refresh settles back to the
-            // clean empty state.
             yield* refreshAccounts(changed).pipe(Effect.forkScoped);
           })
         : Effect.void,

@@ -1,10 +1,3 @@
-/**
- * PiTextGeneration — commit messages, PR content, branch names, thread titles
- * and Lecturn workflow summaries generated through an ephemeral
- * `pi --mode rpc --no-session` process.
- * No session file is written; the user's Pi configuration (default model,
- * auth, custom providers) still applies.
- */
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -46,7 +39,6 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
         mcpSession: undefined,
         extensionPath: undefined,
         ephemeral: true,
-        // No user is present to answer a text-generation extension dialog.
         disableExtensions: true,
         // Background naming/content helpers must never mutate the workspace.
         disableTools: true,
@@ -69,9 +61,6 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
           : cwd;
       const connection = yield* makePiRpcConnection({
         command: piSettings.binaryPath || "pi",
-        // Extensions and tools are disabled because no user is present to
-        // answer a dialog and background text generation is read-only. User
-        // model config and auth still apply.
         args: launch.args,
         cwd: commandCwd,
         env: launch.env,

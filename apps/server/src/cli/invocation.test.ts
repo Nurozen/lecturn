@@ -74,7 +74,6 @@ it("formats the requested subcommand", () => {
 });
 
 it.layer(NodeServices.layer)("root CLI commands", (it) => {
-  /** `sudo lecturn browser setup` as this process would render it, with `lecturn` on PATH or not. */
   const rootCommand = (input: {
     readonly node: string;
     readonly entry: string;
@@ -90,7 +89,6 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
       Effect.provideService(HostProcess.Environment, { PATH: input.path ?? "", ...input.env }),
     );
 
-  /** A directory holding an executable `lecturn`, to stand in for one on PATH. */
   const pathWithLecturn = Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -133,13 +131,12 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
         entry: "/tmp/.mount_Lecturnabc/resources/app.asar/apps/server/dist/bin.mjs",
         env: { LECTURN_CLI_PATH: shim },
       };
-      // The desktop app's shim, quoted for the shell and run as root as is.
+
       expect(yield* rootCommand(desktop)).toBe(`sudo '${shim}' browser setup`);
-      // A `lecturn` the person put on PATH still wins.
       expect(yield* rootCommand({ ...desktop, path: yield* pathWithLecturn })).toBe(
         'sudo env "PATH=$PATH" lecturn browser setup',
       );
-      // A standalone binary names itself.
+
       expect(
         yield* rootCommand({
           node: "/opt/lecturn/lecturn",
@@ -147,7 +144,6 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
           executable: true,
         }),
       ).toBe("sudo /opt/lecturn/lecturn browser setup");
-      // A stale shim path, then no launcher at all, fall back to plain `lecturn`.
       expect(
         yield* rootCommand({ ...desktop, env: { LECTURN_CLI_PATH: path.join(home, "gone") } }),
       ).toBe('sudo env "PATH=$PATH" lecturn browser setup');

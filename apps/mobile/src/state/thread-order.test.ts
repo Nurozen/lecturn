@@ -39,7 +39,6 @@ vi.mock("./use-thread-outbox", async () => {
   return { queuedThreadKeysAtom: Atom.make(new Set<string>()).pipe(Atom.keepAlive) };
 });
 
-// The mocked shell source is writable so tests can deliver canonical upserts.
 const shellsAtom = environmentThreadShells.threadShellsAtom as Atom.Writable<
   readonly EnvironmentThreadShell[],
   readonly EnvironmentThreadShell[]
@@ -51,8 +50,6 @@ const queuedKeysAtom = queuedThreadKeysAtom as Atom.Writable<
 >;
 
 function fixture() {
-  // The shared section helper also reads lineage/settled/snooze fields, so
-  // partial casts break when it grows — build complete shells instead.
   const rows = ["a", "b"].map((id, index) =>
     makeThreadShellFixture({
       id: ThreadId.make(id),

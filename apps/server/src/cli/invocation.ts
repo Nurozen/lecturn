@@ -35,7 +35,6 @@ export function formatCliCommand(input: {
   return `lecturn ${input.subcommand}`;
 }
 
-/** `formatCliCommand` against this process's real entry path and version. */
 export const resolveCliCommand = (subcommand: string) =>
   Effect.map(HostProcess.Arguments, (processArguments) =>
     formatCliCommand({
@@ -45,7 +44,6 @@ export const resolveCliCommand = (subcommand: string) =>
     }),
   );
 
-/** Quotes `value` for a POSIX shell when it needs it. */
 const shellWord = (value: string) =>
   /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replaceAll("'", `'"'"'`)}'`;
 
@@ -106,9 +104,8 @@ export const resolveHostCliCommand = (subcommand: string, args: ReadonlyArray<st
   });
 
 /**
- * `lecturn <subcommand>` as root, for setup a person runs once on the host. `sudo`
- * resets PATH on most distributions, which drops a user-installed Node (nvm,
- * fnm, a tarball) and with it a global `lecturn`, so the command carries
+ * `sudo` resets PATH on most distributions, which drops a user-installed Node
+ * (nvm, fnm, a tarball) and with it a global `lecturn`, so the command carries
  * PATH through unless Node is on root's PATH too. An absolute launcher needs
  * neither.
  */
@@ -123,7 +120,6 @@ export const resolveRootCliCommand = (subcommand: string) =>
     return systemNode ? `sudo ${command}` : `sudo env "PATH=$PATH" ${command}`;
   });
 
-/** Debian and Ubuntu's sudo `secure_path`, minus snap. */
 const ROOT_PATH_DIRECTORIES = [
   "/usr/local/sbin",
   "/usr/local/bin",

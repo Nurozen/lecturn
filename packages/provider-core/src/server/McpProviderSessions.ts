@@ -1,10 +1,3 @@
-/**
- * The Lecturn MCP credential each thread's provider session should expose to its
- * agent. The session manager writes it before a session starts; adapters read
- * it when they build provider launch options.
- *
- * @module provider-core/server/McpProviderSessions
- */
 import type { ThreadId } from "@lecturn/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

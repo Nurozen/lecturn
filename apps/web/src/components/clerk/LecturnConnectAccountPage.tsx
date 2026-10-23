@@ -7,9 +7,8 @@ import { CONNECT_PROFILE_PAGES } from "./connectProfilePages";
 type PortalTargets = Readonly<Record<string, HTMLDivElement | undefined>>;
 
 /**
- * Opens the Clerk account modal on the Lecturn Connect page from outside the
- * account menu. Clerk mounts custom pages into DOM nodes it owns, so the caller
- * must keep `portals` rendered for as long as the modal can be open.
+ * Clerk mounts custom pages into DOM nodes it owns, so the caller must keep `portals` rendered for
+ * as long as the modal can be open.
  */
 export function useLecturnConnectAccountPage(): {
   readonly open: (() => void) | null;

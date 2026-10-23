@@ -4,9 +4,6 @@ import { withUniwind } from "uniwind";
 
 const ThemedPath = withUniwind(Path);
 
-/**
- * Lecturn illuminated book mark.
- */
 export function LecturnWordmark(props: {
   readonly height: number;
   readonly color?: ColorValue;

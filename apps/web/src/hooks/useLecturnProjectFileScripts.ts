@@ -12,23 +12,11 @@ import { useProjectFileQuery } from "~/components/files/projectFilesQueryState";
 const NO_SCRIPTS: ReadonlyArray<LecturnProjectFileScript> = [];
 
 export interface LecturnProjectFileState {
-  /**
-   * - `valid`: lecturn.json exists and decoded.
-   * - `invalid`: lecturn.json exists but fails to decode (the server then ignores
-   *   the whole file, including `iconPath` and every script).
-   * - `missing`: no readable lecturn.json at the workspace root.
-   * - `loading`: the file query has not settled yet.
-   */
   status: "loading" | "missing" | "invalid" | "valid";
-  /** The decoded file when status is `valid`, null otherwise. */
   file: LecturnProjectFile | null;
   scripts: ReadonlyArray<LecturnProjectFileScript>;
 }
 
-/**
- * Decoded state of the project's checked-in `lecturn.json`, including whether the
- * file exists but is broken — which the runtime otherwise swallows silently.
- */
 export function useLecturnProjectFileState(
   environmentId: EnvironmentId,
   cwd: string | null,
@@ -57,11 +45,6 @@ export function useLecturnProjectFileState(
   }, [contents, isPending]);
 }
 
-/**
- * Scripts declared in the project's checked-in `lecturn.json`, offered in the
- * scripts menu for import. Missing, truncated, or invalid files resolve to
- * an empty list.
- */
 export function useLecturnProjectFileScripts(
   environmentId: EnvironmentId,
   cwd: string | null,

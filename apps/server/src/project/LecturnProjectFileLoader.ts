@@ -1,13 +1,3 @@
-/**
- * LecturnProjectFileLoader - Effect service that loads the checked-in `lecturn.json`
- * project file from a workspace root.
- *
- * Loading is best-effort: a missing file resolves to `Option.none`, and
- * unreadable or invalid files are logged and treated as absent so callers
- * can fall back to their defaults.
- *
- * @module LecturnProjectFileLoader
- */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -35,15 +25,12 @@ export class LecturnProjectFileLoadError extends Schema.TaggedError<LecturnProje
   }
 }
 
-/** Service tag for lecturn.json project file loading. */
 export class LecturnProjectFileLoader extends Context.Service<
   LecturnProjectFileLoader,
   {
     /**
-     * Load and decode `lecturn.json` at the workspace root.
-     *
-     * Never fails: missing, unreadable, or invalid files resolve to
-     * `Option.none` (invalid files are logged as warnings).
+     * Never fails: missing, unreadable, or invalid files resolve to `Option.none` (invalid files
+     * are logged as warnings).
      */
     readonly load: (workspaceRoot: string) => Effect.Effect<Option.Option<LecturnProjectFile>>;
   }

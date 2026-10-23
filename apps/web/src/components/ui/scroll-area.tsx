@@ -35,15 +35,11 @@ function ScrollArea({
 }: ScrollAreaPrimitive.Root.Props & {
   /** Fades the scrolled edges. `data-scroll-fade="off"` on the viewport turns the fade off. */
   scrollFade?: boolean;
-  /** Keep focused and highlighted items clear of the fade. Off for lists
-   * whose rows take focus on click, where the scroll would nudge the list. */
   scrollFadePadding?: boolean;
   scrollbarGutter?: boolean;
   hideScrollbars?: boolean;
   chainVerticalScroll?: boolean;
-  /** The viewport clips to the parent's radius; "none" for a region flush to an edge. */
   radius?: "inherit" | "none";
-  /** Override Base UI's focusable viewport when focusable descendants provide scroll access. */
   viewportTabIndex?: number;
 }) {
   return (

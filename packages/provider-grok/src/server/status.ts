@@ -61,7 +61,6 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
 });
 
 const VERSION_PROBE_TIMEOUT_MS = 4_000;
-// `initialize` is a single local round trip, so this is generous even on slow machines.
 const GROK_ACP_INITIALIZE_TIMEOUT_MS = 8_000;
 /**
  * Discovery runs the version, `grok models`, and ACP initialize probes in
@@ -224,7 +223,6 @@ export function buildGrokModelCapabilities(model: EffectAcpSchema.ModelInfo): Mo
     : EMPTY_CAPABILITIES;
 }
 
-/** Models advertised by the ACP agent, with the session's current model marked as default. */
 export function buildGrokModelsFromSessionModelState(
   modelState: EffectAcpSchema.SessionModelState | null | undefined,
 ): ReadonlyArray<ServerProviderModel> {
@@ -252,20 +250,13 @@ export function buildGrokModelsFromSessionModelState(
 }
 
 export interface GrokModelsCliOutput {
-  /** True or false when the CLI printed a login line, null when it printed neither. */
   readonly authenticated: boolean | null;
   readonly models: ReadonlyArray<ServerProviderModel>;
 }
 
 /**
- * Parses `grok models`. The command exits 0 whether or not the user is logged in, so the
- * text is the only signal. Current output looks like:
- *
- *     You are logged in with grok.com.
- *     Default model: grok-4.6
- *     Available models:
- *       * grok-4.6 (default)
- *       - grok-4.5
+ * The command exits 0 whether or not the user is logged in, so the text is the
+ * only signal.
  */
 export function parseGrokModelsCliOutput(output: string): GrokModelsCliOutput {
   const authenticated = /you are logged in/i.test(output)
@@ -342,7 +333,6 @@ export function grokSlashCommandsFromInitialize(
     if (Option.isNone(decoded)) continue;
     const command = decoded.value;
     const name = command.name.trim();
-    // Permission changes must go through Lecturn so the client and provider agree.
     if (!name || name.toLowerCase() === "always-approve") continue;
     // Grok advertises /context, but its ACP handler completes without emitting output.
     if (name.toLowerCase() === "context") continue;
@@ -358,8 +348,8 @@ export function grokSlashCommandsFromInitialize(
 }
 
 /**
- * Reads model and command metadata from `initialize._meta`. This never calls `authenticate`
- * or `session/new`, so it cannot open a browser login or boot the workspace's MCP servers.
+ * This never calls `authenticate` or `session/new`, so it cannot open a browser login or
+ * boot the workspace's MCP servers.
  */
 const discoverGrokMetadataViaAcpInitialize = (
   grokSettings: GrokSettings,
@@ -562,7 +552,6 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
     probe: {
       installed: true,
       version,
-      // A failed metadata probe degrades the model picker, it does not make chats fail.
       status: acpFailed ? "warning" : "ready",
       auth,
       ...(acpFailed

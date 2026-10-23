@@ -126,8 +126,6 @@ export function AgentActivity(
     }
   };
 
-  // Order attention-first so whatever needs the user floats to the top of every
-  // presentation, then failures, then in-flight work, then finished/stale.
   const phasePriority = (phase: AgentActivityPhase): number => {
     if (phase === "waiting_for_approval" || phase === "waiting_for_input") return 0;
     if (phase === "failed") return 1;
@@ -136,7 +134,7 @@ export function AgentActivity(
   };
   // Past the stale date the system stops vouching for the content, so every
   // in-flight row degrades to "stale" rather than claiming an agent is still
-  // working. Terminal phases keep their own state.
+  // working.
   const activities: ReadonlyArray<AgentActivityRowProps> = environment.isStale
     ? props.activities.map((row) =>
         row.phase === "completed" || row.phase === "failed"
@@ -159,20 +157,12 @@ export function AgentActivity(
   const failedRow = activities.find((row) => row.phase === "failed");
   const heroRow = attentionRow ?? failedRow ?? row0;
   const tint = phaseTint(heroRow?.phase);
-  // Headline count leans on the accent when a human is actually blocked.
   const headerTint = attentionRow
     ? phaseTint(attentionRow.phase)
     : failedRow
       ? phaseTint(failedRow.phase)
       : tint;
 
-  // With nothing active the aggregate only carries recently finished work, so
-  // "0 active agents" (and a lone "0" in the expanded island) read as broken.
-  // Lead with the outcome instead. The outcome is derived here from the rows
-  // rather than taken from the server subtitle (which keys off the newest
-  // terminal row): every presentation — header text, tint, count slots,
-  // minimal glyph — must agree, and a failure anywhere should dominate a
-  // newer success.
   const allDone = props.activeCount === 0;
   const doneLabel = failedRow ? "Failed" : "Done";
   const outcomeLabel = hasPullRequests
@@ -183,9 +173,6 @@ export function AgentActivity(
       ? "Agent work failed"
       : "Agent work completed";
 
-  // Header copy: "5 active agents" + (", 1 needs attention"). The banner renders
-  // the two parts in-line so the attention half can carry the accent color;
-  // `summary` is the short form for tight spots (expanded center, watch card).
   const agentWord = props.activeCount === 1 ? "agent" : "agents";
   const agentsLabel = allDone
     ? outcomeLabel
@@ -213,8 +200,6 @@ export function AgentActivity(
       ? `lecturn://${deepLinkRow.deepLink.slice(1)}${props.accountId ? `?accountId=${encodeURIComponent(props.accountId)}` : ""}`
       : null;
 
-  // A scannable status glyph per phase — reads faster than colored words and
-  // ties the compact / expanded / banner / watch presentations together.
   type SFName = NonNullable<ComponentProps<typeof Image>["systemName"]>;
   const phaseSymbol = (phase: AgentActivityPhase): SFName => {
     switch (phase) {
@@ -244,11 +229,6 @@ export function AgentActivity(
     </HStack>
   );
 
-  // Single-line row used by every presentation: glyph, title, inline project,
-  // status. The project and status carry layoutPriority(1) so when space runs
-  // out it's the title that truncates, never the (short) project name or the
-  // status label. Single-line keeps rows inside the expanded island's hard
-  // height budget (~160pt) and lets the banner fit more agents.
   const renderAgentRow = (row: AgentActivityRowProps) => (
     <HStack
       spacing={7}
@@ -279,9 +259,7 @@ export function AgentActivity(
       {/* No layoutPriority and no frame on the project: two bare texts take
           their ideal width when it fits and shrink proportionally only when it
           doesn't — so short rows never truncate, and long title + long project
-          truncate together. (A maxWidth frame is greedy and reserved its full
-          width even for short names; layoutPriority let the project starve the
-          title.) */}
+          truncate together. */}
       {row.projectTitle !== row.threadTitle ? (
         <Text modifiers={[font({ size: 11 }), foregroundStyle(secondaryForeground), lineLimit(1)]}>
           {row.projectTitle}
@@ -336,12 +314,10 @@ export function AgentActivity(
     return destination ? <Link destination={destination}>{content}</Link> : content;
   };
 
-  // The Lecturn mark. `assetName` resolves the template image set bundled in
-  // the widget extension's asset catalog. Image views only honor `resizable`
-  // directly (frame/foregroundStyle are dropped), so we size it via a container
-  // frame the resizable image fills and tint it through the container's
-  // foreground style, which the template image inherits. The square frame matches
-  // the glyph's aspect ratio so it never distorts.
+  // Image views only honor `resizable` directly (frame/foregroundStyle are
+  // dropped), so we size it via a container frame the resizable image fills and
+  // tint it through the container's foreground style, which the template image
+  // inherits.
   const renderLogo = (height: number, color: Foreground) => (
     <HStack modifiers={[frame({ width: height, height }), foregroundStyle(color)]}>
       <Image assetName="LecturnMark" modifiers={[resizable()]} />
@@ -443,8 +419,6 @@ export function AgentActivity(
         {!hasPullRequests && row4 ? renderCompactRow(row4) : null}
       </VStack>,
     ),
-    // Compact card for the watchOS Smart Stack + CarPlay (the `.small` family):
-    // brand + count, then the single most important agent with its status glyph.
     bannerSmall: brandedSurface(
       <VStack
         alignment="leading"
@@ -501,9 +475,6 @@ export function AgentActivity(
           : activeLabel}
       </Text>
     ),
-    // The shared/minimal form is a ~22pt circle — a single signal reads there,
-    // the wordmark does not. Show the blocking/outcome phase glyph, else the
-    // mark (all-done shows the hero row's checkmark/cross).
     minimal:
       (attentionRow || failedRow || allDone) && heroRow
         ? renderGlyph(phaseSymbol(heroRow.phase), 15, phaseTint(heroRow.phase, true))
@@ -524,19 +495,9 @@ export function AgentActivity(
         </Text>
       </HStack>
     ),
-    // No center content: the phase glyphs + statuses in expandedBottom already
-    // carry the attention signal, and the expanded island's height budget is
-    // tight enough that a summary line there pushed the third row off.
     expandedCenter: null,
-    // No trailing content: a timestamp is glanceable-lock-screen info, not
-    // useful in a view the user is actively holding open — and the trailing
-    // region hugs the island's corner radius, which clipped it anyway.
     expandedTrailing: null,
     expandedBottom: brandedSurface(
-      // Vertical padding only: the expanded region provides its own horizontal
-      // content margins, so `all` padding double-indented the rows.
-      // Horizontal padding keeps both edges clear of the island's corner
-      // curvature (right edge clipped status labels; titles hugged the left).
       <VStack
         alignment="leading"
         spacing={5}

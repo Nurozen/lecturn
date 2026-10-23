@@ -115,11 +115,6 @@ const withProviderDiscoveryGate = (
     ),
   );
 
-/**
- * Production facade over the canonical provider-instance registry. Adapter
- * lookup stays dynamic so instance hot reloads and removals are visible
- * without maintaining a second settings watcher or instance map.
- */
 export const layerFromProviderInstanceRegistry: Layer.Layer<
   ProviderAdapterRegistryV2,
   never,

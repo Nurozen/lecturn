@@ -181,9 +181,6 @@ export const layer = Api.make(
     Effect.orDie,
   ),
   Effect.gen(function* () {
-    //
-    // 1. Provision Infrastructure for the Worker to use
-    //
     const { relayPublicOrigin, stage } = yield* RelayDeploymentConfig;
     const apnsDeliveryQueue = yield* RelayApnsDeliveryQueue;
     const apnsDeliveryDeadLetterQueue = yield* RelayApnsDeliveryDeadLetterQueue;
@@ -197,9 +194,6 @@ export const layer = Api.make(
     const randomGatewaySecret = yield* ManagedGatewaySecret;
     const observability = yield* RelayObservability;
 
-    //
-    // 2. Create bindings
-    //
     const apnsEnabled = yield* Config.Boolean("APNS_ENABLED").pipe(Config.withDefault(true));
     const apnsCredentials = apnsEnabled
       ? {
@@ -424,9 +418,6 @@ export const layer = Api.make(
     });
     const hookInboxes = yield* HookInboxObject.HookInboxObject;
 
-    //
-    // 3. Runtime layers and app construction
-    //
     const alchemyRuntimeContext: Alchemy.BaseRuntimeContext = yield* Cloudflare.Worker;
 
     const gatewayUnavailable = () =>
@@ -534,7 +525,6 @@ export const layer = Api.make(
       });
     });
 
-    // Each managed endpoint's held webhook requests live in its own Durable Object.
     const inboxCall =
       <A>(operation: HookInbox.HookInboxError["operation"], endpointKey: string) =>
       (effect: Effect.Effect<A, never, Alchemy.RuntimeContext>) =>
@@ -767,7 +757,6 @@ export const layer = Api.make(
           Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
           Effect.catch((error) =>
             Effect.logWarning("Hook rate limiter unavailable", { error: error.message }).pipe(
-              // Visible on the forward span, so an outage that disables limits shows up.
               Effect.andThen(
                 Effect.annotateCurrentSpan({ "relay.hook.rate_limiter_failed_open": true }),
               ),
@@ -853,7 +842,6 @@ export const layer = Api.make(
         [
           DpopProofs.DpopProofReplay.pipe(
             Effect.flatMap((dpopProofs) => dpopProofs.pruneExpired),
-            // Keep completed thread rows long enough to show their final state.
             Effect.andThen(
               Effect.all([AgentActivityRows.AgentActivityRows, DateTime.now]).pipe(
                 Effect.flatMap(([activityRows, now]) =>

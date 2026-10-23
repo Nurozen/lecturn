@@ -13,7 +13,6 @@ import { museClient } from "@lecturn/provider-muse/client";
 import { openCodeClient } from "@lecturn/provider-opencode/client";
 import { piClient } from "@lecturn/provider-pi/client";
 
-/** The provider client definitions this web build ships, in presentation order. */
 export const providerClients = makeProviderClientRegistry([
   {
     driverKind: ProviderDriverKind.make("codex"),

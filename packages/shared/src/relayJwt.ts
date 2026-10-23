@@ -12,7 +12,6 @@ export const RELAY_HEALTH_RESPONSE_TYP = "lecturn-env-health+jwt";
 export const RELAY_ACTIVITY_PUBLISH_TYP = "lecturn-env-activity+jwt";
 export const RELAY_MANAGED_TUNNEL_RECOVERY_TYP = "lecturn-env-managed-tunnel-recovery+jwt";
 export const RELAY_HOOK_DELIVERY_TYP = "lecturn-relay-hook-delivery+jwt";
-/** Header carrying the signed proof that a webhook request came from the relay. */
 export const RELAY_HOOK_DELIVERY_HEADER = "x-lecturn-relay-delivery";
 
 export class RelayJwtError extends Schema.TaggedError<RelayJwtError>()("RelayJwtError", {

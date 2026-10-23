@@ -212,7 +212,6 @@ const makeLineEmitter = (onLine: (line: string) => Effect.Effect<void>) => {
   };
 };
 
-// Untraced: no attributes, and its time is the runProcessCore span. Errors fail that span.
 const collectText = Effect.fnUntraced(function* (input: {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
@@ -372,7 +371,6 @@ const resolveEnvOptions = Effect.fnUntraced(function* (
   }
   return { env, extendEnv: false };
 });
-/** The executable name without its directory, recorded as `process.command` on process spans. */
 export const commandName = (command: string) => command.replace(/^.*[\\/]/, "");
 
 const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (

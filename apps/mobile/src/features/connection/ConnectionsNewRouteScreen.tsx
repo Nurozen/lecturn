@@ -37,7 +37,6 @@ type ConnectionsNewRouteParams = {
   readonly mode?: string;
   readonly pairingUrl?: string;
   readonly autoConnect?: string;
-  /** Adds a route to this saved machine instead of a new environment. */
   readonly routeFor?: EnvironmentId;
 };
 
@@ -109,10 +108,8 @@ export function ConnectionsNewRouteScreen({
     setPendingConnectionError(null);
   }, []);
 
-  // The error is shared app state; a stale failure must not greet the next visit.
   useEffect(() => () => setPendingConnectionError(null), []);
 
-  // Opening the sheet never prompts; a tap on the scan card asks for the camera.
   const handleScanPress = useCallback(async () => {
     const permission = await requestCameraPermission();
     if (permission.granted) {
@@ -292,11 +289,6 @@ const SCAN_RETICLE_SIZE = 150;
 const SCAN_RETICLE_TOP = 36;
 const SCAN_RETICLE_RADIUS = 28;
 
-/**
- * Live QR scanner: the camera fills the card, blurred everywhere except the
- * reticle so the code being aimed at stays sharp. Without a camera it shows the
- * same frame over a dark gradient.
- */
 function PairingScanCard(props: {
   readonly cameraActive: boolean;
   readonly onScan: (result: { readonly data: string }) => void;
@@ -387,11 +379,6 @@ function PairingScanCard(props: {
   );
 }
 
-/**
- * Managed-relay alternative to manual pairing: signed in, the account's
- * published environments connect with a switch; signed out, one row opens the
- * Lecturn Connect sign-in sheet.
- */
 function LecturnConnectSection() {
   const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
   const navigation = useNavigation();
@@ -442,7 +429,6 @@ function LecturnConnectSection() {
   );
 }
 
-/** Inline grouped-list field: fixed label column, input filling the rest. */
 function PairingInputRow({
   label,
   ...inputProps

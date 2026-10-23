@@ -27,7 +27,6 @@ describe("CDP relay", () => {
     relay.receive(JSON.stringify({ id: 2, method: "Target.createTarget", params: {} }));
     await settle();
     const attach = written.findIndex((message) => message["id"] === 1);
-    // The page is announced right after the auto-attach reply, never before it.
     expect(written.slice(attach, attach + 2)).toEqual([
       { id: 1, result: {} },
       {
@@ -62,7 +61,6 @@ describe("CDP relay", () => {
       }),
     );
     relay.receive(JSON.stringify({ id: 6, method: "DOM.enable", sessionId: "iframe-session" }));
-    // A slow screenshot must not hold up the reply behind it.
     pending[1]!();
     await settle();
     expect(written).toEqual([
@@ -82,7 +80,6 @@ describe("CDP relay", () => {
   it("resumes paused child frames, so cross-site iframes run", async () => {
     const send = vi.fn(async () => ({}));
     const relay = createCdpRelayConnection(makeTarget(send), () => {});
-    // The page's own session is already running; only its children wait.
     relay.receive(
       JSON.stringify({
         id: 1,
@@ -189,7 +186,6 @@ describe("CDP relay downloads", () => {
     );
     await settle();
     expect(directories).toEqual(["/srv/artifacts"]);
-    // The tab's own debugger has no such context, so the id stays here.
     expect(send).toHaveBeenCalledWith(
       "Browser.setDownloadBehavior",
       { behavior: "allowAndName", downloadPath: "/srv/artifacts", eventsEnabled: true },

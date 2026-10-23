@@ -11,8 +11,6 @@ import { isWorkspaceImagePreviewPath } from "@lecturn/shared/filePreview";
 /** An import shows the tail of the session: only its last messages are copied. */
 export const IMPORT_HISTORY_MAX_MESSAGES = 200;
 
-// --- Claude -----------------------------------------------------------------
-
 type ClaudeMessageLike = { readonly type: string; readonly message?: unknown };
 
 function readToolImagePath(toolName: string, input: Record<string, unknown>): string | undefined {
@@ -131,8 +129,6 @@ function extractAssistantContentBlocks(
 export function extractAssistantTextBlocks(message: ClaudeMessageLike): Array<string> {
   return extractAssistantContentBlocks(message, "text", "text");
 }
-
-// --- Codex ------------------------------------------------------------------
 
 /** The loosely decoded Codex thread item an import reads. */
 type CodexImportItem = { readonly type: string } & Record<string, unknown>;

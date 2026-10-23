@@ -424,8 +424,6 @@ describe("EnvironmentLinker", () => {
       expect(result.environmentCredential).toBe("lecturnenv_credential_secret");
       expect(result.endpointRuntime).toBeNull();
       expect(persistedEndpoint).toBe("http://127.0.0.1:3773/");
-      // Downgrading from a managed link must release the previously provisioned
-      // tunnel; nothing else cleans it up before a full unlink.
       expect(deprovisionedEnvironmentId).toBe("env-link-test");
     }).pipe(
       Effect.provide(

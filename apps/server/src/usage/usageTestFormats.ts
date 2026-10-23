@@ -1,8 +1,3 @@
-/**
- * The built-in transcript formats by provider, for engine and cache tests.
- *
- * @module usageTestFormats
- */
 import type { UsageProviderKind } from "@lecturn/contracts";
 import type { TranscriptUsageFormat } from "@lecturn/provider-core/server/usage";
 import { piUsageFormat } from "@lecturn/provider-pi/server/usage";

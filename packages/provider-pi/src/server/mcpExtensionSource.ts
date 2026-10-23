@@ -1,11 +1,4 @@
 /**
- * Source for the Lecturn-owned Pi extension that consumes Lecturn's HTTP MCP server.
- *
- * Pi 0.99+ discovers optional HTTP bridge tools on demand. OpenAI completion
- * gateways need their schemas loaded up front. Older versions keep tools
- * directly available. Pi loads this TypeScript via `--extension`; the
- * server writes it to a cache so packaged builds need no sibling .ts file.
- *
  * Do not import lecturn modules from the string body. The Pi process resolves
  * `@earendil-works/pi-coding-agent` and `typebox` from the user's pi install.
  */

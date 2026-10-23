@@ -2,7 +2,6 @@ import type { ProviderDriverKind, ProviderReplayTranscript } from "@lecturn/cont
 
 import { buildRuntimeInstructions } from "@lecturn/provider-core/server/runtimeInstructions";
 
-/** Adds current runtime context to legacy prompt expectations, keeping outbound matching exact. */
 export function materializeReplayTranscriptRuntimeInstructions(
   transcript: ProviderReplayTranscript,
   runtime: { readonly driver: ProviderDriverKind; readonly model: string },

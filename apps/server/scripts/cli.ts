@@ -142,10 +142,6 @@ const applyDevelopmentIconOverrides = Effect.fn("applyDevelopmentIconOverrides")
   yield* Effect.log("[cli] Applied development icon overrides to dist/client");
 });
 
-// ---------------------------------------------------------------------------
-// build subcommand
-// ---------------------------------------------------------------------------
-
 const buildCmd = Command.make(
   "build",
   {
@@ -208,10 +204,6 @@ const assertStaveBinaries = Effect.fn("assertStaveBinaries")(function* (serverDi
   yield* Effect.log(`[cli] Bundled Stave binaries present for: ${STAVE_PLATFORM_KEYS.join(", ")}`);
 });
 
-// ---------------------------------------------------------------------------
-// build-exe subcommand
-// ---------------------------------------------------------------------------
-
 const buildExeCmd = Command.make(
   "build-exe",
   {
@@ -266,10 +258,6 @@ const buildExeCmd = Command.make(
     "Build the server as a Node single-executable (needs a Node 25.7+ host for --build-sea). The binary still resolves native packages from a node_modules tree beside it.",
   ),
 );
-
-// ---------------------------------------------------------------------------
-// publish subcommand
-// ---------------------------------------------------------------------------
 
 interface PublishCommandConfig {
   readonly access: string;
@@ -357,8 +345,6 @@ const publishPlatformTarballs = Effect.fn("publishPlatformTarballs")(function* (
 ) {
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
-  // npm runs with cwd set to the packages dir below, so tarball paths are
-  // resolved once here rather than joined twice.
   const packagesDir = path.resolve(packagesDirInput);
   const scopeDir = path.join(packagesDir, NPM_PLATFORM_PACKAGE_SCOPE);
   const launcherTarball = path.join(packagesDir, `${NPM_LAUNCHER_PACKAGE_NAME}.tgz`);
@@ -395,7 +381,6 @@ const publishPlatformTarballs = Effect.fn("publishPlatformTarballs")(function* (
     );
   });
 
-  // Each publish takes about 17s, so the platform packages go at once.
   yield* publishPlatformsThenLauncher({ platformTarballs, launcherTarball, publish });
 });
 
@@ -505,10 +490,6 @@ const publishCmd = Command.make(
     "Publish to npm: the @lecturn/lecturn-<platform> tarballs and then the lecturn launcher with --packages-dir, otherwise the apps/server Node package.",
   ),
 );
-
-// ---------------------------------------------------------------------------
-// root command
-// ---------------------------------------------------------------------------
 
 const cli = Command.make("cli").pipe(
   Command.withDescription("Lecturn server build & publish CLI."),

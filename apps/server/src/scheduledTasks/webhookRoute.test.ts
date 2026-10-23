@@ -39,13 +39,11 @@ const mintKeys = NodeCrypto.generateKeyPairSync("ed25519", {
   privateKeyEncoding: { format: "pem", type: "pkcs8" },
   publicKeyEncoding: { format: "pem", type: "spki" },
 });
-/** The secrets a Lecturn Connect-linked environment holds, keyed by name. */
 const linkedSecrets: ReadonlyMap<string, string> = new Map([
   [CLOUD_MINT_PUBLIC_KEY, mintKeys.publicKey],
   [RELAY_ISSUER_SECRET, relayIssuer],
 ]);
 
-/** A proof as the relay signs it for one delivery. */
 const relayProof = Effect.fn("relayProof")(function* (claims: {
   readonly deliveryId: string;
   readonly receivedAt: string;
@@ -144,7 +142,6 @@ describe("webhook route", () => {
     }
   });
 
-  // Live clock: the server checks proofs against real time.
   it.live("trusts the relay's delivery id and receive time only with its signed proof", () =>
     Effect.gen(function* () {
       const received: Array<WebhookTriggerRequest> = [];
@@ -174,22 +171,17 @@ describe("webhook route", () => {
         hookId: "id",
         privateKey: forged.privateKey,
       });
-      // 0: signed by the relay for exactly this delivery.
       yield* send("/api/hooks/id/tok", { ...relayHeaders, "x-lecturn-relay-delivery": proof });
-      // 1: a direct caller claiming to be the relay, without a proof.
       yield* send("/api/hooks/id/tok", relayHeaders);
-      // 2: a proof signed with any other key.
       yield* send("/api/hooks/id/tok", {
         ...relayHeaders,
         "x-lecturn-relay-delivery": forgedProof,
       });
-      // 3: a real proof lifted onto another delivery id.
       yield* send("/api/hooks/id/tok", {
         ...relayHeaders,
         "x-lecturn-relay-delivery-id": "relay-2",
         "x-lecturn-relay-delivery": proof,
       });
-      // 4: a real proof for another hook.
       yield* send("/api/hooks/other/tok", { ...relayHeaders, "x-lecturn-relay-delivery": proof });
       yield* Effect.promise(() => dispose());
       expect(received.map((request) => request.relayDeliveryId)).toEqual([
@@ -204,7 +196,6 @@ describe("webhook route", () => {
     }),
   );
 
-  // Live clock: the server checks proofs against real time.
   it.live("trusts no relay headers on an environment not linked to Lecturn Connect", () =>
     Effect.gen(function* () {
       const received: Array<WebhookTriggerRequest> = [];
@@ -232,7 +223,6 @@ describe("webhook route", () => {
     const deliveryId = ScheduledTaskWebhookDeliveryId.make("delivery:1");
     const cases: ReadonlyArray<[WebhookTriggerResult, number, string]> = [
       [{ _tag: "accepted", deliveryId, outcome: "accepted" }, 202, "accepted"],
-      // Same status as a started run; only the header tells them apart.
       [{ _tag: "accepted", deliveryId, outcome: "duplicate" }, 202, "duplicate"],
       [{ _tag: "accepted", deliveryId, outcome: "prompt_too_long" }, 202, "prompt_too_long"],
       [{ _tag: "not_found" }, 404, "not_found"],
@@ -254,7 +244,6 @@ describe("webhook route", () => {
     }
   });
 
-  // Live clock: the server checks proofs against real time.
   it.live("joins the relay's trace only for requests the relay forwarded", () =>
     Effect.gen(function* () {
       const parents: Array<string | undefined> = [];
@@ -275,7 +264,6 @@ describe("webhook route", () => {
       };
       const proof = yield* relayProof({ deliveryId: "relay-1", receivedAt, hookId: "id" });
       yield* send({ ...relayHeaders, traceparent, "x-lecturn-relay-delivery": proof });
-      // Claiming to be the relay without its proof cannot attach to our traces.
       yield* send({ ...relayHeaders, traceparent });
       yield* send({ traceparent });
       yield* Effect.promise(() => dispose());
@@ -295,7 +283,6 @@ describe("webhook route", () => {
       expect((await handler(post("/api/hooks/id", "{}"))).status).toBe(404);
       expect((await handler(post("/api/hooks/id/tok/extra", "{}"))).status).toBe(404);
       expect((await handler(post("/api/hooks/%E0/tok", "{}"))).status).toBe(404);
-      // No content-length: the reader cap must still apply.
       const chunked = new ReadableStream<Uint8Array>({
         start(controller) {
           for (let sent = 0; sent <= WEBHOOK_MAX_BODY_BYTES; sent += 64 * 1024) {

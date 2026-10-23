@@ -12,10 +12,6 @@ import {
 
 const THREAD_LINK_KEYS = ["prompt"];
 
-/**
- * Applies the `prompt` of a `lecturn://threads/<environmentId>/<threadId>?prompt=…` link to that
- * thread's composer draft, once per link. Used by `ThreadRouteScreen`.
- */
 export function useThreadPromptLink(
   params: Readonly<Record<string, unknown>> | undefined,
   threadDraftKey: string | null,

@@ -43,11 +43,6 @@ import {
   useUpdateScopedSettings,
 } from "./useScopedSettings";
 
-/**
- * Rows for the settings a project may override. The same rows edit
- * environment defaults at an environment scope and project overrides at a
- * project or checkout scope; the scoped hooks route the write.
- */
 const WORKTREE_SUBMODULES_OPTIONS = ["recursive", "top-level", "none"] as const;
 function isWorktreeSubmodules(value: string | null): value is WorktreeSubmodules {
   return value !== null && (WORKTREE_SUBMODULES_OPTIONS as readonly string[]).includes(value);
@@ -93,11 +88,6 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   // A Stave space's repos are already worktrees, so every checkout in the
   // project runs threads in the space root and the workspace default is fixed.
   const isStaveGroup = isProjectScope && scope.members.some((member) => isStaveProject(member));
-  // File-backed keys show their effective value; the target already carries
-  // the checkout's lecturn.json, and a null file here only fills the built-in.
-  // The reset arrow beside the title clears the tier (SettingsRow handles a
-  // project override, the environment value is cleared here), so the picker
-  // has no "inherit" item.
   const effective = target
     ? resolveProjectSettings(target.settings, null, null, null).settings
     : null;

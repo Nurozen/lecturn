@@ -173,7 +173,6 @@ describe("ReviewService", () => {
         prefix: "lecturn-review-workspace-",
       });
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-review-base-" });
-      // Stands in for a project on another drive than the server's home cwd.
       const projectRoot = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-review-project-" });
       const projectChild = `${projectRoot}/packages/app`;
       yield* fs.makeDirectory(projectChild, { recursive: true });
