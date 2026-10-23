@@ -390,6 +390,15 @@ from upstream's side.
 - **Versions and doctor.** Upstream's v0.1.0 release prep is not taken (fork
   stays on its own versions). `t3 doctor` is `lecturn doctor`; the CLI path
   env is `LECTURN_CLI_PATH`.
+- **History compaction.** Upstream now runs `compactEventStore` in production
+  (#19435: one minute after start, then every 6 hours). The fork keeps
+  `thread.imported`, `thread.archived` and `thread.unarchived` out of
+  `SUPERSEDABLE_THREAD_EVENT_TYPES`, for upstream's own `thread.deleted`
+  reason. Decision ingestion replays them by type from a durable cursor
+  (`DecisionSourceEvents.ts`), and the `thread.import` hook reads
+  `importedFrom` from the stored event. `DecisionIngestion.drainThrough` also
+  treats an empty range below the high-water as compacted rather than a gap.
+  Keep both when upstream changes the supersedable set.
 - **Codex replay fixtures.** New Codex replay transcripts are re-recorded with
   the fork's `lecturn_desktop` client name, originator and user agent, as the
   replay matches on them.

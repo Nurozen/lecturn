@@ -207,9 +207,11 @@ export const layer: Layer.Layer<
     // thread.created stays out — verify derives the expected thread set from
     // it, and it anchors replay ordering. thread.deleted stays out too: clients
     // and waitForThread switch on the event type, not just the payload.
+    // Lecturn: thread.imported, thread.archived and thread.unarchived stay for
+    // the same reason. Decision ingestion (DecisionSourceEvents) replays them
+    // from a durable cursor to start a source generation and to park or resume
+    // jobs, and the thread.import hook reads importedFrom from thread.imported.
     const SUPERSEDABLE_THREAD_EVENT_TYPES = [
-      "thread.archived",
-      "thread.unarchived",
       "thread.settled",
       "thread.unsettled",
       "thread.snoozed",
@@ -225,7 +227,6 @@ export const layer: Layer.Layer<
       "thread.interaction-mode-updated",
       "thread.model-selection-updated",
       "thread.provider-switched",
-      "thread.imported",
     ];
     // Read-state events carry the whole thread too, but client reducers apply
     // them without bumping updatedAt. They supersede only each other: a newer

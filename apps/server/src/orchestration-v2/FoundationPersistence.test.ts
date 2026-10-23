@@ -1023,6 +1023,64 @@ it.layer(layerTest)("orchestration V2 foundation persistence", (it) => {
     }),
   );
 
+  it.effect("keeps the thread events that Lecturn cursor consumers switch on", () =>
+    Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
+      const sql = yield* SqlClient.SqlClient;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread:foundation-compact-lecturn");
+      const thread = makeThread(threadId, now);
+      const stateEvent = (
+        suffix: string,
+        type:
+          | "thread.imported"
+          | "thread.archived"
+          | "thread.unarchived"
+          | "thread.metadata-updated",
+      ): OrchestrationV2DomainEvent => ({
+        id: EventId.make(`event:foundation-compact-lecturn:${suffix}`),
+        type,
+        threadId,
+        providerInstanceId,
+        occurredAt: now,
+        payload: thread,
+      });
+
+      yield* eventSink.write({
+        events: [
+          threadCreatedEvent({ id: "event:foundation-compact-lecturn:create", thread, now }),
+          stateEvent("imported", "thread.imported"),
+          stateEvent("meta-1", "thread.metadata-updated"),
+          stateEvent("archived", "thread.archived"),
+          stateEvent("unarchived", "thread.unarchived"),
+          stateEvent("meta-2", "thread.metadata-updated"),
+        ],
+      });
+      yield* maintenance.compactEventStore;
+
+      // Decision ingestion replays these by type from a durable cursor, so a
+      // newer whole-thread payload must not supersede them.
+      const remaining = yield* sql<{ readonly event_id: string }>`
+        SELECT event_id
+        FROM orchestration_events
+        WHERE aggregate_kind = 'thread'
+          AND stream_id = ${threadId}
+        ORDER BY sequence ASC
+      `;
+      assert.deepEqual(
+        remaining.map((row) => row.event_id),
+        [
+          "event:foundation-compact-lecturn:create",
+          "event:foundation-compact-lecturn:imported",
+          "event:foundation-compact-lecturn:archived",
+          "event:foundation-compact-lecturn:unarchived",
+          "event:foundation-compact-lecturn:meta-2",
+        ],
+      );
+    }),
+  );
+
   it.effect("verifies and rebuilds projections with cross-thread subagent relations", () =>
     Effect.gen(function* () {
       const eventSink = yield* EventSink.EventSinkV2;

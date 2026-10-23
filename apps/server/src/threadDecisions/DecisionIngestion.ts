@@ -43,8 +43,14 @@ export const make = Effect.gen(function* () {
           Stream.runCollect,
           Effect.mapError(() => unavailable("Decision history could not be read.")),
         );
-      if (page.length === 0)
+      if (page.length === 0) {
+        // History compaction deletes an event only once a newer one for the same
+        // entity exists. A target below the high-water whose range is gone was
+        // compacted away. Leave the cursor where it is; draining the newer event
+        // continues from it.
+        if ((yield* latestSequence) > sequence) return;
         return yield* unavailable("Decision history has a gap before its committed boundary.");
+      }
       const sources = Array.from(page, decisionSourceEvent);
       // Ignored events only move the cursor; one write at the end of a run of
       // them keeps a large legacy-import backlog from costing a write each.
