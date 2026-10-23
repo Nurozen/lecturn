@@ -8,13 +8,14 @@ import {
   WorkLogPressable,
 } from "./work-log-layout";
 import { QuestionAnswerHistory } from "./QuestionAnswerHistory";
+import { ThreadCommandOutput, useCommandOutputStreaming } from "./thread-command-output";
 import {
   getQuestionAnswerPreview,
   hasQuestionAnswer,
 } from "@lecturn/client-runtime/work-log/user-input";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import { type AppSymbolName, SymbolView } from "../../components/AppSymbol";
+import { type AppSymbolName, SymbolView } from "../../components/ui/AppSymbol";
 import { MaskedView } from "@expo/ui/community/masked-view";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
@@ -56,9 +57,9 @@ import { toolActivityFaviconUrl } from "@lecturn/shared/favicon";
 import { isJavaScriptReplTool } from "@lecturn/shared/toolActivity";
 import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 import { LecturnWordmark } from "../../components/LecturnWordmark";
-import { BrowserAppIcon } from "../../components/BrowserAppIcon";
+import { BrowserAppIcon } from "./BrowserAppIcon";
 import { cn } from "../../lib/cn";
 import { THREAD_WORK_ROW_MIN_HEIGHT, type deriveThreadWorkLogSizing } from "../../lib/layout";
 import {
@@ -904,8 +905,12 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
 ) {
   const { row, expanded } = props;
   const navigation = useNavigation();
+  // Command rows stream their output, including the final output, from the server.
+  const streamsOutput =
+    useCommandOutputStreaming(props.environmentId) &&
+    row.projectedItem.item.type === "command_execution";
   const fetchedDetail = useTurnItemDetail(
-    expanded && row.fetchesDetail
+    expanded && row.fetchesDetail && !streamsOutput
       ? { environmentId: props.environmentId, row: row.projectedItem }
       : null,
   );
@@ -1017,20 +1022,27 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
       : null;
   const outputImages = expanded && fetchedItem ? turnItemOutputImages(fetchedItem) : [];
   const viewedImagePath = workEntryViewedImagePath(row.workEntry);
-  const fetchedOutput = !expanded
-    ? null
-    : shownItem.type === "file_search" || shownItem.type === "web_search"
-      ? turnItemOutputText(shownItem)
-      : fetchedItem
-        ? (turnItemOutputText(fetchedItem) ??
-          (outputImages.length > 0 || viewedImagePath ? null : "No output."))
-        : fetchedDetail.error
-          ? `Couldn't load output: ${fetchedDetail.error}`
-          : row.fetchesDetail
-            ? fetchedDetail.data
-              ? "Output is no longer available."
-              : "Loading output…"
-            : null;
+  const fetchedOutput =
+    !expanded || streamsOutput
+      ? null
+      : shownItem.type === "file_search" || shownItem.type === "web_search"
+        ? turnItemOutputText(shownItem)
+        : fetchedItem
+          ? (turnItemOutputText(fetchedItem) ??
+            (outputImages.length > 0 || viewedImagePath ? null : "No output."))
+          : fetchedDetail.error
+            ? `Couldn't load output: ${fetchedDetail.error}`
+            : row.fetchesDetail
+              ? fetchedDetail.data
+                ? "Output is no longer available."
+                : "Loading output…"
+              : null;
+  const exitLine =
+    failedExitCode === null ? null : (
+      <Text className="mt-1.5 font-mono text-2xs leading-normal text-danger-foreground">
+        exit {failedExitCode}
+      </Text>
+    );
   const toolPresentation = resolveWorkEntryToolPresentation(row.workEntry);
   const previewText = workEntryRowLabel(row.workEntry);
   const answerPreview = row.workEntry.questionAnswer
@@ -1277,12 +1289,19 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
                 {fetchedOutput}
               </Text>
             ) : null}
-            {failedExitCode !== null ? (
-              <Text className="mt-1.5 font-mono text-2xs leading-normal text-danger-foreground">
-                exit {failedExitCode}
-              </Text>
-            ) : null}
+            {streamsOutput ? null : exitLine}
           </ScrollView>
+          {streamsOutput ? (
+            <>
+              <ThreadCommandOutput
+                environmentId={props.environmentId}
+                threadId={row.projectedItem.sourceThreadId}
+                itemId={row.projectedItem.sourceItemId}
+                themeAppearance={props.themeAppearance}
+              />
+              {exitLine}
+            </>
+          ) : null}
         </Animated.View>
       ) : null}
     </Animated.View>

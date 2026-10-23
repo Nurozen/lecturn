@@ -1,28 +1,30 @@
+import { NativeAppBarExample } from "./NativeAppBarExample";
+import { Toast } from "../../components/ui/Toast";
+import { Progress } from "../../components/ui/Progress";
 import { useNavigation } from "@react-navigation/native";
 import { useRef, useState } from "react";
 import { View, type TextInputInstance } from "react-native";
 
-import { AppText, AppTextInput } from "../../components/AppText";
-import { Sheet } from "../../components/Sheet";
-import { Chip } from "../../components/Chip";
-import { Menu } from "../../components/Menu";
-import { ListActionRow } from "../../components/ListActionRow";
-import { ListChoiceRow } from "../../components/ListChoiceRow";
-import { ListRow } from "../../components/ListRow";
-import { ListSection } from "../../components/ListSection";
-import { ListToggleRow } from "../../components/ListToggleRow";
-import { Button } from "../../components/Button";
-import { IconButton } from "../../components/IconButton";
-import { MaterialFloatingActionButton } from "../../components/MaterialFloatingActionButton";
-import { SearchField } from "../../components/SearchField";
-import { LoadingStrip } from "../../components/LoadingStrip";
-import { Notice } from "../../components/Notice";
-import { NumberField } from "../../components/NumberField";
-import { ScreenHeader } from "../../components/ScreenHeader";
-import { ScreenScrollView } from "../../components/ScreenScrollView";
-import { SegmentedControl } from "../../components/SegmentedControl";
-import { SliderRow } from "../../components/SliderRow";
-import * as Dialog from "../../components/Dialog";
+import { AppText, AppTextInput } from "../../components/ui/AppText";
+import { Sheet } from "../../components/ui/Sheet";
+import { Chip } from "../../components/ui/Chip";
+import { Menu } from "../../components/ui/Menu";
+import { ListActionRow } from "../../components/ui/ListActionRow";
+import { ListChoiceRow } from "../../components/ui/ListChoiceRow";
+import { ListRow } from "../../components/ui/ListRow";
+import { ListSection } from "../../components/ui/ListSection";
+import { ListToggleRow } from "../../components/ui/ListToggleRow";
+import { Button } from "../../components/ui/Button";
+import { IconButton } from "../../components/ui/IconButton";
+import { FloatingActionButton } from "../../components/ui/FloatingActionButton";
+import { SearchField } from "../../components/ui/SearchField";
+import { Notice } from "../../components/ui/Notice";
+import { NumberField } from "../../components/ui/NumberField";
+import { AppBar } from "../../components/ui/AppBar";
+import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
+import { SegmentedControl } from "../../components/ui/SegmentedControl";
+import { SliderRow } from "../../components/ui/SliderRow";
+import * as Dialog from "../../components/ui/Dialog";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { MOBILE_THEME_IDS } from "../../lib/mobileTheme";
 
@@ -56,7 +58,7 @@ export function ComponentCatalogScreen() {
   };
   return (
     <View className="flex-1 bg-screen">
-      <ScreenHeader title="UI components" onBack={() => navigation.goBack()} sidebar={false} />
+      <AppBar title="UI components" onBack={() => navigation.goBack()} sidebar={false} />
       <ScreenScrollView
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{ padding: 16, gap: 20, paddingBottom: 40 }}
@@ -135,6 +137,7 @@ export function ComponentCatalogScreen() {
               </View>
             </View>
             <View className="gap-3">
+              <NativeAppBarExample />
               <AppText className="text-lg font-lecturn-semibold">Buttons</AppText>
               <View className="flex-row flex-wrap gap-2">
                 <Button label="Primary" tone="primary" onPress={announceAction} />
@@ -203,10 +206,16 @@ export function ComponentCatalogScreen() {
             <AppText className="text-lg font-lecturn-semibold">Feedback and presentation</AppText>
             <Notice message="This action could not finish. Try again." tone="danger" />
             {notice ? (
-              <Notice
+              <Toast
                 message="Changes are ready to review."
-                icon="checkmark.circle"
-                floating
+                tone="success"
+                action={{
+                  label: "Undo",
+                  onPress: () => {
+                    setNotice(false);
+                    setText("Restored example");
+                  },
+                }}
                 onDismiss={() => setNotice(false)}
               />
             ) : (
@@ -215,6 +224,20 @@ export function ComponentCatalogScreen() {
             <View className="flex-row flex-wrap gap-2">
               <Button label="Sheet" onPress={() => setSheet(true)} />
               <Button label="Dialog" onPress={confirm} />
+              <Button
+                label="Alert"
+                onPress={() =>
+                  Dialog.alert("Example alert", "Choose an action.", [
+                    {
+                      text: "More info",
+                      onPress: () =>
+                        Dialog.alert("More information", "This second alert stays open."),
+                    },
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Continue", onPress: announceAction },
+                  ])
+                }
+              />
               <Button
                 label="Prompt"
                 onPress={() =>
@@ -239,11 +262,10 @@ export function ComponentCatalogScreen() {
                 <Chip label="Menu" trailingIcon="chevron.down" />
               </Menu>
             </View>
-            <View className="relative h-3 overflow-hidden rounded-full bg-subtle">
-              <LoadingStrip progress={0.6} />
-            </View>
+            <Progress value={0.6} label="Example upload" />
+            <Progress label="Connecting" />
             <View className="items-start">
-              <MaterialFloatingActionButton
+              <FloatingActionButton
                 label="New thread"
                 icon="plus"
                 variant="extended"

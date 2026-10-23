@@ -1,3 +1,4 @@
+import * as Dialog from "../../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import {
@@ -34,12 +35,12 @@ import {
 import * as Cause from "effect/Cause";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, Alert, Pressable, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { SymbolView } from "../../components/AppSymbol";
-import { AppText as Text } from "../../components/AppText";
-import { ErrorBanner } from "../../components/ErrorBanner";
+import { SymbolView } from "../../components/ui/AppSymbol";
+import { AppText as Text } from "../../components/ui/AppText";
+import { ErrorBanner } from "../../components/ui/ErrorBanner";
 import { cn } from "../../lib/cn";
 import { relativeTime } from "../../lib/time";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
@@ -643,7 +644,7 @@ export function AddProjectImportSessionsScreen(props: {
       });
       if (result.failed.length > 0) {
         const summary = bulkImportSummary(result);
-        Alert.alert(
+        Dialog.alert(
           summary.title,
           bulkImportFailureDetails(
             summary.description,

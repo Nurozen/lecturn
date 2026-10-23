@@ -19,7 +19,7 @@ import {
 } from "@lecturn/contracts";
 import { useState } from "react";
 import { Linking, ScrollView, View } from "react-native";
-import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
+import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { contextualEnvironment as contextual } from "../../state/contextual";
 import { serverEnvironment } from "../../state/server";
 import { environmentSession } from "../../state/session";

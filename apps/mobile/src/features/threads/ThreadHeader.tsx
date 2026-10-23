@@ -1,7 +1,7 @@
 import { useMemo } from "react";
-import { ScreenHeader } from "../../components/ScreenHeader";
-import { ScreenHeaderButton } from "../../components/ScreenHeaderButton";
-import type { ScreenHeaderAction } from "../../components/ScreenHeader.types";
+import { AppBar } from "../../components/ui/AppBar";
+import { ScreenHeaderButton } from "../../components/ui/ScreenHeaderButton";
+import type { AppBarAction } from "../../components/ui/AppBar.types";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import type { ThreadInspectorMode } from "./thread-inspector-content-stack";
 import { useThreadHeaderOptions } from "./useThreadHeaderOptions";
@@ -21,7 +21,7 @@ export function ThreadHeader(
     /** iOS thread actions menu (decisions, fork) appended after the git items. */
     readonly threadActionsHeaderItem: NativeHeaderItem | null;
     /** Android in-flow fork action, appended after the git controls action. */
-    readonly forkHeaderAction: ScreenHeaderAction | null;
+    readonly forkHeaderAction: AppBarAction | null;
   },
 ) {
   const returnToList = useWorkspaceListNavigation("threads");
@@ -39,8 +39,8 @@ export function ThreadHeader(
           unstable_headerRightItems: () => [...baseRightItems(), threadActionsHeaderItem],
         }
       : native.options;
-  const androidHeaderActions = useMemo<ReadonlyArray<ScreenHeaderAction>>(() => {
-    const actions: ScreenHeaderAction[] = [];
+  const androidHeaderActions = useMemo<ReadonlyArray<AppBarAction>>(() => {
+    const actions: AppBarAction[] = [];
     if (props.onReturnToThread) {
       actions.push({
         accessibilityLabel: "Return to chat",
@@ -95,7 +95,7 @@ export function ThreadHeader(
 
   return (
     <>
-      <ScreenHeader
+      <AppBar
         title={props.title}
         subtitle={props.subtitle}
         sidebar={native.sidebar}

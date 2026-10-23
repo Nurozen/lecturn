@@ -242,12 +242,13 @@ jobs:
         working-directory: apps/mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          OTA_MESSAGE: ${{ inputs.message || format('Production OTA ({0})', github.sha) }}
         run: |
           eas update \
             --channel production \
             --environment production \
             --platform ${{ inputs.platform }} \
-            --message "${{ inputs.message || format('Production OTA ({0})', github.sha) }}" \
+            --message "$OTA_MESSAGE" \
             --non-interactive
 
       # One pass per platform. The fingerprint decides OTA vs store build:

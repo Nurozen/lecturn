@@ -1,10 +1,10 @@
+import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
 import { useNavigation } from "@react-navigation/native";
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ProjectId } from "@lecturn/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import {
-  ActivityIndicator,
   Keyboard,
   Platform,
   Pressable,
@@ -16,9 +16,9 @@ import {
 import { ScrollViewMarker } from "react-native-screens";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
-import { EmptyState } from "../../components/EmptyState";
+import { EmptyState } from "../../components/ui/EmptyState";
 import { cn } from "../../lib/cn";
 import { NativePrimaryColumnContext } from "../../native/v5-workspace-context";
 import { useWorkspaceState } from "../../state/workspace";
@@ -323,7 +323,7 @@ export function PullRequestsScreen(
         ListFooterComponent={
           result.loadingMore ? (
             <View className="items-center py-5">
-              <ActivityIndicator
+              <AppActivityIndicator
                 colorClassName="accent-icon"
                 accessibilityLabel="Loading more pull requests"
               />
@@ -343,7 +343,7 @@ export function PullRequestsScreen(
         ListEmptyComponent={
           result.isPending && connectedTargets.length > 0 ? (
             <View className="items-center py-12">
-              <ActivityIndicator colorClassName="accent-icon" />
+              <AppActivityIndicator colorClassName="accent-icon" />
             </View>
           ) : (
             <View className="px-8 py-12">

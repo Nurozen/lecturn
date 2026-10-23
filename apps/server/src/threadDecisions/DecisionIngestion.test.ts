@@ -151,6 +151,22 @@ it.layer(SqlitePersistence.layerMemory)("Decision ingestion on the V2 applicatio
       assert.equal(yield* jobs.cursor, 0);
     }),
   );
+  it.effect("leaves the cursor in place when compaction removed a drain target", () =>
+    Effect.gen(function* () {
+      const { jobs } = yield* fixture;
+      // Sequence 2 was superseded by 3 and compacted before its live drain ran.
+      const { store } = yield* makeStore([event(1), event(3)]);
+      const ingestion = yield* make.pipe(
+        Effect.provideService(OrchestrationEventStore, store),
+        Effect.provideService(DecisionJobRepository, jobs),
+      );
+      yield* ingestion.drainThrough(1);
+      yield* ingestion.drainThrough(2);
+      assert.equal(yield* jobs.cursor, 1);
+      yield* ingestion.drainThrough(3);
+      assert.equal(yield* jobs.cursor, 3);
+    }),
+  );
   it.effect("keeps explicit recovery subscribed when the initial durable drain fails", () =>
     Effect.scoped(
       Effect.gen(function* () {

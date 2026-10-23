@@ -5,7 +5,7 @@ import type {
   PullRequestMergeMethod,
   SourceControlProviderKind,
 } from "@lecturn/contracts";
-import type { AppSymbolName } from "../../components/AppSymbol";
+import type { AppSymbolName } from "../../components/ui/AppSymbol";
 
 type ActionDetail = Pick<
   PullRequestDetail,

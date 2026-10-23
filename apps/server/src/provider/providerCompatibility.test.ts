@@ -25,7 +25,7 @@ import {
 const driver = ProviderDriverKind.make("codex");
 const policy: ProviderCompatibilityPolicy = {
   driver,
-  lecturnRange: ">=0.0.42 <0.1.0",
+  lecturnRange: ">=0.0.0",
   recommendedVersion: "2.0.0",
   recommendedRange: ">=2.0.0 <3.0.0",
   ranges: [
@@ -211,7 +211,19 @@ describe("provider compatibility", () => {
     ] as const) {
       assert.strictEqual(resolveProviderCompatibility([policy], driver, version)?.status, expected);
     }
-    assert.isUndefined(resolveProviderCompatibility([policy], driver, "0.9.0", "0.1.0"));
+  });
+
+  it("applies policies only within their Lecturn version range", () => {
+    const scopedPolicy = { ...policy, lecturnRange: ">=0.0.42 <0.1.0" };
+    for (const version of ["0.0.42", "0.0.45"]) {
+      assert.strictEqual(
+        resolveProviderCompatibility([scopedPolicy], driver, "0.9.0", version)?.status,
+        "broken",
+      );
+    }
+    for (const version of ["0.0.41", "0.1.0"]) {
+      assert.isUndefined(resolveProviderCompatibility([scopedPolicy], driver, "0.9.0", version));
+    }
   });
 
   it("supports every driver without inventing policies for uncovered adapters", () => {
@@ -242,7 +254,7 @@ describe("provider compatibility", () => {
     assert.strictEqual(supported.status, "error");
     assert.strictEqual(supported.message, "Authentication failed");
     assert.strictEqual(
-      applyProviderCompatibility(supported, [{ ...policy, lecturnRange: ">=9.0.0" }], [policy])
+      applyProviderCompatibility(supported, [{ ...policy, lecturnRange: "<0.0.0" }], [policy])
         .compatibilityAdvisory?.status,
       "broken",
     );
@@ -269,11 +281,11 @@ describe("provider compatibility", () => {
       ranges: [{ range: ">=v2.0 <v3", status: "supported" }],
     });
     assert.strictEqual(
-      resolveProviderCompatibility([prefixed], driver, "2.0.0")?.status,
+      resolveProviderCompatibility([prefixed], driver, "2.0.0", "0.0.45")?.status,
       "supported",
     );
     assert.strictEqual(
-      resolveProviderCompatibility([prefixed], driver, "3.0.0")?.status,
+      resolveProviderCompatibility([prefixed], driver, "3.0.0", "0.0.45")?.status,
       "unknown",
     );
     for (const invalid of [

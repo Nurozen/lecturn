@@ -48,13 +48,14 @@ pin an exact version. The executable is built for Apple Silicon Macs, Linux x64,
 and Windows x64; on other platforms the script tells you to use `npx lecturn`
 instead.
 
-| Task                                             | Command                                                        |
-| ------------------------------------------------ | -------------------------------------------------------------- |
-| Start the server and open the web app            | `lecturn`                                                      |
-| Start the server without a browser               | `lecturn serve`                                                |
-| Keep it running in the background (macOS, Linux) | `lecturn service install` ([details](./background-service.md)) |
-| Move to the newest release                       | `lecturn update`                                               |
-| Remove it again                                  | `lecturn uninstall`                                            |
+| Task                                             | Command                                                                      |
+| ------------------------------------------------ | ---------------------------------------------------------------------------- |
+| Start the server and open the web app            | `lecturn`                                                                    |
+| Start the server without a browser               | `lecturn serve`                                                              |
+| Keep it running in the background (macOS, Linux) | `lecturn service install` ([details](./background-service.md))               |
+| Move to the newest release                       | `lecturn update`                                                             |
+| Reclaim database space                           | `lecturn doctor` ([details](./background-service.md#reclaim-database-space)) |
+| Remove it again                                  | `lecturn uninstall`                                                          |
 
 Run `lecturn help` or `lecturn --help` for the full reference. To start in a new
 working directory, use an explicit path such as `lecturn ./my-project`. A bare

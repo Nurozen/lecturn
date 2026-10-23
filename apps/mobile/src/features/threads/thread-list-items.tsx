@@ -16,8 +16,8 @@ import Animated, {
 } from "react-native-reanimated";
 import { Pressable, View, type ColorValue } from "react-native";
 
-import { SymbolView } from "../../components/AppSymbol";
-import { AppText as Text } from "../../components/AppText";
+import { SymbolView } from "../../components/ui/AppSymbol";
+import { AppText as Text } from "../../components/ui/AppText";
 import { GlassCard } from "../../components/GlassCard";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { useGlassPalette } from "../../lib/useGlassPalette";

@@ -1,4 +1,5 @@
-import { Alert, Platform } from "react-native";
+import * as Dialog from "../../components/ui/Dialog";
+import { Platform } from "react-native";
 import { environmentCatalog } from "../../connection/catalog";
 import { rejectedMobileAccountIds } from "./mobileAccountAdmission";
 import { accountOwnerTarget } from "@lecturn/client-runtime/connection";
@@ -126,7 +127,7 @@ export function MultiAccountCloudAuthBridge({ children }: { readonly children: R
         // They have not received token readers, discovery, push, or persisted ownership.
         for (const session of rejectedSessions) await session.remove();
         if (rejectedSessions.length > 0)
-          Alert.alert(
+          Dialog.alert(
             "Account could not be added",
             "This account was not added. Up to five accounts are supported, and adding an account requires a compatible sign-in service, linked environments, and multi-account push support on iOS. Use Add account in Settings to check availability.",
           );

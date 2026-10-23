@@ -21,7 +21,7 @@ with an override. See the [release checklist](./release.md#4-ongoing-release-che
 
 After publishing a stable release, finalization opens or reuses a `release/version-<tag>` pull request for the package version bump. It explicitly dispatches the normal CI workflow on that branch because pushes made with `GITHUB_TOKEN` do not start push workflows. The release summary links the pull request; merge it after the required checks pass. Branch protection stays enabled, and publishing does not wait for this bookkeeping PR to merge.
 
-Rerunning finalization succeeds without a PR when `main` already has the released versions. An existing version branch is reused only when its changes and generated file contents match; finalization never force-pushes it. If it has diverged, inspect and reconcile that branch before retrying. CI's optional `pull_request_number` dispatch input lets its native-change detector inspect the PR; without a resolvable diff, native checks run as a precaution.
+Rerunning finalization succeeds without a PR when `main` already has the released versions. An existing version branch is reused only when its changes and generated file contents match; finalization never force-pushes it. If it has diverged, inspect and reconcile that branch before retrying. CI's optional `pull_request_number` dispatch input only groups and cancels runs per PR. A dispatched CI run has no diff to inspect, so it runs every job, native checks included.
 
 ## Mobile production builds
 

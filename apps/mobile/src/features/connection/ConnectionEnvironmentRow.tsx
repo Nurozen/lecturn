@@ -1,19 +1,20 @@
+import * as Dialog from "../../components/ui/Dialog";
 import { ConnectionTraceId } from "./ConnectionTraceId";
-import { SymbolView } from "../../components/AppSymbol";
+import { SymbolView } from "../../components/ui/AppSymbol";
 import type { AtomCommandResult } from "@lecturn/client-runtime/state/runtime";
 import { type EnvironmentId, resolveEnvironmentMachineKind } from "@lecturn/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import { useCallback, useState } from "react";
-import { Platform, Alert, Pressable, View } from "react-native";
+import { Platform, Pressable, View } from "react-native";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
 
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
-import { Button } from "../../components/Button";
-import { IconButton } from "../../components/IconButton";
-import { ThemedSwitch } from "../../components/ThemedSwitch";
+import { Button } from "../../components/ui/Button";
+import { IconButton } from "../../components/ui/IconButton";
+import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { cn } from "../../lib/cn";
 import type { ConnectedEnvironmentSummary } from "../../state/remote-runtime-types";
 import { serverEnvironment } from "../../state/server";
@@ -70,7 +71,7 @@ export function ConnectionEnvironmentRow(props: {
       return;
     }
     const error = Cause.squash(result.cause);
-    Alert.alert(
+    Dialog.alert(
       "Could not update environment",
       error instanceof Error ? error.message : "The environment could not be updated.",
     );

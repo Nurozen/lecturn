@@ -350,6 +350,75 @@ from upstream's side.
   PowerShell pin, #18573) are not ported while fork Windows arm64 builds are
   off.
 
+**Upstream changes taken in a Lecturn shape (sync to upstream ba358222).**
+
+- **Mobile design system.** Upstream's `ui/` component layout (#20043), app
+  bar/toolbar/FAB APIs, text-role tokens and `Dialog.alert` presenter are
+  adopted; fork-only screens use `Dialog.alert` too. `GlassSurface` keeps the
+  fork's radius 28 continuous curve and glass palette (not `MOBILE_SHAPE.glass`
+  32). `SegmentedControl`: iOS keeps the fork glass pill
+  (`ui/SegmentedControl.tsx`); Android takes upstream's shared capsule
+  (`ui/SegmentedControl.android.tsx`, #20116). Upstream `font-t3-*` utility
+  classes map to `font-lecturn-*`.
+- **Expo patches.** The fork's `expo-modules-core` (permission registry lock)
+  and `expo-notifications` (pending-response delivery) patches move to the
+  versions upstream's Expo resolves (58.0.19 / 58.1.4 at this sync), pinned by
+  overrides. On each Expo bump, diff the patched files across versions and
+  drop a patch only when upstream ships the fix. `expo-widgets` uses upstream's
+  patch plus the fork hunks (Live Activity `accountId`/`getAccountId`, ended
+  activity dismissal); rebase those hunks onto upstream's next patch. The
+  `@58.0.18` patch also renames the `io.github.jakex7.peek` imports in
+  `android/.../notifications/*.kt` to `io.github.expo.peek`: published 58.0.18
+  imports a package that its `peek-emittables:0.3.2` dependency does not ship,
+  so the Android build fails. It also carries upstream's #20131 hunk that gives
+  the Android `CustomNotification` class a throwing `Constructor`:
+  expo-modules-core 58.0.19 rejects a SharedObject `Class` without one, so
+  `WidgetsModule.definition` throws "constructor cannot be null" while the
+  module registry is built and the Android app never starts. 58.0.20 fixes the
+  imports and the constructor upstream, so drop these hunks when the fork
+  moves to 58.0.20 or later.
+- **`@react-navigation/core` override.** Keep the `pnpm-workspace.yaml` pin at
+  or above the core range that `@react-navigation/native` requires (7.5.1
+  needs `^7.24.0`; upstream #20131). An older pinned core makes every native
+  stack throw "undefined is not a function" in `NativeStackNavigator` at
+  launch, which shows up only at runtime (tsc and the bundle are clean).
+- **`node-pty` exact pin.** `apps/server/package.json` pins `node-pty` to
+  `1.2.0-beta.15` (upstream uses `^1.2.0-beta.15`). Release Smoke regenerates
+  the lockfile from the registry, so a newer beta that has passed pnpm's
+  minimum release age would leave `patches/node-pty@1.2.0-beta.15.patch`
+  unused and fail with `ERR_PNPM_UNUSED_PATCH`. Move the pin and the patch
+  together.
+- **Mobile release versions.** EAS keeps one production profile and the
+  literal `version` in `app.config.ts` (read by `fingerprint.config.js`);
+  upstream's TestFlight/store version split (#20060) and its
+  `T3CODE_MOBILE_VERSION` env are not taken. Upstream's v2 preview channel
+  removal (#20084) has nothing to remove on the fork.
+- **Android APK release.** `mirror-play-apk.cjs` and `mobile-android-apk.yml`
+  follow upstream's beta model with Lecturn names and stay inactive without
+  the Play secret; `release.yml` attaches no APKs. `NightlyMobileBeta.tsx` stays
+  (upstream deleted it in #20092) with the Android row off, as before.
+- **CI.** Upstream's change-based job skipping, caches and typecheck inside
+  Build are taken. The fork keeps its runners, 3 server shards, a 15-minute
+  typecheck wait in Build, `Check` without the macOS native lint, and a
+  fork-only `Mobile Native Changes` job (a required status check on `main`)
+  that reports `changes.outputs.mobile_native`, gates the macOS lint and is in
+  `Check`'s needs.
+- **Versions and doctor.** Upstream's v0.1.0 release prep is not taken (fork
+  stays on its own versions). `t3 doctor` is `lecturn doctor`; the CLI path
+  env is `LECTURN_CLI_PATH`.
+- **History compaction.** Upstream now runs `compactEventStore` in production
+  (#19435: one minute after start, then every 6 hours). The fork keeps
+  `thread.imported`, `thread.archived` and `thread.unarchived` out of
+  `SUPERSEDABLE_THREAD_EVENT_TYPES`, for upstream's own `thread.deleted`
+  reason. Decision ingestion replays them by type from a durable cursor
+  (`DecisionSourceEvents.ts`), and the `thread.import` hook reads
+  `importedFrom` from the stored event. `DecisionIngestion.drainThrough` also
+  treats an empty range below the high-water as compacted rather than a gap.
+  Keep both when upstream changes the supersedable set.
+- **Codex replay fixtures.** New Codex replay transcripts are re-recorded with
+  the fork's `lecturn_desktop` client name, originator and user agent, as the
+  replay matches on them.
+
 ## Recurring mechanical conflicts
 
 **Published migration identities are persistent data.** The fork's

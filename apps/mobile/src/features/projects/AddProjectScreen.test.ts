@@ -31,11 +31,11 @@ vi.mock("../../state/stave", () => ({ useStaveCreateSources: () => null }));
 vi.mock("../threads/use-import-thread", () => ({
   useThreadImportAvailability: () => ({ available: false }),
 }));
-vi.mock("../../components/MaterialListRow", () => ({ MaterialListRow: "MaterialListRow" }));
-vi.mock("../../components/Button", () => ({ Button: "Button" }));
-vi.mock("../../components/ScreenScrollView", () => ({ ScreenScrollView: "ScrollView" }));
+vi.mock("../../components/ui/NavigationRow", () => ({ NavigationRow: "NavigationRow" }));
+vi.mock("../../components/ui/Button", () => ({ Button: "Button" }));
+vi.mock("../../components/ui/ScreenScrollView", () => ({ ScreenScrollView: "ScrollView" }));
 vi.mock("../settings/components/SettingsScreen", () => ({ SettingsScreen: "SettingsScreen" }));
-vi.mock("../../components/ThemedSwitch", () => ({ ThemedSwitch: "Switch" }));
+vi.mock("../../components/ui/ThemedSwitch", () => ({ ThemedSwitch: "Switch" }));
 vi.mock("react-native", () => ({
   Platform: { OS: "ios" },
   ActivityIndicator: "ActivityIndicator",
@@ -52,13 +52,13 @@ vi.mock("@react-navigation/native", () => ({
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ bottom: 0 }),
 }));
-vi.mock("../../components/AppSymbol", () => ({ SymbolView: "SymbolView" }));
-vi.mock("../../components/AppText", () => ({ AppText: "Text", AppTextInput: "TextInput" }));
+vi.mock("../../components/ui/AppSymbol", () => ({ SymbolView: "SymbolView" }));
+vi.mock("../../components/ui/AppText", () => ({ AppText: "Text", AppTextInput: "TextInput" }));
 vi.mock("../../components/EnvironmentMachineSymbol", () => ({
   EnvironmentMachineSymbol: "EnvironmentMachineSymbol",
 }));
-vi.mock("../../components/ErrorBanner", () => ({ ErrorBanner: "ErrorBanner" }));
-vi.mock("../../components/SourceControlIcon", () => ({ SourceControlIcon: "SourceControlIcon" }));
+vi.mock("../../components/ui/ErrorBanner", () => ({ ErrorBanner: "ErrorBanner" }));
+vi.mock("./SourceControlIcon", () => ({ SourceControlIcon: "SourceControlIcon" }));
 vi.mock("../../lib/uuid", () => ({ uuidv4: () => "project" }));
 vi.mock("../../state/session", () => ({
   useEnvironmentScope: (environmentId: string, scope: string) =>

@@ -6,10 +6,10 @@ import { useState, type ReactNode } from "react";
 import { Platform, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AndroidSheetHeader } from "../../../components/AndroidScreenHeader";
-import { MaterialScreenContent } from "../../../components/MaterialScreenContent";
+import { AndroidSheetHeader } from "../../../components/ui/AndroidScreenHeader";
+import { ScreenContent } from "../../../components/ui/ScreenContent";
 import { NativeStackScreenOptions } from "../../../native/StackHeader";
-import { AppText as Text, AppTextInput as TextInput } from "../../../components/AppText";
+import { AppText as Text, AppTextInput as TextInput } from "../../../components/ui/AppText";
 import { cn } from "../../../lib/cn";
 import { useEnvironmentQuery } from "../../../state/query";
 import { useThreadSelection } from "../../../state/use-thread-selection";
@@ -105,7 +105,7 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
           hideBottomBorder
         />
       ) : null}
-      <MaterialScreenContent fitToContents>
+      <ScreenContent fitToContents>
         <ScrollView
           nestedScrollEnabled
           className="android:shrink android:grow-0 ios:flex-1"
@@ -254,7 +254,7 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
             })}
           </View>
         </ScrollView>
-      </MaterialScreenContent>
+      </ScreenContent>
     </View>
   );
 }

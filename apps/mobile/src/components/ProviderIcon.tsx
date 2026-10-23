@@ -1,5 +1,5 @@
 import { CLAUDE_EMBLEM } from "@lecturn/shared/providerEmblems";
-import { AppText as Text } from "./AppText";
+import { AppText as Text } from "./ui/AppText";
 import { Image } from "expo-image";
 import { Defs, LinearGradient, Path, Stop, Svg } from "react-native-svg";
 import { View } from "react-native";

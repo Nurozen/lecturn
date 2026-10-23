@@ -14,12 +14,13 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
-import { AppText as Text } from "../../components/AppText";
-import { ThemedSwitch } from "../../components/ThemedSwitch";
+import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
+import { AppText as Text } from "../../components/ui/AppText";
+import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { cn } from "../../lib/cn";
 import { relativeTime } from "../../lib/time";
-import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
+import { NativeStackScreenOptions } from "../../native/StackHeader";
+import { Toolbar } from "../../components/ui/Toolbar";
 import { environmentProjects } from "../../state/projects";
 import { externalSessionsEnvironment } from "../../state/externalSessions";
 import { environmentThreadShells } from "../../state/threads";
@@ -484,9 +485,9 @@ export function ImportSessionPickerRouteScreen() {
         }}
       />
       {usesNativeMailSearchToolbar ? null : (
-        <NativeHeaderToolbar placement="bottom">
-          <NativeHeaderToolbar.SearchBarSlot />
-        </NativeHeaderToolbar>
+        <Toolbar placement="bottom">
+          <Toolbar.SearchBarSlot />
+        </Toolbar>
       )}
       {content}
     </>

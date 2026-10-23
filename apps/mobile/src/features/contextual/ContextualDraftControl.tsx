@@ -5,8 +5,8 @@ import {
   type ProjectId,
 } from "@lecturn/contracts";
 import { View } from "react-native";
-import { AppText as Text } from "../../components/AppText";
-import { ThemedSwitch } from "../../components/ThemedSwitch";
+import { AppText as Text } from "../../components/ui/AppText";
+import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { contextualEnvironment } from "../../state/contextual";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";

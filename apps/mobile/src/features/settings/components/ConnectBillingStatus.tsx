@@ -1,6 +1,6 @@
 import { ActivityIndicator, Pressable, View } from "react-native";
 import { connectBillingSummary } from "./connectBillingSummary";
-import { AppText as Text } from "../../../components/AppText";
+import { AppText as Text } from "../../../components/ui/AppText";
 import { useConnectBillingStatus } from "./useConnectBillingStatus";
 
 /** Native companion status only: no purchase prompts, prices or external billing links. */

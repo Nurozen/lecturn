@@ -1,6 +1,7 @@
-import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
+import { Toolbar } from "../../components/ui/Toolbar";
+import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 import { useNavigation, type NavigationProp } from "@react-navigation/native";
 import { Platform, View } from "react-native";
 import { deriveProjectGroupLabel } from "@lecturn/client-runtime/state/project-grouping";
@@ -10,7 +11,7 @@ import { TeamSelector } from "../cloud/TeamSelector";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { ContextualButton } from "../contextual/ContextualControls";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
-import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
+import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useEnvironments } from "../../state/environments";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { ConnectAccountsSettings } from "./ConnectAccountsSettings";
@@ -41,13 +42,13 @@ export function SettingsRouteScreen() {
       ) : null}
       {Platform.OS === "ios" && layout.usesSplitView ? (
         <>
-          <NativeHeaderToolbar placement="left">
-            <NativeHeaderToolbar.Button
+          <Toolbar placement="left">
+            <Toolbar.Button
               accessibilityLabel="Go back"
               icon="chevron.left"
               onPress={() => navigation.goBack()}
             />
-          </NativeHeaderToolbar>
+          </Toolbar>
         </>
       ) : null}
       <SettingsEnvironmentFilterHeader closeSettings />

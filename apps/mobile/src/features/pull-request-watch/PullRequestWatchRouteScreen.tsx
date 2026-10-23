@@ -7,7 +7,7 @@ import { useAppearancePreferences } from "../settings/appearance/AppearancePrefe
 import { cardIsVisible } from "./watch-visuals";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
-import { SymbolView, type AppSymbolName } from "../../components/AppSymbol";
+import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
 import {
   mergeHandoffMessage,
   selectMergeHandoffThread,
@@ -34,7 +34,7 @@ import {
 import * as Cause from "effect/Cause";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable, ScrollView, View } from "react-native";
-import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
+import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { makeQueuedMessageMetadata } from "../../lib/commandMetadata";
 import { uuidv4 } from "../../lib/uuid";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";

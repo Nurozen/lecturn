@@ -24,7 +24,7 @@ vi.mock("../../connection/catalog", () => ({
 }));
 vi.mock("react-native", () => ({ View: (props: { children: ReactNode }) => props.children }));
 vi.mock("@react-navigation/native", () => ({ useNavigation: () => ({ navigate() {} }) }));
-vi.mock("../../components/EmptyState", () => ({
+vi.mock("../../components/ui/EmptyState", () => ({
   EmptyState: (props: { title: string }) => {
     screen.message = props.title;
     return null;

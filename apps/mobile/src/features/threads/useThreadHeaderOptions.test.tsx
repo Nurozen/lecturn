@@ -38,6 +38,14 @@ vi.mock("../../state/session", () => ({ useEnvironmentScope: () => true }));
 vi.mock("../../state/use-selected-thread-worktree", () => ({
   useSelectedThreadWorktree: () => ({ selectedThreadGitRepository: null }),
 }));
+vi.mock("../../components/ui/AppBar", async () => {
+  const { NativeStackScreenOptions } = await import("../../native/StackHeader");
+  return {
+    AppBar: (props: import("../../components/ui/AppBar.types").AppBarProps) => (
+      <NativeStackScreenOptions options={props.options} optionsVersion={props.optionsVersion} />
+    ),
+  };
+});
 vi.mock("react-native", () => ({ Alert: { alert: () => {} }, Linking: {}, Platform: {} }));
 vi.mock("../layout/AdaptiveWorkspaceLayout", () => ({
   useAdaptiveWorkspaceLayout: () => ({

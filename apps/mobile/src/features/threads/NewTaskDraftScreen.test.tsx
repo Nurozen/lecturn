@@ -65,7 +65,9 @@ vi.mock("@react-navigation/native", () => ({
 }));
 vi.mock("../../native/StackHeader", () => ({
   NativeStackScreenOptions: native.noop,
-  NativeHeaderToolbar: Object.assign(native.noop, { Button: native.noop }),
+}));
+vi.mock("../../components/ui/Toolbar", () => ({
+  Toolbar: Object.assign(native.noop, { Button: native.noop }),
 }));
 vi.mock("../../lib/useUniwindTheme", () => ({ useUniwindTheme: () => ({}) }));
 vi.mock("../../lib/useFontFamily", () => ({ useFontFamily: () => "Lecturn" }));
@@ -205,8 +207,8 @@ vi.mock("../../components/ComposerToolbar", () => ({
   ComposerToolbarRow: native.noop,
   ComposerToolbarScroller: native.noop,
 }));
-vi.mock("../../components/AndroidScreenHeader", () => ({ AndroidScreenHeader: native.noop }));
-vi.mock("../../components/ComposerAttachmentButton", () => ({
+vi.mock("../../components/ui/AndroidScreenHeader", () => ({ AndroidScreenHeader: native.noop }));
+vi.mock("./ComposerAttachmentButton", () => ({
   ComposerAttachmentButton: native.noop,
 }));
 vi.mock("../../components/ComposerAttachmentStrip", () => ({
@@ -218,8 +220,8 @@ vi.mock("../../components/EnvironmentMachineSymbol", () => ({
 vi.mock("../../components/FilePreviewModal", () => ({ FilePreviewModal: native.noop }));
 vi.mock("../../components/VideoPreviewModal", () => ({ VideoPreviewModal: native.noop }));
 vi.mock("../../components/ProviderIcon", () => ({ ProviderIcon: native.noop }));
-vi.mock("../../components/AppSymbol", () => ({ SymbolView: native.noop }));
-vi.mock("../../components/AppText", () => ({ AppText: native.noop }));
+vi.mock("../../components/ui/AppSymbol", () => ({ SymbolView: native.noop }));
+vi.mock("../../components/ui/AppText", () => ({ AppText: native.noop }));
 vi.mock("./ThreadComposer", () => ({
   ComposerSurface: native.noop,
   COMPOSER_LAYOUT_TRANSITION: undefined,

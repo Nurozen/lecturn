@@ -50,6 +50,22 @@ const shellWord = (value: string) =>
   /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replaceAll("'", `'"'"'`)}'`;
 
 /**
+ * Quotes `value` for PowerShell, the default Windows terminal. Always quoted,
+ * so a path reads the same whether or not it holds a space. Inside double
+ * quotes `"` and its typographic forms (which also end the string) double,
+ * and `$` and the backtick are escaped so nothing expands.
+ */
+const powershellWord = (value: string) =>
+  `"${value
+    .replaceAll("`", "``")
+    .replaceAll("$", "`$")
+    .replace(/["\u201C\u201D\u201E]/g, "$&$&")}"`;
+
+/** Quotes a word for the host's shell: POSIX, or PowerShell on Windows. */
+const hostShellWord = (platform: NodeJS.Platform, value: string) =>
+  platform === "win32" ? powershellWord(value) : shellWord(value);
+
+/**
  * The launcher a person can type to run this install when `lecturn` is not on
  * PATH: the desktop app's `lecturn` shim, which the app and the shim itself
  * name in `LECTURN_CLI_PATH`, or a standalone binary's own path. Script
@@ -67,19 +83,26 @@ const resolveInstallLauncher = Effect.gen(function* () {
 });
 
 /**
- * `lecturn <subcommand>` for a person to run on this host: `lecturn` when it is
- * on PATH, or else the absolute path of the launcher for this install, such as
- * the one the desktop app installs.
+ * `lecturn <subcommand> <args>` for a person to run on this host: `lecturn`
+ * when it is on PATH, or else the absolute path of the launcher for this
+ * install, such as the one the desktop app installs. `args` are quoted for the
+ * host's shell: POSIX, or PowerShell on Windows.
  */
-const resolveHostCliCommand = (subcommand: string) =>
+export const resolveHostCliCommand = (subcommand: string, args: ReadonlyArray<string> = []) =>
   Effect.gen(function* () {
+    const platform = yield* HostProcess.Platform;
+    const withArgs = (prefix: string) =>
+      [prefix, ...args.map((arg) => hostShellWord(platform, arg))].join(" ");
     const command = yield* resolveCliCommand(subcommand);
-    if (command !== `lecturn ${subcommand}`) return { command, launcher: false };
-    if (yield* isCommandAvailable("lecturn")) return { command, launcher: false };
+    if (command !== `lecturn ${subcommand}`) return { command: withArgs(command), launcher: false };
+    if (yield* isCommandAvailable("lecturn"))
+      return { command: withArgs(command), launcher: false };
     const launcher = yield* resolveInstallLauncher;
-    return Option.isSome(launcher)
-      ? { command: `${shellWord(launcher.value)} ${subcommand}`, launcher: true }
-      : { command, launcher: false };
+    if (Option.isNone(launcher)) return { command: withArgs(command), launcher: false };
+    // PowerShell runs a quoted path only through the call operator.
+    const quoted = hostShellWord(platform, launcher.value);
+    const call = platform === "win32" ? `& ${quoted}` : quoted;
+    return { command: withArgs(`${call} ${subcommand}`), launcher: true };
   });
 
 /**
