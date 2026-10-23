@@ -19,7 +19,6 @@ const specIgnored = (value: string) =>
 describe("OtelEnvironment", () => {
   it.effect.each([
     { name: "nothing set", env: {}, disabled: false, warnings: [] },
-    // OTEL_SDK_DISABLED follows the specification: only `true`, case-insensitively.
     { name: "spec true", env: { OTEL_SDK_DISABLED: "true" }, disabled: true, warnings: [SPEC_OFF] },
     { name: "spec True", env: { OTEL_SDK_DISABLED: "True" }, disabled: true, warnings: [SPEC_OFF] },
     {
@@ -517,7 +516,6 @@ describe("OtelEnvironment", () => {
         assert.deepStrictEqual(
           resource.attributes
             .map((attribute) => attribute.key)
-            // Effect adds these to every resource.
             .filter((key) => !key.startsWith("telemetry.sdk.")),
           [...attributes, "service.name"],
         );

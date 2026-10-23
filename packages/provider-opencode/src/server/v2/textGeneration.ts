@@ -1,13 +1,10 @@
 /**
- * Text generation on an OpenCode 2 server. Both of its `generate` endpoints
- * answer 403 on OpenCode's free tier ("free tier can only be used from within
- * OpenCode"), so each request runs as a prompt in a temporary session, as 1.x
+ * Both of its `generate` endpoints answer 403 on OpenCode's free tier ("free tier can only be
+ * used from within OpenCode"), so each request runs as a prompt in a temporary session, as 1.x
  * does, and the session is removed afterwards.
  *
  * Lecturn workflow inference runs in an empty temporary directory and is
  * discarded if the model attempted any tool (every tool ask is rejected).
- *
- * @module textGeneration/OpenCode2TextGeneration
  */
 import { AbsolutePath, Location, Model, Provider, Session } from "@opencode/client/effect";
 import { TextGenerationError } from "@lecturn/contracts";
@@ -25,18 +22,16 @@ import * as TextGenerationOperations from "@lecturn/provider-core/server/textGen
 
 const isTextGenerationError = Schema.is(TextGenerationError);
 
-/** A generation that takes this long is stuck; its session is stopped and removed. */
 const GENERATION_TIMEOUT = "3 minutes";
 
 /**
- * Nothing in a text generation needs a tool, so every tool asks and Lecturn is not
- * there to answer. Denying `shell` or `read` outright gets the whole session
- * refused on OpenCode's free models, and an ask that is never answered would
- * hang, so asks are rejected as they arrive.
+ * Denying `shell` or `read` outright gets the whole session refused on
+ * OpenCode's free models, and an ask that is never answered would hang, so asks
+ * are rejected as they arrive.
  */
 const GENERATION_PERMISSIONS = [{ action: "*", resource: "*", effect: "ask" }] as const;
 
-/** How a generation ended. A failure's cause is the provider's own error, kept out of `detail`. */
+/** A failure's cause is the provider's own error, kept out of `detail`. */
 type Outcome =
   | { readonly _tag: "text"; readonly text: string }
   | { readonly _tag: "failed"; readonly detail: string; readonly cause?: unknown };
@@ -193,7 +188,6 @@ const runOnServer = (
     return result.text;
   }).pipe(Effect.scoped);
 
-/** Text generation for an instance whose server is OpenCode 2. */
 export const make = Effect.fn("OpenCode2TextGeneration.make")(function* () {
   const server = yield* OpenCode2Server.OpenCode2Server;
   const host = yield* ProviderHost.ProviderHost;

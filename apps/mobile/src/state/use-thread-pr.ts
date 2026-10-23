@@ -42,12 +42,6 @@ export {
 
 export type ThreadPrProject = Pick<OrchestrationProjectShell, "workspaceRoot" | "stave">;
 
-/**
- * Linked PRs use server snapshots. Branch fallback and legacy references share
- * a live summary request across visible rows in the same environment. Stave
- * spaces with several editable repos keep explicit links without showing one
- * inferred repo as the whole space.
- */
 export function useThreadPr(
   thread: EnvironmentThreadShell,
   project: ThreadPrProject | null,

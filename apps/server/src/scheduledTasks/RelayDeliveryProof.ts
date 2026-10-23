@@ -1,6 +1,4 @@
 /**
- * Whether a webhook request really came through this environment's relay.
- *
  * The relay's delivery id, receive time and trace context arrive as plain
  * headers, and the webhook URL can also be called directly, so they are only
  * trusted alongside a proof the relay signed with its mint key. A request
@@ -34,7 +32,6 @@ const text = (bytes: Option.Option<Uint8Array>) =>
 export class RelayDeliveryProof extends Context.Service<
   RelayDeliveryProof,
   {
-    /** The relay's own delivery id and receive time, when the request proves it came from the relay. */
     readonly verify: (input: {
       readonly headers: Readonly<Record<string, string>>;
       readonly hookId: string;

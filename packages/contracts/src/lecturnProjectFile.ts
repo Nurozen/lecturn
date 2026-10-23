@@ -115,13 +115,10 @@ export const LecturnProjectFile = Schema.Struct({
 export type LecturnProjectFile = typeof LecturnProjectFile.Type;
 
 /**
- * Settings a repository can also declare in lecturn.json. A key here must be
- * nullable on `ServerSettings` (null means inherit) so both the project
- * override and the environment value can defer to the file; `field` names
- * the lecturn.json field carrying the same value and `builtIn` is what applies
- * when every tier is unset. `resolveProjectSettings` walks project override,
- * environment value, file, built-in, so listing a key here is the whole
- * change for a new file-backed setting.
+ * A key here must be nullable on `ServerSettings` (null means inherit) so both
+ * the project override and the environment value can defer to the file; `field`
+ * names the lecturn.json field carrying the same value and `builtIn` is what applies
+ * when every tier is unset.
  */
 export const PROJECT_FILE_BACKED_SETTINGS = {
   defaultThreadEnvMode: { field: "defaultThreadEnvMode", builtIn: "local" },
@@ -143,11 +140,6 @@ export const PROJECT_FILE_BACKED_SETTINGS = {
 };
 export type ProjectFileBackedSettingKey = keyof typeof PROJECT_FILE_BACKED_SETTINGS;
 
-/**
- * `ServerSettings` with every file-backed key resolved to a concrete value.
- * What `resolveProjectSettings(...).settings` produces once a lecturn.json (or
- * its absence) has been accounted for.
- */
 export type ResolvedServerSettings = Omit<ServerSettings, ProjectFileBackedSettingKey> & {
   readonly [K in ProjectFileBackedSettingKey]: Exclude<ServerSettings[K], null>;
 };

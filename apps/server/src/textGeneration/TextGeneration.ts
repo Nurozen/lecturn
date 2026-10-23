@@ -29,9 +29,6 @@ export type {
   WorkflowSummaryGenerationResult,
 } from "@lecturn/provider-core/server/textGeneration";
 
-/**
- * TextGeneration - Service tag for commit and change request text generation.
- */
 export class TextGeneration extends Context.Service<TextGeneration, ProviderTextGeneration>()(
   "lecturn/textGeneration/TextGeneration",
 ) {}

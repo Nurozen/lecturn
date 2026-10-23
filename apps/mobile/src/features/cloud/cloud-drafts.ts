@@ -33,8 +33,6 @@ export const removeCloudEnvironments = createRuntimeCommand(connectionAtomRuntim
     const entries = yield* SubscriptionRef.get(registry.entries);
     const environmentIds = new Set(
       [...entries.values()]
-        // Only this account's environments that sign-out removes entirely
-        // (no LAN, tailnet, or other direct route left) lose their drafts.
         .filter(
           (entry) =>
             connectionRoutes(entry).some(

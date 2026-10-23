@@ -31,7 +31,6 @@ const encodeChunks = (...chunks: ReadonlyArray<string>) =>
 const eofTrackingStdin = (ended: Deferred.Deferred<void>) =>
   Sink.drain.pipe(Sink.mapEffect(() => Deferred.succeed(ended, undefined).pipe(Effect.asVoid)));
 
-// Accesses private properties of ChildProcessCommand for testing purposes
 function asChildProcessCommand(command: unknown): ChildProcessCommand {
   return command as ChildProcessCommand;
 }

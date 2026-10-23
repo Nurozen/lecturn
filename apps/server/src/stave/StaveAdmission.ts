@@ -28,13 +28,9 @@ import { StaveSpaceLock } from "./StaveSpaceLock.ts";
 import { StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
 import { sameManifestIncarnation } from "./staveIncarnation.ts";
 
-// ---------------------------------------------------------------------------
-// Errors
-//
 // One class per refusal so callers (and clients matching on `_tag`) can tell
 // them apart. Worktree, archived and transitioning refusals share a closed
 // error channel.
-// ---------------------------------------------------------------------------
 
 export const StaveAdmissionIntent = Schema.Literals([
   "thread.create",
@@ -87,10 +83,6 @@ export const isStaveAdmissionError: (cause: unknown) => cause is StaveAdmissionE
     StaveProjectIncarnationMismatchError,
   ]),
 );
-
-// ---------------------------------------------------------------------------
-// Service
-// ---------------------------------------------------------------------------
 
 export interface StaveAdmissionInput {
   /** Workspace root of the project the mutation targets (exact root, not a cwd inside it). */

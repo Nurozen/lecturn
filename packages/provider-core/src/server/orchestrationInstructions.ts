@@ -94,9 +94,7 @@ export function lecturnAcpPromptWithInstructions(input: {
 }
 
 /**
- * Providers without a system/developer-instruction channel receive this
- * context in the first prompt. Keep the wrapper explicit so it cannot be
- * mistaken for text authored by the user.
+ * Keep the wrapper explicit so it cannot be mistaken for text authored by the user.
  */
 function prependLecturnOrchestrationInstructions(prompt: string): string {
   return `<lecturn_orchestration_instructions>${LECTURN_ORCHESTRATION_INSTRUCTIONS.trim()}</lecturn_orchestration_instructions>\n\n<user_request>\n${prompt}\n</user_request>`;

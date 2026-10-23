@@ -93,7 +93,6 @@ const services = GitHubPullRequestApi.layer.pipe(
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 for (const mode of ["detail", "preview"] as const) {
-  // Start each side cold, then retain the caches shared across PRs in one session.
   const rows = await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {

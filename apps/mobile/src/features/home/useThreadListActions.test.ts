@@ -103,10 +103,7 @@ vi.mock("../../lib/uuid", () => ({ uuidv4: () => "00000000-0000-4000-8000-000000
 vi.mock("../../state/use-atom-command", () => ({
   useAtomCommand: (command: unknown) => command,
 }));
-// Stubbed at the direct dependency: the real outbox pulls the Expo file-system
-// storage into a test that only reads which threads are queued.
 vi.mock("../../state/use-thread-outbox", () => ({ queuedThreadKeysAtom: "queued-thread-keys" }));
-// The real hold lives in a module-level atom that would leak between cases.
 vi.mock("../../state/thread-order", () => ({
   threadDropBusyAtom: "thread-drop-busy",
   getPendingThreadOrder: () => state.pendingOrder,

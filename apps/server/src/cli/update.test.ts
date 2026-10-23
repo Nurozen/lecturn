@@ -44,7 +44,6 @@ it.layer(NodeServices.layer)("lecturn update launcher", (it) => {
       const copy = path.join(root, "copy/lecturn");
       const foreign = path.join(root, "foreign/lecturn");
       const elsewhere = path.join(root, "elsewhere/lecturn");
-      // Another install's versions tree: same shape, different home.
       const otherHome = path.join(root, "other/runtime/versions/1.0.0/lecturn");
       const otherLauncher = path.join(root, "other/bin/lecturn");
       for (const file of [newExe, copy, elsewhere, otherHome]) {

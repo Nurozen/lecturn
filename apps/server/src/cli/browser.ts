@@ -1,15 +1,3 @@
-/**
- * `lecturn browser setup` - prepares a Linux host for Lecturn's headless browser, which
- * server browser tabs and HTML render previews share. It is the fix every
- * browser host error names, so it does the whole job in one run:
- *
- * - installs the AppArmor profile that lets Chrome's sandbox run where the host
- *   restricts unprivileged user namespaces (Ubuntu 23.10+), and
- * - installs the Debian packages for any libraries the browser cannot load.
- *
- * Both need root. Without it, the command prints what it would change and the
- * `sudo` line to run. It is safe to run again; it skips what is already done.
- */
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
@@ -35,7 +23,6 @@ export class BrowserSetupStepError extends Schema.TaggedError<BrowserSetupStepEr
   }
 }
 
-/** Runs one setup command, streaming its output, and fails with its exit code. */
 const runStep = Effect.fn("browserSetup.runStep")(function* (
   step: string,
   command: string,
@@ -71,7 +58,6 @@ const setupBaseDir = Effect.fn("browserSetup.baseDir")(function* (explicit: Opti
   return home ? path.join(home, ".lecturn") : yield* resolveBaseDir(undefined);
 });
 
-/** Whether apt has an installable candidate for `name`. */
 const aptOffers = Effect.fn("browserSetup.aptOffers")(function* (name: string) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const policy = yield* spawner

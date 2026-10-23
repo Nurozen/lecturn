@@ -1,4 +1,3 @@
-// The bridge forwards opaque JSON-RPC values without interpreting their schemas.
 // @effect-diagnostics preferSchemaOverJson:off
 import * as Effect from "effect/Effect";
 import * as Semaphore from "effect/Semaphore";

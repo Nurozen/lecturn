@@ -142,10 +142,6 @@ const applyDevelopmentIconOverrides = Effect.fn("applyDevelopmentIconOverrides")
   yield* Effect.log("[cli] Applied development icon overrides to dist/client");
 });
 
-// ---------------------------------------------------------------------------
-// build subcommand
-// ---------------------------------------------------------------------------
-
 const buildCmd = Command.make(
   "build",
   {
@@ -208,10 +204,6 @@ const assertStaveBinaries = Effect.fn("assertStaveBinaries")(function* (serverDi
   yield* Effect.log(`[cli] Bundled Stave binaries present for: ${STAVE_PLATFORM_KEYS.join(", ")}`);
 });
 
-// ---------------------------------------------------------------------------
-// build-exe subcommand
-// ---------------------------------------------------------------------------
-
 const buildExeCmd = Command.make(
   "build-exe",
   {
@@ -266,10 +258,6 @@ const buildExeCmd = Command.make(
     "Build the server as a Node single-executable (needs a Node 25.7+ host for --build-sea). The binary still resolves native packages from a node_modules tree beside it.",
   ),
 );
-
-// ---------------------------------------------------------------------------
-// publish subcommand
-// ---------------------------------------------------------------------------
 
 interface PublishCommandConfig {
   readonly access: string;
@@ -505,10 +493,6 @@ const publishCmd = Command.make(
     "Publish to npm: the @lecturn/lecturn-<platform> tarballs and then the lecturn launcher with --packages-dir, otherwise the apps/server Node package.",
   ),
 );
-
-// ---------------------------------------------------------------------------
-// root command
-// ---------------------------------------------------------------------------
 
 const cli = Command.make("cli").pipe(
   Command.withDescription("Lecturn server build & publish CLI."),

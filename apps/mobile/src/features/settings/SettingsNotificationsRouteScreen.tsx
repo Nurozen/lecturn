@@ -51,7 +51,6 @@ import { useSettingsConnectAccount } from "./useSettingsConnectAccount";
 type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
 type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
 
-// Reflects whether the relay actually accepted this device's registration.
 // Live Activities depend on relay registration; notification permission has
 // its own switch and delivery status.
 function useDeviceRegistered(): boolean {
@@ -500,8 +499,6 @@ function ConfiguredSettingsNotificationsRouteScreen() {
                 : "Live Activity Updates"
             }
             subtitle={agentAwarenessSubtitle}
-            // Same gate: a saved preference is meaningless until the device
-            // registration the relay needs to push updates has succeeded.
             value={
               agentAwarenessPushAvailable &&
               (liveActivityStatus === "enabled" || liveActivityStatus === "linking") &&

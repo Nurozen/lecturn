@@ -18,10 +18,6 @@ export const RELAY_ISSUER_SECRET = "cloud-relay-issuer";
 export const RELAY_ENVIRONMENT_CREDENTIAL_SECRET = "cloud-relay-environment-credential";
 export const PUBLISH_AGENT_ACTIVITY_SECRET = "cloud-publish-agent-activity";
 export const HOLD_WEBHOOKS_WHILE_OFFLINE_SECRET = "cloud-hold-webhooks-while-offline";
-// Set when the relay rejects this environment's credential (401), as after the
-// environment is deregistered from Lecturn Connect. The link stays stored; the mark
-// tells `lecturn connect status` and clients to offer a relink. Linking, unlinking,
-// or a later successful tunnel registration clears it.
 export const CLOUD_LINK_REVOKED = "cloud-link-revoked";
 
 export const encodeEndpointRuntimeConfigJson = Schema.encodeEffect(
@@ -49,10 +45,10 @@ export function isAgentActivityPublishingEnabledValue(value: string | null): boo
   return value === "true";
 }
 
-/** Whether agent-activity publishes currently leave this environment: the
-    publish opt-in secret is enabled and the relay link credentials exist.
-    Mirrors the per-publish gate in AgentAwarenessRelay, so the descriptor
-    capability never advertises publishing that the publisher would skip. */
+/**
+ * Mirrors the per-publish gate in AgentAwarenessRelay, so the descriptor
+    capability never advertises publishing that the publisher would skip.
+ */
 export const readAgentActivityPublishingActive = (
   secrets: ServerSecretStore.ServerSecretStore["Service"],
 ): Effect.Effect<boolean> =>
@@ -81,7 +77,6 @@ export const readAgentActivityPublishingActive = (
     );
   }).pipe(Effect.orElseSucceed(() => false));
 
-/** A non-empty secret as text, or null when it is missing, empty or unreadable. */
 const readSecretString = (name: string) =>
   ServerSecretStore.ServerSecretStore.pipe(
     Effect.flatMap((secrets) => secrets.get(name)),

@@ -31,7 +31,6 @@ const seedUpstreamThrough52 = runMigrations({ toMigrationInclusive: 47 }).pipe(
   Effect.andThen(Migrator.make({})({ loader: Migrator.fromRecord(upstreamLedgerThrough52) })),
 );
 
-// The V2 schema is unchanged from the published September 15–16 previews.
 const seedPreview = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   yield* seedUpstreamThrough52;

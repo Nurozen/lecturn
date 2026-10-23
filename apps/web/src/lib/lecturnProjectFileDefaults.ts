@@ -12,16 +12,6 @@ import {
 } from "~/components/files/projectFilesQueryState";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 
-/**
- * Read and decode the project's checked-in `lecturn.json`.
- *
- * Imperative counterpart to `useLecturnProjectFileState` for the new-thread
- * path, which resolves defaults at call time rather than render time. The
- * file query atom caches per (environment, cwd), so repeat calls don't
- * re-fetch. Optimistic in-app writes overlay the query result, matching what
- * `useProjectFileQuery` renders. Missing, truncated, or invalid files
- * resolve to null.
- */
 export async function readLecturnProjectFile(
   environmentId: EnvironmentId,
   workspaceRoot: string,

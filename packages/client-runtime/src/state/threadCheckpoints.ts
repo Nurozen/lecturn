@@ -43,7 +43,6 @@ export function resolveRevertTargetCheckpoint(
   );
 }
 
-/** Derives the checkpoint/diff rows needed by review UIs from native V2 entities. */
 export function deriveThreadCheckpointSummaries(
   projection: OrchestrationV2ThreadProjection,
 ): ReadonlyArray<ThreadCheckpointSummary> {

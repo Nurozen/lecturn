@@ -285,8 +285,6 @@ export function unpublishPrimaryEnvironmentBeforeSignOut(input: {
   });
 }
 
-// "publish_only" links the environment to the relay for agent-activity
-// publishing alone: no managed tunnel is provisioned, so it can be toggled
 // independently of Lecturn Connect while clients reach the environment out of band.
 export type CloudLinkMode = "managed" | "publish_only" | "decisions";
 

@@ -49,7 +49,6 @@ it("reads the served Lecturn home back out of a rendered unit or plist", () => {
       BootService.renderBootServiceUnit(plan("/home/theo/.lecturn")),
     ),
   ).toBe("/home/theo/.lecturn");
-  // Spaces and specifiers are quoted and escaped on the way in.
   expect(
     BootService.bootServiceBaseDirOf(
       BootService.renderBootServiceUnit(plan("/home/theo/Lecturn Data/100%")),
@@ -137,8 +136,6 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
   const home = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-boot-service-test-" });
   const baseDir = path.join(home, ".lecturn");
   const statePath = path.join(baseDir, "runtime", "service-state.json");
-  // A complete pinned runtime is already present, so install only validates
-  // it and never downloads a release archive.
   const runtime = pinnedRuntimePaths(path, baseDir, "1.2.3", platform);
   yield* fs.makeDirectory(path.dirname(runtime.entryPath), { recursive: true });
   yield* fs.writeFileString(runtime.entryPath, "#!/bin/sh\n");
@@ -182,9 +179,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
       return {
         stdout:
           input.args[0] === "--version"
-            ? // The runtime under test reports the version of the directory it
-              // was launched from, like the real executable.
-              `lecturn v${/versions\/([^/]+)\//.exec(input.command)?.[1] ?? "1.2.3"}\n`
+            ? `lecturn v${/versions\/([^/]+)\//.exec(input.command)?.[1] ?? "1.2.3"}\n`
             : input.command === "loginctl" && input.args[0] === "show-user"
               ? `${control.linger}\n`
               : input.args[1] === "is-enabled"
@@ -214,8 +209,6 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
     serviceBaseDir = baseDir,
   ) =>
     Effect.gen(function* () {
-      // Every version the tests install is present and verified on disk, so
-      // install never downloads.
       const paths = pinnedRuntimePaths(path, serviceBaseDir, cliVersion, platform);
       yield* fs.makeDirectory(path.dirname(paths.entryPath), { recursive: true });
       yield* fs.writeFileString(paths.entryPath, "#!/bin/sh\n");

@@ -410,7 +410,6 @@ export class SnapShotTransition {
       }),
     );
     if (this.active !== active) return;
-    // One display failing must not cut the flight short on the others.
     await Promise.allSettled(
       prepared.map((result) => {
         if (result.status !== "fulfilled" || !result.value || result.value.window.isDestroyed()) {

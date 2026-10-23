@@ -8,7 +8,6 @@ import {
 import { sourceControlRepositorySelector } from "@lecturn/shared/sourceControl";
 import { normalizeThreadPullRequestKey } from "@lecturn/shared/threadPullRequests";
 
-/** Convert checkout-scoped references to the host-level identity used by linked threads. */
 export function pullRequestSyncKey(
   reference: PullRequestRef,
   identity?: RepositoryIdentity | null,

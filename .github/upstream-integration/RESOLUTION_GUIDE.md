@@ -419,6 +419,23 @@ from upstream's side.
   the fork's `lecturn_desktop` client name, originator and user agent, as the
   replay matches on them.
 
+**Upstream changes taken in a Lecturn shape (sync to upstream 86534db4, comment prune #19559).**
+
+- **Comment policy.** Upstream pruned narration/history comments repo-wide and added the
+  `no-low-value-comments` rule; the fork registers it as `lecturn/no-low-value-comments`
+  (error) and AGENTS.md names it. Fork-only comments follow the same rule (dividers and
+  name-restating comments get removed or rewritten as "why" comments).
+- When upstream deletes a comment whose fork copy has Lecturn-renamed lines, delete the
+  whole fork block; never leave the renamed middle lines or strip a fork comment's
+  delimiters. Rewritten upstream comments use Lecturn names (`lecturn` CLI,
+  `lecturn acp-mcp-bridge`, Lecturn home, Lecturn window, `@lecturn/*`, `lecturn.json`).
+- `apps/server/src/cli/invocation.ts`: the fork keeps its stubbed
+  `resolveServerInstallation` (no npm/runner detection) and plain `lecturn` command text.
+- `apps/server/src/project/AgentSessionScanner.ts`: the fork's commondir-based gitInfo
+  comment stays instead of upstream's worktrees/modules wording.
+- Upstream left two comments mid-sentence (`oxlint-plugin-lecturn/test/utils.ts`,
+  `infra/relay/src/environments/ManagedEndpointReaper.ts`); the fork completes them.
+
 ## Recurring mechanical conflicts
 
 **Published migration identities are persistent data.** The fork's

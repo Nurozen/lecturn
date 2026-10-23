@@ -296,7 +296,6 @@ const makeHarness = Effect.fn("TestConnectionHarness.make")(function* (options?:
   });
 
   const layerDependencies = Layer.mergeAll(
-    // Jitter at its maximum, so each retry waits exactly its ceiling: 2s, 4s, 8s...
     Layer.succeed(Random.Random, {
       nextDoubleUnsafe: () => 1 - Number.EPSILON,
       nextIntUnsafe: () => 0,
@@ -586,7 +585,6 @@ describe("EnvironmentSupervisor", () => {
         supervisor.state,
         (state) => state.phase === "connecting" && state.stage === "synchronizing",
       );
-      // 15 seconds of setup plus 75 for the snapshot; setup finished instantly.
       yield* TestClock.adjust("89 seconds");
       expect((yield* SubscriptionRef.get(supervisor.state)).stage).toBe("synchronizing");
 
@@ -1169,7 +1167,6 @@ describe("EnvironmentSupervisor", () => {
         supervisor.state,
         (state) => state.phase === "connected" && state.generation === 1,
       );
-      // A loopback server, or a flap shorter than the probe, keeps working.
       yield* harness.setNetworkStatus("offline");
       for (let attempt = 0; attempt < 100; attempt += 1) {
         if ((yield* Ref.get(probeCount)) > 0) break;
@@ -1202,7 +1199,6 @@ describe("EnvironmentSupervisor", () => {
         supervisor.state,
         (state) => state.phase === "connected" && state.generation === 1,
       );
-      // A wrong offline report: the probe answers, so the session stays.
       yield* harness.setNetworkStatus("offline");
       for (let attempt = 0; attempt < 100; attempt += 1) {
         if ((yield* Ref.get(probeCount)) > 0) break;
@@ -1210,7 +1206,6 @@ describe("EnvironmentSupervisor", () => {
       }
       expect(yield* Ref.get(harness.sessionCount)).toBe(1);
 
-      // The replacement connects although the network still reports offline.
       yield* harness.wake("application-active-reconnect");
       const replaced = yield* awaitState(
         supervisor.state,
@@ -1307,8 +1302,6 @@ describe("EnvironmentSupervisor", () => {
       }
       expect(yield* Ref.get(probeCount)).toBe(1);
 
-      // The flapping session keeps climbing the ladder: the answered retry does
-      // not reset it after this unrelated close.
       yield* harness.closeLatestSession();
       yield* awaitState(
         supervisor.state,
@@ -1669,10 +1662,8 @@ describe("EnvironmentSupervisor", () => {
       yield* awaitState(supervisor.state, (state) => state.phase === "connected");
       yield* harness.wake("application-active-probe");
       yield* Deferred.await(probeStarted);
-      // The OS reports the suspended socket's close before the probe answers.
       yield* harness.closeLatestSession();
 
-      // No TestClock advance: the unanswered probe skips the first backoff rung.
       const reconnected = yield* awaitState(
         supervisor.state,
         (state) => state.phase === "connected" && state.generation === 2,
@@ -1706,7 +1697,6 @@ describe("EnvironmentSupervisor", () => {
       expect(reconnecting.attempt).toBe(1);
       expect(Option.isNone(yield* SubscriptionRef.get(supervisor.session))).toBe(true);
 
-      // No TestClock advance: a failed wake probe skips the first backoff rung.
       yield* Deferred.succeed(allowReconnect, undefined);
       yield* awaitState(
         supervisor.state,
@@ -1732,8 +1722,6 @@ describe("EnvironmentSupervisor", () => {
 
       yield* awaitState(supervisor.state, (state) => state.phase === "connected");
       yield* harness.wake("application-active");
-      // The immediate follow-up attempt fails: only the first attempt after
-      // the wake probe skips the ladder, so this failure backs off normally.
       yield* awaitState(
         supervisor.state,
         (state) => state.phase === "backoff" && state.attempt === 1,
@@ -1786,7 +1774,6 @@ describe("EnvironmentSupervisor", () => {
       yield* harness.wake("application-active");
       yield* TestClock.adjust("5 seconds");
       yield* supervisor.retryNow;
-      // The retry's 3 second limit applies, not the 10 seconds left of the 15.
       yield* TestClock.adjust("2999 millis");
       expect(yield* Ref.get(harness.sessionCount)).toBe(1);
       yield* TestClock.adjust("1 milli");
@@ -1811,8 +1798,6 @@ describe("EnvironmentSupervisor", () => {
       yield* awaitState(supervisor.state, (state) => state.phase === "connected");
       yield* harness.wake("application-active-probe");
       yield* TestClock.adjust("3 seconds");
-      // The timed-out wake probe reconnects immediately without a backoff
-      // sleep: no further clock advance is needed.
       yield* awaitState(
         supervisor.state,
         (state) => state.phase === "connected" && state.generation === 2 && state.attempt === 1,
@@ -2229,7 +2214,6 @@ describe("EnvironmentSupervisor routes", () => {
       yield* awaitState(supervisor.state, (state) => state.phase === "connected");
       const prepared = Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared));
       expect(prepared.target._tag).toBe("RelayConnectionTarget");
-      // The silent route never reached the resolver.
       expect(yield* Ref.get(harness.prepareCount)).toBe(1);
     }),
   );
@@ -2336,7 +2320,6 @@ describe("EnvironmentSupervisor routes", () => {
         initiallyDesired: true,
       }).pipe(Effect.provide(harness.dependencies));
 
-      // A blocked state would stop retrying; the LAN may come back.
       const state = yield* awaitState(supervisor.state, (value) => value.phase === "backoff");
       expect(state.lastFailure?._tag).toBe("ConnectionTransientError");
     }),
@@ -2366,7 +2349,6 @@ describe("EnvironmentSupervisor routes", () => {
         "RelayConnectionTarget",
       );
 
-      // Back home: the LAN answers, and a network change asks for a better route.
       yield* Ref.set(lanReachable, true);
       yield* harness.setNetworkStatus("unknown");
       yield* harness.setNetworkStatus("online");
@@ -2423,7 +2405,6 @@ describe("EnvironmentSupervisor routes", () => {
           route.target._tag === "BearerConnectionTarget"
             ? Ref.get(lanAnswers).pipe(Effect.map((answers) => (answers ? "answered" : "silent")))
             : Effect.succeed("unchecked"),
-        // The LAN answers its check but the socket never opens.
         prepare: (_attempt, target) =>
           target._tag === "BearerConnectionTarget"
             ? Effect.fail(transient("Socket refused."))
@@ -2446,8 +2427,6 @@ describe("EnvironmentSupervisor routes", () => {
       );
       const preparesAfterSwitch = yield* Ref.get(harness.prepareCount);
 
-      // The failed LAN is cooling down, so the next periodic check leaves the
-      // session alone.
       yield* TestClock.adjust("60 seconds");
       yield* Effect.yieldNow;
       expect(yield* Ref.get(harness.prepareCount)).toBe(preparesAfterSwitch);
@@ -2492,7 +2471,6 @@ describe("EnvironmentSupervisor routes", () => {
               )
             : Effect.succeed("unchecked"),
         prepare: (_attempt, target) => Effect.succeed(preparedFor(target)),
-        // The LAN socket never answers once the phone has left the network.
         probe: () =>
           Ref.get(lanReachable).pipe(
             Effect.flatMap((reachable) => (reachable ? Effect.void : Effect.never)),
@@ -2601,7 +2579,6 @@ describe("EnvironmentSupervisor routes", () => {
             ? Effect.succeed("answered")
             : Effect.succeed("unchecked"),
         prepare: (_attempt, target) => Effect.succeed(preparedFor(target)),
-        // Only the reported endpoints matter to the supervisor.
         initialConfig: () =>
           Ref.get(lanAddress).pipe(
             Effect.map((httpBaseUrl): Pick<ServerConfig, "directEndpoints"> => ({
@@ -2633,8 +2610,6 @@ describe("EnvironmentSupervisor routes", () => {
           }),
       }).pipe(Effect.provide(harness.dependencies));
 
-      // Connected over Lecturn Connect, the server reports its LAN address; the
-      // learned route ranks first, answers, and the session moves to it.
       yield* awaitState(
         supervisor.state,
         (state) => state.phase === "connected" && state.generation === 2,

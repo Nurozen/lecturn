@@ -466,7 +466,6 @@ function SettingsScheduledTaskEditorScreen({ title }: { readonly title: string }
   });
   useEffect(() => {
     if (!saved) return;
-    // Let the native removal guard turn off before popping the saved form.
     const frame = requestAnimationFrame(() => {
       if (navigation.isFocused()) navigation.goBack();
     });
@@ -683,7 +682,6 @@ function TaskForm({
       interactionMode: draft.task?.interactionMode ?? "default",
       creationSource: draft.task?.creationSource ?? "mobile",
     };
-    // Lock before React renders, and keep successful creates locked until the form closes.
     submissionPending.current = true;
     setSaving(true);
     const result = await upsert({ environmentId, input });
@@ -1070,7 +1068,6 @@ function WebhookScheduleDetails({
             accessibilityRole="button"
             accessibilityLabel="Copy webhook URL"
             accessibilityHint="Copies the URL to the clipboard"
-            // A bare path is not something a sender can call, so only full URLs copy.
             disabled={!resolved.copyable}
             onPress={() => void tryCopyTextWithHaptic(resolved.address)}
             className="gap-1 active:opacity-70"

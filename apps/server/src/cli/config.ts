@@ -416,8 +416,6 @@ export const resolveServerConfig = (
 
     const otel = yield* OtelEnvironment.load;
 
-    // Lecturn's own OTLP variables name no signal, so the one answer they give
-    // is the answer for all three.
     const signalExport: SignalExport = {
       protocol: env.otlpProtocol,
       headers: env.otlpHeaders,

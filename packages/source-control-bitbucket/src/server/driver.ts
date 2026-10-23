@@ -1,10 +1,4 @@
 import { SourceControlProviderKind } from "@lecturn/contracts";
-/**
- * The Bitbucket Cloud driver: repository operations, discovery, and pull requests through the
- * Bitbucket REST API.
- *
- * @module source-control-bitbucket/server/driver
- */
 import { defineSourceControlDriver } from "@lecturn/source-control-core/server/driver";
 import * as Effect from "effect/Effect";
 

@@ -148,7 +148,6 @@ describe("learned routes", () => {
         allowInsecure: true,
       }),
     ).toBeNull();
-    // A newly reported address is still placed by speed.
     const next = mergeLearnedRoutes({
       entry: reordered,
       activeRoute: RELAY,
@@ -173,7 +172,6 @@ describe("learned routes", () => {
     })!;
     expect(first.map(connectionRouteLabel)).toEqual(["Tailscale", "VPN", "Lecturn Connect"]);
 
-    // The server later finds the address is not on its Tailscale interface.
     const corrected = mergeLearnedRoutes({
       entry: entryWithRoutes(relayOnly, first),
       activeRoute: RELAY,
@@ -203,7 +201,6 @@ describe("learned routes", () => {
       reported: [{ kind: "tailnet", httpBaseUrl: "http://100.101.102.103:3773/" }],
       allowInsecure: true,
     })!;
-    // Same routes in the same order; only the label of the confirmed one changes.
     expect(ids(confirmed)).toEqual(["paired", "other", "relay"]);
     expect(confirmed.map(connectionRouteLabel)).toEqual(["Tailscale", "VPN", "Lecturn Connect"]);
   });
@@ -223,7 +220,6 @@ describe("learned routes", () => {
         allowInsecure: true,
       }),
     ).toBeNull();
-    // The server stops reporting the LAN address; the paired route stays.
     expect(
       mergeLearnedRoutes({ entry, activeRoute: RELAY, reported: [], allowInsecure: true }),
     ).toBeNull();
