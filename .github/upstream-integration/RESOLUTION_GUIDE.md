@@ -382,6 +382,12 @@ from upstream's side.
   needs `^7.24.0`; upstream #20131). An older pinned core makes every native
   stack throw "undefined is not a function" in `NativeStackNavigator` at
   launch, which shows up only at runtime (tsc and the bundle are clean).
+- **`node-pty` exact pin.** `apps/server/package.json` pins `node-pty` to
+  `1.2.0-beta.15` (upstream uses `^1.2.0-beta.15`). Release Smoke regenerates
+  the lockfile from the registry, so a newer beta that has passed pnpm's
+  minimum release age would leave `patches/node-pty@1.2.0-beta.15.patch`
+  unused and fail with `ERR_PNPM_UNUSED_PATCH`. Move the pin and the patch
+  together.
 - **Mobile release versions.** EAS keeps one production profile and the
   literal `version` in `app.config.ts` (read by `fingerprint.config.js`);
   upstream's TestFlight/store version split (#20060) and its
