@@ -115,36 +115,47 @@
     },
     {
       "id": "desktop.sidebar.app-row",
-      "element": "App row: expand chevron, app icon, name, state chip, + and open-in actions",
+      "element": "App row: expand chevron, app icon, name, state chip, + and open-in actions (a pending app has no workspace yet, so only rows with one carry the actions)",
       "owner": "A35",
       "scenes": ["apps-desktop-mockup-scene"],
       "probe": {
-        "kind": "each",
-        "selector": "[data-testid=\"sidebar-app-row\"]",
+        "kind": "all",
         "probes": [
           {
-            "kind": "count",
-            "selector": "[data-testid=\"sidebar-app-expand\"]"
+            "kind": "each",
+            "selector": "[data-testid=\"sidebar-app-row\"]",
+            "probes": [
+              {
+                "kind": "count",
+                "selector": "[data-testid=\"sidebar-app-expand\"]"
+              },
+              {
+                "kind": "count",
+                "selector": "[data-testid=\"sidebar-app-icon\"]"
+              },
+              {
+                "kind": "count",
+                "selector": "[data-testid=\"sidebar-app-name\"]"
+              },
+              {
+                "kind": "count",
+                "selector": "[data-testid=\"sidebar-app-state\"]"
+              }
+            ]
           },
           {
-            "kind": "count",
-            "selector": "[data-testid=\"sidebar-app-icon\"]"
-          },
-          {
-            "kind": "count",
-            "selector": "[data-testid=\"sidebar-app-name\"]"
-          },
-          {
-            "kind": "count",
-            "selector": "[data-testid=\"sidebar-app-state\"]"
-          },
-          {
-            "kind": "count",
-            "selector": "[data-testid=\"sidebar-app-new-thread\"]"
-          },
-          {
-            "kind": "count",
-            "selector": "[data-testid=\"sidebar-app-open\"]"
+            "kind": "some",
+            "selector": "[data-testid=\"sidebar-app-row\"]",
+            "probes": [
+              {
+                "kind": "count",
+                "selector": "[data-testid=\"sidebar-app-new-thread\"]"
+              },
+              {
+                "kind": "count",
+                "selector": "[data-testid=\"sidebar-app-open\"]"
+              }
+            ]
           }
         ]
       }
@@ -504,5 +515,5 @@
       }
     }
   ],
-  "rowsHash": "sha256:ca59beaefdd4142690a46953fca9403d17420c4fc246b7a06e71cdf589711933"
+  "rowsHash": "sha256:77eecee550b69036cca03d87f3e7f8150e5e7b6f7b84369efd8b3b39bbb1ba4f"
 }
