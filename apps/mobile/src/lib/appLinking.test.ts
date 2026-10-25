@@ -14,6 +14,8 @@ describe("shouldHandleAppLink", () => {
     "lecturn://threads/env-1/thread-1",
     "lecturn://pair?pairingUrl=x",
     "lecturn-dev://settings/usage?tab=limits",
+    "lecturn://apps/com.example.rocketwright",
+    "lecturn://apps/com.example.rocketwright/threads/env-1/thread-1",
   ])("handles path-bearing URL %s", (url) => {
     expect(shouldHandleAppLink(url)).toBe(true);
   });

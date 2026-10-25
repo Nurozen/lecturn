@@ -1,6 +1,8 @@
 import { useMemo, type ReactNode } from "react";
 import { View } from "react-native";
 import { ScreenContent } from "../../components/ui/ScreenContent";
+import { AppsScreen } from "../apps/AppsScreen";
+import { AppsToolbar } from "../apps/AppsToolbar.android";
 import { PullRequestsScreen } from "../pull-requests/PullRequestsScreen";
 import { PullRequestToolbar } from "../pull-requests/PullRequestToolbar.android";
 import { WorkspaceTabsContext, useWorkspaceTabs } from "./WorkspaceTabsContext";
@@ -14,6 +16,15 @@ export function AndroidWorkspaceSidebar(props: {
   const context = useMemo(() => ({ ...workspace, bottomClearance: 16 }), [workspace]);
   return workspace.state.selectedTab === "threads" ? (
     props.children
+  ) : workspace.state.selectedTab === "apps" ? (
+    <WorkspaceTabsContext value={context}>
+      <View className="flex-1 bg-header">
+        <AppsToolbar />
+        <ScreenContent insetHorizontal>
+          <AppsScreen />
+        </ScreenContent>
+      </View>
+    </WorkspaceTabsContext>
   ) : (
     <WorkspaceTabsContext value={context}>
       <View className="flex-1 bg-header">

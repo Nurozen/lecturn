@@ -109,7 +109,7 @@ class LecturnWorkspaceNavigationView(
         )
         setContent {
           MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
-            val tabs = listOf("threads", "pullRequests")
+            val tabs = listOf("threads", "apps", "pullRequests")
             if (rail) {
               NavigationRail(
                 modifier = Modifier.fillMaxSize(),
@@ -123,7 +123,11 @@ class LecturnWorkspaceNavigationView(
                     onClick = { onTabSelected(mapOf("tab" to tab)) },
                     icon = { tabIcon(tab) },
                     label = {
-                      val title = if (tab == "threads") "Chats" else "PRs"
+                      val title = when (tab) {
+                        "threads" -> "Chats"
+                        "apps" -> "Apps"
+                        else -> "PRs"
+                      }
                       Text(title, fontSize = (12 * textScale).sp)
                     },
                     colors = NavigationRailItemDefaults.colors(
@@ -150,7 +154,11 @@ class LecturnWorkspaceNavigationView(
                     onClick = { onTabSelected(mapOf("tab" to tab)) },
                     icon = { tabIcon(tab) },
                     label = {
-                      val title = if (tab == "threads") "Chats" else "Pull requests"
+                      val title = when (tab) {
+                        "threads" -> "Chats"
+                        "apps" -> "Apps"
+                        else -> "Pull requests"
+                      }
                       Text(title, fontSize = (12 * textScale).sp)
                     },
                     colors = NavigationBarItemDefaults.colors(
@@ -173,14 +181,14 @@ class LecturnWorkspaceNavigationView(
 
   @Composable
   private fun tabIcon(tab: String) {
-    val drawable = if (tab == "threads") {
-      R.drawable.lecturn_chats
-    } else {
-      R.drawable.lecturn_pull_requests
+    val (drawable, description) = when (tab) {
+      "threads" -> R.drawable.lecturn_chats to "Chats"
+      "apps" -> R.drawable.lecturn_apps to "Apps"
+      else -> R.drawable.lecturn_pull_requests to "Pull requests"
     }
     Icon(
       painter = painterResource(drawable),
-      contentDescription = if (tab == "threads") "Chats" else "Pull requests",
+      contentDescription = description,
     )
   }
 }
