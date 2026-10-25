@@ -96,6 +96,6 @@ export function measureRestingComposerControls(
     blockWidths: widths.map((width) => width.natural),
     iconOnlyBlockWidths: widths.map((width) => width.iconOnly),
     overflowWidth: overflow ? elementOuterWidth(overflow) : 0,
-    ...(controlsStyle.flexWrap === "wrap" ? { wraps: true } : {}),
+    ...(controls.closest("[data-embed-composer-footer-stacked]") ? { keepsBlocks: true } : {}),
   };
 }

@@ -131,9 +131,9 @@ describe("EmbedComposerFooter", () => {
       first.getBoundingClientRect().bottom,
     );
 
-    // The controls row wraps rather than overflows, so the measurement keeps every block visible.
+    // The controls row has no overflow menu, so the measurement keeps every block in place.
     const controls = first.querySelector<HTMLElement>("[data-chat-composer-footer-controls]")!;
-    expect(measureRestingComposerControls(controls)?.wraps).toBe(true);
+    expect(measureRestingComposerControls(controls)?.keepsBlocks).toBe(true);
   });
 
   it("puts attach and send at the end of the one-line input, as the embed mockup draws them", async () => {

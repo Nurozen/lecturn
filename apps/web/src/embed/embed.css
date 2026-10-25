@@ -79,21 +79,37 @@ html[data-lecturn-embed] [data-slot="composer-host"] {
   box-shadow: none;
 }
 
-/* The narrow pane's footer (EmbedComposerFooter): "model | effort | access" on the first row. The
-   controls report flex-wrap to the overflow measurement (restingComposerControlsMeasurement.ts),
-   which then keeps every control in place instead of folding some into the overflow menu. */
-html[data-lecturn-embed] [data-embed-composer-footer-stacked] [data-chat-composer-footer-controls] {
-  flex-wrap: wrap;
-  row-gap: 0.25rem;
-  overflow: visible;
-}
-
-/* Separators are hidden on phone-width viewports, which the embed pane is. */
+/* The narrow pane's footer (EmbedComposerFooter) keeps "model | effort | access" on one row, drawn
+   as the embed mockup draws it: no provider or effort icon. When the row is short, access drops to
+   its icon, then the model label truncates (composerFooterLayout.ts). */
 html[data-lecturn-embed]
   [data-embed-composer-footer-stacked]
-  [data-chat-composer-footer-controls]
-  [data-slot="separator"] {
-  display: block;
+  [data-chat-provider-model-picker]
+  :has(+ [data-chat-provider-model-picker-label]),
+html[data-lecturn-embed]
+  [data-embed-composer-footer-stacked]
+  [data-resting-block="traits"]
+  [data-composer-control-icon]:first-child {
+  display: none;
+}
+
+/* The mockup's vertical rhythm (chip, input line, then the two footer rows): RocketWright's frozen
+   composer region is measured against it. */
+html[data-lecturn-embed]
+  [data-slot="composer-shell"]:has([data-embed-composer-footer-stacked])
+  [data-chat-composer-body] {
+  padding-top: 1.5rem;
+}
+
+html[data-lecturn-embed]
+  [data-slot="composer-shell"]:has([data-embed-composer-footer-stacked])
+  [data-testid="app-ref-chip-strip"] {
+  margin-bottom: 1rem;
+}
+
+html[data-lecturn-embed] [data-embed-composer-footer-stacked] {
+  padding-top: 1.625rem;
+  padding-bottom: 0.625rem;
 }
 
 /* With attach and send at the end of the input line (EmbedComposerFooter), the empty editor is

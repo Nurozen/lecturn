@@ -10,7 +10,7 @@ function measurePicker(input: {
   clientWidth: number;
   flexGrow: string;
   maxWidth?: string;
-  flexWrap?: string;
+  embedFooterStacked?: boolean;
 }) {
   const label = { clientWidth: input.clientWidth, scrollWidth: 160 };
   const picker = {
@@ -18,6 +18,8 @@ function measurePicker(input: {
     querySelector: () => label,
   };
   const controls = {
+    closest: (selector: string) =>
+      input.embedFooterStacked && selector === "[data-embed-composer-footer-stacked]" ? {} : null,
     querySelector: (selector: string) => {
       if (selector === "[data-chat-provider-model-picker]") return picker;
       if (selector === "[data-resting-controls-overflow]") {
@@ -36,7 +38,7 @@ function measurePicker(input: {
   vi.stubGlobal("getComputedStyle", (element: unknown) => {
     if (element === label) return { flexGrow: input.flexGrow };
     if (element === picker) return { minWidth: "52px", maxWidth: input.maxWidth ?? "none" };
-    return { columnGap: "4px", flexWrap: input.flexWrap ?? "nowrap" };
+    return { columnGap: "4px" };
   });
   return measureRestingComposerControls(controls as unknown as HTMLElement)!;
 }
@@ -78,12 +80,12 @@ describe("measureRestingComposerControls", () => {
     });
   });
 
-  it("keeps every block when the controls wrap onto another row", () => {
-    const measurement = measurePicker({ clientWidth: 20, flexGrow: "1", flexWrap: "wrap" });
+  it("keeps every block in the narrow embed footer, which has no overflow menu", () => {
+    const measurement = measurePicker({ clientWidth: 20, flexGrow: "1", embedFooterStacked: true });
 
     expect(resolveRestingComposerControlsLayout({ ...measurement, hostWidth: 200 })).toEqual({
       hiddenCount: 0,
-      iconOnlyCount: 0,
+      iconOnlyCount: 1,
       visible: true,
     });
   });
