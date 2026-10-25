@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off -- Test harness driving a real Electron app; it runs no Effect runtime.
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off globalConsole:off -- Test harness driving a real Electron app; it runs no Effect runtime.
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -147,13 +147,16 @@ export async function launchEmbedHost(options: LaunchOptions = {}): Promise<Embe
     closed = true;
     // before-quit in main.ts clears the live lease and stops the sidecar.
     void app.close().catch(() => undefined);
-    // With the embed view mounted, the window's `closed` never follows its
-    // `close` and the app never quits; a run must not leave it behind.
+    // A run must never leave the app behind, even if quitting hangs again
+    // (mountEmbedView tears its guest down on the window's close so it does not).
     const quit = await Promise.race([
       exited.then(() => true),
       sleep(QUIT_TIMEOUT_MS).then(() => false),
     ]);
     if (!quit) {
+      console.error(
+        `[embed-host e2e] the app did not quit within ${QUIT_TIMEOUT_MS} ms; killing it`,
+      );
       child.kill("SIGKILL");
       await exited;
     }
