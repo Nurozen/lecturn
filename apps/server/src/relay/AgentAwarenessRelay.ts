@@ -54,6 +54,11 @@ import { getOrCreateEnvironmentKeyPairFromSecretStore } from "../cloud/environme
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import {
+  AppRegistrationRepository,
+  layer as AppRegistrationRepositoryLayer,
+} from "../persistence/AppRegistrations.ts";
 import { forkParked } from "../serverActivation.ts";
 
 export class AgentAwarenessRelay extends Context.Service<
@@ -346,6 +351,11 @@ function resolveAgentAwarenessRelayPublishSnapshot(input: {
   };
 }
 
+/** A push names the app as well, since app projects are hidden in Projects mode. */
+export function appProjectTitle(appName: string, projectTitle: string): string {
+  return appName === projectTitle ? appName : `${appName}: ${projectTitle}`;
+}
+
 function terminalWorkSinceStart(thread: OrchestrationV2ThreadShell, startedAt: number): boolean {
   return (
     thread.latestRunCompletedAt != null &&
@@ -457,11 +467,35 @@ export const make = Effect.gen(function* () {
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const projects = yield* ProjectService.ProjectService;
+  const projectStore = yield* ProjectStore.ProjectStoreV2;
+  const appRegistrations = yield* AppRegistrationRepository;
   const watches = yield* Effect.serviceOption(PullRequestWatchService);
   const crypto = yield* Crypto.Crypto;
   const scope = yield* Effect.scope;
   const cloudLinkKeyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(secrets);
   const startedAt = (yield* DateTime.now).epochMilliseconds;
+  // The contracts Project carries no app binding, so it is read from the store.
+  const withAppTitle = (project: Option.Option<Project>) =>
+    Effect.gen(function* () {
+      if (Option.isNone(project)) return project;
+      const row = yield* projectStore.get(project.value.id);
+      const binding = Option.getOrUndefined(row)?.appBinding;
+      if (binding === undefined) return project;
+      const record = yield* appRegistrations.get(binding.appId);
+      if (Option.isNone(record)) return project;
+      return Option.some({
+        ...project.value,
+        title: appProjectTitle(record.value.registration.name, project.value.title),
+      });
+    }).pipe(
+      // A missing app name must never cost the user the push.
+      Effect.catch((cause) =>
+        Effect.logWarning("agent activity could not read the project's connected app", {
+          projectId: Option.getOrUndefined(project)?.id,
+          cause,
+        }).pipe(Effect.as(project)),
+      ),
+    );
   const activeSnapshotPublishedRef = yield* Ref.make(false);
   const catchUpRequests = yield* Queue.dropping<void>(1);
   const publishedStateByThreadRef = yield* Ref.make(new Map<ThreadId, string>());
@@ -675,7 +709,7 @@ export const make = Effect.gen(function* () {
         ? Option.none<OrchestrationV2ThreadShell>()
         : Option.some(threadShell);
     const project = Option.isSome(thread)
-      ? yield* projects.getById(thread.value.projectId)
+      ? yield* projects.getById(thread.value.projectId).pipe(Effect.flatMap(withAppTitle))
       : Option.none<Project>();
     const snapshot = resolveAgentAwarenessRelayPublishSnapshot({
       environmentId,
@@ -1005,4 +1039,6 @@ export const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(AgentAwarenessRelay, make).pipe(
   Layer.provide(TeamPolicyLive.pipe(Layer.provide(FetchHttpClient.layer))),
+  // The repository holds no state, so this copy cannot diverge from AppsLayer's.
+  Layer.provide(AppRegistrationRepositoryLayer),
 );
