@@ -17,6 +17,7 @@ import {
 
 import {
   BAR_FIXTURE_NOW,
+  BAR_SERVER_START_TIMEOUT_ENV,
   barGitStateProblems,
   fetchBarShellSnapshot,
   issueBarReadToken,
@@ -201,7 +202,7 @@ export function parseCaptureWebArgs(args: ReadonlyArray<string>) {
   const out = values.out;
   if (pairingUrl === undefined || out === undefined) {
     throw new Error(
-      `Usage: node scripts/bar/capture-web.ts --pairing-url <url> --out <dir> [--after] [--scene <name>]... [--param name=value]... [--base-dir <dir>] [--clock <iso>] [--checklist ${CHECKLIST_NAMES.join("|")}] [--browser-path <chrome>] [--appearance dark|light]\nScenes: ${Object.keys(ALL_SCENES).join(", ")}\n--after captures the app-fixture scenes (default with --after: ${BAR_APP_SCENE_NAMES.join(", ")}).\nCapture the baseline and its candidates in the same build mode (dev or production): the dev build draws stage art behind the composer send button.`,
+      `Usage: node scripts/bar/capture-web.ts --pairing-url <url> --out <dir> [--after] [--scene <name>]... [--param name=value]... [--base-dir <dir>] [--clock <iso>] [--checklist ${CHECKLIST_NAMES.join("|")}] [--browser-path <chrome>] [--appearance dark|light]\nScenes: ${Object.keys(ALL_SCENES).join(", ")}\n--after captures the app-fixture scenes (default with --after: ${BAR_APP_SCENE_NAMES.join(", ")}).\nCapture the baseline and its candidates in the same build mode (dev or production): the dev build draws stage art behind the composer send button.\nSeed the server first with node scripts/seed-bar-fixture.ts --base-dir <fresh dir> [--app]; on a slow host raise its 90 s server-start timeout with --start-timeout <ms> or ${BAR_SERVER_START_TIMEOUT_ENV}=<ms>.`,
     );
   }
   const after = values.after === true;

@@ -326,6 +326,7 @@ export const make = Effect.gen(function* () {
             refused: refusalMessage(
               info.toolName,
               answer.outcome === "approved" ? "cancelled" : answer.outcome,
+              answer.reason,
             ),
           } as const);
     }).pipe(Effect.catch((error) => Effect.succeed({ refused: error.message } as const)));

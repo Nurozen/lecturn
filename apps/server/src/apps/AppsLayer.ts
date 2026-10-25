@@ -6,8 +6,9 @@
  * Services are stacked in tiers: a service may depend on any service in a
  * lower tier, never on its own tier or above. Reactions that would point
  * upwards subscribe to a stream instead (HeadlessToolHost stops an app's
- * processes from `AppRegistryService.streamStatus`). A new upward edge is an
- * interface change, not an edit to a single service file.
+ * processes and AppToolApprovalService cancels its waiting approvals from
+ * `AppRegistryService.streamStatus`). A new upward edge is an interface
+ * change, not an edit to a single service file.
  *
  * State that orchestration also reaches is not built here. RuntimeLayer
  * provides it once and this layer takes it from the server's context:

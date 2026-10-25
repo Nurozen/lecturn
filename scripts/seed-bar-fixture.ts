@@ -51,7 +51,26 @@ import {
 const REPO_ROOT = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
 const serverBin = (serverRoot: string) => NodePath.join(serverRoot, "apps/server/src/bin.ts");
 const SERVER_READY_LINE = "Lecturn server is ready.";
-const SERVER_START_TIMEOUT_MS = 90_000;
+const DEFAULT_SERVER_START_TIMEOUT_MS = 90_000;
+/** Raises the start timeout for slow hosts (cold caches, CI) without a flag on every script. */
+export const BAR_SERVER_START_TIMEOUT_ENV = "BAR_SERVER_START_TIMEOUT_MS";
+
+/** The `--start-timeout` flag wins over the env variable; both are milliseconds. */
+export function barServerStartTimeoutMs(
+  flag: string | number | undefined,
+  env: Readonly<Record<string, string | undefined>> = NodeProcess.env,
+): number {
+  const [source, raw] =
+    flag !== undefined
+      ? ["--start-timeout", String(flag)]
+      : [BAR_SERVER_START_TIMEOUT_ENV, env[BAR_SERVER_START_TIMEOUT_ENV]];
+  if (raw === undefined || raw.trim() === "") return DEFAULT_SERVER_START_TIMEOUT_MS;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${source} must be a positive whole number of milliseconds, got '${raw}'.`);
+  }
+  return value;
+}
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 
 /** Captures freeze the browser clock here so relative ages render the same on every run. */
@@ -614,6 +633,8 @@ export interface BarServerOptions {
   readonly serverRoot?: string | undefined;
   /** Added to the server's environment, e.g. to enable the scripted test provider. */
   readonly env?: Readonly<Record<string, string>> | undefined;
+  /** Milliseconds to wait for the ready line; defaults to `barServerStartTimeoutMs`. */
+  readonly startTimeoutMs?: number | undefined;
 }
 
 export async function startBarServer(
@@ -623,6 +644,7 @@ export async function startBarServer(
   const host = input.host ?? "127.0.0.1";
   const port = input.port ?? (await reservePort(host));
   const serverRoot = input.serverRoot ?? REPO_ROOT;
+  const startTimeoutMs = barServerStartTimeoutMs(input.startTimeoutMs);
   const child = NodeChildProcess.spawn(
     NodeProcess.execPath,
     [
@@ -650,8 +672,13 @@ export async function startBarServer(
   let output = "";
   const ready = new Promise<string | null>((resolve, reject) => {
     const timer = setTimeout(
-      () => reject(new Error(`Server did not report ready within ${SERVER_START_TIMEOUT_MS}ms.`)),
-      SERVER_START_TIMEOUT_MS,
+      () =>
+        reject(
+          new Error(
+            `Server did not report ready within ${startTimeoutMs}ms; raise it with --start-timeout <ms> or ${BAR_SERVER_START_TIMEOUT_ENV}.`,
+          ),
+        ),
+      startTimeoutMs,
     );
     const onData = (chunk: Buffer) => {
       output = (output + chunk.toString()).slice(-16_384);
@@ -851,6 +878,7 @@ export async function seedBarFixture(
     host: input.host,
     serverRoot: input.serverRoot,
     env,
+    startTimeoutMs: input.startTimeoutMs,
   });
   await migrating.stop();
   await Effect.runPromise(
@@ -888,13 +916,14 @@ function parseCliArgs(args: ReadonlyArray<string>) {
       port: { type: "string" },
       "server-root": { type: "string" },
       "no-start": { type: "boolean", default: false },
+      "start-timeout": { type: "string" },
       app: { type: "boolean", default: false },
     },
   });
   const baseDir = values["base-dir"];
   if (baseDir === undefined) {
     throw new Error(
-      "Usage: node scripts/seed-bar-fixture.ts --base-dir <fresh dir> [--app] [--server-root <checkout>] [--host 127.0.0.1] [--port <n>] [--no-start]",
+      `Usage: node scripts/seed-bar-fixture.ts --base-dir <fresh dir> [--app] [--server-root <checkout>] [--host 127.0.0.1] [--port <n>] [--no-start] [--start-timeout <ms>]\n--start-timeout (or ${BAR_SERVER_START_TIMEOUT_ENV}) is how long each server start may take to report ready; default ${DEFAULT_SERVER_START_TIMEOUT_MS}.`,
     );
   }
   return {
@@ -905,6 +934,7 @@ function parseCliArgs(args: ReadonlyArray<string>) {
       values["server-root"] === undefined ? undefined : NodePath.resolve(values["server-root"]),
     restart: !values["no-start"],
     app: values.app,
+    startTimeoutMs: barServerStartTimeoutMs(values["start-timeout"]),
   };
 }
 

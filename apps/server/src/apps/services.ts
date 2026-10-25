@@ -120,6 +120,8 @@ export type AppToolApprovalOutcome = "approved" | "declined" | "cancelled" | "ex
 export interface AppToolApprovalAnswer {
   readonly outcome: AppToolApprovalOutcome;
   readonly requestId: RuntimeRequestId | null;
+  /** Set on a `cancelled` outcome Lecturn caused, e.g. "RocketWright was revoked". */
+  readonly reason?: string;
 }
 
 export class AppRegistryService extends Context.Service<

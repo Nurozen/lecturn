@@ -2,6 +2,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   AppId,
+  type AppGrantState,
+  type AppStatus,
+  type AppStatusStreamEvent,
   CommandId,
   type ConnectedAppToolApprovalInfo,
   EventId,
@@ -17,17 +20,20 @@ import {
   ProviderTurnId,
   RunAttemptId,
   RunId,
+  RuntimeRequestId,
   ThreadId,
 } from "@lecturn/contracts";
 import type { ProviderInstance } from "@lecturn/provider-core/server/driver";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import type * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -48,7 +54,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as AppToolApprovalRegistry from "./AppToolApprovalRegistry.ts";
 import * as AppToolApprovalService from "./AppToolApprovalService.ts";
-import { AppToolApprovalService as AppToolApprovals } from "./services.ts";
+import { AppRegistryService, AppToolApprovalService as AppToolApprovals } from "./services.ts";
 
 const driver = ProviderDriverKind.make("codex");
 const instanceId = ProviderInstanceId.make("codex");
@@ -108,8 +114,46 @@ const layerRuntime = Layer.mergeAll(RuntimeLayer.layer, RuntimeLayer.layerEventS
   ),
 );
 
+/** The registry's status stream, driven by the tests; an app without a state here is granted. */
+class TestAppStatus extends Context.Service<
+  TestAppStatus,
+  {
+    readonly events: PubSub.PubSub<AppStatusStreamEvent>;
+    readonly states: Map<AppId, AppGrantState | "removed">;
+  }
+>()("test/AppToolApprovalService/TestAppStatus") {}
+
+const appStatus = (appId: AppId, name: string, state: AppGrantState) =>
+  ({ appId, name, state }) as AppStatus;
+
+const layerAppStatus = Layer.effect(
+  TestAppStatus,
+  Effect.map(PubSub.unbounded<AppStatusStreamEvent>(), (events) => ({
+    events,
+    states: new Map(),
+  })),
+);
+
+const layerApps = Layer.unwrap(
+  Effect.gen(function* () {
+    const { events, states } = yield* TestAppStatus;
+    return Layer.mock(AppRegistryService)({
+      streamStatus: Stream.fromPubSub(events),
+      get: (appId) =>
+        Effect.sync(() => {
+          const state = states.get(appId) ?? "granted";
+          return state === "removed"
+            ? Option.none()
+            : Option.some({ status: appStatus(appId, "App", state) } as never);
+        }),
+    });
+  }),
+);
+
 // Built over the runtime's own layers, so the service and the orchestrator share one database and sink.
 const layerTest = AppToolApprovalService.layer.pipe(
+  Layer.provide(layerApps),
+  Layer.provideMerge(layerAppStatus),
   Layer.provideMerge(layerRuntime),
   Layer.provideMerge(Layer.mergeAll(SqlitePersistence.layerMemory, layerConfig)),
   Layer.provideMerge(NodeServices.layer),
@@ -285,8 +329,69 @@ const seedRunningTurn = (name: string) =>
     return { threadId, providerSessionId, rootNodeId, runId } satisfies RunningTurn;
   });
 
+/** A permission request the provider itself raised in the turn, which no app owns. */
+const seedProviderRequest = (turn: RunningTurn) =>
+  Effect.gen(function* () {
+    const eventSink = yield* EventSink.EventSinkV2;
+    const now = yield* DateTime.now;
+    const requestId = RuntimeRequestId.make(`provider-request:${turn.threadId}`);
+    const nodeId = NodeId.make(`provider-approval:${turn.threadId}`);
+    const base = {
+      threadId: turn.threadId,
+      runId: turn.runId,
+      nodeId,
+      driver,
+      providerInstanceId: instanceId,
+      occurredAt: now,
+    };
+    yield* eventSink.write({
+      commandId: CommandId.make(`${turn.threadId}:provider-request`),
+      events: [
+        {
+          ...base,
+          id: EventId.make(`${turn.threadId}:provider-approval-node`),
+          type: "node.updated",
+          payload: {
+            id: nodeId,
+            threadId: turn.threadId,
+            runId: turn.runId,
+            parentNodeId: turn.rootNodeId,
+            rootNodeId: turn.rootNodeId,
+            kind: "approval_request",
+            status: "waiting",
+            countsForRun: false,
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: null,
+            runtimeRequestId: requestId,
+            checkpointScopeId: null,
+            startedAt: now,
+            completedAt: null,
+          },
+        },
+        {
+          ...base,
+          id: EventId.make(`${turn.threadId}:provider-request`),
+          type: "runtime-request.updated",
+          payload: {
+            id: requestId,
+            nodeId,
+            providerTurnId: null,
+            nativeRequestRef: null,
+            kind: "permission",
+            status: "pending",
+            responseCapability: { type: "live", providerSessionId: turn.providerSessionId },
+            createdAt: now,
+            resolvedAt: null,
+          },
+        },
+      ] as Array<OrchestrationV2DomainEvent>,
+    });
+    return requestId;
+  });
+
 /** The gated MCP call: it raises the request and blocks; returns once the request is persisted. */
-const requestApproval = (turn: RunningTurn) =>
+const requestApproval = (turn: RunningTurn, approvalInfo: ConnectedAppToolApprovalInfo = info) =>
   Effect.gen(function* () {
     const approvals = yield* AppToolApprovals;
     const eventSink = yield* EventSink.EventSinkV2;
@@ -296,7 +401,10 @@ const requestApproval = (turn: RunningTurn) =>
       .pipe(Stream.runHead, Effect.forkChild);
     // A toolkit call names its MCP credential, never the provider session that runs the turn.
     const call = yield* approvals
-      .request({ threadId: turn.threadId, providerSessionId: "mcp-credential:toolkit" }, info)
+      .request(
+        { threadId: turn.threadId, providerSessionId: "mcp-credential:toolkit" },
+        approvalInfo,
+      )
       .pipe(Effect.forkChild);
     const stored = Option.getOrThrow(yield* Fiber.join(persisted));
     assert.equal(stored.event.type, "runtime-request.updated");
@@ -557,6 +665,113 @@ it.layer(layerTest)("AppToolApprovalService", (it) => {
     }),
   );
 
+  it.effect("revoking an app cancels its waiting approvals and leaves every other request", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      const outbox = yield* EffectOutbox.EffectOutboxV2;
+      const appId = AppId.make("dev.revoked.app");
+      const turn = yield* seedRunningTurn("revoke");
+      const revoked = yield* requestApproval(turn, { ...info, appId, appName: "Revokee" });
+      const otherApp = yield* requestApproval(turn);
+      const providerRequestId = yield* seedProviderRequest(turn);
+
+      const apps = yield* TestAppStatus;
+      apps.states.set(appId, "revoked");
+      yield* PubSub.publish(apps.events, {
+        type: "upsert",
+        app: appStatus(appId, "Revokee", "revoked"),
+      });
+
+      assert.deepEqual(yield* Fiber.join(revoked.call), {
+        outcome: "cancelled",
+        requestId: revoked.requestId,
+        reason: "Revokee was revoked",
+      });
+      // Through the ordinary answer path, whose effect never reaches the adapter.
+      yield* worker.drain();
+      assert.deepEqual(
+        (yield* outbox.listByCommandId(
+          CommandId.make(`apps:approval-revoked:${revoked.requestId}`),
+        )).map((effect) => effect.status),
+        ["succeeded"],
+      );
+      const projection = yield* orchestrator.getThreadProjection(turn.threadId);
+      const statusOf = (requestId: string) =>
+        projection.runtimeRequests.find((entry) => entry.id === requestId)?.status;
+      const request = projection.runtimeRequests.find((entry) => entry.id === revoked.requestId);
+      assert.deepInclude(request, { status: "resolved", decision: "cancel" });
+      assert.equal(
+        projection.nodes.find((node) => node.id === request?.nodeId)?.status,
+        "cancelled",
+      );
+      assert.equal(
+        projection.turnItems.find(
+          (item) => item.type === "approval_request" && item.requestId === revoked.requestId,
+        )?.status,
+        "cancelled",
+      );
+      assert.equal(statusOf(otherApp.requestId), "pending");
+      assert.equal(statusOf(providerRequestId), "pending");
+      // The agent gets the refusal and carries on; the run is not ended for it.
+      assert.equal(projection.runs.find((run) => run.id === turn.runId)?.status, "running");
+      yield* Fiber.interrupt(otherApp.call);
+    }),
+  );
+
+  it.effect("deleting an app cancels its waiting approvals as removed", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const appId = AppId.make("dev.removed.app");
+      const turn = yield* seedRunningTurn("remove");
+      const { call, requestId } = yield* requestApproval(turn, {
+        ...info,
+        appId,
+        appName: "Leaver",
+      });
+
+      const apps = yield* TestAppStatus;
+      apps.states.set(appId, "removed");
+      yield* PubSub.publish(apps.events, { type: "remove", appId });
+
+      assert.deepEqual(yield* Fiber.join(call), {
+        outcome: "cancelled",
+        requestId,
+        reason: "Leaver was removed",
+      });
+      const projection = yield* orchestrator.getThreadProjection(turn.threadId);
+      assert.deepInclude(
+        projection.runtimeRequests.find((entry) => entry.id === requestId),
+        { status: "resolved", decision: "cancel" },
+      );
+    }),
+  );
+
+  it.effect("an approval raised just after its app was revoked is cancelled at once", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const appId = AppId.make("dev.late.app");
+      (yield* TestAppStatus).states.set(appId, "revoked");
+      const turn = yield* seedRunningTurn("late-revoke");
+      const { call, requestId } = yield* requestApproval(turn, {
+        ...info,
+        appId,
+        appName: "Latecomer",
+      });
+
+      assert.deepEqual(yield* Fiber.join(call), {
+        outcome: "cancelled",
+        requestId,
+        reason: "Latecomer was revoked",
+      });
+      const projection = yield* orchestrator.getThreadProjection(turn.threadId);
+      assert.deepInclude(
+        projection.runtimeRequests.find((entry) => entry.id === requestId),
+        { status: "resolved", decision: "cancel" },
+      );
+    }),
+  );
+
   it.effect("cancels without raising anything when the thread has no running turn", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -596,6 +811,10 @@ it("tells the agent why a call did not run", () => {
   assert.include(AppToolApprovalService.refusalMessage("rw_x", "declined"), "approval declined");
   assert.include(AppToolApprovalService.refusalMessage("rw_x", "cancelled"), "approval cancelled");
   assert.include(AppToolApprovalService.refusalMessage("rw_x", "expired"), "approval expired");
+  assert.equal(
+    AppToolApprovalService.refusalMessage("rw_x", "cancelled", "RocketWright was revoked"),
+    "rw_x did not run: RocketWright was revoked (approval cancelled).",
+  );
 });
 
 it("prompts with the tool alone when the app gives no reason", () => {
