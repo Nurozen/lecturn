@@ -1,0 +1,176 @@
+/**
+ * What each after-capture scene must show before it is captured (A38). The
+ * checks name the DOM hooks the desktop checklist already pins, plus the
+ * example card's own hooks, so a staging miss is told apart from a gap a
+ * critic should judge: a scene that fails here is not written.
+ */
+import type { BarAppManifest } from "./app-fixture.ts";
+import type { Probe, StagingCheck } from "./probe-dom.ts";
+
+export const BAR_APP_SCENE_NAMES = [
+  "projects-mode",
+  "apps-list",
+  "apps-app-selected",
+  "apps-desktop-mockup-scene",
+  "app-thread-supervised",
+  "app-thread-full-access",
+  "settings-connected-apps",
+] as const;
+export type BarAppSceneName = (typeof BAR_APP_SCENE_NAMES)[number];
+
+const id = (testId: string) => `[data-testid="${testId}"]`;
+const sectionHeading = (section: string) =>
+  `${id("app-section-heading")}[data-section="${section}"]`;
+
+const check = (checkId: string, probe: Probe): StagingCheck => ({ id: checkId, probe });
+
+const mode = (label: "Apps" | "Projects") =>
+  check(`mode-${label.toLowerCase()}`, {
+    kind: "text",
+    selector: `${id("sidebar-mode-option")}[data-selected="true"]`,
+    equals: label,
+  });
+
+const appClosed = check("app-row-closed", {
+  kind: "some",
+  selector: id("sidebar-app-row"),
+  probes: [{ kind: "text", selector: id("sidebar-app-state"), equals: "Closed" }],
+});
+
+const closedBanner = check("closed-banner", { kind: "count", selector: id("app-closed-banner") });
+
+const fullAccess = check("full-access", {
+  kind: "text",
+  selector: '[data-slot="composer-shell"] button',
+  pattern: "^Full access$",
+});
+
+const noApproval = check("no-approval-card", {
+  kind: "all",
+  probes: [
+    { kind: "absent", selector: id("app-approval-card") },
+    { kind: "absent", selector: "[data-approval-detail]" },
+  ],
+});
+
+const pendingApproval = check("pending-approval-card", {
+  kind: "count",
+  selector: id("app-approval-card"),
+});
+
+const selectedThread = check("selected-thread-row", {
+  kind: "count",
+  selector: `${id("app-thread-row")}[data-selected="true"]`,
+  min: 1,
+  max: 1,
+});
+
+/** Ready means the card has its tool result (`data-state="saved"`), drawn three stats and a curve. */
+const readyCard = (form?: "wide" | "narrow") =>
+  check(form === undefined ? "card-ready" : `card-ready-${form}`, {
+    kind: "some",
+    selector: id("mcp-app-card"),
+    probes: [
+      {
+        kind: "frame",
+        selector: "iframe",
+        probes: [
+          {
+            kind: "count",
+            selector: `[data-card-layout${form === undefined ? "" : `="${form}"`}][data-state="saved"]`,
+          },
+          { kind: "count", selector: "[data-card-stat]", min: 3, max: 3 },
+          { kind: "chart-points", selector: "[data-card-chart] polyline", min: 2 },
+        ],
+      },
+    ],
+  });
+
+/** Pinned, Active and Settled (n) per workspace as staged, with Settled collapsed as drawn. */
+export function sidebarSectionChecks(manifest: BarAppManifest): ReadonlyArray<StagingCheck> {
+  const visibleRows = manifest.workspaces.reduce(
+    (sum, workspace) => sum + workspace.expected.pinned + workspace.expected.active,
+    0,
+  );
+  return [
+    check("workspaces", {
+      kind: "count",
+      selector: id("sidebar-app-workspace"),
+      min: manifest.workspaces.length,
+      max: manifest.workspaces.length,
+    }),
+    ...manifest.workspaces.map((workspace) => {
+      const { pinned, active, settled } = workspace.expected;
+      const probes: Array<Probe> = [];
+      if (pinned > 0) probes.push({ kind: "count", selector: sectionHeading("pinned") });
+      if (active > 0) probes.push({ kind: "count", selector: sectionHeading("active") });
+      if (settled > 0) {
+        probes.push({
+          kind: "text",
+          selector: `${sectionHeading("settled")} ${id("app-section-heading-label")}`,
+          equals: `Settled (${settled})`,
+        });
+      }
+      return check(`sections-${workspace.key}`, {
+        kind: "some",
+        selector: id("sidebar-app-workspace"),
+        probes,
+      });
+    }),
+    check("thread-rows", {
+      kind: "count",
+      selector: id("app-thread-row"),
+      min: visibleRows,
+      max: visibleRows,
+    }),
+  ];
+}
+
+export function barAppStagingChecks(
+  scene: BarAppSceneName,
+  manifest: BarAppManifest,
+): ReadonlyArray<StagingCheck> {
+  switch (scene) {
+    case "projects-mode":
+      return [
+        mode("Projects"),
+        check("scope-all-projects", {
+          kind: "text",
+          selector: id("sidebar-scope-label"),
+          equals: "All projects",
+        }),
+        check("no-apps-group", { kind: "absent", selector: id("sidebar-apps-group") }),
+      ];
+    case "apps-list":
+      return [mode("Apps"), appClosed];
+    case "apps-app-selected":
+      return [mode("Apps"), appClosed, ...sidebarSectionChecks(manifest)];
+    case "apps-desktop-mockup-scene":
+      return [
+        mode("Apps"),
+        appClosed,
+        ...sidebarSectionChecks(manifest),
+        selectedThread,
+        closedBanner,
+        check("user-message", { kind: "count", selector: '[data-message-role="user"]' }),
+        check("tool-rows-succeeded", {
+          kind: "each",
+          selector: id("app-tool-row"),
+          min: 2,
+          probes: [
+            { kind: "count", selector: `${id("app-tool-row-status")}[data-status="success"]` },
+          ],
+        }),
+        readyCard("wide"),
+        check("assistant-text", { kind: "count", selector: '[data-message-role="assistant"]' }),
+        fullAccess,
+        noApproval,
+      ];
+    case "app-thread-supervised":
+      return [selectedThread, closedBanner, pendingApproval, readyCard()];
+    case "app-thread-full-access":
+      return [selectedThread, closedBanner, readyCard(), fullAccess, noApproval];
+    case "settings-connected-apps":
+      return [check("app-status", { kind: "count", selector: id("app-status") })];
+  }
+}

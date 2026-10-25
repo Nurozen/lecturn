@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @effect-diagnostics nodeBuiltinImport:off - Host-side browser capture tooling writing PNG and JSON files.
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off - Host-side browser capture tooling writing PNG and JSON files.
 
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -7,15 +7,30 @@ import * as NodeProcess from "node:process";
 import * as NodeURL from "node:url";
 import * as NodeUtil from "node:util";
 
-import { chromium, type Page } from "playwright-core";
+import {
+  type Browser,
+  type BrowserContext,
+  type BrowserContextOptions,
+  chromium,
+  type Page,
+} from "playwright-core";
 
-import { BAR_FIXTURE_NOW } from "../seed-bar-fixture.ts";
+import { BAR_FIXTURE_NOW, fetchBarShellSnapshot, issueBarReadToken } from "../seed-bar-fixture.ts";
+import {
+  type BarAppManifest,
+  barAppLiveStateProblems,
+  barAppSceneParams,
+  readBarAppManifest,
+} from "./app-fixture.ts";
+import { BAR_APP_SCENE_NAMES, type BarAppSceneName, barAppStagingChecks } from "./app-scenes.ts";
 import {
   CHECKLIST_NAMES,
   type ChecklistName,
   loadChecklist,
   playwrightProbeRoot,
   probeScene,
+  type StagingCheck,
+  stagingProblems,
 } from "./probe-dom.ts";
 
 export const BAR_VIEWPORT = { width: 1440, height: 900 } as const;
@@ -35,6 +50,13 @@ export interface BarWebScene {
   /** The scene is ready once each of these selectors is visible. */
   readonly readySelectors: ReadonlyArray<string>;
   readonly masks?: ReadonlyArray<string>;
+  /**
+   * `staged`: the app fixture's staging time, so its live threads read as
+   * recent. Projects mode keeps the fixture clock its baseline was drawn at.
+   */
+  readonly clock?: "fixture" | "staged";
+  /** The checklist scene whose rows this capture is probed against, when named differently. */
+  readonly checklistScene?: string;
 }
 
 /** Later checkpoints add their scenes here; names match the checklist `scenes`. */
@@ -56,7 +78,71 @@ export const BAR_WEB_SCENES = {
     readySelectors: ['[data-slot="settings-section-card"]'],
   },
 } satisfies Record<string, BarWebScene>;
-export type BarWebSceneName = keyof typeof BAR_WEB_SCENES;
+
+const APP_THREAD_READY = [
+  "[data-timeline-ready] [data-timeline-row-id]",
+  '[data-testid="mcp-app-card"]',
+];
+// Apps mode is entered through the app deep-link query (`appLinkPath`), never through saved UI state.
+const APP_THREAD_PATH = (threadParam: string) =>
+  `/{environmentId}/{${threadParam}}?sidebar=apps&app={appId}`;
+
+/** The CP3 after-captures (A38); every one but Projects mode needs `seed-bar-fixture.ts --app`. */
+export const BAR_APP_WEB_SCENES = {
+  "projects-mode": {
+    description:
+      "Projects mode beside the app fixture, for the masked diff against projects-sidebar",
+    path: "/",
+    readySelectors: ['[data-slot="sidebar"]'],
+  },
+  "apps-list": {
+    description: "Apps mode with All apps: the Apps group and the closed Embed Host row",
+    path: "/?sidebar=apps",
+    readySelectors: ['[data-testid="sidebar-app-row"]'],
+    clock: "staged",
+  },
+  "apps-app-selected": {
+    description: "Apps mode with Embed Host selected: its workspaces and sections",
+    path: "/apps/{appId}",
+    readySelectors: ['[data-testid="sidebar-app-workspace"]'],
+    clock: "staged",
+  },
+  "apps-desktop-mockup-scene": {
+    description:
+      "The desktop mockup as drawn: pinned app thread in Full access, closed banner, two tool rows, wide card",
+    path: APP_THREAD_PATH("mockupThreadId"),
+    readySelectors: APP_THREAD_READY,
+    clock: "staged",
+  },
+  "app-thread-supervised": {
+    description: "An app thread in Supervised: closed banner, a card and the pending approval card",
+    path: APP_THREAD_PATH("supervisedThreadId"),
+    readySelectors: [...APP_THREAD_READY, '[data-testid="app-approval-card"]'],
+    clock: "staged",
+    checklistScene: "apps-app-thread",
+  },
+  "app-thread-full-access": {
+    description: "The same gated call in Full access: a card and no approval card",
+    path: APP_THREAD_PATH("fullAccessThreadId"),
+    readySelectors: APP_THREAD_READY,
+    clock: "staged",
+  },
+  "settings-connected-apps": {
+    description: "Settings > Connected apps with the granted Embed Host",
+    path: "/settings/apps",
+    readySelectors: ['[data-slot="settings-section-card"]'],
+    clock: "staged",
+  },
+} satisfies Record<BarAppSceneName, BarWebScene>;
+
+const ALL_SCENES: Readonly<Record<string, BarWebScene>> = {
+  ...BAR_WEB_SCENES,
+  ...BAR_APP_WEB_SCENES,
+};
+export type BarWebSceneName = keyof typeof BAR_WEB_SCENES | BarAppSceneName;
+
+const isAppScene = (name: BarWebSceneName): name is BarAppSceneName =>
+  (BAR_APP_SCENE_NAMES as ReadonlyArray<string>).includes(name);
 
 export function resolveScenePath(
   scene: BarWebScene,
@@ -85,19 +171,26 @@ export function parseCaptureWebArgs(args: ReadonlyArray<string>) {
       checklist: { type: "string" },
       "browser-path": { type: "string" },
       appearance: { type: "string" },
+      after: { type: "boolean", default: false },
     },
   });
   const pairingUrl = values["pairing-url"];
   const out = values.out;
   if (pairingUrl === undefined || out === undefined) {
     throw new Error(
-      `Usage: node scripts/bar/capture-web.ts --pairing-url <url> --out <dir> [--scene <name>]... [--param name=value]... [--base-dir <dir>] [--clock <iso>] [--checklist ${CHECKLIST_NAMES.join("|")}] [--browser-path <chrome>] [--appearance dark|light]\nScenes: ${Object.keys(BAR_WEB_SCENES).join(", ")}`,
+      `Usage: node scripts/bar/capture-web.ts --pairing-url <url> --out <dir> [--after] [--scene <name>]... [--param name=value]... [--base-dir <dir>] [--clock <iso>] [--checklist ${CHECKLIST_NAMES.join("|")}] [--browser-path <chrome>] [--appearance dark|light]\nScenes: ${Object.keys(ALL_SCENES).join(", ")}\n--after captures the app-fixture scenes (default with --after: ${BAR_APP_SCENE_NAMES.join(", ")}).`,
     );
   }
-  const scenes = (values.scene ?? Object.keys(BAR_WEB_SCENES)).map((name) => {
-    if (!Object.hasOwn(BAR_WEB_SCENES, name)) throw new Error(`Unknown scene '${name}'.`);
+  const after = values.after === true;
+  const scenes = (
+    values.scene ?? (after ? [...BAR_APP_SCENE_NAMES] : Object.keys(BAR_WEB_SCENES))
+  ).map((name) => {
+    if (!Object.hasOwn(ALL_SCENES, name)) throw new Error(`Unknown scene '${name}'.`);
     return name as BarWebSceneName;
   });
+  if (after && values["base-dir"] === undefined) {
+    throw new Error("--after reads the app fixture's manifest, so it needs --base-dir.");
+  }
   const params: Record<string, string> = {};
   for (const entry of values.param ?? []) {
     const separator = entry.indexOf("=");
@@ -123,7 +216,23 @@ export function parseCaptureWebArgs(args: ReadonlyArray<string>) {
     checklist: checklist as ChecklistName | undefined,
     browserPath: values["browser-path"],
     appearance,
+    after,
   } as const;
+}
+
+const STAGING_TIMEOUT_MS = 30_000;
+
+/** Polls the staging checks while cards load and live rows settle; the last failures if they never pass. */
+async function awaitStaging(
+  page: Page,
+  checks: ReadonlyArray<StagingCheck>,
+): Promise<ReadonlyArray<string>> {
+  const deadline = Date.now() + STAGING_TIMEOUT_MS;
+  for (;;) {
+    const problems = await stagingProblems(checks, playwrightProbeRoot(page));
+    if (problems.length === 0 || Date.now() > deadline) return problems;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
 }
 
 async function settle(page: Page, scene: BarWebScene): Promise<void> {
@@ -137,6 +246,7 @@ async function settle(page: Page, scene: BarWebScene): Promise<void> {
   );
 }
 
+/** False when the scene did not show its staged states, in which case nothing is written but the reasons. */
 export async function captureScene(input: {
   readonly page: Page;
   readonly origin: string;
@@ -144,16 +254,30 @@ export async function captureScene(input: {
   readonly params: Readonly<Record<string, string>>;
   readonly out: string;
   readonly checklist?: ChecklistName;
-}): Promise<void> {
-  const scene: BarWebScene = BAR_WEB_SCENES[input.name];
+  readonly staging?: ReadonlyArray<StagingCheck>;
+}): Promise<boolean> {
+  const scene = ALL_SCENES[input.name]!;
   await input.page.goto(new URL(resolveScenePath(scene, input.params), input.origin).toString());
   await settle(input.page, scene);
   const base = NodePath.join(input.out, input.name);
+  if (input.staging !== undefined && input.staging.length > 0) {
+    const problems = await awaitStaging(input.page, input.staging);
+    if (problems.length > 0) {
+      // A capture left from an earlier run must not pass for this one.
+      for (const suffix of [".png", ".masked.png", ".probe.json"]) {
+        await NodeFSP.rm(`${base}${suffix}`, { force: true });
+      }
+      await NodeFSP.writeFile(`${base}.staging.json`, `${JSON.stringify(problems, null, 2)}\n`);
+      return false;
+    }
+    await NodeFSP.rm(`${base}.staging.json`, { force: true });
+  }
   await input.page.screenshot({ path: `${base}.png`, animations: "disabled", caret: "hide" });
   if (input.checklist !== undefined) {
     const checklist = await loadChecklist(input.checklist);
-    if (checklist.scenes.includes(input.name)) {
-      const results = await probeScene(checklist, input.name, playwrightProbeRoot(input.page));
+    const checklistScene = scene.checklistScene ?? input.name;
+    if (checklist.scenes.includes(checklistScene)) {
+      const results = await probeScene(checklist, checklistScene, playwrightProbeRoot(input.page));
       await NodeFSP.writeFile(`${base}.probe.json`, `${JSON.stringify(results, null, 2)}\n`);
     }
   }
@@ -167,6 +291,35 @@ export async function captureScene(input: {
     ),
   });
   await style.evaluate((node) => (node as unknown as { remove(): void }).remove());
+  return true;
+}
+
+/** Everything the live app states need before the first capture: unexpired and still staged. */
+export function barAppPreflightProblems(input: {
+  readonly manifest: BarAppManifest;
+  readonly liveProblems: ReadonlyArray<string>;
+  readonly now: number;
+}): ReadonlyArray<string> {
+  const expired =
+    input.now >= Date.parse(input.manifest.approvalExpiresAt)
+      ? [
+          `the staged approval expired at ${input.manifest.approvalExpiresAt}; seed a fresh base dir with --app`,
+        ]
+      : [];
+  return [...expired, ...input.liveProblems];
+}
+
+/**
+ * One context per scene, signed in with the paired cookies only: the sidebar
+ * mode and scope persist in local storage, and one scene must not set them
+ * for the next.
+ */
+async function sceneContext(
+  browser: Browser,
+  options: BrowserContextOptions,
+  cookies: Awaited<ReturnType<BrowserContext["cookies"]>>,
+) {
+  return browser.newContext({ ...options, storageState: { cookies, origins: [] } });
 }
 
 async function main(): Promise<void> {
@@ -177,34 +330,82 @@ async function main(): Promise<void> {
       await NodeFSP.readFile(NodePath.join(args.baseDir, "userdata", "environment-id"), "utf8")
     ).trim();
   }
+  const needsApp = args.scenes.some((name) => isAppScene(name) && name !== "projects-mode");
+  let manifest: BarAppManifest | null = null;
+  if (args.after || needsApp) {
+    if (args.baseDir === undefined) throw new Error("App scenes need --base-dir.");
+    manifest = await readBarAppManifest(args.baseDir);
+    for (const [name, value] of Object.entries(barAppSceneParams(manifest))) {
+      params[name] ??= value;
+    }
+    const snapshot = await fetchBarShellSnapshot(
+      args.origin,
+      await issueBarReadToken(args.baseDir),
+    );
+    const problems = barAppPreflightProblems({
+      manifest,
+      liveProblems: barAppLiveStateProblems(snapshot, manifest),
+      now: Date.now(),
+    });
+    if (problems.length > 0) {
+      throw new Error(
+        `The app fixture's live states are not as staged:\n- ${problems.join("\n- ")}`,
+      );
+    }
+  }
   await NodeFSP.mkdir(args.out, { recursive: true });
   const browser = await chromium.launch(
     args.browserPath === undefined ? { channel: "chrome" } : { executablePath: args.browserPath },
   );
+  const contextOptions: BrowserContextOptions = {
+    viewport: BAR_VIEWPORT,
+    deviceScaleFactor: 1,
+    colorScheme: args.appearance,
+    reducedMotion: "reduce",
+  };
+  const discarded: Array<string> = [];
   try {
-    const context = await browser.newContext({
-      viewport: BAR_VIEWPORT,
-      deviceScaleFactor: 1,
-      colorScheme: args.appearance,
-      reducedMotion: "reduce",
-    });
-    const page = await context.newPage();
-    await page.clock.setFixedTime(args.clock);
-    await page.goto(args.pairingUrl);
-    await page.waitForURL((url) => !url.pathname.startsWith("/pair"), { timeout: 60_000 });
+    const pairing = await browser.newContext(contextOptions);
+    const pairingPage = await pairing.newPage();
+    await pairingPage.goto(args.pairingUrl);
+    await pairingPage.waitForURL((url) => !url.pathname.startsWith("/pair"), { timeout: 60_000 });
+    const cookies = await pairing.cookies();
+    await pairing.close();
     for (const name of args.scenes) {
-      await captureScene({
-        page,
-        origin: args.origin,
-        name,
-        params,
-        out: args.out,
-        ...(args.checklist === undefined ? {} : { checklist: args.checklist }),
-      });
-      NodeProcess.stdout.write(`captured ${name}\n`);
+      const scene = ALL_SCENES[name]!;
+      const context = await sceneContext(browser, contextOptions, cookies);
+      try {
+        const page = await context.newPage();
+        await page.clock.setFixedTime(
+          scene.clock === "staged" && manifest !== null ? manifest.stagedAt : args.clock,
+        );
+        const captured = await captureScene({
+          page,
+          origin: args.origin,
+          name,
+          params,
+          out: args.out,
+          ...(args.checklist === undefined ? {} : { checklist: args.checklist }),
+          ...(manifest !== null && isAppScene(name)
+            ? { staging: barAppStagingChecks(name, manifest) }
+            : {}),
+        });
+        if (captured) NodeProcess.stdout.write(`captured ${name}\n`);
+        else {
+          discarded.push(name);
+          NodeProcess.stdout.write(`discarded ${name}: see ${name}.staging.json\n`);
+        }
+      } finally {
+        await context.close();
+      }
     }
   } finally {
     await browser.close();
+  }
+  if (discarded.length > 0) {
+    throw new Error(
+      `Staging checks failed, so these scenes were not captured: ${discarded.join(", ")}`,
+    );
   }
 }
 
