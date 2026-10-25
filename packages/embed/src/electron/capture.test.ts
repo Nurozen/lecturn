@@ -57,6 +57,11 @@ const fakes = vi.hoisted(() => {
 
   class FakeWebContents extends Emitter {
     readonly debugger = new FakeDebugger();
+    readonly ipc = new Emitter();
+    readonly sent: Array<{ channel: string; message: unknown }> = [];
+    send(channel: string, message: unknown) {
+      this.sent.push({ channel, message });
+    }
     destroyed = false;
     crashed = false;
     zoomFactor = 1.5;
@@ -110,17 +115,33 @@ const fakes = vi.hoisted(() => {
   }
 
   class FakeWindow extends Emitter {
+    readonly webContents = new FakeWebContents();
     readonly children = new Set<unknown>();
     readonly contentView = {
       addChildView: (view: unknown) => this.children.add(view),
       removeChildView: (view: unknown) => this.children.delete(view),
+      get children(): Array<unknown> {
+        return [];
+      },
     };
   }
 
-  return { FakeWebContentsView, FakeWindow, journal };
+  const ipcMain = new Emitter();
+  const openedLinks: Array<string> = [];
+  const shell = {
+    openExternal: async (url: string) => {
+      openedLinks.push(url);
+    },
+  };
+
+  return { FakeWebContentsView, FakeWindow, journal, ipcMain, openedLinks, shell };
 });
 
-vi.mock("electron", () => ({ WebContentsView: fakes.FakeWebContentsView }));
+vi.mock("electron", () => ({
+  WebContentsView: fakes.FakeWebContentsView,
+  ipcMain: fakes.ipcMain,
+  shell: fakes.shell,
+}));
 
 import type * as Electron from "electron";
 
@@ -131,6 +152,7 @@ import { mountEmbedView, type MountEmbedViewOptions } from "./mountEmbedView.ts"
 const PNG_BASE64 = Buffer.from("fake-png").toString("base64");
 const ORIGIN_A = "http://127.0.0.1:41001";
 const ORIGIN_B = "http://127.0.0.1:41002";
+const TOKEN_HASH = "#embedToken=embed-token";
 
 function deferred<A = void>() {
   let resolve!: (value: A) => void;
@@ -241,14 +263,14 @@ describe("mountEmbedView", () => {
 
   it("installs the frozen clock before the first load and keeps it through a retarget", async () => {
     const { bridge, view, wc, useSecondOrigin } = await mount({ freezeClock: 1_700_000_000_000 });
-    const firstLoad = fakes.journal.indexOf(`load ${ORIGIN_A}/embed/env-1/project-1`);
+    const firstLoad = fakes.journal.indexOf(`load ${ORIGIN_A}/embed/env-1/project-1${TOKEN_HASH}`);
     expect(fakes.journal.indexOf("Page.addScriptToEvaluateOnNewDocument")).toBeLessThan(firstLoad);
     expect(fakes.journal.indexOf("attach")).toBeLessThan(firstLoad);
 
     useSecondOrigin();
     const generation = bridge.generation;
     await bridge.retarget("project-2", "thread-9");
-    expect(wc.loads.at(-1)).toBe(`${ORIGIN_B}/embed/env-1/project-2/thread-9`);
+    expect(wc.loads.at(-1)).toBe(`${ORIGIN_B}/embed/env-1/project-2/thread-9${TOKEN_HASH}`);
     expect(bridge.generation).toBeGreaterThan(generation);
     // Same view, same partition, same debugger session: the shim registration survives.
     expect(fakes.FakeWebContentsView.created.at(-1)).toBe(view);
@@ -256,6 +278,154 @@ describe("mountEmbedView", () => {
     expect(
       wc.debugger.commands.filter((c) => c.method === "Page.addScriptToEvaluateOnNewDocument"),
     ).toHaveLength(1);
+  });
+});
+
+const FROM_GUEST = "lecturn-embed:from-guest";
+const TO_GUEST = "lecturn-embed:to-guest";
+const INITIALIZED = { jsonrpc: "2.0", method: "ui/notifications/initialized" };
+
+function fromGuest(
+  wc: { ipc: { emit: (event: string, ...args: Array<unknown>) => void } },
+  message: unknown,
+  frame: { url: string; parent: unknown } = {
+    url: `${ORIGIN_A}/embed/env-1/project-1`,
+    parent: null,
+  },
+) {
+  wc.ipc.emit(FROM_GUEST, { senderFrame: frame }, message);
+}
+
+const toGuest = (wc: { sent: Array<{ channel: string; message: any }> }) =>
+  wc.sent.filter((entry) => entry.channel === TO_GUEST).map((entry) => entry.message);
+
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+describe("mountEmbedView bridge", () => {
+  it("answers the guest over the preload channel and holds host messages until it initializes", async () => {
+    const { bridge, wc } = await mount();
+    bridge.setDraft("hello");
+
+    fromGuest(wc, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "ui/initialize",
+      params: {
+        protocolVersion: "2026-01-26",
+        appCapabilities: { experimental: { lecturn: { version: 1 } } },
+      },
+    });
+    await settle();
+    expect(toGuest(wc)).toEqual([
+      expect.objectContaining({
+        id: 1,
+        result: expect.objectContaining({
+          hostContext: expect.objectContaining({ theme: "dark", displayMode: "inline" }),
+        }),
+      }),
+    ]);
+
+    fromGuest(wc, INITIALIZED);
+    expect(toGuest(wc).at(-1)).toEqual({
+      jsonrpc: "2.0",
+      method: "lecturn/composer.setDraft",
+      params: { text: "hello" },
+    });
+  });
+
+  it("only listens to the target's own top document", async () => {
+    const { wc } = await mount();
+    const ping = { jsonrpc: "2.0", id: 9, method: "lecturn/token.refresh" };
+    fromGuest(wc, ping, { url: "https://elsewhere.example/page", parent: null });
+    fromGuest(wc, ping, { url: `${ORIGIN_A}/card`, parent: {} });
+    await settle();
+    expect(toGuest(wc)).toEqual([]);
+  });
+
+  it("refreshes through the connection and follows the guest's thread", async () => {
+    const minted: Array<string> = [];
+    const connection = {
+      embedTarget: async (projectId: string, threadId?: string) => {
+        minted.push(`target ${projectId} ${threadId ?? "-"}`);
+        return {
+          url: `${ORIGIN_A}/embed/env-1/${projectId}`,
+          token: "embed-token",
+          expiresAt: "2026-10-24T00:15:00.000Z",
+        };
+      },
+      refreshEmbedToken: async (projectId: string) => {
+        minted.push(`refresh ${projectId}`);
+        return {
+          url: `${ORIGIN_A}/embed/env-1/${projectId}`,
+          token: "refreshed",
+          expiresAt: "2026-10-24T00:30:00.000Z",
+        };
+      },
+    };
+    const { bridge, wc } = await mount({ connection, target: undefined } as never);
+    const changed: Array<unknown> = [];
+    bridge.on("lecturn/thread.changed", (params) => changed.push(params));
+
+    const before = bridge.generation;
+    fromGuest(wc, {
+      jsonrpc: "2.0",
+      method: "lecturn/thread.changed",
+      params: { threadId: "thread-3" },
+    });
+    expect(bridge.generation).toBeGreaterThan(before);
+    expect(changed).toEqual([{ threadId: "thread-3" }]);
+
+    fromGuest(wc, { jsonrpc: "2.0", id: "r", method: "lecturn/token.refresh" });
+    await settle();
+    expect(toGuest(wc).at(-1)).toEqual({
+      jsonrpc: "2.0",
+      id: "r",
+      result: { token: "refreshed", expiresAt: "2026-10-24T00:30:00.000Z" },
+    });
+    expect(minted).toEqual(["target project-1 -", "refresh project-1"]);
+  });
+
+  it("moves the view to the pane its host page reports and ignores other senders", async () => {
+    const { view, win } = await mount();
+    fakes.ipcMain.emit(
+      "lecturn-embed:pane-rect",
+      { sender: {} },
+      { x: 1, y: 1, width: 1, height: 1 },
+    );
+    expect(view.bounds).toEqual({ x: 0, y: 0, width: 800, height: 600 });
+
+    fakes.ipcMain.emit(
+      "lecturn-embed:pane-rect",
+      { sender: win.webContents },
+      { x: 320.4, y: 40, width: 879.6, height: -5 },
+    );
+    expect(view.bounds).toEqual({ x: 320, y: 40, width: 880, height: 0 });
+  });
+
+  it("forwards the host page's bridge messages and reports invalid ones", async () => {
+    const { bridge, wc, win } = await mount();
+    const errors: Array<string> = [];
+    bridge.on("error", (error) => errors.push(error.reason));
+    fromGuest(wc, INITIALIZED);
+
+    fakes.ipcMain.emit(
+      "lecturn-embed:bridge",
+      { sender: win.webContents },
+      { method: "lecturn/composer.insertMention", params: { ref: "ex:item/1", label: "Item 1" } },
+    );
+    fakes.ipcMain.emit(
+      "lecturn-embed:bridge",
+      { sender: win.webContents },
+      { method: "ui/initialize" },
+    );
+
+    expect(toGuest(wc).at(-1)).toEqual({
+      jsonrpc: "2.0",
+      method: "lecturn/composer.insertMention",
+      params: { ref: "ex:item/1", label: "Item 1" },
+    });
+    expect(errors).toEqual(["bridge-message-rejected"]);
+    bridge.destroy();
   });
 });
 
@@ -337,7 +507,7 @@ describe("captureEmbedView", () => {
 
     respondNormally(wc);
     expect((await captureEmbedView(bridge)).toString()).toBe("fake-png");
-    expect(wc.loads.at(-1)).toBe(`${ORIGIN_B}/embed/env-1/project-2`);
+    expect(wc.loads.at(-1)).toBe(`${ORIGIN_B}/embed/env-1/project-2${TOKEN_HASH}`);
     expect(wc.debugger.attachCount).toBe(1);
   });
 

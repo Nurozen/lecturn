@@ -26,6 +26,18 @@
     "./embedBridge": {
       "types": "./src/embedBridge.ts",
       "import": "./src/embedBridge.ts"
+    },
+    "./appsRpcCore": {
+      "types": "./src/appsRpcCore.ts",
+      "import": "./src/appsRpcCore.ts"
+    },
+    "./auth": {
+      "types": "./src/auth.ts",
+      "import": "./src/auth.ts"
+    },
+    "./environment": {
+      "types": "./src/environment.ts",
+      "import": "./src/environment.ts"
     }
   },
   "scripts": {

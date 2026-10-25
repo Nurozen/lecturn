@@ -1,0 +1,20 @@
+{
+  // @lecturn/embed bundles contracts and shared sources. rolldown-plugin-dts
+  // emits declarations relative to its tsconfig's directory, so this config
+  // sits above all three packages, and `paths` keeps TypeScript from treating
+  // the workspace sources as node_modules libraries it would not emit.
+  "extends": "./embed/tsconfig.json",
+  "compilerOptions": {
+    "typeRoots": ["./embed/node_modules/@types", "./embed/node_modules"],
+    "paths": {
+      "@lecturn/contracts/*": ["./contracts/src/*.ts"],
+      "@lecturn/shared/*": ["./shared/src/*.ts"]
+    }
+  },
+  "include": [
+    "embed/src/node.ts",
+    "embed/src/electron.ts",
+    "embed/src/renderer.ts",
+    "embed/src/browser.ts"
+  ]
+}

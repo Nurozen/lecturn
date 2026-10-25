@@ -16,6 +16,7 @@ export default defineConfig({
       format: "esm",
       outDir: "dist",
       dts: true,
+      tsconfig: "../tsconfig.embed-dts.json",
       sourcemap: true,
       clean: true,
       platform: "node",

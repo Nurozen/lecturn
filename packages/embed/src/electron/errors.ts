@@ -4,7 +4,10 @@ export type EmbedViewErrorReason =
   | "renderer-gone"
   | "stale-capture"
   | "capture-failed"
-  | "load-failed";
+  | "load-failed"
+  | "message-too-large"
+  | "bridge-message-rejected"
+  | "token-refresh-failed";
 
 export class EmbedViewError extends Error {
   override readonly name = "EmbedViewError";

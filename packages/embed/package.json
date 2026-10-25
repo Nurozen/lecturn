@@ -55,7 +55,12 @@
     "typecheck": "tsc-rs --noEmit",
     "test": "vp test run --config ../../vite.config.ts --dir ."
   },
+  "dependencies": {
+    "effect": "catalog:"
+  },
   "devDependencies": {
+    "@lecturn/contracts": "workspace:*",
+    "@lecturn/shared": "workspace:*",
     "@types/node": "catalog:",
     "electron": "44.4.5",
     "vite-plus": "catalog:"
