@@ -1,5 +1,6 @@
 import type { EmbedHostCommand } from "@lecturn/client-runtime/embed/guest";
 import { EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
+import "../../embed/embed.css";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -29,6 +30,9 @@ vi.mock(import("../../embed/bridge"), async (original) => {
     reportTurnState: () => undefined,
     reportReady: (threadId: unknown) => state.bridgeCalls.push(["ready", threadId]),
     navigate: (ref: unknown) => state.bridgeCalls.push(["navigate", ref]),
+    openLink: async (url: unknown) => {
+      state.bridgeCalls.push(["openLink", url]);
+    },
     authorizeHost: (origins: unknown) => state.bridgeCalls.push(["authorize", origins]),
   };
   return {
@@ -80,6 +84,7 @@ vi.mock(import("../ChatView"), async () => {
       return (
         <div data-testid="chat-view">
           <AppRefChip reference="rw:c/fins" />
+          <div data-chat-composer-overlay="true">composer</div>
         </div>
       );
     }) as never,
@@ -116,6 +121,7 @@ const shell = (id: string, updatedAt: string, extra: Record<string, unknown> = {
   updatedAt,
   archivedAt: null,
   deletedAt: null,
+  source: {},
   ...extra,
 });
 
@@ -269,6 +275,43 @@ describe("EmbedView", () => {
       to: "/embed/$environmentId/$projectId/$threadId",
       params: { environmentId, projectId, threadId: "thread-1" },
     });
+  });
+
+  it("shows a thread continued in Lecturn read-only, with the way to its copy", async () => {
+    state.threads = [
+      shell("thread-1", "2026-10-25T01:00:00.000Z", {
+        source: {
+          continuedIn: {
+            environmentId: "env-user",
+            threadId: "copy-1",
+            copiedAt: "2026-10-25T02:00:00.000Z",
+          },
+        },
+      }),
+      shell("thread-2", "2026-10-25T00:00:00.000Z"),
+    ];
+    await render({ threadId: "thread-1" });
+    expect(state.shownThreads.at(-1)).toBe("thread-1");
+    expect(container.textContent).toContain("Continued in Lecturn");
+    const composer = () =>
+      container.querySelector<HTMLElement>('[data-chat-composer-overlay="true"]')!;
+    expect(getComputedStyle(composer()).display).toBe("none");
+
+    const link = [...container.querySelectorAll<HTMLAnchorElement>("a")].find(
+      (anchor) => anchor.textContent === "Open in Lecturn",
+    );
+    await act(async () => link?.click());
+    expect(state.bridgeCalls).toContainEqual([
+      "openLink",
+      "lecturn://apps/dev.example.app/threads/env-user/copy-1",
+    ]);
+    // A host's draft has no composer to land in.
+    await hostSends({ method: "lecturn/composer.setDraft", params: { text: "More fins" } });
+    expect(state.composerCalls).toEqual([]);
+
+    await render({ threadId: "thread-2" });
+    expect(container.textContent).not.toContain("Continued in Lecturn");
+    expect(getComputedStyle(composer()).display).not.toBe("none");
   });
 
   it("shows the switcher unless the host lists threads itself, and falls back to the latest thread", async () => {

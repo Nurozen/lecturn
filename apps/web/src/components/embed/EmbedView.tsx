@@ -1,6 +1,12 @@
 import { deriveEmbedTurnState } from "@lecturn/client-runtime/embed/guest";
 import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
-import type { EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
+import type {
+  ConnectedAppThreadContinuedIn,
+  EnvironmentId,
+  ProjectId,
+  ThreadId,
+} from "@lecturn/contracts";
+import { appLinkFromPath, appLinkPath } from "@lecturn/shared/appLinks";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
@@ -48,6 +54,48 @@ function EmbedThreadReporter({
   return null;
 }
 
+/**
+ * A sidecar thread the helper copied to the user's Lecturn (D33). Its history stays readable
+ * here, but new turns belong to the copy, so the composer is hidden and this points there.
+ */
+function EmbedContinuedNotice({
+  appId,
+  continuedIn,
+}: {
+  readonly appId: string | null;
+  readonly continuedIn: ConnectedAppThreadContinuedIn;
+}) {
+  const link =
+    appId === null
+      ? null
+      : appLinkFromPath(
+          appLinkPath({
+            appId,
+            thread: { environmentId: continuedIn.environmentId, threadId: continuedIn.threadId },
+          }),
+        );
+  return (
+    <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm">
+      <span className="text-muted-foreground">Continued in Lecturn</span>
+      {link === null ? null : (
+        <a
+          href={link}
+          className="font-medium text-primary underline-offset-4 hover:underline"
+          onClick={(event) => {
+            // The host owns navigation out of the view; a bare page falls back to the href.
+            const bridge = readEmbedBridge();
+            if (bridge === null) return;
+            event.preventDefault();
+            bridge.openLink(link).catch(() => undefined);
+          }}
+        >
+          Open in Lecturn
+        </a>
+      )}
+    </div>
+  );
+}
+
 /** A full-pane view that replaces the chat until the user goes back to it. */
 export type EmbedPanel = "providers";
 
@@ -77,6 +125,9 @@ export function EmbedView({
   if (threadId !== null && threadId !== lastThreadId) setLastThreadId(threadId);
   const shownThreadId =
     threadId ?? (panel === null ? null : lastThreadId) ?? liveThreads[0]?.id ?? null;
+
+  const continuedIn =
+    liveThreads.find((thread) => thread.id === shownThreadId)?.source.continuedIn ?? null;
 
   const appContext = useAppEmbedContext(projectRef);
   // Only the first known origins count: the bridge decides once whether its parent may listen.
@@ -129,7 +180,7 @@ export function EmbedView({
   };
   const onHostCommand = useEffectEvent((command: Parameters<typeof runEmbedHostCommand>[0]) => {
     void runEmbedHostCommand(command, {
-      composer: () => composerRef.current,
+      composer: () => (continuedIn === null ? composerRef.current : null),
       openThread,
       createThread,
       openProviders: () =>
@@ -145,7 +196,10 @@ export function EmbedView({
     <AppReferencesContext value={appReferences}>
       <ComposerHandleContext value={composerRef}>
         <EmbedThreadReporter environmentId={environmentId} threadId={shownThreadId} />
-        <main className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background">
+        <main
+          className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background"
+          data-embed-continued={continuedIn === null ? undefined : "true"}
+        >
           {panel === "providers" ? (
             <EmbedProvidersPanel
               environmentId={environmentId}
@@ -167,7 +221,12 @@ export function EmbedView({
             />
           ) : null}
           {panel !== null ? null : shownThreadId !== null ? (
-            <ChatView environmentId={environmentId} threadId={shownThreadId} routeKind="server" />
+            <>
+              <ChatView environmentId={environmentId} threadId={shownThreadId} routeKind="server" />
+              {continuedIn === null ? null : (
+                <EmbedContinuedNotice appId={appContext?.appId ?? null} continuedIn={continuedIn} />
+              )}
+            </>
           ) : (
             <p className="m-auto text-sm text-muted-foreground">No threads in this project yet.</p>
           )}

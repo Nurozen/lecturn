@@ -111,3 +111,9 @@ html[data-lecturn-embed]
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* A sidecar thread already continued in the user's Lecturn reads back here but takes no new
+   turns (D33); EmbedView marks it and shows where it continues instead of the composer. */
+[data-embed-continued="true"] [data-chat-composer-overlay="true"] {
+  display: none;
+}

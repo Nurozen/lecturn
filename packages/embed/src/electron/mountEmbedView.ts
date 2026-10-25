@@ -14,7 +14,12 @@ import {
   EMBED_TO_GUEST_CHANNEL,
 } from "../channels.ts";
 import { embedGuestUrl } from "../embedUrl.ts";
-import type { EmbedConnectionSource, EmbedTargetSource } from "../target.ts";
+import {
+  type EmbedConnectionSource,
+  type EmbedTargetSource,
+  followConnectionMode,
+} from "../target.ts";
+import { isExternalLink } from "../embedUrl.ts";
 import { EmbedViewError } from "./errors.ts";
 import { freezeClockScript } from "./freezeClock.ts";
 import {
@@ -172,9 +177,8 @@ export function mountEmbedView(
     },
     refreshToken,
     openLink: async (url) => {
-      const protocol = new URL(url).protocol;
-      if (protocol !== "https:" && protocol !== "http:") {
-        throw new Error("Only http and https links open outside the embed view.");
+      if (!isExternalLink(url)) {
+        throw new Error("Only http, https and lecturn links open outside the embed view.");
       }
       await Electron.shell.openExternal(url);
     },
@@ -346,9 +350,25 @@ export function mountEmbedView(
   Electron.ipcMain.on(EMBED_PANE_RECT_CHANNEL, onPaneRect);
   Electron.ipcMain.on(EMBED_HOST_BRIDGE_CHANNEL, onHostBridge);
 
+  // Hosts that mount from a connection need no code for a live switch (D36).
+  const stopFollowing =
+    options.connection === undefined
+      ? () => undefined
+      : followConnectionMode(
+          options.connection,
+          () => ({ projectId, threadId }),
+          (nextProjectId, nextThreadId) => {
+            if (isGone()) return;
+            navigate(nextProjectId, nextThreadId).catch((error: EmbedViewError) =>
+              emitError(error),
+            );
+          },
+        );
+
   const destroy = () => {
     if (destroyed) return;
     destroyed = true;
+    stopFollowing();
     generation += 1;
     loadSeq += 1;
     listeners.clear();

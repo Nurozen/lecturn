@@ -16,3 +16,18 @@ export function embedGuestUrl(
   parsed.hash = params.toString();
   return parsed.toString();
 }
+
+/**
+ * Links the view may hand to the OS: web pages, and Lecturn's own deep links
+ * (a thread continued in Lecturn opens there, D33).
+ */
+export function isExternalLink(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === "https:" || parsed.protocol === "http:") return true;
+  return parsed.protocol === "lecturn:" && parsed.host === "apps";
+}
