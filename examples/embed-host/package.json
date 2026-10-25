@@ -1,0 +1,19 @@
+{
+  "name": "embed-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "typecheck": "tsc-rs --noEmit"
+  },
+  "dependencies": {
+    "@lecturn/embed": "workspace:*",
+    "electron": "44.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}
