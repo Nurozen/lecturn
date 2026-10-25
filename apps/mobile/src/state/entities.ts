@@ -19,7 +19,13 @@ import { hasThreadLinks, relabelThreadLinks } from "@lecturn/shared/threadLinks"
 import { Atom } from "effect/reactivity";
 import { useMemo } from "react";
 
-import { listedProjects, listedThreadShells } from "./listed-entities";
+import {
+  appListedProjects,
+  appListedThreadShells,
+  listedProjects,
+  listedThreadShells,
+  newThreadTargetProjects,
+} from "./listed-entities";
 import { environmentProjects } from "./projects";
 import { environmentServerConfigsAtom, serverEnvironment } from "./server";
 import { environmentThreadDetails, environmentThreadShells } from "./threads";
@@ -66,6 +72,19 @@ export const LISTED_THREAD_SHELLS_ATOM = Atom.make((get) =>
   ),
 ).pipe(Atom.withLabel("mobile-thread-shells:listed"));
 
+const NEW_THREAD_TARGET_PROJECTS_ATOM = Atom.make((get) =>
+  newThreadTargetProjects(get(environmentProjects.projectsAtom)),
+).pipe(Atom.withLabel("mobile-projects:new-thread-targets"));
+const APP_PROJECTS_ATOM = Atom.make((get) =>
+  appListedProjects(get(environmentProjects.projectsAtom)),
+).pipe(Atom.withLabel("mobile-projects:apps"));
+const APP_THREAD_SHELLS_ATOM = Atom.make((get) =>
+  appListedThreadShells(
+    get(environmentProjects.projectsAtom),
+    get(environmentThreadShells.navigationThreadShellsAtom),
+  ),
+).pipe(Atom.withLabel("mobile-thread-shells:apps"));
+
 export function waitForProject(
   ref: ScopedProjectRef,
   timeoutMs = 10_000,
@@ -99,14 +118,30 @@ export function useThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
   return useAtomValue(environmentThreadShells.threadShellsAtom);
 }
 
-/** Projects for lists and pickers: archived Stave spaces are restored from New project → Stave. */
+/**
+ * Projects for the Threads tab's lists and pickers: archived Stave spaces are restored from
+ * New project → Stave, and app workspaces are listed under Apps.
+ */
 export function useListedProjects(): ReadonlyArray<EnvironmentProject> {
   return useAtomValue(LISTED_PROJECTS_ATOM);
 }
 
-/** Navigation thread shells (no archived or subagent threads), without those of archived Stave spaces. */
+/** Navigation thread shells (no archived or subagent threads) of the Threads tab's projects. */
 export function useListedThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
   return useAtomValue(LISTED_THREAD_SHELLS_ATOM);
+}
+
+/** Resolves a new thread's named project, app workspaces included; pickers use `useListedProjects`. */
+export function useNewThreadTargetProjects(): ReadonlyArray<EnvironmentProject> {
+  return useAtomValue(NEW_THREAD_TARGET_PROJECTS_ATOM);
+}
+
+export function useAppProjects(): ReadonlyArray<EnvironmentProject> {
+  return useAtomValue(APP_PROJECTS_ATOM);
+}
+
+export function useAppThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
+  return useAtomValue(APP_THREAD_SHELLS_ATOM);
 }
 
 export function useNavigationThreadShells(): ReadonlyArray<EnvironmentThreadShell> {

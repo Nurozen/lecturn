@@ -11,12 +11,15 @@ export function HierarchyRow({
   settled,
   frame,
   guides,
+  connector = true,
   children,
 }: {
   readonly depth: number;
   readonly settled: boolean;
   readonly frame: AccountSectionFrame | undefined;
   readonly guides: readonly SidebarHierarchyLine[] | undefined;
+  /** False for rows that sit beside the branch line, such as threads under a section label. */
+  readonly connector?: boolean;
   readonly children: ReactNode;
 }) {
   const { accent, light, dark, opaque } = useGlassPalette();
@@ -78,7 +81,7 @@ export function HierarchyRow({
             />
           );
         })}
-        {depth > 0 ? (
+        {depth > 0 && connector ? (
           <View
             pointerEvents="none"
             accessible={false}
