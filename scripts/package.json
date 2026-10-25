@@ -13,6 +13,8 @@
     "@lecturn/shared": "workspace:*",
     "@lecturn/tailscale": "workspace:*",
     "effect": "catalog:",
+    "pixelmatch": "7.2.0",
+    "playwright-core": "1.60.0",
     "plist": "catalog:",
     "pngjs": "7.0.0",
     "sharp": "0.35.4"

@@ -87,6 +87,7 @@ interface CliOptions {
   readonly keepRunning: boolean;
   readonly validateOnly: boolean;
   readonly list: boolean;
+  readonly barFixture: boolean;
 }
 
 export interface ShowcaseCapture {
@@ -294,6 +295,7 @@ export function parseShowcaseCliArgs(args: ReadonlyArray<string>): CliOptions {
   let keepRunning = false;
   let validateOnly = false;
   let list = false;
+  let barFixture = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
@@ -353,6 +355,8 @@ export function parseShowcaseCliArgs(args: ReadonlyArray<string>): CliOptions {
       validateOnly = true;
     } else if (argument === "--list") {
       list = true;
+    } else if (argument === "--bar-fixture") {
+      barFixture = true;
     } else if (argument === "--help" || argument === "-h") {
       list = true;
     } else {
@@ -371,14 +375,18 @@ export function parseShowcaseCliArgs(args: ReadonlyArray<string>): CliOptions {
     keepRunning,
     validateOnly,
     list,
+    barFixture,
   };
 }
 
 export function planShowcaseCaptures(
   config: ShowcaseConfig,
-  options: Pick<CliOptions, "platforms" | "deviceIds" | "scenes" | "appearances" | "themes">,
+  options: Pick<CliOptions, "platforms" | "deviceIds" | "scenes" | "appearances" | "themes"> & {
+    readonly barFixture?: boolean;
+  },
 ): ReadonlyArray<ShowcaseCapture> {
   const captures = config.devices
+    .filter((device) => isBarFixtureDevice(device) === (options.barFixture ?? false))
     .filter((device) => options.platforms.size === 0 || options.platforms.has(device.platform))
     .filter((device) => options.deviceIds.size === 0 || options.deviceIds.has(device.id))
     .flatMap((device) => {
@@ -413,6 +421,10 @@ export function planShowcaseCaptures(
   return captures;
 }
 
+export function isBarFixtureDevice(device: ShowcaseDevice): boolean {
+  return device.platform === "ios" && device.barFixture === true;
+}
+
 function printUsage(config: ShowcaseConfig): void {
   NodeProcess.stdout.write(`App screenshot showcase
 
@@ -430,6 +442,7 @@ Options:
   --skip-metro               Reuse an already running showcase Metro server
   --keep-running             Leave devices and Metro running after capture
   --validate-only            Validate existing upload assets without capturing
+  --bar-fixture              Capture the Lecturn Apps Bar fixture on the Bar devices only
   --list                     Print this help and the configured matrix
 
 Scenes: ${SHOWCASE_SCENES.join(", ")}
@@ -950,6 +963,56 @@ async function waitForIosShowcaseScene(
   throw new Error(`iOS showcase scene '${scene}' did not render within ${timeoutMs}ms.`);
 }
 
+async function barFixtureClientConnected(baseDir: string): Promise<boolean> {
+  const output = await commandOutput(
+    "node",
+    ["apps/server/src/bin.ts", "auth", "session", "list", "--base-dir", baseDir, "--json"],
+    { env: { ...NodeProcess.env, NO_COLOR: "1" } },
+  );
+  const start = output.indexOf("[");
+  const end = output.lastIndexOf("]");
+  if (start === -1 || end < start) return false;
+  const sessions = JSON.parse(output.slice(start, end + 1)) as ReadonlyArray<{
+    readonly connected?: unknown;
+  }>;
+  return sessions.some((session) => session.connected === true);
+}
+
+/**
+ * The Bar fixture has none of the showcase threads the in-app coordinator
+ * waits for, so it never reports a ready scene. Instead wait for the app's
+ * live connection to the fixture server, then for the frame to stop changing.
+ */
+async function waitForBarFixtureFrame(
+  udid: string,
+  baseDir: string,
+  timeoutMs = 180_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await barFixtureClientConnected(baseDir))) {
+    if (Date.now() > deadline)
+      throw new Error("The app never connected to the Bar fixture server.");
+    await delay(1_000);
+  }
+  const probePath = NodePath.join(NodeOS.tmpdir(), `lecturn-bar-frame-${udid}.png`);
+  let previous: Buffer | null = null;
+  let stableFrames = 0;
+  while (Date.now() < deadline) {
+    await runCommand("xcrun", ["simctl", "io", udid, "screenshot", probePath]);
+    const bytes = await NodeFSP.readFile(probePath);
+    const { data } = PNG.sync.read(bytes);
+    stableFrames =
+      previous !== null && previous.equals(data) && !pngIsBlack(bytes) ? stableFrames + 1 : 0;
+    previous = data;
+    if (stableFrames >= 2) {
+      await NodeFSP.rm(probePath, { force: true });
+      return;
+    }
+    await delay(1_500);
+  }
+  throw new Error(`The Bar fixture frame did not settle within ${timeoutMs}ms.`);
+}
+
 function iosAxe(): string {
   return NodeProcess.env.AXE_PATH ?? "axe";
 }
@@ -1078,6 +1141,7 @@ async function captureIos(
   metroHost: string,
   pairingUrls: ReadonlyArray<string>,
   registerCleanup: (cleanup: IosCaptureCleanup) => void,
+  barFixtureBaseDir?: string,
 ): Promise<void> {
   const { simulator, createdByRunner } = await ensureIosSimulator(capture.device);
   const startedByRunner = simulator.state !== "Booted";
@@ -1138,6 +1202,9 @@ async function captureIos(
     if (sceneIndex > 0) await NodeFSP.rm(readyPath, { force: true });
     await NodeFSP.writeFile(scenePath, scene);
     const waitForScene = (timeoutMs?: number) => {
+      if (barFixtureBaseDir !== undefined) {
+        return waitForBarFixtureFrame(simulator.udid, barFixtureBaseDir, timeoutMs);
+      }
       const ready = waitForIosShowcaseScene(simulator.udid, scene, timeoutMs);
       return scene === "agent-activity"
         ? allowIosNotificationsUntilReady(simulator.udid, ready)
@@ -1510,11 +1577,31 @@ async function main(): Promise<void> {
     readonly port: number;
   }> = [];
   let metro: NodeChildProcess.ChildProcess | null = null;
+  let barFixtureServer: { readonly pid: number; readonly stop: () => Promise<void> } | null = null;
+  let barFixtureBaseDir: string | undefined;
   const iosCleanups: IosCaptureCleanup[] = [];
   const androidCleanups: AndroidCaptureCleanup[] = [];
 
   try {
-    for (const environment of SHOWCASE_ENVIRONMENTS) {
+    if (options.barFixture) {
+      // Loaded lazily: the seeder pulls in the server's orchestration stores.
+      const { seedBarFixture } = await import("./seed-bar-fixture.ts");
+      barFixtureBaseDir = NodePath.join(showcaseRootDir, "environments", "bar");
+      const { server } = await seedBarFixture({ baseDir: barFixtureBaseDir, host: "127.0.0.1" });
+      if (server === null) throw new Error("The Bar fixture server did not start.");
+      barFixtureServer = server;
+      const environmentId = await waitForFileContent(
+        NodePath.join(barFixtureBaseDir, "userdata", "environment-id"),
+        "Bar fixture environment id",
+      );
+      showcaseEnvironments.push({
+        baseDir: barFixtureBaseDir,
+        environmentId,
+        label: "Bar fixture",
+        port: server.port,
+      });
+    }
+    for (const environment of options.barFixture ? [] : SHOWCASE_ENVIRONMENTS) {
       const projectId = environment.projectIds[0];
       const project = SHOWCASE_PROJECTS.find((candidate) => candidate.id === projectId);
       if (!project) throw new Error(`Showcase environment '${environment.id}' has no project.`);
@@ -1584,6 +1671,7 @@ async function main(): Promise<void> {
           metroHost,
           pairingUrls,
           (cleanup) => iosCleanups.push(cleanup),
+          barFixtureBaseDir,
         );
       } else {
         await captureAndroid(
@@ -1612,6 +1700,9 @@ async function main(): Promise<void> {
       NodeProcess.stdout.write(
         `Showcase environments kept at ${showcaseRootDir} (${serverSummary}).\n`,
       );
+      if (barFixtureServer !== null) {
+        NodeProcess.stdout.write(`Bar fixture server pid ${barFixtureServer.pid}.\n`);
+      }
     }
   } finally {
     if (options.keepRunning) {
@@ -1635,6 +1726,7 @@ async function main(): Promise<void> {
       await Promise.all([
         ...(metro ? [stopProcess(metro)] : []),
         ...showcaseServers.map((server) => stopProcess(server)),
+        ...(barFixtureServer ? [barFixtureServer.stop()] : []),
       ]);
       await NodeFSP.rm(showcaseRootDir, {
         recursive: true,

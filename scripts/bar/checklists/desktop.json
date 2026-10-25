@@ -1,0 +1,508 @@
+{
+  "mockup": "bar/mockups/lecturn-apps-sidebar-desktop.png",
+  "scenes": ["apps-desktop-mockup-scene", "apps-app-thread", "projects-mode"],
+  "rows": [
+    {
+      "id": "desktop.chrome.top-bar",
+      "element": "Top bar: breadcrumb naming the app and the thread, then the existing header actions",
+      "owner": "base",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": null
+    },
+    {
+      "id": "desktop.sidebar.search",
+      "element": "Search row with the new-thread action at the top of the sidebar",
+      "owner": "base",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": null
+    },
+    {
+      "id": "desktop.sidebar.mode-control",
+      "element": "Projects | Apps segmented control under the search row, Apps selected",
+      "owner": "A35",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "some",
+        "selector": "[data-testid=\"sidebar-mode-control\"]",
+        "probes": [
+          {
+            "kind": "text",
+            "selector": "[data-testid=\"sidebar-mode-option\"]",
+            "equals": "Projects"
+          },
+          {
+            "kind": "text",
+            "selector": "[data-testid=\"sidebar-mode-option\"][data-selected=\"true\"]",
+            "equals": "Apps"
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop.sidebar.scope-row-apps",
+      "element": "Labelled scope row: folder icon, the All apps label, chevron and +",
+      "owner": "A35a",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "each",
+        "selector": "[data-testid=\"sidebar-scope-row\"]",
+        "probes": [
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"sidebar-scope-icon\"]"
+          },
+          {
+            "kind": "text",
+            "selector": "[data-testid=\"sidebar-scope-label\"]",
+            "equals": "All apps"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"sidebar-scope-chevron\"]"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"sidebar-scope-add\"]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop.sidebar.scope-row-projects",
+      "element": "The same labelled scope row in Projects mode, with the All projects label",
+      "owner": "A35a",
+      "scenes": ["projects-mode"],
+      "probe": {
+        "kind": "each",
+        "selector": "[data-testid=\"sidebar-scope-row\"]",
+        "probes": [
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"sidebar-scope-icon\"]"
+          },
+          {
+            "kind": "text",
+            "selector": "[data-testid=\"sidebar-scope-label\"]",
+            "equals": "All projects"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"sidebar-scope-chevron\"]"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"sidebar-scope-add\"]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop.sidebar.apps-group",
+      "element": "Boxed Apps group with its Apps heading",
+      "owner": "A35",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "some",
+        "selector": "[data-testid=\"sidebar-apps-group\"]",
+        "probes": [
+          {
+            "kind": "text",
+            "selector": "[data-testid=\"sidebar-apps-group-heading\"]",
+            "equals": "Apps"
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop.sidebar.app-row",
+      "element": "App row: expand chevron, app icon, name, state chip, + and open-in actions",
+      "owner": "A35",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "each",
+        "selector": "[data-testid=\"sidebar-app-row\"]",
+        "probes": [
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"sidebar-app-expand\"]"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"sidebar-app-icon\"]"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"sidebar-app-name\"]"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"sidebar-app-state\"]"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"sidebar-app-new-thread\"]"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"sidebar-app-open\"]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop.sidebar.app-closed-chip",
+      "element": "The app's state chip reads Closed while the app holds no live lease",
+      "owner": "A35",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "text",
+        "selector": "[data-testid=\"sidebar-app-state\"]",
+        "equals": "Closed"
+      }
+    },
+    {
+      "id": "desktop.sidebar.workspace-rows",
+      "element": "Workspace rows under the app, each with an expand chevron and tree connectors",
+      "owner": "A35",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "each",
+        "selector": "[data-testid=\"sidebar-app-workspace\"]",
+        "min": 2,
+        "probes": [
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"sidebar-app-workspace-expand\"]"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"sidebar-tree-connector\"]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop.sidebar.pinned-heading",
+      "element": "Pinned heading with pin icon and collapse chevron under each workspace",
+      "owner": "A35",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "each",
+        "selector": "[data-testid=\"sidebar-app-workspace\"]",
+        "min": 2,
+        "probes": [
+          {
+            "kind": "some",
+            "selector": "[data-testid=\"app-section-heading\"][data-section=\"pinned\"]",
+            "probes": [
+              {
+                "kind": "text",
+                "selector": "[data-testid=\"app-section-heading-label\"]",
+                "equals": "Pinned"
+              },
+              {
+                "kind": "count",
+                "selector": "[data-testid=\"app-section-heading-icon\"]"
+              },
+              {
+                "kind": "count",
+                "selector": "[data-testid=\"app-section-heading-chevron\"]"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop.sidebar.active-heading",
+      "element": "Active heading with its icon and collapse chevron under each workspace",
+      "owner": "A35",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "each",
+        "selector": "[data-testid=\"sidebar-app-workspace\"]",
+        "min": 2,
+        "probes": [
+          {
+            "kind": "some",
+            "selector": "[data-testid=\"app-section-heading\"][data-section=\"active\"]",
+            "probes": [
+              {
+                "kind": "text",
+                "selector": "[data-testid=\"app-section-heading-label\"]",
+                "equals": "Active"
+              },
+              {
+                "kind": "count",
+                "selector": "[data-testid=\"app-section-heading-icon\"]"
+              },
+              {
+                "kind": "count",
+                "selector": "[data-testid=\"app-section-heading-chevron\"]"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop.sidebar.settled-row",
+      "element": "Settled (n) row with a clock icon under each workspace",
+      "owner": "A35",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "each",
+        "selector": "[data-testid=\"sidebar-app-workspace\"]",
+        "min": 2,
+        "probes": [
+          {
+            "kind": "some",
+            "selector": "[data-testid=\"app-section-heading\"][data-section=\"settled\"]",
+            "probes": [
+              {
+                "kind": "text",
+                "selector": "[data-testid=\"app-section-heading-label\"]",
+                "pattern": "^Settled \\(\\d+\\)$"
+              },
+              {
+                "kind": "count",
+                "selector": "[data-testid=\"app-section-heading-icon\"]"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop.sidebar.thread-rows",
+      "element": "Thread rows with a leading document icon",
+      "owner": "A35",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "each",
+        "selector": "[data-testid=\"app-thread-row\"]",
+        "probes": [
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"app-thread-row-icon\"]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop.sidebar.selected-thread-menu",
+      "element": "The selected thread row shows its ⋯ menu",
+      "owner": "A35",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "some",
+        "selector": "[data-testid=\"app-thread-row\"][data-selected=\"true\"]",
+        "probes": [
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"app-thread-row-menu\"]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop.sidebar.footer",
+      "element": "Sidebar footer icon row",
+      "owner": "base",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": null
+    },
+    {
+      "id": "desktop.main.closed-banner",
+      "element": "Closed banner above the thread: unavailable-tools notice, then Open in <App> with an external-link icon",
+      "owner": "A28",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "some",
+        "selector": "[data-testid=\"app-closed-banner\"]",
+        "probes": [
+          {
+            "kind": "text",
+            "selector": "[data-testid=\"app-closed-banner-open\"]",
+            "pattern": "^Open in .+"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"app-closed-banner-open\"] svg"
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop.main.serif-title",
+      "element": "Serif thread-title heading in the display face",
+      "owner": "A27a",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "count",
+        "selector": "[data-testid=\"app-thread-title\"]",
+        "max": 1
+      }
+    },
+    {
+      "id": "desktop.main.user-message",
+      "element": "User message bubble on the right, level with the title",
+      "owner": "base",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "count",
+        "selector": "[data-message-role=\"user\"]"
+      }
+    },
+    {
+      "id": "desktop.main.tool-rows",
+      "element": "App tool rows: leading chevron, tool icon, label, trailing success check",
+      "owner": "A27a",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "each",
+        "selector": "[data-testid=\"app-tool-row\"]",
+        "min": 2,
+        "probes": [
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"app-tool-row-chevron\"]"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"app-tool-row-icon\"]"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"app-tool-row-label\"]"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"app-tool-row-status\"][data-status=\"success\"]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop.main.card-wide",
+      "element": "MCP Apps card in its wide form: title row, three boxed stats, a line chart with points",
+      "owner": "A21",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "some",
+        "selector": "[data-testid=\"mcp-app-card\"]",
+        "probes": [
+          {
+            "kind": "frame",
+            "selector": "iframe",
+            "probes": [
+              {
+                "kind": "count",
+                "selector": "[data-card-layout=\"wide\"]"
+              },
+              {
+                "kind": "count",
+                "selector": "[data-card-title]"
+              },
+              {
+                "kind": "count",
+                "selector": "[data-card-stat]",
+                "min": 3,
+                "max": 3
+              },
+              {
+                "kind": "chart-points",
+                "selector": "svg path, svg polyline",
+                "min": 2
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop.main.card-accent",
+      "element": "The card's curve is drawn in the host accent (gold in full Lecturn)",
+      "owner": "A21",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": null
+    },
+    {
+      "id": "desktop.main.assistant-text",
+      "element": "Assistant text under the card",
+      "owner": "base",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "count",
+        "selector": "[data-message-role=\"assistant\"]"
+      }
+    },
+    {
+      "id": "desktop.composer.shell",
+      "element": "Composer as drawn: input, footer with model, effort, access mode and Contextual · Off, attach and send",
+      "owner": "base",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "some",
+        "selector": "[data-slot=\"composer-shell\"]",
+        "probes": [
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"composer-editor\"]"
+          },
+          {
+            "kind": "text",
+            "selector": "button",
+            "pattern": "^Contextual"
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop.composer.full-access-no-approval",
+      "element": "Full access selected, with no approval card anywhere in the thread",
+      "owner": "A20",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "all",
+        "probes": [
+          {
+            "kind": "text",
+            "selector": "[data-slot=\"composer-shell\"] button",
+            "pattern": "^Full access$"
+          },
+          {
+            "kind": "absent",
+            "selector": "[data-testid=\"app-approval-card\"]"
+          },
+          {
+            "kind": "absent",
+            "selector": "[data-approval-detail]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop.composer.import-link",
+      "element": "Continue a Claude Code or Codex session link under the composer on app threads",
+      "owner": "A27a",
+      "scenes": ["apps-desktop-mockup-scene"],
+      "probe": {
+        "kind": "text",
+        "selector": "button",
+        "pattern": "^Continue a .+ session$"
+      }
+    },
+    {
+      "id": "desktop.app-thread.supervised-approval",
+      "element": "In Supervised, a gated app tool call shows the approval card",
+      "owner": "A20",
+      "scenes": ["apps-app-thread"],
+      "probe": {
+        "kind": "count",
+        "selector": "[data-testid=\"app-approval-card\"]"
+      }
+    }
+  ],
+  "rowsHash": "sha256:ca59beaefdd4142690a46953fca9403d17420c4fc246b7a06e71cdf589711933"
+}

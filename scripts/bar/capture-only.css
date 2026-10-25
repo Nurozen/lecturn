@@ -1,0 +1,20 @@
+/* Injected identically into the baseline and candidate pages for the masked
+   pixel diff only. The celestial texture and grain repeat from the element
+   origin, so a layout shift of a few pixels moves every textured pixel; with
+   them gone the diff measures layout and color. Critics still judge the
+   unmasked captures. Selectors mirror apps/web/src/index.css. */
+body,
+.surface-grain,
+.lecturn-chat-surface,
+.lecturn-page-surface,
+.lecturn-settings-surface,
+.lecturn-celestial-sidebar,
+[data-slot="sidebar-inner"],
+[data-slot="sidebar"].surface-grain {
+  background-image: none !important;
+}
+
+/* Carets blink on their own timer, which a frozen page clock does not stop. */
+* {
+  caret-color: transparent !important;
+}
