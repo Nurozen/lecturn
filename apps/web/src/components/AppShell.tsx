@@ -44,6 +44,7 @@ import { ReopenClosedViewShortcut } from "./ReopenClosedViewShortcut";
 import { BrowserChromeThemeSync, DocumentTitleSync } from "./RootDocumentSync";
 import { SlowRpcRequestToastCoordinator } from "./SlowRpcRequestToastCoordinator";
 import { ThreadNotificationCoordinator } from "./ThreadNotificationCoordinator";
+import { AppPairingPromptCoordinator } from "./apps/AppPairingPromptCoordinator";
 import { ConnectOnboardingDialog } from "./cloud/ConnectOnboardingDialog";
 import { RelayClientInstallDialog } from "./cloud/RelayClientInstallDialog";
 import { DesktopAppActivationCoordinator } from "./desktop/DesktopAppActivationCoordinator";
@@ -126,6 +127,7 @@ export default function AppShell({
           {isElectron ? <RunningThreadKeepAlive /> : null}
           <RelayClientInstallDialog />
           <ConnectOnboardingDialog />
+          {primaryEnvironmentAuthenticated ? <AppPairingPromptCoordinator /> : null}
           <SshPasswordPromptDialog />
           <SnapShotCoordinator />
           <ThreadNotificationCoordinator />
