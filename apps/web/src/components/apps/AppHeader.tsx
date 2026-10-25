@@ -5,13 +5,16 @@ import { ArrowLeftIcon, ExternalLinkIcon, PlusIcon, SettingsIcon } from "lucide-
 
 import { openAppUrl } from "../../lib/openAppUrl";
 import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
 import { AppIcon } from "./AppIcon";
+import { AppRowAction, AppRowTrailing } from "./AppRow";
 import { appTargetWorkspace, appWorkspaceOpenUrl, type AppsSidebarApp } from "./AppsSidebar.logic";
 import { useCanOpenApp } from "./useAppClosedBanner";
 import { useAppPresentation } from "./useAppsSidebarApps";
 
-/** The selected app: who it is, what it can do from here, and the way back to every app. */
+/**
+ * The selected app, drawn as one row like a project header: the way back to every app, who it
+ * is, its state and working count, and what it can do from here.
+ */
 export function AppHeader({
   app,
   onBack,
@@ -27,62 +30,55 @@ export function AppHeader({
   const canOpenApp = useCanOpenApp(target?.project.environmentId ?? null);
   const openUrl = canOpenApp ? appWorkspaceOpenUrl(presentation.openUrlTemplate, target) : null;
   return (
-    <div data-thread-selection-safe data-testid="app-header" className="flex flex-col gap-1.5 pb-2">
-      <div className="flex min-w-0 items-center gap-1.5">
-        <Button
-          type="button"
-          size="icon-xs"
-          variant="ghost-muted"
-          aria-label="Back to all apps"
-          onClick={onBack}
-        >
-          <ArrowLeftIcon aria-hidden />
-        </Button>
+    <div
+      data-thread-selection-safe
+      data-testid="app-header"
+      className="group/app-row flex min-w-0 items-center gap-1 pb-2"
+    >
+      <AppRowAction label="Back to all apps" onClick={onBack}>
+        <ArrowLeftIcon aria-hidden />
+      </AppRowAction>
+      <span className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-xs font-medium text-sidebar-foreground">
         <AppIcon iconDataUrl={presentation.iconDataUrl} />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-sidebar-foreground">
+        <span className="min-w-0 truncate" data-testid="app-header-name">
           {presentation.name}
         </span>
-        {presentation.chip ? (
-          <Badge variant={presentation.chip.variant} size="sm" data-testid="sidebar-app-state">
-            {presentation.chip.label}
-          </Badge>
-        ) : null}
-        <Button
-          type="button"
-          size="icon-xs"
-          variant="ghost-muted"
-          aria-label={`${presentation.name} settings`}
-          onClick={() => void router.navigate({ to: "/settings/apps" })}
-        >
-          <SettingsIcon aria-hidden />
-        </Button>
-      </div>
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+      </span>
+      <AppRowTrailing
+        chip={presentation.chip}
+        working={
+          app.workingCount > 0 ? (
+            <Badge variant="info" size="sm" data-testid="app-header-working">
+              {app.workingCount} working
+            </Badge>
+          ) : null
+        }
+      >
         {target ? (
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
+          <AppRowAction
+            label={`New thread in ${target.project.title}`}
             onClick={() =>
               onNewThread(scopeProjectRef(target.project.environmentId, target.project.id))
             }
           >
             <PlusIcon aria-hidden />
-            New thread
-          </Button>
+          </AppRowAction>
         ) : null}
         {openUrl ? (
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
+          <AppRowAction
+            label={`Open in ${presentation.name}`}
             onClick={() => openAppUrl(openUrl, presentation.openUrlTemplate)}
           >
-            Open in {presentation.name}
             <ExternalLinkIcon aria-hidden />
-          </Button>
+          </AppRowAction>
         ) : null}
-      </div>
+        <AppRowAction
+          label={`${presentation.name} settings`}
+          onClick={() => void router.navigate({ to: "/settings/apps" })}
+        >
+          <SettingsIcon aria-hidden />
+        </AppRowAction>
+      </AppRowTrailing>
     </div>
   );
 }

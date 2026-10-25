@@ -31,6 +31,7 @@ import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { AppIcon } from "../apps/AppIcon";
 import {
   WorkspaceBreadcrumb,
   WorkspaceBreadcrumbItem,
@@ -81,7 +82,14 @@ export const ChatHeader = memo(function ChatHeader({
   onNewThreadInProject,
   onOpenProjectSettings,
 }: ChatHeaderProps) {
+  // An app's workspace is named by its app, as the Apps sidebar names it.
+  const breadcrumbApp = useAppEmbedContext(
+    activeProject?.appBinding
+      ? scopeProjectRef(activeProject.environmentId, activeProject.id)
+      : null,
+  );
   const activeProjectName = activeProject?.title;
+  const breadcrumbProjectName = breadcrumbApp?.name ?? activeProjectName;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const interfaceFont = useClientSettings((settings) => settings.fontFamilySans);
   const breadcrumbContainerRef = useRef<HTMLDivElement>(null);
@@ -186,7 +194,7 @@ export const ChatHeader = memo(function ChatHeader({
     };
   }, [
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Title, font and rename changes resize the breadcrumb text without resizing the list, so it re-measures.
-    activeProjectName,
+    breadcrumbProjectName,
     activeThreadTitle,
     parentThreadLink,
     interfaceFont,
@@ -334,9 +342,13 @@ export const ChatHeader = memo(function ChatHeader({
                     />
                   }
                 >
-                  <ProjectFavicon project={activeProject} className="size-3.5" />
+                  {breadcrumbApp ? (
+                    <AppIcon iconDataUrl={breadcrumbApp.iconDataUrl} />
+                  ) : (
+                    <ProjectFavicon project={activeProject} className="size-3.5" />
+                  )}
                   <WorkspaceBreadcrumbText className="max-w-40">
-                    {activeProjectName}
+                    {breadcrumbProjectName}
                   </WorkspaceBreadcrumbText>
                 </TooltipTrigger>
                 <TooltipPopup side="top">New thread in {activeProjectName}</TooltipPopup>

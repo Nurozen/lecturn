@@ -6,7 +6,7 @@ export function AppsGroup({ children }: { readonly children: ReactNode }) {
     <ul
       role="presentation"
       data-testid="sidebar-apps-group"
-      className="lecturn-sidebar-tree lecturn-local-enclosure flex flex-col gap-px"
+      className="lecturn-sidebar-tree lecturn-apps-tree lecturn-local-enclosure flex flex-col gap-px"
     >
       <li
         data-thread-selection-safe

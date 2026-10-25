@@ -270,7 +270,7 @@ const AppThreadRow = memo(function AppThreadRow({
         data-testid="app-thread-row"
         data-selected={isActive}
         className={cn(
-          "group/app-thread relative flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          "group/app-thread relative flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
           isActive
             ? "bg-sidebar-row-active text-sidebar-foreground"
             : "text-sidebar-foreground/90 hover:bg-sidebar-row-hover",
@@ -300,10 +300,10 @@ const AppThreadRow = memo(function AppThreadRow({
               if (!renameSettledRef.current) actions.commitRename(thread, draftTitle);
             }}
             onClick={(event) => event.stopPropagation()}
-            className="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-sm text-card-foreground outline-none focus:border-foreground"
+            className="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-xs text-card-foreground outline-none focus:border-foreground"
           />
         ) : (
-          <span className="min-w-0 flex-1 truncate text-sm">{thread.title}</span>
+          <span className="min-w-0 flex-1 truncate text-xs">{thread.title}</span>
         )}
         {status ? <StatusDot status={status} /> : null}
         {canOperate && !isRenaming ? (
@@ -316,9 +316,10 @@ const AppThreadRow = memo(function AppThreadRow({
                   data-testid="app-thread-row-menu"
                   onClick={(event) => event.stopPropagation()}
                   className={cn(
-                    "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-popup-open:opacity-100",
+                    "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                    // Out of flow while hidden, so an unselected title keeps the menu's width.
                     !isActive &&
-                      "opacity-0 group-hover/app-thread:opacity-100 group-focus-within/app-thread:opacity-100",
+                      "pointer-events-none absolute right-1.5 opacity-0 group-focus-within/app-thread:pointer-events-auto group-focus-within/app-thread:static group-focus-within/app-thread:opacity-100 group-any-hover/app-thread:pointer-events-auto group-any-hover/app-thread:static group-any-hover/app-thread:opacity-100 data-popup-open:pointer-events-auto data-popup-open:static data-popup-open:opacity-100",
                   )}
                 />
               }

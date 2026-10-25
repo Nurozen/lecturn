@@ -3068,6 +3068,7 @@ body,
 @import "./components/account-surface.css";
 @import "./components/settings/project-settings-glass.css";
 @import "./components/sidebar/account-glass.css";
+@import "./components/apps/apps-tree.css";
 @import "./components/right-panel-glass.css";
 @import "./components/celestial-ornaments.css";
 @import "./components/settings/phone-settings.css";
