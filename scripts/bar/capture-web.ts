@@ -32,8 +32,8 @@ export interface BarWebScene {
   readonly description: string;
   /** Route path; `{name}` segments come from `--param name=value`. */
   readonly path: string;
-  /** The scene is ready once this selector is visible. */
-  readonly readySelector: string;
+  /** The scene is ready once each of these selectors is visible. */
+  readonly readySelectors: ReadonlyArray<string>;
   readonly masks?: ReadonlyArray<string>;
 }
 
@@ -42,17 +42,18 @@ export const BAR_WEB_SCENES = {
   "projects-sidebar": {
     description: "Projects sidebar with the seeded workspaces and their threads",
     path: "/",
-    readySelector: '[data-slot="sidebar"]',
+    readySelectors: ['[data-slot="sidebar"]'],
   },
   "thread-approval": {
     description: "A thread with a live pending approval from the mock Copilot agent",
     path: "/{environmentId}/{threadId}",
-    readySelector: "[data-approval-detail]",
+    // The approval card mounts before the timeline reveals its rows.
+    readySelectors: ["[data-approval-detail]", "[data-timeline-ready] [data-timeline-row-id]"],
   },
   "settings-connections": {
     description: "Settings > Connections",
     path: "/settings/connections",
-    readySelector: '[data-slot="settings-section-card"]',
+    readySelectors: ['[data-slot="settings-section-card"]'],
   },
 } satisfies Record<string, BarWebScene>;
 export type BarWebSceneName = keyof typeof BAR_WEB_SCENES;
@@ -126,7 +127,9 @@ export function parseCaptureWebArgs(args: ReadonlyArray<string>) {
 }
 
 async function settle(page: Page, scene: BarWebScene): Promise<void> {
-  await page.locator(scene.readySelector).first().waitFor({ state: "visible", timeout: 60_000 });
+  for (const selector of scene.readySelectors) {
+    await page.locator(selector).first().waitFor({ state: "visible", timeout: 60_000 });
+  }
   await page.evaluate(() =>
     (
       globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }

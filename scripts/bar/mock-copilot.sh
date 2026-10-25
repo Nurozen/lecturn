@@ -5,6 +5,9 @@
 # tool call and leaves a permission request pending, which is the live approval
 # card the baseline needs (seeded requests expire when the server restarts).
 # Each LECTURN_ACP_* default can be overridden from the server's environment.
+# Start the turn in Supervised mode (Full access never asks), and set
+# "enableProviderUpdateChecks": false in settings.json: the mock's version is
+# older than the latest CLI, and the update toast covers the capture.
 set -eu
 
 if [ "${1-}" = "--version" ]; then
