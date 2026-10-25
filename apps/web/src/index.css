@@ -253,6 +253,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(lecturn-
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-thread-gold: var(--lecturn-thread-gold);
   --color-popover-foreground: var(--contrast-popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--contrast-card-foreground);

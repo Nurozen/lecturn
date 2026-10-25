@@ -1,7 +1,7 @@
 import { AppId, type AppEmbedContext, ThreadId } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { appClosedBanner } from "./useAppClosedBanner";
+import { appClosedBanner, appClosedBannerPlacement } from "./useAppClosedBanner";
 
 const ICON =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
@@ -105,5 +105,20 @@ describe("appClosedBanner", () => {
     expect(
       appClosedBanner({ context: context(), binding, threadId: null, canOpenApp: true })?.openUrl,
     ).toBe("rocketwright://open?workspace=%2Fwork%2Fhopper%2038&thread=");
+  });
+});
+
+describe("appClosedBannerPlacement", () => {
+  it("heads a saved thread in full Lecturn, above its title as drawn", () => {
+    expect(appClosedBannerPlacement({ embedded: false, threadId })).toBe("thread");
+  });
+
+  it("keeps the notice in the composer stack in the embed, which has no thread header", () => {
+    expect(appClosedBannerPlacement({ embedded: true, threadId })).toBe("composer");
+  });
+
+  it("keeps the notice in the composer stack for a draft, which has no thread to head", () => {
+    expect(appClosedBannerPlacement({ embedded: false, threadId: null })).toBe("composer");
+    expect(appClosedBannerPlacement({ embedded: true, threadId: null })).toBe("composer");
   });
 });

@@ -82,11 +82,22 @@ export function useCanOpenApp(environmentId: EnvironmentId | null): boolean {
   );
 }
 
-/** The composer notice for an app thread whose app is not running or was revoked. */
-export function useAppClosedBanner(
+/**
+ * Full Lecturn draws the notice at the top of a thread, above its title. The embed has no thread
+ * header (its host names the thread), and a draft has no shell to head, so both keep it in the
+ * composer stack.
+ */
+export function appClosedBannerPlacement(input: {
+  readonly embedded: boolean;
+  readonly threadId: ThreadId | null;
+}): "composer" | "thread" {
+  return input.embedded || input.threadId === null ? "composer" : "thread";
+}
+
+export function useAppClosedBannerState(
   projectRef: ScopedProjectRef | null,
   threadId: ThreadId | null,
-): ComposerBannerStackItem | null {
+): { readonly banner: AppClosedBanner; readonly open: (() => void) | null } | null {
   const binding = useProject(projectRef)?.appBinding ?? null;
   const context = useAppEmbedContext(binding === null ? null : projectRef);
   const canOpenApp = useCanOpenApp(projectRef?.environmentId ?? null);
@@ -94,6 +105,23 @@ export function useAppClosedBanner(
   const banner = appClosedBanner({ context, binding, threadId, canOpenApp });
   if (banner === null) return null;
   const { openUrl } = banner;
+  const openUrlTemplate = context?.openUrlTemplate ?? null;
+  return {
+    banner,
+    open: openUrl === null ? null : () => openAppUrl(openUrl, openUrlTemplate),
+  };
+}
+
+/** The composer notice for an app thread whose app is not running or was revoked. */
+export function useAppClosedBanner(
+  projectRef: ScopedProjectRef | null,
+  threadId: ThreadId | null,
+): ComposerBannerStackItem | null {
+  const embedded = useEmbedPresentation() !== null;
+  const placement = appClosedBannerPlacement({ embedded, threadId });
+  const state = useAppClosedBannerState(placement === "composer" ? projectRef : null, threadId);
+  if (state === null) return null;
+  const { banner, open } = state;
   return {
     id: `app-${banner.kind}:${banner.appId}`,
     testId: "app-closed-banner",
@@ -101,18 +129,14 @@ export function useAppClosedBanner(
     icon: createElement(banner.kind === "revoked" ? ShieldOffIcon : UnplugIcon),
     title: banner.title,
     actions:
-      openUrl === null
+      open === null
         ? undefined
         : createElement(
             "span",
             { "data-testid": "app-closed-banner-open", className: "contents" },
             createElement(
               Button,
-              {
-                size: "xs",
-                variant: "ghost",
-                onClick: () => openAppUrl(openUrl, context?.openUrlTemplate ?? null),
-              },
+              { size: "xs", variant: "ghost", onClick: open },
               banner.openLabel,
               createElement(ExternalLinkIcon, { "aria-hidden": true }),
             ),
