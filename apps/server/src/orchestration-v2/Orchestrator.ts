@@ -497,6 +497,9 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.created.record":
       return command.parentThreadId;
     case "secret_request.record":
+    case "thread.app-data.set":
+    case "thread.continued-in.set":
+    case "runtime-request.app-expire":
       return command.threadId;
     case "thread.fork":
     case "thread.merge_back":

@@ -1,4 +1,4 @@
-import { CONTEXTUAL_RPC_SCOPES } from "@lecturn/contracts";
+import { APPS_RPC_SCOPES, CONTEXTUAL_RPC_SCOPES } from "@lecturn/contracts";
 import {
   CLIENT_GUARDED_RPC_SCOPES,
   type DeviceListInput,
@@ -59,6 +59,7 @@ export const RPC_REQUIRED_SCOPES = {
   [ORCHESTRATION_V2_WS_METHODS.subscribeCommandOutput]: AuthOrchestrationReadScope,
   [WS_METHODS.projectsMutate]: AuthOrchestrationOperateScope,
   ...CONTEXTUAL_RPC_SCOPES,
+  ...APPS_RPC_SCOPES,
   [WS_METHODS.serverProbe]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetConfig]: AuthOrchestrationReadScope,
   [WS_METHODS.serverRefreshProviders]: AuthOrchestrationReadScope,

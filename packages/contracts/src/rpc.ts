@@ -1,4 +1,5 @@
 import { ContextualRpcs, CONTEXTUAL_WS_METHODS } from "./contextualRpc.ts";
+import { AppsRpcs, APPS_WS_METHODS } from "./appsRpc.ts";
 import {
   ManualCloudLinkProofInput,
   ManualCloudLinkProofResult,
@@ -413,6 +414,7 @@ import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 
 export const WS_METHODS = {
   ...CONTEXTUAL_WS_METHODS,
+  ...APPS_WS_METHODS,
   projectsList: "projects.list",
   projectsAdd: "projects.add",
   projectsRemove: "projects.remove",
@@ -2209,6 +2211,7 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 
 export const WsRpcGroup = RpcGroup.make(
   ...ContextualRpcs,
+  ...AppsRpcs,
   WsSagaWorkbenchGetSnapshotRpc,
   WsSagaWorkbenchGetEvidenceRpc,
   WsSagaWorkbenchGetActivityRpc,

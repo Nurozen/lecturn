@@ -75,6 +75,8 @@ import {
   GitCommandError,
   CONTEXTUAL_WS_METHODS,
   ContextualRpcs,
+  APPS_WS_METHODS,
+  AppsRpcs,
   ProjectListEntriesError,
   ProjectReadFileError,
   ProjectSearchContentsError,
@@ -272,6 +274,7 @@ import { PullRequestWatchService } from "./pullRequest/PullRequestWatchService.t
 import { SagaWorkbenchService } from "./stave/SagaWorkbenchService.ts";
 import { isPathUnder } from "./stave/StaveSpaceLock.ts";
 import { makeStaveRpcHandlers, StaveRpcRuntime } from "./stave/staveRpcHandlers.ts";
+import { appsRpcHandlers } from "./apps/AppsRpcHandlers.ts";
 import { StaveBinary } from "./stave/StaveBinary.ts";
 import { StaveCli } from "./stave/StaveCli.ts";
 import { StaveConfigReader } from "./stave/StaveConfigReader.ts";
@@ -2018,6 +2021,7 @@ const makeWsRpcHandlers = (
 
     const handlers = ServerWsRpcGroup.of({
       ...staveRpcHandlers,
+      ...appsRpcHandlers,
       [WS_METHODS.contextualStatus]: (input) => contextual.status(input),
       [WS_METHODS.contextualProjectSettings]: (input) => contextual.projectSettings(input),
       [WS_METHODS.contextualUpdateProjectSettings]: (input) =>
@@ -3425,6 +3429,7 @@ const makeWsRpcHandlers = (
 // Lecturn's RPCs get their own groups so each `toLayer` stays within it;
 // RpcServer finds handlers by tag, so the layers serve the one WsRpcGroup.
 type ContextualRpcTag = (typeof CONTEXTUAL_WS_METHODS)[keyof typeof CONTEXTUAL_WS_METHODS];
+type AppsRpcTag = (typeof APPS_WS_METHODS)[keyof typeof APPS_WS_METHODS];
 const LECTURN_WS_METHODS = [
   WS_METHODS.staveGetStatus,
   WS_METHODS.staveSpaceStatus,
@@ -3474,9 +3479,11 @@ type WsRpcTag = RpcGroup.Rpcs<typeof ServerWsRpcGroup>["_tag"];
 const lecturnRpcTags: ReadonlySet<string> = new Set(LECTURN_WS_METHODS);
 const WsCoreRpcGroup = ServerWsRpcGroup.omit(
   ...Object.values(CONTEXTUAL_WS_METHODS),
+  ...Object.values(APPS_WS_METHODS),
   ...LECTURN_WS_METHODS,
 );
 const WsContextualRpcGroup = RpcGroup.make(...ContextualRpcs);
+const WsAppsRpcGroup = RpcGroup.make(...AppsRpcs);
 const WsLecturnRpcGroup = ServerWsRpcGroup.omit(
   ...([...ServerWsRpcGroup.requests.keys()].filter((tag) => !lecturnRpcTags.has(tag)) as Array<
     Exclude<WsRpcTag, LecturnRpcTag>
@@ -3487,6 +3494,7 @@ const WsLecturnRpcGroup = ServerWsRpcGroup.omit(
 export const WS_RPC_HANDLER_GROUPS = {
   core: WsCoreRpcGroup,
   contextual: WsContextualRpcGroup,
+  apps: WsAppsRpcGroup,
   lecturn: WsLecturnRpcGroup,
 } as const;
 
@@ -3506,12 +3514,15 @@ const layerWsRpc = (
       serverBrowser,
     ).pipe(
       Effect.map((handlers) => {
-        const coreHandlers: Omit<typeof handlers, ContextualRpcTag | LecturnRpcTag> = handlers;
+        const coreHandlers: Omit<typeof handlers, ContextualRpcTag | AppsRpcTag | LecturnRpcTag> =
+          handlers;
         const contextualHandlers: Pick<typeof handlers, ContextualRpcTag> = handlers;
+        const appsHandlers: Pick<typeof handlers, AppsRpcTag> = handlers;
         const lecturnHandlers: Pick<typeof handlers, LecturnRpcTag> = handlers;
         return Layer.mergeAll(
           WsCoreRpcGroup.toLayer(coreHandlers),
           WsContextualRpcGroup.toLayer(contextualHandlers),
+          WsAppsRpcGroup.toLayer(appsHandlers),
           WsLecturnRpcGroup.toLayer(lecturnHandlers),
         );
       }),
