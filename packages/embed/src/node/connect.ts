@@ -115,7 +115,8 @@ const THREADS_RESUBSCRIBE = Schedule.exponential("500 millis").pipe(
   ),
 );
 const decodeAccessToken = Schema.decodeUnknownSync(AuthAccessTokenResult);
-const decodeTicket = Schema.decodeUnknownSync(AuthWebSocketTicketResult);
+// JSON codec: `expiresAt` arrives as an ISO string, not a DateTime.
+const decodeTicket = Schema.decodeUnknownSync(Schema.toCodecJson(AuthWebSocketTicketResult));
 
 /**
  * The app session, shared by every helper attached to this sidecar. Sharing
@@ -184,8 +185,12 @@ export async function exchangeSeedToken(input: {
   return { accessToken: result.access_token, expiresInSeconds: result.expires_in };
 }
 
-async function issueWebSocketTicket(origin: string, accessToken: string): Promise<string> {
-  const response = await fetch(new URL("/api/auth/websocket-ticket", origin), {
+export async function issueWebSocketTicket(
+  origin: string,
+  accessToken: string,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<string> {
+  const response = await fetchImpl(new URL("/api/auth/websocket-ticket", origin), {
     method: "POST",
     headers: { authorization: `Bearer ${accessToken}` },
     credentials: "omit",

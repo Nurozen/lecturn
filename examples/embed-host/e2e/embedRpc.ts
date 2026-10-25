@@ -18,7 +18,8 @@ import * as RpcSerialization from "effect/rpc/RpcSerialization";
 import * as Socket from "effect/socket/Socket";
 
 const AppsClientGroup = RpcGroup.make(...AppsCoreRpcs);
-const decodeTicket = Schema.decodeUnknownSync(AuthWebSocketTicketResult);
+// JSON codec: `expiresAt` arrives as an ISO string, not a DateTime.
+const decodeTicket = Schema.decodeUnknownSync(Schema.toCodecJson(AuthWebSocketTicketResult));
 const decodeCreateInput = Schema.decodeEffect(AppsCreateEmbedThreadInput);
 
 async function ticketedSocketUrl(origin: string, bearer: string): Promise<string> {
