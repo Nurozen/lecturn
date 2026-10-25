@@ -295,6 +295,36 @@ describe("resolveRestingComposerControlsLayout", () => {
       }),
     ).toEqual({ hiddenCount: 0, visible: false });
   });
+
+  it("keeps every block in place when the controls wrap onto another row", () => {
+    expect(
+      resolveRestingComposerControlsLayout({
+        ...base,
+        hostWidth: 200,
+        wraps: true,
+        previous: { hiddenCount: 2, visible: true },
+      }),
+    ).toEqual({ hiddenCount: 0, visible: true });
+    expect(
+      resolveRestingComposerControlsLayout({
+        ...base,
+        iconOnlyBlockWidths: [20, 24],
+        hostWidth: 0,
+        wraps: true,
+        previous: { hiddenCount: 1, iconOnlyCount: 2, visible: false },
+      }),
+    ).toEqual({ hiddenCount: 0, iconOnlyCount: 0, visible: true });
+  });
+
+  it("goes back to overflowing once the controls stop wrapping", () => {
+    expect(
+      resolveRestingComposerControlsLayout({
+        ...base,
+        hostWidth: 240,
+        previous: { hiddenCount: 0, visible: true },
+      }),
+    ).toEqual({ hiddenCount: 2, visible: true });
+  });
 });
 
 describe("context strip labels and resting composer controls", () => {

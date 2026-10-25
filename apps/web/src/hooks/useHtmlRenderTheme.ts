@@ -2,6 +2,7 @@ import { HTML_RENDER_DEFAULT_FONTS, htmlRenderTheme } from "@lecturn/shared/html
 import { useSyncExternalStore } from "react";
 
 import { appearanceFontStack } from "../appearanceFonts";
+import { getEmbedTheme, subscribeEmbedTheme, withEmbedHostTheme } from "../embed/embedTheme";
 import {
   getStandardThemeColors,
   getThemeColorsForMode,
@@ -37,7 +38,8 @@ export function useHtmlRenderTheme() {
   );
   const sans = useClientSettings((settings) => settings.fontFamilySans);
   const mono = useClientSettings((settings) => settings.fontFamilyCode);
-  return htmlRenderTheme(
+  const embedTheme = useSyncExternalStore(subscribeEmbedTheme, getEmbedTheme, () => null);
+  const lecturnTheme = htmlRenderTheme(
     Object.fromEntries(
       Object.entries(colors).map(([role, color]) => [role, themeColorToHex(color) ?? color]),
     ) as typeof colors,
@@ -47,4 +49,5 @@ export function useHtmlRenderTheme() {
       mono: appearanceFontStack(mono, HTML_RENDER_DEFAULT_FONTS.mono),
     },
   );
+  return embedTheme === null ? lecturnTheme : withEmbedHostTheme(lecturnTheme, embedTheme);
 }

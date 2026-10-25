@@ -1,10 +1,14 @@
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import type { EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
+import { useEffect } from "react";
 
 import { EmbedView } from "../components/embed/EmbedView";
 import { AnchoredToastProvider, ToastProvider } from "../components/ui/toast";
+import { startEmbedBridge } from "./bridge";
 import { readEmbedSwitcherVisible } from "./embedAuth";
 import { EmbedPresentationContext } from "./EmbedPresentationContext";
+import { installEmbedTheme } from "./embedTheme";
+import "./embed.css";
 
 /**
  * The embed's whole chrome. It must not import the app shell (sidebar, command palette,
@@ -20,6 +24,7 @@ export function EmbedShell({
   readonly threadId: ThreadId | null;
 }) {
   const presentation = { projectRef: scopeProjectRef(environmentId, projectId) };
+  useEffect(() => installEmbedTheme(startEmbedBridge()), []);
   return (
     <ToastProvider>
       <AnchoredToastProvider>

@@ -22,6 +22,8 @@ import {
   type ThemeHalves,
   type ThemePreferenceMode,
 } from "../themePalette";
+import { isEmbedLocation } from "../embed/embedAuth";
+import { getEmbedTheme, subscribeEmbedTheme } from "../embed/embedTheme";
 
 type Theme = ThemePreference;
 type ThemeSnapshot = {
@@ -283,6 +285,7 @@ function resolveBrowserChromeSurface(): HTMLElement {
 
 export function syncBrowserChromeTheme() {
   if (typeof document === "undefined" || typeof getComputedStyle === "undefined") return;
+  if (isEmbedLocation()) return;
   const rootStyles = getComputedStyle(document.documentElement);
   const themeChromeColor = document.documentElement.dataset.themeId
     ? normalizeThemeColor(rootStyles.getPropertyValue("--app-chrome-background"))
@@ -310,6 +313,9 @@ export function syncBrowserChromeTheme() {
 
 function applyTheme(theme: Theme, { suppressTransitions = false, preservePreview = true } = {}) {
   if (typeof document === "undefined" || typeof window === "undefined") return;
+  // The embed's host owns its root and page background (embedTheme.ts); the user's Lecturn theme,
+  // which shares this origin's storage, never applies there.
+  if (isEmbedLocation()) return;
   if (preservePreview && document.documentElement.dataset?.themeId === THEME_PREVIEW_ID) {
     return;
   }
@@ -412,13 +418,9 @@ function getSnapshot(): ThemeSnapshot {
   const systemDark = followSystem ? getSystemDark() : false;
   const themeHalves = readStoredThemeHalves();
 
-  const resolvedTheme = resolveThemeAppearance(
-    theme,
-    systemDark,
-    followSystem,
-    appearanceMode,
-    themeHalves,
-  );
+  const resolvedTheme =
+    getEmbedTheme()?.appearance ??
+    resolveThemeAppearance(theme, systemDark, followSystem, appearanceMode, themeHalves);
   if (
     lastSnapshot &&
     lastSnapshot.theme === theme &&
@@ -477,9 +479,11 @@ function subscribe(listener: () => void): () => void {
     const mq = typeof window.matchMedia === "function" ? window.matchMedia(MEDIA_QUERY) : null;
     mq?.addEventListener("change", handleSystemAppearanceChange);
     window.addEventListener("storage", handleStorageChange);
+    const removeEmbedThemeListener = subscribeEmbedTheme(emitChange);
     removeWindowListeners = () => {
       mq?.removeEventListener("change", handleSystemAppearanceChange);
       window.removeEventListener("storage", handleStorageChange);
+      removeEmbedThemeListener();
     };
   }
 
