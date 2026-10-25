@@ -16,7 +16,10 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as SessionStore from "../auth/SessionStore.ts";
 import * as ServerConfig from "../config.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as AppLeaseServiceLayer from "./AppLeaseService.ts";
 import * as AppRegistryServiceLayer from "./AppRegistryService.ts";
@@ -352,9 +355,14 @@ const registryLayer = () => {
     createEmbedThread: () => Effect.die("unused"),
     markThreadsCopied: () => Effect.die("unused"),
   });
+  const sessions = SessionStore.layer.pipe(
+    Layer.provide(ServerSecretStore.layer),
+    Layer.provideMerge(ServerEnvironment.layerIdentity),
+  );
   return AppRegistryServiceLayer.layer.pipe(
     Layer.provideMerge(AppLeaseServiceLayer.layer),
     Layer.provideMerge(LiveToolClientLayer.layer),
+    Layer.provide(sessions),
     Layer.provide(projects),
     Layer.provide(SqlitePersistence.layerMemory),
     Layer.provide(config),
