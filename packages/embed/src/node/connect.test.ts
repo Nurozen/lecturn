@@ -1,4 +1,5 @@
-// @effect-diagnostics nodeBuiltinImport:off globalDate:off -- Tests the Promise API against fake servers and real temp dirs.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off -- Tests the Promise API against fake servers and real temp dirs.
+import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -12,6 +13,7 @@ import type { ConnectionEvent, ConnectionModeEvent } from "../target.ts";
 import type { AttachLedger } from "./copyLedger.ts";
 import {
   type ConnectDeps,
+  connect,
   createConnection,
   exchangeSeedToken,
   issueWebSocketTicket,
@@ -25,6 +27,7 @@ import {
   makeCredentialStore,
   type StoredCredential,
 } from "./credentials.ts";
+import { isProcessAlive } from "./discovery.ts";
 import type { PairingPoll } from "./pairing.ts";
 import { CredentialRejectedError, type ServerSession } from "./serverSession.ts";
 
@@ -713,6 +716,124 @@ describe("connect", () => {
     expect(w.credentials.all.has("env-user")).toBe(false);
     expect(w.state.pairingRequests).toBe(1);
     expect(connection.status.current.pairing).toBe("pending");
+  });
+});
+
+const until = async (condition: () => boolean) => {
+  while (!condition()) await new Promise((resolve) => setTimeout(resolve, 5));
+};
+
+/** A sidecar start that never gets ready; an abort ends it as a killed process would, a moment later. */
+function neverReadySidecar() {
+  const start = { calls: 0, exited: false };
+  const openSidecar: ConnectDeps["openSidecar"] = (signal) => {
+    start.calls += 1;
+    return new Promise((_, reject) => {
+      signal.addEventListener(
+        "abort",
+        () =>
+          setTimeout(() => {
+            start.exited = true;
+            reject(signal.reason);
+          }, 10),
+        { once: true },
+      );
+    });
+  };
+  return { start, openSidecar };
+}
+
+// Reads the envelope like the server, records its pid, and never gets ready.
+const STARTING_SERVER = String.raw`
+import * as fs from "node:fs";
+fs.createReadStream(null, { fd: 3 }).on("data", () => {}).on("end", () => {
+  fs.writeFileSync("sidecar.pid", String(process.pid));
+});
+setInterval(() => {}, 1_000);
+`;
+
+describe("connect lifetime", () => {
+  it("rejects an aborted connect only after the sidecar it was starting has exited", async () => {
+    const w = world();
+    const { start, openSidecar } = neverReadySidecar();
+    const controller = new AbortController();
+    const connecting = createConnection({ ...w.deps, openSidecar }, { signal: controller.signal });
+    await until(() => start.calls === 1);
+
+    const reason = new Error("host quit");
+    controller.abort(reason);
+
+    await expect(connecting).rejects.toBe(reason);
+    expect(start.exited).toBe(true);
+  });
+
+  it("closes a ready connection when the host's signal aborts", async () => {
+    const w = world();
+    const controller = new AbortController();
+    const connection = await createConnection(w.deps, { signal: controller.signal });
+    expect(connection.mode).toBe("sidecar");
+
+    controller.abort();
+
+    await until(() => w.state.sidecarStops === 1);
+    expect(w.state.sidecarRunning).toBe(false);
+  });
+
+  it("stops a fallback sidecar that is still starting at close, and waits for it", async () => {
+    const w = world();
+    w.state.userRunning = true;
+    await w.credentials.set("env-user", {
+      token: USER_TOKEN,
+      expiresAt: new Date(T0 + 86_400_000).toISOString(),
+    });
+    const { start, openSidecar } = neverReadySidecar();
+    const connection = await createConnection({ ...w.deps, openSidecar });
+    expect(connection.mode).toBe("user-server");
+
+    w.state.userRunning = false;
+    await w.clock.beat();
+    // The second miss starts the sidecar, which never parks the loop again.
+    void w.clock.beat();
+    await until(() => start.calls === 1);
+
+    await connection.close();
+    expect(start.exited).toBe(true);
+  });
+
+  it("close() before ready stops the real sidecar process it was starting", async () => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "lecturn-embed-connect-"));
+    try {
+      const serverEntry = NodePath.join(root, "starting-server.mjs");
+      await NodeFSP.writeFile(serverEntry, STARTING_SERVER);
+      const baseDir = NodePath.join(root, "sidecar-home");
+      const pidPath = NodePath.join(baseDir, "sidecar.pid");
+
+      const pending = connect({
+        registration: {
+          appId: "dev.example.app",
+          name: "Example",
+          iconDataUrl:
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+          toolPrefix: "ex",
+          refPrefixes: ["ex:"],
+          liveTools: false,
+          gatedTools: [],
+        },
+        lecturnHome: NodePath.join(root, "lecturn-home"),
+        sidecar: { serverEntry, baseDir, nodePath: process.execPath },
+        readyTimeoutMs: 20_000,
+      });
+      await until(() => NodeFS.existsSync(pidPath));
+      const pid = Number(await NodeFSP.readFile(pidPath, "utf8"));
+      expect(isProcessAlive(pid)).toBe(true);
+
+      await pending.close();
+
+      expect(isProcessAlive(pid)).toBe(false);
+      await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    } finally {
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
   });
 });
 

@@ -57,6 +57,21 @@ export interface ConnectOptions {
   readonly lecturnHome?: string;
   readonly sidecar: SidecarOptions;
   readonly readyTimeoutMs?: number;
+  /**
+   * The host's lifetime. Aborting before `connect` resolves stops a sidecar
+   * that is still starting and rejects once its process has exited; aborting
+   * later closes the connection.
+   */
+  readonly signal?: AbortSignal;
+}
+
+/** `connect`'s promise, closable before it settles (a host that quits while the sidecar starts). */
+export interface PendingLecturnConnection extends Promise<LecturnConnection> {
+  /**
+   * Before ready, stops what `connect` started, a starting sidecar included,
+   * and resolves once it has exited; after ready, the connection's `close`.
+   */
+  close(): Promise<void>;
 }
 
 export interface LecturnConnection extends EmbedConnectionSource {
@@ -117,7 +132,8 @@ export interface SidecarRuntime {
 /** Everything `connect` touches outside itself; tests stand in fake servers here. */
 export interface ConnectDeps {
   discover(): Promise<UserServer | null>;
-  openSidecar(): Promise<SidecarRuntime>;
+  /** Aborted by `close`, which then waits for a start in flight to settle. */
+  openSidecar(signal: AbortSignal): Promise<SidecarRuntime>;
   hasSidecarState(): Promise<boolean>;
   /** The sidecar's environment from an earlier run, to find its copies without starting it. */
   knownSidecarEnvironmentId(): Promise<string | null>;
@@ -162,9 +178,21 @@ interface ThreadSubscription {
  */
 export async function createConnection(
   deps: ConnectDeps,
-  options: { readonly watchIntervalMs?: number } = {},
+  options: { readonly watchIntervalMs?: number; readonly signal?: AbortSignal } = {},
 ): Promise<LecturnConnection> {
   const watchIntervalMs = Math.min(options.watchIntervalMs ?? USER_SERVER_WATCH_INTERVAL_MS, 5_000);
+  // Owned here so `close` can stop a sidecar start the caller's signal knows nothing about.
+  const lifetime = new AbortController();
+  const outer = options.signal;
+  const forwardAbort = () => lifetime.abort(outer?.reason);
+  if (outer?.aborted === true) forwardAbort();
+  else outer?.addEventListener("abort", forwardAbort, { once: true });
+  let sidecarStart: Promise<unknown> = Promise.resolve();
+  const openSidecar = () => {
+    const opening = deps.openSidecar(lifetime.signal);
+    sidecarStart = opening.catch(() => undefined);
+    return opening;
+  };
 
   let ledger = await deps.readLedger();
   let ledgerWrite: Promise<void> = Promise.resolve();
@@ -390,7 +418,7 @@ export async function createConnection(
   };
 
   const enterSidecar = async () => {
-    sidecar ??= await deps.openSidecar();
+    sidecar ??= await openSidecar();
     const session = sidecar.session;
     draining = false;
     await ensureAll(session);
@@ -541,48 +569,65 @@ export async function createConnection(
     await reach(found);
   };
 
-  // Initial attach: a granted user server is used at once, copying first when
-  // the sidecar may hold history it lacks (R7.4); otherwise the sidecar serves
-  // while pairing waits on the user.
-  const found = await deps.discover().catch(() => null);
-  if (found !== null) {
-    const credential = await deps.credentials.get(found.environmentId);
-    let ask = credential === null;
-    if (credential !== null && isCredentialUsable(credential, deps.now())) {
-      if (ledger.pendingCopy && (await deps.hasSidecarState())) {
-        sidecar = await deps.openSidecar().catch(() => null);
-      }
-      try {
-        await attach(found, credential.token);
-      } catch (error) {
-        if (error instanceof CredentialRejectedError) {
-          await deps.credentials.delete(found.environmentId);
-          ask = true;
-        } else {
-          attachRetryAt = deps.now() + ATTACH_RETRY_MS;
+  // Nothing outlives a failed or abandoned connect, least of all a sidecar process.
+  const abandonStart = async () => {
+    await Promise.all(
+      [user?.session, sidecar?.session].map((session) => session?.close().catch(() => undefined)),
+    );
+    await sidecar?.stop().catch(() => undefined);
+    await ledgerWrite;
+  };
+
+  // A granted user server is used at once, copying first when the sidecar may
+  // hold history it lacks (R7.4); otherwise the sidecar serves while pairing
+  // waits on the user.
+  async function initialAttach() {
+    const found = await deps.discover().catch(() => null);
+    if (found !== null) {
+      const credential = await deps.credentials.get(found.environmentId);
+      let ask = credential === null;
+      if (credential !== null && isCredentialUsable(credential, deps.now())) {
+        if (ledger.pendingCopy && (await deps.hasSidecarState())) {
+          sidecar = await openSidecar().catch(() => null);
         }
+        lifetime.signal.throwIfAborted();
+        try {
+          await attach(found, credential.token);
+        } catch (error) {
+          lifetime.signal.throwIfAborted();
+          if (error instanceof CredentialRejectedError) {
+            await deps.credentials.delete(found.environmentId);
+            ask = true;
+          } else {
+            attachRetryAt = deps.now() + ATTACH_RETRY_MS;
+          }
+        }
+      } else if (credential !== null) {
+        await deps.credentials.delete(found.environmentId);
+        ask = true;
       }
-    } else if (credential !== null) {
-      await deps.credentials.delete(found.environmentId);
-      ask = true;
+      if (ask) await requestPairing(found).catch(() => undefined);
     }
-    if (ask) await requestPairing(found).catch(() => undefined);
+    lifetime.signal.throwIfAborted();
+    // `mode` is set inside `attach`, which the compiler's narrowing cannot see.
+    if ((mode as ConnectionMode) !== "user-server") await enterSidecar();
+    lifetime.signal.throwIfAborted();
   }
-  // `mode` is set inside `attach`, which the compiler's narrowing cannot see.
-  if ((mode as ConnectionMode) !== "user-server") {
-    try {
-      await enterSidecar();
-    } catch (error) {
-      await sidecar?.stop().catch(() => undefined);
-      throw error;
-    }
+
+  try {
+    lifetime.signal.throwIfAborted();
+    await initialAttach();
+  } catch (error) {
+    await abandonStart();
+    outer?.removeEventListener("abort", forwardAbort);
+    throw lifetime.signal.aborted ? lifetime.signal.reason : error;
   }
   lastStatus = statusEvent();
 
   let wake = () => {};
   let transition: Promise<void> = Promise.resolve();
   const loop = (async () => {
-    // `close` sets `closed` from outside the loop, between beats.
+    // `close` sets `closed` from outside the loop, between beats or during one.
     while (true) {
       await new Promise<void>((resolve) => {
         wake = resolve;
@@ -591,6 +636,7 @@ export async function createConnection(
       if (closed) return;
       transition = tick().catch(() => undefined);
       await transition;
+      if (closed) return;
     }
   })();
 
@@ -608,7 +654,7 @@ export async function createConnection(
     },
   };
 
-  return {
+  const connection: LecturnConnection = {
     get mode() {
       return mode;
     },
@@ -677,8 +723,12 @@ export async function createConnection(
     close: () => {
       closing ??= (async () => {
         closed = true;
+        outer?.removeEventListener("abort", forwardAbort);
+        lifetime.abort();
         wake();
         await withTimeout(loop, CLOSE_TIMEOUT_MS);
+        // A fallback start cut short by the abort resolves only once its process is gone.
+        await sidecarStart;
         // Clearing first lets Lecturn show the app as closed now rather than
         // when the lease lapses; a server that is already gone must not hold up close.
         const held = [...leases.values()];
@@ -699,6 +749,9 @@ export async function createConnection(
       return closing;
     },
   };
+  // Past ready, the caller's abort means close; `close` aborts it too, harmlessly.
+  lifetime.signal.addEventListener("abort", () => void connection.close(), { once: true });
+  return connection;
 }
 
 /**
@@ -736,10 +789,16 @@ async function openSidecar(input: {
   readonly registration: AppRegistration;
   readonly sidecar: SidecarOptions;
   readonly readyTimeoutMs: number;
+  readonly signal: AbortSignal;
 }): Promise<SidecarRuntime> {
-  const { registration, readyTimeoutMs } = input;
+  const { registration, readyTimeoutMs, signal } = input;
   const deadline = Date.now() + readyTimeoutMs;
-  const handle = await startSidecar({ registration, sidecar: input.sidecar, readyTimeoutMs });
+  const handle = await startSidecar({
+    registration,
+    sidecar: input.sidecar,
+    readyTimeoutMs,
+    signal,
+  });
   const stop = () => (handle.kind === "spawned" ? handle.stop() : Promise.resolve());
   try {
     const sessionPath = sidecarSessionPath(input.sidecar.baseDir);
@@ -761,17 +820,23 @@ async function openSidecar(input: {
         registration.appId,
         sessionPath,
         deadline,
+        signal,
       );
     }
+    signal.throwIfAborted();
     const session = await openServerSession({
       origin: handle.origin,
       environmentId: handle.environmentId,
       accessToken,
     });
+    if (signal.aborted) {
+      await session.close().catch(() => undefined);
+      signal.throwIfAborted();
+    }
     return { session, stop };
   } catch (error) {
     await stop();
-    throw error;
+    throw signal.aborted ? signal.reason : error;
   }
 }
 
@@ -782,8 +847,10 @@ async function attachedSession(
   appId: string,
   sessionPath: string,
   deadline: number,
+  signal: AbortSignal,
 ): Promise<string> {
   while (true) {
+    signal.throwIfAborted();
     const stored = await readStoredSession(sessionPath);
     if (stored !== null && stored.environmentId === environmentId) {
       if (stored.appId !== appId) {
@@ -808,7 +875,26 @@ const defaultLecturnHome = () =>
  * app, else the app's sidecar while pairing waits, switching live when the
  * user grants it or the user server comes and goes.
  */
-export async function connect(options: ConnectOptions): Promise<LecturnConnection> {
+export function connect(options: ConnectOptions): PendingLecturnConnection {
+  const controller = new AbortController();
+  const outer = options.signal;
+  const forwardAbort = () => controller.abort(outer?.reason);
+  if (outer?.aborted === true) forwardAbort();
+  else outer?.addEventListener("abort", forwardAbort, { once: true });
+  const pending = connectWithSignal(options, controller.signal);
+  const close = async () => {
+    outer?.removeEventListener("abort", forwardAbort);
+    controller.abort();
+    const connection = await pending.catch(() => null);
+    await connection?.close();
+  };
+  return Object.assign(pending, { close });
+}
+
+async function connectWithSignal(
+  options: ConnectOptions,
+  signal: AbortSignal,
+): Promise<LecturnConnection> {
   const registration = decodeRegistration(options.registration);
   const readyTimeoutMs = options.readyTimeoutMs ?? 60_000;
   const lecturnHome = options.lecturnHome ?? defaultLecturnHome();
@@ -816,35 +902,44 @@ export async function connect(options: ConnectOptions): Promise<LecturnConnectio
   // A sidecar whose baseDir is the Lecturn home would find itself as the user server.
   const sameHome = NodePath.resolve(lecturnHome) === NodePath.resolve(baseDir);
   const keyring = await loadKeyring();
-  return createConnection({
-    discover: async () => {
-      if (sameHome) return null;
-      const server = await discoverServer(lecturnHome);
-      return server === null
-        ? null
-        : { origin: server.origin, environmentId: server.environmentId };
+  return createConnection(
+    {
+      discover: async () => {
+        if (sameHome) return null;
+        const server = await discoverServer(lecturnHome);
+        return server === null
+          ? null
+          : { origin: server.origin, environmentId: server.environmentId };
+      },
+      openSidecar: (startSignal) =>
+        openSidecar({
+          registration,
+          sidecar: options.sidecar,
+          readyTimeoutMs,
+          signal: startSignal,
+        }),
+      hasSidecarState: () =>
+        NodeFSP.stat(NodePath.join(baseDir, "userdata")).then(
+          () => true,
+          () => false,
+        ),
+      knownSidecarEnvironmentId: async () =>
+        (await readStoredSession(sidecarSessionPath(baseDir)))?.environmentId ?? null,
+      openUserServer: (server, token) =>
+        openServerSession({
+          origin: server.origin,
+          environmentId: server.environmentId,
+          accessToken: token,
+          verify: true,
+        }),
+      createPairingRequest: (server) => createPairingRequest(server.origin, registration),
+      pollPairingRequest: (server, request) => pollPairingRequest(server.origin, request),
+      credentials: makeCredentialStore({ appId: registration.appId, baseDir, keyring }),
+      readLedger: () => readAttachLedger(baseDir),
+      writeLedger: (next) => writeAttachLedger(baseDir, next),
+      wait: delay,
+      now: () => Date.now(),
     },
-    openSidecar: () => openSidecar({ registration, sidecar: options.sidecar, readyTimeoutMs }),
-    hasSidecarState: () =>
-      NodeFSP.stat(NodePath.join(baseDir, "userdata")).then(
-        () => true,
-        () => false,
-      ),
-    knownSidecarEnvironmentId: async () =>
-      (await readStoredSession(sidecarSessionPath(baseDir)))?.environmentId ?? null,
-    openUserServer: (server, token) =>
-      openServerSession({
-        origin: server.origin,
-        environmentId: server.environmentId,
-        accessToken: token,
-        verify: true,
-      }),
-    createPairingRequest: (server) => createPairingRequest(server.origin, registration),
-    pollPairingRequest: (server, request) => pollPairingRequest(server.origin, request),
-    credentials: makeCredentialStore({ appId: registration.appId, baseDir, keyring }),
-    readLedger: () => readAttachLedger(baseDir),
-    writeLedger: (next) => writeAttachLedger(baseDir, next),
-    wait: delay,
-    now: () => Date.now(),
-  });
+    { signal },
+  );
 }

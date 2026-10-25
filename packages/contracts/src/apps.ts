@@ -11,6 +11,7 @@ import {
   EnvironmentId,
   IsoDateTime,
   NonNegativeInt,
+  PositiveInt,
   ProjectId,
   ThreadId,
   TrimmedNonEmptyString,
@@ -335,6 +336,11 @@ export const AppSidecarBootstrap = Schema.Struct({
   mode: Schema.Literal("app-sidecar"),
   registration: AppRegistration,
   appSeedToken: TrimmedNonEmptyString,
+  /**
+   * A pipe whose other end only the app holds: end-of-file means the app is
+   * gone, so the sidecar exits instead of outliving it.
+   */
+  parentPipeFd: Schema.optionalKey(PositiveInt),
 });
 export type AppSidecarBootstrap = typeof AppSidecarBootstrap.Type;
 
