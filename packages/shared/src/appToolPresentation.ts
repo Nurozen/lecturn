@@ -23,16 +23,23 @@ export interface AppToolPresentation {
  */
 export const MAX_APP_TOOL_ICON_URL_LENGTH = 4096;
 
+const APP_TOOL_SOURCE_KEY_PREFIX = "app:";
+
 export function appToolSource(app: AppToolPresentationApp): ToolActivitySource {
   const icon = app.iconDataUrl;
   return {
-    key: `app:${app.appId}`,
+    key: `${APP_TOOL_SOURCE_KEY_PREFIX}${app.appId}`,
     name: app.name,
     kind: "integration",
     ...(icon !== undefined && icon.length > 0 && icon.length <= MAX_APP_TOOL_ICON_URL_LENGTH
       ? { icon: { _tag: "themed-logo", logoUrl: icon } }
       : {}),
   };
+}
+
+/** Clients tell app rows apart by the source the server stamped, never by the tool name. */
+export function isAppToolSource(source: ToolActivitySource | undefined): boolean {
+  return source?.key.startsWith(APP_TOOL_SOURCE_KEY_PREFIX) === true;
 }
 
 export function appToolPresentationMap(

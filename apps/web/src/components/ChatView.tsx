@@ -483,6 +483,7 @@ import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
 import { useAgentOpenedPreviews } from "./preview/useAgentOpenedPreviews";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { useAppClosedBanner } from "./apps/useAppClosedBanner";
+import { AppThreadImportSessionLink } from "./apps/AppThreadImportSessionLink";
 import { ThreadStatusLine } from "./chat/ThreadStatusLine";
 import { formatRelativeTimeUntilLabel } from "../timestampFormat";
 import { ComposerSurface } from "./chat/ComposerSurface";
@@ -8996,6 +8997,9 @@ export default function ChatView(props: ChatViewProps) {
                         <DraftImportSessionLink projectRef={activeProjectRef} />
                       </div>
                     ) : null}
+                    {isDraftHeroState ? null : (
+                      <AppThreadImportSessionLink projectRef={activeProjectRef} />
+                    )}
                   </div>
                 </div>
               </div>

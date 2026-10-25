@@ -1,5 +1,8 @@
 import { ContextualMessageDisclosure } from "../contextual/ContextualDisclosure";
 import { EmbedUserAvatar } from "../embed/EmbedUserAvatar";
+import { AppThreadTitle } from "../apps/AppThreadTitle";
+import { AppToolWorkRow } from "../apps/AppToolWorkRow";
+import { appToolRowOutcome } from "../apps/AppToolWorkRow.logic";
 import { fadeOutTimeline, revealTimeline } from "./timelineExit";
 import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shallow } from "zustand/vanilla/shallow";
@@ -1542,6 +1545,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const listHeader = (
     <>
       {parentThreadLink === null ? listHeaderLeadingContent : null}
+      <AppThreadTitle threadRef={citationThreadRef} />
       {historyControls ? (
         <TimelineHistoryControl {...historyControls} />
       ) : importHistoryTruncated ? (
@@ -5801,10 +5805,13 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       }
     : {};
 
+  const appToolOutcome = appToolRowOutcome(workEntry, showFailedIndicator);
+  const Row = appToolOutcome === undefined ? WorkLogRow : AppToolWorkRow;
   return (
-    <WorkLogRow
+    <Row
       data-v2-item-type={workEntry.projectedItem?.item.type}
       data-v2-item-visibility={workEntry.projectedItem?.visibility}
+      data-app-tool-outcome={appToolOutcome}
       {...rowToggleProps}
       icon={
         <span
@@ -5968,7 +5975,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           )}
         </WorkLogDetails>
       ) : null}
-    </WorkLogRow>
+    </Row>
   );
 }
 
