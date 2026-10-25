@@ -36,7 +36,7 @@ export function EmbedThreadSwitcher({
       >
         <SelectTrigger
           variant="ghost"
-          size="compact"
+          size="compact-fixed"
           className="min-w-0 flex-1"
           aria-label="Thread"
           disabled={threads.length === 0}
@@ -51,7 +51,7 @@ export function EmbedThreadSwitcher({
           ))}
         </SelectPopup>
       </Select>
-      <Button variant="ghost" size="xs" disabled={creating} onClick={onNewThread}>
+      <Button variant="ghost" size="xs-fixed" disabled={creating} onClick={onNewThread}>
         <PlusIcon aria-hidden="true" />
         New thread
       </Button>

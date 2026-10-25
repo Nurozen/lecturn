@@ -194,10 +194,9 @@ function Row({
       layout === "wrap-actions" &&
         "flex flex-wrap *:data-[slot=composer-banner-content]:max-w-[calc(100%-var(--composer-banner-icon-column)-var(--spacing))] *:data-[slot=composer-banner-content]:grow",
       layout === "approval" && "items-start gap-x-2 gap-y-3",
-      // A connected-app approval flows its parts instead (ComposerPendingApprovalPanel): the tool
-      // keeps its whole name, the actions wrap to their own line when they no longer fit beside
-      // it, and the reason closes the banner.
-      "has-[[data-app-tool-approval]]:flex has-[[data-app-tool-approval]]:flex-wrap has-[[data-app-tool-approval]]:items-center has-[[data-app-tool-approval]]:gap-y-0.5",
+      // A connected-app approval flows instead (ComposerPendingApprovalPanel): the tool keeps its
+      // whole name, and the actions wrap below its reason once they no longer fit beside it.
+      "has-[[data-app-tool-approval]]:flex has-[[data-app-tool-approval]]:flex-wrap has-[[data-app-tool-approval]]:items-center has-[[data-app-tool-approval]]:gap-y-2",
       className,
     ),
     "data-composer-banner-row": "true",
@@ -218,7 +217,7 @@ function Icon({ className, ...props }: ComponentProps<"span">) {
       className={cn(
         "col-start-1 row-start-1 flex w-(--composer-banner-icon-column) min-w-0 flex-none items-center justify-center text-muted-foreground [&>svg]:size-3",
         "group-data-[composer-banner-layout=approval]/banner-row:pt-0.5 group-data-[composer-banner-layout=approval]/banner-row:text-warning group-data-[composer-banner-layout=approval]/banner-row:[&>svg]:size-4",
-        "group-has-[[data-app-tool-approval]]/banner-row:pt-0",
+        "group-has-[[data-app-tool-approval]]/banner-row:self-start group-has-[[data-app-tool-approval]]/banner-row:pt-0",
         className,
       )}
       {...props}

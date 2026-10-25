@@ -82,10 +82,11 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
 });
 
 /**
- * The tool, then the app's reason across the whole banner. Its parts flow in
- * the banner row (`data-app-tool-approval`, ComposerBanner): the actions sit
- * beside the tool while both fit, and wrap to their own line in a narrow pane
- * rather than cutting the tool's name short.
+ * The tool with the app's reason under it, as one item of the banner row
+ * (`data-app-tool-approval`, ComposerBanner): the actions sit beside it while
+ * the tool's whole name fits next to them, and otherwise wrap below the reason.
+ * The reason takes no width of its own, so a long one truncates instead of
+ * pushing the actions down.
  */
 function ConnectedAppToolApproval({
   approval,
@@ -104,11 +105,11 @@ function ConnectedAppToolApproval({
   return (
     <span
       aria-label={label}
-      className={cn("contents", className)}
+      className={cn("flex min-w-0 grow flex-col gap-0.5", className)}
       data-app-tool-approval="true"
       role="group"
     >
-      <span className="flex min-w-0 grow items-center gap-2 text-xs">
+      <span className="flex min-w-0 items-center gap-2 text-xs">
         <span
           className="min-w-0 font-medium wrap-anywhere text-warning"
           data-testid="app-approval-title"
@@ -122,13 +123,13 @@ function ConnectedAppToolApproval({
         ) : null}
       </span>
       {notResumable ? (
-        <span className="order-last block min-w-0 basis-full truncate text-2xs text-muted-foreground">
+        <span className="block w-0 min-w-full truncate text-2xs text-muted-foreground">
           {NOT_RESUMABLE_DETAIL}
         </span>
       ) : reason ? (
         <span
           aria-label="Reason"
-          className="order-last block min-w-0 basis-full truncate font-mono text-2xs text-muted-foreground"
+          className="block w-0 min-w-full truncate font-mono text-2xs text-muted-foreground"
           data-testid="app-approval-reason"
         >
           {reason}

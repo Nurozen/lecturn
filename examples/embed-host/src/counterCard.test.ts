@@ -201,6 +201,35 @@ describe("counter card structure hooks", () => {
     expect(curve[0]![1]).toBeCloseTo((zero + two) / 2, 0);
   });
 
+  it.each(forms)("draws a single call as a dot inside the plot at $width px", (form) => {
+    const card = renderCard(form.width);
+    card.sendToolResult({ count: 1, by: 1, history: [1] });
+    const chart = card.document.querySelector("[data-card-chart]");
+    if (!chart) throw new Error("no chart");
+    const ticks = (axis: "x" | "y") =>
+      Array.from(chart.querySelectorAll(`[data-card-tick="${axis}"]`), (tick) => ({
+        label: Number(tick.textContent),
+        x: Number(tick.getAttribute("x")),
+        y: Number(tick.getAttribute("y")),
+      }));
+    const dots = chart.querySelectorAll("[data-card-point]");
+
+    expect(ticks("x").map((tick) => tick.label)).toEqual([1]);
+    expect(dots).toHaveLength(1);
+    const dot = { x: Number(dots[0]!.getAttribute("cx")), y: Number(dots[0]!.getAttribute("cy")) };
+    expect(dot.x).toBeCloseTo(ticks("x")[0]!.x, 0);
+    const y = ticks("y");
+    expect(y.map((tick) => tick.label)).toEqual([0, 1, 2]);
+    expect(dot.y).toBeCloseTo(y[1]!.y, 0);
+  });
+
+  it("drops the dot once the counter has a history", () => {
+    const card = renderCard(380);
+    card.sendToolResult({ count: 1, by: 1, history: [1] });
+    card.sendToolResult({ count: 2, by: 1, history: [1, 2] });
+    expect(card.document.querySelectorAll("[data-card-point]")).toHaveLength(0);
+  });
+
   it("renames its layout when the frame crosses 560 px", () => {
     const card = renderCard(760);
     const layout = () =>
