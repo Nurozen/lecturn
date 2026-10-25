@@ -13,6 +13,7 @@ import {
   EMBED_PANE_RECT_CHANNEL,
   EMBED_TO_GUEST_CHANNEL,
 } from "../channels.ts";
+import { embedGuestUrl } from "../embedUrl.ts";
 import type { EmbedConnectionSource, EmbedTargetSource } from "../target.ts";
 import { EmbedViewError } from "./errors.ts";
 import { freezeClockScript } from "./freezeClock.ts";
@@ -90,15 +91,6 @@ const CDP_PROTOCOL_VERSION = "1.3";
 // Packed, this module and the CommonJS preload are siblings in dist/.
 const embedPreloadPath = () =>
   NodeURL.fileURLToPath(new URL("./electron-preload.cjs", import.meta.url));
-
-// The hash never reaches the server or a Referer; the guest strips it on load.
-const withEmbedToken = (url: string, token: string) => {
-  const parsed = new URL(url);
-  const params = new URLSearchParams(parsed.hash.slice(1));
-  params.set("embedToken", token);
-  parsed.hash = params.toString();
-  return parsed.toString();
-};
 
 const originOf = (url: string) => {
   try {
@@ -252,7 +244,9 @@ export function mountEmbedView(
       if (options.freezeClock !== undefined) await ensureAttached();
       if (!isCurrent()) return;
       guestOrigin = originOf(target.url);
-      await webContents.loadURL(withEmbedToken(target.url, target.token));
+      await webContents.loadURL(
+        embedGuestUrl(target.url, target.token, { switcher: options.switcher !== false }),
+      );
     } catch (cause) {
       if (!isCurrent()) return;
       throw cause instanceof EmbedViewError

@@ -1,4 +1,5 @@
 import {
+  APPS_WS_METHODS,
   EnvironmentAuthorizationError,
   clientRpcRequiredScopes,
   authScopeRequiredResponse,
@@ -74,7 +75,9 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.subscribeWorktreeSetup
   | typeof WS_METHODS.subscribeProjectClones
   | typeof WS_METHODS.terminalAttach
-  | typeof WS_METHODS.terminalObserve;
+  | typeof WS_METHODS.terminalObserve
+  | typeof APPS_WS_METHODS.appsSubscribeStatus
+  | typeof APPS_WS_METHODS.appsSubscribeEmbedContext;
 
 export type EnvironmentStreamCommandRpcTag =
   | typeof WS_METHODS.chatGptHandoffSubscribe

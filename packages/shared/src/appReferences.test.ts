@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { findAppReferences, splitAppReferences } from "./appReferences.ts";
+import {
+  expandAppOpenUrl,
+  findAppReferences,
+  formatAppReferenceHref,
+  parseAppReferenceHref,
+  promptWithAppReferences,
+  splitAppReferences,
+} from "./appReferences.ts";
 
 const refs = (text: string, prefixes: ReadonlyArray<string> = ["rw:"]) =>
   findAppReferences(text, prefixes).map((match) => match.ref);
@@ -75,5 +82,64 @@ describe("splitAppReferences", () => {
   it("returns one text segment without references and none for empty text", () => {
     expect(splitAppReferences("plain", ["rw:"])).toEqual([{ type: "text", text: "plain" }]);
     expect(splitAppReferences("", ["rw:"])).toEqual([]);
+  });
+});
+
+describe("app reference hrefs", () => {
+  it("round-trips references with characters that are special in URLs", () => {
+    for (const ref of ["rw:c/fins", "rw:c/a b#c?d", "rw:sim/run%201"]) {
+      expect(parseAppReferenceHref(formatAppReferenceHref(ref))).toBe(ref);
+    }
+  });
+
+  it("rejects other links and malformed encodings", () => {
+    expect(parseAppReferenceHref("https://example.test/rw:c/fins")).toBeNull();
+    expect(parseAppReferenceHref("lecturn-app-ref://v1/")).toBeNull();
+    expect(parseAppReferenceHref("lecturn-app-ref://v1/%E0%A4%A")).toBeNull();
+  });
+});
+
+describe("expandAppOpenUrl", () => {
+  it("fills every placeholder, encoding the values", () => {
+    expect(
+      expandAppOpenUrl(
+        "rocketwright://open?workspace={workspaceRoot}&thread={threadId}&ref={ref}",
+        {
+          workspaceRoot: "/Users/me/My Rockets/a&b",
+          threadId: "thread-1",
+          ref: "rw:c/fins",
+        },
+      ),
+    ).toBe(
+      "rocketwright://open?workspace=%2FUsers%2Fme%2FMy%20Rockets%2Fa%26b&thread=thread-1&ref=rw%3Ac%2Ffins",
+    );
+  });
+
+  it("leaves missing values empty and refuses a template that is not a URL", () => {
+    expect(
+      expandAppOpenUrl("rw://open?thread={threadId}&ref={ref}", {
+        workspaceRoot: "/w",
+        threadId: null,
+      }),
+    ).toBe("rw://open?thread=&ref=");
+    expect(expandAppOpenUrl("not a url {threadId}", { workspaceRoot: "/w", threadId: "t" })).toBe(
+      null,
+    );
+  });
+});
+
+describe("promptWithAppReferences", () => {
+  it("puts attached references on a line ahead of the prompt", () => {
+    expect(promptWithAppReferences("Check the fins.", ["rw:c/fins", "rw:c/nose"])).toBe(
+      "rw:c/fins rw:c/nose\n\nCheck the fins.",
+    );
+  });
+
+  it("sends references alone, and skips ones the prompt already names or repeats", () => {
+    expect(promptWithAppReferences("  ", ["rw:c/fins"])).toBe("rw:c/fins");
+    expect(promptWithAppReferences("Look at rw:c/fins", ["rw:c/fins", "rw:c/fins"])).toBe(
+      "Look at rw:c/fins",
+    );
+    expect(promptWithAppReferences("Hi", [])).toBe("Hi");
   });
 });

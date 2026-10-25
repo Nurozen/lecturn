@@ -67,3 +67,57 @@ export function splitAppReferences(
   if (cursor < text.length) segments.push({ type: "text", text: text.slice(cursor) });
   return segments;
 }
+
+// A link scheme of its own so markdown renders a reference as a chip without guessing at text.
+export const APP_REFERENCE_PROTOCOL = "lecturn-app-ref";
+const APP_REFERENCE_HREF_PREFIX = `${APP_REFERENCE_PROTOCOL}://v1/`;
+
+export function formatAppReferenceHref(ref: string): string {
+  return `${APP_REFERENCE_HREF_PREFIX}${encodeURIComponent(ref)}`;
+}
+
+export function parseAppReferenceHref(href: string): string | null {
+  if (!href.startsWith(APP_REFERENCE_HREF_PREFIX)) return null;
+  try {
+    const ref = decodeURIComponent(href.slice(APP_REFERENCE_HREF_PREFIX.length));
+    return ref.length > 0 ? ref : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface AppOpenUrlValues {
+  readonly workspaceRoot: string;
+  readonly threadId: string | null;
+  readonly ref?: string;
+}
+
+const OPEN_URL_PLACEHOLDER = /\{(workspaceRoot|threadId|ref)\}/g;
+
+/**
+ * Fills an app's `openUrlTemplate`. Values are percent-encoded because the template is a URL and
+ * a workspace path or reference may hold `&`, `#` or spaces. A template that does not yield a URL
+ * opens nothing.
+ */
+export function expandAppOpenUrl(template: string, values: AppOpenUrlValues): string | null {
+  const url = template.replace(OPEN_URL_PLACEHOLDER, (_match, key: keyof AppOpenUrlValues) =>
+    encodeURIComponent(values[key] ?? ""),
+  );
+  try {
+    return new URL(url).toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The text a turn carries for references the user attached as chips: each one the prompt does not
+ * already name, on a line ahead of the prompt, so the agent reads them as the subject.
+ */
+export function promptWithAppReferences(prompt: string, refs: ReadonlyArray<string>): string {
+  const present = new Set(prompt.split(/\s+/u));
+  const added = [...new Set(refs)].filter((ref) => ref.length > 0 && !present.has(ref));
+  if (added.length === 0) return prompt;
+  const line = added.join(" ");
+  return prompt.trim().length === 0 ? line : `${line}\n\n${prompt}`;
+}

@@ -139,6 +139,9 @@ import {
   type PromptStashEntry,
 } from "../../promptStashStore";
 import { ComposerStashBadge } from "./ComposerStashBadge";
+import { AppRefChipStrip } from "../embed/AppRefChipStrip";
+import { foldAppRefChips, useAppRefChipStore } from "../embed/appRefChipStore";
+import type { EmbedMention } from "../../embed/hostCommands";
 import { ComposerStashMenu } from "./ComposerStashMenu";
 import { useComposerMenuState } from "./useComposerMenuState";
 import { useComposerTriggerState } from "./useComposerTriggerState";
@@ -1484,6 +1487,8 @@ export interface ChatComposerHandle {
   };
   validateProviderInput: (providerInput: string) => boolean;
   setMultipleModelSelections: (selections: ReadonlyArray<ModelSelection>) => void;
+  insertMention: (mention: EmbedMention) => void;
+  setDraft: (text: string) => void;
 }
 
 export interface ChatComposerProps {
@@ -3984,6 +3989,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       });
       return;
     }
+    // A pending question's answer is not a turn, so attached references wait for the next one.
+    const settleAppRefChips = foldAppRefChips(
+      activePendingProgress ? null : composerDraftTargetKey,
+      promptRef,
+    );
     const submission = submitComposerDraft({
       prompt: promptRef.current,
       submissionTarget: activePendingProgress ? "pending-user-input" : "provider-turn",
@@ -4004,6 +4014,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return !providerInputRejectedRef.current;
       },
     });
+    settleAppRefChips(submission.didDispatch);
     setComposerSubmissionError(submission.validationMessage);
     if (!submission.didDispatch) return;
     onTypingGuardSend();
@@ -6282,6 +6293,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         interactionModeEnabled: planModeUiEnabled,
       }),
       setMultipleModelSelections,
+      insertMention: (mention) =>
+        useAppRefChipStore.getState().add(composerDraftTargetKey, mention),
+      setDraft: (text) => {
+        applyPromptReplacementStable(0, promptRef.current.length, text, {
+          expandedCursorAfterReplace: text.length,
+        });
+      },
       validateProviderInput: (providerInput: string) => {
         const validationMessage = getComposerSubmissionValidationMessage({
           prompt: promptRef.current,
@@ -7162,6 +7180,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   </div>
                 )}
 
+              <AppRefChipStrip targetKey={composerDraftTargetKey} />
               <div
                 className={cn("relative", isComposerResting && "flex min-w-0 items-center gap-1")}
                 style={

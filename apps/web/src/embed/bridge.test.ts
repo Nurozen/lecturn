@@ -13,9 +13,18 @@ import {
 } from "./bridge";
 import { __resetEmbedAuthForTests, readEmbedToken, rememberEmbedTokenExpiry } from "./embedAuth";
 import { embedConnectionWakeups, setEmbedTokenRefresher } from "./embedPrimaryAuth";
+import { runEmbedHostCommand, type EmbedHostCommandTargets } from "./hostCommands";
 
 const ORIGIN = "http://127.0.0.1:3773";
 const PARENT_ORIGIN = "http://127.0.0.1:5173";
+const DECLARED_ORIGINS = ["http://127.0.0.1:*"] as never;
+
+/** A bridge whose parent origin the app declared, as the view does once its context loads. */
+function startDeclared(win: Parameters<typeof startEmbedBridge>[0]) {
+  const bridge = startEmbedBridge(win);
+  bridge?.authorizeHost(DECLARED_ORIGINS);
+  return bridge;
+}
 
 interface Posted {
   readonly message: Record<string, unknown>;
@@ -102,7 +111,7 @@ describe("embed bridge", { concurrent: false }, () => {
 
   it("initializes with the parent at its origin, ignores other senders, and queues reports until initialized", async () => {
     const { win, posted, deliver, answer } = makeFrameWindow();
-    const bridge = startEmbedBridge(win);
+    const bridge = startDeclared(win);
     expect(startEmbedBridge(win)).toBe(bridge);
     expect(readEmbedBridge()).toBe(bridge);
     bridge?.reportThread("thread-1");
@@ -135,7 +144,7 @@ describe("embed bridge", { concurrent: false }, () => {
 
   it("sends thread and turn changes once each, and a thread change re-sends its turn state", async () => {
     const { win, posted, answer } = makeFrameWindow();
-    const bridge = startEmbedBridge(win);
+    const bridge = startDeclared(win);
     answer("ui/initialize", initializeResult);
     await flushMicrotasks();
     posted.length = 0;
@@ -161,7 +170,7 @@ describe("embed bridge", { concurrent: false }, () => {
 
   it("passes host commands and context changes to subscribers", async () => {
     const { win, deliver, answer } = makeFrameWindow();
-    const bridge = startEmbedBridge(win);
+    const bridge = startDeclared(win);
     const commands: unknown[] = [];
     const themes: unknown[] = [];
     bridge?.subscribeHostCommands((command) => commands.push(command));
@@ -179,10 +188,58 @@ describe("embed bridge", { concurrent: false }, () => {
     expect(themes).toEqual(["dark", "light"]);
   });
 
+  it("stays silent toward a parent the app did not declare, and holds the handshake until it knows", async () => {
+    const { win, posted, deliver } = makeFrameWindow();
+    const bridge = startEmbedBridge(win);
+    const commands: unknown[] = [];
+    bridge?.subscribeHostCommands((command) => commands.push(command));
+    bridge?.reportThread("thread-1");
+    expect(posted).toEqual([]);
+
+    bridge?.authorizeHost(["http://localhost:5173"] as never);
+    deliver({ jsonrpc: "2.0", method: "lecturn/thread.open", params: { threadId: "thread-9" } });
+    // A later grant cannot reopen a transport that was refused.
+    bridge?.authorizeHost(DECLARED_ORIGINS);
+    await flushMicrotasks();
+    expect(posted).toEqual([]);
+    expect(commands).toEqual([]);
+  });
+
+  it("flushes the held handshake to the declared parent at its exact origin", () => {
+    const { win, posted } = makeFrameWindow();
+    const bridge = startEmbedBridge(win);
+    bridge?.authorizeHost(DECLARED_ORIGINS);
+    expect(posted).toEqual([
+      {
+        message: expect.objectContaining({ method: "ui/initialize" }),
+        targetOrigin: PARENT_ORIGIN,
+      },
+    ]);
+  });
+
+  it("reports ready once per shown thread and forwards activated references", async () => {
+    const { win, posted, answer } = makeFrameWindow();
+    const bridge = startDeclared(win);
+    answer("ui/initialize", initializeResult);
+    await flushMicrotasks();
+    posted.length = 0;
+
+    bridge?.reportReady("thread-1");
+    bridge?.reportReady("thread-1");
+    bridge?.navigate("rw:c/fins");
+    bridge?.reportReady(null);
+
+    expect(posted.map((entry) => [entry.message.method, entry.message.params])).toEqual([
+      ["lecturn/ready", { threadId: "thread-1" }],
+      ["lecturn/navigate", { ref: "rw:c/fins" }],
+      ["lecturn/ready", { threadId: null }],
+    ]);
+  });
+
   it.effect("asks the host for a new token before expiry, then reconnects with it", () =>
     Effect.gen(function* () {
       const { win, onPost, deliver, answer } = makeFrameWindow();
-      startEmbedBridge(win);
+      startDeclared(win);
       answer("ui/initialize", initializeResult);
       rememberEmbedTokenExpiry("tok-1", 120_000);
 
@@ -210,4 +267,77 @@ describe("embed bridge", { concurrent: false }, () => {
       expect(readEmbedToken()).toBe("tok-2");
     }),
   );
+});
+
+describe("embed host commands", () => {
+  const makeTargets = (options: { composer?: boolean; created?: string | null } = {}) => {
+    const calls: Array<[string, unknown]> = [];
+    const targets: EmbedHostCommandTargets = {
+      composer: () =>
+        options.composer === false
+          ? null
+          : {
+              insertMention: (mention) => calls.push(["insertMention", mention]),
+              setDraft: (text) => calls.push(["setDraft", text]),
+            },
+      openThread: (threadId) => calls.push(["openThread", threadId]),
+      createThread: async (input) => {
+        calls.push(["createThread", input]);
+        return options.created === undefined ? "thread-new" : options.created;
+      },
+      openProviders: () => calls.push(["openProviders", null]),
+    };
+    return { calls, targets };
+  };
+
+  it("creates a new thread through the server with the host's appData, then opens it", async () => {
+    const { calls, targets } = makeTargets();
+    await runEmbedHostCommand(
+      { method: "lecturn/thread.new", params: { title: "Fin study", appData: '{"doc":"a"}' } },
+      targets,
+    );
+    expect(calls).toEqual([
+      ["createThread", { title: "Fin study", appData: '{"doc":"a"}' }],
+      ["openThread", "thread-new"],
+    ]);
+  });
+
+  it("stays put when the server creates no thread", async () => {
+    const { calls, targets } = makeTargets({ created: null });
+    await runEmbedHostCommand({ method: "lecturn/thread.new", params: {} }, targets);
+    expect(calls).toEqual([["createThread", {}]]);
+  });
+
+  it("drives the composer, threads and providers panel", async () => {
+    const { calls, targets } = makeTargets();
+    const mention = { ref: "rw:c/fins", label: "Fins" };
+    await runEmbedHostCommand(
+      { method: "lecturn/composer.insertMention", params: mention },
+      targets,
+    );
+    await runEmbedHostCommand(
+      { method: "lecturn/composer.setDraft", params: { text: "Hi" } },
+      targets,
+    );
+    await runEmbedHostCommand(
+      { method: "lecturn/thread.open", params: { threadId: "t-2" } },
+      targets,
+    );
+    await runEmbedHostCommand({ method: "lecturn/providers.open", params: {} }, targets);
+    expect(calls).toEqual([
+      ["insertMention", mention],
+      ["setDraft", "Hi"],
+      ["openThread", "t-2"],
+      ["openProviders", null],
+    ]);
+  });
+
+  it("drops composer commands while no composer is mounted", async () => {
+    const { calls, targets } = makeTargets({ composer: false });
+    await runEmbedHostCommand(
+      { method: "lecturn/composer.setDraft", params: { text: "Hi" } },
+      targets,
+    );
+    expect(calls).toEqual([]);
+  });
 });

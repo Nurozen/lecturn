@@ -165,6 +165,7 @@ const toEmbedContext = (status: AppStatus): AppEmbedContext => ({
   openUrlTemplate: status.openUrlTemplate,
   live: status.live,
   state: status.state,
+  embedOrigins: status.embedOrigins,
 });
 
 export const make = Effect.gen(function* () {

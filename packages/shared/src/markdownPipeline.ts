@@ -12,6 +12,7 @@ import {
   remarkCodexDirectives,
 } from "./codexMarkdownDirectives.ts";
 import { isWindowsDrivePathHref } from "./markdownLinks.ts";
+import { APP_REFERENCE_PROTOCOL } from "./appReferences.ts";
 import { THREAD_LINK_PROTOCOL } from "./threadLinks.ts";
 
 type MarkdownImageHastNode = {
@@ -151,6 +152,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
       "lecturn-citation",
       "t3-context",
       THREAD_LINK_PROTOCOL,
+      APP_REFERENCE_PROTOCOL,
     ],
     src: [...(defaultSchema.protocols?.src ?? []), "file", "t3-context"],
   },

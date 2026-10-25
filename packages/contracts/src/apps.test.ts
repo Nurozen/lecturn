@@ -14,6 +14,7 @@ import {
   ConnectedAppThreadData,
   ConnectedAppThreadSummary,
   appGrantFingerprintSource,
+  matchesAppEmbedOrigin,
 } from "./apps.ts";
 import { ConnectedAppThreadBundleV1 } from "./appsBundle.ts";
 import { ApplicationProjectCreatedPayload } from "./applicationEvent.ts";
@@ -134,6 +135,17 @@ describe("app registration", () => {
     ];
     expect(accepted.filter(is(AppEmbedOrigin))).toEqual(accepted);
     expect(refused.filter(is(AppEmbedOrigin))).toEqual([]);
+  });
+
+  it("matches a page origin against declared origins, `*` standing for one port", () => {
+    const declared = ["http://127.0.0.1:*", "http://localhost:5173"] as Array<AppEmbedOrigin>;
+    expect(matchesAppEmbedOrigin("http://127.0.0.1:41234", declared)).toBe(true);
+    expect(matchesAppEmbedOrigin("http://localhost:5173", declared)).toBe(true);
+    expect(matchesAppEmbedOrigin("http://localhost:5174", declared)).toBe(false);
+    expect(matchesAppEmbedOrigin("http://127.0.0.1", declared)).toBe(false);
+    expect(matchesAppEmbedOrigin("http://127.0.0.1:1.evil.com", declared)).toBe(false);
+    expect(matchesAppEmbedOrigin("https://127.0.0.1:41234", declared)).toBe(false);
+    expect(matchesAppEmbedOrigin("http://127.0.0.1:41234", [])).toBe(false);
   });
 
   it("leases only loopback URLs for 5 to 60 seconds", () => {

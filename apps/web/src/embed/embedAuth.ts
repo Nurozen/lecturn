@@ -8,10 +8,14 @@
 const EMBED_PATH_PREFIX = "/embed/";
 const EMBED_TOKEN_KEY = "embedToken";
 const PARENT_ORIGIN_KEY = "parentOrigin";
+// Hosts that list threads themselves (`switcher: false`) ask the view to hide its own switcher.
+const SWITCHER_KEY = "switcher";
+const EMBED_HASH_KEYS = [EMBED_TOKEN_KEY, PARENT_ORIGIN_KEY, SWITCHER_KEY];
 
 export interface EmbedHashCredential {
   readonly token: string;
   readonly parentOrigin: string | null;
+  readonly switcher: boolean;
 }
 
 // Read from the pathname, not router state: the HTTP layer and connection platform are built
@@ -40,16 +44,19 @@ export function parseEmbedHash(hash: string): EmbedHashCredential | null {
   const params = hashParams(hash);
   const token = params.get(EMBED_TOKEN_KEY)?.trim();
   if (!token) return null;
-  return { token, parentOrigin: normalizeOrigin(params.get(PARENT_ORIGIN_KEY)) };
+  return {
+    token,
+    parentOrigin: normalizeOrigin(params.get(PARENT_ORIGIN_KEY)),
+    switcher: params.get(SWITCHER_KEY) !== "0",
+  };
 }
 
 /** Removes only the embed keys, so any other hash content survives. */
 export function stripEmbedHash(href: string): string {
   const url = new URL(href);
   const params = hashParams(url.hash);
-  if (!params.has(EMBED_TOKEN_KEY) && !params.has(PARENT_ORIGIN_KEY)) return href;
-  params.delete(EMBED_TOKEN_KEY);
-  params.delete(PARENT_ORIGIN_KEY);
+  if (!EMBED_HASH_KEYS.some((key) => params.has(key))) return href;
+  for (const key of EMBED_HASH_KEYS) params.delete(key);
   const rest = params.toString();
   url.hash = rest.length > 0 ? `#${rest}` : "";
   return url.toString();
@@ -59,6 +66,7 @@ let hashConsumed = false;
 let embedToken: string | null = null;
 let embedTokenExpiresAtMs: number | null = null;
 let embedParentOrigin: string | null = null;
+let embedSwitcher = true;
 const tokenListeners = new Set<() => void>();
 
 /** Takes the credential out of the address bar once; later calls return what was taken. */
@@ -69,10 +77,13 @@ export function consumeEmbedHash(): EmbedHashCredential | null {
     if (credential) {
       embedToken = credential.token;
       embedParentOrigin = credential.parentOrigin;
+      embedSwitcher = credential.switcher;
       window.history.replaceState(window.history.state, "", stripEmbedHash(window.location.href));
     }
   }
-  return embedToken === null ? null : { token: embedToken, parentOrigin: embedParentOrigin };
+  return embedToken === null
+    ? null
+    : { token: embedToken, parentOrigin: embedParentOrigin, switcher: embedSwitcher };
 }
 
 /**
@@ -115,7 +126,12 @@ export function readEmbedParentOrigin(): string | null {
   return consumeEmbedHash()?.parentOrigin ?? null;
 }
 
+export function readEmbedSwitcherVisible(): boolean {
+  return consumeEmbedHash()?.switcher ?? true;
+}
+
 export function __resetEmbedAuthForTests(): void {
+  embedSwitcher = true;
   hashConsumed = false;
   embedToken = null;
   embedTokenExpiresAtMs = null;

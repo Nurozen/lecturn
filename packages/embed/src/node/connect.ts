@@ -1,11 +1,18 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off globalFetch:off -- Promise API for hosts that run no Effect runtime.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import { AppLiveLeaseInput, AppRegistration, type AppEmbedTarget } from "@lecturn/contracts/apps";
+import {
+  AppLiveLeaseInput,
+  AppRegistration,
+  type AppEmbedTarget,
+  type ConnectedAppThreadSummary,
+  type ConnectedAppThreadsStreamEvent,
+} from "@lecturn/contracts/apps";
 import {
   APP_EMBED_TOKEN_MAX_TTL_SECONDS,
   AppsEnsureWorkspaceInput,
   AppsMintEmbedTokenInput,
+  AppsSetThreadAppDataInput,
   AppsCoreRpcs,
   APPS_WS_METHODS,
 } from "@lecturn/contracts/appsRpcCore";
@@ -21,12 +28,16 @@ import {
   ORCHESTRATION_PROTOCOL_VERSION_TEXT,
 } from "@lecturn/contracts/environment";
 import * as Cause from "effect/Cause";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import * as RpcClient from "effect/rpc/RpcClient";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcSerialization from "effect/rpc/RpcSerialization";
@@ -59,6 +70,25 @@ export interface LecturnConnection extends EmbedConnectionSource {
   setLiveTools(tools: LiveTools): Promise<void>;
   /** Live tools then answer that the app is closed. */
   clearLiveTools(): Promise<void>;
+  /** The project's threads as the app's rail shows them, `appData` and subtitle included. */
+  listThreads(projectId: string): Promise<ReadonlyArray<ConnectedAppThreadSummary>>;
+  /**
+   * A snapshot, then an upsert or removal per change. Survives reconnects (each one starts with a
+   * fresh snapshot) until the returned function is called or the connection closes.
+   */
+  subscribeThreads(
+    projectId: string,
+    listener: (event: ConnectedAppThreadsStreamEvent) => void,
+  ): () => void;
+  /**
+   * Only the owning app writes `appData`. An omitted `subtitle` keeps the current one and null
+   * clears it; neither write counts as thread history, so it never causes a re-copy.
+   */
+  setThreadAppData(
+    threadId: string,
+    appData: string | null,
+    subtitle?: string | null,
+  ): Promise<void>;
   /** Clears the live lease, and stops the sidecar only when this connection started it. */
   close(): Promise<void>;
 }
@@ -74,6 +104,16 @@ const decodeRegistration = Schema.decodeSync(AppRegistration);
 const decodeEnsureWorkspace = Schema.decodeEffect(AppsEnsureWorkspaceInput);
 const decodeMintEmbedToken = Schema.decodeEffect(AppsMintEmbedTokenInput);
 const decodeLiveLease = Schema.decodeEffect(AppLiveLeaseInput);
+const decodeProjectTarget = Schema.decodeEffect(
+  Schema.Struct({ projectId: AppsMintEmbedTokenInput.fields.projectId }),
+);
+const decodeSetThreadAppData = Schema.decodeEffect(AppsSetThreadAppDataInput);
+// A dropped socket ends the stream; the client reconnects underneath, so resubscribing is enough.
+const THREADS_RESUBSCRIBE = Schedule.exponential("500 millis").pipe(
+  Schedule.modifyDelay(({ duration }) =>
+    Effect.succeed(Duration.min(duration, Duration.seconds(10))),
+  ),
+);
 const decodeAccessToken = Schema.decodeUnknownSync(AuthAccessTokenResult);
 const decodeTicket = Schema.decodeUnknownSync(AuthWebSocketTicketResult);
 
@@ -288,6 +328,39 @@ export async function connect(options: ConnectOptions): Promise<LecturnConnectio
     clearLease: () => run(client[APPS_WS_METHODS.appsClearLiveLease]({})),
   });
 
+  const threadSubscriptions = new Set<Fiber.Fiber<unknown, unknown>>();
+  const subscribeThreads = (
+    projectId: string,
+    listener: (event: ConnectedAppThreadsStreamEvent) => void,
+  ) => {
+    const fiber = Effect.runFork(
+      decodeProjectTarget({ projectId }).pipe(
+        Effect.flatMap((input) =>
+          client[APPS_WS_METHODS.appsSubscribeThreads](input).pipe(
+            Stream.runForEach((event) => Effect.sync(() => listener(event))),
+            // A refusal (wrong project, revoked app) will not change by asking again.
+            Effect.retry({
+              schedule: THREADS_RESUBSCRIBE,
+              while: (error) =>
+                error._tag !== "AppsError" && error._tag !== "EnvironmentAuthorizationError",
+            }),
+          ),
+        ),
+        Effect.provide(silent),
+      ),
+    );
+    threadSubscriptions.add(fiber);
+    return () => {
+      if (!threadSubscriptions.delete(fiber)) return;
+      Effect.runFork(Fiber.interrupt(fiber));
+    };
+  };
+  const stopThreadSubscriptions = () => {
+    const fibers = [...threadSubscriptions];
+    threadSubscriptions.clear();
+    return run(Fiber.interruptAll(fibers));
+  };
+
   let closed: Promise<void> | undefined;
   return {
     mode: "sidecar",
@@ -304,6 +377,24 @@ export async function connect(options: ConnectOptions): Promise<LecturnConnectio
     refreshEmbedToken: (projectId) => mint(projectId),
     setLiveTools: (tools) => liveLease.set(tools),
     clearLiveTools: () => liveLease.clear(),
+    listThreads: (projectId) =>
+      run(
+        decodeProjectTarget({ projectId }).pipe(
+          Effect.flatMap((input) => client[APPS_WS_METHODS.appsListThreads](input)),
+        ),
+      ),
+    subscribeThreads,
+    setThreadAppData: (threadId, appData, subtitle) =>
+      run(
+        decodeSetThreadAppData({
+          threadId,
+          appData,
+          ...(subtitle === undefined ? {} : { subtitle }),
+        }).pipe(
+          Effect.flatMap((input) => client[APPS_WS_METHODS.appsSetThreadAppData](input)),
+          Effect.asVoid,
+        ),
+      ),
     close: () => {
       // Clearing first lets Lecturn show the app as closed now rather than when
       // the lease lapses; a server that is already gone must not hold up close.
@@ -313,6 +404,7 @@ export async function connect(options: ConnectOptions): Promise<LecturnConnectio
       ])
         .catch(() => undefined)
         .finally(() => liveLease.stop())
+        .then(stopThreadSubscriptions)
         .then(closeScope)
         .finally(stopOwned);
       return closed;

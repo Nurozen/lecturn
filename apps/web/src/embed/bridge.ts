@@ -1,4 +1,5 @@
 import { makeEmbedGuest, type EmbedHostCommand } from "@lecturn/client-runtime/embed/guest";
+import { matchesAppEmbedOrigin, type AppEmbedOrigin } from "@lecturn/contracts";
 import type { EmbedHostContext, EmbedTurnState } from "@lecturn/contracts/embedBridge";
 
 import { readEmbedParentOrigin } from "./embedAuth";
@@ -6,11 +7,19 @@ import { setEmbedTokenRefresher } from "./embedPrimaryAuth";
 
 // `EMBED_GUEST_HOST_GLOBAL` in packages/embed/src/channels.ts, which web cannot import.
 const ELECTRON_HOST_GLOBAL = "lecturnEmbedHost";
+// What the guest may say before it learns whether its parent is allowed: the handshake, plus
+// whatever the view reports while the app context loads.
+const MAX_HELD_MESSAGES = 64;
 
 export interface EmbedTransport {
   readonly post: (message: unknown) => void;
   /** Whether a `message` event came from the host, and not from a card frame or another page. */
   readonly accepts: (event: MessageEvent) => boolean;
+  /**
+   * Opens the transport once the app's declared origins are known. A parent on any other origin
+   * framed this view without the app's say, so it is never answered.
+   */
+  readonly authorize: (embedOrigins: ReadonlyArray<AppEmbedOrigin>) => void;
 }
 
 type BridgeWindow = Pick<Window, "addEventListener" | "removeEventListener" | "parent"> & {
@@ -21,7 +30,8 @@ type BridgeWindow = Pick<Window, "addEventListener" | "removeEventListener" | "p
  * An Electron host's helper preload exposes a way out and re-posts host messages to this window
  * from its isolated world, so they arrive same-origin from this window. An iframe host talks over
  * `postMessage` with the parent, pinned to the origin it named in the hash; without one there is
- * no origin to trust, so there is no bridge.
+ * no origin to trust, so there is no bridge. The hash is the host's own claim, so the frame stays
+ * silent until that origin is checked against the app's declared `embedOrigins`.
  */
 export function resolveEmbedTransport(
   win: BridgeWindow,
@@ -35,13 +45,28 @@ export function resolveEmbedTransport(
     return {
       post: (message) => postToHost.call(electronHost, message),
       accepts: (event) => event.source === win && event.origin === win.location.origin,
+      authorize: () => undefined,
     };
   }
   if (win.parent === win || parentOrigin === null) return null;
   const parent = win.parent;
+  let state: "pending" | "open" | "closed" = "pending";
+  let held: Array<unknown> = [];
   return {
-    post: (message) => parent.postMessage(message, parentOrigin),
-    accepts: (event) => event.source === parent && event.origin === parentOrigin,
+    post: (message) => {
+      if (state === "open") parent.postMessage(message, parentOrigin);
+      else if (state === "pending" && held.length < MAX_HELD_MESSAGES) held.push(message);
+    },
+    accepts: (event) =>
+      state === "open" && event.source === parent && event.origin === parentOrigin,
+    authorize: (embedOrigins) => {
+      if (state !== "pending") return;
+      state = matchesAppEmbedOrigin(parentOrigin, embedOrigins) ? "open" : "closed";
+      const flushed = held;
+      held = [];
+      if (state === "open")
+        for (const message of flushed) parent.postMessage(message, parentOrigin);
+    },
   };
 }
 
@@ -52,6 +77,11 @@ export interface EmbedBridge {
   /** Tells the host which thread the view shows; repeats are not sent. */
   readonly reportThread: (threadId: string | null) => void;
   readonly reportTurnState: (threadId: string, state: EmbedTurnState) => void;
+  /** The view has drawn this thread (or its empty state); hosts wait on it before capturing. */
+  readonly reportReady: (threadId: string | null) => void;
+  /** The user activated an app reference; the host decides what it opens. */
+  readonly navigate: (ref: string) => void;
+  readonly authorizeHost: (embedOrigins: ReadonlyArray<AppEmbedOrigin>) => void;
   readonly dispose: () => void;
 }
 
@@ -60,6 +90,7 @@ export function createEmbedBridge(transport: EmbedTransport, win: BridgeWindow):
   const commandListeners = new Set<(command: EmbedHostCommand) => void>();
   let reportedThread: string | null | undefined;
   let reportedTurn: string | undefined;
+  let reportedReady: string | null | undefined;
 
   const guest = makeEmbedGuest({
     post: transport.post,
@@ -106,6 +137,15 @@ export function createEmbedBridge(transport: EmbedTransport, win: BridgeWindow):
       reportedTurn = key;
       guest.notify("lecturn/turn.state", { threadId, state });
     },
+    reportReady(threadId) {
+      if (threadId === reportedReady) return;
+      reportedReady = threadId;
+      guest.notify("lecturn/ready", { threadId });
+    },
+    navigate(ref) {
+      guest.notify("lecturn/navigate", { ref });
+    },
+    authorizeHost: transport.authorize,
     dispose() {
       win.removeEventListener("message", onMessage);
       setEmbedTokenRefresher(null);
