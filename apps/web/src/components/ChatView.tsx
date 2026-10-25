@@ -37,6 +37,7 @@ import * as DateTime from "effect/DateTime";
 import { restorePlanFollowUpComposer } from "./ChatView.logic";
 import { assistantCitationsToPlainText } from "@lecturn/shared/assistantCitations";
 import { useQueuedRunEdit } from "./chat/useQueuedRunEdit";
+import { useFollowEndWhenDrawerDocks } from "./chat/dockedDrawerFollow";
 import {
   isPaintOnlyThreadTimeline,
   peekHeldThreadTimeline,
@@ -4461,6 +4462,12 @@ export default function ChatView(props: ChatViewProps) {
     });
   };
   const scrollToEndStable = useStableCallback(scrollToEnd);
+  useFollowEndWhenDrawerDocks({
+    overlay: composerOverlayElement,
+    inset: composerTimelineInset,
+    isFollowingEnd: () => timelineScrollModeRef.current === "following-end",
+    scrollToEnd: scrollToEndStable,
+  });
   useEffect(() => {
     const composer = composerRef;
     let removeListeners: (() => void) | null = null;

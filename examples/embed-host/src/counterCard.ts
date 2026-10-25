@@ -8,7 +8,8 @@
  * line chart of the counter's history. At 560 px or wider it takes the desktop
  * form ("Saved result" under the title, three boxed tiles); narrower, the embed
  * form (a "Saved" chip, one label/value row per stat). Both forms draw the
- * chart with axes, tick labels and a light grid, and no filled area. Every color comes from the host's
+ * chart with axes, tick labels and a light grid, and no filled area; a single
+ * call is a dot mid-plot. Every color comes from the host's
  * MCP Apps variables, and the curve from `--color-ring-primary`, which Lecturn
  * sets to the thread gold and an embedding host to its own accent.
  *
@@ -72,6 +73,7 @@ const COUNTER_CARD_HTML = `<!doctype html>
   .tick { fill: var(--card-muted); font: 10px/1 var(--font-sans, system-ui, sans-serif); font-variant-numeric: tabular-nums; }
   .axis-title { fill: var(--card-muted); font: 11px/1 var(--font-sans, system-ui, sans-serif); }
   .curve { fill: none; stroke: var(--card-accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .point { fill: var(--card-accent); }
   .note { color: var(--card-muted); font-size: 12px; margin-top: 6px; }
   .note:empty { display: none; }
 
@@ -93,7 +95,7 @@ const COUNTER_CARD_HTML = `<!doctype html>
     .tick { font-size: 11px; }
   }
 
-  .card[data-state="cancelled"] .curve { opacity: 0.35; }
+  .card[data-state="cancelled"] .curve, .card[data-state="cancelled"] .point { opacity: 0.35; }
 </style>
 </head>
 <body>
@@ -116,6 +118,7 @@ const COUNTER_CARD_HTML = `<!doctype html>
   <svg id="chart" data-card-chart role="img" aria-label="Counter history">
     <g id="frame"></g>
     <polyline class="curve" id="curve" points=""/>
+    <g id="points"></g>
   </svg>
   <div class="note" id="note"></div>
 </div>
@@ -189,19 +192,24 @@ const COUNTER_CARD_HTML = `<!doctype html>
     var height = box.height || (wide.matches ? 196 : 168);
     chart.setAttribute("viewBox", "0 0 " + width + " " + height);
 
-    var points = history.length === 1 ? [history[0], history[0]] : history;
-    var xMax = Math.max(points.length, 2);
-    var xStep = niceStep((xMax - 1) / (wide.matches ? 8 : 5));
-    var xTicks = ticks(1, xMax, xStep);
-    var yLo = Math.min.apply(null, points.concat([0]));
-    var yHi = Math.max.apply(null, points.concat([1]));
+    var points = history;
+    var single = points.length === 1;
+    var xMax = points.length;
+    var xTicks = single ? [1] : ticks(1, xMax, niceStep((xMax - 1) / (wide.matches ? 8 : 5)));
+    // One call has no range of its own; spanning twice its value puts it mid-plot, not on the top edge.
+    var range = single ? [0, points[0] * 2, 2] : points.concat([0, 1]);
+    var yLo = Math.min.apply(null, range);
+    var yHi = Math.max.apply(null, range);
     var yStep = niceStep((yHi - yLo) / 4);
     yLo = Math.floor(yLo / yStep) * yStep;
     yHi = Math.ceil(yHi / yStep) * yStep;
     var yTicks = ticks(yLo, yHi, yStep);
     var labelChars = Math.max.apply(null, yTicks.map(function (value) { return String(value).length; }));
     var plot = { left: 18 + labelChars * 6.5 + 8, right: width - 10, top: 8, bottom: height - 34 };
-    var sx = function (x) { return plot.left + ((x - 1) / (xMax - 1)) * (plot.right - plot.left); };
+    var sx = function (x) {
+      if (single) return (plot.left + plot.right) / 2;
+      return plot.left + ((x - 1) / (xMax - 1)) * (plot.right - plot.left);
+    };
     var sy = function (y) { return plot.bottom - ((y - yLo) / (yHi - yLo)) * (plot.bottom - plot.top); };
 
     var frame = byId("frame");
@@ -227,6 +235,12 @@ const COUNTER_CARD_HTML = `<!doctype html>
     byId("curve").setAttribute("points", points.map(function (value, index) {
       return sx(index + 1).toFixed(1) + "," + sy(value).toFixed(1);
     }).join(" "));
+    // A one-point polyline draws nothing.
+    var dots = byId("points");
+    dots.replaceChildren();
+    if (single) {
+      dots.append(svgEl("circle", { class: "point", "data-card-point": "", cx: sx(1), cy: sy(points[0]), r: 3.5 }));
+    }
   }
 
   function showResult(result) {

@@ -47,8 +47,9 @@ const approval: PendingApproval = {
 };
 
 // The banner as ChatComposer draws a pending approval.
-async function render(width: number) {
+async function render(width: number, reason = approval.connectedAppTool!.reason) {
   container.style.width = `${width}px`;
+  const shown = { ...approval, connectedAppTool: { ...approval.connectedAppTool!, reason } };
   await act(async () =>
     root.render(
       <ComposerBanner.Root variant="warning" density="spacious">
@@ -57,7 +58,7 @@ async function render(width: number) {
             <ShieldIcon />
           </ComposerBanner.Icon>
           <ComposerBanner.Content>
-            <ComposerPendingApprovalPanel approval={approval} pendingCount={1} />
+            <ComposerPendingApprovalPanel approval={shown} pendingCount={1} />
           </ComposerBanner.Content>
           <ComposerBanner.Actions>
             <ComposerPendingApprovalActions
@@ -89,25 +90,36 @@ function layout() {
 const actionsCenter = (box: DOMRect) => box.top + box.height / 2;
 
 describe("ComposerPendingApprovalPanel for a connected app's tool", () => {
-  it("keeps the actions beside the whole tool name while they fit", async () => {
+  it("stacks the reason under the tool with the actions beside both while they fit", async () => {
     await render(560);
     const { title, titleBox, reasonBox, actionsBox } = layout();
 
     expect(title.textContent).toBe("Approve ex_window_flash");
     expect(title.scrollWidth).toBeLessThanOrEqual(title.clientWidth);
-    expect(actionsCenter(actionsBox)).toBeGreaterThan(titleBox.top);
-    expect(actionsCenter(actionsBox)).toBeLessThan(titleBox.bottom);
-    expect(actionsBox.left).toBeGreaterThanOrEqual(titleBox.right);
     expect(reasonBox.top).toBeGreaterThanOrEqual(titleBox.bottom);
+    expect(reasonBox.left).toBeCloseTo(titleBox.left, 0);
+    expect(actionsBox.left).toBeGreaterThanOrEqual(Math.max(titleBox.right, reasonBox.right));
+    expect(actionsCenter(actionsBox)).toBeGreaterThan(titleBox.top);
+    expect(actionsCenter(actionsBox)).toBeLessThan(reasonBox.bottom);
   });
 
-  it("wraps the actions to their own line instead of cutting the tool name short", async () => {
+  it("truncates a long reason rather than wrapping the actions", async () => {
+    await render(560, "Flashes the Embed Host window ".repeat(8));
+    const { titleBox, reasonBox, actionsBox } = layout();
+
+    expect(reasonBox.height).toBeLessThan(20);
+    expect(actionsBox.left).toBeGreaterThanOrEqual(reasonBox.right);
+    expect(actionsCenter(actionsBox)).toBeLessThan(reasonBox.bottom);
+    expect(actionsCenter(actionsBox)).toBeGreaterThan(titleBox.top);
+  });
+
+  it("wraps the actions below the reason instead of cutting the tool name short", async () => {
     await render(300);
     const { title, titleBox, reasonBox, actionsBox } = layout();
 
     expect(title.scrollWidth).toBeLessThanOrEqual(title.clientWidth);
     expect(titleBox.height).toBeLessThan(20);
-    expect(actionsBox.top).toBeGreaterThanOrEqual(titleBox.bottom);
-    expect(reasonBox.top).toBeGreaterThanOrEqual(actionsBox.bottom);
+    expect(reasonBox.top).toBeGreaterThanOrEqual(titleBox.bottom);
+    expect(actionsBox.top).toBeGreaterThanOrEqual(reasonBox.bottom);
   });
 });
