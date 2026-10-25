@@ -79,78 +79,19 @@ html[data-lecturn-embed] [data-slot="composer-host"] {
   box-shadow: none;
 }
 
-/* The narrow pane's footer: "model | effort | access" on one row, the Contextual control on the
-   next, attach and send at the end of that second row. The width matches
-   COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX, measured on the same box as the composer form. The
+/* The narrow pane's footer (EmbedComposerFooter): "model | effort | access" on the first row. The
    controls report flex-wrap to the overflow measurement (restingComposerControlsMeasurement.ts),
    which then keeps every control in place instead of folding some into the overflow menu. */
-@container composer-surface (width < 620px) {
-  html[data-lecturn-embed]
-    [data-chat-composer-surface]:not([data-chat-composer-resting])
-    [data-chat-composer-footer] {
-    position: relative;
-    flex-wrap: wrap;
-  }
-
-  html[data-lecturn-embed]
-    [data-chat-composer-surface]:not([data-chat-composer-resting])
-    [data-chat-composer-footer-controls] {
-    flex: 1 1 100%;
-    flex-wrap: wrap;
-    row-gap: 0.25rem;
-    overflow: visible;
-  }
-
-  /* Separators are hidden on phone-width viewports, which the embed pane is. */
-  html[data-lecturn-embed]
-    [data-chat-composer-surface]:not([data-chat-composer-resting])
-    [data-chat-composer-footer-controls]
-    [data-slot="separator"] {
-    display: block;
-  }
-
-  html[data-lecturn-embed]
-    [data-chat-composer-surface]:not([data-chat-composer-resting])
-    [data-chat-composer-footer-controls]
-    [data-resting-block="contextual"] {
-    flex-basis: 100%;
-  }
-
-  html[data-lecturn-embed]
-    [data-chat-composer-surface]:not([data-chat-composer-resting])
-    [data-chat-composer-footer-controls]
-    [data-resting-block="contextual"]
-    > [data-slot="separator"] {
-    display: none;
-  }
-
-  html[data-lecturn-embed]
-    [data-chat-composer-surface]:not([data-chat-composer-resting])
-    [data-chat-composer-footer]
-    > [data-chat-composer-actions="right"] {
-    margin-inline-start: auto;
-  }
-
-  /* With a Contextual row, the actions share it rather than adding a third row. */
-  html[data-lecturn-embed]
-    [data-chat-composer-surface]:not([data-chat-composer-resting])
-    [data-chat-composer-footer]:has([data-resting-block="contextual"])
-    > [data-chat-composer-actions="right"] {
-    position: absolute;
-    inset-inline-end: 0.75rem;
-    bottom: 0.75rem;
-  }
+html[data-lecturn-embed] [data-embed-composer-footer-stacked] [data-chat-composer-footer-controls] {
+  flex-wrap: wrap;
+  row-gap: 0.25rem;
+  overflow: visible;
 }
 
-/* The footer's own padding grows at the sm breakpoint. */
-@media (width >= 40rem) {
-  @container composer-surface (width < 620px) {
-    html[data-lecturn-embed]
-      [data-chat-composer-surface]:not([data-chat-composer-resting])
-      [data-chat-composer-footer]:has([data-resting-block="contextual"])
-      > [data-chat-composer-actions="right"] {
-      inset-inline-end: 1rem;
-      bottom: 1rem;
-    }
-  }
+/* Separators are hidden on phone-width viewports, which the embed pane is. */
+html[data-lecturn-embed]
+  [data-embed-composer-footer-stacked]
+  [data-chat-composer-footer-controls]
+  [data-slot="separator"] {
+  display: block;
 }
