@@ -24,6 +24,7 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
+import { useUiStateStore } from "../uiStateStore";
 import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useEnvironmentIdentificationMode, useLegacySidebarEnabled } from "../hooks/useSettings";
@@ -33,6 +34,7 @@ import {
   usePanelNavigationSuppression,
 } from "../panelAnimations";
 import LegacyThreadSidebar from "./LegacySidebar";
+import { StandaloneAppsSidebar } from "./apps/AppsSidebar";
 import { useThreadVisitedMigration } from "../hooks/useThreadVisitedMigration";
 import ThreadSidebar from "./Sidebar";
 import { SettingsNavigationProvider } from "./settings/SettingsNavigation";
@@ -260,6 +262,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const viewportRef = useWorkspaceViewport(useIsMobile());
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
+  const sidebarMode = useUiStateStore((state) => state.sidebarMode);
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   useThreadVisitedMigration();
@@ -354,7 +357,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
                 <SettingsSidebarNav pathname={pathname} />
               </>
             ) : legacySidebarEnabled ? (
-              <LegacyThreadSidebar />
+              sidebarMode === "apps" ? (
+                <StandaloneAppsSidebar />
+              ) : (
+                <LegacyThreadSidebar />
+              )
             ) : (
               <ThreadSidebar />
             )}

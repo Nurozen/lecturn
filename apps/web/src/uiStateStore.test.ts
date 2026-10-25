@@ -13,6 +13,9 @@ import {
   resolveProjectExpanded,
   setDefaultAdvertisedEndpointKey,
   setProjectExpanded,
+  setSidebarAppCollapsed,
+  setSidebarAppScopeKey,
+  setSidebarMode,
   setSidebarProjectScopeKey,
   setThreadChangedFilesExpanded,
   type UiState,
@@ -23,6 +26,9 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     projectExpandedById: {},
     projectOrder: [],
     sidebarProjectScopeKey: null,
+    sidebarMode: "projects",
+    sidebarAppScopeKey: null,
+    sidebarAppCollapsedByKey: {},
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
@@ -156,6 +162,29 @@ describe("uiStateStore pure functions", () => {
     expect(setSidebarProjectScopeKey(scoped, null).sidebarProjectScopeKey).toBeNull();
     expect(setSidebarProjectScopeKey(scoped, "").sidebarProjectScopeKey).toBeNull();
   });
+
+  it("switches the sidebar mode and keeps each mode's scope", () => {
+    const scoped = setSidebarProjectScopeKey(makeUiState(), "github.com/nurozen/lecturn");
+    const apps = setSidebarAppScopeKey(setSidebarMode(scoped, "apps"), "dev.lecturn.example");
+
+    expect(apps.sidebarMode).toBe("apps");
+    expect(apps.sidebarAppScopeKey).toBe("dev.lecturn.example");
+    expect(setSidebarMode(apps, "apps")).toBe(apps);
+    expect(setSidebarMode(apps, "projects")).toMatchObject({
+      sidebarMode: "projects",
+      sidebarProjectScopeKey: "github.com/nurozen/lecturn",
+      sidebarAppScopeKey: "dev.lecturn.example",
+    });
+    expect(setSidebarAppScopeKey(apps, "").sidebarAppScopeKey).toBeNull();
+  });
+
+  it("records Apps-mode fold choices by key", () => {
+    const folded = setSidebarAppCollapsed(makeUiState(), "settled:env:project", false);
+
+    expect(folded.sidebarAppCollapsedByKey).toEqual({ "settled:env:project": false });
+    expect(setSidebarAppCollapsed(folded, "settled:env:project", false)).toBe(folded);
+    expect(setSidebarAppCollapsed(folded, "", true)).toBe(folded);
+  });
 });
 
 describe("parsePersistedState", () => {
@@ -202,6 +231,9 @@ describe("parsePersistedState", () => {
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
       sidebarProjectScopeKey: null,
+      sidebarMode: "projects",
+      sidebarAppScopeKey: null,
+      sidebarAppCollapsedByKey: {},
       pullRequestMergeMethod: "merge",
       threadChangedFilesExpandedById: {
         "environment:thread-1": {
@@ -324,6 +356,9 @@ describe("uiStateStore persistence", () => {
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
       sidebarProjectScopeKey: null,
+      sidebarMode: "projects",
+      sidebarAppScopeKey: null,
+      sidebarAppCollapsedByKey: {},
       threadChangedFilesExpansionVersion: 2,
       threadChangedFilesExpandedById: {
         "environment:thread-1": {
@@ -347,6 +382,28 @@ describe("uiStateStore persistence", () => {
 
     expect(parsePersistedState(persisted).sidebarProjectScopeKey).toBe(
       "github.com/nurozen/lecturn",
+    );
+  });
+
+  it("restores Apps mode, its scope and fold choices, and drops unknown modes", () => {
+    persistState(
+      makeUiState({
+        sidebarMode: "apps",
+        sidebarAppScopeKey: "dev.lecturn.example",
+        sidebarAppCollapsedByKey: { "app:dev.lecturn.example": true },
+      }),
+    );
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+
+    expect(parsePersistedState(persisted)).toMatchObject({
+      sidebarMode: "apps",
+      sidebarAppScopeKey: "dev.lecturn.example",
+      sidebarAppCollapsedByKey: { "app:dev.lecturn.example": true },
+    });
+    expect(parsePersistedState({ ...persisted, sidebarMode: "widgets" }).sidebarMode).toBe(
+      "projects",
     );
   });
 

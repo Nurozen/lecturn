@@ -27,15 +27,25 @@ export interface PersistedUiState {
   projectOrderCwds?: string[];
   defaultAdvertisedEndpointKey?: string | null;
   sidebarProjectScopeKey?: string | null;
+  sidebarMode?: string;
+  sidebarAppScopeKey?: string | null;
+  sidebarAppCollapsedByKey?: Record<string, boolean>;
   threadChangedFilesExpansionVersion?: number;
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
   pullRequestMergeMethod?: string;
 }
 
+export type SidebarMode = "projects" | "apps";
+
 export interface UiProjectState {
   projectExpandedById: Record<string, boolean>;
   projectOrder: string[];
   sidebarProjectScopeKey: string | null;
+  sidebarMode: SidebarMode;
+  /** The selected app's id in Apps mode; null lists every app. */
+  sidebarAppScopeKey: string | null;
+  /** Only explicit fold choices of Apps-mode groups; each kind of group has its own default. */
+  sidebarAppCollapsedByKey: Record<string, boolean>;
 }
 
 export interface UiThreadState {
@@ -58,6 +68,9 @@ const initialState: UiState = {
   projectExpandedById: {},
   projectOrder: [],
   sidebarProjectScopeKey: null,
+  sidebarMode: "projects",
+  sidebarAppScopeKey: null,
+  sidebarAppCollapsedByKey: {},
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
@@ -113,6 +126,10 @@ function sanitizeTimestampRecord(value: unknown): Record<string, string> {
   );
 }
 
+function sanitizeSidebarMode(value: unknown): SidebarMode {
+  return value === "apps" ? "apps" : "projects";
+}
+
 function isPullRequestMergeMethod(value: unknown): value is PullRequestMergeMethod {
   return value === "merge" || value === "squash" || value === "rebase";
 }
@@ -151,6 +168,9 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
         : {},
     defaultAdvertisedEndpointKey: sanitizeOptionalKey(parsed.defaultAdvertisedEndpointKey),
     sidebarProjectScopeKey: sanitizeOptionalKey(parsed.sidebarProjectScopeKey),
+    sidebarMode: sanitizeSidebarMode(parsed.sidebarMode),
+    sidebarAppScopeKey: sanitizeOptionalKey(parsed.sidebarAppScopeKey),
+    sidebarAppCollapsedByKey: sanitizeBooleanRecord(parsed.sidebarAppCollapsedByKey),
     pullRequestMergeMethod: isPullRequestMergeMethod(parsed.pullRequestMergeMethod)
       ? parsed.pullRequestMergeMethod
       : initialState.pullRequestMergeMethod,
@@ -225,6 +245,9 @@ export function persistState(state: UiState): void {
         threadLastVisitedAtById: state.threadLastVisitedAtById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         sidebarProjectScopeKey: state.sidebarProjectScopeKey,
+        sidebarMode: state.sidebarMode,
+        sidebarAppScopeKey: state.sidebarAppScopeKey,
+        sidebarAppCollapsedByKey: state.sidebarAppCollapsedByKey,
         threadChangedFilesExpansionVersion: THREAD_CHANGED_FILES_EXPANSION_VERSION,
         threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
         pullRequestMergeMethod: state.pullRequestMergeMethod,
@@ -334,6 +357,23 @@ export function setSidebarProjectScopeKey(state: UiState, projectKey: string | n
   };
 }
 
+export function setSidebarMode(state: UiState, mode: SidebarMode): UiState {
+  return state.sidebarMode === mode ? state : { ...state, sidebarMode: mode };
+}
+
+export function setSidebarAppScopeKey(state: UiState, appKey: string | null): UiState {
+  const nextKey = sanitizeOptionalKey(appKey);
+  return state.sidebarAppScopeKey === nextKey ? state : { ...state, sidebarAppScopeKey: nextKey };
+}
+
+export function setSidebarAppCollapsed(state: UiState, key: string, collapsed: boolean): UiState {
+  if (key.length === 0 || state.sidebarAppCollapsedByKey[key] === collapsed) return state;
+  return {
+    ...state,
+    sidebarAppCollapsedByKey: { ...state.sidebarAppCollapsedByKey, [key]: collapsed },
+  };
+}
+
 function setPullRequestMergeMethod(state: UiState, method: PullRequestMergeMethod): UiState {
   return state.pullRequestMergeMethod === method
     ? state
@@ -423,6 +463,9 @@ interface UiStateStore extends UiState {
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
   setSidebarProjectScopeKey: (projectKey: string | null) => void;
+  setSidebarMode: (mode: SidebarMode) => void;
+  setSidebarAppScopeKey: (appKey: string | null) => void;
+  setSidebarAppCollapsed: (key: string, collapsed: boolean) => void;
   setPullRequestMergeMethod: (method: PullRequestMergeMethod) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
   reorderProjects: (
@@ -444,6 +487,10 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
   setSidebarProjectScopeKey: (projectKey) =>
     set((state) => setSidebarProjectScopeKey(state, projectKey)),
+  setSidebarMode: (mode) => set((state) => setSidebarMode(state, mode)),
+  setSidebarAppScopeKey: (appKey) => set((state) => setSidebarAppScopeKey(state, appKey)),
+  setSidebarAppCollapsed: (key, collapsed) =>
+    set((state) => setSidebarAppCollapsed(state, key, collapsed)),
   setPullRequestMergeMethod: (method) => set((state) => setPullRequestMergeMethod(state, method)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),

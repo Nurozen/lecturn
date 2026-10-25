@@ -235,6 +235,7 @@ import {
 } from "./Sidebar.logic";
 import { sortThreads } from "../lib/threadSort";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import { AppsModeSwitch } from "./apps/AppsModeSwitch";
 import {
   namedSnapshotsPerAccount,
   projectKeyMapPerAccount,
@@ -3203,6 +3204,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
       variant="tree"
       fixedHeader={
         <SidebarGroup className="z-[1]">
+          <AppsModeSwitch />
           <SidebarMenu>
             <SidebarMenuItem>
               <CommandDialogTrigger
