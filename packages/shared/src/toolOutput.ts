@@ -9,6 +9,7 @@ import {
   readHtmlRenderReference,
   type HtmlRenderReference,
 } from "./htmlRender.ts";
+import { lecturnMcpToolName } from "./lecturnMcpToolName.ts";
 import { resolveLecturnMcpToolId } from "./lecturnMcpToolPresentation.ts";
 import { MCP_APP_OUTPUT_KEY, readMcpAppReference, type McpAppReference } from "./mcpApp.ts";
 
@@ -186,6 +187,22 @@ export function htmlRenderFromToolItem(item: {
   return output?.isError ? undefined : output?.htmlRender;
 }
 
+/** The server name connected-app cards carry: their tools are served by Lecturn's own MCP server. */
+export const LECTURN_MCP_APP_SERVER = "lecturn";
+
+/**
+ * Whether a recorded tool name is the call of `server`'s `tool`. Lecturn's own
+ * server is recorded under a different name by each adapter, so its tools are
+ * matched through the normalized name rather than Codex's `server.tool` form.
+ */
+function recordsMcpAppTool(
+  toolName: string | null | undefined,
+  app: Pick<McpAppReference, "server" | "tool">,
+): boolean {
+  if (toolName === `${app.server}.${app.tool}`) return true;
+  return app.server === LECTURN_MCP_APP_SERVER && lecturnMcpToolName(toolName) === app.tool;
+}
+
 /**
  * The MCP App a completed tool call carries, if any. The adapter that captured
  * it put the reference in the output, beside the tool's own result. A tool's
@@ -198,7 +215,7 @@ export function mcpAppFromToolItem(item: {
   readonly output?: unknown;
 }): McpAppReference | undefined {
   const app = compactDynamicToolOutput(item.output)?.[MCP_APP_OUTPUT_KEY];
-  return app !== undefined && item.toolName === `${app.server}.${app.tool}` ? app : undefined;
+  return app !== undefined && recordsMcpAppTool(item.toolName, app) ? app : undefined;
 }
 
 /** Some providers report completion even when command output describes a failure. */

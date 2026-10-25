@@ -12,7 +12,7 @@ import {
   type TurnItemId,
 } from "@lecturn/contracts";
 import { mcpAppToolCallableByApp, type McpAppReference } from "@lecturn/shared/mcpApp";
-import { mcpAppFromToolItem } from "@lecturn/shared/toolOutput";
+import { LECTURN_MCP_APP_SERVER, mcpAppFromToolItem } from "@lecturn/shared/toolOutput";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -77,17 +77,31 @@ const make = Effect.gen(function* () {
       .pipe(Effect.mapError((cause) => fail(input.threadId, "request-failed", cause)));
     const app: McpAppReference | undefined =
       item?.type === "dynamic_tool" ? mcpAppFromToolItem(item) : undefined;
-    if (item === null || app === undefined || item.providerThreadId === null) {
+    // Connected-app cards are served by Lecturn itself, so they need no
+    // provider thread: copied and imported threads carry them too.
+    if (
+      item === null ||
+      app === undefined ||
+      (item.providerThreadId === null && app.server !== LECTURN_MCP_APP_SERVER)
+    ) {
       return yield* fail(input.threadId, "not-an-app");
     }
     return { app, providerThreadId: item.providerThreadId };
   });
+
+  // Stub until A21's app route: connected-app cards never reach the provider
+  // session, which on most adapters cannot serve them.
+  const resolveConnectedApp = (threadId: ThreadId) =>
+    fail(threadId, "request-failed", new Error("Connected-app cards are not available yet."));
 
   const resolve = Effect.fn("McpAppRequests.resolve")(function* (input: {
     readonly threadId: ThreadId;
     readonly itemId: TurnItemId;
   }) {
     const { app, providerThreadId } = yield* resolveApp(input);
+    if (app.server === LECTURN_MCP_APP_SERVER || providerThreadId === null) {
+      return yield* resolveConnectedApp(input.threadId);
+    }
     const projection = yield* threadManagement
       .getThreadRecords(input.threadId, ["providerThreads"])
       .pipe(Effect.mapError((cause) => fail(input.threadId, "request-failed", cause)));
