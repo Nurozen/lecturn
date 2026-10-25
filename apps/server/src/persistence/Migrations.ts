@@ -93,6 +93,8 @@ import Migration0077 from "./Migrations/062_ThreadFailureLookupIndex.ts";
 // Upstream published this as 63, which Lecturn's ledger already used
 // (ContextualDisplaySummaries), so it runs here as 78.
 import Migration0078 from "./Migrations/063_DropUnusedV1Projections.ts";
+import Migration0079 from "./Migrations/079_AppRegistrations.ts";
+import Migration0080 from "./Migrations/080_ProjectionProjectsAppBinding.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -125,6 +127,20 @@ const ThreadFailureLookupIndexCompatibility = Effect.gen(function* () {
   if (indexes.length > 0) return;
   yield* Migration0077;
 });
+
+/**
+ * Lecturn-only migrations at ids that a later upstream remap may also take.
+ * The migrator skips an id once any migration is recorded there, so when a
+ * ledger holds another name at one of these ids, the migration runs again on
+ * its own. Their SQL is idempotent for that reason (D31).
+ */
+const selfRepairingMigrations = [
+  [79, "AppRegistrations", Migration0079],
+  [80, "ProjectionProjectsAppBinding", Migration0080],
+] as const;
+const selfRepairingMigrationIds: ReadonlySet<number> = new Set(
+  selfRepairingMigrations.map(([id]) => id),
+);
 
 export const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -215,6 +231,7 @@ export const migrationEntries = [
   // Upstream 63. Idempotent, so a database that already ran it under
   // upstream's id is safe to run again here.
   [78, "DropUnusedV1Projections", Migration0078],
+  ...selfRepairingMigrations,
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -256,6 +273,7 @@ const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(function*
     if (
       id < FIRST_V2_MIGRATION_ID ||
       id > latestRecordedId ||
+      selfRepairingMigrationIds.has(id) ||
       (throughId !== undefined && id > throughId)
     )
       return [];
@@ -303,20 +321,27 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   if (includesV2) {
     yield* assertV2MigrationsCanRun(toMigrationInclusive);
   }
-  const executedMigrations = [
-    ...previewMigrations,
-    ...(yield* run({ loader: makeMigrationLoader(toMigrationInclusive) })),
-  ];
-  const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);
-  yield* migrations.length === 0
-    ? Effect.logDebug("Database schema is current")
-    : Effect.log("Migrations ran successfully").pipe(Effect.annotateLogs({ migrations }));
+  const ranMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
 
   const sql = yield* SqlClient.SqlClient;
   const recorded = yield* sql<{
     readonly migration_id: number;
     readonly name: string;
   }>`SELECT migration_id, name FROM effect_sql_migrations`;
+  const recordedNames = new Map(recorded.map((row) => [row.migration_id, row.name]));
+  const repairedMigrations: Array<readonly [number, string]> = [];
+  for (const [id, name, migration] of selfRepairingMigrations) {
+    if (toMigrationInclusive !== undefined && id > toMigrationInclusive) continue;
+    if (recordedNames.get(id) === name) continue;
+    yield* migration;
+    repairedMigrations.push([id, name]);
+  }
+
+  const executedMigrations = [...previewMigrations, ...ranMigrations, ...repairedMigrations];
+  const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);
+  yield* migrations.length === 0
+    ? Effect.logDebug("Database schema is current")
+    : Effect.log("Migrations ran successfully").pipe(Effect.annotateLogs({ migrations }));
   const manifestNames = new Map<number, string>(migrationEntries.map(([id, name]) => [id, name]));
   const divergent = recorded.flatMap((row) => {
     const expected = manifestNames.get(row.migration_id);
