@@ -44,29 +44,34 @@ export function useConnectedAppCommands(environmentId: EnvironmentId | null) {
   ): Promise<boolean> => {
     if (environmentId === null || !canManage) return false;
     setBusyAppId(app.appId);
+    // React Compiler rejects try/finally, so the busy flag is cleared on both paths by hand.
+    let result: AtomCommandResult<unknown, unknown>;
     try {
-      const result = await execute(environmentId);
-      if (result._tag === "Success") return true;
-      if (!isAtomCommandInterrupted(result)) {
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: FAILURE_TITLES[action],
-            description: connectedAppActionError(action, squashAtomCommandFailure(result), options),
-          }),
-        );
-      }
-      return false;
-    } finally {
+      result = await execute(environmentId);
+    } catch (error) {
       setBusyAppId(null);
+      throw error;
     }
+    setBusyAppId(null);
+    if (result._tag === "Success") return true;
+    if (!isAtomCommandInterrupted(result)) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: FAILURE_TITLES[action],
+          description: connectedAppActionError(action, squashAtomCommandFailure(result), options),
+        }),
+      );
+    }
+    return false;
   };
 
   return {
     canManage,
     busyAppId,
     /** The ceiling is applied before the grant so the app never runs above it. */
-    approve: (app: AppStatus, ceiling: AppRuntimeCeiling = app.runtimeCeiling) => {
+    approve: (app: AppStatus, requestedCeiling?: AppRuntimeCeiling) => {
+      const ceiling = requestedCeiling ?? app.runtimeCeiling;
       const request = app.pendingRequest;
       if (request === null) return Promise.resolve(false);
       return run(app, "approve", async (id) => {
