@@ -1,21 +1,25 @@
 #!/usr/bin/env node
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off globalFetch:off globalConsole:off - a one-shot smoke harness driving installs and server subprocesses with Node APIs.
 /**
- * Clean-install smoke for the vendorable lecturn tarball: what an embedding host (RocketWright)
- * gets from `file:` tarballs, with no workspace, patches or hoisting it did not ask for.
+ * Clean-install smoke for the vendoring kit (`cli.ts pack --out-dir`): what an embedding host
+ * (RocketWright) gets from its `file:` tarballs and lecturn-pack.json, with no workspace, patches
+ * or hoisting it did not ask for.
  *
  * For each pnpm layout (isolated, hoisted) it installs the tarballs into an empty temp dir and,
  * per runtime (this Node, Electron with ELECTRON_RUN_AS_NODE, and with --asar that Electron run
  * again from an asar archive of the hoisted tree), runs the in-process probes (scripts/smoke-pack-probe.ts) and
- * `serve --base-dir <tmp>` until /.well-known/lecturn/environment answers.
+ * `serve --base-dir <tmp>` until /.well-known/lecturn/environment answers, and imports
+ * @lecturn/embed's node and browser entries under this Node.
  *
  * Usage:
- *   node scripts/smoke-pack-install.ts [--electron <binary>] [--asar] [--layout isolated|hoisted|both]
- *     [--tarball <tgz>]... [--patches] [--json <file>] [--keep]
+ *   node scripts/smoke-pack-install.ts [--electron <binary>] [--asar] [--layout hoisted|isolated|both]
+ *     [--pack-dir <dir> | --tarball <tgz>...] [--patches] [--json <file>] [--keep]
  *
- * Without --tarball it runs `apps/server/scripts/cli.ts pack` (apps/server must be built) and packs
- * packages/embed too once it exists. --patches carries Lecturn's patchedDependencies for packages in
- * the installed tree, as a consumer would declare them. Exit code 1 when any check fails.
+ * Without --pack-dir or --tarball it runs `apps/server/scripts/cli.ts pack` (apps/server and
+ * packages/embed must be built). The consumer takes allowBuilds and publicHoistPattern from the
+ * kit's lecturn-pack.json, and with --patches its patchedDependencies too. Bare --tarball runs fall
+ * back to Lecturn's own workspace settings. The default layout is hoisted, the one the kit asks for.
+ * Exit code 1 when any check fails.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -30,6 +34,7 @@ import { createPackageWithOptions } from "@electron/asar";
 import { fromYaml } from "@lecturn/shared/schemaYaml";
 import * as Schema from "effect/Schema";
 
+import { LECTURN_PACK_DESCRIPTOR_FILE, LecturnPackDescriptor } from "./lib/lecturn-pack.ts";
 import type { ProbeCheck } from "./smoke-pack-probe.ts";
 
 const repoRoot = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
@@ -69,6 +74,12 @@ const WorkspaceYaml = Schema.Struct({
   allowBuilds: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
 });
 const decodeWorkspaceYaml = Schema.decodeUnknownSync(fromYaml(WorkspaceYaml));
+const decodePackDescriptor = Schema.decodeUnknownSync(Schema.fromJsonString(LecturnPackDescriptor));
+
+interface PackKit {
+  readonly dir: string;
+  readonly descriptor: LecturnPackDescriptor;
+}
 
 function run(
   command: string,
@@ -101,27 +112,31 @@ function readTarballManifest(tarball: string): { name: string; version: string }
   return JSON.parse(run("tar", ["-xzOf", tarball, "package/package.json"]));
 }
 
-function packTarballs(outDir: string): string[] {
+function readPackKit(dir: string): PackKit {
+  const descriptor = decodePackDescriptor(
+    NodeFS.readFileSync(NodePath.join(dir, LECTURN_PACK_DESCRIPTOR_FILE), "utf8"),
+  );
+  return { dir, descriptor };
+}
+
+function packKit(outDir: string): PackKit {
   run(
     process.execPath,
     [NodePath.join(repoRoot, "apps/server/scripts/cli.ts"), "pack", "--out-dir", outDir],
-    {
-      stdio: "inherit",
-    },
+    { stdio: "inherit" },
   );
-  const embedDir = NodePath.join(repoRoot, "packages/embed");
-  if (NodeFS.existsSync(NodePath.join(embedDir, "package.json"))) {
-    run("vp", ["pm", "pack", "--pack-destination", outDir], { cwd: embedDir, stdio: "inherit" });
-  }
-  return NodeFS.readdirSync(outDir)
-    .filter((name) => name.endsWith(".tgz"))
-    .map((name) => NodePath.join(outDir, name));
+  return readPackKit(outDir);
+}
+
+function kitTarballs(kit: PackKit): string[] {
+  return Object.values(kit.descriptor.packages).map((pkg) => NodePath.join(kit.dir, pkg.tarball));
 }
 
 function installConsumer(input: {
   readonly dir: string;
   readonly layout: Layout;
   readonly tarballs: ReadonlyArray<string>;
+  readonly kit: PackKit | undefined;
   readonly patches: boolean;
 }): void {
   const rootManifest = JSON.parse(
@@ -138,15 +153,24 @@ function installConsumer(input: {
     NodePath.join(input.dir, "package.json"),
     `${JSON.stringify({ name: "lecturn-smoke-consumer", private: true, packageManager: rootManifest.packageManager, dependencies }, null, 2)}\n`,
   );
+  const kitPnpm = input.kit?.descriptor.pnpm;
+  const patchSource = input.kit?.dir ?? repoRoot;
   const patchedDependencies: Record<string, string> = {};
   if (input.patches) {
-    // Only the runtime externals survive into the tarball's dependency closure.
-    for (const [selector, patchPath] of Object.entries(workspace.patchedDependencies ?? {})) {
-      if (!selector.startsWith("@ff-labs/fff-node@") && !selector.startsWith("node-pty@")) continue;
+    const available =
+      kitPnpm?.patchedDependencies ??
+      // Only the runtime externals survive into the tarball's dependency closure.
+      Object.fromEntries(
+        Object.entries(workspace.patchedDependencies ?? {}).filter(
+          ([selector]) =>
+            selector.startsWith("@ff-labs/fff-node@") || selector.startsWith("node-pty@"),
+        ),
+      );
+    for (const [selector, patchPath] of Object.entries(available)) {
       patchedDependencies[selector] = patchPath;
       const target = NodePath.join(input.dir, patchPath);
       NodeFS.mkdirSync(NodePath.dirname(target), { recursive: true });
-      NodeFS.copyFileSync(NodePath.join(repoRoot, patchPath), target);
+      NodeFS.copyFileSync(NodePath.join(patchSource, patchPath), target);
     }
   }
   // JSON is valid YAML, which keeps this free of a YAML encoder.
@@ -154,7 +178,10 @@ function installConsumer(input: {
     NodePath.join(input.dir, "pnpm-workspace.yaml"),
     `${JSON.stringify({
       nodeLinker: input.layout,
-      allowBuilds: { "node-pty": workspace.allowBuilds?.["node-pty"] ?? true },
+      allowBuilds: kitPnpm?.allowBuilds ?? {
+        "node-pty": workspace.allowBuilds?.["node-pty"] ?? true,
+      },
+      ...(kitPnpm ? { publicHoistPattern: kitPnpm.publicHoistPattern } : {}),
       ...(Object.keys(patchedDependencies).length > 0 ? { patchedDependencies } : {}),
     })}\n`,
   );
@@ -325,6 +352,48 @@ async function runServer(runtime: Runtime, treeRoot: string, workDir: string): P
   }
 }
 
+const EMBED_IMPORT_SOURCE = `
+const node = await import("@lecturn/embed/node");
+const browser = await import("@lecturn/embed/browser");
+const types = ["node", "browser", "electron", "renderer"].map((entry) =>
+  import.meta.resolve("@lecturn/embed/" + entry).replace(/\\.mjs$/, ".d.mts"),
+);
+const fs = await import("node:fs");
+const url = await import("node:url");
+console.log(JSON.stringify({
+  connect: typeof node.connect,
+  mountEmbed: typeof browser.mountEmbed,
+  missingTypes: types.filter((file) => !fs.existsSync(url.fileURLToPath(file))),
+}));
+`;
+
+/** Loads the embed package as a host would, which also proves its workspace imports were bundled. */
+function runEmbedImport(consumerDir: string): ProbeCheck {
+  const result = NodeChildProcess.spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", EMBED_IMPORT_SOURCE],
+    { cwd: consumerDir, encoding: "utf8", timeout: 60_000 },
+  );
+  const line = result.stdout.trim().split("\n").at(-1) ?? "";
+  try {
+    const parsed = JSON.parse(line) as {
+      connect: string;
+      mountEmbed: string;
+      missingTypes: string[];
+    };
+    const ok =
+      parsed.connect === "function" &&
+      parsed.mountEmbed === "function" &&
+      parsed.missingTypes.length === 0;
+    return { ok, detail: line };
+  } catch {
+    return {
+      ok: false,
+      detail: `exited ${result.status ?? result.signal}: ${result.stderr.slice(-1_500)}`,
+    };
+  }
+}
+
 function formatTable(results: ReadonlyArray<RunResult>): string {
   const names = [...new Set(results.flatMap((result) => Object.keys(result.checks)))];
   const header = `| layout | runtime | ${names.join(" | ")} |`;
@@ -346,7 +415,8 @@ async function main(): Promise<void> {
     options: {
       electron: { type: "string" },
       asar: { type: "boolean", default: false },
-      layout: { type: "string", default: "both" },
+      layout: { type: "string", default: "hoisted" },
+      "pack-dir": { type: "string" },
       tarball: { type: "string", multiple: true },
       patches: { type: "boolean", default: false },
       json: { type: "string" },
@@ -354,6 +424,9 @@ async function main(): Promise<void> {
     },
   });
   if (values.asar && values.electron === undefined) throw new Error("--asar needs --electron");
+  if (values["pack-dir"] !== undefined && values.tarball !== undefined) {
+    throw new Error("--pack-dir and --tarball are exclusive");
+  }
   const layouts: Layout[] =
     values.layout === "both" ? ["isolated", "hoisted"] : [values.layout as Layout];
   const runtimes: Runtime[] = [
@@ -380,15 +453,25 @@ async function main(): Promise<void> {
   const tmp = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "lecturn-smoke-pack-"));
   const results: RunResult[] = [];
   try {
+    const kit =
+      values.tarball !== undefined
+        ? undefined
+        : values["pack-dir"] !== undefined
+          ? readPackKit(NodePath.resolve(values["pack-dir"]))
+          : packKit(NodePath.join(tmp, "kit"));
     const tarballs =
-      values.tarball?.map((tarball) => NodePath.resolve(tarball)) ??
-      packTarballs(NodePath.join(tmp, "tarballs"));
+      kit === undefined
+        ? (values.tarball ?? []).map((tarball) => NodePath.resolve(tarball))
+        : kitTarballs(kit);
     console.log(
       `[smoke] tarballs: ${tarballs.map((tarball) => NodePath.basename(tarball)).join(", ")}`,
     );
     for (const layout of layouts) {
       const consumerDir = NodePath.join(tmp, `install-${layout}`);
-      installConsumer({ dir: consumerDir, layout, tarballs, patches: values.patches });
+      installConsumer({ dir: consumerDir, layout, tarballs, kit, patches: values.patches });
+      const embedInstalled = NodeFS.existsSync(
+        NodePath.join(consumerDir, "node_modules/@lecturn/embed/package.json"),
+      );
       writeProbe(consumerDir);
       let asarRoot: string | undefined;
       for (const runtime of runtimes) {
@@ -417,7 +500,11 @@ async function main(): Promise<void> {
           layout,
           runtime: label,
           ...(probe.versions ? { versions: probe.versions } : {}),
-          checks: { ...probe.checks, wellKnown: server },
+          checks: {
+            ...probe.checks,
+            wellKnown: server,
+            ...(embedInstalled && !runtime.electron ? { embed: runEmbedImport(consumerDir) } : {}),
+          },
         });
       }
     }
