@@ -1,0 +1,62 @@
+/**
+ * Connected-app state that orchestration hooks must reach.
+ *
+ * `AppsOrchestrationHooks` registers inside the orchestration runtime, which
+ * is built below AppsLayer and cannot see its services. So the state those
+ * hooks read lives here, provided once by RuntimeLayer, and the AppsLayer
+ * services that own it (AppHostContextStore, HeadlessToolHost) wrap these same
+ * refs instead of keeping their own. State only: no logic, no dependencies.
+ */
+import type { AppId, ProjectId, ThreadId } from "@lecturn/contracts";
+import * as Context from "effect/Context";
+import type * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
+
+export type AppHostContextKey = `thread:${ThreadId}` | `project:${ProjectId}`;
+
+export const hostContextKey = (
+  target: { readonly threadId: ThreadId } | { readonly projectId: ProjectId },
+): AppHostContextKey =>
+  "threadId" in target ? `thread:${target.threadId}` : `project:${target.projectId}`;
+
+/** Processes are keyed by app project, never by credential (D5). */
+export type HeadlessProcessKey = `${AppId} ${ProjectId}`;
+
+/** One live call-path process, as the idle reaper needs to see it. */
+export interface HeadlessProcessEntry {
+  readonly appId: AppId;
+  readonly projectId: ProjectId;
+  /** The reaper never closes a process that is still finishing a call. */
+  readonly inFlightCalls: number;
+  readonly lastCallEndedAt: DateTime.Utc | null;
+  /** Closes stdin and waits; the app's own owner may keep serving (D5). */
+  readonly close: Effect.Effect<void>;
+  /** Revoke and shutdown only. */
+  readonly kill: Effect.Effect<void>;
+}
+
+export class AppRuntimeState extends Context.Service<
+  AppRuntimeState,
+  {
+    /** Written by AppHostContextStore, read by the beforeTurnStart contribution. */
+    readonly hostContext: Ref.Ref<ReadonlyMap<AppHostContextKey, string>>;
+    /** Written by HeadlessToolHost, read by the onRunTerminal reaper contribution. */
+    readonly headlessProcesses: Ref.Ref<ReadonlyMap<HeadlessProcessKey, HeadlessProcessEntry>>;
+    /**
+     * Set while an AppsLayer is built over this state. A second build would
+     * split lease, registry and process state between transports, so it dies.
+     */
+    readonly appsLayerBuilt: Ref.Ref<boolean>;
+  }
+>()("lecturn/apps/AppRuntimeState") {}
+
+export const layer = Layer.effect(
+  AppRuntimeState,
+  Effect.all({
+    hostContext: Ref.make<ReadonlyMap<AppHostContextKey, string>>(new Map()),
+    headlessProcesses: Ref.make<ReadonlyMap<HeadlessProcessKey, HeadlessProcessEntry>>(new Map()),
+    appsLayerBuilt: Ref.make(false),
+  }),
+);

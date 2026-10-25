@@ -11,6 +11,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import * as AppToolApprovalRegistry from "../apps/AppToolApprovalRegistry.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 
@@ -66,12 +67,15 @@ export class RuntimeRequestServiceV2 extends Context.Service<
 export const layer: Layer.Layer<
   RuntimeRequestServiceV2,
   never,
-  ProjectionStore.ProjectionStoreV2 | ProviderSessionManager.ProviderSessionManagerV2
+  | AppToolApprovalRegistry.AppToolApprovalRegistry
+  | ProjectionStore.ProjectionStoreV2
+  | ProviderSessionManager.ProviderSessionManagerV2
 > = Layer.effect(
   RuntimeRequestServiceV2,
   Effect.gen(function* () {
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     const sessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
+    const appApprovals = yield* AppToolApprovalRegistry.AppToolApprovalRegistry;
 
     return RuntimeRequestServiceV2.of({
       respond: (input) =>
@@ -94,6 +98,18 @@ export const layer: Layer.Layer<
               providerSessionId: input.providerSessionId,
               requestId: input.requestId,
             });
+          }
+          // Lecturn: a connected-app approval is answered to the waiting MCP
+          // tool call, never to the provider, which did not raise it (D1).
+          if (
+            request.connectedAppTool !== undefined ||
+            (yield* appApprovals.claims(input.requestId))
+          ) {
+            yield* appApprovals.resolve(
+              input.requestId,
+              AppToolApprovalRegistry.outcomeFromDecision(input.decision),
+            );
+            return;
           }
           if (
             request.responseCapability.type !== "live" ||
