@@ -72,8 +72,13 @@ export function AppWorkspaceTree({
   readonly context: AppTreeContext;
 }) {
   if (app.workspaces.length === 0) {
+    // A waiting pairing row already says what the app needs, and it has no threads to promise yet.
+    if (app.pairing.length > 0) return null;
     return (
-      <li className="lecturn-hierarchy-branch flex min-h-9 list-none items-center pt-2 text-xs text-sidebar-muted-foreground">
+      <li
+        data-testid="app-tree-empty"
+        className="lecturn-hierarchy-branch flex min-h-9 list-none items-center py-1.5 text-xs leading-snug text-sidebar-muted-foreground"
+      >
         Threads started from {app.name} appear here.
       </li>
     );

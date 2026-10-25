@@ -35,12 +35,21 @@ const CHIP_VARIANT = {
   muted: "outline",
 } as const satisfies Record<ConnectedAppStatusTone, AppStatusChipVariant>;
 
+/**
+ * `label` is the chip's short form, sized so the app name keeps the row's room; `description`
+ * is the full status for the chip's tooltip and for surfaces with space to spare.
+ */
 export function appStatusChip(app: Pick<AppStatus, "state" | "live">): {
   readonly label: string;
+  readonly description: string;
   readonly variant: AppStatusChipVariant;
 } {
   const status = connectedAppStatus(app);
-  return { label: status.label, variant: CHIP_VARIANT[status.tone] };
+  return {
+    label: app.state === "pairing-requested" ? "Pairing" : status.label,
+    description: status.label,
+    variant: CHIP_VARIANT[status.tone],
+  };
 }
 
 interface AppEnvironmentStatus {

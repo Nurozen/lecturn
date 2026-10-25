@@ -66,11 +66,20 @@ export function AppRowTrailing({
 }) {
   return (
     <>
-      {chip ? (
+      {chip === null ? null : chip.label === chip.description ? (
         <Badge variant={chip.variant} size="sm" data-testid="sidebar-app-state">
           {chip.label}
         </Badge>
-      ) : null}
+      ) : (
+        <Tooltip>
+          <TooltipTrigger
+            render={<Badge variant={chip.variant} size="sm" data-testid="sidebar-app-state" />}
+          >
+            {chip.label}
+          </TooltipTrigger>
+          <TooltipPopup>{chip.description}</TooltipPopup>
+        </Tooltip>
+      )}
       <span className="group/app-row-slot relative flex shrink-0 items-center gap-1">
         {working ? (
           <span className="flex items-center group-any-hover/app-row:hidden group-has-[:focus-visible]/app-row-slot:hidden">

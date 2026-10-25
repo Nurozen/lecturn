@@ -22,7 +22,7 @@ export function useAppsPaletteItems(): AppsPaletteItems {
       appId: app.appId,
       name: app.name,
       icon: <AppIcon iconDataUrl={app.iconDataUrl} />,
-      status: app.primary === null ? null : appStatusChip(app.primary.app).label,
+      status: app.primary === null ? null : appStatusChip(app.primary.app).description,
     })),
     icons: {
       projects: <FolderIcon className={ITEM_ICON_CLASS} />,
