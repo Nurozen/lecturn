@@ -231,7 +231,6 @@ import * as DefectReporter from "./observability/DefectReporter.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { requiredScopeForDeviceList, rpcAuthorizationError } from "./auth/RpcAuthorization.ts";
-import * as RpcAuthorization from "./auth/RpcAuthorization.ts";
 import { RpcInstrumentation, rpcInstrumentationLayer } from "./observability/RpcInstrumentation.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
@@ -274,7 +273,9 @@ import { PullRequestWatchService } from "./pullRequest/PullRequestWatchService.t
 import { SagaWorkbenchService } from "./stave/SagaWorkbenchService.ts";
 import { isPathUnder } from "./stave/StaveSpaceLock.ts";
 import { makeStaveRpcHandlers, StaveRpcRuntime } from "./stave/staveRpcHandlers.ts";
-import { appsRpcHandlers } from "./apps/AppsRpcHandlers.ts";
+import * as AppsRpcHandlers from "./apps/AppsRpcHandlers.ts";
+import type { AppsServices } from "./apps/AppsLayer.ts";
+import * as AppRpcAuthorization from "./apps/appRpcAuthorization.ts";
 import { StaveBinary } from "./stave/StaveBinary.ts";
 import { StaveCli } from "./stave/StaveCli.ts";
 import { StaveConfigReader } from "./stave/StaveConfigReader.ts";
@@ -1928,6 +1929,7 @@ const makeWsRpcHandlers = (
     // Stave reads live in their own module. RpcInstrumentation traces them in the
     // group middleware and RpcScopeAuthorization checks their scopes like any RPC.
     const staveRpcHandlers = yield* makeStaveRpcHandlers();
+    const appsRpcHandlers = yield* AppsRpcHandlers.make(currentSession);
 
     const getOrchestrationV2ArchivedShellSnapshot = Effect.gen(function* () {
       const { threads, projects, snapshotSequence } = yield* loadShellSnapshotParts({
@@ -3562,6 +3564,7 @@ export const layer = Layer.unwrap(
       | StaveRpcRuntime
       | ProjectionStoreV2.ProjectionStoreV2
       | CheckpointStore.CheckpointStore
+      | AppsServices
     >();
     const lecturnServices = Layer.succeedContext(
       Context.merge(lecturnContext, Context.make(PullRequestWatchService, pullRequestWatches)).pipe(
@@ -3613,7 +3616,10 @@ export const layer = Layer.unwrap(
           yield* RpcServer.make(ServerWsRpcGroup, WS_RPC_SERVER_OPTIONS).pipe(
             Effect.provideService(RpcServer.Protocol, withTerminalOutputWindow(protocol)),
             Effect.provide(
-              Layer.merge(RpcAuthorization.layer(session.scopes), rpcInstrumentationLayer),
+              Layer.merge(
+                AppRpcAuthorization.layer(session).pipe(Layer.provide(lecturnServices)),
+                rpcInstrumentationLayer,
+              ),
             ),
             Effect.forkScoped,
           );

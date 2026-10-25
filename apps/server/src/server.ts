@@ -40,6 +40,9 @@ import * as StaveOrchestrationHooks from "./stave/StaveOrchestrationHooks.ts";
 import * as StaveProjectShells from "./stave/StaveProjectShells.ts";
 import * as StaveSettlement from "./stave/StaveSettlement.ts";
 import * as TeamProviderPolicyHooks from "./orchestration-v2/fork/TeamProviderPolicyHooks.ts";
+import * as AppsHttp from "./apps/http.ts";
+import * as AppsLayer from "./apps/AppsLayer.ts";
+import * as AppsOrchestrationHooks from "./apps/AppsOrchestrationHooks.ts";
 import { TeamPolicyLive } from "./cloud/TeamPolicy.ts";
 import { EnvironmentHttpApi, type RepositoryIdentity } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
@@ -708,6 +711,7 @@ const layerScheduledTaskWebhookOrigin = Layer.effect(
 const layerLecturnOrchestrationHookRegistrations = Layer.mergeAll(
   StaveOrchestrationHooks.layer,
   ContextualLayers.hooksLayer,
+  AppsOrchestrationHooks.layer,
   TeamProviderPolicyHooks.layer.pipe(
     Layer.provide(TeamPolicyLive.pipe(Layer.provide(ServerSecretStore.layer))),
   ),
@@ -976,6 +980,7 @@ const layerMakeRoutes = Layer.mergeAll(
     DeviceHubProxy.layer,
     ServerBrowserStream.routeLayer,
     ServerHttp.layerStaticAndDevRoute,
+    AppsHttp.layer,
     Ws.layer,
   ),
   McpHttpServer.layer.pipe(
@@ -983,6 +988,8 @@ const layerMakeRoutes = Layer.mergeAll(
     Layer.provide(McpOAuth.layerMcpClientAuthenticator),
   ),
 ).pipe(
+  // One instance for both transports: a second would split lease and process state.
+  Layer.provide(AppsLayer.layer),
   Layer.provide(
     PullRequestReviewGuideService.layer.pipe(Layer.provide(PullRequestReviewGuides.layer)),
   ),
