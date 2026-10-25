@@ -17,7 +17,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeModule from "node:module";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
-import { connect } from "@lecturn/embed/node";
+import { type ConnectionModeEvent, connect } from "@lecturn/embed/node";
 import { captureEmbedView, mountEmbedView } from "@lecturn/embed/electron";
 import * as Electron from "electron";
 
@@ -143,17 +143,42 @@ async function main() {
       : null,
   );
 
+  // Project ids differ per server, so the e2e hooks follow the live switch (D36).
+  let currentProjectId = projectId;
+  const modeEvents: Array<ConnectionModeEvent> = [];
+  lecturn.status.subscribe((event) => {
+    if (event.type !== "mode") return;
+    modeEvents.push(event);
+    currentProjectId = event.projectIdsByWorkspaceRoot[workspaceRoot] ?? currentProjectId;
+  });
+
   // Driven from Playwright's electronApp.evaluate by e2e/.
   Object.assign(globalThis, {
     embedHost: {
-      environmentId: lecturn.environmentId,
-      origin: lecturn.origin,
-      projectId,
+      get environmentId() {
+        return lecturn.environmentId;
+      },
+      get origin() {
+        return lecturn.origin;
+      },
+      get mode() {
+        return lecturn.mode;
+      },
+      get pairing() {
+        return lecturn.status.current.pairing;
+      },
+      get projectId() {
+        return currentProjectId;
+      },
       workspaceRoot,
       flashLogPath,
       embed,
-      embedTarget: () => lecturn.embedTarget(projectId),
-      openThread: (threadId: string) => embed.retarget(projectId, threadId),
+      modeEvents,
+      embedTarget: () => lecturn.embedTarget(currentProjectId),
+      openThread: (threadId: string) => embed.retarget(currentProjectId, threadId),
+      listThreads: () => lecturn.listThreads(currentProjectId),
+      setThreadAppData: (threadId: string, appData: string | null, subtitle?: string | null) =>
+        lecturn.setThreadAppData(threadId, appData, subtitle),
       capture: async (file: string) => {
         await NodeFSP.writeFile(file, await captureEmbedView(embed));
       },

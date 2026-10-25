@@ -37,7 +37,7 @@ import { ticketedSocketUrl } from "./embedRpc.ts";
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 
 /** The built server the sidecar runs, so the CLI writes the schema that server reads. */
-const lecturnBin = () =>
+export const lecturnBin = () =>
   NodeModule.createRequire(NodePath.join(embedHostDir, "package.json")).resolve(
     "lecturn/dist/bin.mjs",
   );

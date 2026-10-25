@@ -6,6 +6,7 @@
  *   vp run --filter embed-host build
  *   vp run --filter embed-host e2e -- [scenario...]     # e.g. tracer; all by default
  *   vp run --filter embed-host e2e -- --steps 1,2       # spec B2's gold scenario (scenario.ts)
+ *   vp run --filter embed-host e2e -- --steps 3,4,5,ledger   # the attach flow and its copy ledger
  *   vp run --filter embed-host e2e -- captures          # the probed CP2 embed bar captures
  *
  * EMBED_HOST_E2E_ARTIFACTS=<dir> writes `<scenario>-e2e.log` and captures
@@ -16,12 +17,15 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
+/** A spec B2 step number, or `ledger`: the copy-ledger checks after step 5 (D33). */
+export type ScenarioStep = number | "ledger";
+
 export interface E2eContext {
   readonly log: (line: string) => void;
   readonly artifactsDir: string | undefined;
   readonly keep: boolean;
-  /** B2 step numbers for scenario.ts; its automated steps when omitted. */
-  readonly steps?: ReadonlyArray<number>;
+  /** Steps for scenario.ts; its automated steps when omitted. */
+  readonly steps?: ReadonlyArray<ScenarioStep>;
 }
 
 type Scenario = (context: E2eContext) => Promise<void>;
@@ -35,7 +39,7 @@ const fileFor = (name: string) => (name === GOLD_SCENARIO ? `${name}.ts` : `${na
 async function runScenario(
   name: string,
   artifactsDir: string | undefined,
-  steps: ReadonlyArray<number> | undefined,
+  steps: ReadonlyArray<ScenarioStep> | undefined,
 ): Promise<boolean> {
   const lines: Array<string> = [];
   const log = (line: string) => {
@@ -84,9 +88,14 @@ const steps =
     : (args[stepsAt + 1] ?? "")
         .split(",")
         .filter((step) => step.length > 0)
-        .map(Number);
-if (steps !== undefined && (steps.length === 0 || steps.some((step) => !Number.isInteger(step)))) {
-  console.error("--steps takes B2 step numbers, e.g. --steps 1,2");
+        .map((step): ScenarioStep => (step === "ledger" ? step : Number(step)));
+if (
+  steps !== undefined &&
+  (steps.length === 0 || steps.some((step) => step !== "ledger" && !Number.isInteger(step)))
+) {
+  console.error(
+    "--steps takes B2 step numbers or `ledger`, e.g. --steps 1,2 or --steps 3,4,5,ledger",
+  );
   process.exit(2);
 }
 const named =

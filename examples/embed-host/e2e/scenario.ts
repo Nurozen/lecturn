@@ -12,11 +12,15 @@
  *      awaiting-approval → running → idle, and every call carries the right
  *      `lecturn/context`. Then the same flash in Full access and in Auto runs
  *      with no approval card.
+ *   3-5, ledger. A user server starts while the host runs; the host switches
+ *      to it live, is closed and reopened, and its copy ledger is checked
+ *      across fallbacks (attach.ts).
  *   7. Revoke and re-pair (security.ts).
  *   8. The trust boundary: refusals over RPC, the shell stream and MCP,
  *      framing, and re-approval of a changed command (security.ts).
  *
- * Step 7 runs after step 8: it leaves the host without a credential.
+ * Step 8 runs before step 3, on the sidecar. Step 7 runs last, on whichever
+ * server the host ends on: it leaves the host without a credential.
  */
 import * as NodeAssert from "node:assert/strict";
 import * as NodeFS from "node:fs";
@@ -29,6 +33,7 @@ import type { EmbedBridge } from "@lecturn/embed/electron";
 import type { FlashRecord } from "../src/liveMcp.ts";
 import type { CounterCall } from "../tools/counter-mcp.ts";
 import { adminClient, issueAdminToken } from "./adminClient.ts";
+import { type AttachFlow, attachFlow, type SourceThread } from "./attach.ts";
 import { createEmbedThread } from "./embedRpc.ts";
 import { embedPage } from "./embedPage.ts";
 import { step7, step8 } from "./security.ts";
@@ -36,14 +41,21 @@ import {
   type EmbedHostGlobal,
   type EmbedHostRun,
   launchEmbedHost,
+  readJsonArray,
   removeDirs,
   until,
 } from "./harness.ts";
-import type { E2eContext } from "./run.ts";
+import type { E2eContext, ScenarioStep } from "./run.ts";
 
 const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 const SCRIPTS_FILE = NodePath.join(here, "scripts", "b2-steps-1-2.scripted.json");
-export const AUTOMATED_STEPS: ReadonlyArray<number> = [1, 2, 7, 8];
+export const AUTOMATED_STEPS: ReadonlyArray<ScenarioStep> = [1, 2, 3, 4, 5, "ledger", 7, 8];
+// Each later attach step continues from the state the one before it leaves.
+const REQUIRES: ReadonlyArray<readonly [ScenarioStep, ScenarioStep]> = [
+  [4, 3],
+  [5, 4],
+  ["ledger", 3],
+];
 
 const TURN_TIMEOUT_MS = 120_000;
 const CARD_TIMEOUT_MS = 30_000;
@@ -84,11 +96,6 @@ interface ScenarioGlobals {
 
 const collapse = (states: ReadonlyArray<string>) =>
   states.filter((state, index) => index === 0 || states[index - 1] !== state);
-
-async function readJsonArray<T>(path: string): Promise<Array<T>> {
-  if (!NodeFS.existsSync(path)) return [];
-  return JSON.parse(await NodeFSP.readFile(path, "utf8")) as Array<T>;
-}
 
 function assertContext(
   run: EmbedHostRun,
@@ -131,7 +138,7 @@ async function step1(run: EmbedHostRun, log: E2eContext["log"]) {
 }
 
 /** Step 2: the Supervised turn, then the same gated flash in Full access and in Auto. */
-async function step2(run: EmbedHostRun, log: E2eContext["log"]) {
+async function step2(run: EmbedHostRun, log: E2eContext["log"]): Promise<SourceThread> {
   const { host, dirs } = run;
   const countersPath = NodePath.join(dirs.workspace, ".embed-host", "counter-calls.json");
 
@@ -269,6 +276,50 @@ async function step2(run: EmbedHostRun, log: E2eContext["log"]) {
     [["ex_window_flash", "resolved"]],
     "the Supervised flash raised the thread's only app approval",
   );
+  return { threadId, cards };
+}
+
+const SEED_REPLY = "Counted once on the sidecar.";
+
+/** Without step 2, step 3 copies a thread with one counter card made here. */
+async function seedSourceThread(run: EmbedHostRun, log: E2eContext["log"]): Promise<SourceThread> {
+  const { host, dirs } = run;
+  const target = await run.app.evaluate(() =>
+    (globalThis as ScenarioGlobals).embedHost!.embedTarget(),
+  );
+  const threadId = await createEmbedThread({
+    origin: host.origin,
+    embedToken: target.token,
+    projectId: host.projectId,
+    title: THREAD_TITLE,
+  });
+  await run.app.evaluate(
+    (_electron, id) => (globalThis as ScenarioGlobals).embedHost!.openThread(id),
+    threadId,
+  );
+  const page = embedPage(await run.guestPage(`/${threadId}`));
+  await page.send(
+    `Count once.\n\`\`\`scripted\n${JSON.stringify([
+      { toolCall: { name: "ex_counter_increment", arguments: { by: 1 } } },
+      { assistantText: SEED_REPLY },
+    ])}\n\`\`\``,
+  );
+  const [card] = await page.loadedCards(1, CARD_TIMEOUT_MS);
+  // Copied mid-turn, the thread would miss its reply until a later re-copy.
+  await until("the seed turn to finish", TURN_TIMEOUT_MS, async () => {
+    const threads = await run.app.evaluate(() =>
+      (globalThis as ScenarioGlobals).embedHost!.listThreads(),
+    );
+    return threads.find((thread) => thread.threadId === threadId)?.state === "idle"
+      ? true
+      : undefined;
+  });
+  const counted = await readJsonArray<CounterCall>(
+    NodePath.join(dirs.workspace, ".embed-host", "counter-calls.json"),
+  );
+  NodeAssert.deepEqual(card, { state: "saved", count: String(counted.at(-1)?.value) });
+  log(`seeded sidecar thread ${threadId} with one counter card`);
+  return { threadId, cards: [card!] };
 }
 
 export default async function scenario({
@@ -282,23 +333,52 @@ export default async function scenario({
       `B2 step ${unknown.join(", ")} is not automated; automated steps: ${AUTOMATED_STEPS.join(", ")}`,
     );
   }
+  const missing = REQUIRES.filter(
+    ([step, needs]) => steps.includes(step) && !steps.includes(needs),
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      missing.map(([step, needs]) => `step ${step} continues from step ${needs}`).join("; "),
+    );
+  }
   const scripts = JSON.parse(await NodeFSP.readFile(SCRIPTS_FILE, "utf8")) as Record<
     number,
     ReadonlyArray<unknown>
   >;
-  const run = await launchEmbedHost({ scripted: true, scripts });
+  const first = await launchEmbedHost({ scripted: true, scripts });
+  const { dirs } = first;
+  // Steps 4 and 5 close and reopen the host, so from step 3 on the flow owns it.
+  let attach: AttachFlow | null = null;
+  const currentRun = () => (attach === null ? first : attach.run);
   try {
-    // Every later step runs on the host step 1 starts.
-    await step1(run, log);
-    if (steps.includes(2)) await step2(run, log);
-    if (steps.includes(8)) await step8(run, log);
-    if (steps.includes(7)) await step7(run, log);
+    await step1(first, log);
+    const copied = steps.includes(2) ? await step2(first, log) : null;
+    if (steps.includes(8)) await step8(first, log);
+    if (steps.includes(3)) {
+      attach = attachFlow({
+        run: first,
+        log,
+        reopen: () => launchEmbedHost({ scripted: true, scripts, dirs }),
+      });
+      await attach.step3(copied ?? (await seedSourceThread(first, log)));
+      if (steps.includes(4)) await attach.step4();
+      if (steps.includes(5)) await attach.step5();
+      if (steps.includes("ledger")) await attach.ledger();
+    }
+    if (steps.includes(7)) {
+      const host = attach === null ? first : await attach.ensureHost();
+      await host.refreshHost();
+      await step7(host, log);
+    }
   } catch (error) {
-    log(`--- embed-host output ---\n${run.output()}`);
+    const host = currentRun();
+    if (host !== null) log(`--- embed-host output ---\n${host.output()}`);
+    if (attach !== null) log(`--- user server output ---\n${attach.output()}`);
     throw error;
   } finally {
-    await run.close();
-    if (keep) log(`kept ${run.dirs.root}`);
-    else await removeDirs(run.dirs);
+    await currentRun()?.close();
+    await attach?.close();
+    if (keep) log(`kept ${dirs.root}`);
+    else await removeDirs(dirs);
   }
 }

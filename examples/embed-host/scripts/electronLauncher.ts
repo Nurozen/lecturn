@@ -20,7 +20,15 @@ export interface ElectronLaunchCommand {
  * Electron from the workspace, the way the desktop app's own scripts launch it
  * (a renamed runtime copy on macOS, `--no-sandbox` where Linux needs it).
  */
-export async function resolveEmbedHostLaunch(
+export function resolveEmbedHostLaunch(
+  args: ReadonlyArray<string> = [],
+): Promise<ElectronLaunchCommand> {
+  return resolveElectronAppLaunch(embedHostDir, args);
+}
+
+/** The same Electron, running another app: a directory with a package.json, or a main script. */
+export async function resolveElectronAppLaunch(
+  app: string,
   args: ReadonlyArray<string> = [],
 ): Promise<ElectronLaunchCommand> {
   // Read when the launcher loads: with it set, the macOS runtime copy becomes
@@ -29,5 +37,5 @@ export async function resolveEmbedHostLaunch(
   const launcher = (await import(NodeURL.pathToFileURL(launcherPath).href)) as {
     resolveElectronLaunchCommand(args: ReadonlyArray<string>): ElectronLaunchCommand;
   };
-  return launcher.resolveElectronLaunchCommand([embedHostDir, ...args]);
+  return launcher.resolveElectronLaunchCommand([app, ...args]);
 }
