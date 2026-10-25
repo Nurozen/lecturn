@@ -140,6 +140,7 @@ import {
 } from "../../promptStashStore";
 import { ComposerStashBadge } from "./ComposerStashBadge";
 import { AppRefChipStrip } from "../embed/AppRefChipStrip";
+import { EmbedComposerFooter, useEmbedComposerFooterStacked } from "../embed/EmbedComposerFooter";
 import { foldAppRefChips, useAppRefChipStore } from "../embed/appRefChipStore";
 import type { EmbedMention } from "../../embed/hostCommands";
 import { ComposerStashMenu } from "./ComposerStashMenu";
@@ -5050,6 +5051,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const contextualBlock =
     contextualAvailable &&
     (activeThreadId !== null || Boolean(draftId && props.contextualProjectId));
+  const embedFooterStacked = useEmbedComposerFooterStacked(
+    !composerControlsCollapsed && !showProviderUnavailable,
+  );
   const contextualControl = (size: "xs" | "sm", hidden = false) =>
     routeKind === "draft" && draftId && props.contextualProjectId ? (
       <ContextualDraftControl
@@ -5108,7 +5112,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ),
     },
   ];
-  if (contextualBlock)
+  if (contextualBlock && !embedFooterStacked)
     restingBlockDefs.push({
       id: "contextual",
       content: (
@@ -7354,7 +7358,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             />
 
             {isComposerCollapsedMobile || isComposerApprovalState ? null : (
-              <div
+              <EmbedComposerFooter
+                stacked={embedFooterStacked}
+                contextual={contextualBlock && contextualControl("sm")}
                 data-chat-composer-footer="true"
                 data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}
                 className={cn(
@@ -7448,7 +7454,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       : {})}
                   />
                 </div>
-              </div>
+              </EmbedComposerFooter>
             )}
             {showInlineRestingControls ? (
               <div className="h-8">
