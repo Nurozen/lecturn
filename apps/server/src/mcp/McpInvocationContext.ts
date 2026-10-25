@@ -1,9 +1,11 @@
 import {
+  type AppId,
   type AuthMcpClientAccess,
   type EnvironmentId,
   McpCapabilityUnavailableError,
   OrchestratorMcpFailure,
   PreviewAutomationUnavailableError,
+  type ProjectId,
   type ProviderInstanceId,
   type RuntimeMode,
   type ThreadId,
@@ -17,6 +19,7 @@ const ALL_MCP_CAPABILITIES = [
   "worktree",
   "device",
   "pull-requests",
+  "app",
 ] as const;
 export type McpCapability = (typeof ALL_MCP_CAPABILITIES)[number];
 
@@ -24,6 +27,12 @@ export interface McpThreadCaller {
   readonly threadId: ThreadId;
   readonly providerSessionId: string;
   readonly providerInstanceId: ProviderInstanceId;
+}
+
+/** Identity of the connected app whose project the calling thread belongs to. */
+export interface McpAppCaller {
+  readonly appId: AppId;
+  readonly projectId: ProjectId;
 }
 
 export interface McpClientCaller {
@@ -51,6 +60,8 @@ export interface McpInvocationScope {
   readonly requestNamespace: string;
   readonly thread: McpThreadCaller | undefined;
   readonly client: McpClientCaller | undefined;
+  /** Set exactly when `capabilities` has "app"; a capability alone cannot say which app. */
+  readonly app?: McpAppCaller | undefined;
 }
 
 export class McpInvocationContext extends Context.Service<
@@ -111,6 +122,13 @@ const threadCallerRequired = (operation: string) =>
   });
 
 export type McpThreadInvocationScope = McpInvocationScope & { readonly thread: McpThreadCaller };
+
+export type McpAppInvocationScope = McpThreadInvocationScope & { readonly app: McpAppCaller };
+
+export const appInvocationScope = (scope: McpInvocationScope): McpAppInvocationScope | undefined =>
+  scope.capabilities.has("app") && scope.app !== undefined && scope.thread !== undefined
+    ? (scope as McpAppInvocationScope)
+    : undefined;
 
 export const requireThreadScope = (scope: McpInvocationScope, operation: string) =>
   scope.thread === undefined

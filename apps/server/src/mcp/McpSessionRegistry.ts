@@ -22,6 +22,8 @@ export interface McpCredentialRequest {
    */
   readonly browserToolsAvailable?: boolean;
   readonly capabilities?: ReadonlySet<McpInvocationContext.McpCapability>;
+  /** Only threads in an app-bound project get one; it grants that app's tools on `/mcp`. */
+  readonly app?: McpInvocationContext.McpAppCaller;
 }
 
 export interface McpIssuedCredential {
@@ -125,7 +127,9 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
           "worktree",
           "pull-requests",
           ...(request.capabilities ?? (browserToolsAvailable ? (["preview"] as const) : [])),
+          ...(request.app === undefined ? [] : (["app"] as const)),
         ]),
+        ...(request.app === undefined ? {} : { app: request.app }),
         issuedAt,
       };
       yield* SynchronizedRef.update(state, ({ records }) => {
