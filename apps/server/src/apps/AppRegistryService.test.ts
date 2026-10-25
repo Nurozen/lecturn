@@ -1,22 +1,15 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import {
-  AppRegistration,
-  type AppSidecarBootstrap,
-  AppsError,
-  ProjectId,
-} from "@lecturn/contracts";
+import { ProjectId } from "@lecturn/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { McpSchema } from "effect/ai";
 
-import * as ServerConfig from "../config.ts";
+import * as SessionStore from "../auth/SessionStore.ts";
 import { DeviceToolkit } from "../mcp/toolkits/device/tools.ts";
 import { EnvironmentToolkit } from "../mcp/toolkits/environment/tools.ts";
 import { HtmlToolkit } from "../mcp/toolkits/html/tools.ts";
@@ -28,117 +21,43 @@ import { PullRequestsToolkit } from "../mcp/toolkits/pullRequests/tools.ts";
 import { ThreadToolkit } from "../mcp/toolkits/thread/tools.ts";
 import { WorktreeToolkit } from "../mcp/toolkits/worktree/tools.ts";
 import { AttachmentToolkit } from "../mcp/toolkits/attachment/tools.ts";
-import * as SqlitePersistence from "../persistence/Sqlite.ts";
-import * as AppLeaseServiceLayer from "./AppLeaseService.ts";
-import * as AppRegistryServiceLayer from "./AppRegistryService.ts";
 import { RESERVED_APP_TOOL_PREFIXES } from "./AppRegistryService.ts";
+import { AppLeaseService, AppRegistryService } from "./services.ts";
 import {
-  AppLeaseService,
-  AppProjectService,
-  AppRegistryService,
-  LiveToolClient,
-} from "./services.ts";
+  appProject,
+  errorCode,
+  liveDefinitions,
+  makeRegistration,
+  makeRegistryLayer as makeLayer,
+  registration,
+  sidecar,
+  streamQueue,
+} from "./testing/appRegistryTestLayer.ts";
 
-const PNG_1PX =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
-
-const decodeRegistration = Schema.decodeUnknownSync(AppRegistration);
-const makeRegistration = (overrides: Record<string, unknown> = {}) =>
-  decodeRegistration({
-    appId: "dev.example.app",
-    name: "Example",
-    iconDataUrl: PNG_1PX,
-    toolPrefix: "ex",
-    refPrefixes: ["ex:"],
-    headlessTools: {
-      command: "/usr/local/bin/example",
-      args: ["mcp", "{workspaceRoot}"],
-      listArgs: ["mcp", "--list-tools", "{workspaceRoot}"],
-      cwd: "{workspaceRoot}",
-    },
-    liveTools: true,
-    gatedTools: ["deploy"],
-    ...overrides,
-  });
-
-const registration = makeRegistration();
-const appProject = ProjectId.make("project-app");
-const liveDefinitions = [
-  new McpSchema.Tool({ name: "window_flash", inputSchema: { type: "object" } }),
-];
 const headlessDefinitions = [
   new McpSchema.Tool({ name: "design", inputSchema: { type: "object" } }),
 ];
 const liveLease = { url: "http://127.0.0.1:4100/mcp", bearer: "live-bearer", ttlSeconds: 20 };
 
-const makeLayer = (options: { readonly appSidecar?: AppSidecarBootstrap } = {}) => {
-  const liveListCalls = { count: 0 };
-  const config = Layer.effect(
-    ServerConfig.ServerConfig,
-    Effect.gen(function* () {
-      const base = yield* ServerConfig.ServerConfig;
-      return { ...base, ...options } satisfies ServerConfig.ServerConfig["Service"];
-    }),
-  ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-app-registry-" })));
-  const liveClient = Layer.succeed(LiveToolClient)({
-    listTools: () =>
-      Effect.sync(() => {
-        liveListCalls.count++;
-        return liveDefinitions;
-      }),
-    call: () => Effect.die("unused"),
-    readResource: () => Effect.die("unused"),
-  });
-  const projects = Layer.succeed(AppProjectService)({
-    ensureWorkspace: () => Effect.die("unused"),
-    resolveAppForProject: (projectId) =>
-      Effect.succeed(
-        projectId === appProject
-          ? Option.some({ appId: registration.appId, workspaceRoot: "/work/rocket" })
-          : Option.none(),
-      ),
-    listThreads: () => Effect.die("unused"),
-    streamThreads: () => Stream.die("unused"),
-    setThreadAppData: () => Effect.die("unused"),
-    createEmbedThread: () => Effect.die("unused"),
-    markThreadsCopied: () => Effect.die("unused"),
-  });
-  const layer = AppRegistryServiceLayer.layer.pipe(
-    Layer.provideMerge(AppLeaseServiceLayer.layer),
-    Layer.provide(liveClient),
-    Layer.provide(projects),
-    Layer.provide(SqlitePersistence.layerMemory),
-    Layer.provide(config),
-  );
-  return { layer, liveListCalls };
-};
+type Registry = AppRegistryService["Service"];
 
-const sidecar = (overrides: Record<string, unknown> = {}): AppSidecarBootstrap => ({
-  mode: "app-sidecar",
-  registration: makeRegistration(overrides),
-  appSeedToken: "seed-token",
-});
+const poll = (registry: Registry, created: { requestId: string; pollSecret: string }) =>
+  registry.pollPairingRequest({ requestId: created.requestId, pollSecret: created.pollSecret });
 
-/** Delivers a stream's elements in order, so tests await each one instead of sleeping. */
-const streamQueue = <A, E>(stream: Stream.Stream<A, E>) =>
+const stateOf = (registry: Registry) =>
+  registry
+    .get(registration.appId)
+    .pipe(Effect.map((record) => Option.getOrThrow(record).status.state));
+
+/** Pairs through the prompt and returns the delivered credential's token. */
+const grant = (registry: Registry, input: typeof registration) =>
   Effect.gen(function* () {
-    const queue = yield* Queue.unbounded<A>();
-    yield* stream.pipe(
-      Stream.runForEach((value) => Queue.offer(queue, value)),
-      Effect.forkChild({ startImmediately: true }),
-    );
-    return queue;
+    const created = yield* registry.createPairingRequest(input);
+    yield* registry.decidePairing({ requestId: created.requestId, decision: "grant" });
+    const { credential } = yield* poll(registry, created);
+    if (credential === undefined) return yield* Effect.die("no credential delivered");
+    return credential.token;
   });
-
-const isAppsError = Schema.is(AppsError);
-
-const errorCode = <A>(exit: Exit.Exit<A, unknown>) =>
-  Exit.isFailure(exit)
-    ? Option.match(Exit.findErrorOption(exit), {
-        onNone: () => "defect",
-        onSome: (error) => (isAppsError(error) ? error.code : String(error)),
-      })
-    : "success";
 
 it.layer(NodeServices.layer)("AppRegistryService", (it) => {
   it.effect("shows a new app's pairing request until it expires", () => {
@@ -319,6 +238,206 @@ it.layer(NodeServices.layer)("AppRegistryService", (it) => {
         Stream.runCollect(registry.streamEmbedContext(ProjectId.make("project-plain"))),
       );
       assert.strictEqual(errorCode(other), "not-found");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("delivers the credential of a granted request exactly once", () => {
+    const { layer } = makeLayer();
+    return Effect.gen(function* () {
+      const registry = yield* AppRegistryService;
+      const sessions = yield* SessionStore.SessionStore;
+      const created = yield* registry.createPairingRequest(registration);
+      const status = yield* registry.decidePairing({
+        requestId: created.requestId,
+        decision: "grant",
+      });
+      assert.strictEqual(status.state, "granted");
+      assert.isNull(status.pendingRequest);
+      assert.isTrue(yield* registry.isGranted(registration.appId));
+
+      const first = yield* poll(registry, created);
+      assert.strictEqual(first.state, "granted");
+      const credential = first.credential;
+      assert.isDefined(credential);
+      const verified = yield* sessions.verify(credential!.token);
+      assert.strictEqual(verified.subject, "app:dev.example.app");
+      assert.deepEqual(verified.scopes, ["apps:host"]);
+      assert.isUndefined(verified.runtimeModeCeiling);
+
+      assert.deepEqual(yield* poll(registry, created), { state: "granted" });
+      // Answered prompts cannot be answered again, by this client or another.
+      assert.strictEqual(
+        errorCode(
+          yield* Effect.exit(
+            registry.decidePairing({ requestId: created.requestId, decision: "deny" }),
+          ),
+        ),
+        "not-found",
+      );
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("puts only runtime-mode ceilings into the credential", () => {
+    const { layer } = makeLayer();
+    return Effect.gen(function* () {
+      const registry = yield* AppRegistryService;
+      const sessions = yield* SessionStore.SessionStore;
+      const ceilingOf = (ceiling: "read-only" | "auto") =>
+        Effect.gen(function* () {
+          const created = yield* registry.createPairingRequest(registration);
+          const status = yield* registry.setRuntimeCeiling({ appId: registration.appId, ceiling });
+          assert.strictEqual(status.runtimeCeiling, ceiling);
+          yield* registry.decidePairing({ requestId: created.requestId, decision: "grant" });
+          const { credential } = yield* poll(registry, created);
+          return (yield* sessions.verify(credential!.token)).runtimeModeCeiling;
+        });
+      assert.isUndefined(yield* ceilingOf("read-only"));
+      assert.strictEqual(yield* ceilingOf("auto"), "auto");
+      // The registry keeps the full ceiling, read-only included (D2).
+      yield* registry.setRuntimeCeiling({ appId: registration.appId, ceiling: "read-only" });
+      const record = Option.getOrThrow(yield* registry.get(registration.appId));
+      assert.strictEqual(record.status.runtimeCeiling, "read-only");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("sends a changed command or listing command back to pending", () => {
+    const { layer } = makeLayer();
+    return Effect.gen(function* () {
+      const registry = yield* AppRegistryService;
+      yield* grant(registry, registration);
+      yield* registry.setCachedTools(registration.appId, "headless", headlessDefinitions);
+
+      // The same command asks for a new credential without suspending the grant.
+      const same = yield* registry.createPairingRequest(makeRegistration({ name: "Example 2" }));
+      assert.strictEqual(yield* stateOf(registry), "granted");
+      yield* registry.decidePairing({ requestId: same.requestId, decision: "deny" });
+      assert.strictEqual(yield* stateOf(registry), "granted");
+
+      const approved = registration.headlessTools!;
+      for (const headlessTools of [
+        { ...approved, args: ["serve", "{workspaceRoot}"] },
+        { ...approved, listArgs: ["tools", "{workspaceRoot}"] },
+      ]) {
+        const changed = makeRegistration({ headlessTools });
+        const created = yield* registry.createPairingRequest(changed);
+        assert.strictEqual(yield* stateOf(registry), "pairing-requested");
+        assert.isFalse(yield* registry.isGranted(registration.appId));
+        // Until the user decides, the record keeps the command they approved.
+        const pending = Option.getOrThrow(yield* registry.get(registration.appId));
+        assert.deepEqual(pending.registration.headlessTools, registration.headlessTools);
+        assert.deepEqual(pending.status.pendingRequest?.registration.headlessTools, headlessTools);
+
+        yield* registry.decidePairing({ requestId: created.requestId, decision: "grant" });
+        const granted = Option.getOrThrow(yield* registry.get(registration.appId));
+        assert.strictEqual(granted.status.state, "granted");
+        assert.deepEqual(granted.registration.headlessTools, headlessTools);
+        assert.isTrue(Option.isNone((yield* registry.cachedTools(registration.appId)).headless));
+        yield* grant(registry, registration);
+      }
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("lets a denied app ask again", () => {
+    const { layer } = makeLayer();
+    return Effect.gen(function* () {
+      const registry = yield* AppRegistryService;
+      const first = yield* registry.createPairingRequest(registration);
+      const denied = yield* registry.decidePairing({
+        requestId: first.requestId,
+        decision: "deny",
+      });
+      assert.strictEqual(denied.state, "denied");
+      assert.deepEqual(yield* poll(registry, first), { state: "denied" });
+
+      const second = yield* registry.createPairingRequest(registration);
+      assert.strictEqual(yield* stateOf(registry), "pairing-requested");
+      yield* registry.decidePairing({ requestId: second.requestId, decision: "grant" });
+      assert.isDefined((yield* poll(registry, second)).credential);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("retires an app's credentials when it pairs again, is denied, or is revoked", () => {
+    const { layer } = makeLayer();
+    return Effect.gen(function* () {
+      const registry = yield* AppRegistryService;
+      const sessions = yield* SessionStore.SessionStore;
+      const leases = yield* AppLeaseService;
+      const verifies = (token: string) =>
+        sessions.verify(token).pipe(
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
+        );
+
+      const first = yield* grant(registry, registration);
+      const second = yield* grant(registry, registration);
+      assert.isFalse(yield* verifies(first));
+      assert.isTrue(yield* verifies(second));
+
+      const changed = yield* registry.createPairingRequest(
+        makeRegistration({ headlessTools: { ...registration.headlessTools, args: ["serve"] } }),
+      );
+      yield* registry.decidePairing({ requestId: changed.requestId, decision: "deny" });
+      assert.strictEqual(yield* stateOf(registry), "denied");
+      assert.isFalse(yield* verifies(second));
+
+      const third = yield* grant(registry, registration);
+      yield* leases.set(registration.appId, liveLease);
+      const revoked = yield* registry.revoke(registration.appId);
+      assert.strictEqual(revoked.state, "revoked");
+      assert.isNull(revoked.live);
+      assert.isFalse(yield* verifies(third));
+      assert.isTrue(Option.isNone(yield* leases.current(registration.appId)));
+      assert.isFalse(yield* registry.isGranted(registration.appId));
+
+      // A revoked app stays revoked until the user grants it again.
+      const repair = yield* registry.createPairingRequest(registration);
+      assert.strictEqual(yield* stateOf(registry), "revoked");
+      yield* registry.decidePairing({ requestId: repair.requestId, decision: "grant" });
+      assert.strictEqual(yield* stateOf(registry), "granted");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("refuses decisions on expired requests", () => {
+    const { layer } = makeLayer();
+    return Effect.gen(function* () {
+      const registry = yield* AppRegistryService;
+      const created = yield* registry.createPairingRequest(registration);
+      yield* TestClock.adjust("10 minutes");
+      assert.strictEqual(
+        errorCode(
+          yield* Effect.exit(
+            registry.decidePairing({ requestId: created.requestId, decision: "grant" }),
+          ),
+        ),
+        "not-found",
+      );
+      assert.isFalse(yield* registry.isGranted(registration.appId));
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("deletes an app and its credentials", () => {
+    const { layer } = makeLayer();
+    return Effect.gen(function* () {
+      const registry = yield* AppRegistryService;
+      const sessions = yield* SessionStore.SessionStore;
+      const token = yield* grant(registry, registration);
+      const events = yield* streamQueue(registry.streamStatus);
+      yield* Queue.take(events);
+
+      const withThreads = yield* Effect.exit(
+        registry.delete({ appId: registration.appId, deleteThreads: true }),
+      );
+      assert.isTrue(Exit.isFailure(withThreads));
+      assert.isTrue(yield* registry.isGranted(registration.appId));
+
+      yield* registry.delete({ appId: registration.appId, deleteThreads: false });
+      assert.deepEqual(yield* Queue.take(events), { type: "remove", appId: registration.appId });
+      assert.isTrue(Option.isNone(yield* registry.get(registration.appId)));
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(sessions.verify(token))));
+      assert.strictEqual(
+        errorCode(yield* Effect.exit(registry.revoke(registration.appId))),
+        "not-found",
+      );
     }).pipe(Effect.provide(layer));
   });
 });

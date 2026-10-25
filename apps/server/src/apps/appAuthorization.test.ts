@@ -18,6 +18,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import type { AuthenticatedSession } from "../auth/EnvironmentAuth.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import { type AppAuthorizationDeps, EMBED_TOKEN_SCOPES, makeWith } from "./appAuthorization.ts";
 import * as AppsRpcHandlers from "./AppsRpcHandlers.ts";
 import {
@@ -358,6 +359,7 @@ describe("apps.createEmbedThread", () => {
       Effect.provide(
         Layer.mergeAll(
           Layer.mock(AppRegistryService)({}),
+          Layer.mock(ProjectStore.ProjectStoreV2)({}),
           Layer.mock(HeadlessToolHost)({}),
           Layer.mock(AppLeaseService)({}),
           Layer.mock(AppHostContextStore)({}),
