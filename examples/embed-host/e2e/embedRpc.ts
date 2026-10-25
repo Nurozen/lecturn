@@ -22,7 +22,8 @@ const AppsClientGroup = RpcGroup.make(...AppsCoreRpcs);
 const decodeTicket = Schema.decodeUnknownSync(Schema.toCodecJson(AuthWebSocketTicketResult));
 const decodeCreateInput = Schema.decodeEffect(AppsCreateEmbedThreadInput);
 
-async function ticketedSocketUrl(origin: string, bearer: string): Promise<string> {
+/** A WebSocket handshake cannot carry a bearer header, so the bearer buys a one-use ticket for the URL. */
+export async function ticketedSocketUrl(origin: string, bearer: string): Promise<string> {
   const response = await fetch(new URL("/api/auth/websocket-ticket", origin), {
     method: "POST",
     headers: { authorization: `Bearer ${bearer}` },

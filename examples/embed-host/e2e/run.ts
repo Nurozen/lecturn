@@ -5,6 +5,7 @@
  *
  *   vp run --filter embed-host build
  *   vp run --filter embed-host e2e -- [scenario...]     # e.g. tracer; all by default
+ *   vp run --filter embed-host e2e -- --steps 1,2       # spec B2's gold scenario (scenario.ts)
  *
  * EMBED_HOST_E2E_ARTIFACTS=<dir> writes `<scenario>-e2e.log` and captures
  * there; EMBED_HOST_E2E_KEEP=1 keeps each run's temp directory.
@@ -18,14 +19,23 @@ export interface E2eContext {
   readonly log: (line: string) => void;
   readonly artifactsDir: string | undefined;
   readonly keep: boolean;
+  /** B2 step numbers for scenario.ts; its automated steps when omitted. */
+  readonly steps?: ReadonlyArray<number>;
 }
 
 type Scenario = (context: E2eContext) => Promise<void>;
 
 const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 const SUFFIX = ".e2e.ts";
+// The gold scenario is named for the spec, not the e2e suffix, so it has its own entry.
+const GOLD_SCENARIO = "scenario";
+const fileFor = (name: string) => (name === GOLD_SCENARIO ? `${name}.ts` : `${name}${SUFFIX}`);
 
-async function runScenario(name: string, artifactsDir: string | undefined): Promise<boolean> {
+async function runScenario(
+  name: string,
+  artifactsDir: string | undefined,
+  steps: ReadonlyArray<number> | undefined,
+): Promise<boolean> {
   const lines: Array<string> = [];
   const log = (line: string) => {
     const stamped = `[${new Date().toISOString()}] ${line}`;
@@ -35,11 +45,16 @@ async function runScenario(name: string, artifactsDir: string | undefined): Prom
   let passed = false;
   try {
     const module = (await import(
-      NodeURL.pathToFileURL(NodePath.join(here, `${name}${SUFFIX}`)).href
+      NodeURL.pathToFileURL(NodePath.join(here, fileFor(name))).href
     )) as {
       readonly default: Scenario;
     };
-    await module.default({ log, artifactsDir, keep: process.env["EMBED_HOST_E2E_KEEP"] === "1" });
+    await module.default({
+      log,
+      artifactsDir,
+      keep: process.env["EMBED_HOST_E2E_KEEP"] === "1",
+      ...(steps === undefined ? {} : { steps }),
+    });
     passed = true;
     log("PASS");
   } catch (error) {
@@ -54,10 +69,29 @@ async function runScenario(name: string, artifactsDir: string | undefined): Prom
   return passed;
 }
 
-const available = NodeFS.readdirSync(here)
-  .filter((file) => file.endsWith(SUFFIX))
-  .map((file) => file.slice(0, -SUFFIX.length));
-const requested = process.argv.slice(2).filter((arg) => arg !== "--");
+const available = [
+  ...NodeFS.readdirSync(here)
+    .filter((file) => file.endsWith(SUFFIX))
+    .map((file) => file.slice(0, -SUFFIX.length)),
+  GOLD_SCENARIO,
+];
+const args = process.argv.slice(2).filter((arg) => arg !== "--");
+const stepsAt = args.indexOf("--steps");
+const steps =
+  stepsAt === -1
+    ? undefined
+    : (args[stepsAt + 1] ?? "")
+        .split(",")
+        .filter((step) => step.length > 0)
+        .map(Number);
+if (steps !== undefined && (steps.length === 0 || steps.some((step) => !Number.isInteger(step)))) {
+  console.error("--steps takes B2 step numbers, e.g. --steps 1,2");
+  process.exit(2);
+}
+const named =
+  stepsAt === -1 ? args : args.filter((_, index) => index < stepsAt || index > stepsAt + 1);
+// `--steps` alone means the gold scenario.
+const requested = steps !== undefined && named.length === 0 ? [GOLD_SCENARIO] : named;
 const unknown = requested.filter((name) => !available.includes(name));
 if (unknown.length > 0) {
   console.error(`Unknown scenario ${unknown.join(", ")}; available: ${available.join(", ")}`);
@@ -68,6 +102,7 @@ const artifactsDir = process.env["EMBED_HOST_E2E_ARTIFACTS"];
 if (artifactsDir !== undefined) await NodeFSP.mkdir(artifactsDir, { recursive: true });
 let failed = 0;
 for (const name of requested.length > 0 ? requested : available) {
-  if (!(await runScenario(name, artifactsDir))) failed += 1;
+  if (!(await runScenario(name, artifactsDir, name === GOLD_SCENARIO ? steps : undefined)))
+    failed += 1;
 }
 process.exit(failed === 0 ? 0 : 1);
