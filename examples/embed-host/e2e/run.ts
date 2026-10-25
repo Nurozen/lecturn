@@ -6,6 +6,7 @@
  *   vp run --filter embed-host build
  *   vp run --filter embed-host e2e -- [scenario...]     # e.g. tracer; all by default
  *   vp run --filter embed-host e2e -- --steps 1,2       # spec B2's gold scenario (scenario.ts)
+ *   vp run --filter embed-host e2e -- captures          # the probed CP2 embed bar captures
  *
  * EMBED_HOST_E2E_ARTIFACTS=<dir> writes `<scenario>-e2e.log` and captures
  * there; EMBED_HOST_E2E_KEEP=1 keeps each run's temp directory.

@@ -99,7 +99,7 @@ async function main() {
       },
       liveTools: true,
       gatedTools,
-      instructions: "You can increment a counter and flash the host window.",
+      instructions: "You can read and increment a counter and flash the host window.",
     },
     ...(env["LECTURN_HOME"] ? { lecturnHome: env["LECTURN_HOME"] } : {}),
     sidecar: {

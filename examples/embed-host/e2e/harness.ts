@@ -63,6 +63,8 @@ export interface LaunchOptions {
    * what a user would type.
    */
   readonly scripts?: Readonly<Record<number, ReadonlyArray<unknown>>>;
+  /** Extra variables for main.ts, such as `EMBED_HOST_APP_GATE`. */
+  readonly env?: Readonly<Record<string, string>>;
   readonly readyTimeoutMs?: number;
 }
 
@@ -138,6 +140,7 @@ export async function launchEmbedHost(options: LaunchOptions = {}): Promise<Embe
     ELECTRON_ENABLE_LOGGING: "1",
     ...(options.scripted ? { LECTURN_TEST_PROVIDERS: "1" } : {}),
     ...(options.scripts ? { LECTURN_SCRIPTED_PROVIDER_SCRIPTS: dirs.scripts } : {}),
+    ...options.env,
   });
   const app = await _electron.launch({
     executablePath: command.electronPath,

@@ -2,9 +2,10 @@
 /**
  * The host's headless tools: a stdio MCP server Lecturn starts per workspace
  * while the host app may be closed. `counter_increment` keeps a counter under
- * `--root` and renders as the `ui://ex/counter-card` MCP Apps card.
+ * `--root` and renders as the `ui://ex/counter-card` MCP Apps card;
+ * `counter_read` reads it and has no card, so its tool row stands alone.
  *
- * Every call's `_meta` is appended to `<root>/.embed-host/counter-calls.json`
+ * Every increment's `_meta` is appended to `<root>/.embed-host/counter-calls.json`
  * so tests can check the context Lecturn sent with it.
  *
  * `--list-tools` prints the `tools/list` result and exits. It takes no state,
@@ -35,6 +36,15 @@ const counterIncrementTool = {
   },
   _meta: { ui: { resourceUri: COUNTER_CARD_URI } },
 };
+
+const counterReadTool = {
+  name: "counter_read",
+  title: "Read counter",
+  description: "Return the workspace counter's current value without changing it.",
+  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+};
+
+const TOOLS = [counterReadTool, counterIncrementTool];
 
 const counterCard = {
   uri: COUNTER_CARD_URI,
@@ -90,7 +100,15 @@ function makeCounter(root: string) {
   const valuePath = NodePath.join(stateDir, "counter.json");
   const callsPath = NodePath.join(stateDir, "counter-calls.json");
 
-  return async (params: Record<string, unknown>) => {
+  const read = async () => {
+    const { value } = await readJson(valuePath, { value: 0 });
+    return {
+      content: [{ type: "text", text: `The counter is at ${value}.` }],
+      structuredContent: { count: value },
+    };
+  };
+
+  const increment = async (params: Record<string, unknown>) => {
     const args = isRecord(params.arguments) ? params.arguments : {};
     const by = args.by === undefined ? 1 : args.by;
     if (typeof by !== "number" || !Number.isInteger(by) || by < 1 || by > 100) {
@@ -111,10 +129,12 @@ function makeCounter(root: string) {
       structuredContent: { count: value, by, history: calls.map((call) => call.value) },
     };
   };
+
+  return { read, increment };
 }
 
 function serve(root: string) {
-  const increment = makeCounter(root);
+  const counter = makeCounter(root);
 
   const answer = async (method: unknown, params: Record<string, unknown>) => {
     switch (method) {
@@ -129,12 +149,11 @@ function serve(root: string) {
       case "ping":
         return {};
       case "tools/list":
-        return { tools: [counterIncrementTool] };
+        return { tools: TOOLS };
       case "tools/call":
-        if (params.name !== counterIncrementTool.name) {
-          throw new RpcError(-32602, `Unknown tool ${String(params.name)}.`);
-        }
-        return increment(params);
+        if (params.name === counterReadTool.name) return counter.read();
+        if (params.name === counterIncrementTool.name) return counter.increment(params);
+        throw new RpcError(-32602, `Unknown tool ${String(params.name)}.`);
       case "resources/list":
         return { resources: [counterCard] };
       case "resources/read":
@@ -189,7 +208,7 @@ function serve(root: string) {
 
 const argv = process.argv.slice(2);
 if (argv.includes("--list-tools")) {
-  process.stdout.write(`${JSON.stringify({ tools: [counterIncrementTool] })}\n`);
+  process.stdout.write(`${JSON.stringify({ tools: TOOLS })}\n`);
 } else {
   serve(readRoot(argv));
 }
