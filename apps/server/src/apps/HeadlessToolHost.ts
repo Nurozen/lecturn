@@ -52,6 +52,7 @@ interface Slot {
 }
 
 const decodeCallResult = Schema.decodeUnknownEffect(McpSchema.CallToolResult);
+const decodeReadResult = Schema.decodeUnknownEffect(McpSchema.ReadResourceResult);
 
 const make = Effect.gen(function* () {
   const { headlessProcesses } = yield* AppRuntimeState;
@@ -295,6 +296,22 @@ const make = Effect.gen(function* () {
                 new AppsError({
                   code: "unavailable",
                   message: `The app answered ${request.name} with a result Lecturn cannot read.`,
+                }),
+            ),
+          ),
+        ),
+      ),
+    readResource: (appId, projectId, uri) =>
+      withProcess(appId, projectId, (connection) =>
+        connection.request("resources/read", { uri }),
+      ).pipe(
+        Effect.flatMap((result) =>
+          decodeReadResult(result).pipe(
+            Effect.mapError(
+              () =>
+                new AppsError({
+                  code: "unavailable",
+                  message: `The app answered ${uri} with a resource Lecturn cannot read.`,
                 }),
             ),
           ),

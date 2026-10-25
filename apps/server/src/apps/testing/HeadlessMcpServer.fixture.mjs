@@ -16,6 +16,9 @@ const log = (event) => {
   );
 };
 
+const COUNTER_CARD_URI = "ui://ex/counter-card";
+const COUNTER_CARD_HTML = "<!doctype html><title>Counter</title><p>count</p>";
+
 const TOOLS = [
   {
     name: "increment",
@@ -140,13 +143,33 @@ const handle = async (message) => {
         id: message.id,
         result: {
           protocolVersion: PROTOCOL_VERSION,
-          capabilities: { tools: {} },
+          capabilities: { tools: {}, resources: {} },
           serverInfo: { name: "headless-fixture", version: "1.0.0" },
         },
       });
       return;
     case "tools/list":
       send({ id: message.id, result: { tools: TOOLS } });
+      return;
+    case "resources/read":
+      log({ event: "read", uri: message.params?.uri });
+      send(
+        message.params?.uri === COUNTER_CARD_URI
+          ? {
+              id: message.id,
+              result: {
+                contents: [
+                  {
+                    uri: COUNTER_CARD_URI,
+                    mimeType: "text/html;profile=mcp-app",
+                    text: COUNTER_CARD_HTML,
+                    _meta: { ui: { prefersBorder: true } },
+                  },
+                ],
+              },
+            }
+          : { id: message.id, error: { code: -32002, message: "resource not found" } },
+      );
       return;
     case "tools/call": {
       inFlight += 1;

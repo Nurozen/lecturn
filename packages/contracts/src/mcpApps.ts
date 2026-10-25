@@ -37,6 +37,17 @@ export const McpAppToolInfo = Schema.Struct({
   readOnly: Schema.Boolean,
   title: Schema.optional(Schema.String),
   tool: Schema.optional(Schema.Unknown),
+  /**
+   * Set for connected-app cards: a card link starting with one of these
+   * prefixes is an app reference, not a web page.
+   */
+  connectedApp: Schema.optional(
+    Schema.Struct({
+      refPrefixes: Schema.Array(Schema.String),
+      /** The app's `openUrlTemplate` filled in for this thread. */
+      openUrl: Schema.NullOr(Schema.String),
+    }),
+  ),
 });
 export type McpAppToolInfo = typeof McpAppToolInfo.Type;
 
@@ -69,6 +80,7 @@ export const McpAppRequestErrorReason = Schema.Literals([
   "tool-not-callable",
   "unsupported-content",
   "request-failed",
+  "app-unavailable",
 ]);
 export type McpAppRequestErrorReason = typeof McpAppRequestErrorReason.Type;
 
@@ -94,6 +106,8 @@ export class McpAppRequestError extends Schema.TaggedError<McpAppRequestError>()
         return "Only text and structured content are supported.";
       case "request-failed":
         return "The app's MCP server request failed.";
+      case "app-unavailable":
+        return "The connected app behind this card is closed or no longer connected. Open the app, or reconnect it in Settings, to use the card again.";
     }
   }
 }

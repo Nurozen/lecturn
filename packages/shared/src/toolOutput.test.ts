@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { MCP_APP_OUTPUT_KEY, readMcpAppToolOutcome } from "./mcpApp.ts";
 import {
   compactDynamicToolOutput,
+  mcpAppFromToolItem,
   MAX_TOOL_OUTPUT_IMAGES,
   omitToolOutputImageData,
   toolOutputImages,
@@ -144,6 +146,49 @@ describe("compactDynamicToolOutput", () => {
       },
     });
     expect(compactDynamicToolOutput(compact)).toEqual(compact);
+  });
+});
+
+describe("connected-app card envelopes", () => {
+  const card = {
+    attachmentId: "thread-1-abc-html",
+    server: "lecturn",
+    tool: "ex_increment",
+    resourceUri: "ui://ex/counter-card",
+  };
+  const result = { content: [{ type: "text", text: "count 3" }], structuredContent: { count: 3 } };
+  const refusal = "The user declined ex_increment (approval declined).";
+
+  // How adapters record the call: the envelope, the MCP result around it, or its text.
+  const recorded = (envelope: object) => [
+    envelope,
+    { structuredContent: envelope, content: result.content },
+    [{ type: "text", text: JSON.stringify(envelope) }],
+  ];
+
+  it("replays a call's result to its card from every recorded form", () => {
+    for (const output of recorded({ [MCP_APP_OUTPUT_KEY]: card, result })) {
+      expect(mcpAppFromToolItem({ toolName: "mcp__lecturn__ex_increment", output })).toEqual(card);
+      expect(readMcpAppToolOutcome(output)).toEqual({ result });
+    }
+  });
+
+  it("keeps a refused call's card, marked failed and cancelled with the refusal", () => {
+    for (const output of recorded({ [MCP_APP_OUTPUT_KEY]: card, cancelled: { reason: refusal } })) {
+      expect(mcpAppFromToolItem({ toolName: "lecturn.ex_increment", output })).toEqual(card);
+      expect(readMcpAppToolOutcome(output)).toEqual({ cancelled: { reason: refusal } });
+    }
+    expect(
+      compactDynamicToolOutput({
+        isError: true,
+        structuredContent: { [MCP_APP_OUTPUT_KEY]: card, cancelled: { reason: refusal } },
+      }),
+    ).toEqual({ isError: true, [MCP_APP_OUTPUT_KEY]: card });
+  });
+
+  it("finds no outcome in output without a card", () => {
+    expect(readMcpAppToolOutcome({ result })).toEqual({});
+    expect(readMcpAppToolOutcome([{ type: "text", text: "count 3" }])).toEqual({});
   });
 });
 

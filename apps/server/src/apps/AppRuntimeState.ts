@@ -12,7 +12,10 @@ import * as Context from "effect/Context";
 import type * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+
+import type { AppMcpAppRoute } from "../mcpApps/AppMcpAppRoute.ts";
 
 export type AppHostContextKey = `thread:${ThreadId}` | `project:${ProjectId}`;
 
@@ -49,6 +52,11 @@ export class AppRuntimeState extends Context.Service<
      * split lease, registry and process state between transports, so it dies.
      */
     readonly appsLayerBuilt: Ref.Ref<boolean>;
+    /**
+     * Connected-app cards' requests, set while AppsLayer is up: McpAppRequests
+     * is built below AppsLayer and reaches the route through here.
+     */
+    readonly mcpAppRoute: Ref.Ref<Option.Option<AppMcpAppRoute>>;
   }
 >()("lecturn/apps/AppRuntimeState") {}
 
@@ -58,5 +66,6 @@ export const layer = Layer.effect(
     hostContext: Ref.make<ReadonlyMap<AppHostContextKey, string>>(new Map()),
     headlessProcesses: Ref.make<ReadonlyMap<HeadlessProcessKey, HeadlessProcessEntry>>(new Map()),
     appsLayerBuilt: Ref.make(false),
+    mcpAppRoute: Ref.make(Option.none<AppMcpAppRoute>()),
   }),
 );

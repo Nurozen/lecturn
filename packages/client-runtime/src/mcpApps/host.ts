@@ -6,7 +6,11 @@ import {
   jsonBytes,
   type JsonRpcId,
 } from "@lecturn/shared/jsonRpcFrame";
-import { MCP_APP_PROTOCOL_VERSION, type McpAppReference } from "@lecturn/shared/mcpApp";
+import {
+  MCP_APP_PROTOCOL_VERSION,
+  readMcpAppToolOutcome,
+  type McpAppReference,
+} from "@lecturn/shared/mcpApp";
 import * as Base64 from "effect/encoding/Base64";
 import * as Predicate from "effect/Predicate";
 import * as Result from "effect/Result";
@@ -88,6 +92,16 @@ export interface McpAppHostOptions {
   }) => Promise<McpAppCallToolResult>;
   readonly readResource: (input: { readonly uri: string }) => Promise<unknown>;
   readonly openLink: (url: string) => Promise<void>;
+  /**
+   * Connected-app cards only: a `ui/open-link` URL that starts with one of the
+   * app's registered prefixes (`rw:run/7`) is an app reference, opened in the
+   * app instead of as a web page.
+   */
+  readonly openAppRef?: {
+    /** Read per link, like `hostContext`: the app's prefixes can arrive after the host starts. */
+    readonly refPrefixes: () => ReadonlyArray<string>;
+    readonly open: (ref: string) => Promise<void>;
+  };
   readonly sendMessage: (text: string) => Promise<void>;
   /** Replaces what this app tells the agent on its next turn; undefined content clears it. */
   readonly updateModelContext: (context: {
@@ -100,13 +114,27 @@ export interface McpAppHostOptions {
   readonly onSizeChanged: (size: { readonly width?: number; readonly height?: number }) => void;
 }
 
+export interface McpAppToolCall {
+  readonly arguments: unknown;
+  readonly result: McpAppCallToolResult | undefined;
+  /** Lecturn refused the call (an approval was declined, say): the app is told it was cancelled. */
+  readonly cancelled?: { readonly reason?: string } | undefined;
+}
+
+/** The call a card replays to its app, read from the stored tool item. */
+export function mcpAppToolCall(input: unknown, output: unknown): McpAppToolCall {
+  const outcome = readMcpAppToolOutcome(output);
+  return {
+    arguments: input,
+    result: outcome.result as McpAppCallToolResult | undefined,
+    ...(outcome.cancelled === undefined ? {} : { cancelled: outcome.cancelled }),
+  };
+}
+
 export interface McpAppHost {
   /** Handles one message the app posted; the caller has already checked its source. */
   readonly receive: (data: unknown) => void;
-  readonly setToolCall: (call: {
-    readonly arguments: unknown;
-    readonly result: McpAppCallToolResult | undefined;
-  }) => void;
+  readonly setToolCall: (call: McpAppToolCall) => void;
   readonly updateHostContext: () => void;
   /**
    * Asks the app to wrap up before its document goes away (`ui/resource-teardown`),
@@ -141,9 +169,7 @@ const errorMessage = (error: unknown) =>
 export function makeMcpAppHost(options: McpAppHostOptions): McpAppHost {
   let initialized = false;
   let disposed = false;
-  let toolCall:
-    | { readonly arguments: unknown; readonly result: McpAppCallToolResult | undefined }
-    | undefined;
+  let toolCall: McpAppToolCall | undefined;
   let toolCallSent = false;
   let pending = 0;
   let sentContext: McpAppHostContext | undefined;
@@ -165,7 +191,12 @@ export function makeMcpAppHost(options: McpAppHostOptions): McpAppHost {
     notify("ui/notifications/tool-input", {
       arguments: Predicate.isObject(toolCall.arguments) ? toolCall.arguments : {},
     });
-    if (toolCall.result !== undefined) {
+    if (toolCall.cancelled !== undefined) {
+      notify(
+        "ui/notifications/tool-cancelled",
+        toolCall.cancelled.reason === undefined ? {} : { reason: toolCall.cancelled.reason },
+      );
+    } else if (toolCall.result !== undefined) {
       notify("ui/notifications/tool-result", normalizeMcpAppToolResult(toolCall.result));
     }
   };
@@ -250,6 +281,15 @@ export function makeMcpAppHost(options: McpAppHostOptions): McpAppHost {
       }
       case "ui/open-link": {
         const url = params.url;
+        const appRef = options.openAppRef;
+        if (
+          typeof url === "string" &&
+          appRef !== undefined &&
+          appRef.refPrefixes().some((prefix) => prefix !== "" && url.startsWith(prefix))
+        ) {
+          answer(id, () => appRef.open(url).then(() => ({})));
+          return;
+        }
         if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
           fail(id, -32602, "Only http(s) links can be opened.");
           return;
@@ -487,6 +527,30 @@ function readDownloads(contents: unknown): ReadonlyArray<McpAppDownload> | undef
     }
   }
   return files;
+}
+
+/**
+ * `--lecturn-thread-gold` per appearance (apps/web/src/index.css). A card's
+ * document has an opaque origin and cannot read Lecturn's variables, so the
+ * value travels resolved.
+ */
+const LECTURN_THREAD_GOLD = { light: "#bc7642", dark: "#dca64e" } as const;
+
+/**
+ * In full Lecturn, connected-app cards draw their accent in the thread gold
+ * the sidebar uses, rather than the theme's focus ring (D25). Embedded views
+ * keep the host's `--ring`, and other MCP apps keep the theme's.
+ */
+export function connectedAppCardTheme<
+  T extends {
+    readonly appearance: "light" | "dark";
+    readonly variables: Readonly<Record<string, string>>;
+  },
+>(theme: T): T {
+  return {
+    ...theme,
+    variables: { ...theme.variables, "--ring": LECTURN_THREAD_GOLD[theme.appearance] },
+  };
 }
 
 export function mcpAppStyleVariables(
