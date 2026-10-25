@@ -49,6 +49,7 @@ import { APP_VERSION } from "../branding";
 import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";
 import { isEmbedLocation } from "../embed/embedAuth";
 import { embedConnectionWakeups, embedPrimaryAuth } from "../embed/embedPrimaryAuth";
+import * as EmbedConnectionStorage from "../embed/embedConnectionStorage";
 import * as PrimaryEnvironmentHttpLayer from "../environments/primary/httpLayer";
 import {
   readPrimaryEnvironmentTarget,
@@ -825,6 +826,7 @@ const layerRpcRequestObserver = Layer.succeed(
 
 type ConnectionPlatformLayerSource =
   | typeof ConnectionStorage.layer
+  | typeof EmbedConnectionStorage.layer
   | typeof layerConnectivity
   | typeof layerWakeups
   | typeof layerCapabilities
@@ -837,7 +839,7 @@ export const layer: Layer.Layer<
   Layer.Error<ConnectionPlatformLayerSource>,
   Layer.Services<ConnectionPlatformLayerSource>
 > = Layer.mergeAll(
-  ConnectionStorage.layer,
+  isEmbedLocation() ? EmbedConnectionStorage.layer : ConnectionStorage.layer,
   layerConnectivity,
   layerWakeups,
   layerCapabilities,

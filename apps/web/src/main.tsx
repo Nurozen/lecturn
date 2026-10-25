@@ -1,3 +1,5 @@
+// Before any store module loads and captures localStorage.
+import "./embed/embedPersistence";
 import { hasPhoneConnectAccount } from "./lib/androidHostAccess";
 import React from "react";
 import ReactDOM from "react-dom/client";
