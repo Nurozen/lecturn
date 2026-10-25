@@ -24,10 +24,12 @@ import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderS
 import type * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -228,6 +230,22 @@ const seedRunningTurn = (name: string) =>
             contextHandoffId: null,
           },
         }),
+        event("attempt", {
+          type: "run-attempt.updated",
+          payload: {
+            id: attemptId,
+            runId,
+            attemptOrdinal: 1,
+            rootNodeId,
+            providerInstanceId: instanceId,
+            providerThreadId,
+            providerTurnId: ProviderTurnId.make(`provider-turn:${name}`),
+            reason: "initial",
+            status: "running",
+            startedAt: now,
+            completedAt: null,
+          },
+        }),
         event("root", {
           type: "node.updated",
           payload: {
@@ -321,8 +339,9 @@ it.layer(layerTest)("AppToolApprovalService", (it) => {
         appName: "RocketWright",
         prompt: "Approve rw_engine_simulate · Simulates 120 s of burn",
         options: [
-          { decision: "accept", label: "Approve" },
           { decision: "decline", label: "Decline" },
+          { decision: "accept", label: "Approve" },
+          { decision: "cancel", label: "Cancel" },
         ],
       });
       yield* Fiber.interrupt(call);
@@ -356,7 +375,7 @@ it.layer(layerTest)("AppToolApprovalService", (it) => {
         ]),
         [["runtime-request.respond", "succeeded"]],
       );
-      assert.equal(yield* Fiber.join(call), "approved");
+      assert.deepEqual(yield* Fiber.join(call), { outcome: "approved", requestId });
       assert.isFalse(yield* registry.claims(requestId));
       const projection = yield* orchestrator.getThreadProjection(turn.threadId);
       assert.equal(
@@ -388,13 +407,152 @@ it.layer(layerTest)("AppToolApprovalService", (it) => {
         (yield* outbox.listByCommandId(commandId)).map((effect) => effect.status),
         ["succeeded"],
       );
-      assert.equal(yield* Fiber.join(call), "declined");
+      assert.deepEqual(yield* Fiber.join(call), { outcome: "declined", requestId });
       const projection = yield* orchestrator.getThreadProjection(turn.threadId);
       const request = projection.runtimeRequests.find((entry) => entry.id === requestId);
       assert.equal(
         projection.nodes.find((node) => node.id === request?.nodeId)?.status,
         "cancelled",
       );
+    }),
+  );
+
+  it.effect("interrupting the run cancels the waiting call and closes the card", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      const turn = yield* seedRunningTurn("interrupt");
+      const { call, requestId } = yield* requestApproval(turn);
+
+      yield* orchestrator.dispatch({
+        type: "run.interrupt",
+        commandId: CommandId.make("interrupt:stop"),
+        threadId: turn.threadId,
+        runId: turn.runId,
+      });
+      yield* worker.drain();
+
+      assert.deepEqual(yield* Fiber.join(call), { outcome: "cancelled", requestId });
+      const projection = yield* orchestrator.getThreadProjection(turn.threadId);
+      assert.equal(
+        projection.runtimeRequests.find((entry) => entry.id === requestId)?.status,
+        "cancelled",
+      );
+    }),
+  );
+
+  it.effect("settling the stopped turn's background work cancels the waiting call", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const turn = yield* seedRunningTurn("settle");
+      const { call, requestId } = yield* requestApproval(turn);
+
+      yield* orchestrator.dispatch({
+        type: "thread.background-work.settle",
+        commandId: CommandId.make("settle:settle"),
+        threadId: turn.threadId,
+        providerThreadId: ProviderThreadId.make("provider-thread:settle"),
+        providerTurnId: ProviderTurnId.make("provider-turn:settle"),
+      });
+
+      assert.deepEqual(yield* Fiber.join(call), { outcome: "cancelled", requestId });
+      const projection = yield* orchestrator.getThreadProjection(turn.threadId);
+      assert.equal(
+        projection.runtimeRequests.find((entry) => entry.id === requestId)?.status,
+        "cancelled",
+      );
+    }),
+  );
+
+  it.effect("an unanswered request expires after ten minutes", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const turn = yield* seedRunningTurn("expire");
+      const { call, requestId } = yield* requestApproval(turn);
+
+      yield* TestClock.adjust(AppToolApprovalService.APPROVAL_TTL);
+
+      assert.deepEqual(yield* Fiber.join(call), { outcome: "expired", requestId });
+      const projection = yield* orchestrator.getThreadProjection(turn.threadId);
+      const request = projection.runtimeRequests.find((entry) => entry.id === requestId);
+      assert.equal(request?.status, "expired");
+      assert.equal(
+        projection.nodes.find((node) => node.id === request?.nodeId)?.status,
+        "cancelled",
+      );
+      assert.equal(
+        projection.turnItems.find(
+          (item) => item.type === "approval_request" && item.requestId === requestId,
+        )?.status,
+        "cancelled",
+      );
+    }),
+  );
+
+  it.effect("expiry refuses a request that was already answered", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      const turn = yield* seedRunningTurn("expire-late");
+      const { call, requestId } = yield* requestApproval(turn);
+      yield* orchestrator.dispatch({
+        type: "runtime-request.respond",
+        commandId: CommandId.make("expire-late:respond"),
+        threadId: turn.threadId,
+        requestId,
+        decision: "accept",
+      });
+      yield* worker.drain();
+      assert.deepEqual(yield* Fiber.join(call), { outcome: "approved", requestId });
+
+      const late = yield* orchestrator
+        .dispatch({
+          type: "runtime-request.app-expire",
+          commandId: CommandId.make("expire-late:expire"),
+          threadId: turn.threadId,
+          requestId,
+        })
+        .pipe(Effect.exit);
+      assert.isTrue(Exit.isFailure(late));
+      const projection = yield* orchestrator.getThreadProjection(turn.threadId);
+      assert.equal(
+        projection.runtimeRequests.find((entry) => entry.id === requestId)?.status,
+        "resolved",
+      );
+    }),
+  );
+
+  it.effect("the Cancel option ends the call as cancelled", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      const turn = yield* seedRunningTurn("cancel-option");
+      const { call, requestId } = yield* requestApproval(turn);
+
+      yield* orchestrator.dispatch({
+        type: "runtime-request.respond",
+        commandId: CommandId.make("cancel-option:respond"),
+        threadId: turn.threadId,
+        requestId,
+        decision: "cancel",
+      });
+      yield* worker.drain();
+
+      assert.deepEqual(yield* Fiber.join(call), { outcome: "cancelled", requestId });
+    }),
+  );
+
+  it.effect("a call the agent stops waiting on withdraws its request", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const turn = yield* seedRunningTurn("withdraw");
+      const { call, requestId } = yield* requestApproval(turn);
+
+      yield* Fiber.interrupt(call);
+
+      const projection = yield* orchestrator.getThreadProjection(turn.threadId);
+      const request = projection.runtimeRequests.find((entry) => entry.id === requestId);
+      assert.deepInclude(request, { status: "resolved", decision: "cancel" });
     }),
   );
 
@@ -408,7 +566,7 @@ it.layer(layerTest)("AppToolApprovalService", (it) => {
         { threadId: turn.threadId, providerSessionId: "session:someone-else" },
         info,
       );
-      assert.equal(otherSession, "cancelled");
+      assert.deepEqual(otherSession, { outcome: "cancelled", requestId: null });
 
       const idleThreadId = ThreadId.make("thread:idle");
       yield* orchestrator.dispatch({
@@ -429,7 +587,7 @@ it.layer(layerTest)("AppToolApprovalService", (it) => {
         { threadId: idleThreadId, providerSessionId: turn.providerSessionId },
         info,
       );
-      assert.equal(noTurn, "cancelled");
+      assert.deepEqual(noTurn, { outcome: "cancelled", requestId: null });
 
       for (const threadId of [turn.threadId, idleThreadId]) {
         const projection = yield* orchestrator.getThreadProjection(threadId);
@@ -437,6 +595,12 @@ it.layer(layerTest)("AppToolApprovalService", (it) => {
       }
     }),
   );
+});
+
+it("tells the agent why a call did not run", () => {
+  assert.include(AppToolApprovalService.refusalMessage("rw_x", "declined"), "approval declined");
+  assert.include(AppToolApprovalService.refusalMessage("rw_x", "cancelled"), "approval cancelled");
+  assert.include(AppToolApprovalService.refusalMessage("rw_x", "expired"), "approval expired");
 });
 
 it("prompts with the tool alone when the app gives no reason", () => {

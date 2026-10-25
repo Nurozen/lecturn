@@ -388,6 +388,7 @@ it.effect("a second AppsLayer build over the same state fails loudly", () =>
             AppToolApprovalRegistry.layer,
             layerAppsDependencies,
             Layer.mock(ThreadManagement.ThreadManagementService)({}),
+            Layer.mock(Orchestrator.OrchestratorV2)({}),
           ),
         ),
         Effect.exit,

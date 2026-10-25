@@ -40,6 +40,7 @@ import type {
   IsoDateTime,
   OrchestrationV2ShellStreamItem,
   ProjectId,
+  RuntimeRequestId,
   ThreadId,
 } from "@lecturn/contracts";
 import * as Context from "effect/Context";
@@ -113,6 +114,12 @@ export interface AppToolApprovalContext {
 }
 
 export type AppToolApprovalOutcome = "approved" | "declined" | "cancelled" | "expired";
+
+/** `requestId` is null when no request was raised; an approved call re-sends it to the app. */
+export interface AppToolApprovalAnswer {
+  readonly outcome: AppToolApprovalOutcome;
+  readonly requestId: RuntimeRequestId | null;
+}
 
 export class AppRegistryService extends Context.Service<
   AppRegistryService,
@@ -302,7 +309,7 @@ export class AppToolApprovalService extends Context.Service<
     readonly request: (
       context: AppToolApprovalContext,
       info: ConnectedAppToolApprovalInfo,
-    ) => Effect.Effect<AppToolApprovalOutcome, AppsFailure>;
+    ) => Effect.Effect<AppToolApprovalAnswer, AppsFailure>;
   }
 >()("lecturn/apps/services/AppToolApprovalService") {}
 

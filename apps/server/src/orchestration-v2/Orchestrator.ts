@@ -146,6 +146,7 @@ import {
 } from "./ThreadForkService.ts";
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import * as LecturnOrchestrationHooks from "./fork/LecturnOrchestrationHooks.ts";
+import { expire } from "../apps/appToolApprovalExpiry.ts";
 import { applyThreadAppMetadataCommand, threadAppMetadataOf } from "../apps/threadAppMetadata.ts";
 import { ExternalSessionImporterV2, planThreadImport } from "./fork/ThreadImport.ts";
 import {
@@ -11285,6 +11286,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "secret_request.record":
         yield* dispatchSecretRequestRecord(command, events);
+        break;
+      case "runtime-request.app-expire":
+        yield* mapDispatchError(command)(expire(command, projectionStore, emit(events, command)));
         break;
       default:
         return yield* dispatchUnsupported(command);
