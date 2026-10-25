@@ -163,8 +163,8 @@ async function step2(run: EmbedHostRun, log: E2eContext["log"]) {
   await page.waitForRuntimeMode("Supervised");
 
   await page.send(SUPERVISED_TURN.message);
-  await page.approve("ex_window_flash", TURN_TIMEOUT_MS);
-  // The card was up, so both counter calls had run and the host had not been asked yet.
+  await page.waitForApproval("ex_window_flash", TURN_TIMEOUT_MS);
+  // The card is up, so both counter calls have run and the host has not been asked yet.
   const countedBeforeApproval = await readJsonArray<CounterCall>(countersPath);
   NodeAssert.equal(countedBeforeApproval.length, 2, "both counter calls ran before the approval");
   NodeAssert.deepEqual(
@@ -172,6 +172,7 @@ async function step2(run: EmbedHostRun, log: E2eContext["log"]) {
     [],
     "no flash reached the host before it was approved",
   );
+  await page.approve("ex_window_flash", TURN_TIMEOUT_MS);
   log("approved ex_window_flash in the embed");
   await page.waitForReply(SUPERVISED_TURN.reply, TURN_TIMEOUT_MS);
 
