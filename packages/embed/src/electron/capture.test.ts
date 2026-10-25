@@ -10,15 +10,21 @@ const fakes = vi.hoisted(() => {
       this.listeners.set(event, set);
       return this;
     }
+    readonly onceWrappers = new Map<Listener, Listener>();
     once(event: string, listener: Listener) {
       const wrapped: Listener = (...args) => {
         this.off(event, wrapped);
         listener(...args);
       };
+      this.onceWrappers.set(listener, wrapped);
       return this.on(event, wrapped);
     }
+    // Like Node's EventEmitter, `off` also removes a pending `once` by its original listener.
     off(event: string, listener: Listener) {
-      this.listeners.get(event)?.delete(listener);
+      const set = this.listeners.get(event);
+      set?.delete(listener);
+      const wrapped = this.onceWrappers.get(listener);
+      if (wrapped !== undefined && set?.delete(wrapped)) this.onceWrappers.delete(listener);
       return this;
     }
     emit(event: string, ...args: Array<unknown>) {
@@ -435,6 +441,40 @@ describe("mountEmbedView bridge", () => {
     });
     expect(errors).toEqual(["bridge-message-rejected"]);
     bridge.destroy();
+  });
+
+  it("tears the guest down when its window closes, so the window can finish closing", async () => {
+    const paneRectListeners = () => fakes.ipcMain.listeners.get("lecturn-embed:pane-rect")?.size;
+    const { bridge, view, wc, win } = await mount();
+    await bridge.debuggerSession.send("Runtime.evaluate", { expression: "1" });
+    const errors: Array<string> = [];
+    bridge.on("error", (error) => errors.push(error.reason));
+    const rectListenersBefore = paneRectListeners()!;
+    const generationBefore = bridge.generation;
+
+    win.emit("close", { defaultPrevented: false });
+
+    expect(wc.debugger.attached).toBe(false);
+    expect(win.children.has(view)).toBe(false);
+    expect(wc.destroyed).toBe(true);
+    expect(bridge.generation).toBeGreaterThan(generationBefore);
+    expect(paneRectListeners()).toBe(rectListenersBefore - 1);
+    expect(wc.ipc.listeners.get(FROM_GUEST)?.size ?? 0).toBe(0);
+    expect(win.listeners.get("close")?.size ?? 0).toBe(0);
+    expect(win.listeners.get("closed")?.size ?? 0).toBe(0);
+    expect(() => bridge.setDraft("late")).toThrow(EmbedViewError);
+    expect(await captureError(bridge.retarget("project-1"))).toBe("guest-gone");
+    expect(errors).toEqual([]);
+  });
+
+  it("keeps the guest mounted when a listener vetoes the window's close", async () => {
+    const { view, wc, win } = await mount();
+    win.emit("close", { defaultPrevented: true });
+    expect(win.children.has(view)).toBe(true);
+    expect(wc.destroyed).toBe(false);
+
+    win.emit("close", { defaultPrevented: false });
+    expect(wc.destroyed).toBe(true);
   });
 });
 

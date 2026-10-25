@@ -352,17 +352,26 @@ export function mountEmbedView(
     generation += 1;
     loadSeq += 1;
     listeners.clear();
+    win.off("close", onWindowClose);
     win.off("closed", destroy);
     Electron.ipcMain.off(EMBED_PANE_RECT_CHANNEL, onPaneRect);
     Electron.ipcMain.off(EMBED_HOST_BRIDGE_CHANNEL, onHostBridge);
     if (!webContents.isDestroyed()) {
       webContents.ipc.off(EMBED_FROM_GUEST_CHANNEL, onGuestMessage);
-      win.contentView.removeChildView(view);
       if (attached && webContents.debugger.isAttached()) webContents.debugger.detach();
+      win.contentView.removeChildView(view);
       // A WebContentsView does not free its webContents when removed.
       webContents.close();
     }
   };
+  // While this view's webContents is alive the window emits `close` but never
+  // `closed`, so app.quit hangs; the view has to go as soon as closing is
+  // certain. A veto from a `close` listener added after mounting runs too
+  // late to be seen here.
+  const onWindowClose = (event: Electron.Event) => {
+    if (!event.defaultPrevented) destroy();
+  };
+  win.on("close", onWindowClose);
   win.once("closed", destroy);
 
   win.contentView.addChildView(view);
