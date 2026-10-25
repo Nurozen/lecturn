@@ -24,7 +24,10 @@ export function EmbedThreadSwitcher({
 }) {
   const active = threads.find((thread) => thread.id === activeThreadId) ?? null;
   return (
-    <div className="flex min-w-0 shrink-0 items-center gap-1 border-b px-2 py-1">
+    <div
+      data-testid="embed-thread-switcher"
+      className="flex min-w-0 shrink-0 items-center gap-1 border-b px-2 py-1"
+    >
       <Select
         value={activeThreadId}
         onValueChange={(value) => {

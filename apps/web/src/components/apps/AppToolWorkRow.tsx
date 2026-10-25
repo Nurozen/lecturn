@@ -26,9 +26,11 @@ export function AppToolWorkRow({
   return (
     <WorkLogRow
       {...rowProps}
+      data-testid="app-tool-row"
       icon={
         <ChevronRightIcon
           aria-hidden
+          data-testid="app-tool-row-chevron"
           className={cn(
             "size-3.5 shrink-0 text-icon-muted transition-transform duration-200",
             expanded && "rotate-90",
@@ -39,16 +41,28 @@ export function AppToolWorkRow({
       label={
         // max-content keeps the mark beside the label, minmax(0) still lets a long label truncate.
         <span className="grid min-w-0 grid-cols-[auto_minmax(0,max-content)_auto] items-center justify-start gap-1.5">
-          {icon}
-          {label}
+          {/* `contents` keeps the grid's cells as they were; the wrappers only carry the hooks. */}
+          <span data-testid="app-tool-row-icon" className="contents">
+            {icon}
+          </span>
+          <span data-testid="app-tool-row-label" className="contents">
+            {label}
+          </span>
           {outcome === "succeeded" ? (
             <CircleCheckIcon
               role="img"
               aria-label="Tool call succeeded"
+              data-testid="app-tool-row-status"
+              data-status="success"
               className="size-4 shrink-0 text-success-foreground"
             />
           ) : outcome === "failed" ? (
-            <XIcon aria-hidden className="size-3 shrink-0 text-tool-error-icon/40" />
+            <XIcon
+              aria-hidden
+              data-testid="app-tool-row-status"
+              data-status="failed"
+              className="size-3 shrink-0 text-tool-error-icon/40"
+            />
           ) : null}
         </span>
       }

@@ -49,7 +49,7 @@ const chipLabels = () =>
 describe("AppRefChipStrip", () => {
   it("shows inserted mentions once each, and × removes one", async () => {
     await renderStrip();
-    expect(container.querySelector("[data-app-ref-chip-strip]")).toBeNull();
+    expect(container.querySelector('[data-testid="app-ref-chip-strip"]')).toBeNull();
 
     await insert("rw:c/fins");
     await insert("rw:c/nose");
