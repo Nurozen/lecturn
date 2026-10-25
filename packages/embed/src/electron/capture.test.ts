@@ -75,6 +75,9 @@ const fakes = vi.hoisted(() => {
     setZoomFactor(factor: number) {
       this.zoomFactor = factor;
     }
+    getURL() {
+      return this.loads.at(-1) ?? "";
+    }
     loadURL(url: string) {
       this.loads.push(url);
       journal.push(`load ${url}`);
@@ -263,9 +266,15 @@ describe("mountEmbedView", () => {
 
   it("installs the frozen clock before the first load and keeps it through a retarget", async () => {
     const { bridge, view, wc, useSecondOrigin } = await mount({ freezeClock: 1_700_000_000_000 });
+    // mount() returned on the blank load; the target load follows once the shim is in.
+    if (wc.loads.at(-1) === "about:blank") await wc.nextLoad();
     const firstLoad = fakes.journal.indexOf(`load ${ORIGIN_A}/embed/env-1/project-1${TOKEN_HASH}`);
     expect(fakes.journal.indexOf("Page.addScriptToEvaluateOnNewDocument")).toBeLessThan(firstLoad);
     expect(fakes.journal.indexOf("attach")).toBeLessThan(firstLoad);
+    // The fresh view gets a renderer first; CDP commands to a never-navigated view never answer.
+    expect(fakes.journal.indexOf("load about:blank")).toBeLessThan(
+      fakes.journal.indexOf("Page.addScriptToEvaluateOnNewDocument"),
+    );
 
     useSecondOrigin();
     const generation = bridge.generation;
