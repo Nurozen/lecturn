@@ -33,6 +33,8 @@ export interface SidecarOptions {
 export const SIDECAR_EXIT_STATE_DIR_OWNED = 78;
 
 const BOOTSTRAP_FD = 3;
+/** Never written; the server exits at its end-of-file, which only this process's exit causes. */
+const PARENT_PIPE_FD = 4;
 const DEFAULT_READY_TIMEOUT_MS = 60_000;
 const READY_POLL_INTERVAL_MS = 100;
 const STOP_GRACE_MS = 5_000;
@@ -95,7 +97,7 @@ export function makeSidecarEnvelope(
   registration: AppRegistration,
   appSeedToken: string,
 ): AppSidecarBootstrap {
-  return { mode: "app-sidecar", registration, appSeedToken };
+  return { mode: "app-sidecar", registration, appSeedToken, parentPipeFd: PARENT_PIPE_FD };
 }
 
 export class SidecarError extends Error {
@@ -135,6 +137,12 @@ export interface StartSidecarInput {
   readonly sidecar: SidecarOptions;
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly readyTimeoutMs?: number;
+  /**
+   * Aborting before ready stops a sidecar this call spawned and rejects with
+   * the signal's reason once that process has exited. A ready handle is not
+   * affected; `stop()` owns it from then on.
+   */
+  readonly signal?: AbortSignal;
 }
 
 const attached = (server: DiscoveredServer): SidecarHandle => ({
@@ -154,7 +162,7 @@ const redact = (text: string) =>
     .filter((line) => !/token|pairing url/i.test(line))
     .join("\n");
 
-const waitUntilHttpReady = (origin: string, timeoutMs: number) =>
+const waitUntilHttpReady = (origin: string, timeoutMs: number, signal?: AbortSignal) =>
   Effect.runPromise(
     waitForHttpReady({
       baseUrl: origin,
@@ -163,6 +171,7 @@ const waitUntilHttpReady = (origin: string, timeoutMs: number) =>
       makeError: ({ requestUrl }) =>
         new SidecarError("timeout", `The Lecturn sidecar did not answer at ${requestUrl}.`),
     }).pipe(Effect.provide(Layer.merge(FetchHttpClient.layer, Logger.layer([])))),
+    { signal },
   );
 
 /**
@@ -174,10 +183,13 @@ export async function startSidecar(input: StartSidecarInput): Promise<SidecarHan
   const timeoutMs = input.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
   const deadline = Date.now() + timeoutMs;
   const statePath = serverRuntimeStatePath(baseDir, "userdata");
+  const { signal } = input;
 
+  signal?.throwIfAborted();
   // `--base-dir` is explicit, so the server's state is always under `userdata`.
   const owner = await discoverServer(baseDir, { variants: ["userdata"] });
   if (owner !== null) return attached(owner);
+  signal?.throwIfAborted();
 
   await NodeFSP.mkdir(baseDir, { recursive: true });
   const appSeedToken = NodeCrypto.randomBytes(32).toString("base64url");
@@ -191,7 +203,7 @@ export async function startSidecar(input: StartSidecarInput): Promise<SidecarHan
       env: buildSidecarEnv(input.env ?? process.env, {
         electronAsNode: input.sidecar.nodePath === undefined,
       }),
-      stdio: ["ignore", "ignore", "pipe", "pipe"],
+      stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"],
       windowsHide: true,
     });
   } catch (cause) {
@@ -221,6 +233,8 @@ export async function startSidecar(input: StartSidecarInput): Promise<SidecarHan
   const bootstrap = child.stdio[BOOTSTRAP_FD] as NodeStream.Writable | null | undefined;
   bootstrap?.on("error", () => {});
   bootstrap?.end(`${JSON.stringify(envelope)}\n`);
+  const parentPipe = child.stdio[PARENT_PIPE_FD] as NodeStream.Duplex | null | undefined;
+  parentPipe?.on("error", () => {});
 
   const stop = async () => {
     if (exitCode !== undefined) return;
@@ -240,8 +254,19 @@ export async function startSidecar(input: StartSidecarInput): Promise<SidecarHan
     });
   };
 
+  // Every wait below races this, so an abort never waits out the ready timeout.
+  let onAbort = () => {};
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal?.reason);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+  aborted.catch(() => {});
+  const unlessAborted = <A>(promise: Promise<A>) =>
+    signal === undefined ? promise : Promise.race([promise, aborted]);
+
   try {
     while (Date.now() < deadline) {
+      signal?.throwIfAborted();
       if (exitCode !== undefined) {
         if (exitCode !== SIDECAR_EXIT_STATE_DIR_OWNED) {
           throw failure(
@@ -251,18 +276,20 @@ export async function startSidecar(input: StartSidecarInput): Promise<SidecarHan
         }
         // Another process won the race for this baseDir; it publishes its
         // runtime record once it is serving.
-        const winner = await discoverServer(baseDir, { variants: ["userdata"] });
+        const winner = await unlessAborted(discoverServer(baseDir, { variants: ["userdata"] }));
         if (winner !== null) return attached(winner);
       } else {
-        const state = await readServerRuntimeState(statePath);
+        const state = await unlessAborted(readServerRuntimeState(statePath));
         // A crashed earlier sidecar can leave its record behind.
         const fresh =
           state !== null &&
           (state.pid === child.pid ||
             (Date.parse(state.startedAt) >= spawnedAt - 1_000 && isProcessAlive(state.pid)));
         if (fresh) {
-          await waitUntilHttpReady(state.origin, Math.max(1, deadline - Date.now()));
-          const environmentId = await probeEnvironment(state.origin);
+          await unlessAborted(
+            waitUntilHttpReady(state.origin, Math.max(1, deadline - Date.now()), signal),
+          );
+          const environmentId = await unlessAborted(probeEnvironment(state.origin));
           if (environmentId !== null) {
             return {
               kind: "spawned",
@@ -276,11 +303,13 @@ export async function startSidecar(input: StartSidecarInput): Promise<SidecarHan
           }
         }
       }
-      await delay(READY_POLL_INTERVAL_MS);
+      await unlessAborted(delay(READY_POLL_INTERVAL_MS));
     }
     throw failure("timeout", `The Lecturn sidecar was not ready within ${timeoutMs} ms.`);
   } catch (error) {
     await stop();
-    throw error;
+    throw signal?.aborted === true ? signal.reason : error;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
   }
 }

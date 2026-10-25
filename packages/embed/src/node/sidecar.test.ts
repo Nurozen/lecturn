@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off -- Tests the Promise API against real temp dirs, processes and sockets.
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off -- Tests the Promise API against real temp dirs, processes and sockets.
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeHttp from "node:http";
@@ -9,7 +9,7 @@ import { AppRegistration } from "@lecturn/contracts/apps";
 import * as Schema from "effect/Schema";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { serverRuntimeStatePath } from "./discovery.ts";
+import { isProcessAlive, serverRuntimeStatePath } from "./discovery.ts";
 import {
   buildSidecarEnv,
   SIDECAR_ENV_SCRUB,
@@ -57,6 +57,15 @@ fs.writeFileSync(
     cwd: process.cwd(),
     envelope: envelope.trim() ? JSON.parse(envelope) : null,
     envelopeLine: envelope.endsWith("\n"),
+    pid: process.pid,
+    parentPipe: (() => {
+      try {
+        const stat = fs.fstatSync(4);
+        return stat.isSocket() || stat.isFIFO();
+      } catch {
+        return false;
+      }
+    })(),
     env: Object.fromEntries(
       ["ELECTRON_RUN_AS_NODE", "LECTURN_HOME", "LECTURN_PORT", "VITE_DEV_SERVER_URL", "KEEP_ME"].map(
         (key) => [key, process.env[key] ?? null],
@@ -79,6 +88,9 @@ if (mode === "owned") {
   // Another process won the lock and serves at FAKE_WINNER_ORIGIN.
   writeRecord(process.ppid, process.env.FAKE_WINNER_ORIGIN);
   process.exit(78);
+} else if (mode === "starting") {
+  // Never becomes ready: the host gives up while it is still starting.
+  setInterval(() => {}, 1_000);
 } else if (mode === "crash") {
   process.stderr.write("boom: could not open the database\nPairing URL: http://x/#token=stderr-secret\n");
   process.exit(3);
@@ -117,13 +129,20 @@ async function fixture() {
       cwd: string;
       envelope: unknown;
       envelopeLine: boolean;
+      pid: number;
+      parentPipe: boolean;
       env: Record<string, string | null>;
     };
-  const start = (mode: string, extraEnv: Record<string, string> = {}) =>
+  const start = (
+    mode: string,
+    extraEnv: Record<string, string> = {},
+    options: { readonly signal?: AbortSignal } = {},
+  ) =>
     startSidecar({
       registration,
       sidecar: { serverEntry, baseDir, nodePath: process.execPath },
       readyTimeoutMs: 20_000,
+      ...options,
       env: {
         PATH: process.env["PATH"],
         FAKE_SIDECAR_OUT: out,
@@ -218,8 +237,10 @@ describe("startSidecar", () => {
       mode: "app-sidecar",
       registration: encodeRegistration(registration),
       appSeedToken: handle.appSeedToken,
+      parentPipeFd: 4,
     });
     expect(seen.envelopeLine).toBe(true);
+    expect(seen.parentPipe).toBe(true);
     expect(seen.args).not.toContain("--port");
     expect(seen.cwd).toBe(NodeFS.realpathSync(baseDir));
     expect(seen.env).toEqual({
@@ -284,5 +305,36 @@ describe("startSidecar", () => {
     expect(failure.exitCode).toBe(3);
     expect(failure.message).toContain("boom: could not open the database");
     expect(failure.message).not.toContain("secret");
+  });
+
+  it("stops a sidecar that is still starting when aborted, and rejects only once it has exited", async () => {
+    const { out, received, start } = await fixture();
+    const controller = new AbortController();
+    const starting = start("starting", {}, { signal: controller.signal }).then(
+      () => null,
+      (cause: unknown) => cause,
+    );
+    while (!NodeFS.existsSync(out)) await new Promise((resolve) => setTimeout(resolve, 20));
+    const { pid } = await received();
+    expect(isProcessAlive(pid)).toBe(true);
+
+    controller.abort();
+    const error = await starting;
+
+    expect(error).toMatchObject({ name: "AbortError" });
+    expect(isProcessAlive(pid)).toBe(false);
+  });
+
+  it("spawns nothing for a signal that is already aborted", async () => {
+    const { out, start } = await fixture();
+    const reason = new Error("host quit");
+
+    const error = await start("serve", {}, { signal: AbortSignal.abort(reason) }).then(
+      () => null,
+      (cause: unknown) => cause,
+    );
+
+    expect(error).toBe(reason);
+    expect(NodeFS.existsSync(out)).toBe(false);
   });
 });
