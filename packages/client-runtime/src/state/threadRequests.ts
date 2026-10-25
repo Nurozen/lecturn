@@ -1,4 +1,5 @@
 import type {
+  ConnectedAppToolApprovalInfo,
   OrchestrationV2ThreadProjection,
   OrchestrationV2RuntimeRequest,
   OrchestrationV2UserInputQuestion,
@@ -16,7 +17,24 @@ export interface ThreadPendingApproval {
   readonly appName?: string;
   readonly options?: ReadonlyArray<ProviderApprovalOption>;
   readonly responseCapability: "live" | "not_resumable";
+  /** A connected app's tool is waiting on this answer, not the provider. */
+  readonly connectedAppTool?: ConnectedAppToolApprovalInfo;
 }
+
+// One app approval lets one call through, so an option that would widen it
+// to the session or forever has nothing on the server to honor it.
+const CONNECTED_APP_TOOL_OPTIONS: ReadonlyArray<ProviderApprovalOption> = [
+  { decision: "decline", label: "Decline" },
+  { decision: "accept", label: "Approve" },
+  { decision: "cancel", label: "Cancel" },
+];
+
+const connectedAppToolOptions = (options: ReadonlyArray<ProviderApprovalOption> | undefined) => {
+  const scoped = options?.filter(
+    (option) => option.decision !== "acceptForSession" && option.decision !== "acceptAlways",
+  );
+  return scoped === undefined || scoped.length === 0 ? CONNECTED_APP_TOOL_OPTIONS : scoped;
+};
 
 export interface ThreadUserInputQuestion extends Omit<
   OrchestrationV2UserInputQuestion,
@@ -94,16 +112,20 @@ export function derivePendingThreadRequests(
     const item = projection.turnItems.findLast(
       (candidate) => candidate.type === "approval_request" && candidate.requestId === request.id,
     );
+    const itemOptions = item?.type === "approval_request" ? item.options : undefined;
+    const options =
+      request.connectedAppTool === undefined ? itemOptions : connectedAppToolOptions(itemOptions);
     approvals.push({
       requestId: request.id,
       requestKind: request.kind,
       createdAt: DateTime.formatIso(request.createdAt),
       ...(item?.type === "approval_request" && item.prompt ? { detail: item.prompt } : {}),
       ...(item?.type === "approval_request" && item.appName ? { appName: item.appName } : {}),
-      ...(item?.type === "approval_request" && item.options !== undefined
-        ? { options: item.options }
-        : {}),
+      ...(options === undefined ? {} : { options }),
       responseCapability: responseCapability === "live" ? "live" : "not_resumable",
+      ...(request.connectedAppTool === undefined
+        ? {}
+        : { connectedAppTool: request.connectedAppTool }),
     });
   }
 

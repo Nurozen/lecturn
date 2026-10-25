@@ -38,6 +38,7 @@ import * as LiveToolClientLayer from "../../../apps/LiveToolClient.ts";
 import {
   type AppLease,
   AppLeaseService,
+  AppToolApprovalService,
   AppToolkit,
   type AppToolCallRequest,
   HeadlessToolHost,
@@ -503,6 +504,7 @@ const withFreshRegistration = <A, E>(
               layerProjection,
               LiveToolClientLayer.layer,
               Layer.mock(AppLeaseService)({ current: () => Effect.succeedNone }),
+              Layer.mock(AppToolApprovalService)({}),
             ),
           ),
           Layer.provide(NodeServices.layer),
