@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - The fixture under test is host-side tooling that owns temp directories.
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -6,21 +7,38 @@ import * as NodePath from "node:path";
 
 import { assert, it } from "@effect/vitest";
 
-import { fetchBarShellSnapshot, issueBarReadToken, seedBarFixture } from "../seed-bar-fixture.ts";
+import {
+  BAR_FIXTURE,
+  barGitStateProblems,
+  barProjectId,
+  barWorkspaceRoot,
+  fetchBarShellSnapshot,
+  issueBarReadToken,
+  seedBarFixture,
+} from "../seed-bar-fixture.ts";
 import {
   BAR_APP_BUNDLE_PATH,
   BAR_APP_ID,
   BAR_APP_STAGED_THREADS,
+  BAR_PENDING_APP_ID,
+  BAR_PROJECTS_APPROVAL_THREAD,
   type BarAppManifest,
   barAppBundle,
   barAppLiveStateProblems,
   barAppRegistration,
+  barAppSceneParams,
   barAppWorkspaceRoot,
+  barPendingAppRegistration,
   expectedBarAppSections,
   readBarAppManifest,
 } from "./app-fixture.ts";
 import { barAppStagingChecks, sidebarSectionChecks } from "./app-scenes.ts";
-import { barAppPreflightProblems, parseCaptureWebArgs } from "./capture-web.ts";
+import {
+  BAR_APP_WEB_SCENES,
+  barAppPreflightProblems,
+  parseCaptureWebArgs,
+  resolveScenePath,
+} from "./capture-web.ts";
 import { type ProbeRoot, stagingProblems } from "./probe-dom.ts";
 
 const SERVER_TEST_TIMEOUT_MS = 300_000;
@@ -65,6 +83,13 @@ it("registers Embed Host with its gated live flash and lock-free tool listing", 
   assert.include(registration.headlessTools?.listArgs ?? [], "--list-tools");
 });
 
+it("stages a second app that sorts after Embed Host and claims no tool prefix of its own", () => {
+  const pending = barPendingAppRegistration();
+  assert.equal(pending.appId, BAR_PENDING_APP_ID);
+  assert.notEqual(pending.toolPrefix, barAppRegistration().toolPrefix);
+  assert.isAbove(pending.name.localeCompare(barAppRegistration().name), 0);
+});
+
 const manifest: BarAppManifest = {
   version: 1,
   appId: BAR_APP_ID,
@@ -72,6 +97,12 @@ const manifest: BarAppManifest = {
   environmentId: "env",
   stagedAt: "2026-10-25T12:00:00.000Z",
   approvalExpiresAt: "2026-10-25T12:10:00.000Z",
+  pendingPairing: {
+    appId: BAR_PENDING_APP_ID,
+    appName: "Sketch Pad",
+    requestId: "request",
+    expiresAt: "2026-10-25T12:10:30.000Z",
+  },
   workspaces: [
     {
       key: "ws-a",
@@ -93,7 +124,9 @@ const manifest: BarAppManifest = {
     workingA: "wa",
     workingB: "wb",
   },
+  latestThreadId: "wb",
   pinnedImportThreadIds: [],
+  projectsApprovalThreadId: "run38",
 };
 
 const shellThread = (
@@ -123,6 +156,7 @@ const stagedShell = () => ({
     shellThread("old", "a", { settledOverride: "settled" }),
     shellThread("wa", "b", { status: "running" }),
     shellThread("wb", "b", { status: "waiting" }),
+    shellThread("run38", "hopper", { status: "running", pendingRuntimeRequest: { id: "c" } }),
   ],
 });
 
@@ -148,14 +182,48 @@ it("accepts the live states as staged and names each kind of drift", () => {
   const problems = barAppLiveStateProblems(unpinned, manifest).join("\n");
   assert.match(problems, /ws-a has 0 pinned threads, expected 1/u);
   assert.match(problems, /mockup is not pinned/u);
+
+  // The Projects-mode approval is outside the app workspaces, so only its own check sees it.
+  const copilotAnswered = stagedShell();
+  copilotAnswered.threads[6] = shellThread("run38", "hopper");
+  assert.deepEqual(barAppLiveStateProblems(copilotAnswered, manifest), [
+    "run38 is not waiting on its approval",
+  ]);
 });
 
-it("refuses to capture once the staged approval has expired", () => {
+it("refuses to capture once the staged approval or the pairing request has expired", () => {
   const before = Date.parse(manifest.approvalExpiresAt) - 1;
   assert.deepEqual(barAppPreflightProblems({ manifest, liveProblems: [], now: before }), []);
   assert.match(
     barAppPreflightProblems({ manifest, liveProblems: [], now: before + 1 }).join(),
-    /expired/u,
+    /staged approval expired/u,
+  );
+  const pairingLapsed = { ...manifest, approvalExpiresAt: "2026-10-25T13:00:00.000Z" };
+  assert.match(
+    barAppPreflightProblems({
+      manifest: pairingLapsed,
+      liveProblems: [],
+      now: Date.parse(manifest.pendingPairing.expiresAt),
+    }).join(),
+    /Sketch Pad pairing request expired/u,
+  );
+  assert.match(
+    barAppPreflightProblems({
+      manifest,
+      liveProblems: [],
+      gitProblems: ["hopper-38mm is inside the Git repository /x"],
+      now: before,
+    }).join(),
+    /inside the Git repository/u,
+  );
+});
+
+it("opens the Apps list scenes on an app thread, not the Projects-mode draft", () => {
+  const params = { ...barAppSceneParams(manifest), environmentId: "env" };
+  assert.equal(resolveScenePath(BAR_APP_WEB_SCENES["apps-list"], params), "/env/wb?sidebar=apps");
+  assert.equal(
+    resolveScenePath(BAR_APP_WEB_SCENES["apps-app-selected"], params),
+    `/env/wb?sidebar=apps&app=${encodeURIComponent(BAR_APP_ID)}`,
   );
 });
 
@@ -250,6 +318,75 @@ it("holds the mockup and Full access scenes to no approval card, and Supervised 
   assert.include(narrow.join("\n"), "card-ready-wide");
 });
 
+const pairingRow = (buttons: ReadonlyArray<string>): FakeTree => ({
+  '[data-testid="app-pairing-row"]': [{ children: { button: buttons.map((text) => ({ text })) } }],
+});
+
+it("holds the Apps list to the waiting app's Approve and Deny row and an open app thread", async () => {
+  const draft: FakeTree = {
+    '[data-testid="sidebar-mode-option"][data-selected="true"]': [{ text: "Apps" }],
+    '[data-testid="sidebar-app-row"]': [
+      { children: { '[data-testid="sidebar-app-state"]': [{ text: "Closed" }] } },
+    ],
+  };
+  const appRow: FakeTree = {
+    ...draft,
+    '[data-testid="app-thread-row"][data-selected="true"]': [{}],
+  };
+  const checks = barAppStagingChecks("apps-list", manifest);
+  assert.deepEqual(
+    await stagingProblems(checks, fakeRoot({ ...appRow, ...pairingRow(["Deny", "Approve"]) })),
+    [],
+  );
+  const problems = (await stagingProblems(checks, fakeRoot(appRow))).join("\n");
+  assert.match(problems, /^pairing-row: /mu);
+  assert.match(
+    (
+      await stagingProblems(
+        checks,
+        fakeRoot({
+          ...appRow,
+          ...pairingRow(["Deny", "Approve"]),
+          '[data-testid="app-pairing-prompt"]': [{}],
+        }),
+      )
+    ).join(),
+    /no-pairing-prompt/u,
+  );
+  assert.match(
+    (
+      await stagingProblems(checks, fakeRoot({ ...draft, ...pairingRow(["Deny", "Approve"]) }))
+    ).join(),
+    /selected-thread-row/u,
+  );
+});
+
+it("holds Projects mode to CP0's non-Git workspace and its waiting approval row", async () => {
+  const projects = (buttons: ReadonlyArray<string>, extra: FakeTree = {}): FakeTree => ({
+    '[data-testid="sidebar-mode-option"][data-selected="true"]': [{ text: "Projects" }],
+    '[data-testid="sidebar-scope-label"]': [{ text: "All projects" }],
+    '[data-testid="sidebar-row-card"], [data-testid="sidebar-row-slim"]': [
+      { text: "Baseline flight 12m" },
+      { text: "Run 38 m… Approval" },
+    ],
+    button: buttons.map((text) => ({ text })),
+    ...extra,
+  });
+  const checks = barAppStagingChecks("projects-mode", manifest);
+  assert.deepEqual(await stagingProblems(checks, fakeRoot(projects(["Initialize Git"]))), []);
+  // Before the status loads, the client draws a repository.
+  const loading = await stagingProblems(
+    checks,
+    fakeRoot(
+      projects(["Select ref"], {
+        'button:has-text("Select ref")': [{}, {}],
+        'button:has-text("Current checkout")': [{}],
+      }),
+    ),
+  );
+  assert.match(loading.join(), /^not-git-repo: /u);
+});
+
 it("captures the app scenes with --after and needs the base dir for their manifest", () => {
   const base = ["--pairing-url", "http://127.0.0.1:1/pair#token=x", "--out", "/tmp/out"];
   assert.throws(() => parseCaptureWebArgs([...base, "--after"]), /--base-dir/u);
@@ -276,6 +413,8 @@ it(
   "stages every live state on a real server and keeps them until capture",
   async () => {
     const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "lecturn-bar-app-"));
+    // A home inside a repository: the fixture workspaces must still read as no repository.
+    NodeChildProcess.execFileSync("git", ["init", "--quiet", root]);
     const baseDir = NodePath.join(await NodeFSP.realpath(root), "home");
     const { server, app } = await seedBarFixture({ baseDir, app: true });
     try {
@@ -286,6 +425,25 @@ it(
         await issueBarReadToken(baseDir),
       );
       assert.deepEqual(barAppLiveStateProblems(snapshot, app!), []);
+      assert.deepEqual(await barGitStateProblems(baseDir), []);
+      const hopper = BAR_FIXTURE.find((project) => project.key === "hopper-38mm")!;
+      assert.isTrue(barWorkspaceRoot(baseDir, hopper).startsWith(await NodeFSP.realpath(root)));
+      const approval = snapshot.threads.find(
+        (thread) => String(thread.id) === app!.projectsApprovalThreadId,
+      );
+      assert.equal(String(approval?.projectId), barProjectId(hopper));
+      assert.equal(approval?.title, BAR_PROJECTS_APPROVAL_THREAD.title);
+      assert.equal(app!.pendingPairing.appId, BAR_PENDING_APP_ID);
+      assert.isAbove(Date.parse(app!.pendingPairing.expiresAt), Date.parse(app!.stagedAt));
+      // The Apps list scenes open the app thread updated last.
+      const appProjects = new Set(app!.workspaces.map((workspace) => workspace.projectId));
+      const appThreads = snapshot.threads.filter((thread) =>
+        appProjects.has(String(thread.projectId)),
+      );
+      const updatedAt = (thread: (typeof appThreads)[number]) =>
+        Date.parse(String(thread.updatedAt));
+      const latest = appThreads.find((thread) => String(thread.id) === app!.latestThreadId)!;
+      assert.isTrue(appThreads.every((thread) => updatedAt(thread) <= updatedAt(latest)));
       // The mockup thread's two tool rows and its card ran on the headless tools alone.
       const calls = JSON.parse(
         await NodeFSP.readFile(

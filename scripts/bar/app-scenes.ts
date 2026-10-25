@@ -65,6 +65,41 @@ const pendingApproval = check("pending-approval-card", {
   selector: id("app-approval-card"),
 });
 
+/** The seeded pairing request prompts every admin client; capture dismisses it first. */
+const noPairingPrompt = check("no-pairing-prompt", {
+  kind: "absent",
+  selector: id("app-pairing-prompt"),
+});
+
+const pairingRow = check("pairing-row", {
+  kind: "some",
+  selector: id("app-pairing-row"),
+  probes: [
+    { kind: "text", selector: "button", equals: "Approve" },
+    { kind: "text", selector: "button", equals: "Deny" },
+  ],
+});
+
+/**
+ * CP0 drew no repository: Initialize Git and no ref picker. Until its status
+ * loads the client assumes a repository, so this also waits that out.
+ */
+const notGitRepo = check("not-git-repo", {
+  kind: "all",
+  probes: [
+    { kind: "text", selector: "button", equals: "Initialize Git" },
+    { kind: "absent", selector: 'button:has-text("Select ref")' },
+    { kind: "absent", selector: 'button:has-text("Current checkout")' },
+  ],
+});
+
+/** The mock Copilot thread CP0 drew in hopper-38mm, still waiting on its approval. */
+const projectsApprovalRow = check("projects-approval-row", {
+  kind: "text",
+  selector: '[data-testid="sidebar-row-card"], [data-testid="sidebar-row-slim"]',
+  pattern: "Approval",
+});
+
 const selectedThread = check("selected-thread-row", {
   kind: "count",
   selector: `${id("app-thread-row")}[data-selected="true"]`,
@@ -141,6 +176,13 @@ export function barAppStagingChecks(
   scene: BarAppSceneName,
   manifest: BarAppManifest,
 ): ReadonlyArray<StagingCheck> {
+  return [...sceneChecks(scene, manifest), noPairingPrompt];
+}
+
+function sceneChecks(
+  scene: BarAppSceneName,
+  manifest: BarAppManifest,
+): ReadonlyArray<StagingCheck> {
   switch (scene) {
     case "projects-mode":
       return [
@@ -151,11 +193,13 @@ export function barAppStagingChecks(
           equals: "All projects",
         }),
         check("no-apps-group", { kind: "absent", selector: id("sidebar-apps-group") }),
+        projectsApprovalRow,
+        notGitRepo,
       ];
     case "apps-list":
-      return [mode("Apps"), appClosed];
+      return [mode("Apps"), appClosed, pairingRow, selectedThread];
     case "apps-app-selected":
-      return [mode("Apps"), appHeaderClosed, ...sidebarSectionChecks(manifest)];
+      return [mode("Apps"), appHeaderClosed, ...sidebarSectionChecks(manifest), selectedThread];
     case "apps-desktop-mockup-scene":
       return [
         mode("Apps"),
