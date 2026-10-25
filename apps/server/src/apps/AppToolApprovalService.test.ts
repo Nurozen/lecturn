@@ -121,7 +121,7 @@ class TestAppStatus extends Context.Service<
     readonly events: PubSub.PubSub<AppStatusStreamEvent>;
     readonly states: Map<AppId, AppGrantState | "removed">;
   }
->()("test/AppToolApprovalService/TestAppStatus") {}
+>()("lecturn/apps/AppToolApprovalService.test/TestAppStatus") {}
 
 const appStatus = (appId: AppId, name: string, state: AppGrantState) =>
   ({ appId, name, state }) as AppStatus;
