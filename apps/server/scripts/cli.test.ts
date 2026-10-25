@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import * as Option from "effect/Option";
 
 import serverPackageJson from "../package.json" with { type: "json" };
-import { buildPublishManifest, createVpPmPublishArgs } from "./cli.ts";
+import { buildPublishManifest, createVpPmPackArgs, createVpPmPublishArgs } from "./cli.ts";
 
 const workspaceConfig = {
   catalog: Object.fromEntries(
@@ -94,5 +94,43 @@ it("filters pnpm publish by the published package name", () => {
       "--provenance",
       "--dry-run",
     ],
+  );
+});
+
+it("declares only runtime externals in a pack manifest, so a clean install never needs workspace packages", () => {
+  const published = buildPublishManifest({ version: "1.2.3", workspaceConfig });
+  const packed = buildPublishManifest({
+    version: "1.2.3",
+    workspaceConfig,
+    runtimeExternalsOnly: true,
+  });
+
+  assert.isTrue(Object.keys(published.dependencies).some((name) => name.startsWith("@lecturn/")));
+  assert.deepStrictEqual(Object.keys(packed.dependencies).toSorted(), [
+    "@cursor/sdk",
+    "@ff-labs/fff-node",
+    "@napi-rs/keyring",
+    "node-pty",
+    "playwright-core",
+    "undici",
+  ]);
+  assert.isFalse(
+    Object.values(packed.dependencies).some(
+      (spec) => spec.startsWith("workspace:") || spec.startsWith("catalog:"),
+    ),
+  );
+});
+
+it("packs the published package name into the requested directory", () => {
+  assert.deepStrictEqual(createVpPmPackArgs(Option.none(), "/tmp/out"), [
+    "pack",
+    "--filter",
+    "lecturn",
+    "--pack-destination",
+    "/tmp/out",
+  ]);
+  assert.deepStrictEqual(
+    createVpPmPackArgs(Option.some("lecturn-nightly"), "/tmp/out").at(2),
+    "lecturn-nightly",
   );
 });

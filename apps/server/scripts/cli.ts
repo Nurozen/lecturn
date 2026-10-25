@@ -17,6 +17,7 @@ import {
   resolveWebIconOverrides,
 } from "../../../scripts/lib/brand-assets.ts";
 import { findEsmImportsOfExternalPackages } from "../../../scripts/lib/cli-executable-imports.ts";
+import { selectCliRuntimeExternalDependencies } from "../../../scripts/lib/cli-external-packages.ts";
 import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog.ts";
 import { fromJsonStringPretty } from "@lecturn/shared/schemaJson";
 import { fromYaml } from "@lecturn/shared/schemaYaml";
@@ -286,17 +287,39 @@ export const createVpPmPublishArgs = (config: PublishCommandConfig): ReadonlyArr
   return args;
 };
 
+export const createVpPmPackArgs = (
+  packageName: Option.Option<string>,
+  outDir: string,
+): ReadonlyArray<string> => [
+  "pack",
+  "--filter",
+  Option.getOrElse(packageName, () => "lecturn"),
+  "--pack-destination",
+  outDir,
+];
+
 export interface PublishManifestInput {
   readonly version: string;
   readonly workspaceConfig: WorkspaceConfig;
   readonly packageName?: string | undefined;
   readonly binName?: string | undefined;
   readonly githubRepository?: string | undefined;
+  /**
+   * vp pack inlines every other dependency, and the private workspace ones are
+   * not on npm, so a clean install of a vendored tarball fails unless the
+   * manifest declares only what dist/ still imports at runtime.
+   */
+  readonly runtimeExternalsOnly?: boolean | undefined;
 }
 
 export const buildPublishManifest = (input: PublishManifestInput): PackageJson => {
   const workspaceCatalog = input.workspaceConfig.catalog ?? {};
   const workspaceOverrides = input.workspaceConfig.overrides ?? {};
+  const dependencies = resolveCatalogDependencies(
+    serverPackageJson.dependencies,
+    workspaceCatalog,
+    "apps/server",
+  );
   return {
     license: serverPackageJson.license,
     name: input.packageName ?? serverPackageJson.name,
@@ -311,96 +334,112 @@ export const buildPublishManifest = (input: PublishManifestInput): PackageJson =
     version: input.version,
     engines: serverPackageJson.engines,
     files: serverPackageJson.files,
-    dependencies: resolveCatalogDependencies(
-      serverPackageJson.dependencies,
-      workspaceCatalog,
-      "apps/server",
-    ),
+    dependencies: input.runtimeExternalsOnly
+      ? selectCliRuntimeExternalDependencies(dependencies)
+      : dependencies,
     overrides: resolveCatalogDependencies(workspaceOverrides, workspaceCatalog, "apps/server"),
   };
 };
 
-interface PublishFlags extends PublishCommandConfig {
+interface ManifestFlags {
   readonly appVersion: Option.Option<string>;
+  readonly packageName: Option.Option<string>;
   readonly binName: Option.Option<string>;
-  readonly requireStave: boolean;
   readonly verbose: boolean;
 }
 
+interface PublishFlags extends PublishCommandConfig, ManifestFlags {
+  readonly requireStave: boolean;
+}
+
 /**
- * Publishes apps/server itself as the Node-script `lecturn` package: rewrites
- * the manifest (resolved catalog versions, package/bin name, repository) and
- * release icons for the duration of `vp pm publish`, then restores them.
+ * Rewrites the apps/server manifest (resolved catalog versions, package/bin
+ * name, repository) and release icons for the duration of `use`, then restores
+ * them. `use` runs vp pm from the workspace root so pnpm-only workspace
+ * config, including override selectors, is interpreted correctly.
  */
-const publishNodePackage = Effect.fn("publishNodePackage")(function* (config: PublishFlags) {
-  const path = yield* Path.Path;
-  const fs = yield* FileSystem.FileSystem;
-  const repoRoot = yield* RepoRoot;
-  const serverDir = path.join(repoRoot, "apps/server");
-  const packageJsonPath = path.join(serverDir, "package.json");
+const withPackageManifest = <A, E, R>(
+  config: ManifestFlags & { readonly runtimeExternalsOnly: boolean },
+  use: Effect.Effect<A, E, R>,
+) =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path;
+    const fs = yield* FileSystem.FileSystem;
+    const repoRoot = yield* RepoRoot;
+    const serverDir = path.join(repoRoot, "apps/server");
+    const packageJsonPath = path.join(serverDir, "package.json");
 
-  for (const relPath of ["dist/bin.mjs", "dist/client/index.html"]) {
-    const abs = path.join(serverDir, relPath);
-    if (!(yield* fs.exists(abs))) {
-      return yield* new ServerCliBuildAssetMissingError({ assetPath: abs });
+    for (const relPath of ["dist/bin.mjs", "dist/client/index.html"]) {
+      const abs = path.join(serverDir, relPath);
+      if (!(yield* fs.exists(abs))) {
+        return yield* new ServerCliBuildAssetMissingError({ assetPath: abs });
+      }
     }
-  }
 
-  if (config.requireStave) {
-    yield* assertStaveBinaries(serverDir);
-  }
+    return yield* Effect.acquireUseRelease(
+      // Acquire: resolve publish metadata and read every original before mutation.
+      Effect.gen(function* () {
+        const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version);
+        const workspaceConfig = yield* readWorkspaceConfig();
+        const pkg = buildPublishManifest({
+          version,
+          workspaceConfig,
+          packageName: Option.getOrUndefined(config.packageName),
+          binName: Option.getOrUndefined(config.binName),
+          githubRepository: process.env.GITHUB_REPOSITORY,
+          runtimeExternalsOnly: config.runtimeExternalsOnly,
+        });
 
-  yield* Effect.acquireUseRelease(
-    // Acquire: resolve publish metadata and read every original before mutation.
-    Effect.gen(function* () {
-      const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version);
-      const workspaceConfig = yield* readWorkspaceConfig();
-      const pkg = buildPublishManifest({
-        version,
-        workspaceConfig,
-        packageName: Option.getOrUndefined(config.packageName),
-        binName: Option.getOrUndefined(config.binName),
-        githubRepository: process.env.GITHUB_REPOSITORY,
-      });
+        return {
+          packageJsonString: yield* encodePackageJson(pkg),
+          originalPackageJson: yield* fs.readFile(packageJsonPath),
+          icons: yield* preparePublishIcons(repoRoot, serverDir, version),
+        };
+      }),
+      (resource) =>
+        Effect.gen(function* () {
+          yield* fs.writeFileString(packageJsonPath, `${resource.packageJsonString}\n`);
+          for (const icon of resource.icons) {
+            yield* fs.writeFile(icon.targetPath, icon.publish);
+          }
+          yield* Effect.log("[cli] Applied package metadata and publish icon overrides");
+          return yield* use;
+        }),
+      // Release: restore every file even if applying overrides or `use` fails.
+      (resource) =>
+        Effect.gen(function* () {
+          yield* fs.writeFile(packageJsonPath, resource.originalPackageJson);
+          for (const icon of resource.icons) {
+            yield* fs.writeFile(icon.targetPath, icon.original);
+          }
+          if (config.verbose) yield* Effect.log("[cli] Restored original publish assets");
+        }),
+    );
+  });
 
-      return {
-        packageJsonString: yield* encodePackageJson(pkg),
-        originalPackageJson: yield* fs.readFile(packageJsonPath),
-        icons: yield* preparePublishIcons(repoRoot, serverDir, version),
-      };
+const runVpPm = Effect.fn("runVpPm")(function* (args: ReadonlyArray<string>, verbose: boolean) {
+  const repoRoot = yield* RepoRoot;
+  const spawnCommand = yield* resolveSpawnCommand("vp", ["pm", ...args]);
+  yield* Effect.log(`[cli] Running: vp pm ${args.join(" ")}`);
+  yield* runCommand(
+    ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+      cwd: repoRoot,
+      stdout: verbose ? "inherit" : "ignore",
+      stderr: "inherit",
+      shell: spawnCommand.shell,
     }),
-    // Use: pnpm publish from the workspace root so pnpm-only workspace
-    // config, including override selectors, is interpreted correctly.
-    (resource) =>
-      Effect.gen(function* () {
-        yield* fs.writeFileString(packageJsonPath, `${resource.packageJsonString}\n`);
-        for (const icon of resource.icons) {
-          yield* fs.writeFile(icon.targetPath, icon.publish);
-        }
-        yield* Effect.log("[cli] Applied package metadata and publish icon overrides");
+  );
+});
 
-        const args = createVpPmPublishArgs(config);
-        const spawnCommand = yield* resolveSpawnCommand("vp", ["pm", ...args]);
-
-        yield* Effect.log(`[cli] Running: vp pm ${args.join(" ")}`);
-        yield* runCommand(
-          ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-            cwd: repoRoot,
-            stdout: config.verbose ? "inherit" : "ignore",
-            stderr: "inherit",
-            shell: spawnCommand.shell,
-          }),
-        );
-      }),
-    // Release: restore every file even if applying overrides or publishing fails.
-    (resource) =>
-      Effect.gen(function* () {
-        yield* fs.writeFile(packageJsonPath, resource.originalPackageJson);
-        for (const icon of resource.icons) {
-          yield* fs.writeFile(icon.targetPath, icon.original);
-        }
-        if (config.verbose) yield* Effect.log("[cli] Restored original publish assets");
-      }),
+/** Publishes apps/server itself as the Node-script `lecturn` package. */
+const publishNodePackage = Effect.fn("publishNodePackage")(function* (config: PublishFlags) {
+  if (config.requireStave) {
+    const path = yield* Path.Path;
+    yield* assertStaveBinaries(path.join(yield* RepoRoot, "apps/server"));
+  }
+  yield* withPackageManifest(
+    { ...config, runtimeExternalsOnly: false },
+    runVpPm(createVpPmPublishArgs(config), config.verbose),
   );
 });
 
@@ -420,9 +459,38 @@ const publishCmd = Command.make(
   publishNodePackage,
 ).pipe(Command.withDescription("Publish apps/server to npm as the lecturn Node package."));
 
+const packCmd = Command.make(
+  "pack",
+  {
+    outDir: Flag.String("out-dir").pipe(
+      Flag.withDescription("Directory that receives the tarball (created if missing)."),
+    ),
+    appVersion: Flag.String("app-version").pipe(Flag.optional),
+    packageName: Flag.String("package-name").pipe(Flag.optional),
+    binName: Flag.String("bin-name").pipe(Flag.optional),
+    verbose: Flag.Boolean("verbose").pipe(Flag.withDefault(false)),
+  },
+  (config) =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const fs = yield* FileSystem.FileSystem;
+      const outDir = path.resolve(config.outDir);
+      yield* fs.makeDirectory(outDir, { recursive: true });
+      yield* withPackageManifest(
+        { ...config, runtimeExternalsOnly: true },
+        runVpPm(createVpPmPackArgs(config.packageName, outDir), config.verbose),
+      );
+      yield* Effect.log(`[cli] Packed apps/server into ${outDir}`);
+    }),
+).pipe(
+  Command.withDescription(
+    "Pack the built apps/server as a vendorable lecturn tarball declaring only its runtime externals.",
+  ),
+);
+
 const cli = Command.make("cli").pipe(
   Command.withDescription("Lecturn server build & publish CLI."),
-  Command.withSubcommands([buildCmd, buildExeCmd, publishCmd]),
+  Command.withSubcommands([buildCmd, buildExeCmd, publishCmd, packCmd]),
 );
 
 if (import.meta.main) {
