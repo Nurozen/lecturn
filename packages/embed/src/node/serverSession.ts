@@ -16,6 +16,7 @@ import {
   AppsMarkThreadsCopiedInput,
   AppsMintEmbedTokenInput,
   AppsSetThreadAppDataInput,
+  AppsUpdateHostContextInput,
   APPS_WS_METHODS,
 } from "@lecturn/contracts/appsRpcCore";
 import {
@@ -54,6 +55,8 @@ import * as Socket from "effect/socket/Socket";
  */
 export type ThreadCopyBundle = unknown;
 
+export type HostContextTarget = { readonly threadId: string } | { readonly projectId: string };
+
 /** One app session on one Lecturn server, sidecar or user server alike. */
 export interface ServerSession {
   readonly origin: string;
@@ -77,6 +80,8 @@ export interface ServerSession {
     appData: string | null,
     subtitle?: string | null,
   ): Promise<void>;
+  /** Empty text clears the entry. */
+  updateHostContext(target: HostContextTarget, text: string): Promise<void>;
   exportThreads(projectIds: ReadonlyArray<string>): Promise<ThreadCopyBundle>;
   importThreads(
     bundle: ThreadCopyBundle,
@@ -121,6 +126,7 @@ const decodeProjectTarget = Schema.decodeEffect(
   Schema.Struct({ projectId: AppsMintEmbedTokenInput.fields.projectId }),
 );
 const decodeSetThreadAppData = Schema.decodeEffect(AppsSetThreadAppDataInput);
+const decodeUpdateHostContext = Schema.decodeEffect(AppsUpdateHostContextInput);
 const decodeExportThreads = Schema.decodeEffect(AppsExportThreadsInput);
 const decodeMarkThreadsCopied = Schema.decodeEffect(AppsMarkThreadsCopiedInput);
 // A dropped socket ends the stream; the client reconnects underneath, so resubscribing is enough.
@@ -319,6 +325,13 @@ export async function openServerSession(input: {
           ...(subtitle === undefined ? {} : { subtitle }),
         }).pipe(
           Effect.flatMap((payload) => client[APPS_WS_METHODS.appsSetThreadAppData](payload)),
+          Effect.asVoid,
+        ),
+      ),
+    updateHostContext: (target, text) =>
+      run(
+        decodeUpdateHostContext({ target, text }).pipe(
+          Effect.flatMap((payload) => client[APPS_WS_METHODS.appsUpdateHostContext](payload)),
           Effect.asVoid,
         ),
       ),

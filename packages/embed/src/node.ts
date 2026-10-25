@@ -1,6 +1,7 @@
 export { connect, USER_SERVER_WATCH_INTERVAL_MS } from "./node/connect.ts";
 export type {
   ConnectOptions,
+  HostContextTarget,
   LecturnConnection,
   PendingLecturnConnection,
 } from "./node/connect.ts";
