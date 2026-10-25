@@ -304,9 +304,12 @@ async function setSidebarMode(page: Page, label: "Apps" | "Projects") {
     .waitFor({ state: "attached", timeout: UI_TIMEOUT_MS });
 }
 
-/** A copy lands settled, and Apps mode folds Settled by default. */
-async function appThreadRow(workspace: Locator, title: string): Promise<Locator> {
-  const row = workspace.locator(`[data-testid="app-thread-row"][aria-label="${title}"]`);
+/**
+ * A copy lands settled, and Apps mode folds Settled by default. Found by id:
+ * the title can be the first message, scripted block and all.
+ */
+async function appThreadRow(workspace: Locator, threadId: string): Promise<Locator> {
+  const row = workspace.locator(`[data-thread-item$="${threadId}"] [data-testid="app-thread-row"]`);
   const settled = workspace.locator('button[aria-label^="Settled threads in"]');
   if (
     !(await row.isVisible()) &&
@@ -338,8 +341,22 @@ export function attachFlow(input: {
   readonly log: E2eContext["log"];
   /** Launches the host again on the same directories. */
   readonly reopen: () => Promise<EmbedHostRun>;
+  /** Where the CP4 captures go; none are taken without it. */
+  readonly artifactsDir?: string | undefined;
 }): AttachFlow {
-  const { log } = input;
+  const { log, artifactsDir } = input;
+  const capture = async (page: Page, name: string) => {
+    if (artifactsDir === undefined) return;
+    const menus = page.locator('[role="menu"]').filter({ visible: true });
+    if ((await menus.count()) > 0) {
+      log(`closing an open menu before ${name}: ${await menus.first().innerText()}`);
+      await page.keyboard.press("Escape");
+      await menus.first().waitFor({ state: "hidden", timeout: UI_TIMEOUT_MS });
+    }
+    const path = NodePath.join(artifactsDir, name);
+    await page.screenshot({ path });
+    log(`captured ${path}`);
+  };
   const dirs = input.run.dirs;
   const server = userServer(dirs, log);
   const countersPath = NodePath.join(dirs.workspace, ".embed-host", "counter-calls.json");
@@ -463,9 +480,11 @@ export function attachFlow(input: {
     // absence from Projects mode below means something.
     await setSidebarMode(page, "Apps");
     await page.locator(`[aria-label="Show only ${APP_NAME}"]`).click({ timeout: UI_TIMEOUT_MS });
-    const workspace = page.locator('[data-testid="app-workspace"]', { hasText: WORKSPACE_TITLE });
+    const workspace = page.locator('[data-testid="sidebar-app-workspace"]', {
+      hasText: WORKSPACE_TITLE,
+    });
     await workspace.first().waitFor({ state: "visible", timeout: UI_TIMEOUT_MS });
-    const row = await appThreadRow(workspace.first(), copy.title);
+    const row = await appThreadRow(workspace.first(), copyThreadId);
     await row.click();
     await until("the copied thread to open", UI_TIMEOUT_MS, async () =>
       decodedPath(page.url()).endsWith(`/${copyThreadId}`) ? true : undefined,
@@ -476,6 +495,7 @@ export function attachFlow(input: {
     const cards = await embedPage(page).loadedCards(source.cards.length, CARD_TIMEOUT_MS);
     log(`copied cards ${JSON.stringify(cards)}`);
     NodeAssert.deepEqual(cards, source.cards, "the copied cards render with their results");
+    await capture(page, "cp4-copied-thread-apps.png");
 
     await setSidebarMode(page, "Projects");
     const listedInProjects = await page.evaluate(
@@ -527,6 +547,8 @@ export function attachFlow(input: {
       .getByText(CLOSED_BANNER)
       .first()
       .waitFor({ state: "visible", timeout: UI_TIMEOUT_MS });
+    // The copy landed settled, which shows Unsettle in place of the composer.
+    await page.getByRole("button", { name: "Unsettle thread" }).click({ timeout: UI_TIMEOUT_MS });
     await lecturn.waitForRuntimeMode("Full access");
     const countsBefore = (await readJsonArray<CounterCall>(countersPath)).length;
     const flashesBefore = await readJsonArray<FlashRecord>(dirs.flashLog);
@@ -678,11 +700,15 @@ export function attachFlow(input: {
       `lecturn://apps/${HOST_APP_ID}/threads/${copy.userEnvironmentId}/${copy.copyThreadId}`,
       "the notice links to the copy",
     );
+    // The composer stays mounted under the notice; embed.css hides it (D33).
     NodeAssert.equal(
-      await guest.locator('[data-testid="composer-editor"]').count(),
+      await guest.locator('[data-testid="composer-editor"]').filter({ visible: true }).count(),
       0,
       "the copied thread has no composer on the sidecar",
     );
+    // Read back in full: the copied history's card, not just the notice.
+    await embedPage(guest).loadedCards(1, CARD_TIMEOUT_MS);
+    await capture(guest, "cp4-continued-in-lecturn.png");
     log("ledger: the copied thread is read-only on the sidecar with its link");
 
     // A new sidecar thread: the next attach copies it and nothing else.
@@ -744,7 +770,10 @@ export function attachFlow(input: {
       ThreadId.make(midCopy.threadId),
     );
     NodeAssert.ok(
-      !midProjection.messages.some((message) => message.text.includes(HELD_REPLY)),
+      // The user's message names the reply in its script, so only replies count.
+      !midProjection.messages.some(
+        (message) => message.role === "assistant" && message.text.includes(HELD_REPLY),
+      ),
       "the copy was taken before the held turn finished",
     );
     // D33: the sidecar, lease included, stays up while its turn runs.

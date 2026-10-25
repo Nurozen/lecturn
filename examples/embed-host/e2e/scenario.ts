@@ -324,6 +324,7 @@ async function seedSourceThread(run: EmbedHostRun, log: E2eContext["log"]): Prom
 
 export default async function scenario({
   log,
+  artifactsDir,
   keep,
   steps = AUTOMATED_STEPS,
 }: E2eContext): Promise<void> {
@@ -359,6 +360,7 @@ export default async function scenario({
         run: first,
         log,
         reopen: () => launchEmbedHost({ scripted: true, scripts, dirs }),
+        artifactsDir,
       });
       await attach.step3(copied ?? (await seedSourceThread(first, log)));
       if (steps.includes(4)) await attach.step4();

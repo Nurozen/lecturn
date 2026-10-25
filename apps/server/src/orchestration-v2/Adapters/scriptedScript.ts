@@ -69,12 +69,16 @@ function parseJson(text: string, source: string): unknown {
   }
 }
 
-const FENCE = /```scripted[^\S\n]*\r?\n([\s\S]*?)```/u;
+const FENCE = /```scripted[^\S\n]*\r?\n([\s\S]*?)```/gu;
 
-/** The script in a fenced `scripted` block, or undefined when the text has none. */
+/**
+ * The script in the last fenced `scripted` block, or undefined when the text
+ * has none. The last: a thread's first turn after a copy or fork carries the
+ * earlier history ahead of the user's own message, scripts included.
+ */
 export function scriptFromMessage(text: string): ScriptedScript | undefined {
-  const match = FENCE.exec(text);
-  if (match === null) return undefined;
+  const match = [...text.matchAll(FENCE)].at(-1);
+  if (match === undefined) return undefined;
   const decoded = decodeScript(parseJson(match[1]!, "The scripted block"));
   if (Exit.isFailure(decoded)) {
     throw new ScriptedScriptError({
