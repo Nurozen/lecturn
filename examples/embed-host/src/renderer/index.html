@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    />
+    <title>Embed Host</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --sidebar-width: 320px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        height: 100vh;
+        display: grid;
+        grid-template-columns: var(--sidebar-width) 1fr;
+        background: #1b1e20;
+        color: #e6e9ea;
+        font:
+          13px system-ui,
+          sans-serif;
+      }
+      aside {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 16px;
+        border-right: 1px solid #2a3034;
+        overflow: auto;
+      }
+      h1 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      #status {
+        color: #8e989c;
+      }
+      ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      li {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 8px;
+        border-radius: 6px;
+      }
+      li[data-focused] {
+        background: #253c3f;
+      }
+      button {
+        border: 1px solid #2a3034;
+        border-radius: 6px;
+        background: #25292c;
+        color: inherit;
+        font: inherit;
+        padding: 4px 8px;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: #61b5ad;
+      }
+    </style>
+  </head>
+  <body>
+    <aside>
+      <h1>Embed Host</h1>
+      <div id="status"></div>
+      <ul id="items"></ul>
+    </aside>
+    <!-- Lecturn's view is laid over this element; it stays empty. -->
+    <main id="pane"></main>
+    <script src="./renderer.iife.js"></script>
+  </body>
+</html>

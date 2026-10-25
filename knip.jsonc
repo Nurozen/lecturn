@@ -128,7 +128,15 @@
       "entry": ["src/{node,electron,renderer,browser,electron-preload}.ts!"],
     },
     "examples/embed-host": {
-      "entry": ["src/main.ts!"],
+      // Each is loaded on its own: Electron mains, the window preload and page, the stdio tool server, scripts.
+      "entry": [
+        "src/{main,staticMain,preload}.ts!",
+        "src/renderer/main.ts!",
+        "tools/counter-mcp.ts!",
+        "scripts/{start,count-integration-lines}.ts",
+        "e2e/run.ts",
+        "e2e/*.e2e.ts",
+      ],
     },
     "packages/effect-acp": {
       "includeEntryExports": true,

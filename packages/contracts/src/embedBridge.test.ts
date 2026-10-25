@@ -18,6 +18,7 @@ import {
   isDataUrlFontFaceCss,
   utf8ByteLength,
 } from "./embedBridge.ts";
+import embedHostTheme from "../../../examples/embed-host/src/rocketwright-theme.json" with { type: "json" };
 
 const decodeInitializeParams = Schema.decodeUnknownSync(EmbedInitializeParams);
 const decodeHostContext = Schema.decodeUnknownSync(EmbedHostContext);
@@ -92,6 +93,29 @@ describe("handshake", () => {
     const check = checkEmbedMessageSize(response);
     expect(check.fits).toBe(true);
     expect(check.bytes).toBeGreaterThan(EMBED_FONTS_CSS_MAX_BYTES);
+  });
+
+  // The example host sends RocketWright's generated token file verbatim (D35),
+  // so a real host's full set, fonts included, is held to the same limits.
+  it("fits a host context built from the embed-host theme file", () => {
+    const theme = embedHostTheme;
+    const hostContext = decodeHostContext({
+      theme: "dark",
+      displayMode: "inline",
+      locale: "en-US",
+      styles: { variables: theme.variables, css: { fonts: theme.fontsCss } },
+    });
+    expect(Object.keys(hostContext.styles?.variables ?? {}).toSorted()).toEqual(
+      [...EMBED_THEME_VARS].toSorted(),
+    );
+    expect(hostContext.styles?.variables?.["--background"]).toBe("#1b1e20");
+    expect(isDataUrlFontFaceCss(theme.fontsCss)).toBe(true);
+    const check = checkEmbedMessageSize({
+      jsonrpc: "2.0",
+      id: 1,
+      result: encodeInitializeResult(embedInitializeResult(hostContext)),
+    });
+    expect(check.fits).toBe(true);
   });
 
   it("names the size of a message over the envelope limit", () => {
