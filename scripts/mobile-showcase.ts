@@ -972,10 +972,12 @@ async function barFixtureClientConnected(baseDir: string): Promise<boolean> {
   const start = output.indexOf("[");
   const end = output.lastIndexOf("]");
   if (start === -1 || end < start) return false;
+  // `connected` is live state of the process that lists, which is this CLI,
+  // so it is always false here; the server records `lastConnectedAt` instead.
   const sessions = JSON.parse(output.slice(start, end + 1)) as ReadonlyArray<{
-    readonly connected?: unknown;
+    readonly lastConnectedAt?: unknown;
   }>;
-  return sessions.some((session) => session.connected === true);
+  return sessions.some((session) => typeof session.lastConnectedAt === "string");
 }
 
 /**
