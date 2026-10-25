@@ -291,3 +291,22 @@ export function playwrightProbeRoot(host: LocatorHost): ProbeRoot {
     pointCounts: (selector) => host.locator(selector).evaluateAll(countShapePoints),
   };
 }
+
+/** A staged live state a scene must show before it is captured (A38). */
+export interface StagingCheck {
+  readonly id: string;
+  readonly probe: Probe;
+}
+
+/** The failed staging checks, as `id: reason`; empty when the scene shows every staged state. */
+export async function stagingProblems(
+  checks: ReadonlyArray<StagingCheck>,
+  root: ProbeRoot,
+): Promise<ReadonlyArray<string>> {
+  const problems: Array<string> = [];
+  for (const check of checks) {
+    const outcome = await evaluateProbe(check.probe, root);
+    if (!outcome.passed) problems.push(`${check.id}: ${outcome.reason}`);
+  }
+  return problems;
+}

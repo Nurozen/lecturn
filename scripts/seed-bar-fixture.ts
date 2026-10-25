@@ -41,6 +41,12 @@ import * as EventStore from "../apps/server/src/orchestration-v2/EventStore.ts";
 import { planProjectCommand } from "../apps/server/src/orchestration-v2/ProjectCommands.ts";
 import * as ProjectionMaintenance from "../apps/server/src/orchestration-v2/ProjectionMaintenance.ts";
 import * as ProjectionStore from "../apps/server/src/orchestration-v2/ProjectionStore.ts";
+import {
+  BAR_APP_SETTINGS,
+  type BarAppManifest,
+  barAppServerEnv,
+  stageBarAppFixture,
+} from "./bar/app-fixture.ts";
 
 const REPO_ROOT = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
 const serverBin = (serverRoot: string) => NodePath.join(serverRoot, "apps/server/src/bin.ts");
@@ -572,6 +578,8 @@ export interface BarServerOptions {
   readonly port?: number | undefined;
   /** Checkout whose server runs, e.g. a baseline worktree; defaults to this one. */
   readonly serverRoot?: string | undefined;
+  /** Added to the server's environment, e.g. to enable the scripted test provider. */
+  readonly env?: Readonly<Record<string, string>> | undefined;
 }
 
 export async function startBarServer(
@@ -596,7 +604,11 @@ export async function startBarServer(
       "--log-level",
       "info",
     ],
-    { cwd: serverRoot, stdio: ["ignore", "pipe", "pipe"] },
+    {
+      cwd: serverRoot,
+      env: { ...NodeProcess.env, ...input.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
   );
   const pid = child.pid;
   if (pid === undefined) throw new Error("The bar fixture server did not start.");
@@ -641,9 +653,11 @@ export async function startBarServer(
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 
-/** A read-scoped bearer token for checks against a running fixture server. */
-export async function issueBarReadToken(
+/** A bearer token for checks against, or staging on, a running fixture server. */
+export async function issueBarToken(
   baseDir: string,
+  scopes: ReadonlyArray<string>,
+  label: string,
   serverRoot: string = REPO_ROOT,
 ): Promise<string> {
   assertIsolatedBaseDir(baseDir);
@@ -657,10 +671,9 @@ export async function issueBarReadToken(
       "--base-dir",
       baseDir,
       "--token-only",
-      "--scope",
-      "orchestration:read",
+      ...scopes.flatMap((scope) => ["--scope", scope]),
       "--label",
-      "bar-fixture-check",
+      label,
     ],
     { cwd: serverRoot, env: { ...NodeProcess.env, NO_COLOR: "1" } },
   );
@@ -668,6 +681,9 @@ export async function issueBarReadToken(
   if (!token) throw new Error("The session issue command printed no token.");
   return token;
 }
+
+export const issueBarReadToken = (baseDir: string, serverRoot: string = REPO_ROOT) =>
+  issueBarToken(baseDir, ["orchestration:read"], "bar-fixture-check", serverRoot);
 
 export async function fetchBarShellSnapshot(
   origin: string,
@@ -752,6 +768,8 @@ export function shellVisibilityProblems(
 export interface SeedBarFixtureResult {
   readonly baseDir: string;
   readonly server: BarServer | null;
+  /** Present with `app`: the staged connected-app states the after-captures read. */
+  readonly app: BarAppManifest | null;
 }
 
 /**
@@ -764,6 +782,8 @@ export async function seedBarFixture(
     readonly baseDir: string;
     readonly restart?: boolean;
     readonly fixture?: ReadonlyArray<BarFixtureProject>;
+    /** Also pair Embed Host, import its history and stage its live states (A38). */
+    readonly app?: boolean;
   },
 ): Promise<SeedBarFixtureResult> {
   const baseDir = NodePath.resolve(input.baseDir);
@@ -776,18 +796,44 @@ export async function seedBarFixture(
   for (const project of fixture) {
     await NodeFSP.mkdir(barWorkspaceRoot(baseDir, project), { recursive: true });
   }
+  const app = input.app === true;
+  if (app && input.restart === false) {
+    throw new Error("The app fixture stages live turns, so it needs the server left running.");
+  }
+  const env = app ? barAppServerEnv(baseDir) : undefined;
+  if (app) {
+    await NodeFSP.mkdir(NodePath.join(baseDir, "userdata"), { recursive: true });
+    await NodeFSP.writeFile(
+      NodePath.join(baseDir, "userdata", "settings.json"),
+      `${JSON.stringify(BAR_APP_SETTINGS, null, 2)}\n`,
+    );
+  }
   const migrating = await startBarServer({
     baseDir,
     host: input.host,
     serverRoot: input.serverRoot,
+    env,
   });
   await migrating.stop();
   await Effect.runPromise(
     seedBarFixtureOffline(baseDir, fixture).pipe(Effect.provide(barStoreLayer(baseDir))),
   );
-  if (input.restart === false) return { baseDir, server: null };
-  const server = await startBarServer({ ...input, baseDir });
-  return { baseDir, server };
+  if (input.restart === false) return { baseDir, server: null, app: null };
+  const server = await startBarServer({ ...input, baseDir, env });
+  if (!app) return { baseDir, server, app: null };
+  try {
+    const manifest = await stageBarAppFixture({
+      baseDir,
+      origin: server.origin,
+      issueToken: (scopes, label) => issueBarToken(baseDir, scopes, label, input.serverRoot),
+      fetchShell: async () =>
+        fetchBarShellSnapshot(server.origin, await issueBarReadToken(baseDir, input.serverRoot)),
+    });
+    return { baseDir, server, app: manifest };
+  } catch (error) {
+    await server.stop();
+    throw error;
+  }
 }
 
 function parseCliArgs(args: ReadonlyArray<string>) {
@@ -799,12 +845,13 @@ function parseCliArgs(args: ReadonlyArray<string>) {
       port: { type: "string" },
       "server-root": { type: "string" },
       "no-start": { type: "boolean", default: false },
+      app: { type: "boolean", default: false },
     },
   });
   const baseDir = values["base-dir"];
   if (baseDir === undefined) {
     throw new Error(
-      "Usage: node scripts/seed-bar-fixture.ts --base-dir <fresh dir> [--server-root <checkout>] [--host 127.0.0.1] [--port <n>] [--no-start]",
+      "Usage: node scripts/seed-bar-fixture.ts --base-dir <fresh dir> [--app] [--server-root <checkout>] [--host 127.0.0.1] [--port <n>] [--no-start]",
     );
   }
   return {
@@ -814,20 +861,28 @@ function parseCliArgs(args: ReadonlyArray<string>) {
     serverRoot:
       values["server-root"] === undefined ? undefined : NodePath.resolve(values["server-root"]),
     restart: !values["no-start"],
+    app: values.app,
   };
 }
 
 async function main(): Promise<void> {
   const options = parseCliArgs(NodeProcess.argv.slice(2));
-  const { server } = await seedBarFixture(options);
+  const { server, app } = await seedBarFixture(options);
   NodeProcess.stdout.write(`Seeded the bar fixture into ${NodePath.resolve(options.baseDir)}.\n`);
   if (server === null) return;
   NodeProcess.stdout.write(
-    `Server ${server.origin} (pid ${server.pid})\nPairing URL: ${server.pairingUrl ?? "(not printed)"}\nCapture clock: ${BAR_FIXTURE_NOW}\nPress Ctrl-C to stop.\n`,
+    `Server ${server.origin} (pid ${server.pid})\nPairing URL: ${server.pairingUrl ?? "(not printed)"}\nCapture clock: ${BAR_FIXTURE_NOW}\n`,
   );
+  if (app !== null) {
+    NodeProcess.stdout.write(
+      `App fixture: ${app.appName} staged at ${app.stagedAt} (app scenes use this clock).\nThe pending approval expires at ${app.approvalExpiresAt}; capture before then:\n  node scripts/bar/capture-web.ts --after --pairing-url <url> --base-dir ${NodePath.resolve(options.baseDir)} --out <dir> --checklist desktop\n`,
+    );
+  }
+  NodeProcess.stdout.write("Press Ctrl-C to stop.\n");
   const shutdown = () => void server.stop().then(() => NodeProcess.exit(0));
-  NodeProcess.once("SIGINT", shutdown);
-  NodeProcess.once("SIGTERM", shutdown);
+  // The `node:process` namespace has no EventEmitter methods; only the process object does.
+  globalThis.process.once("SIGINT", shutdown);
+  globalThis.process.once("SIGTERM", shutdown);
 }
 
 if (import.meta.main) {
