@@ -1,19 +1,26 @@
 /**
  * App projects (spec R3): one project per `(appId, workspaceRoot)`, invisible
  * to every workspace-root lookup a normal project uses, plus the thread list an
- * app's rail reads. Thread app metadata writes are A13b's.
+ * app's rail reads, plus the writes of thread app metadata, which go through
+ * orchestration like any other thread change (see threadAppMetadata.ts).
  */
 import {
   type AppBinding,
+  type AppId,
   AppsError,
   CommandId,
+  DEFAULT_MODEL,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
   type ConnectedAppThreadState,
   ConnectedAppThreadSummary,
   type ConnectedAppThreadsStreamEvent,
   type OrchestrationV2ThreadShell,
+  type OrchestrationV2ServerCommand,
   ProjectId,
-  type ThreadId,
+  ProviderInstanceId,
+  ThreadId,
 } from "@lecturn/contracts";
+import { resolveProjectSettings } from "@lecturn/shared/projectSettings";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -26,6 +33,7 @@ import * as Stream from "effect/Stream";
 
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import {
   coalesceShellApplicationEvents,
   toShellApplicationEvent,
@@ -33,11 +41,18 @@ import {
 } from "../orchestration-v2/ShellStream.ts";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
-import { AppProjectService, AppsNotImplemented } from "./services.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import { AppProjectService } from "./services.ts";
 import { readHistoryRevisions } from "./threadHistoryRevision.ts";
 
-const notImplemented = (method: string) =>
-  new AppsNotImplemented({ service: "AppProjectService", method });
+const DEFAULT_EMBED_THREAD_TITLE = "New thread";
+
+// Used only when neither the project nor the server names a default model;
+// the embed composer can switch models before the first send.
+const FALLBACK_MODEL_SELECTION = {
+  instanceId: ProviderInstanceId.make("codex"),
+  model: DEFAULT_MODEL,
+};
 
 const unavailable = (message: string) => (cause: unknown) =>
   new AppsError({
@@ -88,8 +103,12 @@ const sameSummary = Schema.toEquivalence(ConnectedAppThreadSummary);
 const newestFirst = (left: ConnectedAppThreadSummary, right: ConnectedAppThreadSummary) =>
   right.updatedAt.localeCompare(left.updatedAt) || left.threadId.localeCompare(right.threadId);
 
+const forbidden = (message: string) => new AppsError({ code: "forbidden", message });
+
 const make = Effect.gen(function* () {
   const projectService = yield* ProjectService.ProjectService;
+  const threadManagement = yield* ThreadManagement.ThreadManagementService;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
   const projects = yield* ProjectStore.ProjectStoreV2;
   const threads = yield* ProjectionStore.ProjectionStoreV2;
   const events = yield* OrchestrationEventStore.OrchestrationEventStore;
@@ -257,14 +276,139 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  const newCommandId = (operation: string) =>
+    crypto.randomUUIDv4().pipe(
+      Effect.map((id) => CommandId.make(`apps:${operation}:${id}`)),
+      Effect.mapError(unavailable("No random id")),
+    );
+
+  const dispatch = (command: OrchestrationV2ServerCommand) =>
+    threadManagement.dispatch(command).pipe(
+      Effect.mapError(
+        (cause) =>
+          new AppsError({
+            code: "unavailable",
+            message: `Could not update the thread: ${cause.message}`,
+          }),
+      ),
+    );
+
+  /**
+   * Only the app bound to a thread's project writes its app fields (R3.3).
+   * Subagent children are not the app's threads, so they are refused too.
+   */
+  const requireOwnedThread = Effect.fn("AppProjectService.requireOwnedThread")(function* (
+    appId: AppId,
+    threadId: ThreadId,
+  ) {
+    const shell = yield* threads
+      .getThreadShell(threadId)
+      .pipe(Effect.mapError(unavailable("Could not read the thread")));
+    if (shell === null || shell.deletedAt !== null) {
+      return yield* new AppsError({ code: "not-found", message: `Thread ${threadId} not found.` });
+    }
+    const binding = yield* resolveAppForProject(shell.projectId);
+    if (
+      Option.isNone(binding) ||
+      binding.value.appId !== appId ||
+      !isRailThread(shell, shell.projectId)
+    ) {
+      return yield* forbidden(`Thread ${threadId} does not belong to ${appId}.`);
+    }
+  });
+
+  const setThreadAppData: AppProjectService["Service"]["setThreadAppData"] = Effect.fn(
+    "AppProjectService.setThreadAppData",
+  )(function* (appId, input) {
+    yield* requireOwnedThread(appId, input.threadId);
+    yield* dispatch({
+      type: "thread.app-data.set",
+      commandId: yield* newCommandId("set-thread-app-data"),
+      threadId: input.threadId,
+      appData: input.appData,
+      ...(input.subtitle === undefined ? {} : { subtitle: input.subtitle }),
+    });
+  });
+
+  const markThreadsCopied: AppProjectService["Service"]["markThreadsCopied"] = Effect.fn(
+    "AppProjectService.markThreadsCopied",
+  )(function* (appId, input) {
+    // Every entry is checked before any is written, so a bad entry changes nothing.
+    yield* Effect.forEach(input.entries, ({ threadId }) => requireOwnedThread(appId, threadId), {
+      discard: true,
+    });
+    yield* Effect.forEach(
+      input.entries,
+      (entry) =>
+        newCommandId("mark-thread-copied").pipe(
+          Effect.flatMap((commandId) =>
+            dispatch({
+              type: "thread.continued-in.set",
+              commandId,
+              threadId: entry.threadId,
+              continuedIn: entry.continuedIn,
+            }),
+          ),
+        ),
+      { discard: true },
+    );
+  });
+
+  /**
+   * The embed view holds an embed token, never the app credential, so the
+   * server creates the thread for the app that owns the token's project (D32)
+   * and is the only writer of the thread's app fields.
+   */
+  const createEmbedThread: AppProjectService["Service"]["createEmbedThread"] = Effect.fn(
+    "AppProjectService.createEmbedThread",
+  )(function* (subject, input) {
+    if (subject.kind !== "embed" || subject.projectId !== input.projectId) {
+      return yield* forbidden("An embed token creates threads only in its own project.");
+    }
+    const binding = yield* requireBinding(input.projectId);
+    if (binding.appId !== subject.appId) {
+      return yield* forbidden(`Project ${input.projectId} does not belong to ${subject.appId}.`);
+    }
+    const project = yield* projectService
+      .getById(input.projectId)
+      .pipe(Effect.mapError(unavailable("Could not read the project")));
+    const settings = yield* serverSettings.getSettings.pipe(
+      Effect.mapError(unavailable("Could not read settings")),
+    );
+    const defaults = resolveProjectSettings(
+      settings,
+      input.projectId,
+      Option.getOrNull(project),
+    ).settings;
+    const id = yield* crypto.randomUUIDv4().pipe(Effect.mapError(unavailable("No random id")));
+    const threadId = ThreadId.make(id);
+    yield* dispatch({
+      type: "thread.create",
+      createdBy: "user",
+      creationSource: "web",
+      commandId: CommandId.make(`apps:create-embed-thread:${id}`),
+      threadId,
+      projectId: input.projectId,
+      title: input.title ?? DEFAULT_EMBED_THREAD_TITLE,
+      modelSelection: defaults.defaultModelSelection ?? FALLBACK_MODEL_SELECTION,
+      runtimeMode: defaults.defaultRuntimeMode,
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      branch: null,
+      worktreePath: null,
+      appOrigin: "embed",
+      ...(input.appData === undefined ? {} : { appData: input.appData }),
+    });
+    return { threadId };
+  });
+
   return AppProjectService.of({
     ensureWorkspace,
     resolveAppForProject,
     listThreads,
     streamThreads,
-    setThreadAppData: () => Effect.fail(notImplemented("setThreadAppData")),
-    createEmbedThread: () => Effect.fail(notImplemented("createEmbedThread")),
-    markThreadsCopied: () => Effect.fail(notImplemented("markThreadsCopied")),
+    setThreadAppData,
+    createEmbedThread,
+    markThreadsCopied,
   });
 });
 

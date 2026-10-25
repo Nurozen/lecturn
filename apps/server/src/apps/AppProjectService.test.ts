@@ -30,6 +30,7 @@ import * as LecturnOrchestrationHooks from "../orchestration-v2/fork/LecturnOrch
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
+import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
@@ -78,6 +79,8 @@ const layerTest = Layer.mergeAll(
       ProjectionStore.layer,
     ),
   ),
+  // Thread metadata writes go through the orchestrator; threadAppMetadata.test.ts covers them.
+  Layer.provideMerge(Layer.mock(ThreadManagement.ThreadManagementService)({})),
   Layer.provideMerge(ProjectEnrichmentService.layer),
   Layer.provideMerge(layerWorkspacePaths),
   Layer.provideMerge(layerMetadata),
