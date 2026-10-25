@@ -345,6 +345,9 @@ async function openThread(run: EmbedHostRun, title: string, switcher: boolean) {
       const { token } = await embedHost.embedTarget();
       const url = new URL(embedHost.embed.webContents.getURL());
       url.hash = new URLSearchParams({ embedToken: token, switcher: "0" }).toString();
+      // The view strips its hash on load, so a hash-only loadURL would be a same-document
+      // navigation the view never reads, and Electron rejects it as ERR_FAILED.
+      await embedHost.embed.webContents.loadURL("about:blank");
       await embedHost.embed.webContents.loadURL(url.toString());
     });
   }
