@@ -20,7 +20,10 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@lecturn/contracts";
-import { resolveProjectSettings } from "@lecturn/shared/projectSettings";
+import {
+  clearProjectSettingsOverrides,
+  resolveProjectSettings,
+} from "@lecturn/shared/projectSettings";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -401,6 +404,35 @@ const make = Effect.gen(function* () {
     return { threadId };
   });
 
+  /**
+   * The embed holds no settings scope, so the server writes only this one key
+   * of the token's own project entry; other projects and keys stay untouched.
+   */
+  const setEmbedDefaultModel: AppProjectService["Service"]["setEmbedDefaultModel"] = Effect.fn(
+    "AppProjectService.setEmbedDefaultModel",
+  )(function* (subject, input) {
+    if (subject.kind !== "embed" || subject.projectId !== input.projectId) {
+      return yield* forbidden("An embed token sets the default model only for its own project.");
+    }
+    const binding = yield* requireBinding(input.projectId);
+    if (binding.appId !== subject.appId) {
+      return yield* forbidden(`Project ${input.projectId} does not belong to ${subject.appId}.`);
+    }
+    const settings = yield* serverSettings.getSettings.pipe(
+      Effect.mapError(unavailable("Could not read settings")),
+    );
+    const entry =
+      input.modelSelection === null
+        ? clearProjectSettingsOverrides(settings, input.projectId, ["defaultModelSelection"])
+        : {
+            ...settings.projectSettingsOverrides[input.projectId],
+            defaultModelSelection: input.modelSelection,
+          };
+    yield* serverSettings
+      .updateSettings({ projectSettingsOverrides: { [input.projectId]: entry } })
+      .pipe(Effect.mapError(unavailable("Could not save the default model")));
+  });
+
   return AppProjectService.of({
     ensureWorkspace,
     resolveAppForProject,
@@ -408,6 +440,7 @@ const make = Effect.gen(function* () {
     streamThreads,
     setThreadAppData,
     createEmbedThread,
+    setEmbedDefaultModel,
     markThreadsCopied,
   });
 });

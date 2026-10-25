@@ -107,6 +107,8 @@ export const make = Effect.fn("AppsRpcHandlers.make")(function* (session: Authen
       toRpcStreamError(registry.streamEmbedContext(projectId)),
     [M.appsCreateEmbedThread]: (input) =>
       asEmbed((embed) => projects.createEmbedThread(embed, input)),
+    [M.appsSetEmbedDefaultModel]: (input) =>
+      asEmbed((embed) => projects.setEmbedDefaultModel(embed, input).pipe(Effect.as({}))),
     [M.appsEnsureWorkspace]: (input) =>
       asApp((appId) =>
         projects

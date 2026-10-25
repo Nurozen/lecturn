@@ -183,6 +183,8 @@ export const APP_RPC_RULES: AppRpcTable = {
   },
   [A.appsSubscribeEmbedContext]: { resolve: "projectId", ...embed },
   [A.appsCreateEmbedThread]: { resolve: "projectId", ...embed },
+  // The providers panel's one write: the default model of the token's own project.
+  [A.appsSetEmbedDefaultModel]: { resolve: "projectId", ...embed },
   [O.subscribeShell]: { resolve: "none", ...embed },
   [O.subscribeThread]: { resolve: "threadId", ...embed },
   [O.getThreadProjection]: { resolve: "threadId", ...embed },

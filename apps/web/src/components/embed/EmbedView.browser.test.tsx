@@ -62,7 +62,6 @@ vi.mock(import("@tanstack/react-router"), async (original) => ({
   useNavigate: (() => async (options: unknown) => {
     state.navigations.push(options);
   }) as never,
-  useRouter: (() => ({ history: { push: () => undefined } })) as never,
 }));
 // The thread view itself is out of scope; this stand-in owns the composer handle as ChatView does.
 vi.mock(import("../ChatView"), async () => {
@@ -86,6 +85,15 @@ vi.mock(import("../ChatView"), async () => {
     }) as never,
   };
 });
+
+// The panel's own reads are covered by EmbedProvidersPanel.logic.test.ts; here it only needs its way back.
+vi.mock(import("./EmbedProvidersPanel"), () => ({
+  EmbedProvidersPanel: (({ onBack }: { onBack: () => void }) => (
+    <button type="button" data-testid="providers-back" onClick={onBack}>
+      Back to chat
+    </button>
+  )) as never,
+}));
 
 import { appsEnvironment } from "../../state/apps";
 import { EmbedView } from "./EmbedView";
@@ -138,13 +146,16 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-const render = (props: { threadId?: string | null; switcher?: boolean } = {}) =>
+const render = (
+  props: { threadId?: string | null; switcher?: boolean; panel?: "providers" | null } = {},
+) =>
   act(async () =>
     root.render(
       <EmbedView
         environmentId={environmentId}
         projectId={projectId}
         threadId={props.threadId ? ThreadId.make(props.threadId) : null}
+        panel={props.panel ?? null}
         switcher={props.switcher ?? false}
       />,
     ),
@@ -230,6 +241,34 @@ describe("EmbedView", () => {
     const chip = container.querySelector<HTMLButtonElement>('button[data-app-ref="rw:c/fins"]');
     await act(async () => chip?.click());
     expect(state.bridgeCalls).toContainEqual(["navigate", "rw:c/fins"]);
+  });
+
+  it("swaps the chat for the providers panel the host opens, then returns to the thread the user left", async () => {
+    state.threads = [
+      shell("thread-1", "2026-10-25T01:00:00.000Z"),
+      shell("thread-latest", "2026-10-25T03:00:00.000Z"),
+    ];
+    await render({ threadId: "thread-1", switcher: true });
+    await hostSends({ method: "lecturn/providers.open", params: {} });
+    expect(state.navigations).toEqual([
+      { to: "/embed/$environmentId/$projectId/providers", params: { environmentId, projectId } },
+    ]);
+
+    await render({ threadId: null, panel: "providers", switcher: true });
+    expect(container.querySelector('[data-testid="chat-view"]')).toBeNull();
+    expect(container.textContent).not.toContain("New thread");
+    // The panel's route names no thread; the host must not hear that the latest one is showing.
+    expect(state.bridgeCalls.findLast(([kind]) => kind === "thread")).toEqual([
+      "thread",
+      "thread-1",
+    ]);
+
+    const back = container.querySelector<HTMLButtonElement>('[data-testid="providers-back"]');
+    await act(async () => back?.click());
+    expect(state.navigations.at(-1)).toEqual({
+      to: "/embed/$environmentId/$projectId/$threadId",
+      params: { environmentId, projectId, threadId: "thread-1" },
+    });
   });
 
   it("shows the switcher unless the host lists threads itself, and falls back to the latest thread", async () => {

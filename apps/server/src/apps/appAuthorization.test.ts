@@ -182,6 +182,18 @@ describe("app RPC allowlist", () => {
       expect(
         yield* allowed(embedSession, A.appsCreateEmbedThread, { projectId: rocketSecondProject }),
       ).toBe(false);
+      const setDefault = (subject: AuthenticatedSession, projectId: ProjectId) =>
+        allowed(subject, A.appsSetEmbedDefaultModel, { projectId, modelSelection: null });
+      expect(yield* setDefault(embedSession, rocketProject)).toBe(true);
+      expect(yield* setDefault(embedSession, rocketSecondProject)).toBe(false);
+      expect(yield* setDefault(embedSession, normalProject)).toBe(false);
+      expect(yield* setDefault(appSession, rocketProject)).toBe(false);
+      // The providers panel reads status from the config stream and may ask for a recheck.
+      expect(yield* allowed(embedSession, W.serverRefreshProviders, {})).toBe(true);
+      expect(yield* allowed(embedSession, W.providerInstallSubscribe, {})).toBe(true);
+      expect(yield* allowed(embedSession, W.providerAuthStart, {})).toBe(false);
+      expect(yield* allowed(embedSession, W.providerInstallStart, {})).toBe(false);
+      expect(yield* allowed(embedSession, W.serverUpdateSettings, { patch: {} })).toBe(false);
       expect(yield* allowed(embedSession, W.serverGetConfig, {})).toBe(true);
       expect(yield* allowed(embedSession, W.subscribeServerConfig, {})).toBe(true);
       expect(yield* allowed(embedSession, W.serverProbe, {})).toBe(true);
