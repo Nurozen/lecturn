@@ -279,7 +279,12 @@ import {
   useComboboxFilter,
 } from "./ui/combobox";
 import { useSagaSidebarTree } from "./stave/useSagaSidebarTree";
+import {
+  partitionThreadsByProjectKeys,
+  withoutArchivedStaveProjectThreads,
+} from "./stave/listedProjects.logic";
 import { useListedProjects } from "./stave/useListedProjects";
+import { AppThreadBadge } from "./apps/AppThreadBadge";
 import { sagaSidebarThreadOrder } from "./stave/staveSaga.logic";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { snapshotsPerAccount, useSidebarSegmentation } from "./sidebar/accountProjectGroups";
@@ -2310,6 +2315,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
               >
                 {thread.title}
               </span>
+              <AppThreadBadge project={threadProject} />
               <span id={`${props.resultId}-pr`} className="contents">
                 <ThreadSearchPullRequestNumber
                   thread={thread}
@@ -2371,16 +2377,22 @@ function partitionForkSidebarThreads(input: {
   readonly threads: readonly EnvironmentThreadShell[];
   readonly scopedProjectKeys: ReadonlySet<string> | null;
   readonly archivedProjectKeys: ReadonlySet<string>;
+  readonly appProjectKeys: ReadonlySet<string>;
   readonly serverConfigs: ReadonlyMap<EnvironmentId, EnvironmentServerConfig>;
   readonly workingShelfEnabled: boolean;
   readonly clockKey: string;
 }) {
-  const { threads, scopedProjectKeys, archivedProjectKeys, serverConfigs, workingShelfEnabled } =
-    input;
+  const { threads, scopedProjectKeys, archivedProjectKeys, appProjectKeys } = input;
+  const { serverConfigs, workingShelfEnabled } = input;
   const preciseNow = new Date().toISOString();
   // Archived Stave spaces keep their threads out of the live list.
-  const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys).filter(
-    (thread) => !archivedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
+  // App threads leave the Projects-mode list but stay findable through search.
+  const { outside: visible, inside: appSearchThreads } = partitionThreadsByProjectKeys(
+    withoutArchivedStaveProjectThreads(
+      filterSidebarV2VisibleThreads(threads, scopedProjectKeys),
+      archivedProjectKeys,
+    ),
+    appProjectKeys,
   );
   inboxReturns.observe(workingShelfEnabled ? threads : null);
   const pinned: EnvironmentThreadShell[] = [];
@@ -2425,6 +2437,7 @@ function partitionForkSidebarThreads(input: {
         firstValidTimestampMs(right.snoozedUntil ?? null),
     ),
     settledThreads: sortSettledThreads(settled),
+    appSearchThreads: sortThreadsForSidebar(appSearchThreads),
     snoozeNow: preciseNow,
   };
 }
@@ -2433,7 +2446,7 @@ export default function Sidebar() {
   const sidebarAccountStyle = useSidebarAccountStyle();
   // Archived Stave spaces (and their threads) leave the sidebar; they come
   // back through New project → Stave.
-  const { projects, archivedProjectKeys } = useListedProjects();
+  const { projects, archivedProjectKeys, appProjectKeys } = useListedProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
   const reservedThreadOrderKeys = {
@@ -2766,11 +2779,13 @@ export default function Sidebar() {
     workingThreads,
     snoozedThreads,
     settledThreads,
+    appSearchThreads,
     snoozeNow,
   } = partitionForkSidebarThreads({
     threads,
     scopedProjectKeys,
     archivedProjectKeys,
+    appProjectKeys,
     serverConfigs,
     workingShelfEnabled,
     clockKey: `${nowMinute}:${snoozeWakeTick}`,
@@ -2786,6 +2801,7 @@ export default function Sidebar() {
     ...workingThreads,
     ...snoozedThreads,
     ...settledThreads,
+    ...appSearchThreads,
   ];
   const searchEnvironmentIds = useConnectedEnvironmentIds();
   const threadSearch = useThreadSearch(searchEnvironmentIds, threadSearchQuery);

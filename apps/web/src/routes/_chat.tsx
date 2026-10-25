@@ -1,4 +1,4 @@
-import { withoutArchivedStaveProjects } from "@lecturn/client-runtime/state/stave-archive";
+import { projectsForProjectsMode } from "@lecturn/client-runtime/state/app-projects";
 import { DesktopActivityBridge } from "../components/pullRequest/DesktopActivityBridge";
 import { AuthPreviewOperateScope } from "@lecturn/contracts";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
@@ -51,7 +51,7 @@ function ChatRouteGlobalShortcuts() {
   const { scratchEnvironmentId, startScratchThread } = useScratchProject();
   const { forkThreadAtLatestTurn } = useForkThread();
   const projectGroupCount = buildSidebarProjectSnapshots({
-    projects: withoutArchivedStaveProjects(projects),
+    projects: projectsForProjectsMode(projects),
     settings: projectGroupingSettings,
     primaryEnvironmentId,
     resolveEnvironmentLabel: () => null,
