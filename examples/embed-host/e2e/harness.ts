@@ -4,6 +4,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { ConnectedAppThreadSummary } from "@lecturn/contracts/apps";
+import type { EmbedBridge } from "@lecturn/embed/electron";
 import type { ConnectionMode, ConnectionModeEvent, ConnectionPairing } from "@lecturn/embed/node";
 import { _electron, type ElectronApplication, type Page } from "playwright-core";
 
@@ -36,6 +37,10 @@ export interface EmbedHostGlobal {
     subtitle?: string | null,
   ): Promise<void>;
   capture(file: string): Promise<void>;
+  /** The pane's view. */
+  readonly embed: EmbedBridge;
+  /** Mounts another view of the project, over the pane, on the running server. */
+  mountView(): EmbedBridge;
 }
 
 /** The plain fields of `EmbedHostGlobal`, as read at one moment. */

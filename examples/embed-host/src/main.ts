@@ -182,6 +182,15 @@ async function main() {
       capture: async (file: string) => {
         await NodeFSP.writeFile(file, await captureEmbedView(embed));
       },
+      // scripts/bar/perf.ts times a mount on the already running server (spec B3).
+      mountView: () =>
+        mountEmbedView(win, {
+          connection: lecturn,
+          projectId: currentProjectId,
+          theme: hostTheme,
+          bounds: paneRect(),
+          ...freezeClock,
+        }),
     },
   });
 }
