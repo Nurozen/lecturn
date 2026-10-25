@@ -3,11 +3,13 @@
  * server.ts registers it beside the other fork contributions; later steps add
  * their hooks to this one contribution.
  */
-import type { ProjectId } from "@lecturn/contracts";
+import type { AppId, ProjectId } from "@lecturn/contracts";
+import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
 
 import {
   type LecturnCommandAdmissionInput,
@@ -16,8 +18,10 @@ import {
   type LecturnRunTerminalNotice,
   type LecturnTurnStartInput,
 } from "../orchestration-v2/fork/LecturnOrchestrationHooks.ts";
+import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
 import {
   type AppRegistrationRecord,
   AppRegistrationRepository,
@@ -25,7 +29,8 @@ import {
 } from "../persistence/AppRegistrations.ts";
 import { formatAppContext, hostContextForTurn } from "./AppHostContextStore.ts";
 import { RUNNING_STATUSES } from "./AppProjectService.ts";
-import { AppRuntimeState } from "./AppRuntimeState.ts";
+import { type AppCredentialTools, AppRuntimeState } from "./AppRuntimeState.ts";
+import { makeAppToolsUnavailableNotices } from "./appToolsUnavailableNotice.ts";
 import { makeHeadlessReaper } from "./headlessReaper.ts";
 
 const CONTRIBUTION = "apps";
@@ -34,6 +39,7 @@ const make = Effect.gen(function* () {
   const projects = yield* ProjectStore.ProjectStoreV2;
   const threads = yield* ProjectionStore.ProjectionStoreV2;
   const registrations = yield* AppRegistrationRepository;
+  const eventSink = yield* EventSink.EventSinkV2;
   const { headlessProcesses, hostContext } = yield* AppRuntimeState;
   const reaper = yield* makeHeadlessReaper((projectId) =>
     threads.getShellSnapshot({ projectId }).pipe(
@@ -111,6 +117,37 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  /** Every cached name, model-visible or not: approving an unlisted one costs nothing. */
+  const toolsFor = (appId: AppId) =>
+    registrations.get(appId).pipe(
+      Effect.map(
+        Option.flatMap((record) =>
+          record.state !== "granted"
+            ? Option.none<AppCredentialTools>()
+            : Option.some({
+                toolPrefix: record.registration.toolPrefix,
+                toolNames: [
+                  ...new Set(
+                    [
+                      ...(record.cachedHeadlessTools ?? []),
+                      ...(record.registration.liveTools ? (record.cachedLiveTools ?? []) : []),
+                    ].map((tool) => `${record.registration.toolPrefix}_${tool.name}`),
+                  ),
+                ],
+              }),
+        ),
+      ),
+      // Without names the provider may ask about app tools too; the call still works.
+      Effect.orElseSucceed(() => Option.none<AppCredentialTools>()),
+    );
+
+  const toolsUnavailableNotice = makeAppToolsUnavailableNotices({
+    threads,
+    eventSink,
+    grantedAppName: (projectId) =>
+      grantedAppOf(projectId).pipe(Effect.map(Option.map((app) => app.registration.name))),
+  });
+
   /** Most turns are on servers where no app ever set context, so they skip both reads. */
   const hostContextPrefix = (input: LecturnTurnStartInput) =>
     Effect.gen(function* () {
@@ -128,6 +165,8 @@ const make = Effect.gen(function* () {
 
   return {
     instructionsFor,
+    toolsFor,
+    toolsUnavailableNotice,
     name: CONTRIBUTION,
     aroundCommand: <A, E, R>(input: LecturnCommandAdmissionInput, commit: Effect.Effect<A, E, R>) =>
       refuseAppWorkspaceMove(input).pipe(Effect.andThen(commit)),
@@ -136,14 +175,25 @@ const make = Effect.gen(function* () {
   };
 });
 
-export const layer = Layer.effectDiscard(
+/** Tests give it their own event sink; `layer` gives it the runtime's. */
+export const layerWithoutEventSink = Layer.effectDiscard(
   Effect.gen(function* () {
     const hooks = yield* LecturnOrchestrationHooks;
-    const { appInstructions } = yield* AppRuntimeState;
-    const { instructionsFor, ...contribution } = yield* make;
+    const { appInstructions, appTools } = yield* AppRuntimeState;
+    const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+    const { instructionsFor, toolsFor, toolsUnavailableNotice, ...contribution } = yield* make;
     yield* hooks.register(contribution);
     yield* Effect.acquireRelease(Ref.set(appInstructions, Option.some(instructionsFor)), () =>
       Ref.set(appInstructions, Option.none()),
     );
+    yield* Effect.acquireRelease(Ref.set(appTools, Option.some(toolsFor)), () =>
+      Ref.set(appTools, Option.none()),
+    );
+    // Adapters report activation outside any hook call (a reused session's
+    // thread, a startup failure after ensureThread), so it is a stream here.
+    const activations = yield* mcpSessions.subscribeActivations;
+    yield* activations.pipe(Stream.runForEach(toolsUnavailableNotice), Effect.forkScoped);
   }),
 ).pipe(Layer.provide(AppRegistrationRepositoryLayer));
+
+export const layer = layerWithoutEventSink.pipe(Layer.provide(RuntimeLayer.layerEventSink));

@@ -15,6 +15,29 @@ export interface McpProviderSessionConfig {
   readonly browserToolsAvailable: boolean;
   readonly capabilities?: ReadonlySet<string>;
   readonly agentDeviceEnvironment?: Readonly<Record<string, string>>;
+  /**
+   * Lecturn: set on a connected app's threads. Lecturn's MCP server gates the
+   * app's tools itself, so adapters keep the provider's own approval prompt off
+   * them (D28). `toolNames` are the prefixed names cached when the credential
+   * was issued; a fresh registration may not have listed any yet.
+   */
+  readonly app?: {
+    readonly appId: string;
+    readonly toolPrefix: string;
+    readonly toolNames: ReadonlyArray<string>;
+  };
+}
+
+/** Whether `toolName`, as Lecturn's MCP server lists it, is this thread's app's. */
+export function isLecturnAppToolName(
+  app: McpProviderSessionConfig["app"],
+  toolName: string,
+): boolean {
+  return (
+    app !== undefined &&
+    toolName.length > app.toolPrefix.length + 1 &&
+    toolName.startsWith(`${app.toolPrefix}_`)
+  );
 }
 
 export function withAgentDeviceEnvironment(

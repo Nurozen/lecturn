@@ -27,6 +27,15 @@ export const hostContextKey = (
 /** `None` for a project no granted app owns, or whose app registered no instructions. */
 export type AppInstructionsLookup = (projectId: ProjectId) => Effect.Effect<Option.Option<string>>;
 
+/** A granted app's tool prefix and its cached tool names, prefixed as agents see them. */
+export interface AppCredentialTools {
+  readonly toolPrefix: string;
+  readonly toolNames: ReadonlyArray<string>;
+}
+
+/** `None` for an app that is not granted. */
+export type AppToolsLookup = (appId: AppId) => Effect.Effect<Option.Option<AppCredentialTools>>;
+
 /** Processes are keyed by app project, never by credential (D5). */
 export type HeadlessProcessKey = `${AppId} ${ProjectId}`;
 
@@ -66,6 +75,12 @@ export class AppRuntimeState extends Context.Service<
      * registry, so it asks through here (appTurnInstructions.ts).
      */
     readonly appInstructions: Ref.Ref<Option.Option<AppInstructionsLookup>>;
+    /**
+     * Set while AppsOrchestrationHooks is up: the session manager mints a
+     * thread's MCP credential below AppsLayer and reads the app's tool names
+     * through here (appMcpCredential.ts).
+     */
+    readonly appTools: Ref.Ref<Option.Option<AppToolsLookup>>;
   }
 >()("lecturn/apps/AppRuntimeState") {}
 
@@ -77,5 +92,6 @@ export const layer = Layer.effect(
     appsLayerBuilt: Ref.make(false),
     mcpAppRoute: Ref.make(Option.none<AppMcpAppRoute>()),
     appInstructions: Ref.make(Option.none<AppInstructionsLookup>()),
+    appTools: Ref.make(Option.none<AppToolsLookup>()),
   }),
 );

@@ -63,6 +63,45 @@ Investigate with read-only actions and do not edit files or otherwise execute th
 export interface LecturnAcpInstructionState {
   readonly interactionMode: ProviderInteractionMode;
   readonly hasLecturnMcp: boolean;
+  /**
+   * Lecturn: a digest of the connected app's instructions, so a changed
+   * registration re-sends them while an unchanged one is not repeated.
+   */
+  readonly appInstructionsHash?: string;
+}
+
+/**
+ * Lecturn: how every adapter labels a connected app's registered
+ * instructions (D7). `undefined` when the thread's app registered none.
+ */
+export function connectedAppInstructionsSection(
+  appInstructions: string | undefined,
+): string | undefined {
+  const text = appInstructions?.trim();
+  return text ? `## Connected app instructions\n\n${text}` : undefined;
+}
+
+/** FNV-1a; only ever compared with the previous turn's value for the same session. */
+function instructionsDigest(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${text.length}:${(hash >>> 0).toString(16)}`;
+}
+
+export function lecturnAcpInstructionState(input: {
+  readonly interactionMode: ProviderInteractionMode;
+  readonly hasLecturnMcp: boolean;
+  readonly appInstructions?: string;
+}): LecturnAcpInstructionState {
+  const section = connectedAppInstructionsSection(input.appInstructions);
+  return {
+    interactionMode: input.interactionMode,
+    hasLecturnMcp: input.hasLecturnMcp,
+    ...(section === undefined ? {} : { appInstructionsHash: instructionsDigest(section) }),
+  };
 }
 
 /**
@@ -73,15 +112,22 @@ export function lecturnAcpPromptWithInstructions(input: {
   readonly prompt: string;
   readonly state: LecturnAcpInstructionState;
   readonly previousState?: LecturnAcpInstructionState;
+  /** The text `state.appInstructionsHash` was computed from. */
+  readonly appInstructions?: string;
 }): string {
   // Native slash commands must remain at the start of the prompt.
   if (input.prompt.trimStart().startsWith("/")) return input.prompt;
   if (
     input.previousState?.interactionMode === input.state.interactionMode &&
-    input.previousState.hasLecturnMcp === input.state.hasLecturnMcp
+    input.previousState.hasLecturnMcp === input.state.hasLecturnMcp &&
+    input.previousState.appInstructionsHash === input.state.appInstructionsHash
   ) {
     return input.prompt;
   }
+  const appSection =
+    input.state.appInstructionsHash === undefined
+      ? undefined
+      : connectedAppInstructionsSection(input.appInstructions);
   const instructions = [
     input.state.interactionMode === "plan"
       ? LECTURN_ACP_PLAN_MODE_INSTRUCTIONS
@@ -89,6 +135,7 @@ export function lecturnAcpPromptWithInstructions(input: {
     ...(input.state.hasLecturnMcp
       ? [LECTURN_BROWSER_TOOL_INSTRUCTIONS.trim(), LECTURN_ORCHESTRATION_INSTRUCTIONS.trim()]
       : []),
+    ...(appSection === undefined ? [] : [appSection]),
   ];
   return `<lecturn_instructions>\n${instructions.join("\n\n")}\n</lecturn_instructions>\n\n<user_request>\n${input.prompt}\n</user_request>`;
 }

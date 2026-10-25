@@ -23,6 +23,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
+import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 
 import * as ServerConfig from "../config.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
@@ -70,7 +71,13 @@ const layerMetadata = Layer.merge(
 const layerTest = Layer.mergeAll(
   AppProjectService.layer,
   AppsOrchestrationHooks.layer.pipe(
-    Layer.provide(Layer.merge(LecturnOrchestrationHooks.layer, AppRuntimeState.layer)),
+    Layer.provide(
+      Layer.mergeAll(
+        LecturnOrchestrationHooks.layer,
+        AppRuntimeState.layer,
+        McpProviderSessions.layer,
+      ),
+    ),
   ),
 ).pipe(
   Layer.provideMerge(

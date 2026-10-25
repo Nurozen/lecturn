@@ -14,10 +14,16 @@ const card = {
 };
 const envelope = { lecturnMcpApp: card, result: { count: 3 } };
 
-// The forms each adapter records a call to Lecturn's own MCP server under.
+// The name each adapter records a call to Lecturn's own MCP server under:
+// Claude, Cursor (`cursorToolName`) and Pi qualify it as `mcp__<server>__`,
+// Codex and every ACP agent (Grok, Copilot, Antigravity, ACP registry) as
+// `<server>.`, and OpenCode under its per-thread server.
 const recordedNames = {
   claude: "mcp__lecturn__ex_counter",
+  cursor: "mcp__lecturn__ex_counter",
+  pi: "mcp__lecturn__ex_counter",
   codex: "lecturn.ex_counter",
+  acp: "lecturn.ex_counter",
   opencode: "lecturn-3f2a9c1e-8b7d-4c6e-9a0b-1d2e3f4a5b6c_ex_counter",
 };
 

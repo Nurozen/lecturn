@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@lecturn/contracts";
+import { AppId, EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import { HttpServer } from "effect/http";
 import * as NetAddress from "effect/net/NetAddress";
@@ -176,5 +176,28 @@ it.effect("does not keep credentials of other threads alive", () =>
     timestamp += 2;
 
     expect(yield* registry.resolve(token)).toBeUndefined();
+  }),
+);
+
+it.effect("hands adapters an app thread's tool names, and nothing on other threads", () =>
+  Effect.gen(function* () {
+    const registry = yield* makeRegistry(() => 1_000);
+    const app = { appId: AppId.make("dev.rocketwright"), projectId: ProjectId.make("project-rw") };
+    const appTools = { toolPrefix: "rw", toolNames: ["rw_simulate"] };
+    const appThread = yield* registry.issue({
+      threadId: ThreadId.make("thread-app"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      app,
+      appTools,
+    });
+    expect(appThread.config.app).toEqual({ appId: "dev.rocketwright", ...appTools });
+    expect(appThread.config.capabilities?.has("app")).toBe(true);
+
+    const plain = yield* registry.issue({
+      threadId: ThreadId.make("thread-plain"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      appTools,
+    });
+    expect(plain.config.app).toBeUndefined();
   }),
 );
