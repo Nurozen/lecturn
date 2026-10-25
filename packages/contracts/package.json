@@ -31,6 +31,10 @@
       "types": "./src/appsRpcCore.ts",
       "import": "./src/appsRpcCore.ts"
     },
+    "./appsHttp": {
+      "types": "./src/appsHttp.ts",
+      "import": "./src/appsHttp.ts"
+    },
     "./auth": {
       "types": "./src/auth.ts",
       "import": "./src/auth.ts"

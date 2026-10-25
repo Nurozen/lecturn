@@ -12,7 +12,7 @@ import {
   type EmbedThemeInput,
   hostContextFor,
 } from "./electron/hostBridge.ts";
-import { embedGuestUrl } from "./embedUrl.ts";
+import { embedGuestUrl, isExternalLink } from "./embedUrl.ts";
 import type { EmbedTarget } from "./target.ts";
 
 export { EmbedViewError } from "./electron/errors.ts";
@@ -32,7 +32,7 @@ export interface MountEmbedOptions {
   readonly switcher?: boolean;
   /** Mints the next embed token; the view asks ahead of expiry. */
   readonly onTokenRefresh: () => Promise<EmbedTokenRefreshResult>;
-  /** A card's `ui/open-link`. Without it, http(s) links open in a new tab. */
+  /** A card's `ui/open-link`. Without it, http(s) and `lecturn://apps` links open in a new tab. */
   readonly onOpenLink?: (url: string) => void | Promise<void>;
 }
 
@@ -106,9 +106,8 @@ export function mountEmbed(container: HTMLElement, options: MountEmbedOptions): 
         await options.onOpenLink(url);
         return;
       }
-      const protocol = new URL(url).protocol;
-      if (protocol !== "https:" && protocol !== "http:") {
-        throw new Error("Only http and https links open outside the embed view.");
+      if (!isExternalLink(url)) {
+        throw new Error("Only http, https and lecturn links open outside the embed view.");
       }
       win.open(url, "_blank", "noopener,noreferrer");
     },

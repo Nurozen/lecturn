@@ -81,6 +81,8 @@ export interface EmbedBridge {
   readonly reportReady: (threadId: string | null) => void;
   /** The user activated an app reference; the host decides what it opens. */
   readonly navigate: (ref: string) => void;
+  /** Asks the host to open a link outside the view (`ui/open-link`); the host may refuse it. */
+  readonly openLink: (url: string) => Promise<void>;
   readonly authorizeHost: (embedOrigins: ReadonlyArray<AppEmbedOrigin>) => void;
   readonly dispose: () => void;
 }
@@ -144,6 +146,9 @@ export function createEmbedBridge(transport: EmbedTransport, win: BridgeWindow):
     },
     navigate(ref) {
       guest.notify("lecturn/navigate", { ref });
+    },
+    async openLink(url) {
+      await guest.request("ui/open-link", { url });
     },
     authorizeHost: transport.authorize,
     dispose() {

@@ -154,6 +154,8 @@ vi.mock("electron", () => ({
 
 import type * as Electron from "electron";
 
+import type { ConnectionEvent } from "../target.ts";
+
 import { captureEmbedView } from "./capture.ts";
 import { EmbedViewError } from "./errors.ts";
 import { mountEmbedView, type MountEmbedViewOptions } from "./mountEmbedView.ts";
@@ -293,6 +295,57 @@ describe("mountEmbedView", () => {
     expect(
       wc.debugger.commands.filter((c) => c.method === "Page.addScriptToEvaluateOnNewDocument"),
     ).toHaveLength(1);
+  });
+
+  it("follows a connection's live switch: same view, mapped thread, generation bumped", async () => {
+    const listeners = new Set<(event: ConnectionEvent) => void>();
+    const roots: Record<string, string> = { "sidecar-p": "/ws/a", "user-p": "/ws/a" };
+    const origins: Record<string, string> = { "sidecar-p": ORIGIN_A, "user-p": ORIGIN_B };
+    const embedTarget = async (projectId: string, threadId?: string) => ({
+      url: `${origins[projectId]}/embed/env/${projectId}${threadId ? `/${threadId}` : ""}`,
+      token: "embed-token",
+      expiresAt: "2026-10-24T00:15:00.000Z",
+    });
+    const status = { type: "status", mode: "sidecar", pairing: "pending", app: null } as const;
+    const connection = {
+      embedTarget,
+      refreshEmbedToken: (projectId: string) => embedTarget(projectId),
+      workspaceRootOf: (projectId: string) => roots[projectId] ?? null,
+      status: {
+        current: status,
+        subscribe: (listener: (event: ConnectionEvent) => void) => {
+          listeners.add(listener);
+          listener(status);
+          return () => listeners.delete(listener);
+        },
+      },
+    };
+    const { bridge, view, wc } = await mount({
+      connection,
+      projectId: "sidecar-p",
+      threadId: "s-1",
+    } as Partial<MountEmbedViewOptions>);
+    expect(wc.loads.at(-1)).toBe(`${ORIGIN_A}/embed/env/sidecar-p/s-1${TOKEN_HASH}`);
+    const generation = bridge.generation;
+
+    const reloaded = wc.nextLoad();
+    for (const listener of listeners) {
+      listener({
+        type: "mode",
+        mode: "user-server",
+        environmentId: "env-user",
+        projectIdsByWorkspaceRoot: { "/ws/a": "user-p" },
+        threadIdMap: { "s-1": "copy-1" },
+      });
+    }
+    await reloaded;
+    expect(wc.loads.at(-1)).toBe(`${ORIGIN_B}/embed/env/user-p/copy-1${TOKEN_HASH}`);
+    expect(fakes.FakeWebContentsView.created.at(-1)).toBe(view);
+    expect(wc.destroyed).toBe(false);
+    expect(bridge.generation).toBeGreaterThan(generation);
+
+    bridge.destroy();
+    expect(listeners.size).toBe(0);
   });
 });
 
