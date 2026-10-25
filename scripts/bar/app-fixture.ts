@@ -19,6 +19,7 @@ import * as Schema from "effect/Schema";
 import * as RpcClient from "effect/rpc/RpcClient";
 import * as RpcSerialization from "effect/rpc/RpcSerialization";
 import * as Socket from "effect/socket/Socket";
+import { PNG } from "pngjs";
 
 import {
   APPS_PAIRING_REQUESTS_PATH,
@@ -66,6 +67,7 @@ export const BAR_APP_BUNDLE_PATH = NodePath.join(
   "apps/server/src/apps/fixtures/embed-host.bundle.json",
 );
 const COUNTER_MCP_PATH = NodePath.join(REPO_ROOT, "examples/embed-host/tools/counter-mcp.ts");
+const MOCK_COPILOT_PATH = NodePath.join(REPO_ROOT, "scripts/bar/mock-copilot.sh");
 
 export const BAR_APP_ID = "dev.example.embedhost";
 export const BAR_APP_MANIFEST_FILE = "bar-app-fixture.json";
@@ -78,16 +80,77 @@ const TURN_TIMEOUT_MS = 120_000;
 const LEASE_TTL_SECONDS = 60;
 const LEASE_HEARTBEAT_MS = 20_000;
 
-/** Enables the scripted provider without changing the default model the baseline drew. */
+/**
+ * Enables the scripted provider, and the mock Copilot the CP0 approval thread
+ * ran on, without changing the default model the baseline drew.
+ */
 export const BAR_APP_SETTINGS = {
-  providerInstances: { scripted: { driver: "scripted", enabled: true } },
+  providerInstances: {
+    scripted: { driver: "scripted", enabled: true },
+    githubCopilot: {
+      driver: "githubCopilot",
+      enabled: true,
+      config: { enabled: true, binaryPath: MOCK_COPILOT_PATH },
+    },
+  },
+  // The mock's version trails the latest CLI, and the update toast would cover the captures.
+  enableProviderUpdateChecks: false,
 } as const;
 
 export function barAppServerEnv(baseDir: string): Readonly<Record<string, string>> {
   return {
     LECTURN_TEST_PROVIDERS: "1",
     LECTURN_SCRIPTED_PROVIDER_SCRIPTS: NodePath.join(baseDir, BAR_APP_SCRIPTS_FILE),
+    // mock-copilot.sh runs the ACP mock on this Node, not whichever `node` PATH finds.
+    LECTURN_BAR_NODE: NodeProcess.execPath,
   };
+}
+
+/**
+ * The live approval thread CP0 drew in hopper-38mm (A11 staged it by hand on
+ * the mock Copilot): Supervised, one tool call, its permission left pending.
+ */
+export const BAR_PROJECTS_APPROVAL_THREAD = {
+  threadId: "bar-run-38mm-approval",
+  title: "Run 38 mm Hopper Flight Simulation",
+  user: "Run the baseline flight simulation for the 38 mm hopper.",
+  model: { instanceId: "githubCopilot", model: "auto" },
+} as const;
+
+export const BAR_PENDING_APP_ID = "dev.example.sketchpad";
+
+/** A 32 px amber disc, so the waiting app does not borrow Embed Host's icon. */
+function discIconDataUrl(): string {
+  const size = 32;
+  const png = new PNG({ width: size, height: size });
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const offset = (y * size + x) * 4;
+      const inside = (x - 15.5) ** 2 + (y - 15.5) ** 2 <= 14 ** 2;
+      png.data[offset] = 0xe0;
+      png.data[offset + 1] = 0xa0;
+      png.data[offset + 2] = 0x40;
+      png.data[offset + 3] = inside ? 0xff : 0;
+    }
+  }
+  return `data:image/png;base64,${PNG.sync.write(png).toString("base64")}`;
+}
+
+/**
+ * A second app left waiting on its pairing request, for the Apps list's
+ * Approve and Deny row. Its name sorts after Embed Host's, so the staged
+ * app keeps the first row the mockup draws.
+ */
+export function barPendingAppRegistration(): AppRegistration {
+  return decodeRegistration({
+    appId: BAR_PENDING_APP_ID,
+    name: "Sketch Pad",
+    iconDataUrl: discIconDataUrl(),
+    toolPrefix: "sk",
+    refPrefixes: ["sk:"],
+    liveTools: true,
+    gatedTools: [],
+  });
 }
 
 /** Embed Host's own registration (examples/embed-host/src/main.ts), run on this Node. */
@@ -291,6 +354,13 @@ export interface BarAppManifest {
   /** Captures of app scenes freeze the page clock here, just after staging. */
   readonly stagedAt: string;
   readonly approvalExpiresAt: string;
+  /** The second app's request, left unanswered; it expires like the approval. */
+  readonly pendingPairing: {
+    readonly appId: string;
+    readonly appName: string;
+    readonly requestId: string;
+    readonly expiresAt: string;
+  };
   readonly workspaces: ReadonlyArray<{
     readonly key: BarAppWorkspaceKey;
     readonly projectId: string;
@@ -298,7 +368,11 @@ export interface BarAppManifest {
     readonly expected: BarAppSectionCounts;
   }>;
   readonly threads: Readonly<Record<BarAppStagedThread["key"], string>>;
+  /** The app thread updated last, which the Apps list scenes open. */
+  readonly latestThreadId: string;
   readonly pinnedImportThreadIds: ReadonlyArray<string>;
+  /** The mock Copilot thread in hopper-38mm, waiting on its approval. */
+  readonly projectsApprovalThreadId: string;
 }
 
 export function barAppManifestPath(baseDir: string): string {
@@ -384,6 +458,12 @@ export function barAppLiveStateProblems(
   for (const id of [manifest.threads.mockup, ...manifest.pinnedImportThreadIds]) {
     if (!pinnedIds.has(id)) problems.push(`${id} is not pinned`);
   }
+  const projectsApproval = snapshot.threads.find(
+    (thread) => String(thread.id) === manifest.projectsApprovalThreadId,
+  );
+  if (projectsApproval?.pendingRuntimeRequest == null) {
+    problems.push(`${manifest.projectsApprovalThreadId} is not waiting on its approval`);
+  }
   return problems;
 }
 
@@ -395,6 +475,7 @@ export function barAppSceneParams(manifest: BarAppManifest): Readonly<Record<str
     mockupThreadId: manifest.threads.mockup,
     supervisedThreadId: manifest.threads.supervised,
     fullAccessThreadId: manifest.threads.fullAccess,
+    latestThreadId: manifest.latestThreadId,
   };
 }
 
@@ -463,22 +544,30 @@ async function until<T>(
 
 const newCommandId = () => CommandId.make(`bar-app:${NodeCrypto.randomUUID()}`);
 
-async function pairBarApp(input: {
-  readonly origin: string;
-  readonly admin: string;
-  readonly registration: AppRegistration;
-}): Promise<string> {
-  const requested = await fetch(new URL(APPS_PAIRING_REQUESTS_PATH, input.origin), {
+/** The app's own first step, from this loopback client as a local app makes it. */
+async function requestPairing(
+  origin: string,
+  registration: AppRegistration,
+): Promise<{ requestId: string; pollSecret: string; expiresAt: string }> {
+  const requested = await fetch(new URL(APPS_PAIRING_REQUESTS_PATH, origin), {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(encodeRegistration(input.registration)),
+    body: JSON.stringify(encodeRegistration(registration)),
   });
   if (!requested.ok) {
     throw new Error(
       `The pairing request was refused: ${requested.status} ${await requested.text()}`,
     );
   }
-  const request = (await requested.json()) as { requestId: string; pollSecret: string };
+  return (await requested.json()) as { requestId: string; pollSecret: string; expiresAt: string };
+}
+
+async function pairBarApp(input: {
+  readonly origin: string;
+  readonly admin: string;
+  readonly registration: AppRegistration;
+}): Promise<string> {
+  const request = await requestPairing(input.origin, input.registration);
   const status = await rpc(input.origin, input.admin, "apps.decidePairing", (client) =>
     client[A.appsDecidePairing](
       decodeDecidePairing({
@@ -598,9 +687,57 @@ async function awaitStagedTurn(input: {
   });
 }
 
+async function stageProjectsApproval(input: {
+  readonly origin: string;
+  readonly admin: string;
+  readonly projectId: ProjectId;
+}): Promise<ThreadId> {
+  const staged = BAR_PROJECTS_APPROVAL_THREAD;
+  const threadId = ThreadId.make(staged.threadId);
+  await dispatch(input.origin, input.admin, {
+    type: "thread.create",
+    createdBy: "user",
+    creationSource: "web",
+    commandId: newCommandId(),
+    threadId,
+    projectId: input.projectId,
+    title: staged.title,
+    modelSelection: {
+      instanceId: ProviderInstanceId.make(staged.model.instanceId),
+      model: staged.model.model,
+    },
+    runtimeMode: "approval-required",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+  });
+  await dispatch(input.origin, input.admin, {
+    type: "message.dispatch",
+    createdBy: "user",
+    creationSource: "web",
+    commandId: newCommandId(),
+    threadId,
+    messageId: MessageId.make(`bar-app-${NodeCrypto.randomUUID()}`),
+    text: staged.user,
+    attachments: [],
+    dispatchMode: { type: "start_immediately" },
+  });
+  await until("the mock Copilot approval", TURN_TIMEOUT_MS, async () => {
+    const projection = await projectionOf(input.origin, input.admin, threadId);
+    const ended = projection.runs.find((run) => ENDED_EARLY.has(run.status));
+    if (ended !== undefined) throw new Error(`The Copilot approval turn ended ${ended.status}.`);
+    return projection.runtimeRequests.some((request) => request.status === "pending")
+      ? projection
+      : undefined;
+  });
+  return threadId;
+}
+
 export interface StageBarAppFixtureInput {
   readonly baseDir: string;
   readonly origin: string;
+  /** hopper-38mm, where the Projects-mode approval thread is staged. */
+  readonly projectsApprovalProjectId: ProjectId;
   readonly issueToken: (scopes: ReadonlyArray<string>, label: string) => Promise<string>;
   readonly fetchShell: () => Promise<ShellForCheck>;
 }
@@ -619,6 +756,11 @@ export async function stageBarAppFixture(input: StageBarAppFixtureInput): Promis
   for (const key of BAR_APP_WORKSPACE_KEYS) {
     await NodeFSP.mkdir(barAppWorkspaceRoot(baseDir, key), { recursive: true });
   }
+  const projectsApprovalThreadId = await stageProjectsApproval({
+    origin,
+    admin,
+    projectId: input.projectsApprovalProjectId,
+  });
   const registration = barAppRegistration();
   const credential = await pairBarApp({ origin, admin, registration });
 
@@ -743,6 +885,10 @@ export async function stageBarAppFixture(input: StageBarAppFixtureInput): Promis
     );
   }
 
+  // Last, so nothing staged after it answers or replaces the request.
+  const pendingRegistration = barPendingAppRegistration();
+  const pendingRequest = await requestPairing(origin, pendingRegistration);
+
   const apps = await rpc(origin, admin, "apps.list", (client) => client[A.appsList]({}));
   const app = apps.find((entry) => entry.appId === BAR_APP_ID);
   if (app?.state !== "granted" || app.live !== null) {
@@ -750,11 +896,21 @@ export async function stageBarAppFixture(input: StageBarAppFixtureInput): Promis
       `The app should be granted and closed, but is ${JSON.stringify(app?.state)} with lease ${JSON.stringify(app?.live)}.`,
     );
   }
+  const pending = apps.find((entry) => entry.appId === BAR_PENDING_APP_ID);
+  if (
+    pending?.state !== "pairing-requested" ||
+    pending.pendingRequest?.requestId !== pendingRequest.requestId
+  ) {
+    throw new Error(
+      `${BAR_PENDING_APP_ID} should be waiting on request ${pendingRequest.requestId}, but is ${JSON.stringify(pending?.state)} with ${JSON.stringify(pending?.pendingRequest?.requestId)}.`,
+    );
+  }
 
   const sections = expectedBarAppSections(bundle);
   const environmentId = (
     await NodeFSP.readFile(NodePath.join(baseDir, "userdata", "environment-id"), "utf8")
   ).trim();
+  const snapshot = await input.fetchShell();
   const manifest: BarAppManifest = {
     version: 1,
     appId: BAR_APP_ID,
@@ -764,6 +920,12 @@ export async function stageBarAppFixture(input: StageBarAppFixtureInput): Promis
     approvalExpiresAt: new Date(
       (approvalRaisedAt ?? Date.now()) + BAR_APP_APPROVAL_TTL_MS,
     ).toISOString(),
+    pendingPairing: {
+      appId: BAR_PENDING_APP_ID,
+      appName: pendingRegistration.name,
+      requestId: pendingRequest.requestId,
+      expiresAt: pendingRequest.expiresAt,
+    },
     workspaces: BAR_APP_WORKSPACE_KEYS.map((key) => ({
       key,
       projectId: projectIds[key],
@@ -771,9 +933,13 @@ export async function stageBarAppFixture(input: StageBarAppFixtureInput): Promis
       expected: sections[key],
     })),
     threads: threadIds,
+    // Subtitles are written in staging order, so the last staged thread is updated last; named
+    // by key, since those writes land within a millisecond of each other.
+    latestThreadId: threadIds[BAR_APP_STAGED_THREADS.at(-1)!.key],
     pinnedImportThreadIds,
+    projectsApprovalThreadId,
   };
-  const problems = barAppLiveStateProblems(await input.fetchShell(), manifest);
+  const problems = barAppLiveStateProblems(snapshot, manifest);
   if (problems.length > 0) {
     throw new Error(`The staged app fixture drifted:\n- ${problems.join("\n- ")}`);
   }

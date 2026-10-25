@@ -15,7 +15,12 @@ import {
   type Page,
 } from "playwright-core";
 
-import { BAR_FIXTURE_NOW, fetchBarShellSnapshot, issueBarReadToken } from "../seed-bar-fixture.ts";
+import {
+  BAR_FIXTURE_NOW,
+  barGitStateProblems,
+  fetchBarShellSnapshot,
+  issueBarReadToken,
+} from "../seed-bar-fixture.ts";
 import {
   type BarAppManifest,
   barAppLiveStateProblems,
@@ -97,16 +102,26 @@ export const BAR_APP_WEB_SCENES = {
     path: "/",
     readySelectors: ['[data-slot="sidebar"]'],
   },
+  // The Apps scenes open the app's latest thread, so the main pane is an app thread like the
+  // sidebar beside it rather than the Projects-mode draft the index shows.
   "apps-list": {
-    description: "Apps mode with All apps: the Apps group and the closed Embed Host row",
-    path: "/?sidebar=apps",
-    readySelectors: ['[data-testid="sidebar-app-row"]'],
+    description:
+      "Apps mode with All apps: the closed Embed Host row, the waiting app's Approve and Deny row, Embed Host's latest thread",
+    path: APP_THREAD_PATH("latestThreadId", "all"),
+    readySelectors: [
+      '[data-testid="sidebar-app-row"]',
+      "[data-timeline-ready] [data-timeline-row-id]",
+    ],
     clock: "staged",
   },
   "apps-app-selected": {
-    description: "Apps mode with Embed Host selected: its workspaces and sections",
-    path: "/apps/{appId}",
-    readySelectors: ['[data-testid="sidebar-app-workspace"]'],
+    description:
+      "Apps mode with Embed Host selected: its workspaces and sections, its latest thread",
+    path: APP_THREAD_PATH("latestThreadId"),
+    readySelectors: [
+      '[data-testid="sidebar-app-workspace"]',
+      "[data-timeline-ready] [data-timeline-row-id]",
+    ],
     clock: "staged",
   },
   "apps-desktop-mockup-scene": {
@@ -237,6 +252,25 @@ async function awaitStaging(
   }
 }
 
+const PAIRING_PROMPT = '[data-testid="app-pairing-prompt"]';
+const PAIRING_PROMPT_WAIT_MS = 15_000;
+
+/**
+ * The seeded pairing request prompts every admin client in a dialog over the
+ * page. Closing it hides it in this page only, as a user dismisses it; the
+ * request stays pending, so the Apps list still shows its row.
+ */
+async function dismissPairingPrompt(page: Page): Promise<void> {
+  const prompt = page.locator(PAIRING_PROMPT);
+  const shown = await prompt.waitFor({ state: "visible", timeout: PAIRING_PROMPT_WAIT_MS }).then(
+    () => true,
+    () => false,
+  );
+  if (!shown) return;
+  await page.keyboard.press("Escape");
+  await prompt.waitFor({ state: "hidden", timeout: 10_000 });
+}
+
 async function settle(page: Page, scene: BarWebScene): Promise<void> {
   for (const selector of scene.readySelectors) {
     await page.locator(selector).first().waitFor({ state: "visible", timeout: 60_000 });
@@ -257,9 +291,11 @@ export async function captureScene(input: {
   readonly out: string;
   readonly checklist?: ChecklistName;
   readonly staging?: ReadonlyArray<StagingCheck>;
+  readonly pairingPending?: boolean;
 }): Promise<boolean> {
   const scene = ALL_SCENES[input.name]!;
   await input.page.goto(new URL(resolveScenePath(scene, input.params), input.origin).toString());
+  if (input.pairingPending === true) await dismissPairingPrompt(input.page);
   await settle(input.page, scene);
   const base = NodePath.join(input.out, input.name);
   if (input.staging !== undefined && input.staging.length > 0) {
@@ -300,15 +336,23 @@ export async function captureScene(input: {
 export function barAppPreflightProblems(input: {
   readonly manifest: BarAppManifest;
   readonly liveProblems: ReadonlyArray<string>;
+  readonly gitProblems?: ReadonlyArray<string>;
   readonly now: number;
 }): ReadonlyArray<string> {
-  const expired =
-    input.now >= Date.parse(input.manifest.approvalExpiresAt)
-      ? [
-          `the staged approval expired at ${input.manifest.approvalExpiresAt}; seed a fresh base dir with --app`,
-        ]
-      : [];
-  return [...expired, ...input.liveProblems];
+  const { manifest } = input;
+  const windows = [
+    { label: "staged approval", expiresAt: manifest.approvalExpiresAt },
+    {
+      label: `${manifest.pendingPairing.appName} pairing request`,
+      expiresAt: manifest.pendingPairing.expiresAt,
+    },
+  ];
+  const expired = windows.flatMap(({ label, expiresAt }) =>
+    input.now >= Date.parse(expiresAt)
+      ? [`the ${label} expired at ${expiresAt}; seed a fresh base dir with --app`]
+      : [],
+  );
+  return [...expired, ...input.liveProblems, ...(input.gitProblems ?? [])];
 }
 
 /**
@@ -332,7 +376,9 @@ async function main(): Promise<void> {
       await NodeFSP.readFile(NodePath.join(args.baseDir, "userdata", "environment-id"), "utf8")
     ).trim();
   }
-  const needsApp = args.scenes.some((name) => isAppScene(name) && name !== "projects-mode");
+  // Projects mode too: its baseline row is the staged Copilot approval, and the pairing prompt
+  // covers it until dismissed.
+  const needsApp = args.scenes.some(isAppScene);
   let manifest: BarAppManifest | null = null;
   if (args.after || needsApp) {
     if (args.baseDir === undefined) throw new Error("App scenes need --base-dir.");
@@ -347,6 +393,7 @@ async function main(): Promise<void> {
     const problems = barAppPreflightProblems({
       manifest,
       liveProblems: barAppLiveStateProblems(snapshot, manifest),
+      gitProblems: await barGitStateProblems(args.baseDir),
       now: Date.now(),
     });
     if (problems.length > 0) {
@@ -391,6 +438,7 @@ async function main(): Promise<void> {
           ...(manifest !== null && isAppScene(name)
             ? { staging: barAppStagingChecks(name, manifest) }
             : {}),
+          pairingPending: manifest !== null,
         });
         if (captured) NodeProcess.stdout.write(`captured ${name}\n`);
         else {

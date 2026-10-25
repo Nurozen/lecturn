@@ -52,6 +52,7 @@ const REPO_ROOT = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import
 const serverBin = (serverRoot: string) => NodePath.join(serverRoot, "apps/server/src/bin.ts");
 const SERVER_READY_LINE = "Lecturn server is ready.";
 const SERVER_START_TIMEOUT_MS = 90_000;
+const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 
 /** Captures freeze the browser clock here so relative ages render the same on every run. */
 export const BAR_FIXTURE_NOW = "2026-10-20T12:00:00.000Z";
@@ -267,6 +268,39 @@ export function barThreadCreatedAt(thread: BarFixtureThread): string {
 
 export function barWorkspaceRoot(baseDir: string, project: BarFixtureProject): string {
   return NodePath.join(baseDir, "workspaces", project.key);
+}
+
+/**
+ * Pins every fixture workspace to "not a Git repository", as CP0 drew it
+ * (Initialize Git, no ref picker): Git stops looking for a repository at the
+ * workspace, so a base dir inside a checkout cannot lend them its repo.
+ */
+export function barGitEnv(baseDir: string): Readonly<Record<string, string>> {
+  const real = NodeFS.realpathSync(baseDir);
+  return {
+    GIT_CEILING_DIRECTORIES: [
+      NodePath.join(real, "workspaces"),
+      NodePath.join(real, "app-workspaces"),
+    ].join(NodePath.delimiter),
+  };
+}
+
+/** Each fixture workspace that Git, under the server's environment, sees inside a repository. */
+export async function barGitStateProblems(
+  baseDir: string,
+  fixture: ReadonlyArray<BarFixtureProject> = BAR_FIXTURE,
+): Promise<ReadonlyArray<string>> {
+  const env = { ...NodeProcess.env, ...barGitEnv(baseDir) };
+  const problems: Array<string> = [];
+  for (const project of fixture) {
+    const root = barWorkspaceRoot(baseDir, project);
+    const inside = await execFile("git", ["rev-parse", "--show-toplevel"], { cwd: root, env }).then(
+      ({ stdout }) => stdout.trim(),
+      () => null,
+    );
+    if (inside !== null) problems.push(`${project.key} is inside the Git repository ${inside}`);
+  }
+  return problems;
 }
 
 export function buildBarProjectCommit(project: BarFixtureProject, workspaceRoot: string) {
@@ -651,8 +685,6 @@ export async function startBarServer(
   }
 }
 
-const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
-
 /** A bearer token for checks against, or staging on, a running fixture server. */
 export async function issueBarToken(
   baseDir: string,
@@ -796,11 +828,17 @@ export async function seedBarFixture(
   for (const project of fixture) {
     await NodeFSP.mkdir(barWorkspaceRoot(baseDir, project), { recursive: true });
   }
+  const gitProblems = await barGitStateProblems(baseDir, fixture);
+  if (gitProblems.length > 0) {
+    throw new Error(
+      `The fixture workspaces must not be Git repositories:\n- ${gitProblems.join("\n- ")}`,
+    );
+  }
   const app = input.app === true;
   if (app && input.restart === false) {
     throw new Error("The app fixture stages live turns, so it needs the server left running.");
   }
-  const env = app ? barAppServerEnv(baseDir) : undefined;
+  const env = { ...barGitEnv(baseDir), ...(app ? barAppServerEnv(baseDir) : {}) };
   if (app) {
     await NodeFSP.mkdir(NodePath.join(baseDir, "userdata"), { recursive: true });
     await NodeFSP.writeFile(
@@ -822,9 +860,14 @@ export async function seedBarFixture(
   const server = await startBarServer({ ...input, baseDir, env });
   if (!app) return { baseDir, server, app: null };
   try {
+    const hopper = fixture.find((project) => project.key === "hopper-38mm");
+    if (hopper === undefined) {
+      throw new Error("The app fixture stages its approval in hopper-38mm.");
+    }
     const manifest = await stageBarAppFixture({
       baseDir,
       origin: server.origin,
+      projectsApprovalProjectId: barProjectId(hopper),
       issueToken: (scopes, label) => issueBarToken(baseDir, scopes, label, input.serverRoot),
       fetchShell: async () =>
         fetchBarShellSnapshot(server.origin, await issueBarReadToken(baseDir, input.serverRoot)),
