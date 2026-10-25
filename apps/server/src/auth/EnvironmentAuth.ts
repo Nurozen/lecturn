@@ -838,6 +838,18 @@ export const make = Effect.gen(function* () {
     );
   };
 
+  // Which subject a request acted as, and whether the browser also sent a
+  // cookie: the embed's cookie-isolation check (D14) reads these from the trace.
+  const annotateAuthenticated =
+    (request: HttpServerRequest.HttpServerRequest) => (session: AuthenticatedSession) =>
+      Effect.annotateCurrentSpan({
+        "auth.subject": session.subject,
+        "auth.method": session.method,
+        "http.request.cookie_present": request.headers.cookie !== undefined,
+        // Some callers hand in partial requests; the annotation must not fail auth.
+        "url.path": typeof request.url === "string" ? requestPath(request.url) : "",
+      });
+
   const authenticateCredential = (
     request: HttpServerRequest.HttpServerRequest,
     credential: ReturnType<typeof resolveRequestCredential>,
@@ -892,6 +904,7 @@ export const make = Effect.gen(function* () {
 
   const getSessionState: EnvironmentAuth["Service"]["getSessionState"] = (request) =>
     authenticateRequest(request).pipe(
+      Effect.tap(annotateAuthenticated(request)),
       Effect.map(
         (session) =>
           ({
@@ -1294,7 +1307,10 @@ export const make = Effect.gen(function* () {
   const authenticateHttpRequest: EnvironmentAuth["Service"]["authenticateHttpRequest"] = (
     request,
   ) =>
-    authenticateRequest(request).pipe(Effect.withSpan("EnvironmentAuth.authenticateHttpRequest"));
+    authenticateRequest(request).pipe(
+      Effect.tap(annotateAuthenticated(request)),
+      Effect.withSpan("EnvironmentAuth.authenticateHttpRequest"),
+    );
 
   const authenticateWebSocketUpgrade: EnvironmentAuth["Service"]["authenticateWebSocketUpgrade"] =
     Effect.fn("EnvironmentAuth.authenticateWebSocketUpgrade")(function* (request) {
@@ -1313,11 +1329,13 @@ export const make = Effect.gen(function* () {
               scopes: session.scopes,
               ...(session.expiresAt ? { expiresAt: session.expiresAt } : {}),
             })),
+            Effect.tap(annotateAuthenticated(request)),
+            Effect.tap(() => Effect.annotateCurrentSpan("auth.websocket_ticket", true)),
           );
         }
       }
 
-      return yield* authenticateRequest(request);
+      return yield* authenticateRequest(request).pipe(Effect.tap(annotateAuthenticated(request)));
     });
 
   const authenticateMcpClient: EnvironmentAuth["Service"]["authenticateMcpClient"] = (request) => {
