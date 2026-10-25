@@ -33,6 +33,7 @@ import { composerFloatingLayerProps } from "../chat/composerEventScope";
 import { useComposerMenuState } from "../chat/useComposerMenuState";
 import { ContextualHostSettings } from "./ContextualHostSettings";
 import { ContextualProjectSettings } from "./ContextualProjectSettings";
+import { isEmbedLocation } from "../../embed/embedAuth";
 
 export function ContextualControl({
   environmentId,
@@ -161,7 +162,10 @@ export function ContextualControl({
           >
             Refresh context for next message
           </MenuItem>
-          <MenuItem onClick={() => setManage(true)}>Manage sources…</MenuItem>
+          {/* Sources are host-wide settings, which an embedded chat cannot reach. */}
+          {isEmbedLocation() ? null : (
+            <MenuItem onClick={() => setManage(true)}>Manage sources…</MenuItem>
+          )}
           {error ? (
             <p role="alert" className="max-w-72 px-2 py-1 text-xs text-destructive">
               {error}
@@ -169,7 +173,9 @@ export function ContextualControl({
           ) : null}
           {!access.operate ? (
             <p className="max-w-72 px-2 py-1 text-xs text-muted-foreground">
-              This connection has read-only thread access.
+              {isEmbedLocation()
+                ? "Change Contextual for this thread in Lecturn."
+                : "This connection has read-only thread access."}
             </p>
           ) : null}
         </MenuPopup>

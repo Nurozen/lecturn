@@ -82,16 +82,20 @@ describe("app RPC authorization", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("denies app and embed sessions a method outside their allowlist", () =>
+  it.effect("denies an app session a method outside its allowlist", () =>
     Effect.gen(function* () {
-      for (const subject of ["app:dev.example.app", "embed:dev.example.app:project-1"]) {
-        const handled: Array<string> = [];
-        const error = yield* probe(session(subject), unfinishedAuthorization, handled).pipe(
-          Effect.flip,
-        );
-        expect(error).toMatchObject({ _tag: "EnvironmentAuthorizationError" });
-        expect(handled).toEqual([]);
-      }
+      // server.probe is on the embed list (D31), so only the app credential is outside it here.
+      const handled: Array<string> = [];
+      const error = yield* probe(
+        session("app:dev.example.app"),
+        unfinishedAuthorization,
+        handled,
+      ).pipe(Effect.flip);
+      expect(error).toMatchObject({ _tag: "EnvironmentAuthorizationError" });
+      expect(handled).toEqual([]);
+      expect(
+        yield* probe(session("embed:dev.example.app:project-1"), unfinishedAuthorization, handled),
+      ).toEqual({});
     }).pipe(Effect.scoped),
   );
 
