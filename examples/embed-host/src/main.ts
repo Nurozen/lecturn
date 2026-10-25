@@ -36,6 +36,9 @@ const cdpPort = env["EMBED_HOST_CDP_PORT"];
 if (cdpPort) Electron.app.commandLine.appendSwitch("remote-debugging-port", cdpPort);
 const freezeClockEnv = env["EMBED_HOST_FREEZE_CLOCK"];
 const freezeClock = freezeClockEnv ? { freezeClock: Number(freezeClockEnv) } : {};
+// Leaves `window_flash` ungated in the registration so the app's own gate
+// decides, which is the path that carries the app's reason for the card.
+const gatedTools = env["EMBED_HOST_APP_GATE"] === "1" ? [] : LIVE_GATED_TOOLS;
 
 // An installed Electron app ships no separate Node, so its tools run on
 // Electron itself in Node mode.
@@ -95,7 +98,7 @@ async function main() {
         cwd: "{workspaceRoot}",
       },
       liveTools: true,
-      gatedTools: LIVE_GATED_TOOLS,
+      gatedTools,
       instructions: "You can increment a counter and flash the host window.",
     },
     ...(env["LECTURN_HOME"] ? { lecturnHome: env["LECTURN_HOME"] } : {}),
