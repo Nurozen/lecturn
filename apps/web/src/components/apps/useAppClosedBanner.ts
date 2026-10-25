@@ -1,4 +1,10 @@
-import type { AppBinding, AppEmbedContext, ScopedProjectRef, ThreadId } from "@lecturn/contracts";
+import type {
+  AppBinding,
+  AppEmbedContext,
+  EnvironmentId,
+  ScopedProjectRef,
+  ThreadId,
+} from "@lecturn/contracts";
 import { expandAppOpenUrl } from "@lecturn/shared/appReferences";
 import { ExternalLinkIcon, ShieldOffIcon, UnplugIcon } from "lucide-react";
 import { createElement } from "react";
@@ -62,22 +68,28 @@ export function appClosedBanner(input: {
 }
 
 /**
- * The composer notice for an app thread whose app is not running or was revoked. The app opens
- * only from the server's machine, and never from the embed, whose host is the app itself.
+ * An app opens only from the server's machine, and never from the embed, whose host is the
+ * app itself.
  */
+export function useCanOpenApp(environmentId: EnvironmentId | null): boolean {
+  const embedPresentation = useEmbedPresentation();
+  const remoteOpen = useRemoteOpenResolution(environmentId);
+  return (
+    embedPresentation === null &&
+    !isLocalEnvironmentDisabled() &&
+    remoteOpen.isResolved &&
+    remoteOpen.state.mode === "local-exec"
+  );
+}
+
+/** The composer notice for an app thread whose app is not running or was revoked. */
 export function useAppClosedBanner(
   projectRef: ScopedProjectRef | null,
   threadId: ThreadId | null,
 ): ComposerBannerStackItem | null {
   const binding = useProject(projectRef)?.appBinding ?? null;
   const context = useAppEmbedContext(binding === null ? null : projectRef);
-  const embedPresentation = useEmbedPresentation();
-  const remoteOpen = useRemoteOpenResolution(projectRef?.environmentId ?? null);
-  const canOpenApp =
-    embedPresentation === null &&
-    !isLocalEnvironmentDisabled() &&
-    remoteOpen.isResolved &&
-    remoteOpen.state.mode === "local-exec";
+  const canOpenApp = useCanOpenApp(projectRef?.environmentId ?? null);
 
   const banner = appClosedBanner({ context, binding, threadId, canOpenApp });
   if (banner === null) return null;

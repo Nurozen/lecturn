@@ -284,6 +284,8 @@ import {
 } from "./stave/listedProjects.logic";
 import { useListedProjects } from "./stave/useListedProjects";
 import { AppThreadBadge } from "./apps/AppThreadBadge";
+import { AppsModeSwitch } from "./apps/AppsModeSwitch";
+import { AppsSidebar } from "./apps/AppsSidebar";
 import { sagaSidebarThreadOrder } from "./stave/staveSaga.logic";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { snapshotsPerAccount, useSidebarSegmentation } from "./sidebar/accountProjectGroups";
@@ -2448,6 +2450,7 @@ export default function Sidebar() {
   // back through New project → Stave.
   const { projects, archivedProjectKeys, appProjectKeys } = useListedProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const sidebarMode = useUiStateStore((store) => store.sidebarMode);
   const threads = useThreadShells();
   const reservedThreadOrderKeys = {
     pinned: new Map(
@@ -4250,7 +4253,8 @@ export default function Sidebar() {
         fixedHeader={
           <SidebarGroup className="z-[1]">
             <SidebarThreadHeader
-              showScopeRow={projectGroups.length > 0}
+              modeSwitch={<AppsModeSwitch />}
+              showScopeRow={sidebarMode === "projects" && projectGroups.length > 0}
               scopePicker={
                 <Combobox
                   items={projectScopeItems}
@@ -4466,7 +4470,8 @@ export default function Sidebar() {
               </p>
             )
           ) : null}
-          {!isSearchingThreads ? (
+          {!isSearchingThreads && sidebarMode === "apps" ? <AppsSidebar /> : null}
+          {!isSearchingThreads && sidebarMode === "projects" ? (
             <TooltipProvider
               key="sidebar-thread-tooltips-150"
               delay={150}
@@ -5378,6 +5383,7 @@ export default function Sidebar() {
             </TooltipProvider>
           ) : null}
           {!isSearchingThreads &&
+          sidebarMode === "projects" &&
           visibleDraftSessionCount === 0 &&
           pinnedThreads.length +
             activeThreads.length +
