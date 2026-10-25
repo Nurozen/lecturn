@@ -71,6 +71,13 @@ const noPairingPrompt = check("no-pairing-prompt", {
   selector: id("app-pairing-prompt"),
 });
 
+/** CP3pol: the short chip, so the waiting app's name keeps its room (the full status is the tooltip). */
+const appPairingChip = check("app-row-pairing", {
+  kind: "some",
+  selector: id("sidebar-app-row"),
+  probes: [{ kind: "text", selector: id("sidebar-app-state"), equals: "Pairing" }],
+});
+
 const pairingRow = check("pairing-row", {
   kind: "some",
   selector: id("app-pairing-row"),
@@ -197,7 +204,7 @@ function sceneChecks(
         notGitRepo,
       ];
     case "apps-list":
-      return [mode("Apps"), appClosed, pairingRow, selectedThread];
+      return [mode("Apps"), appClosed, appPairingChip, pairingRow, selectedThread];
     case "apps-app-selected":
       return [mode("Apps"), appHeaderClosed, ...sidebarSectionChecks(manifest), selectedThread];
     case "apps-desktop-mockup-scene":

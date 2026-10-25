@@ -38,6 +38,12 @@ import {
   stagingProblems,
 } from "./probe-dom.ts";
 
+/**
+ * Capture the baseline and every candidate it is compared with from the same
+ * build mode (both dev servers, or both production builds). The dev build
+ * draws stage art behind the composer send button that a production build
+ * does not, so a mixed pair shows a diff no change made.
+ */
 export const BAR_VIEWPORT = { width: 1440, height: 900 } as const;
 
 const CAPTURE_ONLY_CSS = NodePath.join(
@@ -195,7 +201,7 @@ export function parseCaptureWebArgs(args: ReadonlyArray<string>) {
   const out = values.out;
   if (pairingUrl === undefined || out === undefined) {
     throw new Error(
-      `Usage: node scripts/bar/capture-web.ts --pairing-url <url> --out <dir> [--after] [--scene <name>]... [--param name=value]... [--base-dir <dir>] [--clock <iso>] [--checklist ${CHECKLIST_NAMES.join("|")}] [--browser-path <chrome>] [--appearance dark|light]\nScenes: ${Object.keys(ALL_SCENES).join(", ")}\n--after captures the app-fixture scenes (default with --after: ${BAR_APP_SCENE_NAMES.join(", ")}).`,
+      `Usage: node scripts/bar/capture-web.ts --pairing-url <url> --out <dir> [--after] [--scene <name>]... [--param name=value]... [--base-dir <dir>] [--clock <iso>] [--checklist ${CHECKLIST_NAMES.join("|")}] [--browser-path <chrome>] [--appearance dark|light]\nScenes: ${Object.keys(ALL_SCENES).join(", ")}\n--after captures the app-fixture scenes (default with --after: ${BAR_APP_SCENE_NAMES.join(", ")}).\nCapture the baseline and its candidates in the same build mode (dev or production): the dev build draws stage art behind the composer send button.`,
     );
   }
   const after = values.after === true;
