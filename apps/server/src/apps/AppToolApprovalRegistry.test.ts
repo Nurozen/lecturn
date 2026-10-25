@@ -44,6 +44,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
+import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -127,6 +128,7 @@ const layerAppsDependencies = Layer.mergeAll(
     legacyCookieName: undefined,
   }),
   Layer.mock(ServerEnvironment.ServerEnvironmentIdentity)({}),
+  ServerSettings.layerTest(),
 ).pipe(
   Layer.provideMerge(Layer.merge(SqlitePersistence.layerMemory, layerConfig)),
   Layer.provideMerge(NodeServices.layer),
@@ -380,7 +382,12 @@ it.effect("a second AppsLayer build over the same state fails loudly", () =>
       Layer.build(layer).pipe(
         Effect.scoped,
         Effect.provide(state),
-        Effect.provide(layerAppsDependencies),
+        Effect.provide(
+          Layer.merge(
+            layerAppsDependencies,
+            Layer.mock(ThreadManagement.ThreadManagementService)({}),
+          ),
+        ),
         Effect.exit,
       );
 
