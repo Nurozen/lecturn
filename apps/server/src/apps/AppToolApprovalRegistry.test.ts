@@ -29,8 +29,10 @@ import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
+import * as SessionStore from "../auth/SessionStore.ts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../config.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as McpSessionRegistryTestkit from "../mcp/McpSessionRegistry.testkit.ts";
 import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
@@ -39,7 +41,10 @@ import * as EffectWorker from "../orchestration-v2/EffectWorker.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import { LecturnOrchestrationHooks } from "../orchestration-v2/fork/LecturnOrchestrationHooks.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
+import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
@@ -72,13 +77,18 @@ const providerInstance = {
   textGeneration: {} as ProviderInstance["textGeneration"],
 } satisfies ProviderInstance;
 
+const layerConfig = ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-apps-approvals-" });
+const layerProjectService = Layer.mock(ProjectService.ProjectService)({
+  getById: () => Effect.succeedNone,
+});
+
 const layerRuntime = Layer.mergeAll(RuntimeLayer.layer, RuntimeLayer.layerEventSink).pipe(
   Layer.provideMerge(EffectOutbox.layer),
   Layer.provide(McpSessionRegistryTestkit.layer),
   Layer.provide(McpProviderSessions.layer),
   Layer.provide(SqlitePersistence.layerMemory),
   Layer.provide(Layer.mock(CheckpointStore.CheckpointStore)({})),
-  Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-apps-approvals-" })),
+  Layer.provide(layerConfig),
   Layer.provide(ServerSettings.layerTest()),
   Layer.provide(
     Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
@@ -95,7 +105,7 @@ const layerRuntime = Layer.mergeAll(RuntimeLayer.layer, RuntimeLayer.layerEventS
       createWorktree: () => Effect.succeed({} as never),
     }),
   ),
-  Layer.provide(Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone })),
+  Layer.provide(layerProjectService),
   Layer.provide(
     Layer.merge(
       NodeServices.layer,
@@ -104,6 +114,22 @@ const layerRuntime = Layer.mergeAll(RuntimeLayer.layer, RuntimeLayer.layerEventS
       }),
     ),
   ),
+);
+
+// The same layer values as the runtime's, so one build shares one database.
+const layerAppsDependencies = Layer.mergeAll(
+  ProjectStore.layer,
+  ProjectionStore.layer,
+  OrchestrationEventStore.layer,
+  layerProjectService,
+  Layer.mock(SessionStore.SessionStore)({
+    cookieName: "lecturn_session",
+    legacyCookieName: undefined,
+  }),
+  Layer.mock(ServerEnvironment.ServerEnvironmentIdentity)({}),
+).pipe(
+  Layer.provideMerge(Layer.merge(SqlitePersistence.layerMemory, layerConfig)),
+  Layer.provideMerge(NodeServices.layer),
 );
 
 // Stands in for the apps contribution: it holds only what the runtime gives it.
@@ -128,6 +154,7 @@ const layerHostContextHook = Layer.effectDiscard(
 
 // The server.ts shape: hook registrations inside the runtime, AppsLayer above it.
 const layerServer = AppsLayer.layer.pipe(
+  Layer.provide(layerAppsDependencies),
   Layer.provideMerge(layerHostContextHook.pipe(Layer.provideMerge(layerRuntime))),
 );
 
@@ -350,7 +377,12 @@ it.effect("a second AppsLayer build over the same state fails loudly", () =>
   Effect.gen(function* () {
     const state = yield* Layer.build(AppRuntimeState.layer);
     const buildApps = (layer: typeof AppsLayer.layer) =>
-      Layer.build(layer).pipe(Effect.scoped, Effect.provide(state), Effect.exit);
+      Layer.build(layer).pipe(
+        Effect.scoped,
+        Effect.provide(state),
+        Effect.provide(layerAppsDependencies),
+        Effect.exit,
+      );
 
     const twice = yield* buildApps(Layer.mergeAll(AppsLayer.layer, Layer.fresh(AppsLayer.layer)));
     assert.isTrue(Exit.isFailure(twice));

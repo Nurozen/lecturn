@@ -31,7 +31,6 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
-import Migration0080 from "../persistence/Migrations/080_ProjectionProjectsAppBinding.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
@@ -66,12 +65,6 @@ const layerMetadata = Layer.merge(
   }),
 );
 
-// Migration 80 is registered by A12's Migrations.ts entry; it is idempotent,
-// so applying it here as well is harmless once that lands.
-const layerSqlite = Layer.effectDiscard(Migration0080).pipe(
-  Layer.provideMerge(SqlitePersistence.layerMemory),
-);
-
 const layerTest = Layer.mergeAll(
   AppProjectService.layer,
   AppsOrchestrationHooks.layer.pipe(Layer.provide(LecturnOrchestrationHooks.layer)),
@@ -88,7 +81,7 @@ const layerTest = Layer.mergeAll(
   Layer.provideMerge(ProjectEnrichmentService.layer),
   Layer.provideMerge(layerWorkspacePaths),
   Layer.provideMerge(layerMetadata),
-  Layer.provideMerge(layerSqlite),
+  Layer.provideMerge(SqlitePersistence.layerMemory),
   Layer.provideMerge(ServerSettings.layerTest()),
   Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "app-project-service-test-" })),
   Layer.provideMerge(NodeServices.layer),

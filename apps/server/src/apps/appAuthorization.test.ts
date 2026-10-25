@@ -19,14 +19,17 @@ import * as Option from "effect/Option";
 
 import type { AuthenticatedSession } from "../auth/EnvironmentAuth.ts";
 import { type AppAuthorizationDeps, EMBED_TOKEN_SCOPES, makeWith } from "./appAuthorization.ts";
-import * as AppHostContextStore from "./AppHostContextStore.ts";
-import * as AppLeaseService from "./AppLeaseService.ts";
-import * as AppProjectServiceStub from "./AppProjectService.ts";
-import * as AppRegistryService from "./AppRegistryService.ts";
 import * as AppsRpcHandlers from "./AppsRpcHandlers.ts";
-import { AppAuthorization, AppProjectService, AppsNotImplemented } from "./services.ts";
+import {
+  AppAuthorization,
+  AppHostContextStore,
+  AppLeaseService,
+  AppProjectService,
+  AppRegistryService,
+  AppsNotImplemented,
+  ThreadCopyService,
+} from "./services.ts";
 import { type AppSubject, formatAppSubject, formatEmbedSubject } from "./subjects.ts";
-import * as ThreadCopyService from "./ThreadCopyService.ts";
 
 const rocketwright = AppId.make("dev.rocketwright.app");
 const otherApp = AppId.make("dev.other.app");
@@ -353,22 +356,18 @@ describe("apps.createEmbedThread", () => {
     AppsRpcHandlers.make(subject).pipe(
       Effect.provide(
         Layer.mergeAll(
-          AppRegistryService.layer,
-          AppLeaseService.layer,
-          AppHostContextStore.layer,
-          ThreadCopyService.layer,
+          Layer.mock(AppRegistryService)({}),
+          Layer.mock(AppLeaseService)({}),
+          Layer.mock(AppHostContextStore)({}),
+          Layer.mock(ThreadCopyService)({}),
           Layer.succeed(AppAuthorization)(authorization),
-          Layer.effect(
-            AppProjectService,
-            Effect.map(Effect.service(AppProjectService), (stub) => ({
-              ...stub,
-              createEmbedThread: (embed: AppSubject) =>
-                Effect.sync(() => {
-                  created.push(embed.kind);
-                  return { threadId: rocketThread };
-                }),
-            })),
-          ).pipe(Layer.provide(AppProjectServiceStub.layer)),
+          Layer.mock(AppProjectService)({
+            createEmbedThread: (embed: AppSubject) =>
+              Effect.sync(() => {
+                created.push(embed.kind);
+                return { threadId: rocketThread };
+              }),
+          }),
         ),
       ),
     );
