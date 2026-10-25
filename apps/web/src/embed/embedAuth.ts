@@ -57,7 +57,9 @@ export function stripEmbedHash(href: string): string {
 
 let hashConsumed = false;
 let embedToken: string | null = null;
+let embedTokenExpiresAtMs: number | null = null;
 let embedParentOrigin: string | null = null;
+const tokenListeners = new Set<() => void>();
 
 /** Takes the credential out of the address bar once; later calls return what was taken. */
 export function consumeEmbedHash(): EmbedHashCredential | null {
@@ -73,10 +75,32 @@ export function consumeEmbedHash(): EmbedHashCredential | null {
   return embedToken === null ? null : { token: embedToken, parentOrigin: embedParentOrigin };
 }
 
-/** Swapped in on `lecturn/token.refresh`; reconnects pick it up because the bearer is re-read. */
-export function setEmbedToken(token: string): void {
+/**
+ * Swapped in on `lecturn/token.refresh`. HTTP picks it up because the bearer is re-read per
+ * request; listeners reconnect the socket, whose session is still the old token's.
+ */
+export function setEmbedToken(token: string, expiresAtMs: number | null = null): void {
   hashConsumed = true;
   embedToken = token;
+  embedTokenExpiresAtMs = expiresAtMs;
+  for (const listener of tokenListeners) listener();
+}
+
+export function subscribeEmbedToken(listener: () => void): () => void {
+  tokenListeners.add(listener);
+  return () => {
+    tokenListeners.delete(listener);
+  };
+}
+
+/** The hash carries no expiry, so the first token's is learned from the server later. */
+export function readEmbedTokenExpiresAt(): number | null {
+  consumeEmbedHash();
+  return embedTokenExpiresAtMs;
+}
+
+export function rememberEmbedTokenExpiry(token: string, expiresAtMs: number): void {
+  if (embedToken === token) embedTokenExpiresAtMs = expiresAtMs;
 }
 
 export function readEmbedToken(): string | null {
@@ -94,5 +118,7 @@ export function readEmbedParentOrigin(): string | null {
 export function __resetEmbedAuthForTests(): void {
   hashConsumed = false;
   embedToken = null;
+  embedTokenExpiresAtMs = null;
   embedParentOrigin = null;
+  tokenListeners.clear();
 }

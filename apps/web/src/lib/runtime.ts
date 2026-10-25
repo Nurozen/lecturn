@@ -4,6 +4,8 @@ import * as Layer from "effect/Layer";
 import * as Socket from "effect/socket/Socket";
 
 import { makeWebRemoteHttpClientLayer } from "./remoteHttpLayer";
+import { isEmbedLocation } from "../embed/embedAuth";
+import * as EmbedHttpLayer from "../embed/embedHttpLayer";
 import * as RelayTracing from "@lecturn/shared/relayTracing";
 import * as PrimaryEnvironmentHttpClient from "../environments/primary/httpClient";
 import * as PrimaryEnvironmentHttpLayer from "../environments/primary/httpLayer";
@@ -17,9 +19,13 @@ function configuredRelayUrl(): string {
   return resolveCloudPublicConfig().relayUrl ?? "http://relay.invalid";
 }
 
-const layerHttpClient = makeWebRemoteHttpClientLayer((input, init) =>
+const layerWebHttpClient = makeWebRemoteHttpClientLayer((input, init) =>
   globalThis.fetch(input, init),
 );
+// The connection mints WebSocket tickets and loads snapshots through this client (D14).
+const layerHttpClient = isEmbedLocation()
+  ? EmbedHttpLayer.layerWithoutCookies(layerWebHttpClient)
+  : layerWebHttpClient;
 const layerRelayTracing = RelayTracing.layer(resolveRelayTracingConfig(), {
   serviceName: "lecturn-web",
   serviceVersion: import.meta.env.APP_VERSION,

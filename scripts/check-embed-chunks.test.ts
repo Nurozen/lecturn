@@ -1,6 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import { checkEmbedChunks, embedStartupChunks, type Manifest } from "./check-embed-chunks.ts";
+import {
+  checkEmbedChunks,
+  embedStartupChunks,
+  FORBIDDEN_EMBED_MODULES,
+  type Manifest,
+} from "./check-embed-chunks.ts";
 
 const manifest: Manifest = {
   "index.html": { file: "assets/index.js", isEntry: true },
@@ -44,6 +49,19 @@ describe("check-embed-chunks", () => {
     );
     expect(report.violations).toEqual([
       { module: "src/components/Sidebar.tsx", chunk: "assets/shared.js" },
+    ]);
+  });
+
+  it("flags cloud linking in the embed startup graph by default", () => {
+    const report = checkEmbedChunks(manifest, (file) =>
+      file === "assets/ChatView.js"
+        ? ["../../src/cloud/linkEnvironment.ts"]
+        : file === "assets/AppShell.js"
+          ? FORBIDDEN_EMBED_MODULES.map((module) => `../../${module}`)
+          : [],
+    );
+    expect(report.violations).toEqual([
+      { module: "src/cloud/linkEnvironment.ts", chunk: "assets/ChatView.js" },
     ]);
   });
 

@@ -47,7 +47,8 @@ import { FetchHttpClient } from "effect/http";
 
 import { APP_VERSION } from "../branding";
 import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";
-import { isEmbedLocation, readEmbedBearerToken } from "../embed/embedAuth";
+import { isEmbedLocation } from "../embed/embedAuth";
+import { embedConnectionWakeups, embedPrimaryAuth } from "../embed/embedPrimaryAuth";
 import * as PrimaryEnvironmentHttpLayer from "../environments/primary/httpLayer";
 import {
   readPrimaryEnvironmentTarget,
@@ -213,6 +214,7 @@ const layerWakeups = Wakeups.layer({
       ),
       accountsNeedingSignIn(appAtomRegistry),
       networkPathChanges,
+      ...(isEmbedLocation() ? [embedConnectionWakeups] : []),
     ],
     { concurrency: "unbounded" },
   ),
@@ -351,16 +353,18 @@ const layerCapabilities = Layer.effectContext(
     const identity = ClientCapabilities.RelayDeviceIdentity.of({
       deviceId: Effect.succeedNone,
     });
-    const primaryAuth = ClientCapabilities.PrimaryEnvironmentAuth.of({
-      bearerToken: Effect.tryPromise({
-        try: isEmbedLocation() ? readEmbedBearerToken : readDesktopPrimaryBearerToken,
-        catch: (cause) =>
-          new ConnectionTransientError({
-            reason: "remote-unavailable",
-            detail: `Could not load the desktop primary credential: ${String(cause)}`,
-          }),
-      }).pipe(Effect.map(Option.fromNullishOr)),
-    });
+    const primaryAuth = isEmbedLocation()
+      ? embedPrimaryAuth
+      : ClientCapabilities.PrimaryEnvironmentAuth.of({
+          bearerToken: Effect.tryPromise({
+            try: readDesktopPrimaryBearerToken,
+            catch: (cause) =>
+              new ConnectionTransientError({
+                reason: "remote-unavailable",
+                detail: `Could not load the desktop primary credential: ${String(cause)}`,
+              }),
+          }).pipe(Effect.map(Option.fromNullishOr)),
+        });
     const ssh = ClientCapabilities.SshEnvironmentGateway.of({
       provision: Effect.fn("web.connectionPlatform.ssh.provision")(
         function* (target, expectedEnvironmentId) {
