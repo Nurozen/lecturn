@@ -22,6 +22,7 @@ describe("primary environment HTTP layer", { concurrent: false }, () => {
         location: {
           href: "http://127.0.0.1:3773/settings",
           origin: "http://127.0.0.1:3773",
+          pathname: "/settings",
         },
       },
     });
@@ -41,7 +42,7 @@ describe("primary environment HTTP layer", { concurrent: false }, () => {
     Object.defineProperty(globalThis, "window", {
       configurable: true,
       value: {
-        location: { origin: "lecturn://app" },
+        location: { origin: "lecturn://app", pathname: "/" },
         desktopBridge: {
           getLocalEnvironmentBootstrap: () => ({
             label: "Local environment",

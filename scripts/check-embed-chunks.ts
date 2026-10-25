@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
 /**
- * Asserts the /embed page never loads the app shell. Route code splitting cannot see what the
+ * Asserts the /embed page never loads the app shell or cloud linking. Route code splitting cannot see what the
  * root route imports statically, so a stray import from __root.tsx (or anything the embed route
  * imports) silently drags the sidebar back into the embed's startup graph.
  *
@@ -24,6 +24,8 @@ export const FORBIDDEN_EMBED_MODULES = [
   "src/components/Sidebar.tsx",
   "src/components/settings/SettingsSidebarNav.tsx",
   "src/components/CommandPalette.tsx",
+  // Cloud linking uses the cookie-or-desktop primary HTTP path; the embed must never reach it.
+  "src/cloud/linkEnvironment.ts",
 ];
 
 // bootstrap.ts reaches main.tsx through a dynamic import that always runs, so main counts as

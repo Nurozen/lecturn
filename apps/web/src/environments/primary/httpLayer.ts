@@ -3,14 +3,14 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 
-import { isEmbedLocation, readEmbedBearerToken } from "../../embed/embedAuth";
+import { isEmbedLocation } from "../../embed/embedAuth";
+import { makeEmbedHttpLayer } from "../../embed/embedHttpLayer";
 import { readDesktopPrimaryBearerToken } from "./desktopAuth";
 import { resolvePrimaryEnvironmentHttpUrl } from "./target";
 
 function isSameOriginBrowserPrimary(): boolean {
   if (
     typeof window === "undefined" ||
-    isEmbedLocation() ||
     window.desktopBridge !== undefined ||
     !window.location.origin.startsWith("http")
   ) {
@@ -23,7 +23,7 @@ function isSameOriginBrowserPrimary(): boolean {
 function withPrimaryBearerToken(client: HttpClient.HttpClient): HttpClient.HttpClient {
   return client.pipe(
     HttpClient.mapRequestEffect((request) =>
-      Effect.promise(isEmbedLocation() ? readEmbedBearerToken : readDesktopPrimaryBearerToken).pipe(
+      Effect.promise(readDesktopPrimaryBearerToken).pipe(
         Effect.map((bearerToken) =>
           bearerToken ? HttpClientRequest.bearerToken(request, bearerToken) : request,
         ),
@@ -35,6 +35,7 @@ function withPrimaryBearerToken(client: HttpClient.HttpClient): HttpClient.HttpC
 export function layerForCurrentOrigin() {
   return Layer.unwrap(
     Effect.sync(() => {
+      if (isEmbedLocation()) return makeEmbedHttpLayer();
       const layerBase = layerRemoteHttpClient(globalThis.fetch);
       if (isSameOriginBrowserPrimary()) {
         return Layer.merge(
