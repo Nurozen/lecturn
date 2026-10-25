@@ -130,6 +130,33 @@ export const appInvocationScope = (scope: McpInvocationScope): McpAppInvocationS
     ? (scope as McpAppInvocationScope)
     : undefined;
 
+/**
+ * An app thread's agent works for that app, so its credential reaches only the
+ * app's own project (R2.3); every other caller is unaffected.
+ */
+export const assertProjectReach = (
+  scope: McpInvocationScope,
+  projectId: ProjectId,
+): Effect.Effect<void, OrchestratorMcpFailure> =>
+  scope.app === undefined || scope.app.projectId === projectId
+    ? Effect.void
+    : Effect.fail(
+        new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message:
+            "This thread belongs to a connected app, so it can reach only the app's own project.",
+        }),
+      );
+
+/** For operations that reach beyond every single project, such as creating one. */
+export const refuseAppCaller = (
+  scope: McpInvocationScope,
+  message: string,
+): Effect.Effect<void, OrchestratorMcpFailure> =>
+  scope.app === undefined
+    ? Effect.void
+    : Effect.fail(new OrchestratorMcpFailure({ code: "capability_denied", message }));
+
 export const requireThreadScope = (scope: McpInvocationScope, operation: string) =>
   scope.thread === undefined
     ? Effect.fail(threadCallerRequired(operation))

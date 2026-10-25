@@ -32,6 +32,8 @@ import * as EnvironmentHandlers from "./toolkits/environment/handlers.ts";
 import { ProjectToolkit } from "./toolkits/project/tools.ts";
 import * as ProjectHandlers from "./toolkits/project/handlers.ts";
 import { AttachmentToolkit } from "./toolkits/attachment/tools.ts";
+import * as AppsHandlers from "./toolkits/apps/handlers.ts";
+import { AppsToolkit } from "./toolkits/apps/tools.ts";
 import * as AttachmentHandlers from "./toolkits/attachment/handlers.ts";
 import { ThreadToolkit } from "./toolkits/thread/tools.ts";
 import * as ThreadHandlers from "./toolkits/thread/handlers.ts";
@@ -846,4 +848,5 @@ export const layer = Layer.mergeAll(
   layerPullRequestsToolkit,
   layerDeviceToolkit,
   layerHtmlToolkit,
+  toolkitRegistration(AppsToolkit, AppsHandlers.layer),
 ).pipe(Layer.provideMerge(layerMcpTransport));

@@ -19,6 +19,7 @@ import {
   type OrchestrationV2ThreadShell,
 } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -594,7 +595,11 @@ it.effect("refuses act-as-caller tools to a client caller", () =>
         Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
         Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
         Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
-        Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+        Layer.provide(
+          Layer.mock(ProjectService.ProjectService)({
+            getShell: () => Effect.succeed(Option.none()),
+          }),
+        ),
         Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
       ),
     ),
@@ -647,7 +652,11 @@ it.effect("a caller cannot rewrite a scheduled task that runs above its own mode
               } as never),
           }),
         ),
-        Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+        Layer.provide(
+          Layer.mock(ProjectService.ProjectService)({
+            getShell: () => Effect.succeed(Option.none()),
+          }),
+        ),
         Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
       ),
     ),
@@ -731,7 +740,11 @@ it.effect.each(["lecturn_thread_interrupt", "lecturn_workflow_stop"])(
           Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
           Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
           Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
-          Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+          Layer.provide(
+            Layer.mock(ProjectService.ProjectService)({
+              getShell: () => Effect.succeed(Option.none()),
+            }),
+          ),
           Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
         ),
       ),
@@ -823,7 +836,11 @@ it.effect("discovers workflow stop targets and requires orchestration capability
         Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
         Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
         Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
-        Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+        Layer.provide(
+          Layer.mock(ProjectService.ProjectService)({
+            getShell: () => Effect.succeed(Option.none()),
+          }),
+        ),
         Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
       ),
     ),

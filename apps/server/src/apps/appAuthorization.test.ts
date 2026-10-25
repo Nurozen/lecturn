@@ -7,6 +7,7 @@ import {
   ORCHESTRATION_V2_WS_METHODS as O,
   ProjectId,
   ThreadId,
+  ThreadNoteId,
   WS_METHODS as W,
   type AppBinding,
 } from "@lecturn/contracts";
@@ -66,6 +67,17 @@ const threadProjects = new Map<ThreadId, ProjectId>([
   [normalThread, normalProject],
 ]);
 
+const rocketNote = ThreadNoteId.make("rocket-note");
+const otherAppNote = ThreadNoteId.make("other-app-note");
+const normalNote = ThreadNoteId.make("normal-note");
+const missingNote = ThreadNoteId.make("missing-note");
+
+const noteProjects = new Map<ThreadNoteId, ProjectId>([
+  [rocketNote, rocketProject],
+  [otherAppNote, otherAppProject],
+  [normalNote, normalProject],
+]);
+
 const issued: Array<{ subject: string; ttl: Duration.Duration; label: string }> = [];
 
 const fakeDeps: AppAuthorizationDeps = {
@@ -73,6 +85,7 @@ const fakeDeps: AppAuthorizationDeps = {
     Effect.succeed(Option.fromUndefinedOr(bindings.get(projectId))),
   projectIdForThread: (threadId) =>
     Effect.succeed(Option.fromUndefinedOr(threadProjects.get(threadId))),
+  projectIdForNote: (noteId) => Effect.succeed(Option.fromUndefinedOr(noteProjects.get(noteId))),
   issueEmbedSession: (input) =>
     Effect.sync(() => {
       issued.push(input);
@@ -324,9 +337,6 @@ describe("app RPC allowlist", () => {
       expect(yield* notes({ projectId: otherAppProject })).toBe(false);
       expect(yield* notes({ projectId: normalProject })).toBe(false);
       expect(yield* notes({})).toBe(false);
-      expect(yield* allowed(embedSession, W.threadNotesCreate, { threadId: rocketThread })).toBe(
-        false,
-      );
 
       for (const method of [
         W.contextualStatus,
@@ -348,6 +358,106 @@ describe("app RPC allowlist", () => {
       ] as const) {
         expect(yield* allowed(embedSession, method, payload)).toBe(false);
       }
+    }),
+  );
+
+  it.effect("lets an embed keep notes on its own threads only", () =>
+    Effect.gen(function* () {
+      const create = (threadId: ThreadId) =>
+        allowed(embedSession, W.threadNotesCreate, { id: "new-note", threadId });
+      expect(yield* create(rocketThread)).toBe(true);
+      expect(yield* create(rocketSecondThread)).toBe(false);
+      expect(yield* create(otherAppThread)).toBe(false);
+      expect(yield* create(normalThread)).toBe(false);
+      expect(yield* create(missingThread)).toBe(false);
+
+      for (const method of [W.threadNotesUpdate, W.threadNotesDelete] as const) {
+        const note = (id: ThreadNoteId) => allowed(embedSession, method, { id, comment: null });
+        expect(yield* note(rocketNote)).toBe(true);
+        expect(yield* note(otherAppNote)).toBe(false);
+        expect(yield* note(normalNote)).toBe(false);
+        expect(yield* note(missingNote)).toBe(false);
+        expect(yield* allowed(appSession, method, { id: rocketNote, comment: null })).toBe(false);
+      }
+      expect(yield* allowed(appSession, W.threadNotesCreate, { threadId: rocketThread })).toBe(
+        false,
+      );
+    }),
+  );
+
+  it.effect("lets an embed upload attachments that only its own threads can claim", () =>
+    Effect.gen(function* () {
+      const upload = { name: "plot.png", mimeType: "image/png", sizeBytes: 10 };
+      const stored = (threadId: ThreadId) => createAttachmentId(threadId, "png") ?? "unparseable";
+      expect(yield* allowed(embedSession, W.attachmentsCreateUploadUrl, upload)).toBe(true);
+      expect(yield* allowed(appSession, W.attachmentsCreateUploadUrl, upload)).toBe(false);
+
+      const remove = (attachmentId: string) =>
+        allowed(embedSession, W.attachmentsDelete, { attachmentId });
+      expect(yield* remove(createPendingAttachmentId(".png"))).toBe(true);
+      expect(yield* remove(stored(rocketThread))).toBe(false);
+      expect(yield* remove(stored(normalThread))).toBe(false);
+      expect(
+        yield* allowed(appSession, W.attachmentsDelete, {
+          attachmentId: createPendingAttachmentId(".png"),
+        }),
+      ).toBe(false);
+
+      const attachment = (id: string) => ({
+        type: "image",
+        id,
+        name: "plot.png",
+        mimeType: "image/png",
+        sizeBytes: 10,
+      });
+      const send = (fields: Record<string, unknown>) =>
+        allowed(
+          embedSession,
+          O.dispatchCommand,
+          command({ type: "message.dispatch", threadId: rocketThread, ...fields }),
+        );
+      expect(yield* send({ attachments: [attachment(createPendingAttachmentId(".png"))] })).toBe(
+        true,
+      );
+      expect(yield* send({ attachments: [attachment(stored(rocketThread))] })).toBe(true);
+      expect(yield* send({ attachments: [attachment(stored(normalThread))] })).toBe(false);
+      expect(yield* send({ attachments: [attachment(stored(otherAppThread))] })).toBe(false);
+      expect(yield* send({ senderThreadId: normalThread })).toBe(false);
+      expect(yield* send({ sourcePlanRef: { threadId: otherAppThread, planId: "plan-1" } })).toBe(
+        false,
+      );
+      expect(yield* send({ sourcePlanRef: { threadId: rocketThread, planId: "plan-1" } })).toBe(
+        true,
+      );
+
+      const edit = (id: string) =>
+        allowed(
+          embedSession,
+          O.dispatchCommand,
+          command({
+            type: "queued-run.edit",
+            threadId: rocketThread,
+            runId: "run-1",
+            text: "",
+            attachments: [attachment(id)],
+          }),
+        );
+      expect(yield* edit(stored(rocketThread))).toBe(true);
+      expect(yield* edit(stored(normalThread))).toBe(false);
+
+      const respond = (id: string) =>
+        allowed(
+          embedSession,
+          O.dispatchCommand,
+          command({
+            type: "runtime-request.respond",
+            threadId: rocketThread,
+            requestId: "request-1",
+            attachmentsByQuestionId: { q1: [attachment(id)] },
+          }),
+        );
+      expect(yield* respond(createPendingAttachmentId(".png"))).toBe(true);
+      expect(yield* respond(stored(otherAppThread))).toBe(false);
     }),
   );
 

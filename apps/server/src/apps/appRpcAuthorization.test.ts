@@ -65,6 +65,7 @@ const unfinishedAuthorization = Layer.succeed(AppAuthorization)(
   AppAuthorizationLayer.makeWith({
     resolveAppForProject: unfinished,
     projectIdForThread: unfinished,
+    projectIdForNote: unfinished,
     issueEmbedSession: unfinished,
     environmentId: Effect.die("unused"),
     embedOrigin: "http://127.0.0.1:3773",
