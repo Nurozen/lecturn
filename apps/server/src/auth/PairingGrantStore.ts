@@ -20,6 +20,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
+import { appSidecarSeedGrants } from "../apps/sidecarBootstrap.ts";
 import * as ServerConfig from "../config.ts";
 import * as AuthPairingLinks from "../persistence/AuthPairingLinks.ts";
 
@@ -327,6 +328,10 @@ export const make = Effect.gen(function* () {
       // implicitly trusts.
       remainingUses: "unbounded",
     });
+  }
+
+  for (const [credential, grant] of yield* appSidecarSeedGrants(config)) {
+    yield* seedGrant(credential, grant);
   }
 
   const listActive: PairingGrantStore["Service"]["listActive"] = Effect.fn(
