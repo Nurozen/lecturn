@@ -1112,6 +1112,9 @@ function deriveTurnFolds(input: {
       if (
         timelineEntryIsPersistentResourceCard(entry) ||
         timelineEntryHeadsAppCard(entry) ||
+        // An app thread reads as the calls the agent made into the app, so its tool rows stay
+        // out of the fold, as the app mockups draw a finished turn.
+        (entry.kind === "work" && isAppToolSource(entry.entry.toolSource)) ||
         input.liveSubagentEntryIds.has(entry.id) ||
         input.completeSupersededReplyEntryIds.has(entry.id)
       ) {

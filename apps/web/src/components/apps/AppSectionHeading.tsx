@@ -30,7 +30,7 @@ export function AppSectionHeading({
   const settled = section === "settled";
   const Icon = settled ? ClockIcon : PinIcon;
   return (
-    <div className="pt-2">
+    <div className="pt-2" data-testid="app-section-heading" data-section={section}>
       <button
         type="button"
         data-thread-selection-safe
@@ -43,13 +43,15 @@ export function AppSectionHeading({
           settled ? "lecturn-settled-label" : "text-sidebar-foreground/80",
         )}
       >
-        <Icon aria-hidden className="size-3.5 shrink-0" />
-        <span>{label}</span>
-        {settled ? (
-          <span className="tabular-nums">({count})</span>
-        ) : (
+        <Icon aria-hidden data-testid="app-section-heading-icon" className="size-3.5 shrink-0" />
+        <span data-testid="app-section-heading-label" className="inline-flex items-center gap-1.5">
+          <span>{label}</span>
+          {settled ? <span className="tabular-nums">({count})</span> : null}
+        </span>
+        {settled ? null : (
           <ChevronDownIcon
             aria-hidden
+            data-testid="app-section-heading-chevron"
             className={cn("lecturn-hierarchy-chevron size-3.5", collapsed && "-rotate-90")}
           />
         )}

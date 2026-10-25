@@ -96,6 +96,7 @@ export function useAppClosedBanner(
   const { openUrl } = banner;
   return {
     id: `app-${banner.kind}:${banner.appId}`,
+    testId: "app-closed-banner",
     variant: "warning",
     icon: createElement(banner.kind === "revoked" ? ShieldOffIcon : UnplugIcon),
     title: banner.title,
@@ -103,14 +104,18 @@ export function useAppClosedBanner(
       openUrl === null
         ? undefined
         : createElement(
-            Button,
-            {
-              size: "xs",
-              variant: "ghost",
-              onClick: () => openAppUrl(openUrl, context?.openUrlTemplate ?? null),
-            },
-            banner.openLabel,
-            createElement(ExternalLinkIcon, { "aria-hidden": true }),
+            "span",
+            { "data-testid": "app-closed-banner-open", className: "contents" },
+            createElement(
+              Button,
+              {
+                size: "xs",
+                variant: "ghost",
+                onClick: () => openAppUrl(openUrl, context?.openUrlTemplate ?? null),
+              },
+              banner.openLabel,
+              createElement(ExternalLinkIcon, { "aria-hidden": true }),
+            ),
           ),
   };
 }

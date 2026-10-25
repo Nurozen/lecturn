@@ -95,7 +95,7 @@ function AppWorkspaceBranch({
   const { project } = workspace;
   const sections = APP_SECTION_ORDER.filter((section) => workspace.sections[section].length > 0);
   return (
-    <li className="lecturn-hierarchy-branch list-none" data-testid="app-workspace">
+    <li className="lecturn-hierarchy-branch list-none" data-testid="sidebar-app-workspace">
       <div
         data-thread-selection-safe
         className="group/app-workspace lecturn-project-header flex items-center gap-1 pt-2"
@@ -103,6 +103,7 @@ function AppWorkspaceBranch({
         <button
           type="button"
           data-lecturn-hover
+          data-testid="sidebar-app-workspace-expand"
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded py-1.5 pl-1 text-left text-xs font-medium text-sidebar-foreground"
           aria-label={`${collapsed ? "Expand" : "Collapse"} ${project.title}`}
           aria-expanded={!collapsed}
@@ -172,6 +173,8 @@ function AppSection({
   const threads = workspace.sections[section];
   return (
     <li
+      // The branch's ::before and ::after draw the tree connector.
+      data-testid="sidebar-tree-connector"
       className={cn(
         "lecturn-hierarchy-branch list-none",
         section === "settled" && "lecturn-hierarchy-settled",
@@ -265,6 +268,7 @@ const AppThreadRow = memo(function AppThreadRow({
         data-thread-active={isActive || undefined}
         data-account-selected={isActive || undefined}
         data-testid="app-thread-row"
+        data-selected={isActive}
         className={cn(
           "group/app-thread relative flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
           isActive
@@ -276,7 +280,11 @@ const AppThreadRow = memo(function AppThreadRow({
         }}
         onKeyDown={handleKeyDown}
       >
-        <FileIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+        <FileIcon
+          aria-hidden
+          data-testid="app-thread-row-icon"
+          className="size-4 shrink-0 text-muted-foreground"
+        />
         {isRenaming && canOperate ? (
           <input
             autoFocus
@@ -305,6 +313,7 @@ const AppThreadRow = memo(function AppThreadRow({
                 <button
                   type="button"
                   aria-label={`Actions for ${thread.title}`}
+                  data-testid="app-thread-row-menu"
                   onClick={(event) => event.stopPropagation()}
                   className={cn(
                     "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-popup-open:opacity-100",

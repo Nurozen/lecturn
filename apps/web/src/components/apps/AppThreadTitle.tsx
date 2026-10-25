@@ -18,7 +18,10 @@ export function AppThreadTitle({ threadRef }: { readonly threadRef: ScopedThread
   return (
     <div className="messages-timeline-row-frame">
       <div className="chat-content-lane pb-2">
-        <h1 className="font-display font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
+        <h1
+          data-testid="app-thread-title"
+          className="font-display font-normal text-2xl text-foreground tracking-tight sm:text-3xl"
+        >
           {shell.title}
         </h1>
       </div>

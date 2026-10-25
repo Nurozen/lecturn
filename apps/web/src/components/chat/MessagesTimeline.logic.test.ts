@@ -3786,6 +3786,61 @@ describe("v2 run and attempt history", () => {
       expect.objectContaining({ id: "provider-recovered" }),
     ]);
   });
+  it("keeps app tool rows out of a settled turn's fold", () => {
+    const message = (id: string, role: "user" | "assistant", at: string) => ({
+      id: `${id}-entry`,
+      kind: "message" as const,
+      createdAt: at,
+      message: {
+        id: id as never,
+        role,
+        text: id,
+        runId: role === "user" ? null : ("turn-1" as never),
+        createdAt: at,
+        updatedAt: at,
+        streaming: false,
+      },
+    });
+    const work = (id: string, at: string, app: boolean) => ({
+      id: `${id}-entry`,
+      kind: "work" as const,
+      createdAt: at,
+      entry: {
+        id,
+        createdAt: at,
+        runId: "turn-1" as never,
+        label: id,
+        tone: "tool" as const,
+        toolLifecycleStatus: "completed" as const,
+        ...(app
+          ? {
+              toolSource: {
+                key: "app:embed-host",
+                name: "Embed Host",
+                kind: "integration" as const,
+              },
+            }
+          : {}),
+      },
+    });
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        message("user", "user", "2026-01-01T00:00:00Z"),
+        work("ex_counter_read", "2026-01-01T00:00:01Z", true),
+        work("ran-command", "2026-01-01T00:00:02Z", false),
+        message("final", "assistant", "2026-01-01T00:00:03Z"),
+      ],
+      isWorking: false,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    });
+    expect(rows.map((row) => row.id)).toEqual([
+      "user-entry",
+      "turn-fold:turn-1",
+      "ex_counter_read-entry",
+      "final-entry",
+    ]);
+  });
   it("hides subagents in folded turns when they arrive before commentary", () => {
     const timelineEntries = [
       {
