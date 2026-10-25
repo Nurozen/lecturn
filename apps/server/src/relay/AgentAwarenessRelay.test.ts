@@ -11,6 +11,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   RunId,
+  RuntimeRequestId,
   ThreadId,
   TurnItemId,
 } from "@lecturn/contracts";
@@ -383,6 +384,44 @@ describe("AgentAwarenessRelay", () => {
         assert.equal(shellReads.length, 0);
         assert.equal(publications.length, 0);
       }),
+  );
+
+  // Mobile's alerts come from these publishes; Projects-mode filters must not reach them.
+  it.effect("publishes approval and completion for a connected app's thread", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay();
+      const app = { appOrigin: "app-credential", appData: "rocket:1" } as const;
+      yield* Ref.set(
+        currentShell,
+        shell({
+          ...app,
+          pendingRuntimeRequest: {
+            id: RuntimeRequestId.make("approval-1"),
+            kind: "command",
+            createdAt: DateTime.makeUnsafe(NOW),
+          },
+        }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      yield* Ref.set(
+        currentShell,
+        shell({
+          ...app,
+          status: "completed",
+          latestRunCompletedAt: DateTime.add(yield* DateTime.now, { seconds: 1 }),
+        }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.deepEqual(
+        publications.map((publication) => [publication.state?.phase, publication.state?.deepLink]),
+        [
+          ["waiting_for_approval", "/threads/relay-environment/relay-thread"],
+          ["completed", "/threads/relay-environment/relay-thread"],
+        ],
+      );
+    }),
   );
 
   it.effect("tells the relay whether the user is present at publish time", () =>

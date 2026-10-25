@@ -1,3 +1,5 @@
+import { threadsForProjectsMode } from "@lecturn/client-runtime/state/app-projects";
+import { AppId, EnvironmentId, ProjectId } from "@lecturn/contracts";
 import type { ClientSettings } from "@lecturn/contracts/settings";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
@@ -22,6 +24,8 @@ const state = vi.hoisted(() => ({
   subagent: false,
   background: [] as Array<{ taskId: string; kind: "command" | "monitor" }>,
   delegatedChild: null as "running" | "approval" | null,
+  appProject: false,
+  appStatuses: [] as Array<{ environmentId: string; app: { appId: string; name: string } }>,
   add: vi.fn(
     (_toast: { title: string; description: string; actionProps: { onClick: () => void } }) =>
       "toast-1",
@@ -88,6 +92,20 @@ function mockThreadShell() {
   };
 }
 
+const APP_ID = "dev.rocketwright";
+
+function mockProjects() {
+  return [
+    {
+      id: "project-1",
+      title: "rocket-design",
+      ...(state.appProject
+        ? { appBinding: { appId: APP_ID, workspaceRoot: "/work/rocket-design" } }
+        : {}),
+    },
+  ];
+}
+
 let stableParent: ReturnType<typeof mockThreadShell> | null = null;
 function mockThreads() {
   if (state.delegatedChild === null) return [mockThreadShell()];
@@ -114,7 +132,7 @@ vi.mock(import("@effect/atom-react"), async (original) => ({
   ...(await original()),
   useAtomValue: (() => ({
     status: state.live ? "live" : "disconnected",
-    snapshot: Option.some({ threads: mockThreads() }),
+    snapshot: Option.some({ threads: mockThreads(), projects: mockProjects() }),
   })) as never,
 }));
 vi.mock(import("@tanstack/react-router"), async (original) => ({
@@ -135,6 +153,10 @@ vi.mock(import("../state/environments"), async (original) => ({
   ...(await original()),
   useEnvironmentIds: (() => ["env-1"]) as never,
 }));
+vi.mock(import("../state/apps"), async (original) => ({
+  ...(await original()),
+  useAppStatuses: (() => state.appStatuses) as never,
+}));
 vi.mock(import("../threadNotifications"), async (original) => ({
   ...(await original()),
   playNotificationSound: state.sound,
@@ -148,6 +170,7 @@ vi.mock(import("./ui/toast"), async (original) => {
   };
 });
 
+import { useUiStateStore } from "../uiStateStore";
 import { ThreadNotificationCoordinator } from "./ThreadNotificationCoordinator";
 
 let root: Root;
@@ -180,8 +203,11 @@ beforeEach(() => {
     subagent: false,
     background: [],
     delegatedChild: null,
+    appProject: false,
+    appStatuses: [],
   });
   stableParent = null;
+  useUiStateStore.setState({ sidebarMode: "projects", sidebarAppScopeKey: null });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.spyOn(document, "visibilityState", "get").mockImplementation(
     () => state.visible as DocumentVisibilityState,
@@ -358,5 +384,90 @@ describe("thread notifications", () => {
       tag: "env-1:thread-1",
       silent: true,
     });
+  });
+});
+
+describe("app thread notifications", () => {
+  beforeEach(() => {
+    state.appProject = true;
+    state.appStatuses = [{ environmentId: "env-1", app: { appId: APP_ID, name: "RocketWright" } }];
+  });
+
+  function expectOpenedUnderApps() {
+    expect(state.navigate).toHaveBeenCalledWith({
+      to: "/$environmentId/$threadId",
+      params: { environmentId: "env-1", threadId: "thread-1" },
+    });
+    expect(useUiStateStore.getState()).toMatchObject({
+      sidebarMode: "apps",
+      sidebarAppScopeKey: APP_ID,
+    });
+  }
+
+  it("alerts from a thread the Projects list leaves out", () => {
+    const environmentId = EnvironmentId.make("env-1");
+    const projectId = ProjectId.make("project-1");
+    const binding = { appId: AppId.make(APP_ID), workspaceRoot: "/work/rocket-design" };
+    expect(
+      threadsForProjectsMode(
+        [{ environmentId, id: projectId, appBinding: binding }],
+        [{ environmentId, projectId }],
+      ),
+    ).toEqual([]);
+  });
+
+  it.each([
+    ["approval", "RocketWright: Approval needed"],
+    ["completion", "RocketWright: Thread completed"],
+  ] as const)(
+    "toasts on %s in Projects mode and opens the thread under its app",
+    async (event, title) => {
+      await render();
+      if (event === "approval") state.approval = true;
+      else state.completedAt = "2026-09-13T10:00:00.000Z";
+      await render();
+      expect(state.add).toHaveBeenCalledTimes(1);
+      const toast = state.add.mock.calls[0]?.[0];
+      expect(toast?.title).toBe(title);
+      expect(toast?.description).toBe("Fix the login form");
+      expect(useUiStateStore.getState().sidebarMode).toBe("projects");
+      toast?.actionProps.onClick();
+      expectOpenedUnderApps();
+    },
+  );
+
+  it.each([
+    ["approval", "RocketWright: Approval needed"],
+    ["completion", "RocketWright: Thread completed"],
+  ] as const)(
+    "raises a system alert on %s that opens the thread under its app",
+    async (event, title) => {
+      state.mode = "notifications";
+      state.focused = false;
+      await render();
+      if (event === "approval") state.approval = true;
+      else state.completedAt = "2026-09-13T10:00:00.000Z";
+      await render();
+      expect(state.notification).toHaveBeenCalledWith(title, {
+        body: "Fix the login form",
+        tag: "env-1:thread-1",
+        silent: true,
+      });
+      const notification = state.notification.mock.results[0]?.value as EventTarget;
+      vi.spyOn(window, "focus").mockImplementation(() => undefined);
+      notification.dispatchEvent(new Event("click"));
+      expectOpenedUnderApps();
+    },
+  );
+
+  it("leaves the sidebar in Projects mode when opening a project thread", async () => {
+    state.appProject = false;
+    await render();
+    await complete();
+    const toast = state.add.mock.calls[0]?.[0];
+    expect(toast?.title).toBe("Thread completed");
+    toast?.actionProps.onClick();
+    expect(state.navigate).toHaveBeenCalledTimes(1);
+    expect(useUiStateStore.getState().sidebarMode).toBe("projects");
   });
 });
