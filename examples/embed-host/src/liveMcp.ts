@@ -13,7 +13,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeHttp from "node:http";
 import type * as NodeNet from "node:net";
 
-export const WINDOW_FLASH_TOOL = "window_flash";
+const WINDOW_FLASH_TOOL = "window_flash";
 
 /**
  * For the registration's `gatedTools`: flashing the user's window is visible

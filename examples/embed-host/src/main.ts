@@ -1,96 +1,153 @@
-// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalConsole:off -- A plain Electron host, the shape app developers copy; it runs no Effect runtime.
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off -- A plain Electron host, the shape app developers copy; it runs no Effect runtime.
+/**
+ * Embed Host: the smallest Electron app with Lecturn chat in a pane. The
+ * Lecturn integration is everything between `lecturn:begin` and
+ * `lecturn:end` here, in preload.ts and in renderer/main.ts; the rest is
+ * the host app itself. `scripts/count-integration-lines.ts` measures it.
+ *
+ * Environment (all optional; tests set every one to a temp path):
+ * - LECTURN_HOME: where a user's own Lecturn server would be found.
+ * - EMBED_HOST_SIDECAR_DIR: the app's own Lecturn home.
+ * - EMBED_HOST_WORKSPACE: the workspace the pane chats about.
+ * - EMBED_HOST_USER_DATA: Electron's userData directory.
+ * - EMBED_HOST_FLASH_LOG: where window_flash calls are recorded.
+ * - EMBED_HOST_CDP_PORT, EMBED_HOST_FREEZE_CLOCK: capture and test hooks.
+ */
 import * as NodeFSP from "node:fs/promises";
+import * as NodeModule from "node:module";
 import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
+import { connect } from "@lecturn/embed/node";
+import { captureEmbedView, mountEmbedView } from "@lecturn/embed/electron";
 import * as Electron from "electron";
-import {
-  EMBED_TO_GUEST_CHANNEL,
-  captureEmbedView,
-  mountEmbedView,
-  type EmbedBridge,
-} from "@lecturn/embed/electron";
 
-import { hostContextFontsMessage, startStaticGuest } from "./staticGuest.ts";
+import { iconDataUrl } from "./icon.ts";
+import { LIVE_GATED_TOOLS, startLiveMcp } from "./liveMcp.ts";
+import { hostTheme } from "./theme.ts";
 
-const FONT_FORMATS: Record<string, { readonly mime: string; readonly format: string }> = {
-  ".woff2": { mime: "font/woff2", format: "woff2" },
-  ".woff": { mime: "font/woff", format: "woff" },
-  ".ttf": { mime: "font/ttf", format: "truetype" },
-  ".otf": { mime: "font/otf", format: "opentype" },
-};
+const env = process.env;
+const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
+const require = NodeModule.createRequire(import.meta.url);
 
-const cdpPort = process.env["EMBED_HOST_CDP_PORT"];
+const userDataDir = env["EMBED_HOST_USER_DATA"];
+if (userDataDir) Electron.app.setPath("userData", userDataDir);
+const cdpPort = env["EMBED_HOST_CDP_PORT"];
 if (cdpPort) Electron.app.commandLine.appendSwitch("remote-debugging-port", cdpPort);
-const freezeClockEnv = process.env["EMBED_HOST_FREEZE_CLOCK"];
-const freezeClock = freezeClockEnv ? Number(freezeClockEnv) : undefined;
+const freezeClockEnv = env["EMBED_HOST_FREEZE_CLOCK"];
+const freezeClock = freezeClockEnv ? { freezeClock: Number(freezeClockEnv) } : {};
 
-async function fontFaceCss(files: ReadonlyArray<string>): Promise<string> {
-  const rules = await Promise.all(
-    files.map(async (file, index) => {
-      const kind = FONT_FORMATS[NodePath.extname(file).toLowerCase()];
-      if (!kind) throw new Error(`Unsupported font file: ${file}`);
-      const data = (await NodeFSP.readFile(file)).toString("base64");
-      return `@font-face { font-family: "EmbedProbe${index}"; src: url(data:${kind.mime};base64,${data}) format("${kind.format}"); }`;
-    }),
-  );
-  return rules.join("\n");
-}
+// An installed Electron app ships no separate Node, so its tools run on
+// Electron itself in Node mode.
+const bundledNode = process.execPath;
+const counterServerPath = NodePath.join(here, "counter-mcp.mjs");
+// Matches the sidebar column in renderer/index.html, so the pane is placed
+// right before the renderer's first rect report arrives.
+const SIDEBAR_WIDTH = 320;
 
 async function main() {
   await Electron.app.whenReady();
-  // Two loopback origins so a retarget crosses origins like the sidecar to
-  // user-server switch does (D36).
-  const guests = [await startStaticGuest(), await startStaticGuest()];
-  let guestIndex = 0;
-  const currentOrigin = () => guests[guestIndex]!.origin;
+  const userData = Electron.app.getPath("userData");
+  const workspaceRoot = env["EMBED_HOST_WORKSPACE"] ?? NodePath.join(userData, "ws-a");
+  await NodeFSP.mkdir(workspaceRoot, { recursive: true });
+  const flashLogPath = env["EMBED_HOST_FLASH_LOG"] ?? NodePath.join(userData, "flashes.json");
 
-  const win = new Electron.BrowserWindow({ width: 1200, height: 800, title: "embed-host" });
-  await win.loadURL("data:text/html,<body style='margin:0;background:%23111'></body>");
-  const paneBounds = () => {
-    const { width, height } = win.getContentBounds();
-    return { x: 320, y: 0, width: Math.max(0, width - 320), height };
-  };
-
-  const bridge: EmbedBridge = mountEmbedView(win, {
-    target: {
-      embedTarget: async (projectId, threadId) => ({
-        url: `${currentOrigin()}/embed/static/${projectId}${threadId ? `/${threadId}` : ""}`,
-        token: "static-guest",
-        expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
-      }),
+  const win = new Electron.BrowserWindow({
+    width: 1280,
+    height: 820,
+    title: "Embed Host",
+    backgroundColor: "#1b1e20",
+    webPreferences: {
+      preload: NodePath.join(here, "preload.cjs"),
+      sandbox: true,
+      contextIsolation: true,
     },
-    projectId: "ws-a",
-    theme: "dark",
-    bounds: paneBounds(),
-    ...(freezeClock === undefined ? {} : { freezeClock }),
   });
-  bridge.on("error", (error) => console.error(`[embed-host] ${error.reason}: ${error.message}`));
-  win.on("resize", () => bridge.setBounds(paneBounds()));
+  await win.loadFile(NodePath.join(here, "renderer", "index.html"));
+  const status = (text: string) => win.webContents.send("embed-host:status", text);
+  const paneRect = () => {
+    const { width, height } = win.getContentBounds();
+    return { x: SIDEBAR_WIDTH, y: 0, width: Math.max(0, width - SIDEBAR_WIDTH), height };
+  };
+  status("Starting Lecturn…");
 
-  // Driven from Playwright's electronApp.evaluate for the A9 manual checks.
+  // lecturn:begin
+  const lecturn = await connect({
+    registration: {
+      appId: "dev.example.embedhost",
+      name: "Embed Host",
+      iconDataUrl,
+      toolPrefix: "ex",
+      openUrlTemplate: "embedhost://open?workspace={workspaceRoot}&thread={threadId}",
+      refPrefixes: ["ex:"],
+      headlessTools: {
+        command: bundledNode,
+        args: [counterServerPath, "--root", "{workspaceRoot}"],
+        listArgs: [counterServerPath, "--list-tools"],
+        env: { ELECTRON_RUN_AS_NODE: "1" },
+        cwd: "{workspaceRoot}",
+      },
+      liveTools: true,
+      gatedTools: LIVE_GATED_TOOLS,
+      instructions: "You can increment a counter and flash the host window.",
+    },
+    ...(env["LECTURN_HOME"] ? { lecturnHome: env["LECTURN_HOME"] } : {}),
+    sidecar: {
+      serverEntry: require.resolve("lecturn/dist/bin.mjs"),
+      baseDir: env["EMBED_HOST_SIDECAR_DIR"] ?? NodePath.join(userData, "lecturn"),
+    },
+  });
+  const { projectId } = await lecturn.ensureWorkspace(workspaceRoot, "ws-a");
+  const live = await startLiveMcp({ flashLogPath, onFlash: () => win.flashFrame(true) });
+  await lecturn.setLiveTools({ url: live.url, bearer: live.bearer });
+
+  const embed = mountEmbedView(win, {
+    connection: lecturn,
+    projectId,
+    theme: hostTheme,
+    bounds: paneRect(),
+    ...freezeClock,
+  });
+  embed.on("lecturn/navigate", ({ ref }) => win.webContents.send("embed-host:focus", ref));
+  embed.on("error", (error) => console.error(`[embed-host] ${error.reason}: ${error.message}`));
+
+  let closed = false;
+  Electron.app.on("before-quit", (event) => {
+    if (closed) return;
+    event.preventDefault();
+    void Promise.allSettled([lecturn.close(), live.close()]).finally(() => {
+      closed = true;
+      Electron.app.quit();
+    });
+  });
+  // lecturn:end
+
+  status(`Lecturn ${lecturn.mode} · ws-a`);
+
+  // Driven from Playwright's electronApp.evaluate by e2e/.
   Object.assign(globalThis, {
     embedHost: {
-      bridge,
-      origins: guests.map((guest) => guest.origin),
-      retarget: async (threadId?: string) => {
-        guestIndex = 1 - guestIndex;
-        await bridge.retarget("ws-a", threadId);
-        return currentOrigin();
-      },
-      // One host-context message carrying every font over the preload channel.
-      sendFonts: async (files: ReadonlyArray<string>) => {
-        const message = hostContextFontsMessage(await fontFaceCss(files));
-        bridge.webContents.send(EMBED_TO_GUEST_CHANNEL, message);
-        return Buffer.byteLength(JSON.stringify(message));
-      },
+      environmentId: lecturn.environmentId,
+      origin: lecturn.origin,
+      projectId,
+      workspaceRoot,
+      flashLogPath,
+      embed,
+      embedTarget: () => lecturn.embedTarget(projectId),
+      openThread: (threadId: string) => embed.retarget(projectId, threadId),
       capture: async (file: string) => {
-        await NodeFSP.writeFile(file, await captureEmbedView(bridge));
+        await NodeFSP.writeFile(file, await captureEmbedView(embed));
       },
     },
-  });
-
-  Electron.app.on("window-all-closed", () => {
-    void Promise.all(guests.map((guest) => guest.close())).finally(() => Electron.app.quit());
   });
 }
 
-void main();
+Electron.app.on("window-all-closed", () => Electron.app.quit());
+
+main().catch((error: unknown) => {
+  const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  console.error(`[embed-host] ${message}`);
+  Object.assign(globalThis, { embedHostError: message });
+  for (const win of Electron.BrowserWindow.getAllWindows()) {
+    win.webContents.send("embed-host:status", `Lecturn failed to start: ${String(error)}`);
+  }
+});
