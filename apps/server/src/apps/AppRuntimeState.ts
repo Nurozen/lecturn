@@ -24,6 +24,9 @@ export const hostContextKey = (
 ): AppHostContextKey =>
   "threadId" in target ? `thread:${target.threadId}` : `project:${target.projectId}`;
 
+/** `None` for a project no granted app owns, or whose app registered no instructions. */
+export type AppInstructionsLookup = (projectId: ProjectId) => Effect.Effect<Option.Option<string>>;
+
 /** Processes are keyed by app project, never by credential (D5). */
 export type HeadlessProcessKey = `${AppId} ${ProjectId}`;
 
@@ -57,6 +60,12 @@ export class AppRuntimeState extends Context.Service<
      * is built below AppsLayer and reaches the route through here.
      */
     readonly mcpAppRoute: Ref.Ref<Option.Option<AppMcpAppRoute>>;
+    /**
+     * A granted app's instructions for turns in its projects, set while
+     * AppsOrchestrationHooks is up: RunExecutionService cannot see the
+     * registry, so it asks through here (appTurnInstructions.ts).
+     */
+    readonly appInstructions: Ref.Ref<Option.Option<AppInstructionsLookup>>;
   }
 >()("lecturn/apps/AppRuntimeState") {}
 
@@ -67,5 +76,6 @@ export const layer = Layer.effect(
     headlessProcesses: Ref.make<ReadonlyMap<HeadlessProcessKey, HeadlessProcessEntry>>(new Map()),
     appsLayerBuilt: Ref.make(false),
     mcpAppRoute: Ref.make(Option.none<AppMcpAppRoute>()),
+    appInstructions: Ref.make(Option.none<AppInstructionsLookup>()),
   }),
 );

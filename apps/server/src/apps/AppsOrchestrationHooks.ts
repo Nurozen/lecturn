@@ -3,6 +3,7 @@
  * server.ts registers it beside the other fork contributions; later steps add
  * their hooks to this one contribution.
  */
+import type { ProjectId } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -13,9 +14,16 @@ import {
   LecturnHookRejectedError,
   LecturnOrchestrationHooks,
   type LecturnRunTerminalNotice,
+  type LecturnTurnStartInput,
 } from "../orchestration-v2/fork/LecturnOrchestrationHooks.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import {
+  type AppRegistrationRecord,
+  AppRegistrationRepository,
+  layer as AppRegistrationRepositoryLayer,
+} from "../persistence/AppRegistrations.ts";
+import { formatAppContext, hostContextForTurn } from "./AppHostContextStore.ts";
 import { RUNNING_STATUSES } from "./AppProjectService.ts";
 import { AppRuntimeState } from "./AppRuntimeState.ts";
 import { makeHeadlessReaper } from "./headlessReaper.ts";
@@ -25,7 +33,8 @@ const CONTRIBUTION = "apps";
 const make = Effect.gen(function* () {
   const projects = yield* ProjectStore.ProjectStoreV2;
   const threads = yield* ProjectionStore.ProjectionStoreV2;
-  const { headlessProcesses } = yield* AppRuntimeState;
+  const registrations = yield* AppRegistrationRepository;
+  const { headlessProcesses, hostContext } = yield* AppRuntimeState;
   const reaper = yield* makeHeadlessReaper((projectId) =>
     threads.getShellSnapshot({ projectId }).pipe(
       Effect.map((snapshot) =>
@@ -73,10 +82,56 @@ const make = Effect.gen(function* () {
       });
     });
 
+  /**
+   * A revoked or denied app keeps its project rows, so the binding alone does
+   * not make its context or instructions current.
+   */
+  const grantedAppOf = (projectId: ProjectId) =>
+    Effect.gen(function* () {
+      const project = yield* projects.get(projectId);
+      if (Option.isNone(project) || project.value.appBinding === undefined) {
+        return Option.none<AppRegistrationRecord>();
+      }
+      const record = yield* registrations.get(project.value.appBinding.appId);
+      return Option.filter(record, (entry) => entry.state === "granted");
+    }).pipe(
+      // A missing context or instruction must never cost the user the turn.
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not read the connected app for a turn.", {
+          projectId,
+          cause,
+        }).pipe(Effect.as(Option.none<AppRegistrationRecord>())),
+      ),
+    );
+
+  const instructionsFor = (projectId: ProjectId) =>
+    grantedAppOf(projectId).pipe(
+      Effect.map(
+        Option.flatMap((app) => Option.fromNullishOr(app.registration.instructions || undefined)),
+      ),
+    );
+
+  /** Most turns are on servers where no app ever set context, so they skip both reads. */
+  const hostContextPrefix = (input: LecturnTurnStartInput) =>
+    Effect.gen(function* () {
+      if (input.compaction) return;
+      const text = hostContextForTurn(
+        yield* Ref.get(hostContext),
+        input.thread.id,
+        input.thread.projectId,
+      );
+      if (Option.isNone(text)) return;
+      const app = yield* grantedAppOf(input.thread.projectId);
+      if (Option.isNone(app)) return;
+      return { contextPrefix: formatAppContext(app.value.appId, text.value) };
+    });
+
   return {
+    instructionsFor,
     name: CONTRIBUTION,
     aroundCommand: <A, E, R>(input: LecturnCommandAdmissionInput, commit: Effect.Effect<A, E, R>) =>
       refuseAppWorkspaceMove(input).pipe(Effect.andThen(commit)),
+    beforeTurnStart: hostContextPrefix,
     onRunTerminal: reapIdleHeadless,
   };
 });
@@ -84,6 +139,11 @@ const make = Effect.gen(function* () {
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const hooks = yield* LecturnOrchestrationHooks;
-    yield* hooks.register(yield* make);
+    const { appInstructions } = yield* AppRuntimeState;
+    const { instructionsFor, ...contribution } = yield* make;
+    yield* hooks.register(contribution);
+    yield* Effect.acquireRelease(Ref.set(appInstructions, Option.some(instructionsFor)), () =>
+      Ref.set(appInstructions, Option.none()),
+    );
   }),
-);
+).pipe(Layer.provide(AppRegistrationRepositoryLayer));
