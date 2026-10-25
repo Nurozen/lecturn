@@ -360,9 +360,26 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
         return result.pipe(Effect.map((result) => ({ request, result })));
       };
 
+      // A refused call still gets its card, shown as cancelled.
+      const refuse = (request: AppToolCallRequest, reason: string) =>
+        extensions.wrapResult({
+          scope,
+          appId,
+          tier: appTool.tier,
+          tool: appTool.tool,
+          request,
+          result: errorResult(reason),
+          refusal: reason,
+        });
+
       // 3 and 4. Static gate.
       const first = yield* approve(gate("static"), "static", null);
-      if ("refused" in first) return errorResult(first.refused);
+      if ("refused" in first) {
+        return yield* refuse(
+          { name: bare, arguments: args, meta: withoutLecturnKeys(meta) },
+          first.refused,
+        );
+      }
 
       // 5. Forward.
       let sent = yield* forward(first.approval);
@@ -371,7 +388,7 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
       const reason = approvalRequiredReason(sent.result);
       if (reason !== undefined && !first.approval.approved) {
         const second = yield* approve(gate("app"), "app", reason);
-        if ("refused" in second) return errorResult(second.refused);
+        if ("refused" in second) return yield* refuse(sent.request, second.refused);
         // The app already said it needs approval; a gate that lets the call
         // through without asking (Full access) is approving it.
         sent = yield* forward({ ...second.approval, approved: true });

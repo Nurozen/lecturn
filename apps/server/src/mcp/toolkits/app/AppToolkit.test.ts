@@ -462,6 +462,9 @@ it.effect(
               content: [{ type: "text", text: "Read-only refuses ex_gated_job." }],
             });
             expect(harness.forwarded).toHaveLength(1);
+            expect(harness.wrapped.map((input) => input.refusal)).toEqual([
+              "Read-only refuses ex_gated_job.",
+            ]);
           }),
       );
       yield* withToolkit(
@@ -475,6 +478,7 @@ it.effect(
             const declined = yield* toolkit.call(appScope, "ex_gated_job", {}, {});
             expect(declined.content).toEqual([{ type: "text", text: "approval declined" }]);
             expect(harness.forwarded).toEqual([]);
+            expect(harness.wrapped.map((input) => input.refusal)).toEqual(["approval declined"]);
           }),
       );
     }),

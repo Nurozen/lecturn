@@ -51,6 +51,7 @@ import {
   LiveToolClient,
 } from "../apps/services.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import * as RuntimePolicy from "../orchestration-v2/RuntimePolicy.ts";
 
 interface CardTarget {
   readonly threadId: ThreadId;
@@ -169,6 +170,7 @@ export const make = Effect.gen(function* () {
   const live = yield* LiveToolClient;
   const approvals = yield* AppToolApprovalService;
   const projection = yield* ProjectionStore.ProjectionStoreV2;
+  const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
   const readAppResource = yield* makeAppResourceReader;
 
   const fail = (threadId: ThreadId, reason: McpAppRequestError["reason"], cause?: unknown) =>
@@ -344,12 +346,21 @@ export const make = Effect.gen(function* () {
         return errorResult(`${registration.name} is closed; open it to use ${prefixed}.`);
       }
 
+      // As in AppToolkit.call: gate on the mode the provider actually runs.
+      const running = yield* projection.getRunningTurnContext(card.thread.id).pipe(Effect.option);
+      const policy = yield* runtimePolicy
+        .resolve({
+          thread: card.thread,
+          modelSelection:
+            Option.getOrUndefined(running)?.run?.modelSelection ?? card.thread.modelSelection,
+        })
+        .pipe(Effect.mapError((cause) => fail(input.threadId, "request-failed", cause)));
       const gate = (stage: AppToolGate.AppToolGateInput["stage"]) =>
         AppToolGate.decide({
           stage,
           gated: stage === "app" || registration.gatedTools.includes(bare),
-          runtimeMode: card.thread.runtimeMode,
-          interactionMode: card.thread.interactionMode,
+          runtimeMode: policy.runtimeMode,
+          interactionMode: policy.interactionMode,
           ceiling: status.runtimeCeiling,
         });
       const approve = (stage: "static" | "app", reason: string | null) => {

@@ -14,9 +14,13 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeReadline from "node:readline";
 
+import {
+  COUNTER_CARD_MIME_TYPE,
+  COUNTER_CARD_URI,
+  counterCardResource,
+} from "../src/counterCard.ts";
+
 const PROTOCOL_VERSION = "2025-11-25";
-const COUNTER_CARD_URI = "ui://ex/counter-card";
-const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
 
 const counterIncrementTool = {
   name: "counter_increment",
@@ -35,38 +39,8 @@ const counterIncrementTool = {
 const counterCard = {
   uri: COUNTER_CARD_URI,
   name: "Counter",
-  mimeType: MCP_APP_MIME_TYPE,
+  mimeType: COUNTER_CARD_MIME_TYPE,
 };
-
-// MCP Apps guest: one handshake, then the value from each tool result.
-const COUNTER_CARD_HTML = `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <style>
-      body { margin: 0; padding: 12px 16px; font: 13px system-ui, sans-serif; background: transparent; color: CanvasText; }
-      .label { opacity: 0.7; }
-      .value { font-size: 28px; font-weight: 600; }
-    </style>
-  </head>
-  <body>
-    <div class="label">Counter</div>
-    <div class="value" id="value">-</div>
-    <script>
-      const post = (message) => window.parent.postMessage({ jsonrpc: "2.0", ...message }, "*");
-      window.addEventListener("message", (event) => {
-        const message = event.data;
-        if (!message || message.jsonrpc !== "2.0") return;
-        if (message.id === 1 && message.result) post({ method: "ui/notifications/initialized" });
-        if (message.method === "ui/notifications/tool-result") {
-          const value = message.params && message.params.structuredContent && message.params.structuredContent.value;
-          if (typeof value === "number") document.getElementById("value").textContent = String(value);
-        }
-      });
-      post({ id: 1, method: "ui/initialize", params: { protocolVersion: "2026-01-26", appCapabilities: {} } });
-    </script>
-  </body>
-</html>`;
 
 export interface CounterCall {
   readonly at: string;
@@ -134,7 +108,7 @@ function makeCounter(root: string) {
     await writeJson(callsPath, calls);
     return {
       content: [{ type: "text", text: `The counter is now ${value}.` }],
-      structuredContent: { value },
+      structuredContent: { count: value, by, history: calls.map((call) => call.value) },
     };
   };
 }
@@ -167,11 +141,7 @@ function serve(root: string) {
         if (params.uri !== COUNTER_CARD_URI) {
           throw new RpcError(-32602, `Unknown resource ${String(params.uri)}.`);
         }
-        return {
-          contents: [
-            { uri: COUNTER_CARD_URI, mimeType: MCP_APP_MIME_TYPE, text: COUNTER_CARD_HTML },
-          ],
-        };
+        return { contents: [counterCardResource()] };
       default:
         throw new RpcError(-32601, `Method ${String(method)} is not supported.`);
     }

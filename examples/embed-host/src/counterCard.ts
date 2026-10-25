@@ -16,7 +16,7 @@
 export const COUNTER_CARD_URI = "ui://ex/counter-card";
 export const COUNTER_CARD_MIME_TYPE = "text/html;profile=mcp-app";
 
-export const COUNTER_CARD_HTML = `<!doctype html>
+const COUNTER_CARD_HTML = `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">

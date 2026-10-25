@@ -48,6 +48,7 @@ import {
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
+import * as RuntimePolicy from "../orchestration-v2/RuntimePolicy.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as AppMcpAppRoute from "./AppMcpAppRoute.ts";
 import * as McpAppModelContext from "./McpAppModelContext.ts";
@@ -124,6 +125,8 @@ interface Options {
   readonly state?: AppGrantState;
   readonly ceiling?: AppRuntimeCeiling;
   readonly runtimeMode?: RuntimeMode;
+  /** What the provider runs instead, when it cannot run the stored mode. */
+  readonly resolvedRuntimeMode?: RuntimeMode;
   /** The thread has a running turn on a provider session. */
   readonly running?: boolean;
   readonly leased?: boolean;
@@ -247,6 +250,14 @@ const withCards = <A, E>(
               },
             ),
           ),
+      }),
+      Layer.succeed(RuntimePolicy.RuntimePolicyV2, {
+        resolve: (input) =>
+          Effect.succeed({
+            runtimeMode: options.resolvedRuntimeMode ?? input.thread.runtimeMode,
+            interactionMode: input.thread.interactionMode,
+            cwd: input.thread.worktreePath,
+          }),
       }),
       Layer.mock(ProjectionStore.ProjectionStoreV2)({
         getThread: () => Effect.succeed(thread),
@@ -448,6 +459,20 @@ describe("AppMcpAppRoute", () => {
             ],
           });
           expect(log.forwarded).toEqual([]);
+        }),
+    ),
+  );
+
+  it.effect("gates on the provider's resolved mode, not the thread's stored one", () =>
+    withCards(
+      { runtimeMode: "full-access", resolvedRuntimeMode: "approval-required", running: true },
+      (requests, log) =>
+        Effect.gen(function* () {
+          yield* requests.callTool({ ...target, name: "gated_job", arguments: {} });
+          expect(log.approvals).toHaveLength(1);
+          expect(log.forwarded.map((request) => request.meta[APP_TOOL_APPROVAL_META_KEY])).toEqual([
+            { approved: true, requestId: "request-card" },
+          ]);
         }),
     ),
   );

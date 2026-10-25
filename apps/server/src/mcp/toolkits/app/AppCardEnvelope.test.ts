@@ -40,6 +40,7 @@ import {
 } from "../../../apps/testing/headlessAppFixture.ts";
 import * as ServerConfig from "../../../config.ts";
 import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
+import * as RuntimePolicy from "../../../orchestration-v2/RuntimePolicy.ts";
 import type * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as AppCardEnvelope from "./AppCardEnvelope.ts";
 
@@ -116,6 +117,7 @@ const withEnvelope = <A, E>(
       Layer.mock(LiveToolClient)({}),
       Layer.mock(AppToolApprovalService)({}),
       Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
+      RuntimePolicy.layer,
       ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-app-card-envelope-" }),
     ).pipe(Layer.provideMerge(NodeServices.layer));
     const context = yield* Layer.build(services);
