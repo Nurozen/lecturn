@@ -380,7 +380,8 @@ it.effect("a second AppsLayer build over the same state fails loudly", () =>
       Layer.build(layer).pipe(
         Effect.scoped,
         Effect.provide(state),
-        Effect.provide(layerAppsDependencies),
+        // The server takes the registry from RuntimeLayer; this build has no runtime.
+        Effect.provide(Layer.merge(AppToolApprovalRegistry.layer, layerAppsDependencies)),
         Effect.exit,
       );
 

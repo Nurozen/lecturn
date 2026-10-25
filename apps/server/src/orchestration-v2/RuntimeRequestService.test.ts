@@ -52,7 +52,7 @@ function layerRuntimeRequestTest(
   getSession: ProviderSessionManager.ProviderSessionManagerV2Shape["get"],
 ) {
   return RuntimeRequestService.layer.pipe(
-    Layer.provide(
+    Layer.provideMerge(
       Layer.mergeAll(
         AppToolApprovalRegistry.layer,
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
@@ -323,6 +323,45 @@ it.effect(
       const service = yield* RuntimeRequestService.RuntimeRequestServiceV2;
       yield* service.respond({ threadId, providerSessionId, requestId, decision: "accept" });
       assert.equal(getSession.mock.calls.length, 0);
+    }).pipe(Effect.provide(layerTest));
+  },
+);
+
+it.effect(
+  "answers a claimed request to the waiting call while its provider session is live",
+  () => {
+    const threadId = ThreadId.make("thread-runtime-request-app-claimed");
+    const providerSessionId = ProviderSessionId.make(
+      "provider-session-runtime-request-app-claimed",
+    );
+    const requestId = RuntimeRequestId.make("request-app-claimed");
+    const respondToRuntimeRequest = vi.fn(
+      (_input: ProviderAdapter.ProviderAdapterV2RuntimeRequestResponseInput) => Effect.void,
+    );
+    const getSession = vi.fn(() =>
+      Effect.succeed(Option.some({ respondToRuntimeRequest } as never)),
+    );
+    const layerTest = layerRuntimeRequestTest(
+      projectionWithRuntimeRequest({
+        ...resolvedRuntimeRequest(requestId, providerSessionId),
+        kind: "permission",
+      }),
+      getSession,
+    );
+
+    return Effect.gen(function* () {
+      const service = yield* RuntimeRequestService.RuntimeRequestServiceV2;
+      const registry = yield* AppToolApprovalRegistry.AppToolApprovalRegistry;
+      const outcome = yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* registry.register(requestId);
+          yield* service.respond({ threadId, providerSessionId, requestId, decision: "accept" });
+          return yield* registry.awaitDecision(requestId);
+        }),
+      );
+      assert.equal(outcome, "approved");
+      assert.equal(getSession.mock.calls.length, 0);
+      assert.equal(respondToRuntimeRequest.mock.calls.length, 0);
     }).pipe(Effect.provide(layerTest));
   },
 );
