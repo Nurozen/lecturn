@@ -1,5 +1,6 @@
 import { assert, it, vi } from "@effect/vitest";
 import {
+  AppId,
   NodeId,
   ProviderSessionId,
   RuntimeRequestId,
@@ -13,6 +14,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import type * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
+import * as AppToolApprovalRegistry from "../apps/AppToolApprovalRegistry.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import * as RuntimeRequestService from "./RuntimeRequestService.ts";
@@ -52,6 +54,7 @@ function layerRuntimeRequestTest(
   return RuntimeRequestService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        AppToolApprovalRegistry.layer,
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getRuntimeRequest: (_threadId, requestId) =>
             Effect.succeed(projection.runtimeRequests.find((request) => request.id === requestId)),
@@ -99,6 +102,7 @@ it.effect("forwards orchestrator-resolved runtime requests to the live adapter",
   const layerTest = RuntimeRequestService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        AppToolApprovalRegistry.layer,
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getRuntimeRequest: (_threadId, requestId) =>
             Effect.succeed(projection.runtimeRequests.find((request) => request.id === requestId)),
@@ -163,6 +167,7 @@ it.effect("rejects expired runtime requests before invoking the live adapter", (
   const layerTest = RuntimeRequestService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        AppToolApprovalRegistry.layer,
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getRuntimeRequest: (_threadId, requestId) =>
             Effect.succeed(projection.runtimeRequests.find((request) => request.id === requestId)),
@@ -291,3 +296,33 @@ it.effect("preserves genuine provider session lookup failures as the cause", () 
     assert.strictEqual(error.cause, lookupFailure);
   }).pipe(Effect.provide(layerTest));
 });
+
+it.effect(
+  "never routes a connected-app approval to the provider, even with no waiting call",
+  () => {
+    const threadId = ThreadId.make("thread-runtime-request-app-tool");
+    const providerSessionId = ProviderSessionId.make("provider-session-runtime-request-app-tool");
+    const requestId = RuntimeRequestId.make("request-app-tool");
+    const getSession = vi.fn(() => Effect.succeedNone);
+    const layerTest = layerRuntimeRequestTest(
+      projectionWithRuntimeRequest({
+        ...resolvedRuntimeRequest(requestId, providerSessionId),
+        kind: "permission",
+        connectedAppTool: {
+          appId: AppId.make("dev.example.counter"),
+          appName: "Counter",
+          toolName: "ex_counter_increment",
+          reason: null,
+          source: "static",
+        },
+      }),
+      getSession,
+    );
+
+    return Effect.gen(function* () {
+      const service = yield* RuntimeRequestService.RuntimeRequestServiceV2;
+      yield* service.respond({ threadId, providerSessionId, requestId, decision: "accept" });
+      assert.equal(getSession.mock.calls.length, 0);
+    }).pipe(Effect.provide(layerTest));
+  },
+);
