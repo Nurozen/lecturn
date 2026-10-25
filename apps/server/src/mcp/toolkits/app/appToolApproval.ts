@@ -34,7 +34,7 @@ export const make = Effect.gen(function* () {
         info,
       )
       .pipe(
-        Effect.map(({ outcome, requestId }): AppToolApprovalResult =>
+        Effect.map(({ outcome, requestId, reason }): AppToolApprovalResult =>
           outcome === "approved" && requestId !== null
             ? { approved: true, requestId }
             : {
@@ -42,6 +42,7 @@ export const make = Effect.gen(function* () {
                 message: refusalMessage(
                   info.toolName,
                   outcome === "approved" ? "cancelled" : outcome,
+                  reason,
                 ),
               },
         ),

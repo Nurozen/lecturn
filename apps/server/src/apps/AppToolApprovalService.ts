@@ -9,10 +9,11 @@
  *
  * Every way a request can end is a committed `runtime-request.updated`: the
  * answer, an interrupt or Stop of the run (which cancels the run's pending
- * requests), and expiry. The call reads its outcome from that event, so it
- * ends exactly when the card does.
+ * requests), expiry, and the app being revoked or removed. The call reads its
+ * outcome from that event, so it ends exactly when the card does.
  */
 import {
+  type AppId,
   AppsError,
   CommandId,
   type ConnectedAppToolApprovalInfo,
@@ -41,6 +42,7 @@ import {
   type AppToolApprovalAnswer,
   type AppToolApprovalContext,
   type AppToolApprovalOutcome,
+  AppRegistryService,
   AppToolApprovalService,
 } from "./services.ts";
 
@@ -74,12 +76,15 @@ export const outcomeFromRequest = (
 export const refusalMessage = (
   toolName: string,
   outcome: Exclude<AppToolApprovalOutcome, "approved">,
+  reason?: string,
 ) => {
   switch (outcome) {
     case "declined":
       return `The user declined ${toolName} (approval declined).`;
     case "cancelled":
-      return `${toolName} did not run (approval cancelled).`;
+      return reason === undefined
+        ? `${toolName} did not run (approval cancelled).`
+        : `${toolName} did not run: ${reason} (approval cancelled).`;
     case "expired":
       return `${toolName} did not run: nobody answered within 10 minutes (approval expired).`;
   }
@@ -104,6 +109,85 @@ const make = Effect.gen(function* () {
   const idAllocator = yield* IdAllocator.IdAllocatorV2;
   const registry = yield* AppToolApprovalRegistry;
   const orchestrator = yield* Orchestrator.OrchestratorV2;
+  const apps = yield* AppRegistryService;
+
+  // Calls waiting on an answer in this process, so a revoke can end them. A
+  // request without a waiter is never left pending: the call withdraws it
+  // when interrupted, and runtime recovery settles runs after a restart.
+  const waiting = new Map<
+    RuntimeRequestId,
+    { readonly threadId: ThreadId; readonly appId: AppId; readonly appName: string }
+  >();
+  const cancelReasons = new Map<RuntimeRequestId, string>();
+
+  /** Takes down every card of an app the user shut out; other approvals are not in `waiting`. */
+  const cancelForApp = (appId: AppId, reason: (appName: string) => string) =>
+    Effect.forEach(
+      [...waiting].filter(
+        ([requestId, entry]) => entry.appId === appId && !cancelReasons.has(requestId),
+      ),
+      ([requestId, entry]) => {
+        cancelReasons.set(requestId, reason(entry.appName));
+        // The ordinary answer path, so every client clears the card from the event.
+        return orchestrator
+          .dispatch({
+            type: "runtime-request.respond",
+            commandId: CommandId.make(`apps:approval-revoked:${requestId}`),
+            threadId: entry.threadId,
+            requestId,
+            decision: "cancel",
+          })
+          .pipe(
+            // Answered meanwhile, or its thread is gone: the call still must not wait on.
+            Effect.catch(() => registry.resolve(requestId, "cancelled")),
+            Effect.asVoid,
+          );
+      },
+      { discard: true },
+    );
+
+  const revokedReason = (appName: string) => `${appName} was revoked`;
+  const removedReason = (appName: string) => `${appName} was removed`;
+
+  // The registry sits below this service, so revoke and delete arrive as status changes.
+  yield* apps.streamStatus.pipe(
+    Stream.runForEach((event) => {
+      switch (event.type) {
+        case "snapshot":
+          return Effect.forEach(
+            event.apps.filter((app) => app.state === "revoked"),
+            (app) => cancelForApp(app.appId, revokedReason),
+            { discard: true },
+          );
+        case "upsert":
+          return event.app.state === "revoked"
+            ? cancelForApp(event.app.appId, revokedReason)
+            : Effect.void;
+        case "remove":
+          return cancelForApp(event.appId, removedReason);
+      }
+    }),
+    Effect.catchCause((cause) =>
+      Effect.logWarning("App tool approvals no longer follow app status", { cause }),
+    ),
+    Effect.forkScoped({ startImmediately: true }),
+  );
+
+  // A revoke that landed between the caller's grant check and the commit
+  // published its status before this request was waiting.
+  const cancelIfShutOut = (appId: AppId) =>
+    apps.get(appId).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => cancelForApp(appId, removedReason),
+          onSome: ({ status }) =>
+            status.state === "revoked" ? cancelForApp(appId, revokedReason) : Effect.void,
+        }),
+      ),
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not re-check the app behind an approval", { appId, cause }),
+      ),
+    );
 
   const settleFromEvents = (
     threadId: ThreadId,
@@ -299,8 +383,12 @@ const make = Effect.gen(function* () {
           const wait = Effect.gen(function* () {
             yield* Effect.forkScoped(settleFromEvents(context.threadId, requestId, afterSequence));
             yield* Effect.forkScoped(expireAfterTtl(context.threadId, requestId));
+            yield* cancelIfShutOut(info.appId);
             const outcome = yield* registry.awaitDecision(requestId);
-            return { outcome, requestId } satisfies AppToolApprovalAnswer;
+            const reason = outcome === "cancelled" ? cancelReasons.get(requestId) : undefined;
+            return (
+              reason === undefined ? { outcome, requestId } : { outcome, requestId, reason }
+            ) satisfies AppToolApprovalAnswer;
           });
           // From the commit on, a call that stops waiting has a card to take down.
           return yield* Effect.uninterruptibleMask((restore) =>
@@ -316,8 +404,19 @@ const make = Effect.gen(function* () {
                 .pipe(Effect.mapError(unavailable("Could not raise the app tool approval")));
               // The run settled between the read and the write; nobody can answer the request now.
               if (!committed) return NOT_RAISED;
+              waiting.set(requestId, {
+                threadId: context.threadId,
+                appId: info.appId,
+                appName: info.appName,
+              });
               return yield* restore(wait).pipe(
                 Effect.onInterrupt(() => withdraw(context.threadId, requestId)),
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    waiting.delete(requestId);
+                    cancelReasons.delete(requestId);
+                  }),
+                ),
               );
             }),
           );

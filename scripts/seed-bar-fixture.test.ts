@@ -16,6 +16,7 @@ import {
   BAR_FIXTURE,
   type BarFixtureProject,
   barProjectId,
+  barServerStartTimeoutMs,
   barStoreLayer,
   barThreadCreatedAt,
   barThreadId,
@@ -197,3 +198,21 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   SERVER_TEST_TIMEOUT_MS,
 );
+
+it("waits 90 s for the server by default, longer when the flag or env asks", () => {
+  assert.equal(barServerStartTimeoutMs(undefined, {}), 90_000);
+  assert.equal(barServerStartTimeoutMs(undefined, { BAR_SERVER_START_TIMEOUT_MS: "" }), 90_000);
+  assert.equal(
+    barServerStartTimeoutMs(undefined, { BAR_SERVER_START_TIMEOUT_MS: "240000" }),
+    240_000,
+  );
+  assert.equal(
+    barServerStartTimeoutMs("300000", { BAR_SERVER_START_TIMEOUT_MS: "240000" }),
+    300_000,
+  );
+  assert.throws(() => barServerStartTimeoutMs("90s", {}), /--start-timeout/);
+  assert.throws(
+    () => barServerStartTimeoutMs(undefined, { BAR_SERVER_START_TIMEOUT_MS: "0" }),
+    /BAR_SERVER_START_TIMEOUT_MS/,
+  );
+});
