@@ -16,6 +16,9 @@ const ITEMS: ReadonlyArray<Item> = [
 const ui = (window as unknown as { readonly embedHostUi: EmbedHostUi }).embedHostUi;
 const list = document.getElementById("items")!;
 const statusLine = document.getElementById("status")!;
+const paneTitle = document.getElementById("pane-title")!;
+const paneOpen = document.getElementById("pane-open") as HTMLButtonElement;
+const paneMenuButton = document.getElementById("pane-menu-button")!;
 
 // lecturn:begin
 reportPaneRect(document.getElementById("pane")!);
@@ -49,4 +52,15 @@ ui.onFocus((ref) => {
     row.toggleAttribute("data-focused", row.dataset["ref"] === ref);
   }
   list.querySelector("li[data-focused]")?.scrollIntoView({ block: "nearest" });
+});
+
+ui.onPaneHeader((state) => {
+  paneTitle.textContent = state.title;
+  paneTitle.title = state.title;
+  paneOpen.disabled = !state.canOpenInLecturn;
+});
+paneOpen.addEventListener("click", () => ui.openInLecturn());
+paneMenuButton.addEventListener("click", () => {
+  const rect = paneMenuButton.getBoundingClientRect();
+  ui.openPaneMenu({ x: Math.round(rect.left), y: Math.round(rect.bottom) });
 });

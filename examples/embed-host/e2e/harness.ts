@@ -39,6 +39,7 @@ export interface EmbedHostDirs {
   readonly userData: string;
   readonly workspace: string;
   readonly flashLog: string;
+  readonly scripts: string;
 }
 
 export interface EmbedHostRun {
@@ -47,6 +48,8 @@ export interface EmbedHostRun {
   readonly host: Omit<EmbedHostGlobal, "embedTarget" | "openThread" | "capture">;
   /** The embed guest's page, once its URL contains `urlPart`. */
   guestPage(urlPart: string, timeoutMs?: number): Promise<Page>;
+  /** The host window's own page (renderer/index.html), under the embed view. */
+  hostPage(): Promise<Page>;
   readonly output: () => string;
   close(): Promise<void>;
 }
@@ -54,6 +57,12 @@ export interface EmbedHostRun {
 export interface LaunchOptions {
   /** `providerInstances.scripted` and the default model, so app threads run the scripted provider. */
   readonly scripted?: boolean;
+  /**
+   * Scripts for the scripted provider by 1-based turn index, written to the
+   * file `LECTURN_SCRIPTED_PROVIDER_SCRIPTS` names, so a turn's message is
+   * what a user would type.
+   */
+  readonly scripts?: Readonly<Record<number, ReadonlyArray<unknown>>>;
   readonly readyTimeoutMs?: number;
 }
 
@@ -83,6 +92,7 @@ async function makeDirs(): Promise<EmbedHostDirs> {
     userData: NodePath.join(root, "electron-user-data"),
     workspace: NodePath.join(root, "ws-a"),
     flashLog: NodePath.join(root, "flashes.json"),
+    scripts: NodePath.join(root, "scripted-turns.json"),
   };
   for (const dir of [dirs.lecturnHome, dirs.sidecarDir, dirs.userData, dirs.workspace]) {
     await NodeFSP.mkdir(dir, { recursive: true });
@@ -104,6 +114,10 @@ export async function launchEmbedHost(options: LaunchOptions = {}): Promise<Embe
     );
   }
 
+  if (options.scripts) {
+    await NodeFSP.writeFile(dirs.scripts, `${JSON.stringify(options.scripts, null, 2)}\n`);
+  }
+
   const command = await resolveEmbedHostLaunch();
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -120,6 +134,7 @@ export async function launchEmbedHost(options: LaunchOptions = {}): Promise<Embe
     EMBED_HOST_FLASH_LOG: dirs.flashLog,
     ELECTRON_ENABLE_LOGGING: "1",
     ...(options.scripted ? { LECTURN_TEST_PROVIDERS: "1" } : {}),
+    ...(options.scripts ? { LECTURN_SCRIPTED_PROVIDER_SCRIPTS: dirs.scripts } : {}),
   });
   const app = await _electron.launch({
     executablePath: command.electronPath,
@@ -194,22 +209,8 @@ export async function launchEmbedHost(options: LaunchOptions = {}): Promise<Embe
       app,
       dirs,
       host,
-      guestPage: async (urlPart, timeoutMs = 30_000) => {
-        const deadline = Date.now() + timeoutMs;
-        while (Date.now() < deadline) {
-          const page = app
-            .context()
-            .pages()
-            .find((candidate) => candidate.url().includes(urlPart));
-          if (page !== undefined) return page;
-          await sleep(200);
-        }
-        const urls = app
-          .context()
-          .pages()
-          .map((page) => page.url());
-        throw new Error(`No embed guest page at ${urlPart}; pages: ${urls.join(", ")}`);
-      },
+      guestPage: (urlPart, timeoutMs) => findPage(app, urlPart, timeoutMs),
+      hostPage: () => findPage(app, "/renderer/index.html"),
       output: () => output,
       close,
     };
@@ -222,6 +223,42 @@ export async function launchEmbedHost(options: LaunchOptions = {}): Promise<Embe
       },
     );
   }
+}
+
+/** Polls `probe` until it returns a value; rejects with `label` at the deadline. */
+export async function until<T>(
+  label: string,
+  timeoutMs: number,
+  probe: () => Promise<T | undefined>,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = await probe();
+    if (value !== undefined) return value;
+    await sleep(250);
+  }
+  throw new Error(`Timed out after ${timeoutMs} ms waiting for ${label}`);
+}
+
+async function findPage(
+  app: ElectronApplication,
+  urlPart: string,
+  timeoutMs = 30_000,
+): Promise<Page> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const page = app
+      .context()
+      .pages()
+      .find((candidate) => candidate.url().includes(urlPart));
+    if (page !== undefined) return page;
+    await sleep(200);
+  }
+  const urls = app
+    .context()
+    .pages()
+    .map((page) => page.url());
+  throw new Error(`No page at ${urlPart}; pages: ${urls.join(", ")}`);
 }
 
 /**
