@@ -10,6 +10,7 @@ import {
 import * as Effect from "effect/Effect";
 import { modelSelectionCommandType } from "@lecturn/shared/model";
 
+import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import {
   dispatchFailure,
@@ -98,9 +99,10 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
   ),
   lecturn_thread_search: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
-      const { caller } = yield* readCaller();
+      const { caller, scope } = yield* readCaller();
       const { projectId: requested, ...query } = input;
       const projectId = requested ?? caller?.projectId;
+      if (projectId !== undefined) yield* McpInvocationContext.assertProjectReach(scope, projectId);
       const threadSearch = yield* ThreadSearch.ThreadSearch;
       const result = yield* threadSearch.search(query).pipe(Effect.mapError(unavailable));
       return {

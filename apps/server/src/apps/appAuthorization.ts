@@ -19,10 +19,12 @@ import {
   type AppId,
   type AppsMintEmbedTokenInput,
   type AssetCreateUrlInput,
+  type ChatAttachment,
   type EnvironmentId,
   type OrchestrationV2Command,
   type ProjectId,
   ThreadId,
+  type ThreadNoteId,
   type WsRpcGroup,
 } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
@@ -31,6 +33,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 import type * as Rpc from "effect/rpc/Rpc";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
 
@@ -66,7 +69,9 @@ export type AccessTarget =
   /** A file path that must stay inside the embed token's project root. */
   | { readonly projectPath: string }
   /** A stored attachment, owned by the thread its id was minted for. */
-  | { readonly attachmentId: string };
+  | { readonly attachmentId: string }
+  /** A saved note, owned by the project of the thread it quotes. */
+  | { readonly noteId: ThreadNoteId };
 
 /**
  * How a call names the projects it touches. A function returning `null`
@@ -119,6 +124,41 @@ const TITLE_UPDATE_KEYS: ReadonlySet<string> = new Set([
   "regenerateTitle",
 ]);
 
+const isPendingUpload = (attachmentId: string) =>
+  parseThreadSegmentFromAttachmentId(attachmentId) === PENDING_ATTACHMENT_THREAD_SEGMENT;
+
+/**
+ * A pending upload is claimed into the command's own thread. Any other id is
+ * handed to the provider as stored, so it must already belong to one of the
+ * embed's threads.
+ */
+const storedAttachmentTargets = (
+  attachments: ReadonlyArray<ChatAttachment> | undefined,
+): ReadonlyArray<AccessTarget> =>
+  (attachments ?? [])
+    .filter((attachment) => !isPendingUpload(attachment.id))
+    .map((attachment) => ({ attachmentId: attachment.id }));
+
+/** Threads and files a command reads besides the thread it is addressed to. */
+const commandReferences = (command: OrchestrationV2Command): ReadonlyArray<AccessTarget> => {
+  switch (command.type) {
+    case "message.dispatch":
+      return [
+        ...(command.senderThreadId === undefined ? [] : [{ threadId: command.senderThreadId }]),
+        ...(command.sourcePlanRef === undefined
+          ? []
+          : [{ threadId: command.sourcePlanRef.threadId }]),
+        ...storedAttachmentTargets(command.attachments),
+      ];
+    case "queued-run.edit":
+      return storedAttachmentTargets(command.attachments);
+    case "runtime-request.respond":
+      return storedAttachmentTargets(Object.values(command.attachmentsByQuestionId ?? {}).flat());
+    default:
+      return [];
+  }
+};
+
 const commandTargets = (command: OrchestrationV2Command): ReadonlyArray<AccessTarget> | null => {
   if (!EMBED_COMMAND_TYPES.has(command.type) || !("threadId" in command)) return null;
   if (
@@ -127,7 +167,7 @@ const commandTargets = (command: OrchestrationV2Command): ReadonlyArray<AccessTa
   ) {
     return null;
   }
-  return [{ threadId: command.threadId }];
+  return [{ threadId: command.threadId }, ...commandReferences(command)];
 };
 
 /**
@@ -233,6 +273,17 @@ export const APP_RPC_RULES: AppRpcTable = {
   [W.contextualStatus]: { resolve: "threadId", ...embed },
   [W.contextualDisclosures]: { resolve: "threadId", ...embed },
   [W.contextualConflicts]: { resolve: "threadId", ...embed },
+  [W.threadNotesCreate]: { resolve: "threadId", ...embed },
+  [W.threadNotesUpdate]: { resolve: ({ id }) => [{ noteId: id }], ...embed },
+  [W.threadNotesDelete]: { resolve: ({ id }) => [{ noteId: id }], ...embed },
+  // A pending upload belongs to no thread until a dispatch the embed may send claims it into
+  // one of its own threads (commandTargets); nobody else can name it.
+  [W.attachmentsCreateUploadUrl]: { resolve: "none", ...embed },
+  // A claimed attachment is part of its thread's history; only a pending upload may go.
+  [W.attachmentsDelete]: {
+    resolve: ({ attachmentId }) => (isPendingUpload(attachmentId) ? [] : null),
+    ...embed,
+  },
 };
 
 export const EMBED_TOKEN_SCOPES = [
@@ -305,6 +356,10 @@ export interface AppAuthorizationDeps {
   /** `None` when the thread does not exist. */
   readonly projectIdForThread: (
     threadId: ThreadId,
+  ) => Effect.Effect<Option.Option<ProjectId>, AppsFailure>;
+  /** `None` when the note does not exist. */
+  readonly projectIdForNote: (
+    noteId: ThreadNoteId,
   ) => Effect.Effect<Option.Option<ProjectId>, AppsFailure>;
   readonly issueEmbedSession: (input: {
     readonly subject: string;
@@ -380,6 +435,16 @@ export const makeWith = (deps: AppAuthorizationDeps): AppAuthorization["Service"
       : ownsThread(subject, segment);
   };
 
+  const ownsNote = (subject: AppSubject, noteId: ThreadNoteId) =>
+    deps.projectIdForNote(noteId).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.succeed(false),
+          onSome: (projectId) => ownsProject(subject, projectId),
+        }),
+      ),
+    );
+
   const ownsTarget = (
     subject: AppSubject,
     target: AccessTarget,
@@ -392,7 +457,9 @@ export const makeWith = (deps: AppAuthorizationDeps): AppAuthorization["Service"
           ? ownsProjectRoot(subject, target.projectRoot)
           : "projectPath" in target
             ? ownsProjectPath(subject, target.projectPath)
-            : ownsAttachment(subject, target.attachmentId);
+            : "noteId" in target
+              ? ownsNote(subject, target.noteId)
+              : ownsAttachment(subject, target.attachmentId);
 
   const ownsAll = (subject: AppSubject, targets: ReadonlyArray<AccessTarget>) =>
     Effect.forEach(targets, (target) => ownsTarget(subject, target)).pipe(
@@ -509,6 +576,7 @@ export const layer = Layer.effect(
     const sessions = yield* SessionStore.SessionStore;
     const environment = yield* ServerEnvironment.ServerEnvironmentIdentity;
     const config = yield* ServerConfig.ServerConfig;
+    const sql = yield* SqlClient.SqlClient;
     return makeWith({
       resolveAppForProject: projects.resolveAppForProject,
       projectIdForThread: (threadId) =>
@@ -516,6 +584,13 @@ export const layer = Layer.effect(
           Effect.map((shell) => Option.map(Option.fromNullOr(shell), (found) => found.projectId)),
           Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeedNone }),
           Effect.mapError(() => unavailable("Thread lookup failed.")),
+        ),
+      projectIdForNote: (noteId) =>
+        sql<{
+          readonly project_id: ProjectId;
+        }>`SELECT project_id FROM thread_notes WHERE id = ${noteId}`.pipe(
+          Effect.map((rows) => Option.fromUndefinedOr(rows[0]?.project_id)),
+          Effect.mapError(() => unavailable("Note lookup failed.")),
         ),
       issueEmbedSession: ({ subject, ttl, label }) =>
         sessions

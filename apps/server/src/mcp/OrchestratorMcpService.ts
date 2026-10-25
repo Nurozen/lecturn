@@ -92,6 +92,7 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
+  assertProjectReach,
   clientRuntimeModeCeiling,
   type McpInvocationScope,
   type McpThreadInvocationScope,
@@ -1023,19 +1024,31 @@ const make = Effect.gen(function* () {
     });
 
   const resolveProjectTarget = (
+    scope: McpInvocationScope,
     parent: Pick<OrchestrationV2ThreadProjection, "thread"> | undefined,
     projectId: ProjectId | undefined,
   ) =>
-    projectId !== undefined
-      ? Effect.succeed(projectId)
-      : parent !== undefined
-        ? Effect.succeed(parent.thread.projectId)
-        : Effect.fail(
-            failure(
-              "target_required",
-              "Pass projectId: this MCP client is not running inside a Lecturn thread.",
-            ),
-          );
+    Effect.gen(function* () {
+      const resolved = projectId ?? parent?.thread.projectId;
+      if (resolved === undefined) {
+        return yield* failure(
+          "target_required",
+          "Pass projectId: this MCP client is not running inside a Lecturn thread.",
+        );
+      }
+      yield* assertProjectReach(scope, resolved);
+      return resolved;
+    });
+
+  /** Omitted when the project belongs to no connected app, so other summaries are unchanged. */
+  const appIdFields = (projectId: ProjectId) =>
+    projects.getShell(projectId).pipe(
+      Effect.map((shell) => {
+        const appId = Option.getOrUndefined(shell)?.appBinding?.appId;
+        return appId === undefined ? {} : { appId };
+      }),
+      Effect.orElseSucceed(() => ({})),
+    );
 
   const loadTargetThread = (threadId: ThreadId) =>
     Effect.gen(function* () {
@@ -1055,6 +1068,7 @@ const make = Effect.gen(function* () {
         caller.parent !== undefined && threadId === caller.parent.thread.id
           ? caller.parent
           : yield* loadTargetThread(threadId);
+      yield* assertProjectReach(scope, target.thread.projectId);
       return { ...caller, target } as const;
     });
 
@@ -1076,9 +1090,13 @@ const make = Effect.gen(function* () {
     parent: Pick<OrchestrationV2ThreadProjection, "thread" | "runs"> | undefined,
     projectId: ProjectId,
   ) =>
-    parent === undefined || projectId === parent.thread.projectId
-      ? Effect.void
-      : assertLiveCaller(scope, parent);
+    assertProjectReach(scope, projectId).pipe(
+      Effect.andThen(
+        parent === undefined || projectId === parent.thread.projectId
+          ? Effect.void
+          : assertLiveCaller(scope, parent),
+      ),
+    );
 
   const assertLiveCaller = (
     scope: McpInvocationScope,
@@ -1116,6 +1134,7 @@ const make = Effect.gen(function* () {
       if (shell === null || shell.deletedAt !== null) {
         return yield* failure("thread_not_found", `Thread ${threadId} is no longer available.`);
       }
+      yield* assertProjectReach(scope, shell.projectId);
       const target = yield* threadManagement
         .getProjectThreadRecords({ projectId: shell.projectId, threadId }, [
           "runs",
@@ -1611,7 +1630,7 @@ const make = Effect.gen(function* () {
     scheduleTask: (scope, input) =>
       Effect.gen(function* () {
         const { parent, limits } = yield* loadCaller(scope);
-        const projectId = yield* resolveProjectTarget(parent, input.projectId);
+        const projectId = yield* resolveProjectTarget(scope, parent, input.projectId);
         yield* assertLiveCallerForOtherProject(scope, parent, projectId);
         const project = yield* requireProject(projectId);
         const bindToCurrentThread =
@@ -1671,6 +1690,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const { parent, limits } = yield* loadCaller(scope);
         const projectId = input.projectId ?? parent?.thread.projectId;
+        if (projectId !== undefined) yield* assertProjectReach(scope, projectId);
         const { tasks } = yield* scheduledTasks
           .list()
           .pipe(
@@ -2399,7 +2419,7 @@ const make = Effect.gen(function* () {
     listThreads: (scope, input) =>
       Effect.gen(function* () {
         const { parent } = yield* loadCaller(scope);
-        const projectId = yield* resolveProjectTarget(parent, input.projectId);
+        const projectId = yield* resolveProjectTarget(scope, parent, input.projectId);
         const projectThreads = yield* threadManagement
           .listProjectThreads({
             projectId,
@@ -2436,6 +2456,7 @@ const make = Effect.gen(function* () {
         const nextCursor = cursor + page.length < filtered.length ? cursor + page.length : null;
         return {
           projectId,
+          ...(yield* appIdFields(projectId)),
           currentThreadId: parent?.thread.id ?? null,
           threads: page.map((shell) => listItemFromShell(shell, nowMs)),
           nextCursor,
@@ -2520,7 +2541,10 @@ const make = Effect.gen(function* () {
           }
         }
         return {
-          thread: threadDetail(target, timeline.totalItems, shell, yield* Clock.currentTimeMillis),
+          thread: {
+            ...threadDetail(target, timeline.totalItems, shell, yield* Clock.currentTimeMillis),
+            ...(yield* appIdFields(shell.projectId)),
+          },
           recentRuns: target.runs
             .toSorted((left, right) => right.ordinal - left.ordinal)
             .slice(0, input.runLimit ?? DEFAULT_THREAD_RUN_LIMIT)

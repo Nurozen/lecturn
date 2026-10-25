@@ -137,6 +137,7 @@ export const writesThreads = <P, A, E, R>(
           .getThreadShell(threadId)
           .pipe(Effect.mapError(unavailable));
         if (target !== null && target.deletedAt === null) {
+          yield* McpInvocationContext.assertProjectReach(caller.scope, target.projectId);
           yield* assertTargetWithinLimits(caller.limits, target);
         }
       }
