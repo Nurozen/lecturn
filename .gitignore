@@ -9,6 +9,7 @@ apps/*/dist-exe
 infra/*/dist
 .astro
 packages/*/dist
+examples/*/dist
 .env
 .env.local
 build/

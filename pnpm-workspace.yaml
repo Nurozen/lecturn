@@ -1,5 +1,6 @@
 packages:
   - apps/*
+  - examples/*
   - infra/*
   - oxlint-plugin-lecturn
   - packages/*

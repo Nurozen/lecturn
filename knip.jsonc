@@ -118,6 +118,13 @@
       // These workspace packages are private to this monorepo.
       "includeEntryExports": true,
     },
+    "packages/embed": {
+      // The published helper's entries are its public API; their consumers live outside this repo.
+      "entry": ["src/{node,electron,renderer,browser,electron-preload}.ts!"],
+    },
+    "examples/embed-host": {
+      "entry": ["src/main.ts!"],
+    },
     "packages/effect-acp": {
       "includeEntryExports": true,
       "entry": ["test/fixtures/*.ts"],
