@@ -18,6 +18,14 @@
     "./relay": {
       "types": "./src/relay.ts",
       "import": "./src/relay.ts"
+    },
+    "./apps": {
+      "types": "./src/apps.ts",
+      "import": "./src/apps.ts"
+    },
+    "./embedBridge": {
+      "types": "./src/embedBridge.ts",
+      "import": "./src/embedBridge.ts"
     }
   },
   "scripts": {

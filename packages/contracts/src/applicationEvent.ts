@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 
+import { AppBinding } from "./apps.ts";
 import {
   ApprovalRequestId,
   ClientSurface,
@@ -43,6 +44,8 @@ export const ApplicationProjectCreatedPayload = Schema.Struct({
   defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
   faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   projectIcon: Schema.optional(Schema.NullOr(StoredProjectIcon)),
+  // Lecturn: set once at creation; a project never gains or loses its app.
+  appBinding: Schema.optionalKey(AppBinding),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

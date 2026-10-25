@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 
+import { AppSidecarBootstrap } from "./apps.ts";
 import { PortSchema, PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 // A supervisor must not restart a server refused by the state-directory owner.
@@ -53,6 +54,10 @@ export const DesktopBackendBootstrap = Schema.Struct({
 });
 
 export type DesktopBackendBootstrap = typeof DesktopBackendBootstrap.Type;
+
+/** Every envelope `--bootstrap-fd` may carry; `mode` tells them apart. */
+export const ServerBootstrapEnvelope = Schema.Union([DesktopBackendBootstrap, AppSidecarBootstrap]);
+export type ServerBootstrapEnvelope = typeof ServerBootstrapEnvelope.Type;
 
 /** Written to `<lecturnHome>/runtime` just before the desktop app stops its
     backend to install an update. The updated app starts a new backend right
