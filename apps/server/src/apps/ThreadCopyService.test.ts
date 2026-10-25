@@ -6,6 +6,8 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
   AppId,
+  AuthOrchestrationReadScope,
+  AuthSessionId,
   type ChatAttachment,
   CommandId,
   ConnectedAppThreadBundleV1,
@@ -24,6 +26,7 @@ import {
   RunId,
   type ThreadId,
   TurnItemId,
+  WS_METHODS,
 } from "@lecturn/contracts";
 import type { ProviderInstance } from "@lecturn/provider-core/server/driver";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
@@ -42,11 +45,16 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 
+import * as AssetAccess from "../assets/AssetAccess.ts";
+import * as NativeAppIconResolver from "../assets/NativeAppIconResolver.ts";
 import {
   resolveAttachmentPath,
   resolveAttachmentPathById,
   createAttachmentId,
 } from "../attachmentStore.ts";
+import type { AuthenticatedSession } from "../auth/EnvironmentAuth.ts";
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as SessionStore from "../auth/SessionStore.ts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -62,13 +70,21 @@ import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
+import * as AppAuthorizationLayer from "./appAuthorization.ts";
 import * as AppProjectServiceLayer from "./AppProjectService.ts";
-import { AppProjectService, AppRegistryService, ThreadCopyService } from "./services.ts";
+import {
+  AppAuthorization,
+  AppProjectService,
+  AppRegistryService,
+  ThreadCopyService,
+} from "./services.ts";
+import { formatEmbedSubject } from "./subjects.ts";
 import { copyThreadId, recopyThreadId } from "./threadCopyHistory.ts";
 import * as ThreadCopyServiceLayer from "./ThreadCopyService.ts";
 
@@ -1041,6 +1057,149 @@ describe("embed-host fixture bundle", () => {
           }
           assert.isAtLeast(cards, 1);
         }),
+      );
+    }),
+  );
+});
+
+/** The live authorization over the environment's own projections, as the socket runs it. */
+const authorizationLayer = AppAuthorizationLayer.layer.pipe(
+  Layer.provide(
+    Layer.mock(SessionStore.SessionStore)({ cookieName: "unused", legacyCookieName: undefined }),
+  ),
+  Layer.provide(
+    Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+      getEnvironmentId: Effect.succeed(EnvironmentId.make("environment:user")),
+    }),
+  ),
+);
+
+const sessionFor = (subject: string): AuthenticatedSession => ({
+  sessionId: AuthSessionId.make(`session:${subject}`),
+  subject,
+  method: "bearer-access-token",
+  scopes: [AuthOrchestrationReadScope],
+});
+
+const canCreateUrl = (session: AuthenticatedSession, attachmentId: string) =>
+  Effect.flatMap(AppAuthorization, (authorization) =>
+    authorization.authorizeRpc(session, WS_METHODS.assetsCreateUrl, {
+      resource: { _tag: "attachment", attachmentId },
+    }),
+  ).pipe(
+    Effect.as(true),
+    Effect.catchTags({ EnvironmentAuthorizationError: () => Effect.succeed(false) }),
+  );
+
+describe("copied card assets", () => {
+  it.effect("serve the copy's embed and full Lecturn, and no other app or project", () =>
+    Effect.gen(function* () {
+      const fixture = NodeFS.readFileSync(
+        NodePath.join(import.meta.dirname, "fixtures", "embed-host.bundle.json"),
+        "utf8",
+      );
+      const bundle = yield* decodeBundleJson(fixture);
+      const user = yield* startEnvironment("user");
+      yield* user.run(importBundle(bundle));
+      yield* user.run(
+        Effect.gen(function* () {
+          const [cardProject, otherProject] = yield* Effect.forEach(bundle.projects, (project) =>
+            appProjectFor(project.workspaceRoot),
+          );
+          const cards: Array<{ projectId: ProjectId; threadId: ThreadId; attachmentId: string }> =
+            [];
+          for (const projectId of [cardProject!, otherProject!]) {
+            for (const copy of yield* listCopies(projectId)) {
+              for (const row of (yield* projectionOf(copy.threadId)).visibleTurnItems) {
+                const card = mcpAppFromToolItem(row.item as never);
+                if (card === undefined) continue;
+                cards.push({ projectId, threadId: copy.threadId, attachmentId: card.attachmentId });
+              }
+            }
+          }
+          assert.isAtLeast(cards.length, 1);
+
+          // A normal project whose thread id is shaped like a copy's, holding its own card.
+          const normalProject = "normal-project" as ProjectId;
+          yield* Effect.flatMap(ProjectService.ProjectService, (projects) =>
+            projects.create({
+              commandId: CommandId.make("normal-project:create"),
+              projectId: normalProject,
+              title: "Normal",
+              workspaceRoot: "/work/normal",
+            }),
+          );
+          const normalThread = copyThreadId(
+            EnvironmentId.make("environment:elsewhere"),
+            "normal-thread" as ThreadId,
+          );
+          yield* Effect.flatMap(Orchestrator.OrchestratorV2, (orchestrator) =>
+            orchestrator.dispatch({
+              type: "thread.create",
+              createdBy: "user",
+              creationSource: "web",
+              commandId: CommandId.make("normal-thread:create"),
+              threadId: normalThread,
+              projectId: normalProject,
+              title: "Normal thread",
+              modelSelection,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: null,
+            }),
+          );
+          yield* writeTurn(normalThread, 1, { card: true });
+          const normalCard = (yield* projectionOf(normalThread)).visibleTurnItems
+            .map((row) => mcpAppFromToolItem(row.item as never))
+            .find((card) => card !== undefined)!.attachmentId;
+
+          for (const { projectId, attachmentId } of cards) {
+            const ownEmbed = sessionFor(formatEmbedSubject(app, projectId));
+            const siblingEmbed = sessionFor(
+              formatEmbedSubject(app, projectId === cardProject ? otherProject! : cardProject!),
+            );
+            const otherAppEmbed = sessionFor(
+              formatEmbedSubject(AppId.make("dev.other.app"), projectId),
+            );
+            assert.isTrue(yield* canCreateUrl(ownEmbed, attachmentId));
+            assert.isFalse(yield* canCreateUrl(siblingEmbed, attachmentId));
+            assert.isFalse(yield* canCreateUrl(otherAppEmbed, attachmentId));
+            assert.isFalse(yield* canCreateUrl(ownEmbed, normalCard));
+
+            // Full Lecturn: an ordinary session passes, and the signed URL serves the card.
+            assert.isTrue(yield* canCreateUrl(sessionFor("user:local"), attachmentId));
+            const issued = yield* AssetAccess.issueAssetUrl({
+              resource: { _tag: "attachment", attachmentId, mimeType: "text/html" },
+            });
+            const [token, fileName] = issued.relativeUrl
+              .slice(AssetAccess.ASSET_ROUTE_PREFIX.length + 1)
+              .split("/");
+            const served = yield* AssetAccess.resolveAsset(token!, decodeURIComponent(fileName!));
+            assert.include(NodeFS.readFileSync((served as { path: string }).path, "utf8"), "<html");
+          }
+          // An id minted for a copy that its history never references resolves to no thread.
+          const [first] = cards;
+          assert.isFalse(
+            yield* canCreateUrl(
+              sessionFor(formatEmbedSubject(app, first!.projectId)),
+              createAttachmentId(first!.threadId, "html")!,
+            ),
+          );
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            Layer.mergeAll(
+              authorizationLayer,
+              ServerSecretStore.layer,
+              NativeAppIconResolver.layer,
+              WorkspacePaths.layer,
+              Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
+                resolvePath: () => Effect.succeed(null),
+              }),
+            ),
+          ),
+        ),
       );
     }),
   );
