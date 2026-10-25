@@ -9,6 +9,7 @@ import { prepareProviderAuthDelivery } from "./providerAuthDelivery";
 import { isElectron } from "./env";
 import { hasCloudPublicConfig } from "./cloud/publicConfig";
 import { getRouter } from "./router";
+import { isEmbedLocation } from "./embed/embedAuth";
 import {
   syncDocumentElectronPlatformClasses,
   syncDocumentWindowControlsOverlayClass,
@@ -47,13 +48,15 @@ const app = <AppRoot router={router} />;
 // Loading only the selected runtime as a split chunk keeps every Clerk byte out
 // of the startup graph for local-mode users, and keeps the bundled clerk-js out
 // of the browser build entirely.
-const managedAuthShellModule = hasPhoneConnectAccount()
-  ? import("./cloud/PhoneManagedAuthShell")
-  : clerkPublishableKey && hasCloudPublicConfig()
-    ? isElectron
-      ? import("./components/clerk/ElectronManagedAuthShell")
-      : import("./components/clerk/BrowserManagedAuthShell")
-    : null;
+const managedAuthShellModule = isEmbedLocation()
+  ? null
+  : hasPhoneConnectAccount()
+    ? import("./cloud/PhoneManagedAuthShell")
+    : clerkPublishableKey && hasCloudPublicConfig()
+      ? isElectron
+        ? import("./components/clerk/ElectronManagedAuthShell")
+        : import("./components/clerk/BrowserManagedAuthShell")
+      : null;
 
 export const startup = Promise.all([
   managedAuthShellModule?.then((module) => module.default) ?? null,

@@ -1,7 +1,3 @@
-import { ProviderDetectionProgress } from "../components/ProviderDetectionProgress";
-import { PermissionUpdateNotice } from "../components/PermissionUpdateNotice";
-import { type ServerLifecycleWelcomePayload } from "@lecturn/contracts";
-import { scopedProjectKey, scopeProjectRef } from "@lecturn/client-runtime/environment";
 import {
   Outlet,
   Link,
@@ -9,92 +5,38 @@ import {
   createRootRoute,
   type ErrorComponentProps,
   useLocation,
-  useNavigate,
   useRouter,
 } from "@tanstack/react-router";
 import { Check, Copy } from "lucide";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
-import { APP_BASE_NAME, APP_DISPLAY_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
-import { resolveServerBackedAppDisplayName } from "../branding.logic";
-import { AppSidebarLayout } from "../components/AppSidebarLayout";
-import { CommandPalette } from "../components/CommandPalette";
-import { CustomSnoozeDialogHost } from "../components/CustomSnoozeDialog";
-import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
-import { KeybindingsConfigWarning } from "../components/KeybindingsConfigWarning";
-import { FirstRunGate } from "../components/onboarding/FirstRunGate";
-import { ConnectOnboardingDialog } from "../components/cloud/ConnectOnboardingDialog";
-import { RelayClientInstallDialog } from "../components/cloud/RelayClientInstallDialog";
-import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
-import { StaveWizardDialog } from "../components/stave/StaveWizardDialog";
-import { ImportFolderSessionsDialog } from "../components/ImportFolderSessionsDialog";
-import { SnapShotCoordinator } from "../components/desktop/SnapShotCoordinator";
-import { DesktopAppActivationCoordinator } from "../components/desktop/DesktopAppActivationCoordinator";
-import { DesktopWebLinkCoordinator } from "../components/desktop/DesktopWebLinkCoordinator";
-import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepAlive";
-import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
-import { DesktopUpdateLaunchNotice } from "../components/sidebar/updateEverythingRun";
-import { NightlyMobileBetaNotice } from "../components/NightlyMobileBeta";
-import { LegacyThreadMigrationToast } from "../components/LegacyThreadMigrationToast";
-import { ThreadNotificationCoordinator } from "../components/ThreadNotificationCoordinator";
-import { ReopenClosedViewShortcut } from "../components/ReopenClosedViewShortcut";
-import { ProjectCloneToastCoordinator } from "../components/ProjectCloneToastCoordinator";
-import { PullRequestGuideRunCoordinator } from "../components/pullRequest/guide/PullRequestGuideRunCoordinator";
-import { SlowRpcRequestToastCoordinator } from "../components/SlowRpcRequestToastCoordinator";
-import { ChatGptWelcomeCoordinator } from "../components/settings/ChatGptWelcomeCoordinator";
-import { ProviderAuthCallbackCoordinator } from "../components/settings/ProviderAuthCallbackCoordinator";
-import { ThemeEditorHost } from "../components/settings/ThemeEditorHost";
+import { APP_DISPLAY_NAME, APP_VERSION } from "../branding";
+import { BrowserChromeThemeSync, DocumentTitleSync } from "../components/RootDocumentSync";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
-import { useDefaultThemeAdoption } from "../hooks/useDefaultTheme";
-import { useEnvironmentThemeSync } from "../hooks/useEnvironmentTheme";
 import { Button } from "../components/ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
 import { StandalonePage, StandalonePageHeader } from "../components/ui/standalone-page";
-import {
-  AnchoredToastProvider,
-  stackedThreadToast,
-  ToastProvider,
-  toastManager,
-} from "../components/ui/toast";
-import { isElectron } from "../env";
 import { cn } from "../lib/utils";
-import { applyAppearanceFontVariables } from "~/appearanceFonts";
-import { applyAppearanceContrast } from "~/appearanceContrast";
-import { useClientSettings } from "../hooks/useSettings";
-import {
-  deriveLogicalProjectKeyFromSettings,
-  derivePhysicalProjectKeyFromPath,
-  selectProjectGroupingSettings,
-} from "../logicalProject";
-import { useUiStateStore } from "../uiStateStore";
-import { syncBrowserChromeTheme } from "../hooks/useTheme";
-import { configureClientTracing } from "../observability/clientTracing";
 import { resolveInitialServerAuthGateState } from "../environments/primary";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
 import { useHostedPromptLinkLanding } from "../components/promptLinks/HostedPromptLinkLanding";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
-import { useAtomValue } from "@effect/atom-react";
-import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
-import {
-  primaryServerConfigAtom,
-  primaryServerConfigEventAtom,
-  primaryServerWelcomeAtom,
-} from "../state/server";
-import { readProject, setActiveEnvironmentId, useActiveEnvironmentId } from "../state/entities";
-import {
-  createKeybindingsUpdateToastController,
-  type KeybindingsUpdateToastController,
-} from "../components/KeybindingsUpdateToast.logic";
+import { isEmbedLocation } from "../embed/embedAuth";
 
 import { getDesktopSnapShotBridge } from "../lib/desktopSnapShot";
 import { installDesktopPasteAsText } from "../lib/desktopPasteAsText";
 import { shouldResumeSnapShotSetupOnStartup } from "../lib/snapShotSetupResume";
 
+const loadAppShell = () => import("../components/AppShell");
+const AppShell = lazy(loadAppShell);
+
 export const Route = createRootRoute({
   beforeLoad: async ({ location }) => {
-    if (location.pathname === "/account/billing") {
+    // The embed authenticates with its own bearer, never the cookie gate below.
+    if (location.pathname === "/account/billing" || isEmbedLocation(location)) {
       return { authGateState: { status: "hosted-static" } as const };
     }
+    void loadAppShell();
 
     if (location.pathname === "/pair" && hasHostedPairingRequest(new URL(window.location.href))) {
       return {
@@ -152,7 +94,6 @@ function RootRouteView() {
   useEffect(() => installDesktopPasteAsText(window.desktopBridge, window), []);
   const pathname = useLocation({ select: (location) => location.pathname });
   const { authGateState } = Route.useRouteContext();
-  const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
   // Once true, stays true: a visit to /welcome means the bootstrap already chose a route.
   const [returningFromWelcome, setReturningFromWelcome] = useState(pathname === "/welcome");
   if (pathname === "/welcome" && !returningFromWelcome) setReturningFromWelcome(true);
@@ -162,6 +103,7 @@ function RootRouteView() {
 
   if (
     pathname === "/account/billing" ||
+    isEmbedLocation({ pathname }) ||
     pathname === "/pair" ||
     pathname === "/connect" ||
     pathname.startsWith("/connect/") ||
@@ -188,29 +130,11 @@ function RootRouteView() {
     );
   }
 
-  if (pathname === "/welcome") {
-    return (
-      <ToastProvider>
-        <AnchoredToastProvider>
-          <DocumentTitleSync />
-          <BrowserChromeThemeSync key={pathname} />
-          <ContrastAppearanceSync />
-          <EnvironmentThemeSync />
-          <GlassAppearanceSync />
-          <FontAppearanceSync />
-          <ProviderAuthCallbackCoordinator />
-          <CustomSnoozeDialogHost />
-          <CommandPalette>
-            <AppSidebarLayout>
-              <Outlet />
-            </AppSidebarLayout>
-          </CommandPalette>
-        </AnchoredToastProvider>
-      </ToastProvider>
-    );
-  }
-
-  if (authGateState.status !== "authenticated" && authGateState.status !== "hosted-static") {
+  if (
+    pathname !== "/welcome" &&
+    authGateState.status !== "authenticated" &&
+    authGateState.status !== "hosted-static"
+  ) {
     return (
       <>
         <DocumentTitleSync />
@@ -220,199 +144,15 @@ function RootRouteView() {
     );
   }
 
-  const appShell = (
-    <CommandPalette>
-      <AppSidebarLayout>
-        <Outlet />
-      </AppSidebarLayout>
-    </CommandPalette>
-  );
-
   return (
-    <ToastProvider>
-      <AnchoredToastProvider>
-        <DocumentTitleSync />
-        <BrowserChromeThemeSync key={pathname} />
-        <ContrastAppearanceSync />
-        <EnvironmentThemeSync />
-        <GlassAppearanceSync />
-        <FontAppearanceSync />
-        <ProviderAuthCallbackCoordinator />
-        <ChatGptWelcomeCoordinator />
-        <FirstRunGate
-          enabled={primaryEnvironmentAuthenticated}
-          hostedStatic={authGateState.status === "hosted-static"}
-        >
-          {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
-          {primaryEnvironmentAuthenticated ? <DesktopAppActivationCoordinator /> : null}
-          {primaryEnvironmentAuthenticated ? <DesktopWebLinkCoordinator /> : null}
-          {isElectron ? <RunningThreadKeepAlive /> : null}
-          <RelayClientInstallDialog />
-          <ConnectOnboardingDialog />
-          <SshPasswordPromptDialog />
-          <SnapShotCoordinator />
-          <ThreadNotificationCoordinator />
-          <ReopenClosedViewShortcut />
-          <ConfirmDialogHost />
-          <StaveWizardDialog />
-          <ImportFolderSessionsDialog />
-          <CustomSnoozeDialogHost />
-          <SlowRpcRequestToastCoordinator />
-          <PermissionUpdateNotice />
-          {primaryEnvironmentAuthenticated ? <LegacyThreadMigrationToast /> : null}
-          <ProjectCloneToastCoordinator />
-          <PullRequestGuideRunCoordinator />
-          <HostedStaticEnvironmentBootstrap />
-          {primaryEnvironmentAuthenticated ? (
-            <EventRouter skipInitialBootstrapNavigation={returningFromWelcome} />
-          ) : null}
-          {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
-          {isElectron ? <DesktopUpdateLaunchNotice /> : null}
-          {/* Hosted Nightly is "hosted-static", not authenticated, and needs it too. */}
-          <NightlyMobileBetaNotice />
-          {appShell}
-          {primaryEnvironmentAuthenticated ? <ProviderDetectionProgress /> : null}
-          {/* Above the router: a theme draft is judged by walking the app, so the
-              editor has to survive navigation away from settings. */}
-          <ThemeEditorHost />
-        </FirstRunGate>
-      </AnchoredToastProvider>
-    </ToastProvider>
+    <Suspense fallback={null}>
+      <AppShell
+        authGateState={authGateState}
+        pathname={pathname}
+        returningFromWelcome={returningFromWelcome}
+      />
+    </Suspense>
   );
-}
-
-function EnvironmentThemeSync() {
-  useEnvironmentThemeSync();
-  // Ordered after the palette sync so a first-run client adopting the
-  // environment's own theme finds it already in the library.
-  useDefaultThemeAdoption();
-  return null;
-}
-
-function ContrastAppearanceSync() {
-  const appearanceContrast = useClientSettings((settings) => settings.appearanceContrast);
-  const diffColorScheme = useClientSettings((settings) => settings.diffColorScheme);
-
-  useEffect(() => {
-    document.documentElement.dataset.diffColorScheme = diffColorScheme;
-  }, [diffColorScheme]);
-
-  const chatWidth = useClientSettings((settings) => settings.chatWidth);
-  useEffect(() => {
-    document.documentElement.dataset.chatWidth = chatWidth;
-  }, [chatWidth]);
-
-  useEffect(() => {
-    applyAppearanceContrast(document.documentElement, appearanceContrast);
-  }, [appearanceContrast]);
-
-  return null;
-}
-
-function GlassAppearanceSync() {
-  const glassOpacity = useClientSettings((settings) => settings.glassOpacity);
-
-  useEffect(() => {
-    const style = document.documentElement.style;
-    style.setProperty("--glass-opacity", `${glassOpacity}%`);
-    if (glassOpacity === 100) {
-      style.setProperty("--glass-blur", "0px");
-    } else {
-      style.removeProperty("--glass-blur");
-    }
-  }, [glassOpacity]);
-
-  return null;
-}
-
-function FontAppearanceSync() {
-  const fontFamilySans = useClientSettings((settings) => settings.fontFamilySans);
-  const fontFamilyCode = useClientSettings((settings) => settings.fontFamilyCode);
-  const fontFamilyComposer = useClientSettings((settings) => settings.fontFamilyComposer);
-  const fontSizeInterface = useClientSettings((settings) => settings.fontSizeInterface);
-  const fontSizePrompt = useClientSettings((settings) => settings.fontSizePrompt);
-  const fontSizeCode = useClientSettings((settings) => settings.fontSizeCode);
-  const fontSmoothing = useClientSettings((settings) => settings.fontSmoothing);
-
-  useEffect(() => {
-    applyAppearanceFontVariables(document.documentElement, {
-      sans: fontFamilySans,
-      code: fontFamilyCode,
-      composer: fontFamilyComposer,
-      sizeInterface: fontSizeInterface,
-      sizePrompt: fontSizePrompt,
-      sizeCode: fontSizeCode,
-      smoothing: fontSmoothing,
-    });
-  }, [
-    fontFamilyCode,
-    fontFamilyComposer,
-    fontFamilySans,
-    fontSizeCode,
-    fontSizeInterface,
-    fontSizePrompt,
-    fontSmoothing,
-  ]);
-
-  return null;
-}
-
-/** Keyed by pathname: each route paints its own surface, which the browser chrome samples. */
-function BrowserChromeThemeSync() {
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      syncBrowserChromeTheme();
-    });
-    return () => {
-      window.cancelAnimationFrame(frame);
-    };
-  }, []);
-  return null;
-}
-
-function DocumentTitleSync() {
-  const primaryServerVersion =
-    useAtomValue(primaryServerConfigAtom)?.environment.serverVersion ?? null;
-  const title = resolveServerBackedAppDisplayName({
-    baseName: APP_BASE_NAME,
-    fallbackDisplayName: APP_DISPLAY_NAME,
-    fallbackStageLabel: APP_STAGE_LABEL,
-    primaryServerVersion,
-  });
-
-  useEffect(() => {
-    document.title = title;
-  }, [title]);
-
-  return null;
-}
-
-function HostedStaticEnvironmentBootstrap() {
-  const { environments } = useEnvironments();
-  const activeEnvironmentId = useActiveEnvironmentId();
-
-  useEffect(() => {
-    if (
-      environments.some(
-        (environment) => environment.entry.target._tag === "PrimaryConnectionTarget",
-      )
-    ) {
-      return;
-    }
-
-    if (activeEnvironmentId) {
-      return;
-    }
-
-    const firstSavedEnvironment = environments[0];
-    if (!firstSavedEnvironment) {
-      return;
-    }
-
-    setActiveEnvironmentId(firstSavedEnvironment.environmentId);
-  }, [activeEnvironmentId, environments]);
-
-  return null;
 }
 
 function RootRouteErrorView({ error }: ErrorComponentProps) {
@@ -508,132 +248,4 @@ function errorReport(error: unknown, pathname: string): string {
     cause = cause instanceof Error ? cause.cause : undefined;
   }
   return lines.join("\n");
-}
-
-function AuthenticatedTracingBootstrap() {
-  useEffect(() => {
-    void configureClientTracing();
-  }, []);
-
-  return null;
-}
-
-function EventRouter({
-  skipInitialBootstrapNavigation,
-}: {
-  readonly skipInitialBootstrapNavigation: boolean;
-}) {
-  const navigate = useNavigate();
-  const pathname = useLocation({ select: (loc) => loc.pathname });
-  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
-  const primaryEnvironment = usePrimaryEnvironment();
-  const serverConfig = useAtomValue(primaryServerConfigAtom);
-  const serverConfigEvent = useAtomValue(primaryServerConfigEventAtom);
-  const serverWelcome = useAtomValue(primaryServerWelcomeAtom);
-  const readPathname = useEffectEvent(() => pathname);
-  const handledBootstrapThreadIdRef = useRef<string | null>(null);
-  const skipInitialBootstrapNavigationRef = useRef(skipInitialBootstrapNavigation);
-  const handledConfigEventRef = useRef(serverConfigEvent);
-  const [keybindingsToastController] = useState<KeybindingsUpdateToastController>(() =>
-    createKeybindingsUpdateToastController({}),
-  );
-
-  const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
-    if (!payload) return;
-
-    setActiveEnvironmentId(payload.environment.environmentId);
-    void (async () => {
-      if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
-        return;
-      }
-      const bootstrapProject = readProject(
-        scopeProjectRef(payload.environment.environmentId, payload.bootstrapProjectId),
-      );
-      const bootstrapProjectKey =
-        (bootstrapProject
-          ? deriveLogicalProjectKeyFromSettings(bootstrapProject, projectGroupingSettings)
-          : null) ??
-        (serverConfig?.cwd
-          ? derivePhysicalProjectKeyFromPath(payload.environment.environmentId, serverConfig.cwd)
-          : null) ??
-        scopedProjectKey(
-          scopeProjectRef(payload.environment.environmentId, payload.bootstrapProjectId),
-        );
-      useUiStateStore.getState().setProjectExpanded(bootstrapProjectKey, true);
-
-      if (readPathname() !== "/") {
-        return;
-      }
-      if (skipInitialBootstrapNavigationRef.current) {
-        skipInitialBootstrapNavigationRef.current = false;
-        handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
-        return;
-      }
-      if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
-        return;
-      }
-      await navigate({
-        to: "/$environmentId/$threadId",
-        params: {
-          environmentId: payload.environment.environmentId,
-          threadId: payload.bootstrapThreadId,
-        },
-        replace: true,
-      });
-      handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
-    })().catch(() => undefined);
-  });
-
-  const handleServerConfigUpdated = useEffectEvent(() => {
-    const decision = keybindingsToastController.handle(serverConfigEvent);
-    if (!decision) {
-      return;
-    }
-
-    if (decision._tag === "Success") {
-      toastManager.add({
-        type: "success",
-        title: "Keybindings updated",
-        description: "Keybindings configuration reloaded successfully.",
-      });
-      return;
-    }
-
-    toastManager.add(
-      stackedThreadToast({
-        type: "warning",
-        title: "Invalid keybindings configuration",
-        description: (
-          <KeybindingsConfigWarning
-            message={decision.message}
-            environmentId={primaryEnvironment?.environmentId ?? null}
-            configPath={serverConfig?.keybindingsConfigPath ?? null}
-            availableEditors={serverConfig?.availableEditors ?? []}
-          />
-        ),
-      }),
-    );
-  });
-
-  useEffect(() => {
-    if (!serverConfig) {
-      return;
-    }
-
-    setActiveEnvironmentId(serverConfig.environment.environmentId);
-  }, [serverConfig]);
-
-  useEffect(() => {
-    handleWelcome(serverWelcome);
-  }, [serverWelcome]);
-
-  useEffect(() => {
-    if (serverConfigEvent === null || handledConfigEventRef.current === serverConfigEvent) {
-      return;
-    }
-    handledConfigEventRef.current = serverConfigEvent;
-    handleServerConfigUpdated();
-  }, [serverConfigEvent]);
-
-  return null;
 }

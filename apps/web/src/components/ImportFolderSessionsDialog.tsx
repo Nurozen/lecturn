@@ -49,7 +49,7 @@ import { toastManager } from "./ui/toast";
 
 /**
  * Host for the multi-select import that follows the palette's "From Claude
- * Code or Codex" source, mounted once in `__root.tsx` and driven by the
+ * Code or Codex" source, mounted once in `AppShell.tsx` and driven by the
  * `importFolderSessions` bus. The dialog refuses to close while an import runs
  * so its progress and failures stay observed.
  */

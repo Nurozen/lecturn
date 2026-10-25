@@ -38,6 +38,7 @@ import { Route as AccountBillingRouteImport } from './routes/account.billing'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as ChatNewRouteImport } from './routes/_chat.new'
 import { Route as ExtensionsFundingApproveRouteImport } from './routes/extensions.funding.approve'
+import { Route as EmbedEnvironmentIdProjectIdRouteImport } from './routes/embed.$environmentId.$projectId'
 import { Route as DecisionsFundingApproveRouteImport } from './routes/decisions.funding.approve'
 import { Route as DecisionsEnvironmentIdProjectIdRouteImport } from './routes/decisions.$environmentId.$projectId'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
@@ -190,6 +191,12 @@ const ExtensionsFundingApproveRoute =
     path: '/extensions/funding/approve',
     getParentRoute: () => rootRouteImport,
   } as any)
+const EmbedEnvironmentIdProjectIdRoute =
+  EmbedEnvironmentIdProjectIdRouteImport.update({
+    id: '/embed/$environmentId/$projectId',
+    path: '/embed/$environmentId/$projectId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const DecisionsFundingApproveRoute = DecisionsFundingApproveRouteImport.update({
   id: '/decisions/funding/approve',
   path: '/decisions/funding/approve',
@@ -251,6 +258,7 @@ export interface FileRoutesByFullPath {
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
   '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
+  '/embed/$environmentId/$projectId': typeof EmbedEnvironmentIdProjectIdRoute
   '/extensions/funding/approve': typeof ExtensionsFundingApproveRoute
   '/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
 }
@@ -286,6 +294,7 @@ export interface FileRoutesByTo {
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
   '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
+  '/embed/$environmentId/$projectId': typeof EmbedEnvironmentIdProjectIdRoute
   '/extensions/funding/approve': typeof ExtensionsFundingApproveRoute
   '/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
 }
@@ -323,6 +332,7 @@ export interface FileRoutesById {
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
   '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
+  '/embed/$environmentId/$projectId': typeof EmbedEnvironmentIdProjectIdRoute
   '/extensions/funding/approve': typeof ExtensionsFundingApproveRoute
   '/_chat/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
 }
@@ -360,6 +370,7 @@ export interface FileRouteTypes {
     | '/draft/$draftId'
     | '/decisions/$environmentId/$projectId'
     | '/decisions/funding/approve'
+    | '/embed/$environmentId/$projectId'
     | '/extensions/funding/approve'
     | '/sagas/$environmentId/$projectId'
   fileRoutesByTo: FileRoutesByTo
@@ -395,6 +406,7 @@ export interface FileRouteTypes {
     | '/draft/$draftId'
     | '/decisions/$environmentId/$projectId'
     | '/decisions/funding/approve'
+    | '/embed/$environmentId/$projectId'
     | '/extensions/funding/approve'
     | '/sagas/$environmentId/$projectId'
   id:
@@ -431,6 +443,7 @@ export interface FileRouteTypes {
     | '/_chat/draft/$draftId'
     | '/decisions/$environmentId/$projectId'
     | '/decisions/funding/approve'
+    | '/embed/$environmentId/$projectId'
     | '/extensions/funding/approve'
     | '/_chat/sagas/$environmentId/$projectId'
   fileRoutesById: FileRoutesById
@@ -448,6 +461,7 @@ export interface RootRouteChildren {
   ProjectsProjectKeyRoute: typeof ProjectsProjectKeyRoute
   DecisionsEnvironmentIdProjectIdRoute: typeof DecisionsEnvironmentIdProjectIdRoute
   DecisionsFundingApproveRoute: typeof DecisionsFundingApproveRoute
+  EmbedEnvironmentIdProjectIdRoute: typeof EmbedEnvironmentIdProjectIdRoute
   ExtensionsFundingApproveRoute: typeof ExtensionsFundingApproveRoute
 }
 
@@ -656,6 +670,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ExtensionsFundingApproveRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/embed/$environmentId/$projectId': {
+      id: '/embed/$environmentId/$projectId'
+      path: '/embed/$environmentId/$projectId'
+      fullPath: '/embed/$environmentId/$projectId'
+      preLoaderRoute: typeof EmbedEnvironmentIdProjectIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/decisions/funding/approve': {
       id: '/decisions/funding/approve'
       path: '/decisions/funding/approve'
@@ -767,6 +788,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProjectsProjectKeyRoute: ProjectsProjectKeyRoute,
   DecisionsEnvironmentIdProjectIdRoute: DecisionsEnvironmentIdProjectIdRoute,
   DecisionsFundingApproveRoute: DecisionsFundingApproveRoute,
+  EmbedEnvironmentIdProjectIdRoute: EmbedEnvironmentIdProjectIdRoute,
   ExtensionsFundingApproveRoute: ExtensionsFundingApproveRoute,
 }
 export const routeTree = rootRouteImport
