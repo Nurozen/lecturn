@@ -14,9 +14,10 @@ export function useEmbedComposerFooterStacked(expanded: boolean): boolean {
 
 /**
  * The composer footer. Outside the embed it is the footer div itself. In the embed pane it has two
- * real rows: the controls ("model | effort | access") on the first, then Contextual with the
- * attach and send actions on the second. The row wrappers stay mounted while the composer rests,
- * as `contents`, so the controls and actions keep their state across a collapse.
+ * real rows, the controls ("model | effort | access") and then Contextual, while attach and send
+ * sit at the end of the input line above it, as the embed mockup draws them; ChatComposer pads the
+ * editor by the actions' width so text never runs under them. The wrappers stay mounted while the
+ * composer rests, as `contents`, so the controls and actions keep their state across a collapse.
  */
 export function EmbedComposerFooter({
   stacked,
@@ -38,19 +39,34 @@ export function EmbedComposerFooter({
   }
   // ChatComposer passes exactly two children: the controls, then the actions.
   const [controls, actions] = Children.toArray(children);
-  const row = cn("flex min-w-0 items-center", !stacked && "contents");
   return (
     <div
-      className={cn(className, stacked && "flex-col items-stretch gap-1 sm:gap-1")}
+      className={cn(className, stacked && "relative flex-col items-stretch gap-1 sm:gap-1")}
       data-testid="embed-composer-footer"
       data-embed-composer-footer-stacked={stacked ? "true" : undefined}
       {...props}
     >
-      <div data-testid="embed-composer-footer-row" className={row}>
+      <div
+        data-testid="embed-composer-footer-row"
+        className={stacked ? "flex min-w-0 items-center" : "contents"}
+      >
         {controls}
       </div>
-      <div data-testid="embed-composer-footer-row" className={cn(row, "justify-end gap-2")}>
-        {stacked && contextual ? <div className="-ms-2.5 me-auto min-w-0">{contextual}</div> : null}
+      {stacked && contextual ? (
+        <div data-testid="embed-composer-footer-row" className="-ms-2.5 flex min-w-0 items-center">
+          {contextual}
+        </div>
+      ) : null}
+      <div
+        data-testid="embed-composer-inline-actions"
+        // One prompt line tall above the editor body's bottom padding, so the actions center on
+        // the input line whatever their height, and inset by the footer's padding.
+        className={
+          stacked
+            ? "absolute end-3 bottom-full mb-2 flex h-[calc(var(--font-size-prompt,var(--text-sm))*1.625)] items-center sm:end-4"
+            : "contents"
+        }
+      >
         {actions}
       </div>
     </div>

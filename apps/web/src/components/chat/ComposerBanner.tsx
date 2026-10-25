@@ -194,9 +194,10 @@ function Row({
       layout === "wrap-actions" &&
         "flex flex-wrap *:data-[slot=composer-banner-content]:max-w-[calc(100%-var(--composer-banner-icon-column)-var(--spacing))] *:data-[slot=composer-banner-content]:grow",
       layout === "approval" && "items-start gap-x-2 gap-y-3",
-      // A connected-app approval lays its tool and reason out on this grid
-      // (ComposerPendingApprovalPanel); the reason sits right under the tool.
-      "has-[[data-app-tool-approval]]:gap-y-0.5",
+      // A connected-app approval flows its parts instead (ComposerPendingApprovalPanel): the tool
+      // keeps its whole name, the actions wrap to their own line when they no longer fit beside
+      // it, and the reason closes the banner.
+      "has-[[data-app-tool-approval]]:flex has-[[data-app-tool-approval]]:flex-wrap has-[[data-app-tool-approval]]:items-center has-[[data-app-tool-approval]]:gap-y-0.5",
       className,
     ),
     "data-composer-banner-row": "true",
@@ -217,6 +218,7 @@ function Icon({ className, ...props }: ComponentProps<"span">) {
       className={cn(
         "col-start-1 row-start-1 flex w-(--composer-banner-icon-column) min-w-0 flex-none items-center justify-center text-muted-foreground [&>svg]:size-3",
         "group-data-[composer-banner-layout=approval]/banner-row:pt-0.5 group-data-[composer-banner-layout=approval]/banner-row:text-warning group-data-[composer-banner-layout=approval]/banner-row:[&>svg]:size-4",
+        "group-has-[[data-app-tool-approval]]/banner-row:pt-0",
         className,
       )}
       {...props}
@@ -261,9 +263,9 @@ function Actions({ className, ...props }: ComponentProps<"span">) {
         "col-start-3 row-start-1 flex flex-wrap items-center justify-end gap-1",
         "group-data-[composer-banner-layout=approval]/banner-row:self-center group-data-[composer-banner-layout=approval]/banner-row:gap-1.5",
         // Narrow approvals wrap their actions below the detail, except a
-        // connected-app approval, whose one-line tool leaves them room.
+        // connected-app approval, whose row wraps them only when they do not fit.
         "@max-[560px]:group-[[data-composer-banner-layout=approval]:not(:has([data-app-tool-approval]))]/banner-row:col-start-2 @max-[560px]:group-[[data-composer-banner-layout=approval]:not(:has([data-app-tool-approval]))]/banner-row:col-end-4 @max-[560px]:group-[[data-composer-banner-layout=approval]:not(:has([data-app-tool-approval]))]/banner-row:row-start-2",
-        "group-data-[composer-banner-layout=wrap-actions]/banner-row:ms-auto",
+        "group-data-[composer-banner-layout=wrap-actions]/banner-row:ms-auto group-has-[[data-app-tool-approval]]/banner-row:ms-auto",
         className,
       )}
       {...props}

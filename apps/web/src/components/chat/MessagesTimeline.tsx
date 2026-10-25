@@ -1,5 +1,6 @@
 import { ContextualMessageDisclosure } from "../contextual/ContextualDisclosure";
 import { EmbedUserAvatar } from "../embed/EmbedUserAvatar";
+import { useEmbedPresentation } from "../../embed/EmbedPresentationContext";
 import { AppThreadTitle } from "../apps/AppThreadTitle";
 import { AppToolWorkRow } from "../apps/AppToolWorkRow";
 import { appToolRowOutcome } from "../apps/AppToolWorkRow.logic";
@@ -248,7 +249,7 @@ import {
   worktreeSetupAgentStarted,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
-  TIMELINE_MINIMAP_MIN_ITEMS,
+  timelineMinimapShown,
   type TimelineLatestRun,
   type WorkGroupScrollAnchor,
 } from "./MessagesTimeline.logic";
@@ -1879,6 +1880,7 @@ function TimelineMinimap({
   onWheel: (event: WheelEvent) => void;
   onSelect: (item: TimelineMinimapItem) => void;
 }) {
+  const embedded = useEmbedPresentation() !== null;
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const wheelTargetRef = (node: HTMLDivElement | null) => {
     if (!node) return;
@@ -1941,7 +1943,7 @@ function TimelineMinimap({
     });
   };
 
-  if (items.length < TIMELINE_MINIMAP_MIN_ITEMS) {
+  if (!timelineMinimapShown(items.length, embedded)) {
     return null;
   }
 

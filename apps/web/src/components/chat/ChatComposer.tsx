@@ -4847,14 +4847,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   useLayoutEffect(() => {
     onRestingChange(isComposerResting);
   }, [isComposerResting, onRestingChange]);
+  const embedFooterStacked = useEmbedComposerFooterStacked(
+    !composerControlsCollapsed && !showProviderUnavailable,
+  );
   const [restingActionsElement, setRestingActionsElement] = useState<HTMLDivElement | null>(null);
   const [restingActionsWidth, setRestingActionsWidth] = useState<number | null>(null);
   useLayoutEffect(() => {
-    if (!isComposerResting || !restingActionsElement) return;
+    if (!(isComposerResting || embedFooterStacked) || !restingActionsElement) return;
     const measure = () => setRestingActionsWidth(restingActionsElement.offsetWidth);
     measure();
     return observeResize(restingActionsElement, measure);
-  }, [isComposerResting, restingActionsElement]);
+  }, [embedFooterStacked, isComposerResting, restingActionsElement]);
   const restingImagePreviewCounts = getRestingComposerImagePreviewCounts(
     standaloneComposerImages.length,
   );
@@ -5051,9 +5054,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const contextualBlock =
     contextualAvailable &&
     (activeThreadId !== null || Boolean(draftId && props.contextualProjectId));
-  const embedFooterStacked = useEmbedComposerFooterStacked(
-    !composerControlsCollapsed && !showProviderUnavailable,
-  );
   const contextualControl = (size: "xs" | "sm", hidden = false) =>
     routeKind === "draft" && draftId && props.contextualProjectId ? (
       <ContextualDraftControl
@@ -7198,7 +7198,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               <div
                 className={cn("relative", isComposerResting && "flex min-w-0 items-center gap-1")}
                 style={
-                  isComposerResting && restingActionsWidth !== null
+                  (isComposerResting || embedFooterStacked) && restingActionsWidth !== null
                     ? { paddingRight: `calc(${restingActionsWidth}px + 1rem)` }
                     : undefined
                 }

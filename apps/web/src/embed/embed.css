@@ -95,3 +95,19 @@ html[data-lecturn-embed]
   [data-slot="separator"] {
   display: block;
 }
+
+/* With attach and send at the end of the input line (EmbedComposerFooter), the empty editor is
+   that one line, and its placeholder stays on it. */
+html[data-lecturn-embed]
+  [data-slot="composer-shell"]:has([data-embed-composer-footer-stacked])
+  .composer-tiptap {
+  min-height: 0;
+}
+
+html[data-lecturn-embed]
+  [data-slot="composer-shell"]:has([data-embed-composer-footer-stacked])
+  [data-composer-placeholder] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

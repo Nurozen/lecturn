@@ -89,8 +89,35 @@ const render = (node: ReactNode, embedded: boolean) => {
 const buttonTexts = (element: Element) =>
   Array.from(element.querySelectorAll("button"), (button) => button.textContent);
 
+// The editor ChatComposer renders above the footer, with the same classes the input line has.
+const composer = (stacked: boolean) => (
+  <div data-slot="composer-shell" className="relative">
+    <div data-chat-composer-body="true" className="relative px-3 pt-3.5 pb-2">
+      <div className="relative" style={{ paddingRight: "calc(5rem + 1rem)" }}>
+        <div className="relative flow-root text-sm">
+          <div
+            data-testid="composer-editor"
+            className="composer-tiptap -m-1 block min-h-19.5 p-1 leading-relaxed"
+          >
+            <p>
+              <br />
+            </p>
+          </div>
+          <div
+            data-composer-placeholder
+            className="pointer-events-none absolute inset-0 leading-relaxed"
+          >
+            Ask anything, @tag files/folders, $use skills, or / for commands
+          </div>
+        </div>
+      </div>
+    </div>
+    {footer(stacked)}
+  </div>
+);
+
 describe("EmbedComposerFooter", () => {
-  it("puts model, effort and access on the first row and Contextual with the actions on the second", async () => {
+  it("puts model, effort and access on the first row and Contextual on the second", async () => {
     await render(footer(true), true);
 
     const rows = container.querySelectorAll(
@@ -99,7 +126,7 @@ describe("EmbedComposerFooter", () => {
     expect(rows).toHaveLength(2);
     const [first, second] = rows as unknown as [HTMLElement, HTMLElement];
     expect(buttonTexts(first)).toEqual(["Opus 5", "High", "Supervised"]);
-    expect(buttonTexts(second)).toEqual(["Contextual · Off", "Send"]);
+    expect(buttonTexts(second)).toEqual(["Contextual · Off"]);
     expect(second.getBoundingClientRect().top).toBeGreaterThanOrEqual(
       first.getBoundingClientRect().bottom,
     );
@@ -109,19 +136,60 @@ describe("EmbedComposerFooter", () => {
     expect(measureRestingComposerControls(controls)?.wraps).toBe(true);
   });
 
-  it("keeps the controls mounted when the embed footer stops stacking", async () => {
+  it("puts attach and send at the end of the one-line input, as the embed mockup draws them", async () => {
+    await render(composer(true), true);
+
+    const editor = container.querySelector<HTMLElement>('[data-testid="composer-editor"]')!;
+    const placeholder = container.querySelector<HTMLElement>("[data-composer-placeholder]")!;
+    const actions = container.querySelector<HTMLElement>(
+      '[data-testid="embed-composer-inline-actions"]',
+    )!;
+    const footerBox = container
+      .querySelector<HTMLElement>('[data-testid="embed-composer-footer"]')!
+      .getBoundingClientRect();
+    const lineHeight = Number.parseFloat(getComputedStyle(editor).lineHeight);
+    const line = editor.getBoundingClientRect();
+    const actionsBox = actions.getBoundingClientRect();
+
+    expect(line.height).toBeLessThanOrEqual(lineHeight + 8);
+    expect(placeholder.getBoundingClientRect().height).toBeLessThanOrEqual(lineHeight + 1);
+    expect(placeholder.scrollWidth).toBeGreaterThan(placeholder.clientWidth);
+    const lineCenter = line.top + line.height / 2;
+    const actionsCenter = actionsBox.top + actionsBox.height / 2;
+    expect(Math.abs(actionsCenter - lineCenter)).toBeLessThanOrEqual(2);
+    expect(actionsBox.bottom).toBeLessThanOrEqual(footerBox.top);
+    expect(footerBox.right - actionsBox.right).toBe(12);
+    expect(buttonTexts(actions)).toEqual(["Send"]);
+  });
+
+  it("keeps the editor's own height while the footer rests in one row", async () => {
+    await render(composer(false), true);
+
+    const editor = container.querySelector<HTMLElement>('[data-testid="composer-editor"]')!;
+    expect(editor.getBoundingClientRect().height).toBeGreaterThan(60);
+    expect(
+      getComputedStyle(container.querySelector("[data-composer-placeholder]")!).whiteSpace,
+    ).toBe("normal");
+  });
+
+  it("keeps the controls and actions mounted when the embed footer stops stacking", async () => {
     await render(footer(true), true);
     const controls = container.querySelector("[data-chat-composer-footer-controls]");
+    const actions = container.querySelector("[data-chat-composer-actions]");
 
     await render(footer(false), true);
 
     expect(container.querySelector("[data-chat-composer-footer-controls]")).toBe(controls);
+    expect(container.querySelector("[data-chat-composer-actions]")).toBe(actions);
     expect(container.textContent).not.toContain("Contextual");
-    const [first, second] = Array.from(
+    const [first] = Array.from(
       container.querySelectorAll<HTMLElement>('[data-testid="embed-composer-footer-row"]'),
     );
     expect(getComputedStyle(first!).display).toBe("contents");
-    expect(getComputedStyle(second!).display).toBe("contents");
+    expect(
+      getComputedStyle(container.querySelector('[data-testid="embed-composer-inline-actions"]')!)
+        .display,
+    ).toBe("contents");
   });
 
   it("renders the plain footer div outside the embed", async () => {
