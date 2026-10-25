@@ -26,6 +26,7 @@
 - [Remote access](./user/remote-access.md)
 - [Notifications and Live Activities](./user/notifications-and-live-activities.md)
 - [Outside agents (MCP)](./user/outside-agents.md)
+- [Connected apps](./user/connected-apps.md)
 - [Running in the background](./user/background-service.md)
 - [Updating Lecturn](./user/updating.md)
 - Provider guides: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [GitHub Copilot](./user/providers-copilot.md) · [Antigravity](./user/providers-antigravity.md) · [Pi](./user/providers-pi.md) · [Muse Code](./user/providers-muse.md)
@@ -56,6 +57,7 @@ source alone does not explain. Most code changes do not need an internal documen
 - [Stave integration](internals/stave-integration.md) — fork-only: how a project maps to a Stave space, the manifest reader, derived `project.stave`, admission rules.
 - [Product analytics](./internals/product-analytics.md)
 - [Environment auth](./internals/environment-auth.md)
+- [App trust boundary](./internals/app-trust-boundary.md)
 - [Lecturn Connect](./internals/lecturn-connect.md)
 - [Teams architecture](./internals/teams.md)
 - [Architecture decision records](./adr/README.md)

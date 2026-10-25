@@ -261,6 +261,150 @@ onSelectAccount }`, reads every token through `readToken(accountId)`, and gets
   and `packages/client-runtime/src/state/connections.ts`
   (`unlistedRelayEnvironmentIdsValueAtom`): resolve as the union.
 
+**Lecturn Apps** (connected apps, the `/embed` view, `@lecturn/embed`; see
+`docs/internals/app-trust-boundary.md`). Fork-only paths, which upstream can
+never conflict with:
+`packages/embed/**`, `examples/embed-host/**`,
+`packages/contracts/src/{apps,appsRpc,appsRpcCore,appsHttp,appsBundle,embedBridge}.ts`,
+`packages/shared/src/{appLinks,appReferences,appToolPresentation,jsonRpcFrame,lecturnMcpToolName}.ts`,
+`packages/client-runtime/src/embed/**`,
+`packages/client-runtime/src/state/{apps,appProjects}.ts`,
+`apps/server/src/apps/**`, `apps/server/src/mcp/toolkits/{app,apps}/**`,
+`apps/server/src/mcpApps/AppMcpAppRoute.ts`,
+`apps/server/src/persistence/AppRegistrations.ts`,
+`apps/server/src/persistence/Migrations/{079_AppRegistrations,080_ProjectionProjectsAppBinding}.ts`,
+`apps/server/src/orchestration-v2/Adapters/{ScriptedAdapterV2,scriptedScript}.ts`,
+`apps/server/src/provider/Drivers/ScriptedDriver.ts`,
+`apps/web/src/embed/**`, `apps/web/src/components/{apps,embed}/**`,
+`apps/web/src/components/AppShell.tsx`, `apps/web/src/components/RootDocumentSync.tsx`,
+`apps/web/src/components/settings/ConnectedAppsSettings*`,
+`apps/web/src/components/sidebar/{SidebarScopeRow*,SidebarHeaderIconButton,JumpHintBadge}.tsx`,
+`apps/web/src/components/chat/{composerApprovalState,dockedDrawerFollow}.ts`,
+`apps/web/src/routes/{embed.*,_chat.apps.$appId,settings.apps}.tsx`,
+`apps/web/src/{state/apps,lib/openAppUrl}.ts`, `apps/desktop/src/ipc/methods/apps.ts`,
+`apps/mobile/src/features/apps/**`, `apps/mobile/src/state/apps.ts`,
+`scripts/bar/**`, `scripts/lib/lecturn-pack.ts`,
+`scripts/{check-embed-chunks,seed-bar-fixture,smoke-pack-install,smoke-pack-probe}.ts`,
+`packages/tsconfig.embed-dts.json`, `docs/internals/app-trust-boundary.md`,
+`docs/user/connected-apps.md`, and their tests.
+
+`apps/web/src/routes/__root.tsx` is the one structural move: the root's
+authenticated body (sidebar layout, command palette, coordinators, dialogs,
+toasts) now lives in `components/AppShell.tsx`, loaded lazily so `/embed`
+never downloads it. An upstream change to that body, such as a new
+coordinator, goes into `AppShell.tsx`; take upstream's `__root.tsx` and keep
+the lazy `AppShell` import with its `void loadAppShell()` preload in
+`beforeLoad`, the `/embed` bypass beside `/account/billing` in `beforeLoad`,
+and `isEmbedLocation({ pathname })` in `RootRouteView`'s standalone check.
+`scripts/check-embed-chunks.ts` fails if the sidebar reaches the embed chunk.
+
+Call sites in upstream hot files, which must survive a merge. Each is one
+line or one spread unless noted:
+
+- `packages/contracts/src/rpc.ts`: `...APPS_WS_METHODS` in `WS_METHODS` and
+  `...AppsRpcs` in `WsRpcGroup`, plus the import.
+- `packages/contracts/src/clientRpcPermissions.ts`: the four `apps*`
+  `AuthAccessWriteScope` entries (decide pairing, revoke, set ceiling, delete).
+- `packages/contracts/src/orchestrationV2.ts`: `...ConnectedAppThreadFields`
+  in `OrchestrationV2AppThread`, `OrchestrationV2ThreadShell` and the
+  `thread.create` command; `connectedAppTool` on
+  `OrchestrationV2RuntimeRequest`; the three internal commands
+  `thread.app-data.set`, `thread.continued-in.set` and
+  `runtime-request.app-expire`. Every field is optional so non-app payloads
+  are unchanged; never make one required.
+- `packages/shared/src/promptLinks.ts`: the `apps` host in
+  `promptLinkAppPath` and the `appLinkFromPath` early return in
+  `promptLinkDeepLink`.
+- `packages/client-runtime/src/rpc/client.ts`: `appsSubscribeStatus` and
+  `appsSubscribeEmbedContext` in `EnvironmentSubscriptionRpcTag`.
+- `apps/server/src/server.ts`: `AppsOrchestrationHooks.layer` in
+  `layerLecturnOrchestrationHookRegistrations`, `AppsHttp.layer` in
+  `layerMakeRoutes`, and `Layer.provide(AppsLayer.layer)` on the routes'
+  outer pipe. Never move `AppsLayer` into the `mergeAll`: `Ws` and
+  `McpHttpServer` would not see it, and a second instance splits lease and
+  process state.
+- `apps/server/src/ws.ts`: `AppsRpcHandlers.make(currentSession)` spread
+  into the handlers; `AppStreamFilter.filterShellStream(currentSession)` on
+  `subscribeShell`; `APPS_WS_METHODS` omitted from `WsCoreRpcGroup`, with
+  `WsAppsRpcGroup`, `AppsRpcTag` and `appsHandlers` beside the contextual
+  ones; and the per-socket `AppRpcAuthorization.layer(session)`, which wraps
+  `RpcAuthorization.layer(session.scopes)`. If upstream reshapes that merge,
+  keep the wrapper: without it app sessions get plain scope checks only.
+- `apps/server/src/orchestration-v2/runtimeLayer.ts`: the
+  `Layer.provideMerge(Layer.merge(AppRuntimeState.layer, AppToolApprovalRegistry.layer))`
+  after the hook registry.
+- `apps/server/src/orchestration-v2/RuntimeRequestService.ts`: the early
+  return that answers a `connectedAppTool` or claimed request to the
+  approval registry before any adapter call.
+- `apps/server/src/orchestration-v2/Orchestrator.ts`: two
+  imports; the three internal command types in `commandThreadId`;
+  `...threadAppMetadataOf(command)` in thread creation; the two metadata
+  cases in the decide, apply and command-type switches
+  (`applyThreadAppMetadataCommand`); the `runtime-request.app-expire` case
+  calling `expire(...)`.
+- `apps/server/src/orchestration-v2/RunExecutionService.ts`:
+  `...(yield* appInstructionsTurnInput(input.appThread.projectId))` in the
+  turn input.
+- `apps/server/src/mcp/McpHttpServer.ts`: `interceptAppTools(invocation, httpEffect)`
+  in `makeMcpAuthMiddleware` and `toolkitRegistration(AppsToolkit, AppsHandlers.layer)`.
+- `apps/server/src/auth/EnvironmentAuth.ts`: `rejectAppAudience` with the
+  `path` argument of `authenticateToken` and on the ticket path;
+  `embedBearerBesideCookie` before the cookie-first credential path;
+  `annotateAuthenticated` on the HTTP and socket paths; the app-subject
+  filter in `listSessions`. `persistence/AuthSessions.ts` keeps the
+  `subject NOT LIKE 'app:%'` and `'embed:%'` lines in revoke-all-except.
+- `apps/server/src/cli/config.ts`: the bootstrap envelope decodes
+  `ServerBootstrapEnvelope` and goes through `splitServerBootstrap`;
+  `appSidecar` is spread into the resolved config.
+- `apps/server/src/http.ts`: the `frameAncestors` parameter of
+  `handleStaticAndDevRequest`, the
+  `...(isHtml ? yield* frameAncestors(url.value.pathname) : {})` header line,
+  and `FrameAncestors.make` in `layerStaticAndDevRoute`. Never add the policy
+  to asset or attachment routes.
+- `apps/server/src/persistence/Migrations.ts`: `selfRepairingMigrations`
+  (ids 79 and 80) in `migrationEntries`; see the migration rule below.
+- `apps/web/src/main.tsx`, `apps/web/src/lib/runtime.ts`,
+  `apps/web/src/environments/primary/httpLayer.ts`,
+  `apps/web/src/connection/platform.ts`: the `isEmbedLocation()` branches
+  (no managed auth shell, cookie-free HTTP client, embed primary auth and
+  wakeups) and the `embedPersistence` import first in `main.tsx`. Losing any
+  one lets the embed authenticate with the user's cookie.
+- `apps/web/src/components/ChatView.tsx`: `useEmbedPresentation()` and
+  `useEmbedAwareNavigate()` instead of `useNavigate()`; the
+  `embedPresentation === null` guards on the right panel, preview mini
+  player, open-in picker, header, git controls, thread details panel and
+  terminals; `useAppClosedBanner` joined into the banner items;
+  `AppThreadImportSessionLink` under the composer; `useFollowEndWhenDrawerDocks`.
+- `apps/web/src/components/chat/ChatComposer.tsx`: `insertMention` and
+  `setDraft` on `ChatComposerHandle`; `<AppRefChipStrip>` above the prompt
+  editor; `foldAppRefChips` before submit and `settleAppRefChips` after;
+  `approvalSendBlockReason`, `approvalReplacesComposer` and the
+  `appApprovalTestId` attributes on the approval banner;
+  `useComposerPhoneViewport()` for `isMobileViewport`; the footer wrapped in
+  `<EmbedComposerFooter>` with `embedFooterStacked` beside `isComposerResting`.
+- `apps/web/src/components/chat/MessagesTimeline.tsx`: `<AppThreadTitle>` at
+  the top of the conversation, `<EmbedUserAvatar />` in the user row,
+  `timelineMinimapShown(items.length, embedded)`, and the
+  `appToolRowOutcome` selector choosing `AppToolWorkRow` over `WorkLogRow`.
+- `apps/web/src/components/Sidebar.tsx`: the apps imports;
+  `appProjectKeys` from `useListedProjects()` and through
+  `partitionForkSidebarThreads` (`partitionThreadsByProjectKeys`, which
+  keeps app threads out of the list and in `appSearchThreads`);
+  `<AppThreadBadge>` in search rows; `sidebarMode` with its early returns in
+  keyboard navigation and new thread; the `modeSwitch`, `showScopeRow`,
+  `SidebarScopeTrigger`, `onScopeAdd` and `newThreadDisabled` props of
+  `SidebarThreadHeader`; `<AppsSidebar />` swapped for the project list in
+  Apps mode. `SidebarThreadHeader.tsx` is the fork's rewrite of upstream's
+  header (search row, mode switch slot, labelled scope row); take upstream's
+  search behavior into it rather than taking upstream's file.
+  `AppSidebarLayout.tsx` and `LegacySidebar.tsx` carry the same
+  `sidebarMode` switch and `sidebar.toggleApps` shortcut.
+- `apps/web/src/components/CommandPalette.tsx`: the `useAppsPaletteItems`
+  call, `actionItems.push(...appsPalette.actions)`, the `open-app` intent
+  and view, and `<AppThreadBadge>` on thread items.
+- `apps/mobile/src/Stack.tsx`: the `AppThreads` screen and the
+  `APP_THREAD_LINKING_PATH` alias on the thread screen's linking.
+
 **Lecturn behavior upstream removed.** Keep these when an upstream change
 drops them; line-level fork-delta reviews miss them because the removal comes
 from upstream's side.
@@ -501,6 +645,10 @@ compatibility or a new additive migration where needed. Validate both a fresh
 database and fixtures representing already-upgraded fork databases and upstream
 databases. If those paths cannot be proven safe, preserve the batch and explain
 the unresolved design; never merge based only on fresh-database tests.
+Lecturn Apps migrations 79 (`AppRegistrations`) and 80
+(`ProjectionProjectsAppBinding`) re-run when a ledger records another name at
+their id, so their SQL must stay idempotent; give remapped upstream migrations
+ids above them.
 
 - `apps/mobile/package.json` pins `expo-audio` to the exact patched version (upstream uses a
   tilde range). Keep the exact pin: `scripts/release-smoke.ts` re-resolves a fresh lockfile, and a
