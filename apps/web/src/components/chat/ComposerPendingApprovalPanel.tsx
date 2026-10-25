@@ -82,10 +82,10 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
 });
 
 /**
- * One line with the tool, and the app's reason under it across the whole
- * banner. Its parts are placed on the banner row's grid
- * (`data-app-tool-approval`, ComposerBanner), so the actions stay beside the
- * tool in a narrow embedded pane instead of wrapping below it.
+ * The tool, then the app's reason across the whole banner. Its parts flow in
+ * the banner row (`data-app-tool-approval`, ComposerBanner): the actions sit
+ * beside the tool while both fit, and wrap to their own line in a narrow pane
+ * rather than cutting the tool's name short.
  */
 function ConnectedAppToolApproval({
   approval,
@@ -108,9 +108,9 @@ function ConnectedAppToolApproval({
       data-app-tool-approval="true"
       role="group"
     >
-      <span className="col-start-2 row-start-1 flex min-w-0 items-center gap-2 self-center text-xs">
+      <span className="flex min-w-0 grow items-center gap-2 text-xs">
         <span
-          className="min-w-0 truncate font-medium text-warning"
+          className="min-w-0 font-medium wrap-anywhere text-warning"
           data-testid="app-approval-title"
         >
           {label}
@@ -122,13 +122,13 @@ function ConnectedAppToolApproval({
         ) : null}
       </span>
       {notResumable ? (
-        <span className="col-span-full row-start-2 block min-w-0 truncate text-2xs text-muted-foreground">
+        <span className="order-last block min-w-0 basis-full truncate text-2xs text-muted-foreground">
           {NOT_RESUMABLE_DETAIL}
         </span>
       ) : reason ? (
         <span
           aria-label="Reason"
-          className="col-span-full row-start-2 block min-w-0 truncate font-mono text-2xs text-muted-foreground"
+          className="order-last block min-w-0 basis-full truncate font-mono text-2xs text-muted-foreground"
           data-testid="app-approval-reason"
         >
           {reason}

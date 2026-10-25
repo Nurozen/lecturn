@@ -9,6 +9,7 @@ import {
 } from "@lecturn/shared/assistantCitations";
 import { shallow } from "zustand/vanilla/shallow";
 import { renderCodexDirectivesForCopy } from "@lecturn/shared/codexMarkdownDirectives";
+import { isAppToolSource } from "@lecturn/shared/appToolPresentation";
 import {
   commandDisplayText,
   commandProgramName,
@@ -185,6 +186,8 @@ export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string
     return "Read file";
   }
   const heading = normalizeCompactToolLabel(entry.toolTitle || entry.label);
+  // An app's tool id is the name the agent called and the app documents, so it stays as written.
+  if (isAppToolSource(entry.toolSource)) return heading;
   return `${heading.charAt(0).toUpperCase()}${heading.slice(1)}`;
 }
 
@@ -292,6 +295,11 @@ const TIMELINE_MINIMAP_ITEM_SPACING = 8;
 export const TIMELINE_MINIMAP_MIN_ITEMS = 2;
 const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "calc(100vh - 18rem)";
 const TIMELINE_MINIMAP_PERSISTENT_GUTTER = 48;
+
+/** The embed pane is the host's narrow chat, drawn without Lecturn's turn rail. */
+export function timelineMinimapShown(itemCount: number, embedded: boolean): boolean {
+  return !embedded && itemCount >= TIMELINE_MINIMAP_MIN_ITEMS;
+}
 
 export interface WorkGroupScrollAnchor {
   readonly entryId: string;
