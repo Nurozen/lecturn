@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off globalFetch:off -- Promise API for hosts that run no Effect runtime.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import { AppRegistration, type AppEmbedTarget } from "@lecturn/contracts/apps";
+import { AppLiveLeaseInput, AppRegistration, type AppEmbedTarget } from "@lecturn/contracts/apps";
 import {
   APP_EMBED_TOKEN_MAX_TTL_SECONDS,
   AppsEnsureWorkspaceInput,
@@ -33,6 +33,7 @@ import * as RpcSerialization from "effect/rpc/RpcSerialization";
 import * as Socket from "effect/socket/Socket";
 
 import type { EmbedConnectionSource } from "../target.ts";
+import { type LiveTools, makeLiveLeaseHeartbeat } from "./liveLease.ts";
 import { type SidecarHandle, type SidecarOptions, startSidecar } from "./sidecar.ts";
 
 export interface ConnectOptions {
@@ -50,7 +51,15 @@ export interface LecturnConnection extends EmbedConnectionSource {
   ensureWorkspace(workspaceRoot: string, title: string): Promise<{ readonly projectId: string }>;
   embedTarget(projectId: string, threadId?: string): Promise<AppEmbedTarget>;
   refreshEmbedToken(projectId: string): Promise<AppEmbedTarget>;
-  /** Stops the sidecar only when this connection started it. */
+  /**
+   * Publishes the app's live MCP endpoint and keeps its lease alive while the
+   * app runs (heartbeat every 20 s, lease 60 s). Calling it again moves the
+   * lease to the new endpoint.
+   */
+  setLiveTools(tools: LiveTools): Promise<void>;
+  /** Live tools then answer that the app is closed. */
+  clearLiveTools(): Promise<void>;
+  /** Clears the live lease, and stops the sidecar only when this connection started it. */
   close(): Promise<void>;
 }
 
@@ -59,9 +68,12 @@ const AppsClientGroup = RpcGroup.make(...AppsCoreRpcs);
 // The longest token the server mints; the guest refreshes it before expiry.
 const EMBED_TOKEN_TTL_SECONDS = APP_EMBED_TOKEN_MAX_TTL_SECONDS;
 
+const CLOSE_CLEAR_TIMEOUT_MS = 2_000;
+
 const decodeRegistration = Schema.decodeSync(AppRegistration);
 const decodeEnsureWorkspace = Schema.decodeEffect(AppsEnsureWorkspaceInput);
 const decodeMintEmbedToken = Schema.decodeEffect(AppsMintEmbedTokenInput);
+const decodeLiveLease = Schema.decodeEffect(AppLiveLeaseInput);
 const decodeAccessToken = Schema.decodeUnknownSync(AuthAccessTokenResult);
 const decodeTicket = Schema.decodeUnknownSync(AuthWebSocketTicketResult);
 
@@ -266,6 +278,16 @@ export async function connect(options: ConnectOptions): Promise<LecturnConnectio
       }).pipe(Effect.flatMap((input) => client[APPS_WS_METHODS.appsMintEmbedToken](input))),
     );
 
+  const liveLease = makeLiveLeaseHeartbeat({
+    setLease: (input) =>
+      run(
+        decodeLiveLease(input).pipe(
+          Effect.flatMap((lease) => client[APPS_WS_METHODS.appsSetLiveLease](lease)),
+        ),
+      ),
+    clearLease: () => run(client[APPS_WS_METHODS.appsClearLiveLease]({})),
+  });
+
   let closed: Promise<void> | undefined;
   return {
     mode: "sidecar",
@@ -280,8 +302,19 @@ export async function connect(options: ConnectOptions): Promise<LecturnConnectio
     embedTarget: (projectId, threadId) => mint(projectId, threadId),
     // Embed tokens are scoped to the project; the thread only shapes the url.
     refreshEmbedToken: (projectId) => mint(projectId),
+    setLiveTools: (tools) => liveLease.set(tools),
+    clearLiveTools: () => liveLease.clear(),
     close: () => {
-      closed ??= closeScope().finally(stopOwned);
+      // Clearing first lets Lecturn show the app as closed now rather than when
+      // the lease lapses; a server that is already gone must not hold up close.
+      closed ??= Promise.race([
+        liveLease.clear(),
+        new Promise((resolve) => setTimeout(resolve, CLOSE_CLEAR_TIMEOUT_MS).unref()),
+      ])
+        .catch(() => undefined)
+        .finally(() => liveLease.stop())
+        .then(closeScope)
+        .finally(stopOwned);
       return closed;
     },
   };
