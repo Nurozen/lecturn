@@ -3,25 +3,46 @@ import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import type { ConnectedAppThreadSummary } from "@lecturn/contracts/apps";
+import type { ConnectionMode, ConnectionModeEvent, ConnectionPairing } from "@lecturn/embed/node";
 import { _electron, type ElectronApplication, type Page } from "playwright-core";
 
 import { embedHostDir, resolveEmbedHostLaunch } from "../scripts/electronLauncher.ts";
 
-/** What src/main.ts publishes on the main process's globalThis once the pane is mounted. */
+/**
+ * What src/main.ts publishes on the main process's globalThis once the pane is
+ * mounted. The server-side ids follow the connection across a live switch.
+ */
 export interface EmbedHostGlobal {
   readonly environmentId: string;
   readonly origin: string;
+  readonly mode: ConnectionMode;
+  readonly pairing: ConnectionPairing;
   readonly projectId: string;
   readonly workspaceRoot: string;
   readonly flashLogPath: string;
+  /** Every `mode` event since the host started, oldest first. */
+  readonly modeEvents: ReadonlyArray<ConnectionModeEvent>;
   embedTarget(): Promise<{
     readonly url: string;
     readonly token: string;
     readonly expiresAt: string;
   }>;
   openThread(threadId: string): Promise<void>;
+  listThreads(): Promise<ReadonlyArray<ConnectedAppThreadSummary>>;
+  setThreadAppData(
+    threadId: string,
+    appData: string | null,
+    subtitle?: string | null,
+  ): Promise<void>;
   capture(file: string): Promise<void>;
 }
+
+/** The plain fields of `EmbedHostGlobal`, as read at one moment. */
+export type EmbedHostSnapshot = Pick<
+  EmbedHostGlobal,
+  "environmentId" | "origin" | "mode" | "projectId" | "workspaceRoot" | "flashLogPath"
+>;
 
 /**
  * For `app.evaluate` callbacks, which are serialized into the main process and
@@ -45,7 +66,9 @@ export interface EmbedHostDirs {
 export interface EmbedHostRun {
   readonly app: ElectronApplication;
   readonly dirs: EmbedHostDirs;
-  readonly host: Omit<EmbedHostGlobal, "embedTarget" | "openThread" | "capture">;
+  /** As of launch or the last `refreshHost`; a live switch changes every server-side id. */
+  readonly host: EmbedHostSnapshot;
+  refreshHost(): Promise<EmbedHostSnapshot>;
   /** The embed guest's page, once its URL contains `urlPart`. */
   guestPage(urlPart: string, timeoutMs?: number): Promise<Page>;
   /** The host window's own page (renderer/index.html), under the embed view. */
@@ -66,6 +89,8 @@ export interface LaunchOptions {
   /** Extra variables for main.ts, such as `EMBED_HOST_APP_GATE`. */
   readonly env?: Readonly<Record<string, string>>;
   readonly readyTimeoutMs?: number;
+  /** Reopens the host on an earlier run's directories, so it finds its sidecar state and credential. */
+  readonly dirs?: EmbedHostDirs;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -106,7 +131,7 @@ export async function launchEmbedHost(options: LaunchOptions = {}): Promise<Embe
   if (!NodeFS.existsSync(NodePath.join(embedHostDir, "dist", "main.mjs"))) {
     throw new Error("embed-host is not built; run `vp run --filter embed-host build` first.");
   }
-  const dirs = await makeDirs();
+  const dirs = options.dirs ?? (await makeDirs());
   if (options.scripted) {
     const settingsDir = NodePath.join(dirs.sidecarDir, "userdata");
     await NodeFSP.mkdir(settingsDir, { recursive: true });
@@ -186,7 +211,7 @@ export async function launchEmbedHost(options: LaunchOptions = {}): Promise<Embe
 
   try {
     const deadline = Date.now() + (options.readyTimeoutMs ?? 120_000);
-    let host: EmbedHostRun["host"] | null = null;
+    let host: EmbedHostSnapshot | null = null;
     while (host === null) {
       const state = await app.evaluate(() => {
         const globals = globalThis as HostGlobals;
@@ -197,6 +222,7 @@ export async function launchEmbedHost(options: LaunchOptions = {}): Promise<Embe
           host: {
             environmentId: published.environmentId,
             origin: published.origin,
+            mode: published.mode,
             projectId: published.projectId,
             workspaceRoot: published.workspaceRoot,
             flashLogPath: published.flashLogPath,
@@ -211,10 +237,27 @@ export async function launchEmbedHost(options: LaunchOptions = {}): Promise<Embe
       else await sleep(250);
     }
 
+    let current: EmbedHostSnapshot = host;
     return {
       app,
       dirs,
-      host,
+      get host() {
+        return current;
+      },
+      refreshHost: async () => {
+        current = await app.evaluate(() => {
+          const published = (globalThis as HostGlobals).embedHost!;
+          return {
+            environmentId: published.environmentId,
+            origin: published.origin,
+            mode: published.mode,
+            projectId: published.projectId,
+            workspaceRoot: published.workspaceRoot,
+            flashLogPath: published.flashLogPath,
+          };
+        });
+        return current;
+      },
       guestPage: (urlPart, timeoutMs) => findPage(app, urlPart, timeoutMs),
       hostPage: () => findPage(app, "/renderer/index.html"),
       output: () => output,
@@ -230,6 +273,15 @@ export async function launchEmbedHost(options: LaunchOptions = {}): Promise<Embe
     );
   }
 }
+
+export async function readJsonArray<T>(path: string): Promise<Array<T>> {
+  if (!NodeFS.existsSync(path)) return [];
+  return JSON.parse(await NodeFSP.readFile(path, "utf8")) as Array<T>;
+}
+
+/** The base dir of the server the host is on, where `lecturn auth session issue` writes. */
+export const serverBaseDir = (run: EmbedHostRun): string =>
+  run.host.mode === "user-server" ? run.dirs.lecturnHome : run.dirs.sidecarDir;
 
 /** Polls `probe` until it returns a value; rejects with `label` at the deadline. */
 export async function until<T>(

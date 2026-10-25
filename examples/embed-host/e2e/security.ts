@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetch:off globalTimers:off globalDate:off -- Test harness driving a real Electron app and server; it runs no Effect runtime of its own.
 /**
  * Spec B2 steps 7 and 8, on whichever server the host is using (the sidecar
- * when `--steps 7,8` runs on its own):
+ * when `--steps 7,8` runs on its own, the user server after steps 3-5):
  *
  *   7. Revoke the app as Settings does. Its credential and embed token are
  *      refused, its live lease is gone and its headless process stops, while
@@ -68,13 +68,13 @@ import type { Page } from "playwright-core";
 import { iconDataUrl } from "../src/icon.ts";
 import { ADMIN_SCOPES, issueAdminToken } from "./adminClient.ts";
 import { createEmbedThread, ticketedSocketUrl } from "./embedRpc.ts";
-import { type EmbedHostRun, type HostGlobals, until } from "./harness.ts";
+import { type EmbedHostRun, type HostGlobals, serverBaseDir, until } from "./harness.ts";
 import type { E2eContext } from "./run.ts";
 
-const HOST_APP_ID = AppId.make("dev.example.embedhost");
+export const HOST_APP_ID = AppId.make("dev.example.embedhost");
 const PROBE_APP_ID = AppId.make("dev.example.securityprobe");
 // Settings reads app status (access:read) and changes it (access:write).
-const SETTINGS_SCOPES = [...ADMIN_SCOPES, "access:read"];
+export const SETTINGS_SCOPES = [...ADMIN_SCOPES, "access:read"];
 const TURN_TIMEOUT_MS = 120_000;
 const EMBED_TOKEN_TTL_SECONDS = 300;
 
@@ -112,7 +112,7 @@ async function rpcExit<A, E>(
   );
 }
 
-async function rpc<A, E>(
+export async function rpc<A, E>(
   origin: string,
   token: string,
   label: string,
@@ -137,12 +137,12 @@ function assertRefused(label: string, exit: Exit.Exit<unknown, unknown>) {
   );
 }
 
-const newCommandId = () => CommandId.make(`embed-host-e2e:${NodeCrypto.randomUUID()}`);
+export const newCommandId = () => CommandId.make(`embed-host-e2e:${NodeCrypto.randomUUID()}`);
 
-const dispatch = (origin: string, token: string, command: OrchestrationV2Command) =>
+export const dispatch = (origin: string, token: string, command: OrchestrationV2Command) =>
   rpc(origin, token, command.type, (client) => client[O.dispatchCommand](command));
 
-const projectionOf = (origin: string, token: string, threadId: ThreadId) =>
+export const projectionOf = (origin: string, token: string, threadId: ThreadId) =>
   rpc(origin, token, "getThreadProjection", (client) =>
     client[O.getThreadProjection]({ threadId }),
   ) as Promise<OrchestrationV2ThreadProjection>;
@@ -156,14 +156,14 @@ const shellSnapshot = (client: WsClient) =>
     ),
   );
 
-const appStatus = async (origin: string, settings: string, appId: AppId) => {
+export const appStatus = async (origin: string, settings: string, appId: AppId) => {
   const apps = await rpc(origin, settings, "apps.list", (client) => client[A.appsList]({}));
   const app = apps.find((entry) => entry.appId === appId);
   NodeAssert.ok(app, `${appId} is registered`);
   return app;
 };
 
-const setRuntimeMode = (
+export const setRuntimeMode = (
   origin: string,
   token: string,
   threadId: ThreadId,
@@ -274,7 +274,12 @@ async function pollPairing(origin: string, request: PairingRequest) {
   };
 }
 
-const decide = (origin: string, settings: string, requestId: string, decision: "grant" | "deny") =>
+export const decide = (
+  origin: string,
+  settings: string,
+  requestId: string,
+  decision: "grant" | "deny",
+) =>
   rpc(origin, settings, `apps.decidePairing ${decision}`, (client) =>
     client[A.appsDecidePairing](decodeDecidePairing({ requestId, decision })),
   );
@@ -437,9 +442,9 @@ function isAlive(pid: number): boolean {
 const REVOKE_REPLY = "Counted once before the revoke.";
 
 export async function step7(run: EmbedHostRun, log: E2eContext["log"]): Promise<void> {
-  const { host, dirs } = run;
+  const { host } = run;
   const { origin } = host;
-  const settings = await issueAdminToken(dirs.sidecarDir, SETTINGS_SCOPES);
+  const settings = await issueAdminToken(serverBaseDir(run), SETTINGS_SCOPES);
   const projectId = ProjectId.make(host.projectId);
 
   // A thread with history and a running headless process, and one to delete later.
@@ -572,7 +577,7 @@ const PROBE_REPLY = "Security probe done.";
 export async function step8(run: EmbedHostRun, log: E2eContext["log"]): Promise<void> {
   const { host, dirs } = run;
   const { origin } = host;
-  const settings = await issueAdminToken(dirs.sidecarDir, SETTINGS_SCOPES);
+  const settings = await issueAdminToken(serverBaseDir(run), SETTINGS_SCOPES);
   const hostProject = ProjectId.make(host.projectId);
   const allowedPage = await startFramePage();
   const refusedPage = await startFramePage();
