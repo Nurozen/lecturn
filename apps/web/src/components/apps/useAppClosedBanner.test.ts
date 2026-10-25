@@ -27,6 +27,7 @@ describe("appClosedBanner", () => {
       appClosedBanner({ context: context(), binding, threadId, canOpenApp: true }),
     ).toStrictEqual({
       appId: "dev.rocketwright.desktop",
+      kind: "closed",
       title: "RocketWright closed: live tools unavailable",
       openLabel: "Open in RocketWright",
       openUrl: "rocketwright://open?workspace=%2Fwork%2Fhopper%2038&thread=thread-1",
@@ -47,14 +48,31 @@ describe("appClosedBanner", () => {
     ).toBeNull();
   });
 
-  it.each(["revoked", "denied", "pairing-requested"] as const)(
-    "shows nothing for a %s app, which is not merely closed",
+  it.each(["denied", "pairing-requested"] as const)(
+    "shows nothing for a %s app, which waits on the user's own decision",
     (state) => {
       expect(
         appClosedBanner({ context: context({ state }), binding, threadId, canOpenApp: true }),
       ).toBeNull();
     },
   );
+
+  it("says a revoked app must pair again and opens it to do so, live lease or not", () => {
+    for (const live of [null, { expiresAt: "2026-10-25T12:00:00.000Z" }]) {
+      const banner = appClosedBanner({
+        context: context({ state: "revoked", live }),
+        binding,
+        threadId,
+        canOpenApp: true,
+      });
+      expect(banner).toMatchObject({
+        kind: "revoked",
+        title: "RocketWright access revoked: open it to pair again",
+        openLabel: "Open in RocketWright",
+        openUrl: "rocketwright://open?workspace=%2Fwork%2Fhopper%2038&thread=thread-1",
+      });
+    }
+  });
 
   it("shows nothing for a thread outside an app project", () => {
     expect(

@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProjectId } from "@lecturn/contracts";
+import { AppsError, ProjectId } from "@lecturn/contracts";
 import { assert, it } from "@effect/vitest";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
@@ -21,8 +22,10 @@ import { PullRequestsToolkit } from "../mcp/toolkits/pullRequests/tools.ts";
 import { ThreadToolkit } from "../mcp/toolkits/thread/tools.ts";
 import { WorktreeToolkit } from "../mcp/toolkits/worktree/tools.ts";
 import { AttachmentToolkit } from "../mcp/toolkits/attachment/tools.ts";
+import { EMBED_TOKEN_SCOPES } from "./appAuthorization.ts";
 import { RESERVED_APP_TOOL_PREFIXES } from "./AppRegistryService.ts";
 import { AppLeaseService, AppRegistryService } from "./services.ts";
+import { formatEmbedSubject } from "./subjects.ts";
 import {
   appProject,
   errorCode,
@@ -382,11 +385,19 @@ it.layer(NodeServices.layer)("AppRegistryService", (it) => {
       assert.isFalse(yield* verifies(second));
 
       const third = yield* grant(registry, registration);
+      const embed = yield* sessions.issue({
+        subject: formatEmbedSubject(registration.appId, appProject),
+        method: "bearer-access-token",
+        scopes: EMBED_TOKEN_SCOPES,
+        ttl: Duration.minutes(15),
+        client: { label: "Example", deviceType: "bot" },
+      });
       yield* leases.set(registration.appId, liveLease);
       const revoked = yield* registry.revoke(registration.appId);
       assert.strictEqual(revoked.state, "revoked");
       assert.isNull(revoked.live);
       assert.isFalse(yield* verifies(third));
+      assert.isFalse(yield* verifies(embed.token));
       assert.isTrue(Option.isNone(yield* leases.current(registration.appId)));
       assert.isFalse(yield* registry.isGranted(registration.appId));
 
@@ -416,8 +427,8 @@ it.layer(NodeServices.layer)("AppRegistryService", (it) => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("deletes an app and its credentials", () => {
-    const { layer } = makeLayer();
+  it.effect("deletes an app and its credentials and keeps its threads", () => {
+    const { layer, deletedProjectsOf } = makeLayer();
     return Effect.gen(function* () {
       const registry = yield* AppRegistryService;
       const sessions = yield* SessionStore.SessionStore;
@@ -425,20 +436,62 @@ it.layer(NodeServices.layer)("AppRegistryService", (it) => {
       const events = yield* streamQueue(registry.streamStatus);
       yield* Queue.take(events);
 
-      const withThreads = yield* Effect.exit(
-        registry.delete({ appId: registration.appId, deleteThreads: true }),
-      );
-      assert.isTrue(Exit.isFailure(withThreads));
-      assert.isTrue(yield* registry.isGranted(registration.appId));
-
       yield* registry.delete({ appId: registration.appId, deleteThreads: false });
       assert.deepEqual(yield* Queue.take(events), { type: "remove", appId: registration.appId });
       assert.isTrue(Option.isNone(yield* registry.get(registration.appId)));
       assert.isTrue(Exit.isFailure(yield* Effect.exit(sessions.verify(token))));
+      assert.deepEqual(deletedProjectsOf, []);
       assert.strictEqual(
         errorCode(yield* Effect.exit(registry.revoke(registration.appId))),
         "not-found",
       );
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("revokes an app before deleting its projects and threads", () => {
+    const { layer, deletedProjectsOf } = makeLayer();
+    return Effect.gen(function* () {
+      const registry = yield* AppRegistryService;
+      const sessions = yield* SessionStore.SessionStore;
+      const token = yield* grant(registry, registration);
+      const events = yield* streamQueue(registry.streamStatus);
+      yield* Queue.take(events);
+
+      yield* registry.delete({ appId: registration.appId, deleteThreads: true });
+      const revoked = yield* Queue.take(events);
+      assert.strictEqual(revoked.type === "upsert" ? revoked.app.state : revoked.type, "revoked");
+      assert.deepEqual(yield* Queue.take(events), { type: "remove", appId: registration.appId });
+      assert.deepEqual(deletedProjectsOf, [registration.appId]);
+      assert.isTrue(Option.isNone(yield* registry.get(registration.appId)));
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(sessions.verify(token))));
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("leaves a revoked app to delete again when its threads could not all go", () => {
+    let failures = 1;
+    const { layer, deletedProjectsOf } = makeLayer({
+      deleteAppProjects: () =>
+        failures-- > 0
+          ? Effect.fail(new AppsError({ code: "unavailable", message: "disk full" }))
+          : Effect.void,
+    });
+    return Effect.gen(function* () {
+      const registry = yield* AppRegistryService;
+      const sessions = yield* SessionStore.SessionStore;
+      const token = yield* grant(registry, registration);
+
+      assert.strictEqual(
+        errorCode(
+          yield* Effect.exit(registry.delete({ appId: registration.appId, deleteThreads: true })),
+        ),
+        "unavailable",
+      );
+      assert.strictEqual(yield* stateOf(registry), "revoked");
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(sessions.verify(token))));
+
+      yield* registry.delete({ appId: registration.appId, deleteThreads: true });
+      assert.deepEqual(deletedProjectsOf, [registration.appId]);
+      assert.isTrue(Option.isNone(yield* registry.get(registration.appId)));
     }).pipe(Effect.provide(layer));
   });
 });

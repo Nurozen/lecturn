@@ -12,6 +12,11 @@
  *      awaiting-approval → running → idle, and every call carries the right
  *      `lecturn/context`. Then the same flash in Full access and in Auto runs
  *      with no approval card.
+ *   7. Revoke and re-pair (security.ts).
+ *   8. The trust boundary: refusals over RPC, the shell stream and MCP,
+ *      framing, and re-approval of a changed command (security.ts).
+ *
+ * Step 7 runs after step 8: it leaves the host without a credential.
  */
 import * as NodeAssert from "node:assert/strict";
 import * as NodeFS from "node:fs";
@@ -26,6 +31,7 @@ import type { CounterCall } from "../tools/counter-mcp.ts";
 import { adminClient, issueAdminToken } from "./adminClient.ts";
 import { createEmbedThread } from "./embedRpc.ts";
 import { embedPage } from "./embedPage.ts";
+import { step7, step8 } from "./security.ts";
 import {
   type EmbedHostGlobal,
   type EmbedHostRun,
@@ -37,7 +43,7 @@ import type { E2eContext } from "./run.ts";
 
 const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 const SCRIPTS_FILE = NodePath.join(here, "scripts", "b2-steps-1-2.scripted.json");
-export const AUTOMATED_STEPS: ReadonlyArray<number> = [1, 2];
+export const AUTOMATED_STEPS: ReadonlyArray<number> = [1, 2, 7, 8];
 
 const TURN_TIMEOUT_MS = 120_000;
 const CARD_TIMEOUT_MS = 30_000;
@@ -285,6 +291,8 @@ export default async function scenario({
     // Every later step runs on the host step 1 starts.
     await step1(run, log);
     if (steps.includes(2)) await step2(run, log);
+    if (steps.includes(8)) await step8(run, log);
+    if (steps.includes(7)) await step7(run, log);
   } catch (error) {
     log(`--- embed-host output ---\n${run.output()}`);
     throw error;

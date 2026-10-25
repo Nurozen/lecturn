@@ -355,6 +355,7 @@ const registryLayer = () => {
     createEmbedThread: () => Effect.die("unused"),
     setEmbedDefaultModel: () => Effect.die("unused"),
     markThreadsCopied: () => Effect.die("unused"),
+    deleteAppProjects: () => Effect.die("unused"),
   });
   const sessions = SessionStore.layer.pipe(
     Layer.provide(ServerSecretStore.layer),

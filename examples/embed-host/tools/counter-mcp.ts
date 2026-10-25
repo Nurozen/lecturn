@@ -6,7 +6,8 @@
  * `counter_read` reads it and has no card, so its tool row stands alone.
  *
  * Every increment's `_meta` is appended to `<root>/.embed-host/counter-calls.json`
- * so tests can check the context Lecturn sent with it.
+ * so tests can check the context Lecturn sent with it, and every served process
+ * appends its pid to `counter-processes.json` so they can tell when it stops.
  *
  * `--list-tools` prints the `tools/list` result and exits. It takes no state,
  * so Lecturn can refresh definitions while another process owns the root.
@@ -133,8 +134,17 @@ function makeCounter(root: string) {
   return { read, increment };
 }
 
+async function recordProcess(root: string): Promise<void> {
+  const stateDir = NodePath.join(root, ".embed-host");
+  const path = NodePath.join(stateDir, "counter-processes.json");
+  await NodeFSP.mkdir(stateDir, { recursive: true });
+  const pids = await readJson<Array<number>>(path, []);
+  await writeJson(path, [...pids, process.pid]);
+}
+
 function serve(root: string) {
   const counter = makeCounter(root);
+  void recordProcess(root).catch(() => undefined);
 
   const answer = async (method: unknown, params: Record<string, unknown>) => {
     switch (method) {
