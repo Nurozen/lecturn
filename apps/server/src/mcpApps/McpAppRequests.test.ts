@@ -34,7 +34,10 @@ const deepParent = (id: ThreadId): ThreadId | null => {
   return depth === 1 ? threadId : deepForkId(depth - 1);
 };
 
-const appItem = (output: unknown): OrchestrationV2TurnItem => ({
+const appItem = (
+  output: unknown,
+  overrides: Partial<{ toolName: string; providerThreadId: ProviderThreadId | null }> = {},
+): OrchestrationV2TurnItem => ({
   id: itemId,
   threadId,
   runId: null,
@@ -53,6 +56,7 @@ const appItem = (output: unknown): OrchestrationV2TurnItem => ({
   toolName: "weather.get_weather",
   input: {},
   output,
+  ...overrides,
 });
 
 const app = {
@@ -272,5 +276,45 @@ describe("McpAppRequests", () => {
         "provider-unsupported",
       );
     }),
+  );
+
+  it.effect("keeps connected-app cards off the provider session", () =>
+    Effect.gen(function* () {
+      const requests = yield* McpAppRequests.McpAppRequests;
+      const before = calls.length;
+      const input = { threadId, itemId };
+      assert.equal(
+        yield* reason(requests.readResource({ ...input, uri: "ui://ex/card" })),
+        "request-failed",
+      );
+      assert.equal(
+        yield* reason(requests.callTool({ ...input, name: "ex_counter", arguments: {} })),
+        "request-failed",
+      );
+      assert.equal(calls.length, before);
+      yield* requests.updateModelContext({
+        ...input,
+        conversationThreadId: threadId,
+        content: [{ type: "text", text: "Counter at 3" }],
+      });
+      assert.equal(storedContext.get(`${threadId}/${itemId}`), "Counter at 3");
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          item: appItem(
+            {
+              lecturnMcpApp: {
+                ...app,
+                server: "lecturn",
+                tool: "ex_counter",
+                resourceUri: "ui://ex/card",
+              },
+            },
+            { toolName: "mcp__lecturn__ex_counter", providerThreadId: null },
+          ),
+          mcpApps,
+        }),
+      ),
+    ),
   );
 });
