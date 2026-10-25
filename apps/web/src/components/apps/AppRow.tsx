@@ -113,7 +113,10 @@ export function AppRow({
         </AppRowAction>
       ) : null}
       {openUrl ? (
-        <AppRowAction label={`Open in ${presentation.name}`} onClick={() => openAppUrl(openUrl)}>
+        <AppRowAction
+          label={`Open in ${presentation.name}`}
+          onClick={() => openAppUrl(openUrl, presentation.openUrlTemplate)}
+        >
           <ExternalLinkIcon aria-hidden />
         </AppRowAction>
       ) : null}

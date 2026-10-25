@@ -4,6 +4,7 @@ import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@lecturn
 import type { Project, Thread } from "../types";
 import { makeThreadFixture } from "../test-fixtures";
 import {
+  buildAppsPaletteItems,
   buildBrowseGroups,
   buildCommandPaletteProjectMetadata,
   buildCommandPaletteRows,
@@ -960,5 +961,78 @@ describe("virtualized command palette rows", () => {
     expect(findHighlightedCommandPaletteItem(groups, "thread-b")?.value).toBe("thread-b");
     expect(findHighlightedCommandPaletteItem(groups, "offline")).toBeNull();
     expect(findHighlightedCommandPaletteItem(groups, null)).toBeNull();
+  });
+});
+
+describe("buildAppsPaletteItems", () => {
+  const icons = { projects: "projects-icon", apps: "apps-icon", appsAddon: "apps-addon" };
+  const apps = [
+    { appId: "com.example.rocket", name: "RocketWright", icon: "rocket-icon", status: "Running" },
+    { appId: "com.example.atlas", name: "Atlas", icon: "atlas-icon", status: null },
+  ];
+
+  it("offers the mode that is not showing, bound to the toggle shortcut", async () => {
+    const showSidebarMode = vi.fn();
+    const inProjects = buildAppsPaletteItems({
+      sidebarMode: "projects",
+      apps,
+      icons,
+      showSidebarMode,
+    });
+    const inApps = buildAppsPaletteItems({ sidebarMode: "apps", apps, icons, showSidebarMode });
+
+    expect(inProjects.actions[0]).toMatchObject({
+      title: "Switch sidebar to Apps",
+      shortcutCommand: "sidebar.toggleApps",
+    });
+    expect(inApps.actions[0]).toMatchObject({ title: "Switch sidebar to Projects" });
+    const switchToProjects = inApps.actions[0];
+    if (switchToProjects?.kind !== "action") throw new Error("expected an action");
+    await switchToProjects.run();
+    expect(showSidebarMode).toHaveBeenCalledWith({ mode: "projects" });
+  });
+
+  it("opens one app in the Apps sidebar from Open app…", async () => {
+    const showSidebarMode = vi.fn();
+    const { actions, openAppItems } = buildAppsPaletteItems({
+      sidebarMode: "projects",
+      apps,
+      icons,
+      showSidebarMode,
+    });
+    const openApp = actions[1];
+
+    expect(openApp).toMatchObject({ kind: "submenu", title: "Open app…" });
+    if (openApp?.kind !== "submenu") throw new Error("expected a submenu");
+    expect(openApp.groups[0]?.items).toBe(openAppItems);
+    expect(openAppItems.map((item) => [item.title, item.description])).toEqual([
+      ["RocketWright", "Running"],
+      ["Atlas", undefined],
+    ]);
+    // Searching the root list for an app's name finds Open app….
+    expect(openApp.searchTerms).toContain("Atlas");
+    await openAppItems[1]!.run();
+    expect(showSidebarMode).toHaveBeenCalledWith({ mode: "apps", appId: "com.example.atlas" });
+  });
+
+  it("leaves Open app… out until an app is connected", () => {
+    const { actions, openAppItems } = buildAppsPaletteItems({
+      sidebarMode: "projects",
+      apps: [],
+      icons,
+      showSidebarMode: vi.fn(),
+    });
+
+    expect(actions.map((action) => action.title)).toEqual(["Switch sidebar to Apps"]);
+    expect(openAppItems).toEqual([]);
+  });
+
+  it("opens straight into the app list when asked to", () => {
+    const state = reduceCommandPaletteUiState(
+      { open: false, mode: "files", openIntent: null },
+      { _tag: "OpenApp" },
+    );
+
+    expect(state).toEqual({ open: true, mode: "command", openIntent: { kind: "open-app" } });
   });
 });

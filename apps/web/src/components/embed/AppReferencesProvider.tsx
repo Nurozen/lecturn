@@ -46,7 +46,7 @@ export function AppReferencesProvider({
                     threadId,
                     ref,
                   });
-                  if (url !== null) openAppUrl(url);
+                  if (url !== null) openAppUrl(url, template);
                 },
         };
   return <AppReferencesContext value={value}>{children}</AppReferencesContext>;

@@ -1,3 +1,4 @@
+import { scopedThreadKey, scopeThreadRef } from "@lecturn/client-runtime/environment";
 import { appGroups } from "@lecturn/client-runtime/state/app-projects";
 import type {
   EnvironmentProject,
@@ -291,4 +292,62 @@ export function isAppTreeGroupCollapsed(
     collapsedByKey[appTreeGroupKey(group)] ??
     (group.kind === "section" && group.section === "settled")
   );
+}
+
+export const APP_SECTION_ORDER = ["pinned", "active", "settled"] as const satisfies ReadonlyArray<
+  keyof AppsSidebarSections
+>;
+
+/**
+ * The thread rows Apps mode shows, top to bottom, so jump and next/previous shortcuts walk what
+ * the user sees. Folded apps, workspaces and sections hide their rows.
+ */
+export function appsSidebarVisibleThreads(input: {
+  readonly apps: ReadonlyArray<AppsSidebarApp>;
+  readonly selected: AppsSidebarApp | null;
+  readonly collapsedByKey: Readonly<Record<string, boolean>>;
+}): ReadonlyArray<EnvironmentThreadShell> {
+  const folded = (group: AppTreeGroup) => isAppTreeGroupCollapsed(input.collapsedByKey, group);
+  const shown =
+    input.selected === null
+      ? input.apps.filter((app) => !folded({ kind: "app", appId: app.appId }))
+      : [input.selected];
+  return shown.flatMap((app) =>
+    app.workspaces.flatMap((workspace) =>
+      folded({ kind: "workspace", workspaceKey: workspace.key })
+        ? []
+        : APP_SECTION_ORDER.flatMap((section) =>
+            folded({ kind: "section", section, workspaceKey: workspace.key })
+              ? []
+              : workspace.sections[section],
+          ),
+    ),
+  );
+}
+
+/**
+ * Where the sidebar's New thread lands in Apps mode: the open app thread's workspace when it
+ * belongs to the apps in view, otherwise the workspace of those apps the user touched last.
+ */
+export function appsNewThreadWorkspace(input: {
+  readonly apps: ReadonlyArray<AppsSidebarApp>;
+  readonly selected: AppsSidebarApp | null;
+  readonly activeThreadKey: string | null;
+}): AppsSidebarWorkspace | null {
+  const workspaces = (input.selected === null ? input.apps : [input.selected]).flatMap(
+    (app) => app.workspaces,
+  );
+  const active =
+    input.activeThreadKey === null
+      ? undefined
+      : workspaces.find((workspace) =>
+          APP_SECTION_ORDER.some((section) =>
+            workspace.sections[section].some(
+              (thread) =>
+                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) ===
+                input.activeThreadKey,
+            ),
+          ),
+        );
+  return active ?? appTargetWorkspace({ workspaces });
 }

@@ -43,6 +43,7 @@ import { Route as EmbedEnvironmentIdProjectIdRouteImport } from './routes/embed.
 import { Route as DecisionsFundingApproveRouteImport } from './routes/decisions.funding.approve'
 import { Route as DecisionsEnvironmentIdProjectIdRouteImport } from './routes/decisions.$environmentId.$projectId'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
+import { Route as ChatAppsAppIdRouteImport } from './routes/_chat.apps.$appId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 import { Route as EmbedEnvironmentIdProjectIdProvidersRouteImport } from './routes/embed.$environmentId.$projectId.providers'
 import { Route as EmbedEnvironmentIdProjectIdThreadIdRouteImport } from './routes/embed.$environmentId.$projectId.$threadId'
@@ -221,6 +222,11 @@ const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
   path: '/draft/$draftId',
   getParentRoute: () => ChatRoute,
 } as any)
+const ChatAppsAppIdRoute = ChatAppsAppIdRouteImport.update({
+  id: '/apps/$appId',
+  path: '/apps/$appId',
+  getParentRoute: () => ChatRoute,
+} as any)
 const ChatEnvironmentIdThreadIdRoute =
   ChatEnvironmentIdThreadIdRouteImport.update({
     id: '/$environmentId/$threadId',
@@ -276,6 +282,7 @@ export interface FileRoutesByFullPath {
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/settings/storage': typeof SettingsStorageRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
+  '/apps/$appId': typeof ChatAppsAppIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
   '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
@@ -315,6 +322,7 @@ export interface FileRoutesByTo {
   '/settings/storage': typeof SettingsStorageRoute
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
+  '/apps/$appId': typeof ChatAppsAppIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
   '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
@@ -356,6 +364,7 @@ export interface FileRoutesById {
   '/settings/storage': typeof SettingsStorageRoute
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
+  '/_chat/apps/$appId': typeof ChatAppsAppIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
   '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
@@ -397,6 +406,7 @@ export interface FileRouteTypes {
     | '/settings/source-control'
     | '/settings/storage'
     | '/$environmentId/$threadId'
+    | '/apps/$appId'
     | '/draft/$draftId'
     | '/decisions/$environmentId/$projectId'
     | '/decisions/funding/approve'
@@ -436,6 +446,7 @@ export interface FileRouteTypes {
     | '/settings/storage'
     | '/'
     | '/$environmentId/$threadId'
+    | '/apps/$appId'
     | '/draft/$draftId'
     | '/decisions/$environmentId/$projectId'
     | '/decisions/funding/approve'
@@ -476,6 +487,7 @@ export interface FileRouteTypes {
     | '/settings/storage'
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
+    | '/_chat/apps/$appId'
     | '/_chat/draft/$draftId'
     | '/decisions/$environmentId/$projectId'
     | '/decisions/funding/approve'
@@ -743,6 +755,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatDraftDraftIdRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/_chat/apps/$appId': {
+      id: '/_chat/apps/$appId'
+      path: '/apps/$appId'
+      fullPath: '/apps/$appId'
+      preLoaderRoute: typeof ChatAppsAppIdRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/$environmentId/$threadId': {
       id: '/_chat/$environmentId/$threadId'
       path: '/$environmentId/$threadId'
@@ -779,6 +798,7 @@ interface ChatRouteChildren {
   ChatPullRequestsRoute: typeof ChatPullRequestsRoute
   ChatIndexRoute: typeof ChatIndexRoute
   ChatEnvironmentIdThreadIdRoute: typeof ChatEnvironmentIdThreadIdRoute
+  ChatAppsAppIdRoute: typeof ChatAppsAppIdRoute
   ChatDraftDraftIdRoute: typeof ChatDraftDraftIdRoute
   ChatSagasEnvironmentIdProjectIdRoute: typeof ChatSagasEnvironmentIdProjectIdRoute
 }
@@ -788,6 +808,7 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatPullRequestsRoute: ChatPullRequestsRoute,
   ChatIndexRoute: ChatIndexRoute,
   ChatEnvironmentIdThreadIdRoute: ChatEnvironmentIdThreadIdRoute,
+  ChatAppsAppIdRoute: ChatAppsAppIdRoute,
   ChatDraftDraftIdRoute: ChatDraftDraftIdRoute,
   ChatSagasEnvironmentIdProjectIdRoute: ChatSagasEnvironmentIdProjectIdRoute,
 }

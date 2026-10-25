@@ -58,6 +58,8 @@ export class ElectronShell extends Context.Service<
   ElectronShell,
   {
     readonly openExternal: (rawUrl: unknown) => Effect.Effect<boolean>;
+    /** Opens a connected app's URL; `ipc/methods/apps.ts` checks it against the app's scheme. */
+    readonly openAppUrl: (url: string) => Effect.Effect<boolean>;
     readonly openSystemSettings: (pane: SystemSettingsPane) => Effect.Effect<boolean>;
     readonly copyText: (text: string) => Effect.Effect<void>;
   }
@@ -76,6 +78,13 @@ export const make = ElectronShell.of({
           ),
         ),
     }),
+  openAppUrl: (url) =>
+    Effect.promise(() =>
+      Electron.shell.openExternal(url).then(
+        () => true,
+        () => false,
+      ),
+    ),
   openSystemSettings: (pane) =>
     Effect.promise(() =>
       Electron.shell.openExternal(MAC_PERMISSION_SETTINGS_URLS[pane]).then(

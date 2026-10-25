@@ -72,7 +72,12 @@ export function AppHeader({
           </Button>
         ) : null}
         {openUrl ? (
-          <Button type="button" size="xs" variant="ghost" onClick={() => openAppUrl(openUrl)}>
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            onClick={() => openAppUrl(openUrl, presentation.openUrlTemplate)}
+          >
             Open in {presentation.name}
             <ExternalLinkIcon aria-hidden />
           </Button>

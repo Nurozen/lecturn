@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { appLinkFromPath, appLinkPath, appLinkPathFromUrl, parseAppDeepLink } from "./appLinks.ts";
+import {
+  appLinkFromPath,
+  appLinkPath,
+  appLinkPathFromUrl,
+  parseAppDeepLink,
+  parseAppsSidebarSearch,
+} from "./appLinks.ts";
 
 describe("parseAppDeepLink", () => {
   it("reads the app and optional thread", () => {
@@ -72,5 +78,40 @@ describe("app link paths", () => {
       expect(path).not.toBeNull();
       expect(appLinkFromPath(path ?? "")).toBe(link);
     }
+  });
+});
+
+describe("parseAppsSidebarSearch", () => {
+  it("reads the mode and the app to select", () => {
+    expect(parseAppsSidebarSearch("?sidebar=apps&app=com.rw")).toEqual({
+      mode: "apps",
+      appId: "com.rw",
+    });
+    expect(parseAppsSidebarSearch("?sidebar=apps")).toEqual({ mode: "apps", appId: null });
+    expect(parseAppsSidebarSearch("?sidebar=projects&app=com.rw")).toEqual({
+      mode: "projects",
+      appId: null,
+    });
+  });
+
+  it("ignores queries without a known mode and drops invalid app ids", () => {
+    expect(parseAppsSidebarSearch("")).toBeNull();
+    expect(parseAppsSidebarSearch("?app=com.rw")).toBeNull();
+    expect(parseAppsSidebarSearch("?sidebar=settings")).toBeNull();
+    expect(parseAppsSidebarSearch("?sidebar=apps&app=Not%20An%20App")).toEqual({
+      mode: "apps",
+      appId: null,
+    });
+  });
+
+  it("reads the query a thread deep link opens", () => {
+    const path = appLinkPath({
+      appId: "com.rw",
+      thread: { environmentId: "env-1", threadId: "thread-1" },
+    });
+    expect(parseAppsSidebarSearch(new URL(path, "https://app.invalid").search)).toEqual({
+      mode: "apps",
+      appId: "com.rw",
+    });
   });
 });

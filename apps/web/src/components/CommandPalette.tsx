@@ -80,6 +80,7 @@ import {
   GitForkIcon,
   ImportIcon,
   LayersIcon,
+  LayoutGridIcon,
   MessageSquareDashedIcon,
   LinkIcon,
   MessageSquareIcon,
@@ -222,6 +223,8 @@ import { useConnectAccountPaletteItems } from "./clerk/useConnectAccountPaletteI
 import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sidebar.logic";
 import { withoutArchivedStaveProjectThreads } from "./stave/listedProjects.logic";
 import { useListedProjects } from "./stave/useListedProjects";
+import { AppThreadBadge } from "./apps/AppThreadBadge";
+import { useAppsPaletteItems } from "./apps/useAppsPaletteItems";
 import { namedSnapshotsPerAccount, useSidebarSegmentation } from "./sidebar/accountProjectGroups";
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { CommandPaletteContent } from "./CommandPaletteContent";
@@ -663,6 +666,8 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           openImportSession(detail.projectRef);
         } else if (detail.open === "new-thread-in") {
           openNewThreadIn();
+        } else if (detail.open === "open-app") {
+          dispatch({ _tag: "OpenApp" });
         } else if (detail.open === "add-project") {
           openAddProject();
         } else if (detail.query !== undefined) {
@@ -810,6 +815,7 @@ function OpenCommandPaletteDialog(props: {
   // Pickers and thread lists leave out archived Stave spaces; they come back
   // through New project → Stave. Path lookups (add, import) keep every project.
   const { projects: listedProjects, archivedProjectKeys } = useListedProjects();
+  const appsPalette = useAppsPaletteItems();
   const decisionConfigs = useServerConfigs();
   const contextualTargetEnvironment =
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
@@ -1362,6 +1368,9 @@ function OpenCommandPaletteDialog(props: {
           settled={thread.settledOverride === "settled"}
         />
         <ThreadRowTrailingStatus thread={thread} />
+        <AppThreadBadge
+          project={projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null}
+        />
       </>
     ),
     renderDescription: (thread, { projectTitle }) => {
@@ -2344,6 +2353,7 @@ function OpenCommandPaletteDialog(props: {
   // The parent pushes an intent into this mounted dialog; applying it clears the
   // parent's intent and may navigate, so it runs after commit but before paint.
   const projectThreadItemCount = projectThreadItems.length;
+  const openAppItemCount = appsPalette.openAppItems.length;
   const applyOpenIntent = useEffectEvent((intent: CommandPaletteOpenIntent) => {
     switch (intent.kind) {
       case "search":
@@ -2373,6 +2383,17 @@ function OpenCommandPaletteDialog(props: {
           groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
         });
         return;
+      case "open-app":
+        clearOpenIntent();
+        browseNavigation.invalidate();
+        setAddProjectCloneFlow(null);
+        setNewProjectFlow(null);
+        setViewStack([]);
+        pushPaletteView({
+          addonIcon: <LayoutGridIcon className={ADDON_ICON_CLASS} />,
+          groups: [{ value: "apps", label: "Apps", items: appsPalette.openAppItems }],
+        });
+        return;
       case "import-session":
         clearOpenIntent();
         setAddProjectCloneFlow(null);
@@ -2398,9 +2419,10 @@ function OpenCommandPaletteDialog(props: {
     if (openIntent === null) return;
     // A new-thread-in intent waits until the project items exist.
     if (openIntent.kind === "new-thread-in" && projectThreadItemCount === 0) return;
+    if (openIntent.kind === "open-app" && openAppItemCount === 0) return;
     // oxlint-disable-next-line react/set-state-in-effect -- applying the intent dispatches to the parent reducer and can navigate, neither of which may run during render.
     applyOpenIntent(openIntent);
-  }, [openIntent, projectThreadItemCount]);
+  }, [openIntent, openAppItemCount, projectThreadItemCount]);
 
   actionItems.push({
     kind: "action",
@@ -2417,6 +2439,8 @@ function OpenCommandPaletteDialog(props: {
       });
     },
   });
+
+  actionItems.push(...appsPalette.actions);
 
   if (
     environments.some(

@@ -22,6 +22,8 @@ import { AppRow } from "./AppRow";
 import { AppsGroup } from "./AppsGroup";
 import { AppsModeSwitch } from "./AppsModeSwitch";
 import {
+  appsNewThreadWorkspace,
+  appsSidebarVisibleThreads,
   appTreeGroupKey,
   isAppTreeGroupCollapsed,
   resolveAppsSidebarScope,
@@ -30,6 +32,10 @@ import {
 } from "./AppsSidebar.logic";
 import { AppWorkspaceTree, type AppThreadSupport, type AppTreeContext } from "./AppWorkspaceTree";
 import { useAppsSidebarApps } from "./useAppsSidebarApps";
+import {
+  useAppsSidebarThreadJumps,
+  usePublishAppsNewThreadTarget,
+} from "./useAppsSidebarShortcuts";
 import { useAppThreadActions } from "./useAppThreadActions";
 
 // One object per combination keeps memoized rows from re-rendering on every tree render.
@@ -114,6 +120,13 @@ export function AppsSidebar() {
   const routeThreadRef = resolveActiveThreadRouteRef(routeTarget, routeDraftThread);
 
   const selected = resolveAppsSidebarScope(apps, scopeKey);
+  const activeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
+  const jumpLabelByKey = useAppsSidebarThreadJumps({
+    threads: appsSidebarVisibleThreads({ apps, selected, collapsedByKey }),
+    routeThreadRef,
+    open: actions.open,
+  });
+  usePublishAppsNewThreadTarget(appsNewThreadWorkspace({ apps, selected, activeThreadKey }));
   const selectApp = (appId: string | null) => {
     clearSelection();
     setScopeKey(appId);
@@ -122,7 +135,8 @@ export function AppsSidebar() {
     collapsedByKey,
     onToggle: (group: AppTreeGroup) =>
       setCollapsed(appTreeGroupKey(group), !isAppTreeGroupCollapsed(collapsedByKey, group)),
-    activeThreadKey: routeThreadRef ? scopedThreadKey(routeThreadRef) : null,
+    activeThreadKey,
+    jumpLabelByKey,
     actions,
     supports: (environmentId: EnvironmentId) => {
       const capabilities = serverConfigs.get(environmentId)?.environment.capabilities;

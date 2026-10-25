@@ -284,6 +284,8 @@ import {
 } from "./stave/listedProjects.logic";
 import { useListedProjects } from "./stave/useListedProjects";
 import { AppThreadBadge } from "./apps/AppThreadBadge";
+import { useAppsNewThreadTarget } from "./apps/useAppsSidebarShortcuts";
+import { JumpHintBadge } from "./sidebar/JumpHintBadge";
 import { AppsModeSwitch } from "./apps/AppsModeSwitch";
 import { AppsSidebar } from "./apps/AppsSidebar";
 import { sagaSidebarThreadOrder } from "./stave/staveSaga.logic";
@@ -430,17 +432,6 @@ function RelativeTimeLabel(props: { timestamp: string | null }) {
 
 function threadTimeTimestamp(thread: SidebarThreadSummary): string {
   return thread.latestUserMessageAt ?? thread.updatedAt;
-}
-
-function JumpHintBadge(props: { label: string }) {
-  return (
-    <span
-      aria-hidden
-      className="pointer-events-none absolute right-1.5 top-1/2 z-10 inline-flex h-5 -translate-y-1/2 items-center rounded-full border border-border/80 bg-background/95 px-1.5 font-mono text-3xs font-medium tracking-tight text-foreground shadow-sm"
-    >
-      {props.label}
-    </span>
-  );
 }
 
 function terminalProcessLabel(count: number): string {
@@ -2451,6 +2442,7 @@ export default function Sidebar() {
   const { projects, archivedProjectKeys, appProjectKeys } = useListedProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const sidebarMode = useUiStateStore((store) => store.sidebarMode);
+  const appsNewThreadTarget = useAppsNewThreadTarget((state) => state.target);
   const threads = useThreadShells();
   const reservedThreadOrderKeys = {
     pinned: new Map(
@@ -4157,6 +4149,7 @@ export default function Sidebar() {
   );
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (sidebarMode === "apps") return; // AppsSidebar walks its own rows.
       if (event.defaultPrevented || event.repeat || isCommandPaletteOpen() || isModelPickerOpen()) {
         return;
       }
@@ -4202,6 +4195,7 @@ export default function Sidebar() {
     orderedThreadKeys,
     routeTerminalOpen,
     routeThreadKey,
+    sidebarMode,
     threadByKey,
   ]);
 
@@ -4226,6 +4220,11 @@ export default function Sidebar() {
   }, [shouldShowJumpHintsNow, updateThreadJumpHintsVisibility]);
 
   const handleNewThreadClick = (event?: ReactMouseEvent) => {
+    if (sidebarMode === "apps") {
+      if (isMobile) setOpenMobile(false);
+      if (appsNewThreadTarget !== null) void newThreadContext.handleNewThread(appsNewThreadTarget);
+      return;
+    }
     if (shouldCreateNewThreadInCurrentProject(event?.shiftKey ?? false, projectGroups.length)) {
       if (isMobile) setOpenMobile(false);
       void startNewThreadFromContext({
@@ -4382,10 +4381,12 @@ export default function Sidebar() {
               }
               onScopeAdd={openAddProjectCommandPalette}
               onNewThread={handleNewThreadClick}
-              newThreadDisabled={projects.length === 0}
+              newThreadDisabled={
+                sidebarMode === "apps" ? appsNewThreadTarget === null : projects.length === 0
+              }
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
-              showNewThreadInProjectHint={projectGroups.length > 1}
+              showNewThreadInProjectHint={sidebarMode === "projects" && projectGroups.length > 1}
               searchInputRef={threadSearchInputRef}
               searchQuery={threadSearchQuery}
               onSearchQueryChange={(value) => {

@@ -21,11 +21,13 @@ import {
 import { cn } from "~/lib/utils";
 import { useEnvironmentScope } from "../../state/session";
 import { resolveThreadStatusPill, type ThreadStatusPill } from "../Sidebar.logic";
+import { JumpHintBadge } from "../sidebar/JumpHintBadge";
 import { SidebarHierarchyPanel } from "../sidebar/SidebarHierarchyPanel";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AppSectionHeading } from "./AppSectionHeading";
 import {
+  APP_SECTION_ORDER,
   isAppTreeGroupCollapsed,
   type AppsSidebarApp,
   type AppsSidebarSections,
@@ -43,14 +45,12 @@ export interface AppTreeContext {
   readonly collapsedByKey: Readonly<Record<string, boolean>>;
   readonly onToggle: (group: AppTreeGroup) => void;
   readonly activeThreadKey: string | null;
+  /** Jump shortcut labels while the jump modifier is held; null hides them. */
+  readonly jumpLabelByKey: ReadonlyMap<string, string> | null;
   readonly actions: AppThreadActions;
   readonly supports: (environmentId: EnvironmentId) => AppThreadSupport;
   readonly onNewThread: (projectRef: ScopedProjectRef) => void;
 }
-
-const SECTION_ORDER = ["pinned", "active", "settled"] as const satisfies ReadonlyArray<
-  keyof AppsSidebarSections
->;
 
 // Static on purpose: Apps mode schedules no frames while idle.
 function StatusDot({ status }: { readonly status: ThreadStatusPill }) {
@@ -93,7 +93,7 @@ function AppWorkspaceBranch({
   const group = { kind: "workspace", workspaceKey: workspace.key } as const;
   const collapsed = isAppTreeGroupCollapsed(context.collapsedByKey, group);
   const { project } = workspace;
-  const sections = SECTION_ORDER.filter((section) => workspace.sections[section].length > 0);
+  const sections = APP_SECTION_ORDER.filter((section) => workspace.sections[section].length > 0);
   return (
     <li className="lecturn-hierarchy-branch list-none" data-testid="app-workspace">
       <div
@@ -193,6 +193,7 @@ function AppSection({
                 key={threadKey}
                 thread={thread}
                 isActive={context.activeThreadKey === threadKey}
+                jumpLabel={context.jumpLabelByKey?.get(threadKey) ?? null}
                 isRenaming={context.actions.renamingThreadKey === threadKey}
                 actions={context.actions}
                 supports={context.supports(thread.environmentId)}
@@ -208,12 +209,14 @@ function AppSection({
 const AppThreadRow = memo(function AppThreadRow({
   thread,
   isActive,
+  jumpLabel,
   isRenaming,
   actions,
   supports,
 }: {
   readonly thread: EnvironmentThreadShell;
   readonly isActive: boolean;
+  readonly jumpLabel: string | null;
   readonly isRenaming: boolean;
   readonly actions: AppThreadActions;
   readonly supports: AppThreadSupport;
@@ -345,6 +348,7 @@ const AppThreadRow = memo(function AppThreadRow({
             </MenuPopup>
           </Menu>
         ) : null}
+        {jumpLabel ? <JumpHintBadge label={jumpLabel} /> : null}
       </div>
     </li>
   );
