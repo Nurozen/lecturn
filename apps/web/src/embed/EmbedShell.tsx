@@ -2,7 +2,7 @@ import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import type { EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
 import { useEffect } from "react";
 
-import { EmbedView } from "../components/embed/EmbedView";
+import { type EmbedPanel, EmbedView } from "../components/embed/EmbedView";
 import { AnchoredToastProvider, ToastProvider } from "../components/ui/toast";
 import { startEmbedBridge } from "./bridge";
 import { readEmbedSwitcherVisible } from "./embedAuth";
@@ -18,10 +18,12 @@ export function EmbedShell({
   environmentId,
   projectId,
   threadId,
+  panel,
 }: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
   readonly threadId: ThreadId | null;
+  readonly panel: EmbedPanel | null;
 }) {
   const presentation = { projectRef: scopeProjectRef(environmentId, projectId) };
   useEffect(() => installEmbedTheme(startEmbedBridge()), []);
@@ -33,6 +35,7 @@ export function EmbedShell({
             environmentId={environmentId}
             projectId={projectId}
             threadId={threadId}
+            panel={panel}
             switcher={readEmbedSwitcherVisible()}
           />
         </EmbedPresentationContext>

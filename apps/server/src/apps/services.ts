@@ -19,6 +19,7 @@ import type {
   AppPairingRequestId,
   AppRegistration,
   AppsCreateEmbedThreadInput,
+  AppsSetEmbedDefaultModelInput,
   AppsDecidePairingInput,
   AppsDeleteInput,
   AppSidecarBootstrap,
@@ -196,6 +197,10 @@ export class AppProjectService extends Context.Service<
       subject: AppSubject,
       input: AppsCreateEmbedThreadInput,
     ) => Effect.Effect<{ readonly threadId: ThreadId }, AppsFailure>;
+    readonly setEmbedDefaultModel: (
+      subject: AppSubject,
+      input: AppsSetEmbedDefaultModelInput,
+    ) => Effect.Effect<void, AppsFailure>;
     readonly markThreadsCopied: (
       appId: AppId,
       input: AppsMarkThreadsCopiedInput,

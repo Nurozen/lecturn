@@ -130,6 +130,7 @@ export const APPS_WS_METHODS = {
   appsDelete: "apps.delete",
   appsSubscribeEmbedContext: "apps.subscribeEmbedContext",
   appsCreateEmbedThread: "apps.createEmbedThread",
+  appsSetEmbedDefaultModel: "apps.setEmbedDefaultModel",
   appsEnsureWorkspace: "apps.ensureWorkspace",
   appsSetLiveLease: "apps.setLiveLease",
   appsClearLiveLease: "apps.clearLiveLease",

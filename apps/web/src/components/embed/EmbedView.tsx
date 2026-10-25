@@ -1,7 +1,7 @@
 import { deriveEmbedTurnState } from "@lecturn/client-runtime/embed/guest";
 import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
 import type { EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
-import { useNavigate, useRouter } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { ComposerHandleContext } from "../../composerHandleContext";
@@ -18,6 +18,7 @@ import ChatView from "../ChatView";
 import type { ChatComposerHandle } from "../chat/ChatComposer";
 import { toastManager } from "../ui/toast";
 import { AppReferencesContext } from "./AppReferencesContext";
+import { EmbedProvidersPanel } from "./EmbedProvidersPanel";
 import { EmbedThreadSwitcher } from "./EmbedThreadSwitcher";
 
 /**
@@ -47,16 +48,21 @@ function EmbedThreadReporter({
   return null;
 }
 
+/** A full-pane view that replaces the chat until the user goes back to it. */
+export type EmbedPanel = "providers";
+
 /** The embedded project: its thread (or switcher), driven by the host over the bridge. */
 export function EmbedView({
   environmentId,
   projectId,
   threadId,
+  panel,
   switcher,
 }: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
   readonly threadId: ThreadId | null;
+  readonly panel: EmbedPanel | null;
   readonly switcher: boolean;
 }) {
   const projectRef = scopeProjectRef(environmentId, projectId);
@@ -66,7 +72,11 @@ export function EmbedView({
     .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   // A host may open the project without naming a thread, and the embed has no draft composer to
   // fall back to, so it shows the project's most recent live thread.
-  const shownThreadId = threadId ?? liveThreads[0]?.id ?? null;
+  // A panel's route names no thread; the host keeps hearing about the one the user left.
+  const [lastThreadId, setLastThreadId] = useState(threadId);
+  if (threadId !== null && threadId !== lastThreadId) setLastThreadId(threadId);
+  const shownThreadId =
+    threadId ?? (panel === null ? null : lastThreadId) ?? liveThreads[0]?.id ?? null;
 
   const appContext = useAppEmbedContext(projectRef);
   // Only the first known origins count: the bridge decides once whether its parent may listen.
@@ -84,7 +94,6 @@ export function EmbedView({
 
   const composerRef = useRef<ChatComposerHandle | null>(null);
   const navigate = useNavigate();
-  const router = useRouter();
   const createEmbedThread = useAtomCommand(appsEnvironment.createEmbedThread, {
     reportFailure: false,
   });
@@ -108,13 +117,26 @@ export function EmbedView({
     toastManager.add({ type: "error", title: "Couldn't start a new thread" });
     return null;
   };
+  const closePanel = () => {
+    if (shownThreadId !== null) {
+      openThread(shownThreadId);
+      return;
+    }
+    void navigate({
+      to: "/embed/$environmentId/$projectId",
+      params: { environmentId, projectId },
+    });
+  };
   const onHostCommand = useEffectEvent((command: Parameters<typeof runEmbedHostCommand>[0]) => {
     void runEmbedHostCommand(command, {
       composer: () => composerRef.current,
       openThread,
       createThread,
-      // The panel's route sits beside the thread route, which the typed router does not know yet.
-      openProviders: () => router.history.push(`/embed/${environmentId}/${projectId}/providers`),
+      openProviders: () =>
+        void navigate({
+          to: "/embed/$environmentId/$projectId/providers",
+          params: { environmentId, projectId },
+        }),
     });
   });
   useEffect(() => startEmbedBridge()?.subscribeHostCommands(onHostCommand), []);
@@ -124,7 +146,14 @@ export function EmbedView({
       <ComposerHandleContext value={composerRef}>
         <EmbedThreadReporter environmentId={environmentId} threadId={shownThreadId} />
         <main className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background">
-          {switcher ? (
+          {panel === "providers" ? (
+            <EmbedProvidersPanel
+              environmentId={environmentId}
+              projectId={projectId}
+              onBack={closePanel}
+            />
+          ) : null}
+          {switcher && panel === null ? (
             <EmbedThreadSwitcher
               threads={liveThreads}
               activeThreadId={shownThreadId}
@@ -137,7 +166,7 @@ export function EmbedView({
               }}
             />
           ) : null}
-          {shownThreadId !== null ? (
+          {panel !== null ? null : shownThreadId !== null ? (
             <ChatView environmentId={environmentId} threadId={shownThreadId} routeKind="server" />
           ) : (
             <p className="m-auto text-sm text-muted-foreground">No threads in this project yet.</p>

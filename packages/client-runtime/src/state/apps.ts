@@ -22,5 +22,10 @@ export function createAppsEnvironmentAtoms<R, E>(
       label: "environment-data:apps:create-embed-thread",
       tag: APPS_WS_METHODS.appsCreateEmbedThread,
     }),
+    // The embed holds no settings scope; the server writes this one key of its own project.
+    setEmbedDefaultModel: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:apps:set-embed-default-model",
+      tag: APPS_WS_METHODS.appsSetEmbedDefaultModel,
+    }),
   };
 }

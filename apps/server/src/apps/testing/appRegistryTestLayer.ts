@@ -87,6 +87,7 @@ export const makeRegistryLayer = (options: { readonly appSidecar?: AppSidecarBoo
     streamThreads: () => Stream.die("unused"),
     setThreadAppData: () => Effect.die("unused"),
     createEmbedThread: () => Effect.die("unused"),
+    setEmbedDefaultModel: () => Effect.die("unused"),
     markThreadsCopied: () => Effect.die("unused"),
   });
   const sessions = SessionStore.layer.pipe(

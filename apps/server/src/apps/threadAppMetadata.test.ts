@@ -401,6 +401,62 @@ it.layer(TestLayer)("thread app metadata through orchestration", (it) => {
     }),
   );
 
+  it.effect("an embed sets only its own project's default model, which its new threads use", () =>
+    Effect.gen(function* () {
+      const service = yield* AppProjects;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projectId = ProjectId.make("project:default-model");
+      const otherProjectId = ProjectId.make("project:default-model-other");
+      yield* seedProject(projectId, app);
+      yield* seedProject(otherProjectId, otherApp);
+      yield* settings.updateSettings({
+        projectSettingsOverrides: {
+          [projectId]: { defaultAutoPull: true },
+          [otherProjectId]: { defaultModelSelection: modelSelection },
+        },
+      });
+      const overrides = () =>
+        settings.getSettings.pipe(Effect.map((current) => current.projectSettingsOverrides));
+      const chosen = { instanceId, model: "gpt-5.5" } satisfies ModelSelection;
+
+      yield* service.setEmbedDefaultModel(embed(app, projectId), {
+        projectId,
+        modelSelection: chosen,
+      });
+      assert.deepEqual((yield* overrides())[projectId], {
+        defaultAutoPull: true,
+        defaultModelSelection: chosen,
+      });
+      const { threadId } = yield* service.createEmbedThread(embed(app, projectId), { projectId });
+      assert.deepEqual((yield* orchestrator.getThreadShell(threadId))?.modelSelection, chosen);
+
+      // Back to the environment default: the key goes, the project's other overrides stay.
+      yield* service.setEmbedDefaultModel(embed(app, projectId), {
+        projectId,
+        modelSelection: null,
+      });
+      assert.deepEqual((yield* overrides())[projectId], { defaultAutoPull: true });
+
+      const codes = yield* Effect.forEach(
+        [
+          [embed(app, projectId), otherProjectId],
+          [embed(app, otherProjectId), otherProjectId],
+          [{ kind: "app", appId: app }, projectId],
+        ] as const,
+        ([subject, target]) =>
+          service.setEmbedDefaultModel(subject, { projectId: target, modelSelection: chosen }).pipe(
+            Effect.flip,
+            Effect.map((error) => ("code" in error ? error.code : error._tag)),
+          ),
+      );
+      assert.deepEqual(codes, ["forbidden", "forbidden", "forbidden"]);
+      assert.deepEqual((yield* overrides())[otherProjectId], {
+        defaultModelSelection: modelSelection,
+      });
+    }),
+  );
+
   it.effect("app data and copy marks update the shell without moving historyRevision", () =>
     Effect.gen(function* () {
       const service = yield* AppProjects;

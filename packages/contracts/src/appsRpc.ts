@@ -17,14 +17,32 @@ import {
   AuthOrchestrationReadScope,
   EnvironmentAuthorizationError,
 } from "./auth.ts";
+import { ProjectId } from "./baseSchemas.ts";
+import { ModelSelection } from "./modelSelection.ts";
 
 export * from "./appsRpcCore.ts";
+
+/**
+ * The embed's own project default for new threads; null returns it to the
+ * environment default. Kept out of appsRpcCore so @lecturn/embed does not
+ * bundle the model schemas it never sends.
+ */
+export const AppsSetEmbedDefaultModelInput = Schema.Struct({
+  projectId: ProjectId,
+  modelSelection: Schema.NullOr(ModelSelection),
+});
+export type AppsSetEmbedDefaultModelInput = typeof AppsSetEmbedDefaultModelInput.Type;
 
 const error = Schema.Union([AppsError, EnvironmentAuthorizationError]);
 const M = APPS_WS_METHODS;
 
 export const AppsRpcs = [
   ...AppsCoreRpcs,
+  Rpc.make(M.appsSetEmbedDefaultModel, {
+    payload: AppsSetEmbedDefaultModelInput,
+    success: Schema.Struct({}),
+    error,
+  }),
   Rpc.make(M.appsExportThreads, {
     payload: AppsExportThreadsInput,
     success: ConnectedAppThreadBundleV1,
@@ -50,6 +68,7 @@ export const APPS_RPC_SCOPES = {
   [M.appsDelete]: AuthAccessWriteScope,
   [M.appsSubscribeEmbedContext]: AuthOrchestrationReadScope,
   [M.appsCreateEmbedThread]: AuthOrchestrationOperateScope,
+  [M.appsSetEmbedDefaultModel]: AuthOrchestrationOperateScope,
   [M.appsEnsureWorkspace]: AuthAppHostScope,
   [M.appsSetLiveLease]: AuthAppHostScope,
   [M.appsClearLiveLease]: AuthAppHostScope,
