@@ -155,7 +155,23 @@ export const APP_RPC_RULES: AppRpcTable = {
     ...embed,
   },
   [O.dispatchCommand]: { resolve: commandTargets, ...embed },
+  // App cards in the pane: each call names the tool call that produced the card, and the
+  // environment resolves the card's server from that item (D3).
+  [W.mcpAppsReadResource]: { resolve: "threadId", ...embed },
+  [W.mcpAppsToolInfo]: { resolve: "threadId", ...embed },
+  [W.mcpAppsCallTool]: { resolve: "threadId", ...embed },
+  [W.mcpAppsUpdateModelContext]: {
+    resolve: ({ threadId, conversationThreadId }) => [
+      { threadId },
+      { threadId: conversationThreadId },
+    ],
+    ...embed,
+  },
+  // The web client's connection handshake: it opens on the config stream and probes with
+  // server.probe, so an embed that can read the config needs both (D31).
   [W.serverGetConfig]: { resolve: "none", ...embed },
+  [W.subscribeServerConfig]: { resolve: "none", ...embed },
+  [W.serverProbe]: { resolve: "none", ...embed },
   [W.serverRefreshProviders]: { resolve: "none", ...embed },
   [W.providerInstallSubscribe]: { resolve: "none", ...embed },
   [W.serverReportClientActivity]: { resolve: "none", ...embed },

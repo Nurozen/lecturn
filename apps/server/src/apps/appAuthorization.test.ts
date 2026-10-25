@@ -180,6 +180,15 @@ describe("app RPC allowlist", () => {
         yield* allowed(embedSession, A.appsCreateEmbedThread, { projectId: rocketSecondProject }),
       ).toBe(false);
       expect(yield* allowed(embedSession, W.serverGetConfig, {})).toBe(true);
+      expect(yield* allowed(embedSession, W.subscribeServerConfig, {})).toBe(true);
+      expect(yield* allowed(embedSession, W.serverProbe, {})).toBe(true);
+      const card = { itemId: "item-1", uri: "ui://ex/counter-card" };
+      expect(
+        yield* allowed(embedSession, W.mcpAppsReadResource, { ...card, threadId: rocketThread }),
+      ).toBe(true);
+      expect(
+        yield* allowed(embedSession, W.mcpAppsReadResource, { ...card, threadId: normalThread }),
+      ).toBe(false);
       expect(yield* allowed(embedSession, A.appsMintEmbedToken, { projectId: rocketProject })).toBe(
         false,
       );

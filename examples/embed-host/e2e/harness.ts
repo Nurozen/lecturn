@@ -58,6 +58,7 @@ export interface LaunchOptions {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const QUIT_TIMEOUT_MS = 20_000;
 
 const SCRIPTED_SETTINGS = {
   providerInstances: { scripted: { driver: "scripted", enabled: true } },
@@ -108,6 +109,9 @@ export async function launchEmbedHost(options: LaunchOptions = {}): Promise<Embe
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value;
   }
+  // Inherited when the e2e runs from an agent inside Lecturn desktop; it would
+  // start Electron as plain Node, which rejects Playwright's debugging flags.
+  delete env["ELECTRON_RUN_AS_NODE"];
   Object.assign(env, {
     LECTURN_HOME: dirs.lecturnHome,
     EMBED_HOST_SIDECAR_DIR: dirs.sidecarDir,
@@ -133,12 +137,27 @@ export async function launchEmbedHost(options: LaunchOptions = {}): Promise<Embe
     output += chunk.toString();
   });
 
+  const exited = new Promise<void>((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) resolve();
+    else child.once("exit", () => resolve());
+  });
   let closed = false;
   const close = async () => {
     if (closed) return;
     closed = true;
     // before-quit in main.ts clears the live lease and stops the sidecar.
-    await app.close().catch(() => undefined);
+    void app.close().catch(() => undefined);
+    // With the embed view mounted, the window's `closed` never follows its
+    // `close` and the app never quits; a run must not leave it behind.
+    const quit = await Promise.race([
+      exited.then(() => true),
+      sleep(QUIT_TIMEOUT_MS).then(() => false),
+    ]);
+    if (!quit) {
+      child.kill("SIGKILL");
+      await exited;
+    }
+    await stopLeftoverSidecar(dirs.sidecarDir);
   };
 
   try {
@@ -199,6 +218,25 @@ export async function launchEmbedHost(options: LaunchOptions = {}): Promise<Embe
         cause: error,
       },
     );
+  }
+}
+
+/**
+ * main.ts installs its before-quit cleanup only once the pane is mounted, so a
+ * run that failed earlier leaves its sidecar serving. Its runtime record in
+ * this run's own temp baseDir names the PID.
+ */
+async function stopLeftoverSidecar(sidecarDir: string): Promise<void> {
+  const record = await NodeFSP.readFile(
+    NodePath.join(sidecarDir, "userdata", "server-runtime.json"),
+    "utf8",
+  ).catch(() => null);
+  const pid = record === null ? undefined : (JSON.parse(record) as { pid?: unknown }).pid;
+  if (typeof pid !== "number") return;
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    // Already gone.
   }
 }
 

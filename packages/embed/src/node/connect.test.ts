@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { exchangeSeedToken } from "./connect.ts";
+import { exchangeSeedToken, issueWebSocketTicket } from "./connect.ts";
 
 function recordingFetch(response: Response) {
   const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
@@ -55,5 +55,19 @@ describe("exchangeSeedToken", () => {
         fetch,
       }),
     ).rejects.toThrow(/refused the sidecar seed: 401 .*invalid_grant/);
+  });
+});
+
+describe("issueWebSocketTicket", () => {
+  it("reads the ticket from the server's JSON answer", async () => {
+    const { fetch, requests } = recordingFetch(
+      Response.json({ ticket: "ws-ticket", expiresAt: "2026-10-25T11:36:24.457Z" }),
+    );
+
+    await expect(
+      issueWebSocketTicket("http://127.0.0.1:41001", "app-session", fetch),
+    ).resolves.toBe("ws-ticket");
+    expect(requests[0]!.url).toBe("http://127.0.0.1:41001/api/auth/websocket-ticket");
+    expect(requests[0]!.init?.credentials).toBe("omit");
   });
 });

@@ -62,14 +62,21 @@ export default async function tracer({ log, artifactsDir, keep }: E2eContext): P
     await guest.locator("button.lecturn-composer-send:enabled").click({ timeout: 15_000 });
     log("sent the scripted turn");
 
-    const toolRow = guest.locator('[data-timeline-row-kind="work"]').first();
+    // The counter tool declares a card (`_meta.ui.resourceUri`), so its call renders as an
+    // MCP Apps row in place of a work row (A21).
+    const toolRow = guest
+      .locator('[data-timeline-row-kind="work"], [data-timeline-row-kind="mcp-app"]')
+      .first();
     await toolRow.waitFor({ state: "visible", timeout: TURN_TIMEOUT_MS });
     await guest.getByText(REPLY).first().waitFor({ state: "visible", timeout: TURN_TIMEOUT_MS });
+    const rowKind = await toolRow.getAttribute("data-timeline-row-kind");
     const rowText = (await toolRow.evaluate((element) => element.textContent ?? ""))
       .replace(/\s+/g, " ")
       .trim();
-    log(`tool row: ${rowText}`);
-    NodeAssert.match(rowText, /counter/i, "the work row names the counter tool");
+    log(`tool row (${rowKind}): ${rowText}`);
+    if (rowKind === "work") {
+      NodeAssert.match(rowText, /counter/i, "the work row names the counter tool");
+    }
 
     const callsPath = NodePath.join(dirs.workspace, ".embed-host", "counter-calls.json");
     const calls = JSON.parse(await NodeFSP.readFile(callsPath, "utf8")) as Array<CounterCall>;

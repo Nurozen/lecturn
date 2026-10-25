@@ -117,6 +117,9 @@ const readRect = (value: unknown): Electron.Rectangle | null => {
   };
 };
 
+/** net::ERR_ABORTED */
+const ABORTED = -3;
+
 export function mountEmbedView(
   win: Electron.BaseWindow,
   options: MountEmbedViewOptions,
@@ -208,6 +211,8 @@ export function mountEmbedView(
     if (options.freezeClock === undefined) return;
     const script = freezeClockScript(options.freezeClock);
     try {
+      // A view that never navigated has no renderer, and CDP commands to it never answer.
+      if (webContents.getURL() === "") await webContents.loadURL("about:blank");
       await webContents.debugger.sendCommand("Page.enable");
       await webContents.debugger.sendCommand("Page.addScriptToEvaluateOnNewDocument", {
         source: script,
@@ -230,6 +235,26 @@ export function mountEmbedView(
     return attaching;
   };
 
+  // Electron rejects a loadURL with the abort of the earlier load it replaced
+  // (a retarget while the first target is still loading), while the new load
+  // carries on; it has loaded once loading stops with the guest on this URL.
+  const loadGuest = async (url: string) => {
+    try {
+      await webContents.loadURL(url);
+    } catch (cause) {
+      const failed = cause as { readonly errno?: unknown; readonly url?: unknown };
+      if (failed.errno !== ABORTED || failed.url === url || isGone()) throw cause;
+      if (webContents.isLoading()) {
+        await new Promise<void>((resolve) => {
+          webContents.once("did-stop-loading", () => resolve());
+          webContents.once("destroyed", () => resolve());
+        });
+      }
+      const withoutHash = (value: string) => value.split("#")[0];
+      if (isGone() || withoutHash(webContents.getURL()) !== withoutHash(url)) throw cause;
+    }
+  };
+
   const navigate = async (nextProjectId: string, nextThreadId: string | undefined) => {
     const seq = ++loadSeq;
     generation += 1;
@@ -244,7 +269,7 @@ export function mountEmbedView(
       if (options.freezeClock !== undefined) await ensureAttached();
       if (!isCurrent()) return;
       guestOrigin = originOf(target.url);
-      await webContents.loadURL(
+      await loadGuest(
         embedGuestUrl(target.url, target.token, { switcher: options.switcher !== false }),
       );
     } catch (cause) {
