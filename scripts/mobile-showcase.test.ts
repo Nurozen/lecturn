@@ -17,6 +17,7 @@ import {
 } from "./mobile-showcase-environment.ts";
 import {
   encodeAndroidPairingUrls,
+  isBarFixtureDevice,
   normalizeStorePng,
   parseShowcaseCliArgs,
   parsePairingCredentialOutput,
@@ -276,13 +277,15 @@ it("defaults every device to the app's own palette", () => {
 
 it("configures every default device with an exact upload-ready store target", () => {
   assert.deepStrictEqual(
-    showcaseConfig.devices.map((device) => [
-      device.id,
-      device.platform === "ios" ? (device.orientation ?? "portrait") : null,
-      device.storeAsset.directory,
-      device.storeAsset.width,
-      device.storeAsset.height,
-    ]),
+    showcaseConfig.devices
+      .filter((device) => !isBarFixtureDevice(device))
+      .map((device) => [
+        device.id,
+        device.platform === "ios" ? (device.orientation ?? "portrait") : null,
+        device.storeAsset.directory,
+        device.storeAsset.width,
+        device.storeAsset.height,
+      ]),
     [
       ["iphone-6.9", "portrait", "apple/iphone-6.9", 1320, 2868],
       ["iphone-6.5", "portrait", "apple/iphone-6.5", 1284, 2778],
@@ -291,6 +294,27 @@ it("configures every default device with an exact upload-ready store target", ()
       ["android-tablet-7", null, "google-play/tablet-7", 1080, 1920],
       ["android-tablet-10", null, "google-play/tablet-10", 1440, 2560],
     ],
+  );
+});
+
+it("captures the Bar iPhone 15 only in Bar fixture runs", () => {
+  const storeRun = planShowcaseCaptures(
+    showcaseConfig,
+    parseShowcaseCliArgs(["--platform", "ios"]),
+  );
+  assert.isFalse(storeRun.some((capture) => isBarFixtureDevice(capture.device)));
+
+  const options = parseShowcaseCliArgs(["--bar-fixture"]);
+  assert.equal(options.barFixture, true);
+  const barRun = planShowcaseCaptures(showcaseConfig, options);
+  assert.deepStrictEqual(
+    barRun.map((capture) => [
+      capture.device.id,
+      capture.device.platform === "ios" ? capture.device.simulatorDeviceType : null,
+      capture.scenes,
+      capture.appearance,
+    ]),
+    [["iphone-15-bar", "com.apple.CoreSimulator.SimDeviceType.iPhone-15", ["threads"], "dark"]],
   );
 });
 

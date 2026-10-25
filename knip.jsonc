@@ -103,14 +103,19 @@
       // icon exporters stay beside export-lecturn-icons.ts, which icons:export runs instead.
       // Knip loads its preprocessor (knip-schemas.ts) through a CLI option, not a source import.
       // mobile-native-client.ts runs directly for native client verification (AGENTS.md),
-      // and setup-worktree.ts runs directly from the lecturn.json setup action.
+      // and setup-worktree.ts runs directly from the lecturn.json setup action. The Bar capture
+      // tools (bar/*, seed-bar-fixture.ts) run by hand against isolated fixture servers.
       "entry": [
+        "bar/capture-web.ts",
+        "bar/pixel-diff.ts",
+        "bar/theme-probe.ts",
         "export-android-icons.ts",
         "export-brand-icons.ts",
         "export-provider-emblems.ts",
         "generate-legal-notices.ts",
         "knip-schemas.ts",
         "mobile-native-client.ts",
+        "seed-bar-fixture.ts",
         "setup-worktree.ts",
       ],
     },

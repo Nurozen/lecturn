@@ -1,0 +1,285 @@
+{
+  "mockup": "bar/mockups/rocketwright-embedded-chat.png",
+  "scenes": [
+    "embed-host-mockup-scene",
+    "embed-host-timeline",
+    "embed-host-approval",
+    "embed-host-card",
+    "embed-host-full-access"
+  ],
+  "rows": [
+    {
+      "id": "embed.pane.no-switcher",
+      "element": "No thread switcher in the embed pane (switcher:false; the host's rail lists threads)",
+      "owner": "A25",
+      "scenes": ["embed-host-mockup-scene"],
+      "probe": {
+        "kind": "absent",
+        "selector": "[data-testid=\"embed-thread-switcher\"]"
+      }
+    },
+    {
+      "id": "embed.pane.compact-switcher",
+      "element": "Compact thread switcher at the top of the pane when the host enables it",
+      "owner": "A25",
+      "scenes": [
+        "embed-host-timeline",
+        "embed-host-approval",
+        "embed-host-card",
+        "embed-host-full-access"
+      ],
+      "probe": {
+        "kind": "count",
+        "selector": "[data-testid=\"embed-thread-switcher\"]",
+        "max": 1
+      }
+    },
+    {
+      "id": "embed.pane.no-global-sidebar",
+      "element": "No global Lecturn sidebar in the pane",
+      "owner": "A17b",
+      "scenes": [
+        "embed-host-mockup-scene",
+        "embed-host-timeline",
+        "embed-host-approval",
+        "embed-host-card",
+        "embed-host-full-access"
+      ],
+      "probe": {
+        "kind": "absent",
+        "selector": "[data-slot=\"sidebar\"]"
+      }
+    },
+    {
+      "id": "embed.pane.header",
+      "element": "Pane header row: thread title, ⋯ menu and an open-in icon",
+      "owner": "A17b",
+      "scenes": ["embed-host-mockup-scene"],
+      "probe": null
+    },
+    {
+      "id": "embed.timeline.user-avatar",
+      "element": "User avatar circle beside each user message",
+      "owner": "A26",
+      "scenes": ["embed-host-mockup-scene"],
+      "probe": {
+        "kind": "each",
+        "selector": "[data-message-role=\"user\"]",
+        "probes": [
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"embed-user-avatar\"]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "embed.timeline.tool-rows",
+      "element": "App tool rows: leading chevron, tool icon, label, trailing success check",
+      "owner": "A27a",
+      "scenes": ["embed-host-mockup-scene", "embed-host-timeline"],
+      "probe": {
+        "kind": "each",
+        "selector": "[data-testid=\"app-tool-row\"]",
+        "min": 2,
+        "probes": [
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"app-tool-row-chevron\"]"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"app-tool-row-icon\"]"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"app-tool-row-label\"]"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"app-tool-row-status\"][data-status=\"success\"]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "embed.timeline.card-narrow",
+      "element": "MCP Apps card in its narrow form: title row with a status chip, three stats as rows, a line chart with points",
+      "owner": "A21",
+      "scenes": ["embed-host-mockup-scene", "embed-host-card"],
+      "probe": {
+        "kind": "some",
+        "selector": "[data-testid=\"mcp-app-card\"]",
+        "probes": [
+          {
+            "kind": "frame",
+            "selector": "iframe",
+            "probes": [
+              {
+                "kind": "count",
+                "selector": "[data-card-layout=\"narrow\"]"
+              },
+              {
+                "kind": "count",
+                "selector": "[data-card-title]"
+              },
+              {
+                "kind": "count",
+                "selector": "[data-card-stat]",
+                "min": 3,
+                "max": 3
+              },
+              {
+                "kind": "chart-points",
+                "selector": "svg path, svg polyline",
+                "min": 2
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "embed.timeline.card-accent",
+      "element": "The card's curve is drawn in the host's --ring accent",
+      "owner": "A21",
+      "scenes": ["embed-host-mockup-scene", "embed-host-card"],
+      "probe": null
+    },
+    {
+      "id": "embed.timeline.assistant-text",
+      "element": "Assistant text under the card",
+      "owner": "base",
+      "scenes": ["embed-host-mockup-scene", "embed-host-timeline"],
+      "probe": {
+        "kind": "count",
+        "selector": "[data-message-role=\"assistant\"]"
+      }
+    },
+    {
+      "id": "embed.approval.card",
+      "element": "Approval card: shield icon, Approve <tool> title, mono reason line, Decline, Approve and ⋯",
+      "owner": "A20",
+      "scenes": ["embed-host-mockup-scene", "embed-host-approval"],
+      "probe": {
+        "kind": "each",
+        "selector": "[data-testid=\"app-approval-card\"]",
+        "probes": [
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"app-approval-icon\"]"
+          },
+          {
+            "kind": "text",
+            "selector": "[data-testid=\"app-approval-title\"]",
+            "pattern": "^Approve .+"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"app-approval-reason\"]"
+          },
+          {
+            "kind": "text",
+            "selector": "button",
+            "equals": "Decline"
+          },
+          {
+            "kind": "text",
+            "selector": "button",
+            "equals": "Approve"
+          },
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"app-approval-more\"]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "embed.approval.none-in-full-access",
+      "element": "No approval card in Full access or Auto",
+      "owner": "A20",
+      "scenes": ["embed-host-full-access"],
+      "probe": {
+        "kind": "all",
+        "probes": [
+          {
+            "kind": "absent",
+            "selector": "[data-testid=\"app-approval-card\"]"
+          },
+          {
+            "kind": "absent",
+            "selector": "[data-approval-detail]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "embed.composer.chip-strip",
+      "element": "Removable app-reference chip strip above the composer input (an rw:c/fins-style chip with ×)",
+      "owner": "A25",
+      "scenes": ["embed-host-mockup-scene"],
+      "probe": {
+        "kind": "some",
+        "selector": "[data-testid=\"app-ref-chip-strip\"]",
+        "probes": [
+          {
+            "kind": "each",
+            "selector": "[data-testid=\"app-ref-chip\"]",
+            "probes": [
+              {
+                "kind": "count",
+                "selector": "[data-testid=\"app-ref-chip-remove\"]"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "embed.composer.input",
+      "element": "Composer input with attach and send",
+      "owner": "base",
+      "scenes": ["embed-host-mockup-scene"],
+      "probe": {
+        "kind": "some",
+        "selector": "[data-slot=\"composer-shell\"]",
+        "probes": [
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"composer-editor\"]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "embed.composer.footer-two-rows",
+      "element": "Two-row composer footer: model | effort | access, then Contextual · Off",
+      "owner": "A26",
+      "scenes": ["embed-host-mockup-scene"],
+      "probe": {
+        "kind": "some",
+        "selector": "[data-testid=\"embed-composer-footer\"]",
+        "probes": [
+          {
+            "kind": "count",
+            "selector": "[data-testid=\"embed-composer-footer-row\"]",
+            "min": 2,
+            "max": 2
+          },
+          {
+            "kind": "text",
+            "selector": "button",
+            "pattern": "^Contextual"
+          },
+          {
+            "kind": "text",
+            "selector": "button",
+            "equals": "Supervised"
+          }
+        ]
+      }
+    }
+  ],
+  "rowsHash": "sha256:2317e91478fc2508d1e16b3b69154612964e2c1d7779e7cbbccf3300d23e7b2a"
+}
