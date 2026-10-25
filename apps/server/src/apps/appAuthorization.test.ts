@@ -20,7 +20,12 @@ import * as Option from "effect/Option";
 
 import { ASSET_ROUTE_PREFIX } from "../assets/AssetAccess.ts";
 import { ATTACHMENT_UPLOAD_ROUTE_PREFIX } from "../assets/AttachmentUpload.ts";
-import { createAttachmentId, createPendingAttachmentId } from "../attachmentStore.ts";
+import {
+  createAttachmentId,
+  createPendingAttachmentId,
+  parseThreadSegmentFromAttachmentId,
+  toSafeThreadAttachmentSegment,
+} from "../attachmentStore.ts";
 import type { AuthenticatedSession } from "../auth/EnvironmentAuth.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import { type AppAuthorizationDeps, EMBED_TOKEN_SCOPES, makeWith } from "./appAuthorization.ts";
@@ -48,6 +53,9 @@ const rocketSecondThread = ThreadId.make("rocket-second-thread");
 const otherAppThread = ThreadId.make("other-app-thread");
 const normalThread = ThreadId.make("normal-thread");
 const missingThread = ThreadId.make("missing-thread");
+/** An imported copy: its id is not an attachment segment, so its attachments name it lossily. */
+const rocketCopyThread = ThreadId.make("copy:environment:sidecar:rocket-thread");
+const normalCopyThread = ThreadId.make("copy:environment:other:normal-thread");
 
 const binding = (appId: AppId, root: string): AppBinding => ({
   appId,
@@ -65,6 +73,8 @@ const threadProjects = new Map<ThreadId, ProjectId>([
   [rocketSecondThread, rocketSecondProject],
   [otherAppThread, otherAppProject],
   [normalThread, normalProject],
+  [rocketCopyThread, rocketProject],
+  [normalCopyThread, normalProject],
 ]);
 
 const rocketNote = ThreadNoteId.make("rocket-note");
@@ -85,6 +95,16 @@ const fakeDeps: AppAuthorizationDeps = {
     Effect.succeed(Option.fromUndefinedOr(bindings.get(projectId))),
   projectIdForThread: (threadId) =>
     Effect.succeed(Option.fromUndefinedOr(threadProjects.get(threadId))),
+  threadIdForAttachment: (attachmentId) => {
+    const segment = parseThreadSegmentFromAttachmentId(attachmentId);
+    return Effect.succeed(
+      Option.fromUndefinedOr(
+        [...threadProjects.keys()].find(
+          (threadId) => segment !== null && toSafeThreadAttachmentSegment(threadId) === segment,
+        ),
+      ),
+    );
+  },
   projectIdForNote: (noteId) => Effect.succeed(Option.fromUndefinedOr(noteProjects.get(noteId))),
   issueEmbedSession: (input) =>
     Effect.sync(() => {
@@ -272,6 +292,8 @@ describe("app RPC allowlist", () => {
       expect(yield* attachment(rocketSecondThread)).toBe(false);
       expect(yield* attachment(otherAppThread)).toBe(false);
       expect(yield* attachment(normalThread)).toBe(false);
+      expect(yield* attachment(rocketCopyThread)).toBe(true);
+      expect(yield* attachment(normalCopyThread)).toBe(false);
       expect(
         yield* asset({ _tag: "attachment", attachmentId: createPendingAttachmentId(".png") }),
       ).toBe(false);

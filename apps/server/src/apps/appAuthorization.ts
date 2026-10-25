@@ -32,7 +32,6 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type * as Rpc from "effect/rpc/Rpc";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
@@ -40,6 +39,7 @@ import type * as RpcGroup from "effect/rpc/RpcGroup";
 import {
   PENDING_ATTACHMENT_THREAD_SEGMENT,
   parseThreadSegmentFromAttachmentId,
+  toSafeThreadAttachmentSegment,
 } from "../attachmentStore.ts";
 import { requiredScopeForRpcMethod } from "../auth/RpcAuthorization.ts";
 import * as SessionStore from "../auth/SessionStore.ts";
@@ -68,7 +68,7 @@ export type AccessTarget =
   | { readonly projectRoot: string }
   /** A file path that must stay inside the embed token's project root. */
   | { readonly projectPath: string }
-  /** A stored attachment, owned by the thread its id was minted for. */
+  /** A stored attachment, owned by the thread whose history references it. */
   | { readonly attachmentId: string }
   /** A saved note, owned by the project of the thread it quotes. */
   | { readonly noteId: ThreadNoteId };
@@ -333,8 +333,6 @@ const describeCall = (method: string, payload: unknown) =>
 
 const withoutTrailingSlashes = (path: string) => path.replace(/[/\\]+$/, "") || path;
 
-const isThreadId = Schema.is(ThreadId);
-
 const isAbsolutePath = (path: string) => /^(?:[/\\]|[A-Za-z]:[/\\])/.test(path);
 
 /**
@@ -357,6 +355,10 @@ export interface AppAuthorizationDeps {
   readonly projectIdForThread: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<ProjectId>, AppsFailure>;
+  /** `None` for a pending upload or an attachment no thread's history references. */
+  readonly threadIdForAttachment: (
+    attachmentId: string,
+  ) => Effect.Effect<Option.Option<ThreadId>, AppsFailure>;
   /** `None` when the note does not exist. */
   readonly projectIdForNote: (
     noteId: ThreadNoteId,
@@ -426,14 +428,15 @@ export const makeWith = (deps: AppAuthorizationDeps): AppAuthorization["Service"
             ),
           );
 
-  const ownsAttachment = (subject: AppSubject, attachmentId: string) => {
-    const segment = parseThreadSegmentFromAttachmentId(attachmentId);
-    // Thread ids are lowercase UUIDs, which the attachment segment keeps verbatim; any other
-    // id is refused rather than guessed at.
-    return segment === null || segment === PENDING_ATTACHMENT_THREAD_SEGMENT || !isThreadId(segment)
-      ? Effect.succeed(false)
-      : ownsThread(subject, segment);
-  };
+  const ownsAttachment = (subject: AppSubject, attachmentId: string) =>
+    deps.threadIdForAttachment(attachmentId).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.succeed(false),
+          onSome: (threadId) => ownsThread(subject, threadId),
+        }),
+      ),
+    );
 
   const ownsNote = (subject: AppSubject, noteId: ThreadNoteId) =>
     deps.projectIdForNote(noteId).pipe(
@@ -560,6 +563,42 @@ export const makeWith = (deps: AppAuthorizationDeps): AppAuthorization["Service"
 
 const unavailable = (message: string) => new AppsError({ code: "unavailable", message });
 
+/**
+ * An attachment id carries its thread only as a lossy segment. A thread whose id is that
+ * segment owns it as minted; any other thread must be one whose segment matches and whose
+ * history references the id, since several reshaped ids can share a segment.
+ */
+const makeThreadIdForAttachment = (
+  sql: SqlClient.SqlClient,
+  projections: ProjectionStoreV2["Service"],
+): AppAuthorizationDeps["threadIdForAttachment"] =>
+  Effect.fn("AppAuthorization.threadIdForAttachment")(
+    function* (attachmentId) {
+      const segment = parseThreadSegmentFromAttachmentId(attachmentId);
+      if (segment === null || segment === PENDING_ATTACHMENT_THREAD_SEGMENT) {
+        return Option.none<ThreadId>();
+      }
+      // Besides the exact id, only ids the segment reshapes: anything outside its alphabet
+      // (copies are `copy:<env>:<thread>`) or longer than it keeps.
+      const rows = yield* sql<{ readonly thread_id: ThreadId }>`
+        SELECT thread_id FROM orchestration_v2_projection_threads
+        WHERE thread_id = ${segment}
+          OR thread_id GLOB '*[^a-z0-9_-]*'
+          OR length(thread_id) > 80
+      `;
+      if (rows.some((row) => row.thread_id === segment)) {
+        return Option.some(ThreadId.make(segment));
+      }
+      for (const { thread_id: threadId } of rows) {
+        if (toSafeThreadAttachmentSegment(threadId) !== segment) continue;
+        const referenced = yield* projections.getThreadAttachmentIds(threadId);
+        if (referenced.includes(attachmentId)) return Option.some(threadId);
+      }
+      return Option.none<ThreadId>();
+    },
+    Effect.mapError(() => unavailable("Attachment lookup failed.")),
+  );
+
 /** Embedding is local-only, so the page is served from this server's own loopback origin. */
 const resolveEmbedOrigin = (config: ServerConfig.ServerConfig["Service"]) => {
   if (config.devUrl !== undefined) return config.devUrl.origin;
@@ -585,6 +624,7 @@ export const layer = Layer.effect(
           Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeedNone }),
           Effect.mapError(() => unavailable("Thread lookup failed.")),
         ),
+      threadIdForAttachment: makeThreadIdForAttachment(sql, projections),
       projectIdForNote: (noteId) =>
         sql<{
           readonly project_id: ProjectId;
