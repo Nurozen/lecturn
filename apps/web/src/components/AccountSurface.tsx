@@ -12,6 +12,7 @@ import {
 import { createPortal } from "react-dom";
 import { useAccountTint } from "../cloud/useAccountTint";
 import { knownConnectAccountsAtom } from "../cloud/knownAccounts";
+import { useEmbedPresentation } from "../embed/EmbedPresentationContext";
 import { cn } from "../lib/utils";
 import {
   ACCOUNT_KNOCK_MS,
@@ -142,6 +143,15 @@ export function AccountSurface({
       clearKnock?.();
     };
   }, [animate]);
+  // The embed pane is the host's flat background: no tint, glass, ornaments or seam.
+  const embedded = useEmbedPresentation() !== null;
+  if (embedded) {
+    return (
+      <Tag {...props} className={cn("relative isolate", className)} style={style}>
+        {children}
+      </Tag>
+    );
+  }
   return (
     <Tag
       {...props}

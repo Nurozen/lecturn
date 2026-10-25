@@ -65,6 +65,10 @@ export function embedPage(guest: Page) {
         .waitFor({ state: "visible", timeout: 30_000 });
     },
 
+    async waitForApproval(toolName: string, timeoutMs: number) {
+      await approvalGroup(toolName).waitFor({ state: "attached", timeout: timeoutMs });
+    },
+
     /** Clicks Approve on the banner row that asks for `toolName`, then waits for it to go. */
     async approve(toolName: string, timeoutMs: number) {
       const group = approvalGroup(toolName);

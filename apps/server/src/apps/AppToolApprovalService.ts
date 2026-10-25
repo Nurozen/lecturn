@@ -169,9 +169,11 @@ const make = Effect.gen(function* () {
       .pipe(Effect.ignore);
 
   /**
-   * The request records for the turn the calling session is running, or
-   * undefined when that session holds no running turn on the thread. A gated
-   * call outside one has nobody to show the request to.
+   * The request records for the thread's running turn, or undefined when the
+   * thread has none. A gated call outside one has nobody to show the request
+   * to. The caller's session id is not compared with the turn's: a toolkit
+   * call carries its MCP credential's id, which is per thread and outlives
+   * provider sessions, so it never equals the provider session id.
    */
   const buildRequest = Effect.fnUntraced(function* (
     context: AppToolApprovalContext,
@@ -186,7 +188,6 @@ const make = Effect.gen(function* () {
       run.activeAttemptId === null ||
       providerThread === undefined ||
       providerThread.providerSessionId === null ||
-      providerThread.providerSessionId !== context.providerSessionId ||
       providerTurn === undefined
     ) {
       return undefined;

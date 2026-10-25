@@ -118,7 +118,10 @@ export async function launchEmbedHost(options: LaunchOptions = {}): Promise<Embe
     await NodeFSP.writeFile(dirs.scripts, `${JSON.stringify(options.scripts, null, 2)}\n`);
   }
 
-  const command = await resolveEmbedHostLaunch();
+  // Captures are checked against the exact sRGB tokens the host sends (scripts/bar/theme-probe.ts);
+  // macOS otherwise converts the page to the display's color profile (#1b1e20 reads #1c1e20).
+  // Only the command line works: appended from main, the switch is set but has no effect.
+  const command = await resolveEmbedHostLaunch(["--force-color-profile=srgb"]);
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value;

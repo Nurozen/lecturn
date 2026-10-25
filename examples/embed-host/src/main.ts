@@ -34,9 +34,6 @@ const userDataDir = env["EMBED_HOST_USER_DATA"];
 if (userDataDir) Electron.app.setPath("userData", userDataDir);
 const cdpPort = env["EMBED_HOST_CDP_PORT"];
 if (cdpPort) Electron.app.commandLine.appendSwitch("remote-debugging-port", cdpPort);
-// Captures are checked against the exact sRGB tokens the host sends (scripts/bar/theme-probe.ts);
-// macOS otherwise converts the page to the display's color profile, shifting #f4eddf to #f3ede1.
-Electron.app.commandLine.appendSwitch("force-color-profile", "srgb");
 const freezeClockEnv = env["EMBED_HOST_FREEZE_CLOCK"];
 const freezeClock = freezeClockEnv ? { freezeClock: Number(freezeClockEnv) } : {};
 

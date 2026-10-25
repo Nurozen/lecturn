@@ -294,8 +294,9 @@ const requestApproval = (turn: RunningTurn) =>
     const persisted = yield* eventSink
       .stream({ threadId: turn.threadId, afterSequence, eventType: "runtime-request.updated" })
       .pipe(Stream.runHead, Effect.forkChild);
+    // A toolkit call names its MCP credential, never the provider session that runs the turn.
     const call = yield* approvals
-      .request({ threadId: turn.threadId, providerSessionId: turn.providerSessionId }, info)
+      .request({ threadId: turn.threadId, providerSessionId: "mcp-credential:toolkit" }, info)
       .pipe(Effect.forkChild);
     const stored = Option.getOrThrow(yield* Fiber.join(persisted));
     assert.equal(stored.event.type, "runtime-request.updated");
@@ -556,17 +557,11 @@ it.layer(layerTest)("AppToolApprovalService", (it) => {
     }),
   );
 
-  it.effect("cancels without raising anything when the session holds no running turn", () =>
+  it.effect("cancels without raising anything when the thread has no running turn", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       const approvals = yield* AppToolApprovals;
       const turn = yield* seedRunningTurn("other-session");
-
-      const otherSession = yield* approvals.request(
-        { threadId: turn.threadId, providerSessionId: "session:someone-else" },
-        info,
-      );
-      assert.deepEqual(otherSession, { outcome: "cancelled", requestId: null });
 
       const idleThreadId = ThreadId.make("thread:idle");
       yield* orchestrator.dispatch({
