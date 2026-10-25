@@ -18,7 +18,13 @@ import {
 } from "../../../scripts/lib/brand-assets.ts";
 import { findEsmImportsOfExternalPackages } from "../../../scripts/lib/cli-executable-imports.ts";
 import { selectCliRuntimeExternalDependencies } from "../../../scripts/lib/cli-external-packages.ts";
+import {
+  LECTURN_PACK_DESCRIPTOR_FILE,
+  type LecturnPackDescriptor,
+} from "../../../scripts/lib/lecturn-pack.ts";
+import { loadRepoEnv, resolvePublicConfig } from "../../../scripts/lib/public-config.ts";
 import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog.ts";
+import { normalizeSecureRelayUrl } from "@lecturn/shared/relayUrl";
 import { fromJsonStringPretty } from "@lecturn/shared/schemaJson";
 import { fromYaml } from "@lecturn/shared/schemaYaml";
 import { resolveSpawnCommand } from "@lecturn/shared/shell";
@@ -29,6 +35,8 @@ import {
   ServerCliCommandExitError,
   ServerCliDevelopmentIconSourceMissingError,
   ServerCliDevelopmentIconTargetMissingError,
+  ServerCliEmbedBuildMissingError,
+  ServerCliEmbedWorkspaceImportError,
   ServerCliExecutableImportError,
   ServerCliPublishIconSourceMissingError,
   ServerCliPublishIconTargetMissingError,
@@ -57,6 +65,8 @@ const encodePackageJson = Schema.encodeEffect(PackageJsonPrettyJson);
 const WorkspaceConfig = Schema.Struct({
   catalog: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   overrides: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  patchedDependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  allowBuilds: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
 });
 type WorkspaceConfig = typeof WorkspaceConfig.Type;
 const decodeWorkspaceConfig = Schema.decodeEffect(fromYaml(WorkspaceConfig));
@@ -65,7 +75,7 @@ const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("../../..", import.meta.url))),
 );
 
-const readWorkspaceConfig = Effect.fn("readWorkspaceConfig")(function* () {
+export const readWorkspaceConfig = Effect.fn("readWorkspaceConfig")(function* () {
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
   const repoRoot = yield* RepoRoot;
@@ -341,6 +351,140 @@ export const buildPublishManifest = (input: PublishManifestInput): PackageJson =
   };
 };
 
+/** The file name `pnpm pack` gives a package's tarball. */
+export const packTarballName = (name: string, version: string): string =>
+  `${name.replace(/^@/, "").replace("/", "-")}-${version}.tgz`;
+
+const patchSelectorPackageName = (selector: string): string => {
+  const versionAt = selector.lastIndexOf("@");
+  return versionAt > 0 ? selector.slice(0, versionAt) : selector;
+};
+
+/** Keeps the patches whose package (`<name>@<version>` selector) is a declared dependency. */
+const selectPackPatchedDependencies = (
+  patchedDependencies: Readonly<Record<string, string>>,
+  dependencyNames: ReadonlyArray<string>,
+): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(patchedDependencies).filter(([selector]) =>
+      dependencyNames.includes(patchSelectorPackageName(selector)),
+    ),
+  );
+
+/**
+ * @lecturn/embed must inline its private workspace imports (contracts,
+ * shared) into dist, declarations included, because those packages are not on
+ * npm. Source maps are skipped: their sourcesContent quotes the originals.
+ */
+export const findWorkspacePackageImports = (source: string): ReadonlyArray<string> => {
+  const specifiers = new Set<string>();
+  for (const match of source.matchAll(
+    /(?:\bfrom|\bimport|\brequire)\s*\(?\s*["'](@lecturn\/[^"']+)["']/g,
+  )) {
+    if (match[1] !== undefined) specifiers.add(match[1]);
+  }
+  return [...specifiers].toSorted();
+};
+
+const collectPublishedExportTargets = (
+  exports: Readonly<Record<string, string | Readonly<Record<string, string>>>>,
+): ReadonlyArray<string> => [
+  ...new Set(
+    Object.values(exports).flatMap((target) =>
+      typeof target === "string" ? [target] : Object.values(target),
+    ),
+  ),
+];
+
+export interface PackBuildFactsInput {
+  /** What `lecturn#build` read: the repo .env and .env.local over the process env (vite.config.ts). */
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly repoEnvFile: boolean;
+  readonly version: string;
+}
+
+/** Mirrors hasCloudPublicConfig and AnalyticsService, which read these keys as build-time defines. */
+export const derivePackBuildFacts = (
+  input: PackBuildFactsInput,
+): LecturnPackDescriptor["build"] => {
+  const publicConfig = resolvePublicConfig(input.env);
+  return {
+    repoEnvFile: input.repoEnvFile,
+    lecturnConnect: Boolean(
+      normalizeSecureRelayUrl(publicConfig.relayUrl ?? "") &&
+      publicConfig.clerkPublishableKey &&
+      publicConfig.clerkCliOAuthClientId,
+    ),
+    telemetry: Boolean(input.env.LECTURN_POSTHOG_KEY?.trim()),
+    // withPackageManifest swaps the release icons in for the pack, as for publish.
+    icons: resolveWebAssetBrandForPackageVersion(input.version),
+  };
+};
+
+// @cursor/sdk finds its platform helper (sandbox, rg, tree-sitter) by walking
+// up from argv[1] for node_modules/@cursor/sdk-<platform>-<arch>.
+const CURSOR_HELPER_HOIST_PATTERN = "@cursor/sdk-*";
+
+export interface PackDescriptorInput {
+  readonly server: Pick<PackageJson, "name" | "version" | "bin" | "dependencies">;
+  readonly embed: {
+    readonly name: string;
+    readonly version: string;
+    readonly dependencies?: Readonly<Record<string, string>> | undefined;
+  };
+  readonly workspaceConfig: WorkspaceConfig;
+  readonly build: LecturnPackDescriptor["build"];
+}
+
+export const buildPackDescriptor = (input: PackDescriptorInput): LecturnPackDescriptor => {
+  const dependencyNames = [
+    ...Object.keys(input.server.dependencies),
+    ...Object.keys(input.embed.dependencies ?? {}),
+  ];
+  const patched = selectPackPatchedDependencies(
+    input.workspaceConfig.patchedDependencies ?? {},
+    dependencyNames,
+  );
+  return {
+    version: 1,
+    packages: {
+      lecturn: {
+        name: input.server.name,
+        version: input.server.version,
+        tarball: packTarballName(input.server.name, input.server.version),
+        bin: input.server.bin,
+      },
+      embed: {
+        name: input.embed.name,
+        version: input.embed.version,
+        tarball: packTarballName(input.embed.name, input.embed.version),
+      },
+    },
+    pnpm: {
+      nodeLinker: "hoisted",
+      publicHoistPattern: [CURSOR_HELPER_HOIST_PATTERN],
+      allowBuilds: Object.fromEntries(
+        Object.entries(input.workspaceConfig.allowBuilds ?? {}).filter(([name]) =>
+          dependencyNames.includes(name),
+        ),
+      ),
+      patchedDependencies: Object.fromEntries(
+        Object.entries(patched).map(([selector, patchPath]) => [
+          selector,
+          `patches/${patchPath.slice(patchPath.lastIndexOf("/") + 1)}`,
+        ]),
+      ),
+    },
+    notes: [
+      `Install hoisted (nodeLinker: hoisted). An isolated install also needs publicHoistPattern ["${CURSOR_HELPER_HOIST_PATTERN}"]: @cursor/sdk finds its platform helper by walking up from argv[1], and without the hoist it stays inside the virtual store.`,
+      "patchedDependencies paths are relative to this file. The @ff-labs/fff-node patch is required when the tree is packed into an asar (it loads libfff_c from *.asar.unpacked); the node-pty patch only changes Windows.",
+      "Inside an asar on macOS and Linux, name the archive app.asar or node_modules.asar (node-pty only rewrites those to .unpacked for spawn-helper), unpack *.node, *.dylib, *.so*, *.dll and spawn-helper, and copy @cursor/sdk-* beside the archive as real files.",
+      `Built ${input.build.repoEnvFile ? "with" : "without"} a repo .env: Lecturn Connect ${input.build.lecturnConnect ? "available" : "unavailable (lecturn connect reports missing public configuration)"}, telemetry ${input.build.telemetry ? "enabled" : "off (no PostHog key)"}, ${input.build.icons} icons.`,
+    ],
+    build: input.build,
+  };
+};
+
 interface ManifestFlags {
   readonly appVersion: Option.Option<string>;
   readonly packageName: Option.Option<string>;
@@ -360,7 +504,7 @@ interface PublishFlags extends PublishCommandConfig, ManifestFlags {
  */
 const withPackageManifest = <A, E, R>(
   config: ManifestFlags & { readonly runtimeExternalsOnly: boolean },
-  use: Effect.Effect<A, E, R>,
+  use: (manifest: PackageJson) => Effect.Effect<A, E, R>,
 ) =>
   Effect.gen(function* () {
     const path = yield* Path.Path;
@@ -391,6 +535,7 @@ const withPackageManifest = <A, E, R>(
         });
 
         return {
+          pkg,
           packageJsonString: yield* encodePackageJson(pkg),
           originalPackageJson: yield* fs.readFile(packageJsonPath),
           icons: yield* preparePublishIcons(repoRoot, serverDir, version),
@@ -403,7 +548,7 @@ const withPackageManifest = <A, E, R>(
             yield* fs.writeFile(icon.targetPath, icon.publish);
           }
           yield* Effect.log("[cli] Applied package metadata and publish icon overrides");
-          return yield* use;
+          return yield* use(resource.pkg);
         }),
       // Release: restore every file even if applying overrides or `use` fails.
       (resource) =>
@@ -437,8 +582,7 @@ const publishNodePackage = Effect.fn("publishNodePackage")(function* (config: Pu
     const path = yield* Path.Path;
     yield* assertStaveBinaries(path.join(yield* RepoRoot, "apps/server"));
   }
-  yield* withPackageManifest(
-    { ...config, runtimeExternalsOnly: false },
+  yield* withPackageManifest({ ...config, runtimeExternalsOnly: false }, () =>
     runVpPm(createVpPmPublishArgs(config), config.verbose),
   );
 });
@@ -459,32 +603,158 @@ const publishCmd = Command.make(
   publishNodePackage,
 ).pipe(Command.withDescription("Publish apps/server to npm as the lecturn Node package."));
 
+const EmbedPackageJson = Schema.Struct({
+  name: Schema.String,
+  version: Schema.String,
+  dependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  publishConfig: Schema.Struct({
+    exports: Schema.Record(
+      Schema.String,
+      Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.String)]),
+    ),
+  }),
+});
+const decodeEmbedPackageJson = Schema.decodeEffect(Schema.fromJsonString(EmbedPackageJson));
+
+/** Every published export must exist, and no emitted file may still import a workspace package. */
+const assertEmbedBuilt = Effect.fn("assertEmbedBuilt")(function* (embedDir: string) {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  const manifest = yield* decodeEmbedPackageJson(
+    yield* fs.readFileString(path.join(embedDir, "package.json")),
+  );
+  for (const target of collectPublishedExportTargets(manifest.publishConfig.exports)) {
+    const assetPath = path.join(embedDir, target);
+    if (!(yield* fs.exists(assetPath))) {
+      return yield* new ServerCliEmbedBuildMissingError({ assetPath });
+    }
+  }
+  const distDir = path.join(embedDir, "dist");
+  for (const file of yield* fs.readDirectory(distDir, { recursive: true })) {
+    if (!/\.(?:[cm]?js|d\.[cm]?ts)$/.test(file)) continue;
+    const filePath = path.join(distDir, file);
+    const specifiers = findWorkspacePackageImports(yield* fs.readFileString(filePath));
+    if (specifiers.length > 0) {
+      return yield* new ServerCliEmbedWorkspaceImportError({ filePath, specifiers });
+    }
+  }
+  return manifest;
+});
+
+const decodeJsonObject = Schema.decodeEffect(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+);
+
+/**
+ * pnpm pack resolves every `workspace:` spec, devDependencies included, and
+ * fails on @lecturn/shared, which has no version. A consumer never installs
+ * devDependencies, and the workspace ones are bundled into dist, so the packed
+ * manifest drops them; the original is restored afterwards.
+ */
+const withEmbedPackManifest = <A, E, R>(embedDir: string, use: Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path;
+    const fs = yield* FileSystem.FileSystem;
+    const packageJsonPath = path.join(embedDir, "package.json");
+    return yield* Effect.acquireUseRelease(
+      fs.readFile(packageJsonPath),
+      (original) =>
+        Effect.gen(function* () {
+          const { devDependencies: _devDependencies, ...packed } = yield* decodeJsonObject(
+            new TextDecoder().decode(original),
+          );
+          yield* fs.writeFileString(packageJsonPath, `${yield* encodePackageJson(packed)}\n`);
+          return yield* use;
+        }),
+      (original) => fs.writeFile(packageJsonPath, original),
+    );
+  });
+
+const readPackBuildFacts = Effect.fn("readPackBuildFacts")(function* (
+  repoRoot: string,
+  version: string,
+) {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  const repoEnvFile =
+    (yield* fs.exists(path.join(repoRoot, ".env"))) ||
+    (yield* fs.exists(path.join(repoRoot, ".env.local")));
+  const env = yield* Effect.sync(() => loadRepoEnv({ repoRoot }));
+  return derivePackBuildFacts({ env, repoEnvFile, version });
+});
+
+/**
+ * Emits the vendoring kit an embedding host installs from: the lecturn and
+ * @lecturn/embed tarballs, the patches their runtime dependencies need, and
+ * lecturn-pack.json with the pnpm settings and build facts.
+ */
+const packVendorKit = Effect.fn("packVendorKit")(function* (
+  config: ManifestFlags & { readonly outDir: string },
+) {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  const repoRoot = yield* RepoRoot;
+  const outDir = path.resolve(config.outDir);
+
+  const embedDir = path.join(repoRoot, "packages/embed");
+  const embed = yield* assertEmbedBuilt(embedDir);
+  yield* fs.makeDirectory(outDir, { recursive: true });
+  const server = yield* withPackageManifest({ ...config, runtimeExternalsOnly: true }, (manifest) =>
+    runVpPm(createVpPmPackArgs(config.packageName, outDir), config.verbose).pipe(
+      Effect.as(manifest),
+    ),
+  );
+  yield* withEmbedPackManifest(
+    embedDir,
+    runVpPm(createVpPmPackArgs(Option.some(embed.name), outDir), config.verbose),
+  );
+
+  const workspaceConfig = yield* readWorkspaceConfig();
+  const descriptor = buildPackDescriptor({
+    server,
+    embed,
+    workspaceConfig,
+    build: yield* readPackBuildFacts(repoRoot, server.version),
+  });
+  for (const { tarball } of Object.values(descriptor.packages)) {
+    const assetPath = path.join(outDir, tarball);
+    if (!(yield* fs.exists(assetPath))) {
+      return yield* new ServerCliBuildAssetMissingError({ assetPath });
+    }
+  }
+
+  const patchesDir = path.join(outDir, "patches");
+  yield* fs.remove(patchesDir, { recursive: true, force: true });
+  yield* fs.makeDirectory(patchesDir, { recursive: true });
+  for (const [selector, target] of Object.entries(descriptor.pnpm.patchedDependencies)) {
+    const source = workspaceConfig.patchedDependencies?.[selector];
+    if (source === undefined) continue;
+    yield* fs.copyFile(path.join(repoRoot, source), path.join(outDir, target));
+  }
+  yield* fs.writeFileString(
+    path.join(outDir, LECTURN_PACK_DESCRIPTOR_FILE),
+    `${yield* encodePackageJson(descriptor)}\n`,
+  );
+  yield* Effect.log(
+    `[cli] Packed ${descriptor.packages.lecturn.tarball} and ${descriptor.packages.embed.tarball} into ${outDir}`,
+  );
+});
+
 const packCmd = Command.make(
   "pack",
   {
     outDir: Flag.String("out-dir").pipe(
-      Flag.withDescription("Directory that receives the tarball (created if missing)."),
+      Flag.withDescription("Directory that receives the vendoring kit (created if missing)."),
     ),
     appVersion: Flag.String("app-version").pipe(Flag.optional),
     packageName: Flag.String("package-name").pipe(Flag.optional),
     binName: Flag.String("bin-name").pipe(Flag.optional),
     verbose: Flag.Boolean("verbose").pipe(Flag.withDefault(false)),
   },
-  (config) =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path;
-      const fs = yield* FileSystem.FileSystem;
-      const outDir = path.resolve(config.outDir);
-      yield* fs.makeDirectory(outDir, { recursive: true });
-      yield* withPackageManifest(
-        { ...config, runtimeExternalsOnly: true },
-        runVpPm(createVpPmPackArgs(config.packageName, outDir), config.verbose),
-      );
-      yield* Effect.log(`[cli] Packed apps/server into ${outDir}`);
-    }),
+  packVendorKit,
 ).pipe(
   Command.withDescription(
-    "Pack the built apps/server as a vendorable lecturn tarball declaring only its runtime externals.",
+    "Pack the built apps/server and packages/embed as vendorable tarballs, with the patches and lecturn-pack.json an embedding host installs from.",
   ),
 );
 
