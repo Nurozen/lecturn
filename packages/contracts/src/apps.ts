@@ -57,6 +57,20 @@ export const AppEmbedOrigin = Schema.String.check(
 );
 export type AppEmbedOrigin = typeof AppEmbedOrigin.Type;
 
+const PORT = /^\d{1,5}$/;
+
+/** Whether a page origin is one an app declared, with `*` standing for any port. */
+export function matchesAppEmbedOrigin(
+  origin: string,
+  embedOrigins: ReadonlyArray<AppEmbedOrigin>,
+): boolean {
+  return embedOrigins.some((pattern) => {
+    if (!pattern.endsWith(":*")) return origin === pattern;
+    const base = pattern.slice(0, -1);
+    return origin.startsWith(base) && PORT.test(origin.slice(base.length));
+  });
+}
+
 export const AppAbsolutePath = Schema.String.check(
   Schema.isMaxLength(4096),
   Schema.isPattern(/^(\/|[A-Za-z]:[\\/]|\\\\)/),
@@ -359,6 +373,8 @@ export const AppEmbedContext = Schema.Struct({
   openUrlTemplate: Schema.NullOr(shortText(2048)),
   live: AppLiveState,
   state: AppGrantState,
+  /** The iframe guest answers only a parent on one of these origins. */
+  embedOrigins: Schema.Array(AppEmbedOrigin),
 });
 export type AppEmbedContext = typeof AppEmbedContext.Type;
 

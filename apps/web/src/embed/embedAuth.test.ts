@@ -44,13 +44,20 @@ describe("parseEmbedHash", () => {
     expect(parseEmbedHash("#embedToken=abc&parentOrigin=http%3A%2F%2F127.0.0.1%3A5173")).toEqual({
       token: "abc",
       parentOrigin: "http://127.0.0.1:5173",
+      switcher: true,
     });
+  });
+
+  it("hides the thread switcher only when the host asks", () => {
+    expect(parseEmbedHash("#embedToken=abc&switcher=0")?.switcher).toBe(false);
+    expect(parseEmbedHash("#embedToken=abc&switcher=1")?.switcher).toBe(true);
   });
 
   it("drops a parent origin that is not a bare origin", () => {
     expect(parseEmbedHash("#embedToken=abc&parentOrigin=http://127.0.0.1:5173/path")).toEqual({
       token: "abc",
       parentOrigin: null,
+      switcher: true,
     });
     expect(parseEmbedHash("#embedToken=abc&parentOrigin=nope")?.parentOrigin).toBeNull();
   });
@@ -64,7 +71,7 @@ describe("parseEmbedHash", () => {
 
 describe("stripEmbedHash", () => {
   it("removes the embed keys and keeps the rest", () => {
-    expect(stripEmbedHash("http://h/embed/e/p#embedToken=abc&parentOrigin=x")).toBe(
+    expect(stripEmbedHash("http://h/embed/e/p#embedToken=abc&parentOrigin=x&switcher=0")).toBe(
       "http://h/embed/e/p",
     );
     expect(stripEmbedHash("http://h/embed/e/p#embedToken=abc&other=1")).toBe(

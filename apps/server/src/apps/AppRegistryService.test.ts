@@ -231,6 +231,7 @@ it.layer(NodeServices.layer)("AppRegistryService", (it) => {
       const initial = yield* Queue.take(contexts);
       assert.strictEqual(initial.name, "Example");
       assert.isNull(initial.live);
+      assert.deepEqual(initial.embedOrigins, []);
       yield* leases.set(registration.appId, liveLease);
       assert.isNotNull((yield* Queue.take(contexts)).live);
 

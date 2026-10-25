@@ -315,6 +315,10 @@
       "types": "./src/state/staveSpaceWizard.ts",
       "default": "./src/state/staveSpaceWizard.ts"
     },
+    "./state/apps": {
+      "types": "./src/state/apps.ts",
+      "default": "./src/state/apps.ts"
+    },
     "./state/source-control": {
       "types": "./src/state/sourceControl.ts",
       "default": "./src/state/sourceControl.ts"
