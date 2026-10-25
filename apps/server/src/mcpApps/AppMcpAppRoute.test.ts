@@ -130,6 +130,10 @@ interface Options {
   /** The thread has a running turn on a provider session. */
   readonly running?: boolean;
   readonly leased?: boolean;
+  /** The live `window_flash` is statically gated too. */
+  readonly gatedLive?: boolean;
+  /** The user revokes the app while its approval card is waiting. */
+  readonly revokeDuringApproval?: boolean;
   readonly headlessReadFails?: boolean;
   readonly approval?: AppToolApprovalAnswer;
   readonly threadProjectId?: ProjectId;
@@ -175,9 +179,11 @@ const withCards = <A, E>(
       ...fixture,
       ...(options.noHeadless === true ? {} : { headlessTools: fixtureHeadless! }),
       openUrlTemplate: "counter://open?root={workspaceRoot}&thread={threadId}",
-      gatedTools: ["gated_job"],
+      gatedTools: options.gatedLive === true ? ["gated_job", "window_flash"] : ["gated_job"],
       liveTools: true,
     };
+    let state = options.state ?? "granted";
+    let leased = options.leased === true;
     const thread = {
       id: threadId,
       projectId: options.threadProjectId ?? projectId,
@@ -199,11 +205,11 @@ const withCards = <A, E>(
     const appServices = Layer.mergeAll(
       Layer.mock(AppRegistryService)({
         get: (id) =>
-          Effect.succeed(
+          Effect.sync(() =>
             id === appId
               ? Option.some({
                   status: {
-                    ...statusOf(registration, options.state ?? "granted"),
+                    ...statusOf(registration, state),
                     runtimeCeiling: options.ceiling ?? null,
                   },
                   registration,
@@ -218,7 +224,7 @@ const withCards = <A, E>(
           Effect.succeed(id === projectId ? Option.some({ appId, workspaceRoot }) : Option.none()),
       }),
       Layer.mock(AppLeaseService)({
-        current: () => Effect.succeed(options.leased === true ? Option.some(lease) : Option.none()),
+        current: () => Effect.sync(() => (leased ? Option.some(lease) : Option.none())),
       }),
       Layer.mock(HeadlessToolHost)({
         call: (_appId, _projectId, request) =>
@@ -240,9 +246,13 @@ const withCards = <A, E>(
       }),
       Layer.mock(AppToolApprovalService)({
         request: (context, info) =>
-          Effect.sync(() =>
-            log.approvals.push({ providerSessionId: context.providerSessionId, info }),
-          ).pipe(
+          Effect.sync(() => {
+            log.approvals.push({ providerSessionId: context.providerSessionId, info });
+            if (options.revokeDuringApproval === true) {
+              state = "revoked";
+              leased = false;
+            }
+          }).pipe(
             Effect.as(
               options.approval ?? {
                 outcome: "approved",
@@ -529,6 +539,23 @@ describe("AppMcpAppRoute", () => {
         }),
       );
     }),
+  );
+
+  it.effect(
+    "never contacts an app revoked while a card's gated live call waited for approval",
+    () =>
+      withCards(
+        { leased: true, running: true, gatedLive: true, revokeDuringApproval: true },
+        (requests, log) =>
+          Effect.gen(function* () {
+            const exit = yield* requests
+              .callTool({ ...target, name: "window_flash", arguments: {} })
+              .pipe(Effect.exit);
+            expect(log.approvals).toHaveLength(1);
+            expect(log.liveCalls).toEqual([]);
+            expect(exit._tag).toBe("Failure");
+          }),
+      ),
   );
 
   it.effect("reads headless first, then live, and reports an app it cannot reach", () =>
