@@ -2,11 +2,12 @@ import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import * as Dialog from "../../components/ui/Dialog";
 import type { EnvironmentId, ThreadId, TurnItemId } from "@lecturn/contracts";
 import {
+  connectedAppCardTheme,
   makeMcpAppHost,
   McpAppHostRefusal,
   mcpAppStyleVariables,
+  mcpAppToolCall,
   mcpResourceBytes,
-  type McpAppCallToolResult,
   type McpAppHost,
   type McpAppHostContext,
 } from "@lecturn/client-runtime/mcp-apps";
@@ -19,6 +20,7 @@ import {
   mcpAppReferencesEqual,
   type McpAppReference,
 } from "@lecturn/shared/mcpApp";
+import { LECTURN_MCP_APP_SERVER } from "@lecturn/shared/toolOutput";
 import * as Predicate from "effect/Predicate";
 import Constants from "expo-constants";
 import { useNavigation } from "@react-navigation/native";
@@ -121,17 +123,17 @@ export function ThreadMcpApp(props: {
 
   const { themeId, themeAppearance, themeVariables, systemColorsActive } =
     useAppearancePreferences();
-  const theme = useMemo(
-    () =>
-      mobileHtmlRenderTheme({
-        themeId,
-        appearance: themeAppearance,
-        variables: themeVariables,
-        systemColors: systemColorsActive,
-        platform: Platform.OS,
-      }),
-    [themeId, themeAppearance, themeVariables, systemColorsActive],
-  );
+  const connectedApp = app.server === LECTURN_MCP_APP_SERVER;
+  const theme = useMemo(() => {
+    const htmlTheme = mobileHtmlRenderTheme({
+      themeId,
+      appearance: themeAppearance,
+      variables: themeVariables,
+      systemColors: systemColorsActive,
+      platform: Platform.OS,
+    });
+    return connectedApp ? connectedAppCardTheme(htmlTheme) : htmlTheme;
+  }, [themeId, themeAppearance, themeVariables, systemColorsActive, connectedApp]);
   const resource = useMemo(
     () => ({
       _tag: "attachment" as const,
@@ -193,11 +195,7 @@ export function ThreadMcpApp(props: {
   const storedItem = detail.data?.item;
   const toolCall = useMemo(() => {
     if (storedItem?.type !== "dynamic_tool") return undefined;
-    const output = storedItem.output as { readonly result?: unknown } | undefined;
-    return {
-      arguments: storedItem.input,
-      result: output?.result as McpAppCallToolResult | undefined,
-    };
+    return mcpAppToolCall(storedItem.input, storedItem.output);
   }, [storedItem]);
 
   const callTool = useAtomCommand(mcpAppEnvironment.callTool, { reportFailure: false });

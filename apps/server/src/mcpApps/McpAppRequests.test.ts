@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
+import * as AppRuntimeState from "../apps/AppRuntimeState.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import type * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
 import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
@@ -76,6 +77,7 @@ function makeLayer(input: {
   return McpAppRequests.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        AppRuntimeState.layer,
         Layer.mock(McpAppModelContext.McpAppModelContext)({
           set: (entry) =>
             Effect.sync(() => {
@@ -278,6 +280,7 @@ describe("McpAppRequests", () => {
     }),
   );
 
+  // AppMcpAppRoute.test.ts covers the route itself; here AppsLayer is not up.
   it.effect("keeps connected-app cards off the provider session", () =>
     Effect.gen(function* () {
       const requests = yield* McpAppRequests.McpAppRequests;
@@ -285,11 +288,11 @@ describe("McpAppRequests", () => {
       const input = { threadId, itemId };
       assert.equal(
         yield* reason(requests.readResource({ ...input, uri: "ui://ex/card" })),
-        "request-failed",
+        "app-unavailable",
       );
       assert.equal(
         yield* reason(requests.callTool({ ...input, name: "ex_counter", arguments: {} })),
-        "request-failed",
+        "app-unavailable",
       );
       assert.equal(calls.length, before);
       yield* requests.updateModelContext({

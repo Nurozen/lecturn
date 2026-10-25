@@ -103,6 +103,25 @@ it.effect("starts the app's command once per app project and reuses it", () =>
   ),
 );
 
+it.effect("reads a card document on the call-path process it shares with calls", () =>
+  withHost({ listArgs: false }, ({ host, workspace, processes }) =>
+    Effect.gen(function* () {
+      yield* call(host, "echo_meta");
+      const read = yield* host.readResource(appId, projectId, "ui://ex/counter-card");
+      expect(read.contents[0]).toMatchObject({
+        uri: "ui://ex/counter-card",
+        mimeType: "text/html;profile=mcp-app",
+      });
+      const missing = yield* host
+        .readResource(appId, projectId, "ui://ex/missing")
+        .pipe(Effect.flip);
+      expect(missing.message).toContain("resource not found");
+      expect(starts(workspace, "serve")).toHaveLength(1);
+      expect(yield* processes).toBe(1);
+    }),
+  ),
+);
+
 it.effect("closes stdin of an idle process after the idle timeout and lets it exit", () =>
   withHost({ listArgs: false }, ({ host, workspace, processes, reaper }) =>
     Effect.gen(function* () {

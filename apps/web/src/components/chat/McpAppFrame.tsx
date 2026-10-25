@@ -1,10 +1,11 @@
-import type { EnvironmentId, ThreadId, TurnItemId } from "@lecturn/contracts";
+import type { EnvironmentId, McpAppToolInfo, ThreadId, TurnItemId } from "@lecturn/contracts";
 import {
+  connectedAppCardTheme,
   makeMcpAppHost,
   McpAppHostRefusal,
   mcpAppStyleVariables,
+  mcpAppToolCall,
   mcpResourceBytes,
-  type McpAppCallToolResult,
   type McpAppDisplayMode,
   type McpAppHost,
   type McpAppHostContext,
@@ -18,12 +19,15 @@ import {
   mcpAppFileName,
   type McpAppReference,
 } from "@lecturn/shared/mcpApp";
+import { LECTURN_MCP_APP_SERVER } from "@lecturn/shared/toolOutput";
 import { Minimize2Icon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
 import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
 import { APP_VERSION } from "~/branding";
+import { isEmbedLocation } from "~/embed/embedAuth";
+import { readLocalApi } from "~/localApi";
 import { isConfirmDialogActive, requestConfirmDialog } from "~/confirmDialog";
 import { useHtmlRenderTheme } from "~/hooks/useHtmlRenderTheme";
 import { Button } from "~/components/ui/button";
@@ -72,7 +76,10 @@ export function McpAppFrame(props: {
   readonly onFullscreenChange?: (fullscreen: boolean) => void;
 }) {
   const { app } = props;
-  const theme = useHtmlRenderTheme();
+  const connectedApp = app.server === LECTURN_MCP_APP_SERVER;
+  const htmlTheme = useHtmlRenderTheme();
+  // The embed's host already sets `--ring` to its own accent.
+  const theme = connectedApp && !isEmbedLocation() ? connectedAppCardTheme(htmlTheme) : htmlTheme;
   const frameRef = useRef<HTMLIFrameElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -133,12 +140,7 @@ export function McpAppFrame(props: {
   // The host gets the tool call pushed by an effect keyed on it, so it must stay cached.
   const toolCall =
     storedItem?.type === "dynamic_tool"
-      ? {
-          arguments: storedItem.input,
-          result: (storedItem.output as { readonly result?: unknown } | undefined)?.result as
-            | McpAppCallToolResult
-            | undefined,
-        }
+      ? mcpAppToolCall(storedItem.input, storedItem.output)
       : undefined;
 
   const callTool = useAtomCommand(mcpAppEnvironment.callTool, { reportFailure: false });
@@ -148,6 +150,7 @@ export function McpAppFrame(props: {
     reportFailure: false,
   });
   const [toolDefinition, setToolDefinition] = useState<unknown>(undefined);
+  const [appLinks, setAppLinks] = useState<McpAppToolInfo["connectedApp"]>(undefined);
 
   // Read by the host on every message, so it always sees current values
   // without being rebuilt (which would drop the app's session).
@@ -161,6 +164,7 @@ export function McpAppFrame(props: {
     updateModelContext,
     displayMode,
     toolDefinition,
+    appLinks,
   };
   const hostRef = useRef<McpAppHost | null>(null);
   const latest = useRef(live);
@@ -212,9 +216,9 @@ export function McpAppFrame(props: {
         input: { threadId: props.threadId, itemId: props.itemId, name: app.tool },
       })
       .then((info) => {
-        if (!cancelled && info._tag === "Success" && info.value.tool !== undefined) {
-          setToolDefinition(info.value.tool);
-        }
+        if (cancelled || info._tag !== "Success") return;
+        if (info.value.tool !== undefined) setToolDefinition(info.value.tool);
+        setAppLinks(info.value.connectedApp);
       });
     return () => {
       cancelled = true;
@@ -320,6 +324,29 @@ export function McpAppFrame(props: {
         }
         window.open(url, "_blank", "noopener,noreferrer");
       },
+      // In full Lecturn a reference opens the app itself, at this thread; the
+      // embed's own navigation is the bridge's (lecturn/navigate).
+      ...(app.server === LECTURN_MCP_APP_SERVER && !isEmbedLocation()
+        ? {
+            openAppRef: {
+              refPrefixes: () => latest.current.appLinks?.refPrefixes ?? [],
+              open: async () => {
+                if (
+                  document.activeElement !== frameRef.current ||
+                  !navigator.userActivation?.isActive
+                ) {
+                  throw new McpAppHostRefusal("Links open only from a click in the app.");
+                }
+                const url = latest.current.appLinks?.openUrl;
+                const api = readLocalApi();
+                if (url == null || api === undefined) {
+                  throw new McpAppHostRefusal("This app has no link Lecturn can open.");
+                }
+                await api.shell.openExternal(url);
+              },
+            },
+          }
+        : {}),
       sendMessage: async (text) => {
         const send = latest.current.props.onSendMessage;
         if (send === undefined) throw new McpAppHostRefusal("Messages are not available here.");

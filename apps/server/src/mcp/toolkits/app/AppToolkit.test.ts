@@ -56,6 +56,7 @@ import {
   makeFakeApps,
   makeWorkspace,
 } from "../../../apps/testing/headlessAppFixture.ts";
+import * as ServerConfig from "../../../config.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../../../orchestration-v2/ProjectStore.ts";
@@ -599,6 +600,7 @@ const withFreshRegistration = <A, E>(
               LiveToolClientLayer.layer,
               Layer.mock(AppLeaseService)({ current: () => Effect.succeedNone }),
               Layer.mock(AppToolApprovalService)({}),
+              ServerConfig.layerTest(workspace.workspaceRoot, { prefix: "lecturn-app-toolkit-" }),
             ),
           ),
           Layer.provide(NodeServices.layer),

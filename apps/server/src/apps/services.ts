@@ -272,6 +272,12 @@ export class HeadlessToolHost extends Context.Service<
       projectId: ProjectId,
       request: AppToolCallRequest,
     ) => Effect.Effect<McpSchema.CallToolResult, AppsFailure>;
+    /** On the call-path process, for card documents and the resources cards read (A21). */
+    readonly readResource: (
+      appId: AppId,
+      projectId: ProjectId,
+      uri: string,
+    ) => Effect.Effect<McpSchema.ReadResourceResult, AppsFailure>;
     /** Runs the registration's `listArgs`; never the call-path command. */
     readonly refreshDefinitions: (
       appId: AppId,

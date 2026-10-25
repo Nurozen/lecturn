@@ -39,7 +39,7 @@ export const fixtureProjectId = ProjectId.make("project-counter");
 
 export interface FixtureLogEvent {
   readonly pid: number;
-  readonly event: "start" | "exit" | "call" | "stdin-closed" | "sigterm";
+  readonly event: "start" | "exit" | "call" | "read" | "stdin-closed" | "sigterm";
   readonly mode?: "list" | "serve";
   readonly cwd?: string;
   readonly argv?: ReadonlyArray<string>;
@@ -47,6 +47,7 @@ export interface FixtureLogEvent {
   readonly electronRunAsNode?: string | null;
   readonly name?: string;
   readonly inFlight?: number;
+  readonly uri?: string;
 }
 
 /** A real workspace folder (cwd must exist) and the fixture's event log inside it. */
