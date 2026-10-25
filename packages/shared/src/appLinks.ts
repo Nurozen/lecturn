@@ -21,7 +21,25 @@ export const APPS_SIDEBAR_PARAM = "sidebar";
 export const APPS_SIDEBAR_VALUE = "apps";
 export const APP_ID_PARAM = "app";
 
-const isAppId = (value: string) => value.length <= APP_ID_MAX_LENGTH && APP_ID.test(value);
+export const isAppId = (value: string) => value.length <= APP_ID_MAX_LENGTH && APP_ID.test(value);
+
+export interface AppsSidebarSearch {
+  readonly mode: "projects" | "apps";
+  /** The app to select; null leaves the current scope. */
+  readonly appId: string | null;
+}
+
+/**
+ * The sidebar mode a route's query asks for (`?sidebar=apps&app=<appId>`), or null when it asks
+ * for none. An app id that is not one is dropped rather than selected.
+ */
+export function parseAppsSidebarSearch(search: string): AppsSidebarSearch | null {
+  const params = new URLSearchParams(search);
+  const mode = params.get(APPS_SIDEBAR_PARAM);
+  if (mode !== APPS_SIDEBAR_VALUE && mode !== "projects") return null;
+  const appId = mode === APPS_SIDEBAR_VALUE ? params.get(APP_ID_PARAM) : null;
+  return { mode, appId: appId !== null && isAppId(appId) ? appId : null };
+}
 
 /** The target of a parsed `lecturn://apps/...` URL, or null when it is not one. */
 export function parseAppDeepLink(url: URL): AppLinkTarget | null {

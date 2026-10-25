@@ -13,7 +13,7 @@ const COMMAND_PALETTE_OPEN_EVENT = "lecturn:open-command-palette";
 
 export type CommandPaletteOpenDetail =
   | {
-      readonly open?: "add-project" | "new-thread-in";
+      readonly open?: "add-project" | "new-thread-in" | "open-app";
       readonly query?: string;
       readonly linkedThreads?: CommandPaletteLinkedThreads;
     }

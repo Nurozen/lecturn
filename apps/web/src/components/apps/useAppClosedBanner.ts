@@ -104,7 +104,11 @@ export function useAppClosedBanner(
         ? undefined
         : createElement(
             Button,
-            { size: "xs", variant: "ghost", onClick: () => openAppUrl(openUrl) },
+            {
+              size: "xs",
+              variant: "ghost",
+              onClick: () => openAppUrl(openUrl, context?.openUrlTemplate ?? null),
+            },
             banner.openLabel,
             createElement(ExternalLinkIcon, { "aria-hidden": true }),
           ),

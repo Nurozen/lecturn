@@ -13,7 +13,10 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import { makeThreadFixture } from "../../test-fixtures";
+import { scopedThreadKey, scopeThreadRef } from "@lecturn/client-runtime/environment";
 import {
+  appsNewThreadWorkspace,
+  appsSidebarVisibleThreads,
   appStatusChip,
   appTargetWorkspace,
   appTreeGroupKey,
@@ -314,5 +317,69 @@ describe("Apps-mode scope and folds", () => {
     expect(isAppTreeGroupCollapsed({}, app)).toBe(false);
     expect(isAppTreeGroupCollapsed({ [appTreeGroupKey(settled)]: false }, settled)).toBe(false);
     expect(isAppTreeGroupCollapsed({ [appTreeGroupKey(app)]: true }, app)).toBe(true);
+  });
+});
+
+describe("Apps-mode shortcuts", () => {
+  const hopper = makeProject("hopper");
+  const liquid = makeProject("liquid");
+  const atlasDesk = makeProject("desk", MAC, ATLAS);
+  const threads = [
+    makeThread("pinned", hopper, { pinnedAt: "2026-10-21T00:00:00.000Z" }),
+    makeThread("active", hopper, { updatedAt: "2026-10-22T00:00:00.000Z" }),
+    makeThread("settled", hopper, { settledOverride: "settled" }),
+    makeThread("fresh", liquid, { updatedAt: "2026-10-24T00:00:00.000Z" }),
+    makeThread("atlas", atlasDesk, { updatedAt: "2026-10-23T00:00:00.000Z" }),
+  ];
+  const apps = build({ projects: [hopper, liquid, atlasDesk], threads });
+  const rocket = apps.find((app) => app.appId === ROCKET)!;
+  const atlas = apps.find((app) => app.appId === ATLAS)!;
+  const workspaceKey = (title: string) =>
+    rocket.workspaces.find((workspace) => workspace.project.title === title)!.key;
+  const threadKey = (title: string) => {
+    const thread = threads.find((candidate) => candidate.title === title)!;
+    return scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+  };
+
+  it("walks the rows Apps mode shows, in order, leaving folded groups out", () => {
+    const visible = (
+      collapsedByKey: Record<string, boolean>,
+      selected = null as typeof rocket | null,
+    ) => titles(appsSidebarVisibleThreads({ apps, selected, collapsedByKey }));
+
+    expect(visible({})).toEqual(["atlas", "pinned", "active", "fresh"]);
+    expect(visible({ [appTreeGroupKey({ kind: "app", appId: ATLAS })]: true })).toEqual([
+      "pinned",
+      "active",
+      "fresh",
+    ]);
+    expect(
+      visible({
+        [appTreeGroupKey({
+          kind: "section",
+          section: "settled",
+          workspaceKey: workspaceKey("hopper"),
+        })]: false,
+        [appTreeGroupKey({ kind: "workspace", workspaceKey: workspaceKey("liquid") })]: true,
+      }),
+    ).toEqual(["atlas", "pinned", "active", "settled"]);
+    // A selected app shows under its header even when its row was folded in the list.
+    expect(visible({ [appTreeGroupKey({ kind: "app", appId: ROCKET })]: true }, rocket)).toEqual([
+      "pinned",
+      "active",
+      "fresh",
+    ]);
+  });
+
+  it("starts New thread in the open app thread's workspace, else the latest one in view", () => {
+    const target = (selected: typeof rocket | null, activeThreadKey: string | null) =>
+      appsNewThreadWorkspace({ apps, selected, activeThreadKey })?.project.title ?? null;
+
+    expect(target(null, threadKey("active"))).toBe("hopper");
+    expect(target(null, null)).toBe("liquid");
+    expect(target(rocket, threadKey("atlas"))).toBe("liquid");
+    expect(target(atlas, threadKey("active"))).toBe("desk");
+    expect(target(null, "mac:not-an-app-thread")).toBe("liquid");
+    expect(appsNewThreadWorkspace({ apps: [], selected: null, activeThreadKey: null })).toBeNull();
   });
 });

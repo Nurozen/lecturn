@@ -33,6 +33,8 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
+import { useAppsNewThreadTarget } from "../components/apps/useAppsSidebarShortcuts";
+import { useUiStateStore } from "../uiStateStore";
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
@@ -128,6 +130,11 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
+        const appsTarget = useAppsNewThreadTarget.getState().target;
+        if (useUiStateStore.getState().sidebarMode === "apps" && appsTarget !== null) {
+          void handleNewThread(appsTarget);
+          return;
+        }
         if (!legacySidebarEnabled && projectGroupCount > 1) {
           openCommandPalette({ open: "new-thread-in" });
           return;

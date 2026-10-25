@@ -1688,3 +1688,42 @@ describe("Usage shortcuts", () => {
     );
   });
 });
+
+describe("sidebar mode shortcut", () => {
+  it("toggles Projects | Apps with Mod+Alt+P by default, including macOS's Option layer", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: "π", code: "KeyP", metaKey: true, altKey: true }),
+        DEFAULT_RESOLVED_KEYBINDINGS,
+        { platform: "MacIntel" },
+      ),
+      "sidebar.toggleApps",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: "p", ctrlKey: true, altKey: true }),
+        DEFAULT_RESOLVED_KEYBINDINGS,
+        { platform: "Win32" },
+      ),
+      "sidebar.toggleApps",
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "sidebar.toggleApps", "MacIntel"),
+      "⌥⌘P",
+    );
+  });
+
+  it("shares its chord with no other default binding", () => {
+    const toggleApps = DEFAULT_RESOLVED_KEYBINDINGS.find(
+      (binding) => binding.command === "sidebar.toggleApps",
+    );
+    assert.isDefined(toggleApps);
+    const sameChord = DEFAULT_RESOLVED_KEYBINDINGS.filter(
+      (binding) => JSON.stringify(binding.shortcut) === JSON.stringify(toggleApps?.shortcut),
+    );
+    assert.deepStrictEqual(
+      sameChord.map((binding) => binding.command),
+      ["sidebar.toggleApps"],
+    );
+  });
+});
