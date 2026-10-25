@@ -192,6 +192,7 @@ export const makeFakeApps = (input: {
       layer: Layer.merge(registry, projects),
       cacheWrites,
       cache,
+      state,
       publishStatus,
     };
   });

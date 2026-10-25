@@ -248,6 +248,10 @@ const withToolkit = <A, E>(
     readonly cachedHeadless?: ReadonlyArray<McpSchema.Tool>;
     readonly decide?: (input: AppToolGate.AppToolGateInput) => AppToolGate.AppToolGateDecision;
     readonly approval?: AppToolApproval.AppToolApprovalResult;
+    /** The app holds a live lease when the call starts. */
+    readonly leased?: boolean;
+    /** The user revokes the app while its approval card is waiting. */
+    readonly revokeDuringApproval?: boolean;
   },
   body: (toolkit: AppToolkit["Service"], harness: Harness) => Effect.Effect<A, E>,
 ) =>
@@ -266,11 +270,21 @@ const withToolkit = <A, E>(
       ...(options.cachedHeadless === undefined ? {} : { cachedHeadless: options.cachedHeadless }),
       cachedLive: liveTools,
     });
+    const lease = yield* Ref.make<Option.Option<AppLease>>(
+      options.leased === true
+        ? Option.some({
+            appId,
+            url: "http://127.0.0.1:45231/mcp" as AppLease["url"],
+            bearer: "live-bearer",
+            expiresAt: DateTime.add(at, { hours: 1 }),
+          })
+        : Option.none(),
+    );
     const services = Layer.mergeAll(
       fake.layer,
       layerProjectionFor(options.thread ?? thread),
       layerRuntimePolicyFor(options.supportedRuntimeModes),
-      Layer.mock(AppLeaseService)({ current: () => Effect.succeedNone }),
+      Layer.mock(AppLeaseService)({ current: () => Ref.get(lease) }),
       Layer.mock(LiveToolClient)({
         call: (_lease: AppLease, request) =>
           Effect.sync(() => harness.liveCalls.push(request)).pipe(Effect.as(answer(request))),
@@ -291,6 +305,11 @@ const withToolkit = <A, E>(
       },
       requestApproval: (request) =>
         Effect.sync(() => harness.approvals.push(request)).pipe(
+          Effect.andThen(
+            options.revokeDuringApproval === true
+              ? Ref.set(fake.state, "revoked").pipe(Effect.andThen(Ref.set(lease, Option.none())))
+              : Effect.void,
+          ),
           Effect.as(options.approval ?? { approved: true, requestId: "request-7" }),
         ),
       wrapResult: (input) =>
@@ -538,6 +557,26 @@ it.effect("answers a closed app's live tool without gating or contacting it", ()
         expect(harness.gateInputs).toEqual([]);
         expect(harness.liveCalls).toEqual([]);
         expect(harness.forwarded).toEqual([]);
+      }),
+  ),
+);
+
+it.effect("never contacts an app revoked while its gated live call waited for approval", () =>
+  withToolkit(
+    {
+      registration: registrationFor(true),
+      cachedHeadless: cachedTools,
+      leased: true,
+      revokeDuringApproval: true,
+      decide: () => ({ kind: "ask" }),
+    },
+    (toolkit, harness) =>
+      Effect.gen(function* () {
+        const exit = yield* toolkit.call(appScope, "ex_window_flash", {}, {}).pipe(Effect.exit);
+
+        expect(harness.approvals).toHaveLength(1);
+        expect(harness.liveCalls).toEqual([]);
+        expect(exit._tag).toBe("Failure");
       }),
   ),
 );

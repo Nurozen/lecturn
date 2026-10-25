@@ -280,8 +280,7 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
       }
 
       // 2. Lease, before any gating: a closed app is never contacted.
-      const lease = appTool.tier === "live" ? yield* leases.current(appId) : Option.none();
-      if (appTool.tier === "live" && Option.isNone(lease)) {
+      if (appTool.tier === "live" && Option.isNone(yield* leases.current(appId))) {
         return errorResult(`${registration.name} is closed; open it to use ${name}.`);
       }
 
@@ -344,21 +343,37 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
           }
         });
 
-      const forward = (approval: AppToolApprovalMeta) => {
-        const request: AppToolCallRequest = {
-          name: bare,
-          arguments: args,
-          meta: {
-            ...withoutLecturnKeys(meta),
-            [APP_TOOL_CONTEXT_META_KEY]: context.meta,
-            [APP_TOOL_APPROVAL_META_KEY]: approval,
-          },
-        };
-        const result = Option.isSome(lease)
-          ? live.call(lease.value, request)
-          : headless.call(appId, projectId, request);
-        return result.pipe(Effect.map((result) => ({ request, result })));
-      };
+      const forward = (approval: AppToolApprovalMeta) =>
+        Effect.gen(function* () {
+          const request: AppToolCallRequest = {
+            name: bare,
+            arguments: args,
+            meta: {
+              ...withoutLecturnKeys(meta),
+              [APP_TOOL_CONTEXT_META_KEY]: context.meta,
+              [APP_TOOL_APPROVAL_META_KEY]: approval,
+            },
+          };
+          // An approval can wait for minutes, so the grant and lease read
+          // before it are stale: an app revoked or closed meanwhile is not contacted.
+          if (Option.isNone(yield* grantedApp(appId))) {
+            return yield* new AppsError({
+              code: "forbidden",
+              message: `${appId} is not a granted connected app.`,
+            });
+          }
+          if (appTool.tier === "headless") {
+            return { request, result: yield* headless.call(appId, projectId, request) };
+          }
+          const current = yield* leases.current(appId);
+          if (Option.isNone(current)) {
+            return {
+              request,
+              result: errorResult(`${registration.name} is closed; open it to use ${name}.`),
+            };
+          }
+          return { request, result: yield* live.call(current.value, request) };
+        });
 
       // A refused call still gets its card, shown as cancelled.
       const refuse = (request: AppToolCallRequest, reason: string) =>

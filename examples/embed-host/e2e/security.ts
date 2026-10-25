@@ -32,6 +32,8 @@ import {
   type AppStatus,
   CommandId,
   MessageId,
+  ORCHESTRATION_PROTOCOL_HEADER,
+  ORCHESTRATION_PROTOCOL_VERSION_TEXT,
   ORCHESTRATION_V2_WS_METHODS as O,
   type OrchestrationV2Command,
   type OrchestrationV2ThreadProjection,
@@ -216,6 +218,12 @@ async function httpStatus(origin: string, path: string, init: RequestInit = {}):
 }
 
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+
+// The orchestration routes answer 400 to a request without the protocol header.
+const orchestrationHeaders = (token: string) => ({
+  ...bearer(token),
+  [ORCHESTRATION_PROTOCOL_HEADER]: ORCHESTRATION_PROTOCOL_VERSION_TEXT,
+});
 
 /** A WebSocket ticket is the first thing every client buys with its bearer. */
 const ticketStatus = (origin: string, token: string) =>
@@ -527,7 +535,7 @@ export async function step7(run: EmbedHostRun, log: E2eContext["log"]): Promise<
   );
   NodeAssert.equal(
     await httpStatus(origin, `/api/orchestration/threads/${threadId}/transcript`, {
-      headers: bearer(settings),
+      headers: orchestrationHeaders(settings),
     }),
     200,
     "the thread exports",
@@ -569,6 +577,10 @@ export async function step7(run: EmbedHostRun, log: E2eContext["log"]): Promise<
   );
   const fresh = await mintEmbedToken(origin, credential, projectId);
   NodeAssert.equal(await ticketStatus(origin, fresh.token), 200, "a new embed token works");
+  NodeAssert.ok(
+    isRefusedStatus(await ticketStatus(origin, target.token)),
+    "re-pairing does not revive an embed token minted before the revoke",
+  );
   log("re-paired: project, threads and embed tokens restored");
 }
 
@@ -756,14 +768,16 @@ export async function step8(run: EmbedHostRun, log: E2eContext["log"]): Promise<
     NodeAssert.ok(
       isRefusedStatus(
         await httpStatus(origin, `/api/orchestration/threads/${normalThread}`, {
-          headers: bearer(hostEmbed.token),
+          headers: orchestrationHeaders(hostEmbed.token),
         }),
       ),
       "embed token: a normal thread over HTTP",
     );
     NodeAssert.ok(
       isRefusedStatus(
-        await httpStatus(origin, "/api/orchestration/shell", { headers: bearer(probeCredential) }),
+        await httpStatus(origin, "/api/orchestration/shell", {
+          headers: orchestrationHeaders(probeCredential),
+        }),
       ),
       "app credential: the shell over HTTP",
     );

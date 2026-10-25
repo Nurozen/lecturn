@@ -341,8 +341,7 @@ export const make = Effect.gen(function* () {
       const bare = found.tool.name;
       const prefixed = `${registration.toolPrefix}_${bare}`;
 
-      const lease = found.tier === "live" ? yield* leases.current(card.appId) : Option.none();
-      if (found.tier === "live" && Option.isNone(lease)) {
+      if (found.tier === "live" && Option.isNone(yield* leases.current(card.appId))) {
         return errorResult(`${registration.name} is closed; open it to use ${prefixed}.`);
       }
 
@@ -384,18 +383,42 @@ export const make = Effect.gen(function* () {
       };
 
       const context = yield* contextMeta(card);
-      const forward = (approval: AppToolApprovalMeta) => {
-        const request: AppToolCallRequest = {
-          name: bare,
-          arguments: input.arguments,
-          meta: { [APP_TOOL_CONTEXT_META_KEY]: context, [APP_TOOL_APPROVAL_META_KEY]: approval },
-        };
-        return (
-          Option.isSome(lease)
-            ? live.call(lease.value, request)
-            : headless.call(card.appId, card.projectId, request)
-        ).pipe(Effect.mapError((cause) => fail(input.threadId, "request-failed", cause)));
-      };
+      const forward = (approval: AppToolApprovalMeta) =>
+        Effect.gen(function* () {
+          const request: AppToolCallRequest = {
+            name: bare,
+            arguments: input.arguments,
+            meta: { [APP_TOOL_CONTEXT_META_KEY]: context, [APP_TOOL_APPROVAL_META_KEY]: approval },
+          };
+          // As in AppToolkit.call: an approval can wait for minutes, so an app
+          // revoked or closed meanwhile is not contacted.
+          const record = yield* registry
+            .get(card.appId)
+            .pipe(Effect.mapError((cause) => fail(input.threadId, "request-failed", cause)));
+          if (Option.isNone(record) || record.value.status.state !== "granted") {
+            return yield* fail(input.threadId, "app-unavailable");
+          }
+          if (found.tier === "headless") {
+            return yield* headless
+              .call(card.appId, card.projectId, request)
+              .pipe(Effect.mapError((cause) => fail(input.threadId, "request-failed", cause)));
+          }
+          const current = yield* leases.current(card.appId);
+          if (Option.isNone(current)) {
+            return new McpSchema.CallToolResult({
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: `${registration.name} is closed; open it to use ${prefixed}.`,
+                },
+              ],
+            });
+          }
+          return yield* live
+            .call(current.value, request)
+            .pipe(Effect.mapError((cause) => fail(input.threadId, "request-failed", cause)));
+        });
 
       const first = yield* approve("static", null);
       if ("refused" in first) return errorResult(first.refused);
