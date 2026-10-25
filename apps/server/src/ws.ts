@@ -276,6 +276,7 @@ import { makeStaveRpcHandlers, StaveRpcRuntime } from "./stave/staveRpcHandlers.
 import * as AppsRpcHandlers from "./apps/AppsRpcHandlers.ts";
 import type { AppsServices } from "./apps/AppsLayer.ts";
 import * as AppRpcAuthorization from "./apps/appRpcAuthorization.ts";
+import * as AppStreamFilter from "./apps/appStreamFilter.ts";
 import { StaveBinary } from "./stave/StaveBinary.ts";
 import { StaveCli } from "./stave/StaveCli.ts";
 import { StaveConfigReader } from "./stave/StaveConfigReader.ts";
@@ -2333,7 +2334,9 @@ const makeWsRpcHandlers = (
       [ORCHESTRATION_V2_WS_METHODS.subscribeArchivedShell]: (_input) =>
         Stream.unwrap(subscribeOrchestrationV2ArchivedShell()),
       [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: (input) =>
-        Stream.unwrap(subscribeOrchestrationV2Shell(input)),
+        Stream.unwrap(subscribeOrchestrationV2Shell(input)).pipe(
+          AppStreamFilter.filterShellStream(currentSession),
+        ),
       [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: (input) =>
         Stream.unwrap(
           Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(

@@ -45,6 +45,8 @@ import { REUSABLE_DEV_SESSION_EXPIRES_AT, resolveReusableDevAuth } from "./Reusa
 import { verifyRequestDpopProof } from "./dpop.ts";
 import { DESKTOP_RENDERER_ORIGINS } from "../httpCors.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import { appHttpRouteFor, requestPath } from "../apps/appHttpAuthorization.ts";
+import { parseAppSubject } from "../apps/subjects.ts";
 
 const DEFAULT_SESSION_SUBJECT = "cli-issued-session";
 export const INTERNAL_ADMINISTRATIVE_BOOTSTRAP_SUBJECT = "administrative-bootstrap";
@@ -621,6 +623,20 @@ const rejectMcpClientAudience = <S extends { readonly subject: string }>(session
       ).pipe(Effect.tap(() => Effect.logWarning("Rejected an MCP client session outside /mcp.")))
     : Effect.succeed(session);
 
+/** Connected-app sessions reach only the routes `apps/appHttpAuthorization.ts` lists (R2.3). */
+const rejectAppAudience =
+  (path: () => string) =>
+  <S extends { readonly subject: string }>(session: S) => {
+    const subject = parseAppSubject(session.subject);
+    return subject === null || appHttpRouteFor(subject, path()) !== null
+      ? Effect.succeed(session)
+      : Effect.fail(
+          new ServerAuthInvalidCredentialError({
+            diagnostic: "Connected app sessions are not accepted on this route.",
+          }),
+        );
+  };
+
 const mapSessionVerificationErrors = <A, R>(
   effect: Effect.Effect<A, SessionStore.SessionCredentialError, R>,
 ): Effect.Effect<A, ServerAuthInvalidCredentialError | ServerAuthInternalError, R> =>
@@ -730,6 +746,7 @@ export const make = Effect.gen(function* () {
 
   const authenticateToken = (
     token: string,
+    path: () => string,
   ): Effect.Effect<
     AuthenticatedSession,
     ServerAuthInvalidCredentialError | ServerAuthInternalError
@@ -746,6 +763,7 @@ export const make = Effect.gen(function* () {
       ),
       mapSessionVerificationErrors,
       Effect.flatMap(rejectMcpClientAudience),
+      Effect.flatMap(rejectAppAudience(path)),
       Effect.map((session) => ({
         sessionId: session.sessionId,
         subject: session.subject,
@@ -781,11 +799,50 @@ export const make = Effect.gen(function* () {
     ...config.devAllowedOrigins,
   ]);
 
+  /**
+   * The embed page shares the user's origin, so its requests can carry the
+   * user's cookie as well (D14). A bearer that verifies to an embed session
+   * wins over the cookie, so the embed never acts as the user; any other
+   * bearer keeps today's cookie-first order.
+   */
+  const embedBearerBesideCookie = (
+    request: HttpServerRequest.HttpServerRequest,
+    credential: ReturnType<typeof resolveRequestCredential>,
+  ) => {
+    const bearer =
+      credential !== undefined && isBrowserCookieCredential(credential.source)
+        ? parseBearerToken(request)
+        : null;
+    if (bearer === null) return Effect.succeedNone;
+    return sessions.verify(bearer).pipe(
+      Effect.map((session) =>
+        parseAppSubject(session.subject)?.kind === "embed" && !session.proofKeyThumbprint
+          ? Option.some(bearer)
+          : Option.none(),
+      ),
+      Effect.orElseSucceed(() => Option.none<string>()),
+    );
+  };
+
   const authenticateRequest = (
     request: HttpServerRequest.HttpServerRequest,
   ): Effect.Effect<AuthenticatedSession, ServerAuthCredentialError | ServerAuthInternalError> => {
-    const dpopToken = parseDpopToken(request);
     const credential = resolveRequestCredential(request);
+    return embedBearerBesideCookie(request, credential).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => authenticateCredential(request, credential),
+          onSome: (bearer) => authenticateToken(bearer, () => requestPath(request.url)),
+        }),
+      ),
+    );
+  };
+
+  const authenticateCredential = (
+    request: HttpServerRequest.HttpServerRequest,
+    credential: ReturnType<typeof resolveRequestCredential>,
+  ): Effect.Effect<AuthenticatedSession, ServerAuthCredentialError | ServerAuthInternalError> => {
+    const dpopToken = parseDpopToken(request);
     if (!credential?.token) {
       return Effect.fail(new ServerAuthMissingCredentialError({}));
     }
@@ -799,7 +856,7 @@ export const make = Effect.gen(function* () {
         }),
       );
     }
-    return authenticateToken(credential.token).pipe(
+    return authenticateToken(credential.token, () => requestPath(request.url)).pipe(
       Effect.flatMap((session) => {
         if (session.proofKeyThumbprint) {
           if (!dpopToken || dpopToken !== credential.token) {
@@ -1121,7 +1178,12 @@ export const make = Effect.gen(function* () {
 
   const listSessions: EnvironmentAuth["Service"]["listSessions"] = () =>
     sessions.listActive().pipe(
-      Effect.map((activeSessions) => activeSessions.toSorted(bySessionPriority)),
+      // Connected apps are managed under Settings > Apps, not as clients (D11).
+      Effect.map((activeSessions) =>
+        activeSessions
+          .filter((session) => parseAppSubject(session.subject) === null)
+          .toSorted(bySessionPriority),
+      ),
       Effect.mapError((cause) => new ServerAuthSessionsListError({ cause })),
       Effect.withSpan("EnvironmentAuth.listSessions"),
     );
@@ -1243,6 +1305,7 @@ export const make = Effect.gen(function* () {
           return yield* sessions.verifyWebSocketToken(websocketTicket).pipe(
             mapSessionVerificationErrors,
             Effect.flatMap(rejectMcpClientAudience),
+            Effect.flatMap(rejectAppAudience(() => requestUrl.value.pathname)),
             Effect.map((session) => ({
               sessionId: session.sessionId,
               subject: session.subject,
