@@ -293,6 +293,11 @@ import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
+import {
+  appApprovalTestId,
+  approvalReplacesComposer,
+  approvalSendBlockReason,
+} from "./composerApprovalState";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import {
@@ -2334,6 +2339,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
   const sendDisabledReason =
     externalSendDisabledReason ??
+    approvalSendBlockReason(activePendingApproval) ??
     (multipleModelSelections?.length === 0 ? "Select at least one model." : null) ??
     (activePendingProgress
       ? attachmentBlockReason
@@ -2797,14 +2803,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const nonPersistedComposerImageIdSet = new Set(nonPersistedComposerImageIds);
 
-  const isComposerApprovalState = activePendingApproval !== null;
+  const isComposerApprovalState = approvalReplacesComposer(activePendingApproval);
   const composerSuggestionsVisible = composerMenuOpen && !isComposerApprovalState;
   const composerSuggestionListVisible = composerSuggestionsVisible && composerMenuItems.length > 0;
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const isChoiceOnlyPendingQuestion =
     activePendingProgress?.activeQuestion?.allowCustomAnswer === false;
   const showComposerTopDrawer =
-    isComposerApprovalState ||
+    activePendingApproval !== null ||
     pendingUserInputs.length > 0 ||
     (!isComposerCollapsedMobile && showPlanFollowUpPrompt && activeProposedPlan !== null);
   const showCollapsedMobilePromptRow =
@@ -6513,8 +6519,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   <ComposerBanner.Row
                     layout="approval"
                     data-chat-composer-collapsed-controls="true"
+                    data-testid={appApprovalTestId(activePendingApproval, "card")}
                   >
-                    <ComposerBanner.Icon>
+                    <ComposerBanner.Icon
+                      data-testid={appApprovalTestId(activePendingApproval, "icon")}
+                    >
                       <ShieldIcon />
                     </ComposerBanner.Icon>
                     <ComposerBanner.Content>
@@ -6531,6 +6540,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           activePendingApproval.requestId,
                         )}
                         options={activePendingApproval.options}
+                        moreTestId={appApprovalTestId(activePendingApproval, "more")}
                         canRespond={activePendingApproval.responseCapability === "live"}
                         onRespondToApproval={onRespondToApproval}
                       />
