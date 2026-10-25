@@ -147,4 +147,23 @@ describe("extractToolActivityPresentation", () => {
       }),
     ).toEqual({});
   });
+
+  it("keeps the app source the server stamps on a connected app's tool rows", () => {
+    const toolSource = {
+      key: "app:dev.rocketwright.app",
+      name: "RocketWright",
+      kind: "integration",
+      icon: { _tag: "themed-logo", logoUrl: "data:image/png;base64,iVBORw0KGgo=" },
+    };
+    expect(
+      extractToolActivityPresentation({
+        type: "dynamic_tool",
+        toolName: "mcp__lecturn__rw_simulate",
+        title: "rw_simulate",
+        toolIcon: toolSource.icon,
+        toolSource,
+        input: { config: "baseline" },
+      }),
+    ).toEqual({ toolIcon: toolSource.icon, toolSource });
+  });
 });

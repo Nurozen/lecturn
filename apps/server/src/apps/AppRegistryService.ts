@@ -31,6 +31,7 @@ import {
   layer as AppRegistrationRepositoryLayer,
 } from "../persistence/AppRegistrations.ts";
 import { issueAppCredential } from "./appCredential.ts";
+import { syncAppToolPresentations } from "./appToolPresentationSync.ts";
 import {
   type AppLease,
   AppLeaseService,
@@ -661,6 +662,8 @@ export const make = Effect.gen(function* () {
     ),
     Effect.forkScoped({ startImmediately: true }),
   );
+
+  yield* syncAppToolPresentations(streamStatus).pipe(Effect.forkScoped({ startImmediately: true }));
 
   // A sidecar exists only for its app, so a registration it cannot serve
   // stops it instead of running without the app.

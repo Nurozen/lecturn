@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
+import { setRegisteredAppToolPresentations } from "@lecturn/shared/appToolPresentation";
 import { mcpToolPresentation } from "./mcpToolPresentation.ts";
 
 describe("mcpToolPresentation", () => {
@@ -99,5 +100,39 @@ describe("mcpToolPresentation", () => {
         toolSource: { key: "mcp:weather", name: "weather", kind: "integration" },
       },
     );
+  });
+
+  it("brands a registered app's tools with the app instead of Lecturn's server", () => {
+    const icon = "data:image/png;base64,iVBORw0KGgo=";
+    setRegisteredAppToolPresentations([
+      { appId: "dev.rocketwright.app", name: "RocketWright", toolPrefix: "rw", iconDataUrl: icon },
+    ]);
+    try {
+      const branded = {
+        title: "rw_simulate",
+        toolIcon: { _tag: "themed-logo", logoUrl: icon },
+        toolSource: {
+          key: "app:dev.rocketwright.app",
+          name: "RocketWright",
+          kind: "integration",
+          icon: { _tag: "themed-logo", logoUrl: icon },
+        },
+      };
+      expect(mcpToolPresentation({ toolName: "mcp__lecturn__rw_simulate" })).toEqual(branded);
+      expect(mcpToolPresentation({ serverName: "lecturn", toolName: "rw_simulate" })).toEqual(
+        branded,
+      );
+      expect(
+        mcpToolPresentation({ serverName: "lecturn-0f9a1c2e", toolName: "rw_task_status" })
+          .toolSource?.key,
+      ).toBe("app:dev.rocketwright.app");
+      expect(
+        mcpToolPresentation({ serverName: "rocketwright", toolName: "rw_simulate" }).toolSource
+          ?.key,
+      ).toBe("mcp:rocketwright");
+      expect(mcpToolPresentation({ serverName: "lecturn", toolName: "task_status" })).toEqual({});
+    } finally {
+      setRegisteredAppToolPresentations([]);
+    }
   });
 });

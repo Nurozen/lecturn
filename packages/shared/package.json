@@ -415,6 +415,10 @@
       "types": "./src/orchestrationV2Timeline.ts",
       "import": "./src/orchestrationV2Timeline.ts"
     },
+    "./appToolPresentation": {
+      "types": "./src/appToolPresentation.ts",
+      "import": "./src/appToolPresentation.ts"
+    },
     "./lecturnMcpToolPresentation": {
       "types": "./src/lecturnMcpToolPresentation.ts",
       "import": "./src/lecturnMcpToolPresentation.ts"
