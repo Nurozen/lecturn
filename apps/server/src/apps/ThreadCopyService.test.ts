@@ -490,6 +490,18 @@ const sendMessage = (threadId: ThreadId, text: string) =>
     }),
   );
 
+const renameThread = (threadId: ThreadId, title: string) =>
+  Effect.flatMap(Orchestrator.OrchestratorV2, (orchestrator) =>
+    orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make(`${threadId}:rename:${title}`),
+      threadId,
+      title,
+    }),
+  );
+
+const RAW_TITLE = "Count once. ```scripted";
+
 describe("ThreadCopyService", () => {
   it.effect(
     "copies threads, cards and uploads into another environment that outlives the source",
@@ -707,6 +719,65 @@ describe("ThreadCopyService", () => {
       }),
   );
 
+  it.effect("a source renamed after the copy retitles the copy without re-copying history", () =>
+    Effect.gen(function* () {
+      const sidecar = yield* startEnvironment("sidecar");
+      const user = yield* startEnvironment("user");
+      const source = yield* sidecar.run(createSourceThread("/work/rocket", RAW_TITLE));
+      yield* sidecar.run(writeTurn(source.threadId, 1, { card: true }));
+      const first = yield* sidecar.run(exportAll);
+      yield* user.run(importBundle(first));
+      const copyId = copyThreadId(sidecar.environmentId, source.threadId);
+      const before = yield* user.run(Effect.all([projectionOf(copyId), attachmentFiles]));
+      assert.strictEqual(before[0].thread.title, RAW_TITLE);
+
+      yield* sidecar.run(renameThread(source.threadId, "Counter study"));
+      const renamed = yield* sidecar.run(exportAll);
+      const [was, now] = [first, renamed].map((bundle) => bundle.projects[0]!.threads[0]!);
+      assert.strictEqual(now!.title, "Counter study");
+      assert.strictEqual(now!.historyRevision, was!.historyRevision);
+
+      assert.deepEqual(yield* user.run(importBundle(renamed)), { imported: 0, skipped: 1 });
+      const sequence = yield* user.run(latestSequence);
+      assert.deepEqual(yield* user.run(importBundle(renamed)), { imported: 0, skipped: 1 });
+      assert.strictEqual(yield* user.run(latestSequence), sequence);
+
+      yield* user.run(
+        Effect.gen(function* () {
+          const projection = yield* projectionOf(copyId);
+          assert.strictEqual(projection.thread.title, "Counter study");
+          assert.deepEqual(projection.thread.copiedFrom, before[0].thread.copiedFrom);
+          assert.deepEqual(projection.visibleTurnItems, before[0].visibleTurnItems);
+          assert.deepEqual(yield* attachmentFiles, before[1]);
+          const [summary] = yield* listCopies(yield* appProjectFor("/work/rocket"));
+          assert.strictEqual(summary?.title, "Counter study");
+        }),
+      );
+    }),
+  );
+
+  it.effect("a re-copy carries the source's current title", () =>
+    Effect.gen(function* () {
+      const sidecar = yield* startEnvironment("sidecar");
+      const user = yield* startEnvironment("user");
+      const source = yield* sidecar.run(createSourceThread("/work/rocket", RAW_TITLE));
+      yield* sidecar.run(writeTurn(source.threadId, 1));
+      yield* user.run(importBundle(yield* sidecar.run(exportAll)));
+
+      yield* sidecar.run(renameThread(source.threadId, "Counter study"));
+      yield* sidecar.run(writeTurn(source.threadId, 2));
+      assert.deepEqual(yield* user.run(importBundle(yield* sidecar.run(exportAll))), {
+        imported: 1,
+        skipped: 0,
+      });
+      const copy = yield* user.run(
+        projectionOf(copyThreadId(sidecar.environmentId, source.threadId)),
+      );
+      assert.strictEqual(copy.thread.title, "Counter study");
+      assert.lengthOf(transcript(copy), 4);
+    }),
+  );
+
   it.effect(
     "never overwrites a copy with Lecturn-side turns; newer history becomes a new thread",
     () =>
@@ -750,6 +821,21 @@ describe("ThreadCopyService", () => {
             );
           }),
         );
+
+        // A rename reaches the history-only re-copy, suffix kept, and never the continued copy.
+        yield* sidecar.run(renameThread(source.threadId, "Apogee study"));
+        assert.deepEqual(yield* user.run(importBundle(yield* sidecar.run(exportAll))), {
+          imported: 0,
+          skipped: 1,
+        });
+        const [kept, recopy] = yield* user.run(
+          Effect.all([
+            projectionOf(copyId),
+            projectionOf(recopyThreadId(sidecar.environmentId, source.threadId, revision)),
+          ]),
+        );
+        assert.strictEqual(kept.thread.title, continued.thread.title);
+        assert.strictEqual(recopy.thread.title, `Apogee study (from ${APP_NAME})`);
       }),
   );
 

@@ -327,6 +327,7 @@ it("holds the Apps list to the waiting app's Approve and Deny row and an open ap
     '[data-testid="sidebar-mode-option"][data-selected="true"]': [{ text: "Apps" }],
     '[data-testid="sidebar-app-row"]': [
       { children: { '[data-testid="sidebar-app-state"]': [{ text: "Closed" }] } },
+      { children: { '[data-testid="sidebar-app-state"]': [{ text: "Pairing" }] } },
     ],
   };
   const appRow: FakeTree = {
@@ -340,6 +341,16 @@ it("holds the Apps list to the waiting app's Approve and Deny row and an open ap
   );
   const problems = (await stagingProblems(checks, fakeRoot(appRow))).join("\n");
   assert.match(problems, /^pairing-row: /mu);
+  // The wide chip CP3 found crowding the waiting app's name.
+  const wideChip: FakeTree = {
+    ...appRow,
+    ...pairingRow(["Deny", "Approve"]),
+    '[data-testid="sidebar-app-row"]': [
+      { children: { '[data-testid="sidebar-app-state"]': [{ text: "Closed" }] } },
+      { children: { '[data-testid="sidebar-app-state"]': [{ text: "Pairing requested" }] } },
+    ],
+  };
+  assert.match((await stagingProblems(checks, fakeRoot(wideChip))).join(), /app-row-pairing/u);
   assert.match(
     (
       await stagingProblems(

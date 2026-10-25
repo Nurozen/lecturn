@@ -115,13 +115,23 @@ interface CopyRow {
   readonly threadId: ThreadId;
   readonly sourceThreadId: string;
   readonly revision: number;
+  readonly title: string;
   readonly deleted: boolean;
 }
 
 type ThreadPlan =
   | { readonly type: "skip" }
   | { readonly type: "create"; readonly threadId: ThreadId; readonly title: string }
-  | { readonly type: "replace"; readonly current: OrchestrationV2AppThread };
+  | {
+      readonly type: "replace";
+      readonly current: OrchestrationV2AppThread;
+      readonly title: string;
+    }
+  | {
+      readonly type: "retitle";
+      readonly current: OrchestrationV2AppThread;
+      readonly title: string;
+    };
 
 const make = Effect.gen(function* () {
   const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -406,12 +416,14 @@ const make = Effect.gen(function* () {
       readonly threadId: ThreadId;
       readonly sourceThreadId: string;
       readonly revision: number;
+      readonly title: string;
       readonly deletedAt: string | null;
     }>`
       SELECT
         thread_id AS "threadId",
         json_extract(payload_json, '$.copiedFrom.sourceThreadId') AS "sourceThreadId",
         json_extract(payload_json, '$.copiedFrom.sourceHistoryRevision') AS "revision",
+        json_extract(payload_json, '$.title') AS "title",
         deleted_at AS "deletedAt"
       FROM orchestration_v2_projection_threads
       WHERE json_extract(payload_json, '$.copiedFrom.sourceEnvironmentId') = ${sourceEnvironmentId}
@@ -424,6 +436,7 @@ const make = Effect.gen(function* () {
         threadId: row.threadId,
         sourceThreadId: row.sourceThreadId,
         revision: row.revision,
+        title: row.title,
         deleted: row.deletedAt !== null,
       });
       bySource.set(row.sourceThreadId, copies);
@@ -440,6 +453,11 @@ const make = Effect.gen(function* () {
    * D33: an up-to-date copy is skipped. A newer source replaces a copy that
    * is still history only; a copy the user has continued is never touched,
    * and the newer history becomes a thread of its own.
+   *
+   * The title is metadata: a rename alone never re-copies history. An
+   * up-to-date copy that is still history only takes the source's current
+   * title instead, which matters because a source is often renamed (title
+   * generation, the user) after its first copy.
    */
   const planThread = Effect.fn("ThreadCopyService.planThread")(function* (input: {
     readonly appName: Effect.Effect<string, AppsError>;
@@ -448,7 +466,15 @@ const make = Effect.gen(function* () {
     readonly copies: ReadonlyArray<CopyRow>;
   }) {
     const { bundle, thread } = input;
-    const title = thread.title.trim() === "" ? UNTITLED : thread.title.trim();
+    const sourceTitle = thread.title.trim();
+    const firstCopyId = copyThreadId(bundle.sourceEnvironmentId, thread.sourceThreadId);
+    // A re-copy's suffix tells it apart from the continued copy beside it.
+    const titleOf = (threadId: ThreadId) => {
+      const title = sourceTitle === "" ? UNTITLED : sourceTitle;
+      return threadId === firstCopyId
+        ? Effect.succeed(title)
+        : Effect.map(input.appName, (name) => `${title} (from ${name})`);
+    };
     const latest = input.copies.reduce<CopyRow | undefined>(
       (best, copy) => (best === undefined || copy.revision > best.revision ? copy : best),
       undefined,
@@ -456,26 +482,36 @@ const make = Effect.gen(function* () {
     if (latest === undefined) {
       return {
         type: "create",
-        threadId: copyThreadId(bundle.sourceEnvironmentId, thread.sourceThreadId),
+        threadId: firstCopyId,
+        title: yield* titleOf(firstCopyId),
+      } satisfies ThreadPlan;
+    }
+    if (latest.revision >= thread.historyRevision) {
+      if (sourceTitle === "" || latest.deleted) return { type: "skip" } satisfies ThreadPlan;
+      const title = yield* titleOf(latest.threadId);
+      if (latest.title === title || (yield* hasRuns(latest.threadId))) {
+        return { type: "skip" } satisfies ThreadPlan;
+      }
+      return {
+        type: "retitle",
+        current: yield* projections.getThread(latest.threadId),
         title,
       } satisfies ThreadPlan;
     }
-    if (latest.revision >= thread.historyRevision) return { type: "skip" } satisfies ThreadPlan;
     if (!latest.deleted && !(yield* hasRuns(latest.threadId))) {
+      const current = yield* projections.getThread(latest.threadId);
       return {
         type: "replace",
-        current: yield* projections.getThread(latest.threadId),
+        current,
+        title: sourceTitle === "" ? current.title : yield* titleOf(latest.threadId),
       } satisfies ThreadPlan;
     }
-    return {
-      type: "create",
-      threadId: recopyThreadId(
-        bundle.sourceEnvironmentId,
-        thread.sourceThreadId,
-        thread.historyRevision,
-      ),
-      title: `${title} (from ${yield* input.appName})`,
-    } satisfies ThreadPlan;
+    const threadId = recopyThreadId(
+      bundle.sourceEnvironmentId,
+      thread.sourceThreadId,
+      thread.historyRevision,
+    );
+    return { type: "create", threadId, title: yield* titleOf(threadId) } satisfies ThreadPlan;
   });
 
   const threadDefaults = Effect.fn("ThreadCopyService.threadDefaults")(function* (
@@ -516,7 +552,7 @@ const make = Effect.gen(function* () {
     readonly bundle: ConnectedAppThreadBundleV1;
     readonly projectId: ProjectId;
     readonly thread: ConnectedAppThreadBundleThread;
-    readonly plan: Exclude<ThreadPlan, { readonly type: "skip" }>;
+    readonly plan: Extract<ThreadPlan, { readonly type: "create" | "replace" }>;
     readonly stagingDir: string;
     readonly assets: ReadonlyMap<string, ConnectedAppThreadBundleAsset>;
   }) {
@@ -587,7 +623,7 @@ const make = Effect.gen(function* () {
           ...(metadata.appOrigin === undefined ? {} : { appOrigin: metadata.appOrigin }),
           ...(metadata.continuedIn === undefined ? {} : { continuedIn: metadata.continuedIn }),
           ...appFields(thread, copiedFrom),
-          title: thread.title.trim() === "" ? current.title : thread.title.trim(),
+          title: plan.title,
           updatedAt,
           ...sectionFields(thread, current.pinnedAt ?? null),
         },
@@ -657,6 +693,25 @@ const make = Effect.gen(function* () {
     });
   });
 
+  const retitleThread = Effect.fn("ThreadCopyService.retitleThread")(function* (
+    current: OrchestrationV2AppThread,
+    title: string,
+  ) {
+    const now = yield* DateTime.now;
+    yield* eventSink.write({
+      events: [
+        {
+          // A title can come back to an earlier value, so the id cannot be derived from it.
+          id: EventId.make(`${EVENT_PREFIX}:${current.id}:title:${NodeCrypto.randomUUID()}`),
+          type: "thread.metadata-updated",
+          threadId: current.id,
+          occurredAt: now,
+          payload: { ...current, title },
+        },
+      ],
+    });
+  });
+
   const runImport = Effect.fn("ThreadCopyService.runImport")(function* (
     appId: AppId,
     bundle: ConnectedAppThreadBundleV1,
@@ -696,6 +751,12 @@ const make = Effect.gen(function* () {
           copies: copies.get(thread.sourceThreadId) ?? [],
         });
         if (plan.type === "skip") {
+          skipped += 1;
+          continue;
+        }
+        // No history is copied, so it counts as skipped.
+        if (plan.type === "retitle") {
+          yield* retitleThread(plan.current, plan.title);
           skipped += 1;
           continue;
         }
