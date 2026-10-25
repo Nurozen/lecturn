@@ -356,6 +356,8 @@ export const make = Effect.gen(function* () {
       `,
   });
 
+  // Connected-app credentials and embed tokens are not clients the user signed
+  // in; "revoke other clients" must not disconnect apps (apps/subjects.ts).
   const revokeOtherSessionRows = SqlSchema.findAll({
     Request: RevokeOtherAuthSessionsInput,
     Result: Schema.Struct({ sessionId: AuthSessionId }),
@@ -365,6 +367,8 @@ export const make = Effect.gen(function* () {
         SET revoked_at = ${revokedAt}
         WHERE session_id <> ${currentSessionId}
           AND revoked_at IS NULL
+          AND subject NOT LIKE 'app:%'
+          AND subject NOT LIKE 'embed:%'
         RETURNING session_id AS "sessionId"
       `,
   });

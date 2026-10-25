@@ -12,9 +12,9 @@ import * as RpcTest from "effect/rpc/RpcTest";
 
 import type { AuthenticatedSession } from "../auth/EnvironmentAuth.ts";
 import { RPC_REQUIRED_SCOPES } from "../auth/RpcAuthorization.ts";
-import * as AppAuthorizationStub from "./appAuthorization.ts";
+import * as AppAuthorizationLayer from "./appAuthorization.ts";
 import * as AppRpcAuthorization from "./appRpcAuthorization.ts";
-import { AppAuthorization } from "./services.ts";
+import { AppAuthorization, AppsNotImplemented } from "./services.ts";
 
 const group = WsRpcGroup.omit(
   ...[...WsRpcGroup.requests.keys()].filter(
@@ -58,6 +58,19 @@ const recordingAuthorization = (calls: Array<string>) =>
     mintEmbedToken: () => Effect.die("unused"),
   });
 
+// A3's project service stub: every lookup is unfinished.
+const unfinished = () =>
+  Effect.fail(new AppsNotImplemented({ service: "AppProjectService", method: "lookup" }));
+const unfinishedAuthorization = Layer.succeed(AppAuthorization)(
+  AppAuthorizationLayer.makeWith({
+    resolveAppForProject: unfinished,
+    projectIdForThread: unfinished,
+    issueEmbedSession: unfinished,
+    environmentId: Effect.die("unused"),
+    embedOrigin: "http://127.0.0.1:3773",
+  }),
+);
+
 describe("app RPC authorization", () => {
   it.effect("never consults app authorization for ordinary sessions", () =>
     Effect.gen(function* () {
@@ -69,11 +82,11 @@ describe("app RPC authorization", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("denies app and embed sessions while their checks are unimplemented", () =>
+  it.effect("denies app and embed sessions a method outside their allowlist", () =>
     Effect.gen(function* () {
       for (const subject of ["app:dev.example.app", "embed:dev.example.app:project-1"]) {
         const handled: Array<string> = [];
-        const error = yield* probe(session(subject), AppAuthorizationStub.layer, handled).pipe(
+        const error = yield* probe(session(subject), unfinishedAuthorization, handled).pipe(
           Effect.flip,
         );
         expect(error).toMatchObject({ _tag: "EnvironmentAuthorizationError" });
