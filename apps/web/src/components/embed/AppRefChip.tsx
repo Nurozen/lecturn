@@ -29,10 +29,19 @@ export function AppRefChip({
 
   if (onRemove !== undefined) {
     return (
-      <ContextChip kind="app-ref" title={reference} data-app-ref={reference}>
+      <ContextChip
+        kind="app-ref"
+        title={reference}
+        data-app-ref={reference}
+        data-testid="app-ref-chip"
+      >
         {icon}
         <ContextChipLabel>{label}</ContextChipLabel>
-        <ContextChipAction aria-label={`Remove ${label}`} onClick={onRemove}>
+        <ContextChipAction
+          aria-label={`Remove ${label}`}
+          data-testid="app-ref-chip-remove"
+          onClick={onRemove}
+        >
           <XIcon aria-hidden="true" />
         </ContextChipAction>
       </ContextChip>

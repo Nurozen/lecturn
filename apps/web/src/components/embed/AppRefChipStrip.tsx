@@ -12,7 +12,7 @@ export function AppRefChipStrip({ targetKey }: { readonly targetKey: string }) {
   const remove = useAppRefChipStore((state) => state.remove);
   if (presentation === null || chips.length === 0) return null;
   return (
-    <div className="mb-2 flex min-w-0 flex-wrap gap-1.5" data-app-ref-chip-strip="">
+    <div className="mb-2 flex min-w-0 flex-wrap gap-1.5" data-testid="app-ref-chip-strip">
       {chips.map((chip) => (
         <AppRefChip
           key={chip.ref}

@@ -468,7 +468,7 @@ export function McpAppFrame(props: {
   return (
     // The row keeps its inline height while the app is full screen, so the
     // timeline does not jump; the box itself is what goes full screen.
-    <div style={{ height }}>
+    <div style={{ height }} data-testid="mcp-app-card">
       <div
         ref={boxRef}
         // Full screen is the same box shown in the browser's top layer: moving

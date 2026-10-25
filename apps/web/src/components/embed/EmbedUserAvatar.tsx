@@ -12,7 +12,7 @@ export function EmbedUserAvatar() {
     <span
       aria-hidden
       data-thread-find-ignore
-      data-embed-user-avatar
+      data-testid="embed-user-avatar"
       className="pointer-events-none absolute end-[calc(100%+0.75rem)] top-1.5 flex size-8 items-center justify-center rounded-full bg-foreground/85 text-background"
     >
       <UserIcon className="size-4.5" />
