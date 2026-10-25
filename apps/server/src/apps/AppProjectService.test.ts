@@ -441,4 +441,59 @@ it.layer(layerTest)("AppProjectService", (it) => {
       );
     }).pipe(TestClock.withLive),
   );
+
+  it.effect("deletes every project of one app with its threads and nothing else", () =>
+    Effect.gen(function* () {
+      const service = yield* AppProjects;
+      const store = yield* ProjectStore.ProjectStoreV2;
+      const threads = yield* ProjectionStore.ProjectionStoreV2;
+      const leaving = AppId.make("dev.leaving-app");
+      const first = yield* service.ensureWorkspace(leaving, {
+        workspaceRoot: "/work/leaving-a",
+        title: "A",
+      });
+      const second = yield* service.ensureWorkspace(leaving, {
+        workspaceRoot: "/work/leaving-b",
+        title: "B",
+      });
+      const staying = yield* service.ensureWorkspace(otherApp, {
+        workspaceRoot: "/work/leaving-a",
+        title: "Other app",
+      });
+      const normal = yield* createNormalProject(
+        ProjectId.make("normal:leaving"),
+        "/work/leaving-a",
+      );
+      const owned = [ThreadId.make("thread:leaving:a"), ThreadId.make("thread:leaving:b")];
+      const kept = [ThreadId.make("thread:leaving:other"), ThreadId.make("thread:leaving:normal")];
+      yield* createThread(owned[0]!, first.projectId, 1);
+      yield* createThread(owned[1]!, second.projectId, 2);
+      yield* createThread(kept[0]!, staying.projectId, 3);
+      yield* createThread(kept[1]!, normal.id, 4);
+
+      yield* service.deleteAppProjects(leaving);
+      // A retry after a partial failure deletes nothing twice.
+      yield* service.deleteAppProjects(leaving);
+
+      for (const projectId of [first.projectId, second.projectId]) {
+        assert.isTrue(Option.isNone(yield* store.get(projectId)));
+      }
+      for (const projectId of [staying.projectId, normal.id]) {
+        assert.isTrue(Option.isSome(yield* store.get(projectId)));
+      }
+      const isLive = (threadId: ThreadId) =>
+        threads.getThread(threadId).pipe(
+          Effect.map((thread) => thread.deletedAt === null),
+          Effect.orElseSucceed(() => false),
+        );
+      for (const threadId of owned) assert.isFalse(yield* isLive(threadId));
+      for (const threadId of kept) assert.isTrue(yield* isLive(threadId));
+      // The workspace is free again: the app gets a new project if it comes back.
+      const back = yield* service.ensureWorkspace(leaving, {
+        workspaceRoot: "/work/leaving-a",
+        title: "A",
+      });
+      assert.notStrictEqual(back.projectId, first.projectId);
+    }),
+  );
 });

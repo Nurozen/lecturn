@@ -205,6 +205,8 @@ export class AppProjectService extends Context.Service<
       appId: AppId,
       input: AppsMarkThreadsCopiedInput,
     ) => Effect.Effect<void, AppsFailure>;
+    /** Every project bound to the app, with its threads (`apps.delete` with `deleteThreads`). */
+    readonly deleteAppProjects: (appId: AppId) => Effect.Effect<void, AppsFailure>;
   }
 >()("lecturn/apps/services/AppProjectService") {}
 

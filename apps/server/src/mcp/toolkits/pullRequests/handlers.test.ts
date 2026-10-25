@@ -1,4 +1,5 @@
 import {
+  AppId,
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
@@ -43,7 +44,9 @@ const testCrypto = Crypto.make({
 
 const invocation = (
   capabilities: ReadonlyArray<McpInvocationContext.McpCapability>,
+  app?: McpInvocationContext.McpAppCaller,
 ): McpInvocationContext.McpInvocationScope => ({
+  ...(app === undefined ? {} : { app }),
   environmentId: EnvironmentId.make("environment-1"),
   requestNamespace: "provider-session-1",
   thread: {
@@ -139,6 +142,8 @@ interface HarnessOptions {
   readonly project?: OrchestrationProjectShell | null;
   readonly reject?: (command: OrchestrationCommand) => string | null;
   readonly projects?: ReadonlyArray<OrchestrationProjectShell>;
+  /** Calls as a connected app's thread whose own project is this one. */
+  readonly app?: McpInvocationContext.McpAppCaller;
   readonly generate?: (
     input: PullRequestRef,
   ) => Effect.Effect<
@@ -171,7 +176,12 @@ const makeHarness = Effect.fn("makePullRequestsToolkitHarness")(function* (
   const layerDependencies = Layer.mergeAll(
     Layer.mock(ProjectService.ProjectService)({
       getShell: () => Effect.succeed(Option.fromNullishOr(project)),
-      listShells: () => Effect.succeed(options.projects ?? (project ? [project] : [])),
+      listShells: (filter) =>
+        Effect.succeed(
+          (options.projects ?? (project ? [project] : [])).filter(
+            (shell) => filter?.projectIds === undefined || filter.projectIds.includes(shell.id),
+          ),
+        ),
     }),
     Layer.mock(PullRequestReviewGuideService.PullRequestReviewGuideService)({
       get: () => Effect.succeed(NO_GUIDE),
@@ -217,7 +227,13 @@ const makeHarness = Effect.fn("makePullRequestsToolkitHarness")(function* (
       Effect.map(
         (chunk) => chunk.at(-1)!.result as Tool.Success<(typeof PullRequestsToolkit.tools)[Name]>,
       ),
-      Effect.provideService(McpInvocationContext.McpInvocationContext, invocation(capabilities)),
+      Effect.provideService(
+        McpInvocationContext.McpInvocationContext,
+        invocation(
+          options.app === undefined ? capabilities : [...capabilities, "app"],
+          options.app,
+        ),
+      ),
       Effect.provide(layerDependencies),
     );
   return { commands, guideRequests, call };
@@ -545,6 +561,67 @@ describe("pull request toolkit handlers", () => {
         { kind: "derived", numbers: [1, 2, 3] },
         { kind: "derived", numbers: [10] },
       ]);
+    }),
+  );
+});
+
+describe("pull request tools on a connected app's thread", () => {
+  const appCaller = (projectId: ProjectId): McpInvocationContext.McpAppCaller => ({
+    appId: AppId.make("dev.example.app"),
+    projectId,
+  });
+
+  it.effect("refuses threads outside the app's project and writes nothing", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        thread: makeThread([makeLink(4, { headBranch: "feature" })]),
+        app: appCaller(ProjectId.make("project-app")),
+      });
+      const listed = yield* harness
+        .call("list_thread_pull_requests", { threadId: THREAD_ID })
+        .pipe(Effect.flip);
+      expect(listed).toMatchObject({ _tag: "OrchestratorMcpFailure", code: "capability_denied" });
+      for (const name of ["link_pull_request", "watch_pull_request"] as const) {
+        const error = yield* harness
+          .call(name, { threadId: THREAD_ID, url: "https://github.com/acme/widgets/pull/5" })
+          .pipe(Effect.flip);
+        expect(error).toMatchObject({ _tag: "OrchestratorMcpFailure", code: "capability_denied" });
+      }
+      expect(yield* Ref.get(harness.commands)).toEqual([]);
+    }),
+  );
+
+  it.effect("serves threads of the app's own project as before", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        thread: makeThread([makeLink(4, { headBranch: "feature" })]),
+        app: appCaller(PROJECT_ID),
+      });
+      const result = yield* harness.call("list_thread_pull_requests", { threadId: THREAD_ID });
+      expect(result.pullRequests.map((entry) => entry.number)).toEqual([4]);
+    }),
+  );
+
+  it.effect("finds review guides only through the app's own project", () =>
+    Effect.gen(function* () {
+      const appProject = { ...makeProject(null), id: ProjectId.make("project-app") };
+      const harness = yield* makeHarness({
+        projects: [makeProject(), appProject],
+        app: appCaller(appProject.id),
+      });
+      const written = yield* harness.call("write_pull_request_guides", {
+        pullRequests: [{ repository: "acme/widgets", number: 12, host: "github.com" }],
+      });
+      expect(written.guides.map((guide) => guide.outcome)).toEqual(["failed"]);
+      expect(yield* Ref.get(harness.guideRequests)).toEqual([]);
+      const read = yield* harness
+        .call("read_pull_request_guide", {
+          repository: "acme/widgets",
+          number: 12,
+          host: "github.com",
+        })
+        .pipe(Effect.flip);
+      expect(read).toMatchObject({ _tag: "PullRequestProjectNotFoundError" });
     }),
   );
 });

@@ -1,4 +1,5 @@
 import {
+  type AppId,
   AppRegistration,
   type AppSidecarBootstrap,
   AppsError,
@@ -57,13 +58,23 @@ export const liveDefinitions = [
  * The real registry over an in-memory database, with real sessions so issued
  * credentials can be verified. Leases and sessions stay reachable for asserts.
  */
-export const makeRegistryLayer = (options: { readonly appSidecar?: AppSidecarBootstrap } = {}) => {
+export const makeRegistryLayer = (
+  options: {
+    readonly appSidecar?: AppSidecarBootstrap;
+    /** Stands in for deleting the app's projects; the default records the call and succeeds. */
+    readonly deleteAppProjects?: (appId: AppId) => Effect.Effect<void, AppsError>;
+  } = {},
+) => {
   const liveListCalls = { count: 0 };
+  const deletedProjectsOf: Array<AppId> = [];
   const config = Layer.effect(
     ServerConfig.ServerConfig,
     Effect.gen(function* () {
       const base = yield* ServerConfig.ServerConfig;
-      return { ...base, ...options } satisfies ServerConfig.ServerConfig["Service"];
+      return {
+        ...base,
+        ...(options.appSidecar === undefined ? {} : { appSidecar: options.appSidecar }),
+      } satisfies ServerConfig.ServerConfig["Service"];
     }),
   ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-app-registry-" })));
   const liveClient = Layer.succeed(LiveToolClient)({
@@ -89,6 +100,10 @@ export const makeRegistryLayer = (options: { readonly appSidecar?: AppSidecarBoo
     createEmbedThread: () => Effect.die("unused"),
     setEmbedDefaultModel: () => Effect.die("unused"),
     markThreadsCopied: () => Effect.die("unused"),
+    deleteAppProjects: (appId) =>
+      (options.deleteAppProjects?.(appId) ?? Effect.void).pipe(
+        Effect.tap(() => Effect.sync(() => deletedProjectsOf.push(appId))),
+      ),
   });
   const sessions = SessionStore.layer.pipe(
     Layer.provide(ServerSecretStore.layer),
@@ -102,7 +117,7 @@ export const makeRegistryLayer = (options: { readonly appSidecar?: AppSidecarBoo
     Layer.provide(SqlitePersistence.layerMemory),
     Layer.provide(config),
   );
-  return { layer, liveListCalls };
+  return { layer, liveListCalls, deletedProjectsOf };
 };
 
 export const sidecar = (overrides: Record<string, unknown> = {}): AppSidecarBootstrap => ({

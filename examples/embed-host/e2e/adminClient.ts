@@ -44,7 +44,10 @@ const lecturnBin = () =>
 
 export const ADMIN_SCOPES = ["access:write", "orchestration:read", "orchestration:operate"];
 
-export async function issueAdminToken(baseDir: string): Promise<string> {
+export async function issueAdminToken(
+  baseDir: string,
+  scopes: ReadonlyArray<string> = ADMIN_SCOPES,
+): Promise<string> {
   const { stdout } = await execFile(process.execPath, [
     lecturnBin(),
     "auth",
@@ -52,7 +55,7 @@ export async function issueAdminToken(baseDir: string): Promise<string> {
     "issue",
     "--base-dir",
     baseDir,
-    ...ADMIN_SCOPES.flatMap((scope) => ["--scope", scope]),
+    ...scopes.flatMap((scope) => ["--scope", scope]),
     "--label",
     "embed-host e2e admin",
     "--token-only",

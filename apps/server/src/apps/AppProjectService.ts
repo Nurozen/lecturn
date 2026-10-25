@@ -433,6 +433,30 @@ const make = Effect.gen(function* () {
       .pipe(Effect.mapError(unavailable("Could not save the default model")));
   });
 
+  /**
+   * One project at a time, each with a command id fixed by the project, so a
+   * delete that failed part way is retried without deleting anything twice.
+   */
+  const deleteAppProjects: AppProjectService["Service"]["deleteAppProjects"] = Effect.fn(
+    "AppProjectService.deleteAppProjects",
+  )(function* (appId) {
+    const rows = yield* projects
+      .list()
+      .pipe(Effect.mapError(unavailable("Could not list projects")));
+    yield* Effect.forEach(
+      rows.filter((row) => row.appBinding?.appId === appId),
+      (row) =>
+        projectService
+          .delete({
+            commandId: CommandId.make(`apps:delete-app-project:${row.projectId}`),
+            projectId: row.projectId,
+            force: true,
+          })
+          .pipe(Effect.mapError(unavailable(`Could not delete project ${row.projectId}`))),
+      { discard: true },
+    );
+  });
+
   return AppProjectService.of({
     ensureWorkspace,
     resolveAppForProject,
@@ -442,6 +466,7 @@ const make = Effect.gen(function* () {
     createEmbedThread,
     setEmbedDefaultModel,
     markThreadsCopied,
+    deleteAppProjects,
   });
 });
 

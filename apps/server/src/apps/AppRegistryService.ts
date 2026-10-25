@@ -37,7 +37,6 @@ import {
   AppLeaseService,
   AppProjectService,
   AppRegistryService,
-  AppsNotImplemented,
   LiveToolClient,
 } from "./services.ts";
 import { parseAppSubject } from "./subjects.ts";
@@ -100,9 +99,6 @@ const sameSecretHash = (expected: string, actual: string) => {
 
 const invalid = (message: string) => new AppsError({ code: "invalid", message });
 const notFound = (message: string) => new AppsError({ code: "not-found", message });
-
-const notImplemented = (method: string) =>
-  new AppsNotImplemented({ service: "AppRegistryService", method });
 
 const iso = (value: DateTime.Utc) => DateTime.formatIso(value);
 
@@ -508,12 +504,18 @@ export const make = Effect.gen(function* () {
 
   const deleteApp: AppRegistryService["Service"]["delete"] = ({ appId, deleteThreads }) =>
     Effect.gen(function* () {
-      // Deleting the app's projects and threads lands with the reverse-state
-      // work (plan A46); refusing beats reporting a deletion that did not happen.
-      if (deleteThreads) return yield* notImplemented("delete with deleteThreads");
-      yield* requireRecord(appId);
+      const record = yield* requireRecord(appId);
       yield* revokeAppSessions(appId);
       yield* leases.clear(appId);
+      if (deleteThreads) {
+        // Revoked first, so the app is shut out and its headless processes stop
+        // while its threads go; a deletion that fails part way leaves a revoked
+        // app the user can delete again, never a granted one missing threads.
+        const now = yield* DateTime.now;
+        yield* storage(repository.upsert(writeOf(record, now, { state: "revoked" })));
+        yield* publishStatus(appId);
+        yield* projects.deleteAppProjects(appId);
+      }
       yield* storage(repository.delete(appId));
       yield* publishStatus(appId);
     });
