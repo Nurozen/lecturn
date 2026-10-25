@@ -141,12 +141,12 @@ const titles = (threads: ReadonlyArray<EnvironmentThreadShell>) =>
 
 describe("appStatusChip", () => {
   it.each([
-    [{ state: "granted", live: { expiresAt: NOW } }, "Running", "success"],
-    [{ state: "granted", live: null }, "Closed", "outline"],
-    [{ state: "revoked", live: null }, "Revoked", "error"],
-    [{ state: "pairing-requested", live: null }, "Pairing requested", "warning"],
-  ] as const)("labels %o as %s", (app, label, variant) => {
-    expect(appStatusChip(app)).toEqual({ label, variant });
+    [{ state: "granted", live: { expiresAt: NOW } }, "Running", "Running", "success"],
+    [{ state: "granted", live: null }, "Closed", "Closed", "outline"],
+    [{ state: "revoked", live: null }, "Revoked", "Revoked", "error"],
+    [{ state: "pairing-requested", live: null }, "Pairing", "Pairing requested", "warning"],
+  ] as const)("labels %o as %s", (app, label, description, variant) => {
+    expect(appStatusChip(app)).toEqual({ label, description, variant });
   });
 });
 

@@ -45,7 +45,10 @@ export function AppToolWorkRow({
           <span data-testid="app-tool-row-icon" className="contents">
             {icon}
           </span>
-          <span data-testid="app-tool-row-label" className="contents">
+          {/* Only the label takes part in baseline alignment, so the grid hands the row the
+              label's text baseline, which the leading chevron is set against, rather than the
+              icon's bottom edge. */}
+          <span data-testid="app-tool-row-label" className="contents *:self-baseline">
             {label}
           </span>
           {outcome === "succeeded" ? (

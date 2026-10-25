@@ -2,7 +2,8 @@ import { ContextualMessageDisclosure } from "../contextual/ContextualDisclosure"
 import { EmbedUserAvatar } from "../embed/EmbedUserAvatar";
 import { useEmbedPresentation } from "../../embed/EmbedPresentationContext";
 import { AppClosedThreadBanner } from "../apps/AppClosedThreadBanner";
-import { AppThreadTitle } from "../apps/AppThreadTitle";
+import { AppThreadTitle, AppThreadTitleBeside } from "../apps/AppThreadTitle";
+import { appThreadTitleRowId } from "../apps/AppThreadTitle.logic";
 import { AppToolWorkRow } from "../apps/AppToolWorkRow";
 import { appToolRowOutcome } from "../apps/AppToolWorkRow.logic";
 import { fadeOutTimeline, revealTimeline } from "./timelineExit";
@@ -1524,6 +1525,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     isPreparingWorktree,
     latestRunId: latestRun?.runId ?? null,
   };
+  const appTitleRowId = appThreadTitleRowId({ rows, historyControls, importHistoryTruncated });
   const listHeaderLeadingContent =
     parentThreadLink === null ? (
       topFadeEnabled ? (
@@ -1548,7 +1550,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     <>
       {parentThreadLink === null ? listHeaderLeadingContent : null}
       <AppClosedThreadBanner threadRef={citationThreadRef} />
-      <AppThreadTitle threadRef={citationThreadRef} />
+      <AppThreadTitle threadRef={citationThreadRef} beside={appTitleRowId !== null} />
       {historyControls ? (
         <TimelineHistoryControl {...historyControls} />
       ) : importHistoryTruncated ? (
@@ -1646,7 +1648,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const renderItem = ({ item }: { item: MessagesTimelineRow }) => (
     <div className="messages-timeline-row-frame">
       <div className="chat-content-lane overflow-x-clip" data-timeline-root="true">
-        <TimelineRowContent row={item} />
+        <AppThreadTitleBeside threadRef={citationThreadRef} shown={item.id === appTitleRowId}>
+          <TimelineRowContent row={item} />
+        </AppThreadTitleBeside>
       </div>
     </div>
   );

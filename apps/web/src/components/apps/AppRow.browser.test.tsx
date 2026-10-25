@@ -114,6 +114,42 @@ function app(): AppsSidebarApp {
   })[0]!;
 }
 
+const SKETCH = AppId.make("com.example.sketch");
+
+function pendingApp(): AppsSidebarApp {
+  return buildAppsSidebarApps({
+    statuses: [
+      {
+        environmentId: MAC,
+        app: {
+          ...status,
+          appId: SKETCH,
+          name: "Sketch Pad",
+          state: "pairing-requested",
+          pendingRequest: {
+            requestId: "request-1",
+            requestedAt: NOW,
+            registration: {
+              appId: SKETCH,
+              name: "Sketch Pad",
+              iconDataUrl: ICON,
+              toolPrefix: "sk",
+              refPrefixes: ["sk:"],
+              liveTools: true,
+              gatedTools: [],
+            },
+          },
+        },
+      },
+    ],
+    projects: [],
+    threads: [],
+    environmentLabels: new Map([[MAC, "Mac"]]),
+    now: NOW,
+    supports: () => ({ settlement: true, snooze: true }),
+  })[0]!;
+}
+
 const noop = () => undefined;
 const context: AppTreeContext = {
   collapsedByKey: {},
@@ -196,6 +232,47 @@ describe("Apps sidebar rows at the default sidebar width", () => {
     );
     expect(container.querySelector('[data-testid="sidebar-app-new-thread"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="sidebar-app-open"]')).not.toBeNull();
+  });
+
+  it("keeps a pending app's name whole beside its pairing chip", async () => {
+    const subject = pendingApp();
+    expect(subject.pairing).toHaveLength(1);
+    await render(
+      SIDEBAR_GROUP_WIDTH,
+      <AppsGroup>
+        <li className="list-none">
+          <AppRow
+            app={subject}
+            collapsed={false}
+            onToggle={noop}
+            onSelect={noop}
+            onNewThread={noop}
+          />
+        </li>
+        <AppWorkspaceTree app={subject} context={context} />
+      </AppsGroup>,
+    );
+
+    readsWhole(container.querySelector('[data-testid="sidebar-app-name"]'));
+    expect(container.querySelector('[data-testid="sidebar-app-state"]')?.textContent).toBe(
+      "Pairing",
+    );
+    // The pairing row speaks for an app with no threads yet, so no second line runs on below it.
+    expect(container.querySelector('[data-testid="app-tree-empty"]')).toBeNull();
+  });
+
+  it("keeps the empty-tree note inside its row when it wraps", async () => {
+    const subject = { ...app(), workspaces: [], pairing: [] };
+    await render(
+      SIDEBAR_GROUP_WIDTH,
+      <AppsGroup>
+        <AppWorkspaceTree app={subject} context={context} />
+      </AppsGroup>,
+    );
+
+    const note = container.querySelector('[data-testid="app-tree-empty"]') as HTMLElement;
+    expect(note).not.toBeNull();
+    expect(note.scrollHeight).toBeLessThanOrEqual(note.clientHeight);
   });
 
   it("keeps the selected app's name whole in its one-row header", async () => {
