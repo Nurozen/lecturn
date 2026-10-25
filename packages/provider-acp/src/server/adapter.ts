@@ -78,6 +78,7 @@ import {
 } from "./runtimeModel.ts";
 import {
   acpClientExecuteDisposition,
+  acpLecturnAppToolDisposition,
   acpMcpToolApprovalElicitationDisposition,
   acpPermissionDisposition,
   type AcpPermissionDisposition,
@@ -92,6 +93,7 @@ import {
 import { ACP_EMPTY_OPTION_VALUE, ACP_SESSION_MODE_OPTION_ID } from "./sessionConfig.ts";
 import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
 import {
+  lecturnAcpInstructionState,
   lecturnAcpPromptWithInstructions,
   type LecturnAcpInstructionState,
 } from "@lecturn/provider-core/server/orchestrationInstructions";
@@ -1334,6 +1336,23 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           .read(threadId)
           .pipe(Effect.map((session) => acpMcpContext(session, self, extraServers)));
   const driver = flavor.driver;
+  // Every ACP session gets the stdio bridge whenever the thread has a session,
+  // so the session itself is the answer (see acpMcpContext).
+  const reportAcpMcpActivation = (
+    threadId: ThreadId,
+    providerThreadId: OrchestrationV2ProviderThread["id"],
+  ) =>
+    mcpSessions.read(threadId).pipe(
+      Effect.flatMap((session) =>
+        McpProviderSessions.reportThreadMcpActivation({
+          mcpSessions,
+          threadId,
+          providerThreadId,
+          driver,
+          mcpActivated: session !== undefined,
+        }),
+      ),
+    );
   const continuationRequests = options.continuationRequests;
   const postSettleContinuationEnabled =
     flavor.enablePostSettleContinuation === true && continuationRequests !== undefined;
@@ -5323,10 +5342,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 handlerGeneration,
                 Effect.gen(function* () {
                   const context = yield* activeContext;
-                  const disposition = (flavor.permissionDisposition ?? acpPermissionDisposition)(
-                    context.input.runtimePolicy,
-                    params,
-                  );
+                  const appTools = (yield* mcpSessions.read(context.input.threadId))?.app;
+                  const disposition =
+                    acpLecturnAppToolDisposition(params, appTools) ??
+                    (flavor.permissionDisposition ?? acpPermissionDisposition)(
+                      context.input.runtimePolicy,
+                      params,
+                    );
                   if (disposition === "allow") {
                     const optionId = selectAutoApprovedPermissionOption(params);
                     return {
@@ -6407,10 +6429,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           sessionId: string,
         ) {
           const prompt: Array<EffectAcpSchema.ContentBlock> = [];
-          const instructionState = {
+          const instructionState = lecturnAcpInstructionState({
             interactionMode: turnInput.runtimePolicy.interactionMode,
             hasLecturnMcp: (yield* readAdapterMcpContext(turnInput.threadId)).servers.length > 0,
-          } satisfies LecturnAcpInstructionState;
+            ...(turnInput.appInstructions === undefined
+              ? {}
+              : { appInstructions: turnInput.appInstructions }),
+          });
           const previousInstructionState = (yield* Ref.get(promptInstructionStates)).get(sessionId);
           const messageText = providerMessageTextWithAttachmentPaths({
             text: turnInput.message.text,
@@ -6420,6 +6445,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           const text = lecturnAcpPromptWithInstructions({
             prompt: messageText,
             state: instructionState,
+            ...(turnInput.appInstructions === undefined
+              ? {}
+              : { appInstructions: turnInput.appInstructions }),
             ...(previousInstructionState === undefined
               ? {}
               : { previousState: previousInstructionState }),
@@ -6956,6 +6984,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               yield* Ref.update(providerThreadByNativeSessionId, (current) =>
                 new Map(current).set(sessionId, providerThread),
               );
+              yield* reportAcpMcpActivation(
+                threadInput.threadId,
+                threadInput.existingProviderThread?.id ?? providerThread.id,
+              );
               return providerThread;
             },
             (effect, threadInput) =>
@@ -7009,6 +7041,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                     yield* Ref.set(activeInteractionMode, nextRuntimePolicy.interactionMode);
                   }
                   const now = yield* DateTime.now;
+                  const appThreadId = threadInput.providerThread.appThreadId;
+                  if (appThreadId !== null) {
+                    yield* reportAcpMcpActivation(appThreadId, threadInput.providerThread.id);
+                  }
                   return {
                     ...threadInput.providerThread,
                     providerSessionId: input.providerSessionId,

@@ -24,6 +24,11 @@ export interface McpCredentialRequest {
   readonly capabilities?: ReadonlySet<McpInvocationContext.McpCapability>;
   /** Only threads in an app-bound project get one; it grants that app's tools on `/mcp`. */
   readonly app?: McpInvocationContext.McpAppCaller;
+  /** Handed to adapters with the config, so they can keep their own prompt off app tools. */
+  readonly appTools?: {
+    readonly toolPrefix: string;
+    readonly toolNames: ReadonlyArray<string>;
+  };
 }
 
 export interface McpIssuedCredential {
@@ -147,6 +152,9 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
           authorizationHeader: `Bearer ${rawToken}`,
           browserToolsAvailable: scope.capabilities.has("preview"),
           capabilities: scope.capabilities,
+          ...(request.app === undefined || request.appTools === undefined
+            ? {}
+            : { app: { appId: request.app.appId, ...request.appTools } }),
         },
       };
     },

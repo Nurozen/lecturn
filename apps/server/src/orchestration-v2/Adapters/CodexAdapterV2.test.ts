@@ -54,8 +54,10 @@ import { TestClock } from "effect/testing";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import packageJson from "../../../package.json" with { type: "json" };
+import { makeAppToolsUnavailableNotices } from "../../apps/appToolsUnavailableNotice.ts";
 import * as ServerConfig from "../../config.ts";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
+import type * as McpProviderSession from "@lecturn/provider-core/server/mcpSession";
 import * as ProviderEventLoggers from "@lecturn/provider-core/server/ProviderEventLoggers";
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
 import * as EffectWorker from "../EffectWorker.ts";
@@ -520,6 +522,32 @@ describe("CodexAdapterV2 runtime policy", () => {
       }),
   );
 
+  it.effect("adds a connected app's instructions to the developer instructions", () =>
+    Effect.gen(function* () {
+      const build = (hasLecturnMcp: boolean) =>
+        CodexAdapterV2.buildCodexTurnStartParams({
+          nativeThreadId: "native-thread-app",
+          codexInput: [{ type: "text", text: "Fly it.", text_elements: [] }],
+          runtimePolicy: {
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            cwd: "/workspace",
+          },
+          modelSelection: CODEX_TEST_MODEL_SELECTION,
+          hasLecturnMcp,
+          appInstructions: "Use rw_ tools for rocket edits.",
+        });
+      const section = "## Connected app instructions\n\nUse rw_ tools for rocket edits.";
+      const withMcp = (yield* build(true)).collaborationMode?.settings.developer_instructions;
+      assert.isTrue(withMcp?.endsWith(`\n\n${section}`));
+      assert.isTrue((withMcp?.length ?? 0) > section.length + 2);
+      assert.equal(
+        (yield* build(false)).collaborationMode?.settings.developer_instructions,
+        section,
+      );
+    }),
+  );
+
   it.effect("omits default-mode collaboration settings without the Lecturn MCP server", () =>
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
@@ -680,6 +708,57 @@ describe("CodexAdapterV2 process spawning", () => {
           },
         },
       },
+    );
+  });
+
+  it("turns off Codex's own approval for a connected app's tools alone", () => {
+    const threadId = ThreadId.make("thread-codex-app");
+    const mcpSession = {
+      environmentId: EnvironmentId.make("environment-codex-app"),
+      threadId,
+      providerSessionId: "mcp-session-codex-app",
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      endpoint: "http://127.0.0.1:43123/mcp",
+      authorizationHeader: "Bearer secret-codex-token",
+      browserToolsAvailable: true,
+      app: {
+        appId: "dev.rocketwright",
+        toolPrefix: "rw",
+        toolNames: ["rw_simulate", "rw_open_design"],
+      },
+    };
+
+    assert.deepEqual(CodexAdapterV2.codexThreadRuntimeParams({ mcpSession }).config.mcp_servers, {
+      lecturn: {
+        url: "http://127.0.0.1:43123/mcp",
+        tool_timeout_sec: 3_900,
+        http_headers: { Authorization: "Bearer secret-codex-token" },
+        // Per tool, never `default_tools_approval_mode`: Lecturn's own tools keep Codex's policy.
+        tools: {
+          rw_simulate: { approval_mode: "approve" },
+          rw_open_design: { approval_mode: "approve" },
+        },
+      },
+    });
+    const { app: _app, ...plainSession } = mcpSession;
+    assert.deepEqual(
+      CodexAdapterV2.codexThreadRuntimeParams({ mcpSession: plainSession }).config.mcp_servers,
+      {
+        lecturn: {
+          url: "http://127.0.0.1:43123/mcp",
+          tool_timeout_sec: 3_900,
+          http_headers: { Authorization: "Bearer secret-codex-token" },
+        },
+      },
+    );
+    // A fresh registration has no cached names yet; nothing changes until it does.
+    assert.notProperty(
+      (
+        CodexAdapterV2.codexThreadRuntimeParams({
+          mcpSession: { ...mcpSession, app: { ...mcpSession.app, toolNames: [] } },
+        }).config.mcp_servers as { lecturn: object }
+      ).lecturn,
+      "tools",
     );
   });
 
@@ -1841,6 +1920,158 @@ function withReplayRequestId(
     ? { ...entry, frame: { ...entry.frame, id } }
     : entry;
 }
+
+describe("CodexAdapterV2 MCP activation", () => {
+  const appMcpSession = (threadId: ThreadId): McpProviderSession.McpProviderSessionConfig => ({
+    environmentId: EnvironmentId.make("environment-codex-activation"),
+    threadId,
+    providerSessionId: `mcp-session-${threadId}`,
+    providerInstanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
+    endpoint: "http://127.0.0.1:43123/mcp",
+    authorizationHeader: `Bearer token-${threadId}`,
+    browserToolsAvailable: false,
+    capabilities: new Set(["orchestration", "app"]),
+    app: { appId: "dev.rocketwright", toolPrefix: "rw", toolNames: ["rw_simulate"] },
+  });
+
+  it.effect(
+    "reports each app thread on a reused session, and a later MCP startup failure for its own thread",
+    () =>
+      Effect.gen(function* () {
+        const first = ThreadId.make("thread-codex-app-first");
+        const second = ThreadId.make("thread-codex-app-second");
+        const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+        yield* mcpSessions.set(appMcpSession(first));
+        yield* mcpSessions.set(appMcpSession(second));
+        const activations = yield* mcpSessions.subscribeActivations;
+        const preamble = (nativeThreadId: string) =>
+          codexReplayPreamble({ nativeThreadId, nativeTurnId: "unused", prompt: "unused" });
+        const transcript = makeCodexReplayTranscript({
+          scenario: "mcp-activation",
+          entries: [
+            ...preamble("app-first").slice(0, 5),
+            // The second thread attaches to the running app-server; no new initialize.
+            ...preamble("app-second")
+              .slice(3, 5)
+              .map((entry) => withReplayRequestId(entry, 3)),
+            // Codex starts MCP servers after answering, so the failure comes later.
+            {
+              type: "emit_inbound",
+              label: "mcpServer/startupStatus/updated",
+              frame: {
+                method: "mcpServer/startupStatus/updated",
+                params: {
+                  name: "lecturn",
+                  status: "failed",
+                  threadId: "app-second",
+                  error: "connect ECONNREFUSED 127.0.0.1:43123",
+                },
+              },
+            },
+          ],
+        });
+        const driver = yield* CodexReplay.makeReplayDriver(transcript, {});
+        const adapter = yield* CodexAdapterV2.makeCodexAdapterV2({
+          instanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
+          settings: DEFAULT_CODEX_SETTINGS,
+          environment: {},
+          clientFactory: {
+            open: (openInput) =>
+              Layer.build(CodexReplay.layerReplayWithDriver(driver)).pipe(
+                Effect.flatMap((context) =>
+                  Effect.service(CodexClient.CodexAppServerClient).pipe(Effect.provide(context)),
+                ),
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderAdapter.ProviderAdapterOpenSessionError({
+                      driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+                      providerSessionId: openInput.providerSessionId,
+                      cause,
+                    }),
+                ),
+              ),
+          },
+          crypto: yield* Crypto.Crypto,
+          fileSystem: yield* FileSystem.FileSystem,
+          idAllocator: yield* IdAllocator.IdAllocatorV2,
+          serverConfig: yield* makeReplayServerConfig(transcript.scenario).pipe(Effect.orDie),
+        });
+        const runtime = yield* adapter.openSession({
+          threadId: first,
+          providerSessionId: ProviderSessionId.make("provider-session-codex-activation"),
+          modelSelection: CODEX_TEST_MODEL_SELECTION,
+          runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+        });
+        const ensure = (threadId: ThreadId) =>
+          runtime.ensureThread({
+            threadId,
+            modelSelection: CODEX_TEST_MODEL_SELECTION,
+            runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+          });
+        const firstThread = yield* ensure(first);
+        const secondThread = yield* ensure(second);
+
+        const signals = yield* activations.pipe(Stream.take(3), Stream.runCollect);
+        assert.deepEqual(signals, [
+          {
+            type: "mcp-activated",
+            threadId: first,
+            providerThreadId: firstThread.id,
+            driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+            mcpActivated: true,
+          },
+          {
+            type: "mcp-activated",
+            threadId: second,
+            providerThreadId: secondThread.id,
+            driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+            mcpActivated: true,
+          },
+          {
+            type: "mcp-activation-failed",
+            threadId: second,
+            providerThreadId: secondThread.id,
+            driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+            reason: "connect ECONNREFUSED 127.0.0.1:43123",
+          },
+        ]);
+
+        // The apps contribution turns exactly the failed thread's signal into its notice.
+        const notices: Array<{ readonly threadId: ThreadId; readonly message: string }> = [];
+        const notice = makeAppToolsUnavailableNotices({
+          threads: {
+            getThread: () => Effect.succeed({ projectId: "project-rocket" } as never),
+            getTurnItem: () => Effect.succeed(null),
+            getNextTurnItemOrdinal: () => Effect.succeed(1),
+          },
+          eventSink: {
+            write: ({ events }) =>
+              Effect.sync(() => {
+                for (const event of events) {
+                  if (
+                    event.type === "turn-item.updated" &&
+                    event.payload.type === "system_notice"
+                  ) {
+                    notices.push({ threadId: event.threadId, message: event.payload.message });
+                  }
+                }
+                return [];
+              }),
+          },
+          grantedAppName: () => Effect.succeedSome("RocketWright"),
+        });
+        for (const signal of signals) yield* notice(signal);
+        assert.deepEqual(notices, [
+          { threadId: second, message: "RocketWright tools unavailable with Codex" },
+        ]);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+  );
+});
 
 describe("CodexAdapterV2 session initialize", () => {
   const openReplaySession = (

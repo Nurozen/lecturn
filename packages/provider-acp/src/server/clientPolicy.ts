@@ -264,3 +264,59 @@ export function makeAcpClientPolicyGrants(): AcpClientPolicyGrants {
     allowsExecute: (turnKey) => sessionExecute || (turnKey !== null && turnExecute === turnKey),
   };
 }
+
+/** Lecturn: the connected app whose tools this thread reaches on Lecturn's MCP server. */
+export interface AcpLecturnAppTools {
+  readonly toolPrefix: string;
+}
+
+// Only forms that name Lecturn's server count, never a bare tool name: a bare
+// "rw_x" title could be anything the agent chose to call it.
+const LECTURN_QUALIFIED_TOOL = [
+  /^(?:mcp[-_]{1,2})?lecturn[-_.:/ ]{1,3}(?<tool>[A-Za-z0-9][A-Za-z0-9_-]*)(?::.*)?$/i,
+  /^(?<tool>[A-Za-z0-9][A-Za-z0-9_-]*) \(lecturn MCP Server\)(?::.*)?$/i,
+];
+
+function acpLecturnToolNames(toolCall: EffectAcpSchema.RequestPermissionRequest["toolCall"]) {
+  const rawInput = unknownRecord(toolCall.rawInput);
+  const meta = unknownRecord(toolCall._meta);
+  const names: Array<string> = [];
+  // codex-acp tags MCP calls structurally.
+  if (typeof rawInput?.server === "string" && /^lecturn$/i.test(rawInput.server.trim())) {
+    if (typeof rawInput.tool === "string") names.push(rawInput.tool.trim());
+  }
+  if (typeof meta?.serverId === "string" && /^lecturn$/i.test(meta.serverId.trim())) {
+    if (typeof meta.toolName === "string") names.push(meta.toolName.trim());
+  }
+  // A command's title is free text the agent wrote, so it never names an app tool.
+  if (toolCall.kind === "execute") return names;
+  const claudeCode = unknownRecord(meta?.claudeCode);
+  for (const candidate of [meta?.toolName, claudeCode?.toolName, toolCall.title]) {
+    if (typeof candidate !== "string") continue;
+    for (const pattern of LECTURN_QUALIFIED_TOOL) {
+      const tool = pattern.exec(candidate.trim())?.groups?.tool;
+      if (tool !== undefined) names.push(tool);
+    }
+  }
+  return names;
+}
+
+/**
+ * Lecturn's MCP server gates connected-app tools itself (static gates and
+ * app-decided ones, by runtime mode), so a native ACP prompt for one would
+ * ask the user twice (D28). File mutations never qualify: an app tool is not
+ * one, whatever it is called.
+ */
+export function acpLecturnAppToolDisposition(
+  request: EffectAcpSchema.RequestPermissionRequest,
+  app: AcpLecturnAppTools | undefined,
+): "allow" | undefined {
+  if (app === undefined || isAcpMutationKind(request.toolCall.kind ?? "other")) return undefined;
+  if ((request.toolCall.locations?.length ?? 0) > 0) return undefined;
+  const prefix = `${app.toolPrefix}_`;
+  return acpLecturnToolNames(request.toolCall).some(
+    (tool) => tool.length > prefix.length && tool.startsWith(prefix),
+  )
+    ? "allow"
+    : undefined;
+}

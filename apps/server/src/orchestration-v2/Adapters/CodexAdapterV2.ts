@@ -117,6 +117,7 @@ import { codexAppServerArgs, resolveCodexLaunchArgs } from "../../provider/codex
 import { mergeProviderInstanceEnvironment } from "@lecturn/provider-core/server/instanceEnvironment";
 import * as McpProviderSession from "@lecturn/provider-core/server/mcpSession";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
+import { connectedAppInstructionsSection } from "@lecturn/provider-core/server/orchestrationInstructions";
 import {
   MCP_APP_EXTENSION_ID,
   MCP_APP_MIME_TYPE,
@@ -723,6 +724,7 @@ export function buildCodexTurnStartParams(input: {
   /** ChatGPT token sharing does not accept service tiers. */
   readonly omitServiceTier?: boolean;
   readonly appContext?: ProviderAdapter.ProviderAdapterV2TurnInput["appContext"];
+  readonly appInstructions?: string;
 }) {
   return Effect.gen(function* () {
     const runtimeModeDefaults = codexRuntimeModeTurnDefaults(input.runtimePolicy.runtimeMode);
@@ -744,10 +746,19 @@ export function buildCodexTurnStartParams(input: {
       input.omitServiceTier === true
         ? undefined
         : getCodexServiceTierOptionValue(input.modelSelection);
-    const developerInstructions =
+    // Lecturn: a connected app's registered instructions are the app's own
+    // guidance for its tools, unlike its context, so they are developer text (D7).
+    const appInstructions = connectedAppInstructionsSection(input.appInstructions);
+    const lecturnInstructions =
       input.hasLecturnMcp !== true
         ? undefined
         : buildCodexDeveloperInstructions(input.runtimePolicy.interactionMode);
+    const developerInstructions =
+      appInstructions === undefined
+        ? lecturnInstructions
+        : lecturnInstructions === undefined
+          ? appInstructions
+          : `${lecturnInstructions}\n\n${appInstructions}`;
     // An app's context is text an MCP server wrote, so it goes in as untrusted
     // context: Codex renders it as quoted user-side input, never as developer
     // instructions.
@@ -1296,6 +1307,21 @@ export const CODEX_THREAD_CONFIG = {
 // that limit so the server's own wait timeout ends a long call.
 const CODEX_LECTURN_MCP_TOOL_TIMEOUT_SEC = 65 * 60;
 
+/**
+ * Lecturn: Lecturn's MCP server gates a connected app's tools by runtime mode,
+ * so Codex's own MCP approval is turned off for those tools alone, on app
+ * threads alone (D28). A server-wide `default_tools_approval_mode` would also
+ * stop Codex asking about Lecturn's own tools.
+ */
+function codexAppToolApprovals(mcpSession: McpProviderSession.McpProviderSessionConfig): {
+  readonly tools?: Record<string, { readonly approval_mode: "approve" }>;
+} {
+  const names = mcpSession.app?.toolNames ?? [];
+  return names.length === 0
+    ? {}
+    : { tools: Object.fromEntries(names.map((name) => [name, { approval_mode: "approve" }])) };
+}
+
 export function codexThreadRuntimeParams(input: {
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
   readonly modelSelection?: { readonly model: string };
@@ -1326,6 +1352,7 @@ export function codexThreadRuntimeParams(input: {
                 http_headers: {
                   Authorization: mcpSession.authorizationHeader,
                 },
+                ...codexAppToolApprovals(mcpSession),
               },
             },
           }),
@@ -1755,6 +1782,52 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   ),
                 );
         const sessionMcpParams = extraMcpServers === undefined ? {} : { extraMcpServers };
+        // Lecturn: Codex starts a thread's MCP servers after `thread/start` or
+        // resume answers, and reports a failure by native thread id, possibly
+        // before this session knows which app thread that is (R4.7).
+        const mcpThreadsByNativeId = new Map<
+          string,
+          { readonly threadId: ThreadId; readonly providerThreadId: ProviderThreadId }
+        >();
+        const earlyMcpStartupFailures = new Map<string, string>();
+        const reportCodexMcpFailure = (
+          target: { readonly threadId: ThreadId; readonly providerThreadId: ProviderThreadId },
+          reason: string,
+        ) =>
+          mcpSessions.reportActivation({
+            type: "mcp-activation-failed",
+            ...target,
+            driver: CODEX_PROVIDER,
+            reason,
+          });
+        const reportCodexMcpActivation = (input: {
+          readonly nativeThreadId: string;
+          readonly threadId: ThreadId;
+          readonly providerThreadId: ProviderThreadId;
+          readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
+        }) =>
+          Effect.gen(function* () {
+            const target = { threadId: input.threadId, providerThreadId: input.providerThreadId };
+            yield* McpProviderSessions.reportThreadMcpActivation({
+              mcpSessions,
+              ...target,
+              driver: CODEX_PROVIDER,
+              mcpActivated: input.mcpSession !== undefined,
+            });
+            // From here to the buffer read nothing yields, so a failure the
+            // handler sees lands either in the buffer or on the mapped thread,
+            // and always after the activation above.
+            if (input.mcpSession !== undefined) {
+              mcpThreadsByNativeId.set(input.nativeThreadId, target);
+            } else {
+              mcpThreadsByNativeId.delete(input.nativeThreadId);
+            }
+            const early = earlyMcpStartupFailures.get(input.nativeThreadId);
+            earlyMcpStartupFailures.delete(input.nativeThreadId);
+            if (early !== undefined && input.mcpSession !== undefined) {
+              yield* reportCodexMcpFailure(target, early);
+            }
+          });
         const additionalContextByThread = yield* Ref.make(
           new Map<
             string,
@@ -4350,6 +4423,24 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           }).pipe(Effect.orDie),
         );
 
+        yield* client.handleServerNotification("mcpServer/startupStatus/updated", (payload) =>
+          Effect.gen(function* () {
+            if (payload.name !== "lecturn" || payload.status !== "failed") return;
+            const nativeThreadId = payload.threadId;
+            if (nativeThreadId === undefined || nativeThreadId === null) return;
+            const reason = payload.error ?? "Codex could not start Lecturn's MCP server.";
+            const target = mcpThreadsByNativeId.get(nativeThreadId);
+            if (target === undefined) {
+              // Codex's own subagent threads are never mapped; keep the buffer small.
+              if (earlyMcpStartupFailures.size < 64) {
+                earlyMcpStartupFailures.set(nativeThreadId, reason);
+              }
+              return;
+            }
+            yield* reportCodexMcpFailure(target, reason);
+          }),
+        );
+
         yield* client.handleServerNotification("account/rateLimits/updated", (payload) =>
           Effect.gen(function* () {
             yield* Ref.update(rateLimitSnapshot, (previous) =>
@@ -6238,6 +6329,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               deviceToolsAvailable: mcpSession?.capabilities?.has("device") ?? false,
               omitServiceTier: adapterOptions.resolveRuntime !== undefined,
               ...(turnInput.appContext === undefined ? {} : { appContext: turnInput.appContext }),
+              ...(turnInput.appInstructions === undefined
+                ? {}
+                : { appInstructions: turnInput.appInstructions }),
             });
             yield* Ref.update(pendingRootTurns, (current) => {
               const updated = new Map(current);
@@ -6500,26 +6594,36 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             ensureInitialized.pipe(
               Effect.andThen(mcpSessions.read(threadInput.threadId)),
               Effect.flatMap((mcpSession) =>
-                client.request(
-                  "thread/start",
-                  codexThreadRuntimeParams({
-                    ...sessionMcpParams,
-                    mcpSession,
-                    modelSelection: threadInput.modelSelection,
-                    runtimePolicy: threadInput.runtimePolicy,
-                  }),
-                ),
+                client
+                  .request(
+                    "thread/start",
+                    codexThreadRuntimeParams({
+                      ...sessionMcpParams,
+                      mcpSession,
+                      modelSelection: threadInput.modelSelection,
+                      runtimePolicy: threadInput.runtimePolicy,
+                    }),
+                  )
+                  .pipe(Effect.map((response) => ({ response, mcpSession }))),
               ),
-              Effect.map((response): OrchestrationV2ProviderThread =>
-                providerThreadFromCodexThread({
-                  appThreadId: threadInput.threadId,
-                  idAllocator,
-                  ownerNodeId: null,
-                  providerSessionId: input.providerSessionId,
-                  providerInstanceId: adapterOptions.instanceId,
-                  thread: response.thread,
-                }),
-              ),
+              Effect.flatMap(({ response, mcpSession }) => {
+                const providerThread: OrchestrationV2ProviderThread = providerThreadFromCodexThread(
+                  {
+                    appThreadId: threadInput.threadId,
+                    idAllocator,
+                    ownerNodeId: null,
+                    providerSessionId: input.providerSessionId,
+                    providerInstanceId: adapterOptions.instanceId,
+                    thread: response.thread,
+                  },
+                );
+                return reportCodexMcpActivation({
+                  nativeThreadId: response.thread.id,
+                  threadId: threadInput.threadId,
+                  providerThreadId: threadInput.existingProviderThread?.id ?? providerThread.id,
+                  mcpSession,
+                }).pipe(Effect.as(providerThread));
+              }),
               Effect.mapError(
                 (cause) =>
                   new ProviderAdapter.ProviderAdapterEnsureThreadError({
@@ -6532,15 +6636,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           resumeThread: (threadInput) =>
             Effect.gen(function* () {
               const nativeThreadId = yield* getNativeThreadId(threadInput.providerThread);
+              const appThreadId = threadInput.threadId ?? threadInput.providerThread.appThreadId;
+              const mcpSession = yield* readMcpSession(appThreadId);
               // excludeTurns is not in the generated request schema yet.
               const resume = client.raw.request("thread/resume", {
                 threadId: nativeThreadId,
                 excludeTurns: true,
                 ...codexThreadRuntimeParams({
                   ...sessionMcpParams,
-                  mcpSession: yield* readMcpSession(
-                    threadInput.threadId ?? threadInput.providerThread.appThreadId,
-                  ),
+                  mcpSession,
                   ...(threadInput.modelSelection === undefined
                     ? {}
                     : { modelSelection: threadInput.modelSelection }),
@@ -6570,6 +6674,14 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 ),
                 Effect.flatMap(decodeCodexResumeMetadata),
               );
+              if (appThreadId !== null) {
+                yield* reportCodexMcpActivation({
+                  nativeThreadId: response.thread.id,
+                  threadId: appThreadId,
+                  providerThreadId: threadInput.providerThread.id,
+                  mcpSession,
+                });
+              }
               return {
                 ...threadInput.providerThread,
                 providerSessionId: input.providerSessionId,

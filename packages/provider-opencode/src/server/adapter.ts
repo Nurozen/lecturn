@@ -71,7 +71,10 @@ import {
   staveMemoryOpenCodeMcpConfig,
   type StaveMemoryResolver,
 } from "@lecturn/provider-core/server/staveMemory";
-import { lecturnOrchestrationSystemPrompt } from "@lecturn/provider-core/server/orchestrationInstructions";
+import {
+  connectedAppInstructionsSection,
+  lecturnOrchestrationSystemPrompt,
+} from "@lecturn/provider-core/server/orchestrationInstructions";
 import { buildRuntimeInstructions } from "@lecturn/provider-core/server/runtimeInstructions";
 import * as OpenCodeRuntime from "./OpenCodeRuntime.ts";
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
@@ -93,6 +96,10 @@ import { openCodeToolTurnItem } from "./toolItems.ts";
 export { openCodeToolProjectionKind } from "./toolItems.ts";
 
 export const OPENCODE_PROVIDER = ProviderDriverKind.make("opencode");
+
+// Above Lecturn's hour-long wait tools, as Claude and Codex are; it also
+// covers a connected app's 10-minute approval wait (D28).
+const LECTURN_MCP_TOOL_TIMEOUT_MS = 65 * 60 * 1_000;
 export const OPENCODE_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(OPENCODE_PROVIDER);
 export const OPENCODE_SDK_PROTOCOL = "opencode-sdk.sse" as const;
 const DEFAULT_OPENCODE_SETTINGS = Schema.decodeSync(OpenCodeSettings)({});
@@ -969,6 +976,18 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
         });
 
         const hasLecturnMcp = mcpSession !== undefined && !connection.external;
+        // One thread per session, and the server was added (or not) for it at open.
+        const reportMcpActivation = (
+          threadId: ThreadId,
+          providerThreadId: OrchestrationV2ProviderThread["id"],
+        ) =>
+          McpProviderSessions.reportThreadMcpActivation({
+            mcpSessions,
+            threadId,
+            providerThreadId,
+            driver: OPENCODE_PROVIDER,
+            mcpActivated: hasLecturnMcp && threadId === input.threadId,
+          });
         const orchestrationSystemPrompt = lecturnOrchestrationSystemPrompt(hasLecturnMcp);
         if (hasLecturnMcp) {
           yield* OpenCodeRuntime.runOpenCodeSdk("mcp.add", () =>
@@ -979,6 +998,9 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                 url: mcpSession.endpoint,
                 headers: { Authorization: mcpSession.authorizationHeader },
                 oauth: false,
+                // OpenCode 1.x applies this to tool calls too (default 5 s); it
+                // must outlast Lecturn's wait tools and an app's approval wait.
+                timeout: LECTURN_MCP_TOOL_TIMEOUT_MS,
               },
             }),
           );
@@ -3073,6 +3095,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                       updatedAt: created.updatedAt,
                     };
               registerThread(nativeSession, providerThread, null);
+              yield* reportMcpActivation(threadInput.threadId, providerThread.id);
               return providerThread;
             }).pipe(
               Effect.mapError(
@@ -3099,6 +3122,10 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                 updatedAt: dateTimeFromEpoch(nativeSession.time.updated, resumedAt),
               };
               registerThread(nativeSession, providerThread, null);
+              yield* reportMcpActivation(
+                providerThread.appThreadId ?? input.threadId,
+                providerThread.id,
+              );
               return providerThread;
             }).pipe(
               Effect.mapError(
@@ -3259,6 +3286,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                   harness: "OpenCode",
                   model: turnInput.modelSelection.model,
                 }),
+                connectedAppInstructionsSection(turnInput.appInstructions),
               ]
                 .filter(Boolean)
                 .join("\n\n");
