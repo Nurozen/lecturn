@@ -31,6 +31,7 @@ import {
   formatDuration,
   isStreamingMessageTextUpdate,
   isStreamingTurnItemTextUpdate,
+  timelineEntryHeadsAppCard,
   timelineEntryIsPersistentResourceCard,
   workEntryDisplayIndicatesToolFailure,
   workEntryIndicatesToolSuccess,
@@ -795,6 +796,7 @@ function deriveSupersededAttemptFolds(
       (entry.kind === "message" && entry.message.role === "user") ||
       entry.kind === "html-render" ||
       entry.kind === "mcp-app" ||
+      timelineEntryHeadsAppCard(entry) ||
       timelineEntryIsPersistentResourceCard(entry) ||
       liveSubagentEntryIds.has(entry.id) ||
       (entry.kind === "work" && entry.entry.itemType === "system_notice")
@@ -1101,6 +1103,7 @@ function deriveTurnFolds(input: {
       }
       if (
         timelineEntryIsPersistentResourceCard(entry) ||
+        timelineEntryHeadsAppCard(entry) ||
         input.liveSubagentEntryIds.has(entry.id) ||
         input.completeSupersededReplyEntryIds.has(entry.id)
       ) {
@@ -1680,11 +1683,12 @@ export function deriveMessagesTimelineRows(input: {
       }
       const groupedEntries = [timelineEntry.entry];
       let cursor = index + 1;
-      while (cursor < timelineEntries.length) {
+      while (cursor < timelineEntries.length && !timelineEntryHeadsAppCard(timelineEntry)) {
         const nextEntry = timelineEntries[cursor];
         if (
           !nextEntry ||
           nextEntry.kind !== "work" ||
+          timelineEntryHeadsAppCard(nextEntry) ||
           nextEntry.entry.sourceActivityKind === "context-compaction" ||
           nextEntry.entry.tone === "error" ||
           nextEntry.entry.sourceActivityKind === "runtime.error" ||

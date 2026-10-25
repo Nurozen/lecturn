@@ -25,6 +25,7 @@ import {
 import type { HtmlRenderReference } from "@lecturn/shared/htmlRender";
 import { turnItemDetailRevision } from "@lecturn/client-runtime/work-log/item-detail";
 import type { McpAppReference } from "@lecturn/shared/mcpApp";
+import { isAppToolSource } from "@lecturn/shared/appToolPresentation";
 import { htmlRenderFromToolItem, mcpAppFromToolItem } from "@lecturn/shared/toolOutput";
 import {
   contextCompactionLabel,
@@ -158,6 +159,8 @@ export type TimelineEntry = (
       readonly kind: "work";
       readonly createdAt: string;
       readonly entry: WorkLogEntry;
+      /** An app tool's row that heads its MCP app card. */
+      readonly headsAppCard?: true;
     }
   | {
       readonly id: string;
@@ -337,6 +340,11 @@ export function timelineEntryIsPersistentResourceCard(entry: TimelineEntry): boo
   return (
     entry.kind === "event" && PERSISTENT_RESOURCE_V2_ITEM_TYPES.has(entry.projectedItem.item.type)
   );
+}
+
+/** The row stays beside its card, so it never folds away or merges into a tool group. */
+export function timelineEntryHeadsAppCard(entry: TimelineEntry): boolean {
+  return entry.kind === "work" && entry.headsAppCard === true;
 }
 
 function projectedItemCreatedAt(row: OrchestrationV2ProjectedTurnItem): string {
@@ -722,8 +730,21 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
         ? mcpAppFromToolItem(item)
         : undefined;
     if (mcpApp !== undefined) {
+      const workEntry = projectedWorkEntry(row);
+      // App cards sit under their tool's row, as the app mockups draw them; other MCP Apps replace it.
+      const headsAppCard = isAppToolSource(workEntry.toolSource);
+      if (headsAppCard) {
+        entries.push({
+          id: item.id,
+          kind: "work",
+          createdAt,
+          entry: workEntry,
+          headsAppCard,
+          ...attemptMetadata,
+        });
+      }
       entries.push({
-        id: item.id,
+        id: headsAppCard ? `${item.id}:app-card` : item.id,
         kind: "mcp-app",
         createdAt,
         runId: item.runId,

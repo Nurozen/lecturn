@@ -21,6 +21,7 @@ import {
   type ThreadImportOrigin,
 } from "@lecturn/contracts";
 import { resolveUserMessagePresentation } from "@lecturn/client-runtime/user-message";
+import { appToolSource } from "@lecturn/shared/appToolPresentation";
 import { summarizeToolGroup } from "@lecturn/client-runtime/work-log/presentation";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
@@ -3048,5 +3049,59 @@ describe("MCP apps", () => {
 
   it("keeps a running app call an ordinary work row", () => {
     expect(feed("running").some((candidate) => candidate.type === "mcp-app")).toBe(false);
+  });
+
+  it("drops the tool row of a card no connected app serves", () => {
+    expect(feed("completed").map((entry) => entry.type)).toEqual(["message", "mcp-app", "message"]);
+  });
+
+  it("keeps a connected app's tool row above its card, outside the run fold", () => {
+    const counterCard = {
+      attachmentId: "attachment-counter",
+      server: "lecturn",
+      tool: "ex_counter_increment",
+      resourceUri: "ui://ex/counter-card",
+    };
+    const appToolCall = {
+      ...appCall("completed"),
+      toolName: "mcp__lecturn__ex_counter_increment",
+      output: { lecturnMcpApp: counterCard, result: { content: [] } },
+      toolSource: appToolSource({ appId: "dev.example", name: "Example", toolPrefix: "ex" }),
+    } as OrchestrationV2TurnItem;
+    const appFeed = () =>
+      buildThreadFeed([
+        projected(userMessage(), 0),
+        projected(command(), 1),
+        projected(appToolCall, 2),
+        projected(assistantMessage("2026-06-20T00:00:04.000Z"), 3),
+      ]);
+    const latestRun = {
+      runId,
+      status: "completed" as const,
+      startedAt: "2026-06-20T00:00:01.000Z",
+      completedAt: "2026-06-20T00:00:04.000Z",
+    };
+    const entries = appFeed();
+    expect(entries.map((entry) => entry.type)).toEqual([
+      "message",
+      "activity-group",
+      "activity-group",
+      "mcp-app",
+      "message",
+    ]);
+    const row = entries[2];
+    expect(row?.type === "activity-group" ? row.activities.map((a) => a.id) : []).toEqual([
+      "local:thread-1:item-app",
+    ]);
+    expect(entries[3]).toMatchObject({ type: "mcp-app", app: counterCard, itemId: "item-app" });
+    expect(appFeed().map((entry) => entry.id)).toEqual(entries.map((entry) => entry.id));
+    const collapsed = deriveThreadFeedPresentation(entries, latestRun, new Set());
+    expect(collapsed.map((entry) => entry.type)).toEqual([
+      "message",
+      "run-fold",
+      "activity-group",
+      "mcp-app",
+      "message",
+    ]);
   });
 });
