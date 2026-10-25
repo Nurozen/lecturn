@@ -31,6 +31,7 @@ import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsDiagnosticsRouteImport } from './routes/settings.diagnostics'
 import { Route as SettingsConnectionsRouteImport } from './routes/settings.connections'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
+import { Route as SettingsAppsRouteImport } from './routes/settings.apps'
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
 import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$projectKey'
 import { Route as ContextualEnvironmentIdRouteImport } from './routes/contextual.$environmentId'
@@ -157,6 +158,11 @@ const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
   path: '/archived',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsAppsRoute = SettingsAppsRouteImport.update({
+  id: '/apps',
+  path: '/apps',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsAppearanceRoute = SettingsAppearanceRouteImport.update({
   id: '/appearance',
   path: '/appearance',
@@ -254,6 +260,7 @@ export interface FileRoutesByFullPath {
   '/contextual/$environmentId': typeof ContextualEnvironmentIdRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
+  '/settings/apps': typeof SettingsAppsRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -291,6 +298,7 @@ export interface FileRoutesByTo {
   '/contextual/$environmentId': typeof ContextualEnvironmentIdRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
+  '/settings/apps': typeof SettingsAppsRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -331,6 +339,7 @@ export interface FileRoutesById {
   '/contextual/$environmentId': typeof ContextualEnvironmentIdRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
+  '/settings/apps': typeof SettingsAppsRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -372,6 +381,7 @@ export interface FileRouteTypes {
     | '/contextual/$environmentId'
     | '/projects/$projectKey'
     | '/settings/appearance'
+    | '/settings/apps'
     | '/settings/archived'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -409,6 +419,7 @@ export interface FileRouteTypes {
     | '/contextual/$environmentId'
     | '/projects/$projectKey'
     | '/settings/appearance'
+    | '/settings/apps'
     | '/settings/archived'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -448,6 +459,7 @@ export interface FileRouteTypes {
     | '/contextual/$environmentId'
     | '/projects/$projectKey'
     | '/settings/appearance'
+    | '/settings/apps'
     | '/settings/archived'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -647,6 +659,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsArchivedRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/apps': {
+      id: '/settings/apps'
+      path: '/apps'
+      fullPath: '/settings/apps'
+      preLoaderRoute: typeof SettingsAppsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/appearance': {
       id: '/settings/appearance'
       path: '/appearance'
@@ -777,6 +796,7 @@ const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
 
 interface SettingsRouteChildren {
   SettingsAppearanceRoute: typeof SettingsAppearanceRoute
+  SettingsAppsRoute: typeof SettingsAppsRoute
   SettingsArchivedRoute: typeof SettingsArchivedRoute
   SettingsConnectionsRoute: typeof SettingsConnectionsRoute
   SettingsDiagnosticsRoute: typeof SettingsDiagnosticsRoute
@@ -795,6 +815,7 @@ interface SettingsRouteChildren {
 
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAppearanceRoute: SettingsAppearanceRoute,
+  SettingsAppsRoute: SettingsAppsRoute,
   SettingsArchivedRoute: SettingsArchivedRoute,
   SettingsConnectionsRoute: SettingsConnectionsRoute,
   SettingsDiagnosticsRoute: SettingsDiagnosticsRoute,

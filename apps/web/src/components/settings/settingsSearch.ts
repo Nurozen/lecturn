@@ -27,6 +27,7 @@ export type SettingsPath =
   | "/settings/relay"
   | "/settings/storage"
   | "/settings/connections"
+  | "/settings/apps"
   | "/settings/archived";
 
 export type SettingsSearchScope =
@@ -98,6 +99,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/source-control": "Source Control",
   "/settings/storage": "Storage",
   "/settings/connections": "Connections",
+  "/settings/apps": "Connected apps",
   "/settings/relay": "Relay",
   "/settings/archived": "Archive",
 };
@@ -1095,6 +1097,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["pull request trusted environments shared credentials permissions read actions"],
   },
   {
+    id: "connected-apps",
+    title: "Connected apps",
+    to: "/settings/apps",
+    searchTerms: [
+      "apps pairing approve deny revoke re-pair remove headless command env runtime ceiling read-only gated tools embed",
+    ],
+  },
+  {
     id: "archive",
     title: "Archived threads",
     to: "/settings/archived",
@@ -1118,6 +1128,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/source-control": "environment-defaults",
   "/settings/storage": "project-defaults",
   "/settings/connections": "connections",
+  "/settings/apps": "connections",
   // Relay health and publishing belong to this device's Connect account.
   "/settings/relay": null,
   "/settings/scheduled-tasks": null,
