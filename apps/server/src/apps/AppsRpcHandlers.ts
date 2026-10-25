@@ -1,9 +1,17 @@
-import { APPS_WS_METHODS as M, AppsError, AppsRpcs, type AppId } from "@lecturn/contracts";
+import {
+  APPS_WS_METHODS as M,
+  AppsError,
+  AppsRpcs,
+  type AppId,
+  type AppStatus,
+  type ProjectId,
+} from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as Stream from "effect/Stream";
 
 import type { AuthenticatedSession } from "../auth/EnvironmentAuth.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import {
   AppAuthorization,
   AppHostContextStore,
@@ -43,6 +51,7 @@ export const make = Effect.fn("AppsRpcHandlers.make")(function* (session: Authen
   const hostContext = yield* AppHostContextStore;
   const threadCopy = yield* ThreadCopyService;
   const headless = yield* HeadlessToolHost;
+  const projectStore = yield* ProjectStore.ProjectStoreV2;
 
   const subject = parseAppSubject(session.subject);
   // `apps:host` is only ever granted to app subjects; this keeps a mis-scoped
@@ -56,10 +65,41 @@ export const make = Effect.fn("AppsRpcHandlers.make")(function* (session: Authen
       ? toRpcError(run(subject))
       : Effect.fail(forbidden("Only an embedded Lecturn view can call this method."));
 
+  // D5: definitions refresh through the app's lock-free listArgs, which spawn
+  // nothing without them; never delays the answer.
+  const refreshDefinitions = (appId: AppId, projectId: ProjectId) =>
+    headless
+      .refreshDefinitions(appId, projectId)
+      .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach);
+
+  // The cache is per app, so the most recently used project lists for all.
+  const refreshAfterGrant = (status: AppStatus) =>
+    projectStore.list().pipe(
+      Effect.map((rows) =>
+        rows
+          .filter((row) => row.appBinding?.appId === status.appId)
+          .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+          .at(0),
+      ),
+      Effect.flatMap((row) =>
+        row === undefined ? Effect.void : refreshDefinitions(status.appId, row.projectId),
+      ),
+      Effect.ignoreCause({ log: true }),
+    );
+
   return AppsRpcGroup.of({
     [M.appsList]: () => toRpcError(registry.list),
     [M.appsSubscribeStatus]: () => toRpcStreamError(registry.streamStatus),
-    [M.appsDecidePairing]: (input) => toRpcError(registry.decidePairing(input)),
+    [M.appsDecidePairing]: (input) =>
+      toRpcError(
+        registry
+          .decidePairing(input)
+          .pipe(
+            Effect.tap((status) =>
+              input.decision === "grant" ? refreshAfterGrant(status) : Effect.void,
+            ),
+          ),
+      ),
     [M.appsRevoke]: ({ appId }) => toRpcError(registry.revoke(appId)),
     [M.appsSetRuntimeCeiling]: (input) => toRpcError(registry.setRuntimeCeiling(input)),
     [M.appsDelete]: (input) => toRpcError(registry.delete(input).pipe(Effect.as({}))),
@@ -69,15 +109,9 @@ export const make = Effect.fn("AppsRpcHandlers.make")(function* (session: Authen
       asEmbed((embed) => projects.createEmbedThread(embed, input)),
     [M.appsEnsureWorkspace]: (input) =>
       asApp((appId) =>
-        projects.ensureWorkspace(appId, input).pipe(
-          // D5: refresh definitions through the app's lock-free listArgs; it
-          // spawns nothing without them, and never delays the answer.
-          Effect.tap(({ projectId }) =>
-            headless
-              .refreshDefinitions(appId, projectId)
-              .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach),
-          ),
-        ),
+        projects
+          .ensureWorkspace(appId, input)
+          .pipe(Effect.tap(({ projectId }) => refreshDefinitions(appId, projectId))),
       ),
     [M.appsSetLiveLease]: (input) => asApp((appId) => leases.set(appId, input)),
     [M.appsClearLiveLease]: () => asApp((appId) => leases.clear(appId).pipe(Effect.as({}))),

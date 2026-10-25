@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { authScopeResponse, AuthStandardClientScopes } from "@lecturn/contracts";
+import { AppId, authScopeResponse, AuthStandardClientScopes } from "@lecturn/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -7,6 +7,7 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { issueAppCredential } from "../apps/appCredential.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as PersistenceErrors from "../persistence/Errors.ts";
@@ -432,6 +433,35 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       expect(yield* upgrade("/ws")).toBe("app:dev.rocketwright.app");
       expect(yield* upgrade("/api/device-hub/stream")).toBe(null);
     }).pipe(Effect.provide(layerEnvironmentAuth())),
+  );
+
+  it.effect(
+    "authenticates a paired app's credential with apps:host and runtime-mode ceilings only",
+    () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const sessions = yield* SessionStore.SessionStore;
+        const issue = (ceiling: "read-only" | "auto-accept-edits") =>
+          issueAppCredential(sessions, {
+            appId: AppId.make("dev.rocketwright.app"),
+            name: "RocketWright",
+            ceiling,
+          });
+
+        const readOnly = yield* issue("read-only");
+        const session = yield* serverAuth.authenticateHttpRequest({
+          url: "/api/auth/websocket-ticket",
+          cookies: {},
+          headers: { authorization: `Bearer ${readOnly.token}` },
+        } as never);
+        expect(session.subject).toBe("app:dev.rocketwright.app");
+        expect(session.scopes).toEqual(["apps:host"]);
+        // Read-only lives in the registry; the claim holds runtime modes only (D2).
+        expect((yield* sessions.verify(readOnly.token)).runtimeModeCeiling).toBeUndefined();
+
+        const capped = yield* issue("auto-accept-edits");
+        expect((yield* sessions.verify(capped.token)).runtimeModeCeiling).toBe("auto-accept-edits");
+      }).pipe(Effect.provide(layerEnvironmentAuth())),
   );
 
   it.effect("leaves connected apps out of the client session lists", () =>
