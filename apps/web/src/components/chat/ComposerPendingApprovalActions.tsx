@@ -16,6 +16,7 @@ interface ComposerPendingApprovalActionsProps {
   canRespond: boolean;
   disabled?: boolean;
   options?: ReadonlyArray<ProviderApprovalOption> | undefined;
+  moreTestId?: string | undefined;
   onRespondToApproval: (
     requestId: RuntimeRequestId,
     decision: ProviderApprovalDecision,
@@ -35,6 +36,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
   canRespond,
   disabled = false,
   options = DEFAULT_APPROVAL_OPTIONS,
+  moreTestId,
   onRespondToApproval,
 }: ComposerPendingApprovalActionsProps) {
   const primaryOptions = options.filter(
@@ -77,7 +79,14 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
         <Menu>
           <MenuTrigger
             disabled={disabled || isResponding}
-            render={<Button size="icon-xs" variant="outline" aria-label="More approval options" />}
+            render={
+              <Button
+                size="icon-xs"
+                variant="outline"
+                aria-label="More approval options"
+                data-testid={moreTestId}
+              />
+            }
           >
             <EllipsisIcon />
           </MenuTrigger>

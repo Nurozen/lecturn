@@ -2,6 +2,7 @@ import type { ConnectedAppToolApprovalInfo } from "@lecturn/contracts";
 import { memo } from "react";
 import { type PendingApproval } from "../../session-logic";
 import { cn } from "~/lib/utils";
+import { appApprovalReasonLine } from "./composerApprovalState";
 
 const NOT_RESUMABLE_DETAIL = "Provider process is gone — interrupt or restart the run to respond.";
 
@@ -98,7 +99,8 @@ function ConnectedAppToolApproval({
   className: string | undefined;
 }) {
   const label = `Approve ${tool.toolName}`;
-  const reason = tool.reason?.trim();
+  const reason = appApprovalReasonLine(approval);
+  const notResumable = approval.responseCapability === "not_resumable";
   return (
     <span
       aria-label={label}
@@ -107,24 +109,31 @@ function ConnectedAppToolApproval({
       role="group"
     >
       <span className="col-start-2 row-start-1 flex min-w-0 items-center gap-2 self-center text-xs">
-        <span className="min-w-0 truncate font-medium text-warning">{label}</span>
+        <span
+          className="min-w-0 truncate font-medium text-warning"
+          data-testid="app-approval-title"
+        >
+          {label}
+        </span>
         {pendingCount > 1 ? (
           <span className="ml-auto shrink-0 text-2xs text-muted-foreground tabular-nums">
             1/{pendingCount}
           </span>
         ) : null}
       </span>
-      <span
-        aria-label="Reason"
-        className={cn(
-          "col-span-full row-start-2 block min-w-0 truncate text-2xs text-muted-foreground",
-          reason ? "font-mono" : "font-sans",
-        )}
-      >
-        {approval.responseCapability === "not_resumable"
-          ? NOT_RESUMABLE_DETAIL
-          : reason || tool.appName}
-      </span>
+      {notResumable ? (
+        <span className="col-span-full row-start-2 block min-w-0 truncate text-2xs text-muted-foreground">
+          {NOT_RESUMABLE_DETAIL}
+        </span>
+      ) : reason ? (
+        <span
+          aria-label="Reason"
+          className="col-span-full row-start-2 block min-w-0 truncate font-mono text-2xs text-muted-foreground"
+          data-testid="app-approval-reason"
+        >
+          {reason}
+        </span>
+      ) : null}
     </span>
   );
 }
