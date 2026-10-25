@@ -507,6 +507,22 @@
       "types": "./src/mcpApp.ts",
       "import": "./src/mcpApp.ts"
     },
+    "./jsonRpcFrame": {
+      "types": "./src/jsonRpcFrame.ts",
+      "import": "./src/jsonRpcFrame.ts"
+    },
+    "./lecturnMcpToolName": {
+      "types": "./src/lecturnMcpToolName.ts",
+      "import": "./src/lecturnMcpToolName.ts"
+    },
+    "./appReferences": {
+      "types": "./src/appReferences.ts",
+      "import": "./src/appReferences.ts"
+    },
+    "./appLinks": {
+      "types": "./src/appLinks.ts",
+      "import": "./src/appLinks.ts"
+    },
     "./atomicWrite": {
       "types": "./src/atomicWrite.ts",
       "import": "./src/atomicWrite.ts"

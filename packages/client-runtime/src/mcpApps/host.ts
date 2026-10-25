@@ -1,15 +1,18 @@
 // @effect-diagnostics globalTimers:off - The bridge runs in the client, outside an Effect runtime.
+import {
+  isJsonRpcId,
+  JSON_RPC_MAX_MESSAGE_BYTES,
+  JSON_RPC_MAX_PENDING_REQUESTS,
+  jsonBytes,
+  type JsonRpcId,
+} from "@lecturn/shared/jsonRpcFrame";
 import { MCP_APP_PROTOCOL_VERSION, type McpAppReference } from "@lecturn/shared/mcpApp";
 import * as Base64 from "effect/encoding/Base64";
 import * as Predicate from "effect/Predicate";
 import * as Result from "effect/Result";
 
-const MAX_MESSAGE_BYTES = 256 * 1024;
-const MAX_PENDING_REQUESTS = 16;
 const TEARDOWN_TIMEOUT_MS = 2000;
 const encoder = new TextEncoder();
-
-type JsonRpcId = string | number;
 
 export type McpAppDisplayMode = "inline" | "fullscreen" | "pip";
 
@@ -113,18 +116,6 @@ export interface McpAppHost {
   readonly dispose: () => void;
 }
 
-function jsonBytes(value: unknown): number {
-  try {
-    return encoder.encode(JSON.stringify(value) ?? "").byteLength;
-  } catch {
-    return Number.POSITIVE_INFINITY;
-  }
-}
-
-function isId(value: unknown): value is JsonRpcId {
-  return typeof value === "string" || (typeof value === "number" && Number.isFinite(value));
-}
-
 /**
  * Providers can report absent fields as null (Codex sends `_meta: null`), which
  * the MCP Apps SDK rejects, dropping the whole notification or response.
@@ -180,7 +171,7 @@ export function makeMcpAppHost(options: McpAppHostOptions): McpAppHost {
   };
 
   const answer = (id: JsonRpcId, run: () => Promise<unknown>) => {
-    if (pending >= MAX_PENDING_REQUESTS) {
+    if (pending >= JSON_RPC_MAX_PENDING_REQUESTS) {
       fail(id, -32000, "Too many requests in flight.");
       return;
     }
@@ -389,19 +380,19 @@ export function makeMcpAppHost(options: McpAppHostOptions): McpAppHost {
   const hostHandle: McpAppHost = {
     receive: (data) => {
       if (disposed || !Predicate.isObject(data) || data.jsonrpc !== "2.0") return;
-      if (jsonBytes(data) > MAX_MESSAGE_BYTES) {
-        if (isId(data.id) && typeof data.method === "string") {
+      if (jsonBytes(data) > JSON_RPC_MAX_MESSAGE_BYTES) {
+        if (isJsonRpcId(data.id) && typeof data.method === "string") {
           fail(data.id, -32600, "Message too large.");
         }
         return;
       }
       const method = data.method;
       if (typeof method !== "string") {
-        if (isId(data.id) && ("result" in data || "error" in data)) handleResponse(data.id);
+        if (isJsonRpcId(data.id) && ("result" in data || "error" in data)) handleResponse(data.id);
         return;
       }
       const params = Predicate.isObject(data.params) ? data.params : {};
-      if (isId(data.id)) handleRequest(data.id, method, params);
+      if (isJsonRpcId(data.id)) handleRequest(data.id, method, params);
       else handleNotification(method, params);
     },
     setToolCall: (call) => {
