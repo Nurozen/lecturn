@@ -13,6 +13,7 @@ export function WorkspaceSidebarTabs() {
         role="tab"
         options={[
           { value: "threads", label: "Threads" },
+          { value: "apps", label: "Apps" },
           { value: "pullRequests", label: "Pull requests" },
         ]}
         selected={workspace.state.selectedTab}
