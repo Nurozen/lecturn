@@ -176,7 +176,9 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useLocation } from "@tanstack/react-router";
+import { useEmbedPresentation } from "../embed/EmbedPresentationContext";
+import { useEmbedAwareNavigate } from "../embed/embedNavigation";
 import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
 import { isMacPlatform } from "../lib/utils";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
@@ -1241,7 +1243,8 @@ export default function ChatView(props: ChatViewProps) {
     (store) => store.setStickyModelSelection,
   );
   const timestampFormat = settings.timestampFormat;
-  const navigate = useNavigate();
+  const embedPresentation = useEmbedPresentation();
+  const navigate = useEmbedAwareNavigate();
   // Selects primitives: an object here is new on every router store update, which
   // re-renders ChatView on unrelated navigation state changes.
   const citationHref = useLocation({ select: (location) => location.href });
@@ -1696,7 +1699,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const canReuseTerminal = activeThreadKnownSessionsRaw !== null;
   const previewPanelOpen = activeRightPanelKind === "preview" && browserAvailable;
-  const rightPanelOpen = rightPanelState.isOpen;
+  const rightPanelOpen = rightPanelState.isOpen && embedPresentation === null;
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   const activeTerminalDrawerPresence = usePanelPresence(
@@ -1723,10 +1726,12 @@ export default function ChatView(props: ChatViewProps) {
   const rightPanelControlsAtRoot = rightPanelPresent && !shouldUsePlanSidebarSheet;
   const renderedRightPanelSurface = rightPanelPresence.value?.activeSurface ?? null;
   const renderedRightPanelSurfaces = rightPanelPresence.value?.surfaces ?? [];
-  const previewMiniPlayerVisible = shouldRenderPreviewMiniPlayer(
-    activePreviewMiniPlayer?.source ?? null,
-    renderedRightPanelSurface,
-  );
+  const previewMiniPlayerVisible =
+    embedPresentation === null &&
+    shouldRenderPreviewMiniPlayer(
+      activePreviewMiniPlayer?.source ?? null,
+      renderedRightPanelSurface,
+    );
   const canMaximizeRightPanel = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const rightPanelMaximized = canMaximizeRightPanel && rightPanelState.maximized === true;
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUsePlanSidebarSheet;
@@ -3126,7 +3131,7 @@ export default function ChatView(props: ChatViewProps) {
     remoteOpenMode: remoteOpenState.mode,
   });
   useOpenFavoriteEditorShortcut({
-    enabled: showOpenInPicker,
+    enabled: showOpenInPicker && embedPresentation === null,
     environmentId: activeThread?.environmentId ?? environmentId,
     keybindings,
     availableEditors,
@@ -8331,6 +8336,7 @@ export default function ChatView(props: ChatViewProps) {
           <header
             ref={threadPanelPopoverAnchorRef}
             data-chat-header
+            hidden={embedPresentation !== null}
             className={cn(
               "relative bg-background [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
               isElectron
@@ -8929,7 +8935,7 @@ export default function ChatView(props: ChatViewProps) {
                                     ref={branchToolbarRef}
                                     environmentId={activeThread.environmentId}
                                     threadId={activeThread.id}
-                                    showGitControls={isGitRepo}
+                                    showGitControls={isGitRepo && embedPresentation === null}
                                     {...(routeKind === "draft" && draftId ? { draftId } : {})}
                                     onEnvModeChange={onEnvModeChangeStable}
                                     startFromOrigin={startFromOrigin}
@@ -9008,7 +9014,9 @@ export default function ChatView(props: ChatViewProps) {
                 onConfirm={handleSwitchCheckoutToThreadStable}
               />
 
-              <ThreadDetailsPanel {...threadDetailsPanelProps} />
+              {embedPresentation === null ? (
+                <ThreadDetailsPanel {...threadDetailsPanelProps} />
+              ) : null}
 
               <PullRequestThreadDialogHost
                 threadKey={activeThreadKey}
@@ -9020,7 +9028,7 @@ export default function ChatView(props: ChatViewProps) {
             </ThreadFindCanvas>
           </div>
 
-          {mountedTerminalThreadRefs.map(
+          {(embedPresentation === null ? mountedTerminalThreadRefs : []).map(
             ({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
               <PersistentThreadTerminalDrawer
                 key={mountedThreadKey}

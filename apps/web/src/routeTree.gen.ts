@@ -43,6 +43,7 @@ import { Route as DecisionsFundingApproveRouteImport } from './routes/decisions.
 import { Route as DecisionsEnvironmentIdProjectIdRouteImport } from './routes/decisions.$environmentId.$projectId'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
+import { Route as EmbedEnvironmentIdProjectIdThreadIdRouteImport } from './routes/embed.$environmentId.$projectId.$threadId'
 import { Route as ChatSagasEnvironmentIdProjectIdRouteImport } from './routes/_chat.sagas.$environmentId.$projectId'
 
 const WelcomeRoute = WelcomeRouteImport.update({
@@ -219,6 +220,12 @@ const ChatEnvironmentIdThreadIdRoute =
     path: '/$environmentId/$threadId',
     getParentRoute: () => ChatRoute,
   } as any)
+const EmbedEnvironmentIdProjectIdThreadIdRoute =
+  EmbedEnvironmentIdProjectIdThreadIdRouteImport.update({
+    id: '/$threadId',
+    path: '/$threadId',
+    getParentRoute: () => EmbedEnvironmentIdProjectIdRoute,
+  } as any)
 const ChatSagasEnvironmentIdProjectIdRoute =
   ChatSagasEnvironmentIdProjectIdRouteImport.update({
     id: '/sagas/$environmentId/$projectId',
@@ -258,9 +265,10 @@ export interface FileRoutesByFullPath {
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
   '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
-  '/embed/$environmentId/$projectId': typeof EmbedEnvironmentIdProjectIdRoute
+  '/embed/$environmentId/$projectId': typeof EmbedEnvironmentIdProjectIdRouteWithChildren
   '/extensions/funding/approve': typeof ExtensionsFundingApproveRoute
   '/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
+  '/embed/$environmentId/$projectId/$threadId': typeof EmbedEnvironmentIdProjectIdThreadIdRoute
 }
 export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
@@ -294,9 +302,10 @@ export interface FileRoutesByTo {
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
   '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
-  '/embed/$environmentId/$projectId': typeof EmbedEnvironmentIdProjectIdRoute
+  '/embed/$environmentId/$projectId': typeof EmbedEnvironmentIdProjectIdRouteWithChildren
   '/extensions/funding/approve': typeof ExtensionsFundingApproveRoute
   '/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
+  '/embed/$environmentId/$projectId/$threadId': typeof EmbedEnvironmentIdProjectIdThreadIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -332,9 +341,10 @@ export interface FileRoutesById {
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
   '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
-  '/embed/$environmentId/$projectId': typeof EmbedEnvironmentIdProjectIdRoute
+  '/embed/$environmentId/$projectId': typeof EmbedEnvironmentIdProjectIdRouteWithChildren
   '/extensions/funding/approve': typeof ExtensionsFundingApproveRoute
   '/_chat/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
+  '/embed/$environmentId/$projectId/$threadId': typeof EmbedEnvironmentIdProjectIdThreadIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -373,6 +383,7 @@ export interface FileRouteTypes {
     | '/embed/$environmentId/$projectId'
     | '/extensions/funding/approve'
     | '/sagas/$environmentId/$projectId'
+    | '/embed/$environmentId/$projectId/$threadId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/connect'
@@ -409,6 +420,7 @@ export interface FileRouteTypes {
     | '/embed/$environmentId/$projectId'
     | '/extensions/funding/approve'
     | '/sagas/$environmentId/$projectId'
+    | '/embed/$environmentId/$projectId/$threadId'
   id:
     | '__root__'
     | '/_chat'
@@ -446,6 +458,7 @@ export interface FileRouteTypes {
     | '/embed/$environmentId/$projectId'
     | '/extensions/funding/approve'
     | '/_chat/sagas/$environmentId/$projectId'
+    | '/embed/$environmentId/$projectId/$threadId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -461,7 +474,7 @@ export interface RootRouteChildren {
   ProjectsProjectKeyRoute: typeof ProjectsProjectKeyRoute
   DecisionsEnvironmentIdProjectIdRoute: typeof DecisionsEnvironmentIdProjectIdRoute
   DecisionsFundingApproveRoute: typeof DecisionsFundingApproveRoute
-  EmbedEnvironmentIdProjectIdRoute: typeof EmbedEnvironmentIdProjectIdRoute
+  EmbedEnvironmentIdProjectIdRoute: typeof EmbedEnvironmentIdProjectIdRouteWithChildren
   ExtensionsFundingApproveRoute: typeof ExtensionsFundingApproveRoute
 }
 
@@ -705,6 +718,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatEnvironmentIdThreadIdRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/embed/$environmentId/$projectId/$threadId': {
+      id: '/embed/$environmentId/$projectId/$threadId'
+      path: '/$threadId'
+      fullPath: '/embed/$environmentId/$projectId/$threadId'
+      preLoaderRoute: typeof EmbedEnvironmentIdProjectIdThreadIdRouteImport
+      parentRoute: typeof EmbedEnvironmentIdProjectIdRoute
+    }
     '/_chat/sagas/$environmentId/$projectId': {
       id: '/_chat/sagas/$environmentId/$projectId'
       path: '/sagas/$environmentId/$projectId'
@@ -775,6 +795,21 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
   SettingsRouteChildren,
 )
 
+interface EmbedEnvironmentIdProjectIdRouteChildren {
+  EmbedEnvironmentIdProjectIdThreadIdRoute: typeof EmbedEnvironmentIdProjectIdThreadIdRoute
+}
+
+const EmbedEnvironmentIdProjectIdRouteChildren: EmbedEnvironmentIdProjectIdRouteChildren =
+  {
+    EmbedEnvironmentIdProjectIdThreadIdRoute:
+      EmbedEnvironmentIdProjectIdThreadIdRoute,
+  }
+
+const EmbedEnvironmentIdProjectIdRouteWithChildren =
+  EmbedEnvironmentIdProjectIdRoute._addFileChildren(
+    EmbedEnvironmentIdProjectIdRouteChildren,
+  )
+
 const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRouteWithChildren,
   ConnectRoute: ConnectRoute,
@@ -788,7 +823,8 @@ const rootRouteChildren: RootRouteChildren = {
   ProjectsProjectKeyRoute: ProjectsProjectKeyRoute,
   DecisionsEnvironmentIdProjectIdRoute: DecisionsEnvironmentIdProjectIdRoute,
   DecisionsFundingApproveRoute: DecisionsFundingApproveRoute,
-  EmbedEnvironmentIdProjectIdRoute: EmbedEnvironmentIdProjectIdRoute,
+  EmbedEnvironmentIdProjectIdRoute:
+    EmbedEnvironmentIdProjectIdRouteWithChildren,
   ExtensionsFundingApproveRoute: ExtensionsFundingApproveRoute,
 }
 export const routeTree = rootRouteImport

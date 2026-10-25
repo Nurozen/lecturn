@@ -11,6 +11,10 @@
       "types": "./src/imageAttachmentSize.ts",
       "default": "./src/imageAttachmentSize.ts"
     },
+    "./embed/guest": {
+      "types": "./src/embed/guest.ts",
+      "default": "./src/embed/guest.ts"
+    },
     "./handoff": {
       "types": "./src/handoff.ts",
       "default": "./src/handoff.ts"
