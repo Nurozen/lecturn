@@ -34,6 +34,7 @@ import * as McpToolAccess from "./McpToolAccess.ts";
 import * as McpToolAccessTestkit from "./McpToolAccess.testkit.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
+import * as AppToolInterceptor from "./toolkits/app/AppToolInterceptor.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 
 const environmentId = EnvironmentId.make("environment-mcp-test");
@@ -760,6 +761,7 @@ it.effect("terminates HTTP MCP sessions with DELETE", () =>
         issuedAt: 1,
       };
       const layerServer = McpHttpServer.layerMcpTransport.pipe(
+        Layer.provide(AppToolInterceptor.layerNoAppTools),
         Layer.provide(
           Layer.mock(McpSessionRegistry.McpSessionRegistry)({
             resolve: (presented) =>
@@ -1014,6 +1016,7 @@ it.effect("admits provider and OAuth client credentials and points only clients 
         }),
       ).pipe(
         Layer.provideMerge(McpHttpServer.layerMcpTransport),
+        Layer.provide(AppToolInterceptor.layerNoAppTools),
         Layer.provide(
           Layer.mock(McpSessionRegistry.McpSessionRegistry)({
             resolve: (token) =>

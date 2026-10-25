@@ -1,5 +1,6 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type { McpSchema } from "effect/ai";
@@ -30,6 +31,16 @@ export interface AppToolSourceShape {
 export class AppToolSource extends Context.Service<AppToolSource, AppToolSourceShape>()(
   "lecturn/mcp/toolkits/app/AppToolInterceptor/AppToolSource",
 ) {}
+
+/** For `/mcp` servers that serve no connected apps, such as tests of built-in toolkits. */
+export const layerNoAppTools = Layer.succeed(AppToolSource)({
+  listFor: () => Effect.succeed([]),
+  call: (_scope, name) =>
+    Effect.succeed({
+      isError: true,
+      content: [{ type: "text", text: `Unknown app tool ${name}.` }],
+    }),
+});
 
 const JsonRpcId = Schema.Union([Schema.String, Schema.Number]);
 
@@ -181,7 +192,7 @@ const answerAppCall = (
  * did not recognize goes to the app. Built-in tools win every name clash.
  */
 export const make = Effect.gen(function* () {
-  const source = yield* Effect.serviceOption(AppToolSource);
+  const tools = yield* AppToolSource;
   return <E, R>(
     invocation: McpInvocationContext.McpInvocationScope,
     httpEffect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
@@ -191,8 +202,7 @@ export const make = Effect.gen(function* () {
     R | HttpServerRequest.HttpServerRequest
   > => {
     const scope = McpInvocationContext.appInvocationScope(invocation);
-    if (Option.isNone(source) || scope === undefined) return httpEffect;
-    const tools = source.value;
+    if (scope === undefined) return httpEffect;
     return Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
       // The body is cached, so the transport can still read it.

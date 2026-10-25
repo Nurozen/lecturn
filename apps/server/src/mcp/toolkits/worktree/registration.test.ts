@@ -32,6 +32,7 @@ import * as SourceControlRepositoryService from "../../../sourceControl/SourceCo
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
 import * as McpHttpServer from "../../McpHttpServer.ts";
 import * as McpSessionRegistry from "../../McpSessionRegistry.ts";
+import * as AppToolInterceptor from "../app/AppToolInterceptor.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as PreviewBrowser from "../../../preview/PreviewBrowser.ts";
 
@@ -83,7 +84,10 @@ const decodeToolsListPayload = Schema.decodeUnknownEffect(ToolsListPayload);
 it.effect("production mcp layer lists worktree tools over http", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const layerRoutes = McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer));
+      const layerRoutes = McpHttpServer.layer.pipe(
+        Layer.provide(McpSessionRegistry.layer),
+        Layer.provide(AppToolInterceptor.layerNoAppTools),
+      );
       yield* HttpRouter.serve(layerRoutes, {
         disableListenLog: true,
         disableLogger: true,

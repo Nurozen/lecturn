@@ -10,6 +10,7 @@ import {
   AppLeaseService,
   AppProjectService,
   AppRegistryService,
+  HeadlessToolHost,
   ThreadCopyService,
   type AppsFailure,
   type AppsNotImplemented,
@@ -41,6 +42,7 @@ export const make = Effect.fn("AppsRpcHandlers.make")(function* (session: Authen
   const authorization = yield* AppAuthorization;
   const hostContext = yield* AppHostContextStore;
   const threadCopy = yield* ThreadCopyService;
+  const headless = yield* HeadlessToolHost;
 
   const subject = parseAppSubject(session.subject);
   // `apps:host` is only ever granted to app subjects; this keeps a mis-scoped
@@ -65,7 +67,18 @@ export const make = Effect.fn("AppsRpcHandlers.make")(function* (session: Authen
       toRpcStreamError(registry.streamEmbedContext(projectId)),
     [M.appsCreateEmbedThread]: (input) =>
       asEmbed((embed) => projects.createEmbedThread(embed, input)),
-    [M.appsEnsureWorkspace]: (input) => asApp((appId) => projects.ensureWorkspace(appId, input)),
+    [M.appsEnsureWorkspace]: (input) =>
+      asApp((appId) =>
+        projects.ensureWorkspace(appId, input).pipe(
+          // D5: refresh definitions through the app's lock-free listArgs; it
+          // spawns nothing without them, and never delays the answer.
+          Effect.tap(({ projectId }) =>
+            headless
+              .refreshDefinitions(appId, projectId)
+              .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach),
+          ),
+        ),
+      ),
     [M.appsSetLiveLease]: (input) => asApp((appId) => leases.set(appId, input)),
     [M.appsClearLiveLease]: () => asApp((appId) => leases.clear(appId).pipe(Effect.as({}))),
     [M.appsMintEmbedToken]: (input) => asApp((appId) => authorization.mintEmbedToken(appId, input)),
