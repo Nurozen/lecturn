@@ -69,7 +69,7 @@ function describeFailure(error: unknown): string {
 }
 
 /**
- * Host for the Stave wizard, mounted once in `__root.tsx` and driven by the
+ * Host for the Stave wizard, mounted once in `AppShell.tsx` and driven by the
  * `staveWizard` bus. Each request gets a fresh inner component; the dialog
  * refuses to close while a create is running so the operation stays observed.
  */
