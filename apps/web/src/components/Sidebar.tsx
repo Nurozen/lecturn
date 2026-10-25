@@ -94,7 +94,6 @@ import {
   FolderIcon,
   GitBranchIcon,
   GitForkIcon,
-  ListFilterIcon,
   MessageCircleQuestionIcon,
   PinIcon,
   PinOffIcon,
@@ -294,7 +293,8 @@ import { useSidebarSegments } from "./sidebar/useSidebarSegments";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHierarchyPanel } from "./sidebar/SidebarHierarchyPanel";
 import { partitionShelfRows } from "./sidebar/sidebarShelfRows";
-import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
+import { SidebarScopeTrigger } from "./sidebar/SidebarScopeRow";
+import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
@@ -2751,7 +2751,6 @@ export default function Sidebar() {
       });
     },
   );
-  const headerSearchRef = useRef<HTMLDivElement | null>(null);
   // Safari can send a click after Ctrl+click opens settings. Ignore that one
   // selection, then clear the guard when the picker opens again.
   const suppressNextScopeChangeRef = useRef(false);
@@ -4251,9 +4250,8 @@ export default function Sidebar() {
         fixedHeader={
           <SidebarGroup className="z-[1]">
             <SidebarThreadHeader
-              searchFieldRef={headerSearchRef}
-              hasProjects={projectGroups.length > 0}
-              projectScope={
+              showScopeRow={projectGroups.length > 0}
+              scopePicker={
                 <Combobox
                   items={projectScopeItems}
                   filteredItems={filteredProjectScopeItems}
@@ -4280,26 +4278,22 @@ export default function Sidebar() {
                 >
                   <ComboboxTrigger
                     render={
-                      <SidebarHeaderIconButton
-                        label={
-                          scopedProjectGroup
-                            ? `Filter threads by project: ${scopedProjectGroup.displayName}`
-                            : "Filter threads by project"
+                      <SidebarScopeTrigger
+                        kind="projects"
+                        selectedLabel={scopedProjectGroup?.displayName ?? null}
+                        icon={
+                          scopedProjectGroup ? (
+                            <ProjectFavicon
+                              project={scopedProjectGroup}
+                              className="size-4 shrink-0"
+                            />
+                          ) : undefined
                         }
                       />
                     }
-                  >
-                    {scopedProjectGroup ? (
-                      <span className="flex shrink-0">
-                        <ProjectFavicon project={scopedProjectGroup} className="size-4" />
-                      </span>
-                    ) : (
-                      <ListFilterIcon className="size-4" />
-                    )}
-                  </ComboboxTrigger>
+                  />
                   <ComboboxPopup
                     align="start"
-                    anchor={headerSearchRef}
                     className="max-w-[min(18rem,var(--available-width))] overflow-hidden"
                   >
                     <ComboboxSearchInput
@@ -4382,7 +4376,7 @@ export default function Sidebar() {
                   </ComboboxPopup>
                 </Combobox>
               }
-              onNewProject={openAddProjectCommandPalette}
+              onScopeAdd={openAddProjectCommandPalette}
               onNewThread={handleNewThreadClick}
               newThreadDisabled={projects.length === 0}
               newThreadShortcutLabel={newThreadShortcutLabel}
