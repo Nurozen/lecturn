@@ -158,6 +158,49 @@ describe("counter card structure hooks", () => {
     ).toEqual({ passed: true });
   });
 
+  it.each(forms)("pairs each stat's label with its value at $width px", (form) => {
+    const card = renderCard(form.width);
+    card.sendToolResult({ count: 5, by: 2, history: [1, 3, 5] });
+    const rows = Array.from(card.document.querySelectorAll("[data-card-stat]"), (stat) =>
+      Array.from(stat.children, (child) => child.textContent),
+    );
+    expect(rows).toEqual([
+      ["Count", "5"],
+      ["Change", "+2"],
+      ["Calls", "3"],
+    ]);
+  });
+
+  it.each(forms)("draws an unfilled curve on labelled axes at $width px", (form) => {
+    const card = renderCard(form.width);
+    card.sendToolResult({ count: 5, by: 2, history: [1, 3, 5] });
+    const chart = card.document.querySelector("[data-card-chart]");
+    if (!chart) throw new Error("no chart");
+    const ticks = (axis: "x" | "y") =>
+      Array.from(chart.querySelectorAll(`[data-card-tick="${axis}"]`), (tick) => ({
+        label: Number(tick.textContent),
+        x: Number(tick.getAttribute("x")),
+        y: Number(tick.getAttribute("y")),
+      }));
+    const curve = (chart.querySelector("polyline")?.getAttribute("points") ?? "")
+      .split(" ")
+      .map((pair) => pair.split(",").map(Number));
+
+    expect(chart.querySelectorAll('[data-card-axis="x"], [data-card-axis="y"]')).toHaveLength(2);
+    expect(chart.querySelectorAll("line.grid").length).toBeGreaterThan(0);
+    expect(chart.querySelectorAll("path, polygon")).toHaveLength(0);
+    // One x tick per call, each under its point.
+    expect(ticks("x").map((tick) => tick.label)).toEqual([1, 2, 3]);
+    curve.forEach(([x], index) => expect(x).toBeCloseTo(ticks("x")[index]!.x, 0));
+    // The y ticks span the history from zero, and the first point sits between 0 and 2.
+    const y = ticks("y");
+    expect(y[0]!.label).toBe(0);
+    expect(y.at(-1)!.label).toBeGreaterThanOrEqual(5);
+    const zero = y.find((tick) => tick.label === 0)!.y;
+    const two = y.find((tick) => tick.label === 2)!.y;
+    expect(curve[0]![1]).toBeCloseTo((zero + two) / 2, 0);
+  });
+
   it("renames its layout when the frame crosses 560 px", () => {
     const card = renderCard(760);
     const layout = () =>

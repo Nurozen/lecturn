@@ -7,7 +7,8 @@
  * illustrative): a title row with an icon, a saved state, three stats and a
  * line chart of the counter's history. At 560 px or wider it takes the desktop
  * form ("Saved result" under the title, three boxed tiles); narrower, the embed
- * form (a "Saved" chip, stats in a row). Every color comes from the host's
+ * form (a "Saved" chip, one label/value row per stat). Both forms draw the
+ * chart with axes, tick labels and a light grid, and no filled area. Every color comes from the host's
  * MCP Apps variables, and the curve from `--color-ring-primary`, which Lecturn
  * sets to the thread gold and an embedding host to its own accent.
  *
@@ -62,34 +63,37 @@ const COUNTER_CARD_HTML = `<!doctype html>
     flex: none; font-size: 11px; padding: 1px 8px; border-radius: 999px;
     border: 1px solid var(--card-border); color: var(--card-muted);
   }
-  .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0 8px; }
-  .stat-label { color: var(--card-muted); font-size: 11px; }
-  .stat-value { font: 600 15px/1.3 var(--font-mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; }
-  #chart { display: block; width: 100%; height: 88px; overflow: visible; }
-  .grid { stroke: var(--card-border); stroke-width: 1; }
+  .stats { margin: 12px 0 10px; }
+  .stat-label { color: var(--card-muted); }
+  .stat-value { font-variant-numeric: tabular-nums; }
+  #chart { display: block; width: 100%; height: 168px; overflow: visible; }
+  .grid { stroke: var(--card-border); stroke-width: 1; opacity: 0.6; }
+  .axis { stroke: var(--card-muted); stroke-width: 1; opacity: 0.7; }
+  .tick { fill: var(--card-muted); font: 10px/1 var(--font-sans, system-ui, sans-serif); font-variant-numeric: tabular-nums; }
+  .axis-title { fill: var(--card-muted); font: 11px/1 var(--font-sans, system-ui, sans-serif); }
   .curve { fill: none; stroke: var(--card-accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-  .area { fill: color-mix(in srgb, var(--card-accent) 14%, transparent); stroke: none; }
-  .dot { fill: var(--card-accent); }
   .note { color: var(--card-muted); font-size: 12px; margin-top: 6px; }
   .note:empty { display: none; }
 
-  /* Narrow (embed pane): a chip carries the saved state; stats sit in a row. */
+  /* Narrow (embed pane): a chip carries the saved state; one label/value row per stat. */
   .subtitle { display: none; }
-  .stat { display: flex; align-items: baseline; gap: 6px; }
+  .stat { display: grid; grid-template-columns: minmax(0, 45%) minmax(0, 1fr); gap: 8px; padding: 3px 0; }
+  .stat-value { font-size: 13px; }
 
-  /* Wide (desktop main pane): a subtitle instead of the chip, boxed tiles. */
+  /* Wide (desktop main pane): a subtitle instead of the chip, three boxed tiles. */
   @media (min-width: 560px) {
     .chip { display: none; }
     .subtitle { display: block; }
+    .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0 8px; }
     .stat { display: block; background: var(--card-tile); border: 1px solid var(--card-border);
       border-radius: calc(var(--card-radius) - 2px); padding: 8px 10px; }
-    .stat-value { font-size: 18px; }
-    #chart { height: 120px; }
+    .stat-label { font-size: 11px; }
+    .stat-value { font: 600 18px/1.3 var(--font-mono, ui-monospace, monospace); }
+    #chart { height: 196px; }
+    .tick { font-size: 11px; }
   }
 
-  .card[data-state="cancelled"] .curve,
-  .card[data-state="cancelled"] .area,
-  .card[data-state="cancelled"] .dot { opacity: 0.35; }
+  .card[data-state="cancelled"] .curve { opacity: 0.35; }
 </style>
 </head>
 <body>
@@ -109,10 +113,9 @@ const COUNTER_CARD_HTML = `<!doctype html>
     <div class="stat" data-card-stat><div class="stat-label">Change</div><div class="stat-value" id="change">–</div></div>
     <div class="stat" data-card-stat><div class="stat-label">Calls</div><div class="stat-value" id="calls">–</div></div>
   </div>
-  <svg id="chart" data-card-chart viewBox="0 0 300 100" preserveAspectRatio="none" role="img" aria-label="Counter history">
-    <line class="grid" x1="0" y1="99.5" x2="300" y2="99.5"/>
-    <path class="area" id="area" d=""/>
-    <polyline class="curve" id="curve" points="" vector-effect="non-scaling-stroke"/>
+  <svg id="chart" data-card-chart role="img" aria-label="Counter history">
+    <g id="frame"></g>
+    <polyline class="curve" id="curve" points=""/>
   </svg>
   <div class="note" id="note"></div>
 </div>
@@ -125,7 +128,10 @@ const COUNTER_CARD_HTML = `<!doctype html>
 
   // The stylesheet's query, so data-card-layout always names the form drawn.
   var wide = window.matchMedia("(min-width: 560px)");
-  function syncLayout() { card.dataset.cardLayout = wide.matches ? "wide" : "narrow"; }
+  function syncLayout() {
+    card.dataset.cardLayout = wide.matches ? "wide" : "narrow";
+    if (lastHistory) draw(lastHistory);
+  }
   syncLayout();
   wide.addEventListener("change", syncLayout);
 
@@ -152,18 +158,75 @@ const COUNTER_CARD_HTML = `<!doctype html>
     byId("subtitle").textContent = subtitle;
   }
 
+  var SVG = "http://www.w3.org/2000/svg";
+  var lastHistory = null;
+
+  // A 1-2-5 step, so tick labels stay round whatever the counter's range.
+  function niceStep(raw) {
+    var magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
+    var unit = raw / magnitude;
+    return Math.max(1, (unit <= 1 ? 1 : unit <= 2 ? 2 : unit <= 5 ? 5 : 10) * magnitude);
+  }
+  function ticks(lo, hi, step) {
+    var out = [];
+    for (var value = Math.ceil(lo / step) * step; value <= hi + 1e-9; value += step) out.push(value);
+    return out;
+  }
+  function svgEl(tag, attrs, text) {
+    var el = document.createElementNS(SVG, tag);
+    for (var name in attrs) el.setAttribute(name, String(attrs[name]));
+    if (text !== undefined) el.textContent = text;
+    return el;
+  }
+
+  // Laid out in the chart's own pixel size (jsdom has none, hence the fallbacks)
+  // so tick labels are never stretched the way a fixed, unscaled viewBox would.
   function draw(history) {
+    lastHistory = history;
+    var chart = byId("chart");
+    var box = chart.getBoundingClientRect();
+    var width = box.width || (wide.matches ? 600 : 300);
+    var height = box.height || (wide.matches ? 196 : 168);
+    chart.setAttribute("viewBox", "0 0 " + width + " " + height);
+
     var points = history.length === 1 ? [history[0], history[0]] : history;
-    var max = Math.max.apply(null, points.concat([1]));
-    var min = Math.min.apply(null, points.concat([0]));
-    var span = max - min || 1;
-    var coords = points.map(function (value, index) {
-      var x = (index / (points.length - 1)) * 300;
-      var y = 96 - ((value - min) / span) * 88;
-      return x.toFixed(1) + "," + y.toFixed(1);
+    var xMax = Math.max(points.length, 2);
+    var xStep = niceStep((xMax - 1) / (wide.matches ? 8 : 5));
+    var xTicks = ticks(1, xMax, xStep);
+    var yLo = Math.min.apply(null, points.concat([0]));
+    var yHi = Math.max.apply(null, points.concat([1]));
+    var yStep = niceStep((yHi - yLo) / 4);
+    yLo = Math.floor(yLo / yStep) * yStep;
+    yHi = Math.ceil(yHi / yStep) * yStep;
+    var yTicks = ticks(yLo, yHi, yStep);
+    var labelChars = Math.max.apply(null, yTicks.map(function (value) { return String(value).length; }));
+    var plot = { left: 18 + labelChars * 6.5 + 8, right: width - 10, top: 8, bottom: height - 34 };
+    var sx = function (x) { return plot.left + ((x - 1) / (xMax - 1)) * (plot.right - plot.left); };
+    var sy = function (y) { return plot.bottom - ((y - yLo) / (yHi - yLo)) * (plot.bottom - plot.top); };
+
+    var frame = byId("frame");
+    frame.replaceChildren();
+    yTicks.forEach(function (value) {
+      var y = sy(value);
+      if (value !== yLo) frame.append(svgEl("line", { class: "grid", x1: plot.left, y1: y, x2: plot.right, y2: y }));
+      frame.append(svgEl("line", { class: "axis", x1: plot.left - 4, y1: y, x2: plot.left, y2: y }));
+      frame.append(svgEl("text", { class: "tick", "data-card-tick": "y", x: plot.left - 7, y: y, "text-anchor": "end", "dominant-baseline": "middle" }, String(value)));
     });
-    byId("curve").setAttribute("points", coords.join(" "));
-    byId("area").setAttribute("d", "M0,100 L" + coords.join(" L") + " L300,100 Z");
+    xTicks.forEach(function (value) {
+      var x = sx(value);
+      if (value !== 1) frame.append(svgEl("line", { class: "grid", x1: x, y1: plot.top, x2: x, y2: plot.bottom }));
+      frame.append(svgEl("line", { class: "axis", x1: x, y1: plot.bottom, x2: x, y2: plot.bottom + 4 }));
+      frame.append(svgEl("text", { class: "tick", "data-card-tick": "x", x: x, y: plot.bottom + 15, "text-anchor": "middle" }, String(value)));
+    });
+    frame.append(svgEl("line", { class: "axis", "data-card-axis": "x", x1: plot.left, y1: plot.bottom, x2: plot.right, y2: plot.bottom }));
+    frame.append(svgEl("line", { class: "axis", "data-card-axis": "y", x1: plot.left, y1: plot.top, x2: plot.left, y2: plot.bottom }));
+    frame.append(svgEl("text", { class: "axis-title", x: (plot.left + plot.right) / 2, y: height - 4, "text-anchor": "middle" }, "Call"));
+    var yTitle = (plot.top + plot.bottom) / 2;
+    frame.append(svgEl("text", { class: "axis-title", x: 10, y: yTitle, "text-anchor": "middle", transform: "rotate(-90 10 " + yTitle + ")" }, "Count"));
+
+    byId("curve").setAttribute("points", points.map(function (value, index) {
+      return sx(index + 1).toFixed(1) + "," + sy(value).toFixed(1);
+    }).join(" "));
   }
 
   function showResult(result) {
@@ -218,7 +281,10 @@ const COUNTER_CARD_HTML = `<!doctype html>
     }
   });
 
-  if (typeof ResizeObserver === "function") new ResizeObserver(reportSize).observe(document.body);
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver(reportSize).observe(document.body);
+    new ResizeObserver(function () { if (lastHistory) draw(lastHistory); }).observe(byId("chart"));
+  }
 
   request("ui/initialize", {
     protocolVersion: "2026-01-26",
