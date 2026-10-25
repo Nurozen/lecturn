@@ -68,6 +68,7 @@ import {
   formatReadToolLabel,
   formatSearchToolLabel,
 } from "@lecturn/shared/toolActivity";
+import { isAppToolSource } from "@lecturn/shared/appToolPresentation";
 import { formatDuration } from "@lecturn/shared/orchestrationTiming";
 import type { HtmlRenderReference } from "@lecturn/shared/htmlRender";
 import type { McpAppReference } from "@lecturn/shared/mcpApp";
@@ -315,6 +316,8 @@ const projectedEntriesCache = new WeakMap<
   {
     readonly attemptId: RunAttemptId | null;
     readonly entry: RawThreadFeedEntry;
+    /** An app tool's card, which follows its row. */
+    readonly card?: RawThreadFeedEntry;
   }
 >();
 const localMessageEntriesCache = new WeakMap<
@@ -1945,6 +1948,7 @@ export function buildThreadFeed(
     const cached = projectedEntriesCache.get(row);
     if (cached?.attemptId === attemptId) {
       entries.push(cached.entry);
+      if (cached.card) entries.push(cached.card);
       continue;
     }
     const createdAt = DateTime.formatIso(item.startedAt ?? item.updatedAt);
@@ -1979,6 +1983,21 @@ export function buildThreadFeed(
         revision: turnItemDetailRevision(item),
         app,
       };
+      const activity = toFeedActivity(row, attemptId);
+      // App cards sit under their tool's row, as the app mockups draw them; other MCP Apps replace
+      // it. Prominent keeps that row on its own and out of the run fold, beside its card.
+      if (isAppToolSource(activity.workEntry.toolSource)) {
+        const rowEntry: RawThreadFeedEntry = {
+          type: "activity",
+          id: activity.id,
+          createdAt,
+          runId: item.runId,
+          activity: { ...activity, prominent: true },
+        };
+        projectedEntriesCache.set(row, { attemptId, entry: rowEntry, card: entry });
+        entries.push(rowEntry, entry);
+        continue;
+      }
       projectedEntriesCache.set(row, { attemptId, entry });
       entries.push(entry);
       continue;

@@ -3,9 +3,10 @@
  * The CP1 tracer: the sidecar starts, the workspace is ensured, the embed is
  * mounted with RocketWright's theme under the host's own pane header, and
  * one scripted turn calls `ex_counter_increment` through Lecturn's app
- * toolkit. It asserts the header, the user's plain message, the tool's card
- * row with its card loaded and showing the result, the counter server's call
- * log and the `lecturn/context` meta Lecturn sent with the call.
+ * toolkit. It asserts the header, the user's plain message, the app tool's
+ * row with its success check and, under it, the card loaded and showing the
+ * result, the counter server's call log and the `lecturn/context` meta
+ * Lecturn sent with the call.
  */
 import * as NodeAssert from "node:assert/strict";
 import * as NodeFSP from "node:fs/promises";
@@ -61,15 +62,40 @@ async function assertPaneHeader(run: Awaited<ReturnType<typeof launchEmbedHost>>
   return { headerBottom: layout.headerBottom, view };
 }
 
+/** Both mockups draw an app tool's row, ending on a success check, with its card under it. */
+async function assertAppToolRow(guest: Page) {
+  const row = guest.locator('[data-timeline-row-kind="work"]:has([data-app-tool-outcome])');
+  const workRows = await guest.locator('[data-timeline-row-kind="work"]').allTextContents();
+  NodeAssert.equal(
+    await row.count(),
+    1,
+    `one app tool row for ${TOOL}; work rows: ${JSON.stringify(workRows)}`,
+  );
+  NodeAssert.equal(
+    await row.locator("[data-app-tool-outcome]").getAttribute("data-app-tool-outcome"),
+    "succeeded",
+  );
+  await row
+    .getByRole("img", { name: "Tool call succeeded" })
+    .waitFor({ state: "visible", timeout: 5_000 });
+  const cardFollowsRow = await row.evaluate((element) => {
+    const card = document.querySelector('[data-timeline-row-kind="mcp-app"]');
+    return (
+      card !== null &&
+      (element.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+    );
+  });
+  NodeAssert.ok(cardFollowsRow, "the card sits under the app tool row");
+  return (await row.textContent())?.replace(/\s+/g, " ").trim();
+}
+
 /** Fails as soon as the card row shows its load error; resolves once the card shows the result. */
 async function assertCardLoaded(guest: Page) {
   const row = guest.locator('[data-timeline-row-kind="mcp-app"]');
-  const rows = await row.count();
-  const workRows = await guest.locator('[data-timeline-row-kind="work"]').allTextContents();
   NodeAssert.equal(
-    rows,
+    await row.count(),
     1,
-    `one card row for ${TOOL} (it declares _meta.ui.resourceUri); work rows: ${JSON.stringify(workRows)}`,
+    `one card row for ${TOOL} (it declares _meta.ui.resourceUri)`,
   );
   const unable = row.getByText(/Unable to load/);
   const card = row.frameLocator("iframe").locator(".card");
@@ -138,6 +164,8 @@ export default async function tracer({ log, artifactsDir, keep }: E2eContext): P
     NodeAssert.ok(userText?.includes(MESSAGE), "the user bubble shows the typed message");
     NodeAssert.doesNotMatch(userText ?? "", /scripted|toolCall/, "no script in the user bubble");
 
+    const toolRow = await assertAppToolRow(guest);
+    log(`app tool row: ${toolRow} (succeeded)`);
     const card = await assertCardLoaded(guest);
     log(`card row (mcp-app): state ${card.state}, count ${card.count}`);
     NodeAssert.equal(card.state, "saved", "the card received a successful tool result");

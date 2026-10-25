@@ -18,6 +18,7 @@ import {
   type OrchestrationV2TurnItem,
 } from "@lecturn/contracts";
 import type { ThreadRuntimeSummary } from "@lecturn/client-runtime/state/shell";
+import { appToolSource } from "@lecturn/shared/appToolPresentation";
 import { deriveMessagesTimelineRows } from "./components/chat/MessagesTimeline.logic";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
@@ -1324,7 +1325,43 @@ describe("HTML renders in the timeline", () => {
       itemId: "render",
       mcpApp,
     });
+    expect(entries.some((entry) => entry.kind === "work" && entry.id === "render")).toBe(false);
     expect(rowsFor(entries, false)).toEqual(["message", "turn-fold", "mcp-app", "message"]);
+  });
+
+  it("keeps a connected app's tool row above its card, outside the fold and any tool group", () => {
+    const mcpApp = {
+      attachmentId: "render-thread-app-html",
+      server: "lecturn",
+      tool: "ex_counter_increment",
+      resourceUri: "ui://ex/counter-card",
+    };
+    const call = renderCall("completed", { lecturnMcpApp: mcpApp, result: { content: [] } });
+    const entries = turn(
+      call.type === "dynamic_tool"
+        ? {
+            ...call,
+            toolName: "mcp__lecturn__ex_counter_increment",
+            toolSource: appToolSource({ appId: "dev.example", name: "Example", toolPrefix: "ex" }),
+          }
+        : call,
+    );
+    const row = entries.find((entry) => entry.kind === "work" && entry.id === "render");
+    const card = entries.find((entry) => entry.kind === "mcp-app");
+    expect(row).toMatchObject({ headsAppCard: true });
+    expect(card).toMatchObject({ itemId: "render", mcpApp });
+    expect(card?.id).not.toBe(row?.id);
+    expect(entries.indexOf(card!)).toBe(entries.indexOf(row!) + 1);
+    expect(rowsFor(entries, false)).toEqual(["message", "turn-fold", "work", "mcp-app", "message"]);
+    expect(rowsFor(entries, true)).toEqual([
+      "message",
+      "turn-fold",
+      "work",
+      "work",
+      "mcp-app",
+      "work",
+      "message",
+    ]);
   });
 
   it("keeps a render visible when its superseded attempt folds", () => {
