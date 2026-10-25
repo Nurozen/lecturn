@@ -527,6 +527,16 @@ describe("scripted script grammar", () => {
     );
   });
 
+  it("reads the user's own block when handed-off history carries earlier ones", () => {
+    const history = 'Context handoff:\nuser: Count.\n```scripted\n[{"assistantText":"old"}]\n```';
+    assert.deepEqual(
+      scriptFromMessage(
+        `${history}\n\nUser message:\nAgain.\n\`\`\`scripted\n[{"assistantText":"new"}]\n\`\`\``,
+      ),
+      [{ assistantText: "new" }],
+    );
+  });
+
   it("picks a scripts-file entry by 1-based turn index in either file form", () => {
     const steps = [{ assistantText: "second" }];
     assert.deepEqual(scriptFromFile(JSON.stringify([[], steps]), 2), steps);
