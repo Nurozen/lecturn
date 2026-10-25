@@ -103,6 +103,8 @@ export interface RestingComposerControlsMeasurement {
   blockWidths: readonly number[];
   overflowWidth: number;
   iconOnlyBlockWidths?: readonly number[];
+  /** The controls wrap onto further rows (the narrow embed footer), so none need to overflow. */
+  wraps?: boolean;
 }
 
 function restingComposerControlsWidth(
@@ -151,6 +153,13 @@ export function resolveRestingComposerControlsLayout(
   },
 ): { hiddenCount: number; iconOnlyCount?: number; visible: boolean } {
   const { blockWidths, hostWidth, previous } = input;
+  if (input.wraps) {
+    return {
+      hiddenCount: 0,
+      ...(input.iconOnlyBlockWidths ? { iconOnlyCount: 0 } : {}),
+      visible: true,
+    };
+  }
   const iconSteps = input.iconOnlyBlockWidths ? blockWidths.length : 0;
   const previousStep = previous
     ? previous.hiddenCount > 0

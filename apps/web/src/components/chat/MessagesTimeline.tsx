@@ -1,4 +1,5 @@
 import { ContextualMessageDisclosure } from "../contextual/ContextualDisclosure";
+import { EmbedUserAvatar } from "../embed/EmbedUserAvatar";
 import { fadeOutTimeline, revealTimeline } from "./timelineExit";
 import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shallow } from "zustand/vanilla/shallow";
@@ -2528,6 +2529,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         data-chat-user-message-bubble="true"
         className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground"
       >
+        <EmbedUserAvatar />
         <MessageAuthorHeading>You</MessageAuthorHeading>
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[210px] grid-cols-2 gap-2">

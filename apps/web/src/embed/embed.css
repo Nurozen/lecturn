@@ -1,0 +1,156 @@
+/* The embed pane takes the host's look (D17). embedTheme.ts sets the allowlisted tokens inline on
+   the root; this file points every token Lecturn derives from its own palette at those, and drops
+   what only Lecturn's own chrome wears. `:root` doubles the selector's weight so it outranks the
+   palette's `:root.dark` block whatever order the stylesheets load in. */
+html:root[data-lecturn-embed] {
+  --app-chrome-background: var(--background);
+  --toolbar-background: var(--background);
+  --toolbar-foreground: var(--foreground);
+  --toolbar-border: var(--border);
+  --toolbar-control: var(--card);
+  --toolbar-control-foreground: var(--foreground);
+  --toolbar-control-hover: var(--accent);
+  --surface-raised: var(--card);
+  --placeholder: var(--muted-foreground);
+  --secondary-label: var(--muted-foreground);
+  --icon-muted: var(--muted-foreground);
+  --message-surface: var(--accent);
+  --message-foreground: var(--accent-foreground);
+  --message-action: var(--primary);
+  --message-action-foreground: var(--primary-foreground);
+  --message-action-hover: color-mix(in srgb, var(--primary) 85%, var(--foreground));
+  --code-background: var(--card);
+  --code-foreground: var(--card-foreground);
+  --terminal-background: var(--background);
+  --terminal-foreground: var(--foreground);
+  --terminal-cursor: var(--primary);
+  --terminal-selection-background: color-mix(in srgb, var(--primary) 30%, transparent);
+  --app-scrollbar-thumb: var(--border);
+  --app-scrollbar-thumb-hover: var(--muted-foreground);
+  --update: var(--primary);
+  --update-foreground: var(--primary);
+  --update-surface: var(--accent);
+
+  /* Lecturn's brass thread becomes the host's primary. */
+  --lecturn-thread-gold: var(--primary);
+  --lecturn-thread-highlight: color-mix(in srgb, var(--primary) 70%, var(--foreground));
+  --lecturn-spinner-gold: var(--primary);
+  --lecturn-spinner-highlight: color-mix(in srgb, var(--primary) 70%, var(--foreground));
+  --lecturn-thread-tip: color-mix(in srgb, var(--primary) 50%, var(--foreground));
+  --lecturn-thread-trail: color-mix(in srgb, var(--primary) 40%, transparent);
+  --lecturn-thread-line: color-mix(in srgb, var(--primary) 60%, transparent);
+  --lecturn-thread-glow: color-mix(in srgb, var(--primary) 35%, transparent);
+  --lecturn-thread-name: var(--primary);
+  --lecturn-thread-name-highlight: color-mix(in srgb, var(--primary) 70%, var(--foreground));
+  --lecturn-thread-edge: transparent;
+
+  /* A flat pane: no frosted composer. */
+  --glass-opacity: 100%;
+  --glass-blur: 0px;
+  --glass-saturation: 1;
+}
+
+/* No grain or night sky: the pane is the host's flat background, pixel for pixel. */
+html[data-lecturn-embed]
+  :is(
+    body,
+    .surface-grain,
+    .lecturn-chat-surface,
+    .lecturn-page-surface,
+    .lecturn-settings-surface,
+    .lecturn-celestial-sidebar
+  ) {
+  background-image: none;
+}
+
+html[data-lecturn-embed] [data-slot="composer-shell"] {
+  --chat-composer-glass-surface: var(--card);
+  --chat-composer-highlight: transparent;
+  --chat-composer-outline: var(--border);
+}
+
+html[data-lecturn-embed] [data-slot="composer-shell"]::before {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--card);
+}
+
+html[data-lecturn-embed] [data-slot="composer-host"] {
+  box-shadow: none;
+}
+
+/* The narrow pane's footer: "model | effort | access" on one row, the Contextual control on the
+   next, attach and send at the end of that second row. The width matches
+   COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX, measured on the same box as the composer form. The
+   controls report flex-wrap to the overflow measurement (restingComposerControlsMeasurement.ts),
+   which then keeps every control in place instead of folding some into the overflow menu. */
+@container composer-surface (width < 620px) {
+  html[data-lecturn-embed]
+    [data-chat-composer-surface]:not([data-chat-composer-resting])
+    [data-chat-composer-footer] {
+    position: relative;
+    flex-wrap: wrap;
+  }
+
+  html[data-lecturn-embed]
+    [data-chat-composer-surface]:not([data-chat-composer-resting])
+    [data-chat-composer-footer-controls] {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    row-gap: 0.25rem;
+    overflow: visible;
+  }
+
+  /* Separators are hidden on phone-width viewports, which the embed pane is. */
+  html[data-lecturn-embed]
+    [data-chat-composer-surface]:not([data-chat-composer-resting])
+    [data-chat-composer-footer-controls]
+    [data-slot="separator"] {
+    display: block;
+  }
+
+  html[data-lecturn-embed]
+    [data-chat-composer-surface]:not([data-chat-composer-resting])
+    [data-chat-composer-footer-controls]
+    [data-resting-block="contextual"] {
+    flex-basis: 100%;
+  }
+
+  html[data-lecturn-embed]
+    [data-chat-composer-surface]:not([data-chat-composer-resting])
+    [data-chat-composer-footer-controls]
+    [data-resting-block="contextual"]
+    > [data-slot="separator"] {
+    display: none;
+  }
+
+  html[data-lecturn-embed]
+    [data-chat-composer-surface]:not([data-chat-composer-resting])
+    [data-chat-composer-footer]
+    > [data-chat-composer-actions="right"] {
+    margin-inline-start: auto;
+  }
+
+  /* With a Contextual row, the actions share it rather than adding a third row. */
+  html[data-lecturn-embed]
+    [data-chat-composer-surface]:not([data-chat-composer-resting])
+    [data-chat-composer-footer]:has([data-resting-block="contextual"])
+    > [data-chat-composer-actions="right"] {
+    position: absolute;
+    inset-inline-end: 0.75rem;
+    bottom: 0.75rem;
+  }
+}
+
+/* The footer's own padding grows at the sm breakpoint. */
+@media (width >= 40rem) {
+  @container composer-surface (width < 620px) {
+    html[data-lecturn-embed]
+      [data-chat-composer-surface]:not([data-chat-composer-resting])
+      [data-chat-composer-footer]:has([data-resting-block="contextual"])
+      > [data-chat-composer-actions="right"] {
+      inset-inline-end: 1rem;
+      bottom: 1rem;
+    }
+  }
+}
