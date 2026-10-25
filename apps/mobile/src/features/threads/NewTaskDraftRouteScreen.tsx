@@ -8,7 +8,7 @@ import {
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
 import { AppText as Text } from "../../components/ui/AppText";
-import { useListedProjects } from "../../state/entities";
+import { useNewThreadTargetProjects } from "../../state/entities";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useWorkspaceState } from "../../state/workspace";
 import { vcsEnvironment } from "../../state/vcs";
@@ -35,7 +35,7 @@ export function NewTaskDraftRouteScreen({ route }: StaticScreenProps<NewTaskDraf
     ? params.pendingTaskId[0]
     : params.pendingTaskId;
   const draftId = Array.isArray(params.draftId) ? params.draftId[0] : params.draftId;
-  const projects = useListedProjects();
+  const projects = useNewThreadTargetProjects();
   const { state: catalogState } = useWorkspaceState();
   const navigation = useNavigation();
   const switchRef = useAtomCommand(vcsEnvironment.switchRef, { reportFailure: false });

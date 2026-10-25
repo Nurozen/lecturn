@@ -32,15 +32,29 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
   const warning = options.find((option) => option.warning)?.warning;
   const canRespond = props.approval.responseCapability === "live";
   const disabled = !canRespond || props.respondingApprovalId === props.approval.requestId;
+  // A connected app's gated tool waits on this answer, not the provider, so name the app and
+  // the tool, and give the app's own reason in place of the generic prompt.
+  const appTool = props.approval.connectedAppTool;
+  const detail = appTool ? appTool.reason?.trim() || null : props.approval.detail;
   return (
     <GlassCard tone="accent" radius={24} className="gap-2.5 p-4" opaque>
-      <Text className="font-lecturn-medium text-xs text-primary">Approval needed</Text>
-      <Text className="font-lecturn-bold text-lg text-foreground">
-        {props.approval.appName ?? props.approval.requestKind}
+      <Text className="font-lecturn-medium text-xs text-primary">
+        {appTool ? `${appTool.appName} · Approval needed` : "Approval needed"}
       </Text>
-      {props.approval.detail ? (
-        <Text className="font-sans text-sm leading-normal text-foreground-secondary">
-          {props.approval.detail}
+      <Text className="font-lecturn-bold text-lg text-foreground">
+        {appTool
+          ? `Approve ${appTool.toolName}`
+          : (props.approval.appName ?? props.approval.requestKind)}
+      </Text>
+      {detail ? (
+        <Text
+          className={
+            appTool
+              ? "font-mono text-sm leading-normal text-foreground-secondary"
+              : "font-sans text-sm leading-normal text-foreground-secondary"
+          }
+        >
+          {detail}
         </Text>
       ) : null}
       {!canRespond ? (

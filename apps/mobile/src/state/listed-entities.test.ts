@@ -2,12 +2,18 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@lecturn/client-runtime/state/shell";
-import { EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
+import { AppId, EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { makeThreadShellFixture } from "../test-fixtures";
 
-import { listedProjects, listedThreadShells } from "./listed-entities";
+import {
+  appListedProjects,
+  appListedThreadShells,
+  listedProjects,
+  listedThreadShells,
+  newThreadTargetProjects,
+} from "./listed-entities";
 
 function makeProject(
   id: string,
@@ -27,6 +33,13 @@ function makeProject(
     ...(state === undefined
       ? {}
       : { stave: { spaceId: id, isSaga: false, state, repos: [], memories: [] } }),
+  };
+}
+
+function makeAppProject(id: string, environmentId: string): EnvironmentProject {
+  return {
+    ...makeProject(id, environmentId),
+    appBinding: { appId: AppId.make("com.example.rocket"), workspaceRoot: `/work/${id}` },
   };
 }
 
@@ -67,5 +80,43 @@ describe("listed projects and threads", () => {
     const threads = [makeThread("t-plain", plain)];
     expect(listedProjects(projects)).toBe(projects);
     expect(listedThreadShells(projects, threads)).toBe(threads);
+  });
+
+  it("keeps connected-app workspaces and their threads out of the Threads tab", () => {
+    const app = makeAppProject("rocket", "mac");
+    const appElsewhere = makeAppProject("rocket", "server");
+    // Same project id on another environment is a different, normal project.
+    const plainSameId = makeProject("rocket", "laptop");
+    const projects = [plain, app, appElsewhere, plainSameId, archived];
+    const threads = [
+      makeThread("t-plain", plain),
+      makeThread("t-app", app),
+      makeThread("t-app-elsewhere", appElsewhere),
+      makeThread("t-plain-same-id", plainSameId),
+      makeThread("t-archived", archived),
+    ];
+
+    expect(listedProjects(projects)).toEqual([plain, plainSameId]);
+    expect(listedThreadShells(projects, threads).map((thread) => thread.id)).toEqual([
+      "t-plain",
+      "t-plain-same-id",
+    ]);
+
+    expect(appListedProjects(projects)).toEqual([app, appElsewhere]);
+    expect(appListedThreadShells(projects, threads).map((thread) => thread.id)).toEqual([
+      "t-app",
+      "t-app-elsewhere",
+    ]);
+  });
+
+  it("lets a new thread target an app workspace but not an archived space", () => {
+    const app = makeAppProject("rocket", "mac");
+    expect(newThreadTargetProjects([plain, app, archived])).toEqual([plain, app]);
+  });
+
+  it("returns empty Apps selections without app workspaces", () => {
+    const projects = [plain, live];
+    expect(appListedProjects(projects)).toEqual([]);
+    expect(appListedThreadShells(projects, [makeThread("t-plain", plain)])).toEqual([]);
   });
 });

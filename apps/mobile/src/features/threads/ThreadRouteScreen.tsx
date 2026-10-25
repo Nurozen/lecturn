@@ -105,6 +105,7 @@ import {
   useAndroidWorkspaceBack,
   useWorkspaceListNavigation,
 } from "../workspace/useAndroidWorkspaceNavigation";
+import { useThreadWorkspaceTab } from "../apps/useThreadWorkspaceTab";
 
 interface ThreadInspectorSelection {
   readonly routeThreadIdentity: string | null;
@@ -200,7 +201,7 @@ function ThreadUnavailableScreen(props: {
 }
 
 export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
-  useAndroidWorkspaceBack("threads");
+  useAndroidWorkspaceBack(useThreadWorkspaceTab(props.route.params));
   return <AccountScopedThreadRouteScreen {...props} />;
 }
 function AccountScopedThreadRouteScreen(props: ThreadRouteScreenProps) {
