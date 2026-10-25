@@ -19,7 +19,12 @@ export type AppHttpRoute =
   | { readonly kind: "socket" }
   | { readonly kind: "shell" }
   | { readonly kind: "projects" }
-  | { readonly kind: "thread"; readonly threadId: ThreadId };
+  | { readonly kind: "thread"; readonly threadId: ThreadId }
+  /**
+   * Asset reads and attachment uploads. The signed token in the path is the
+   * whole grant, minted only by an RPC the subject was already authorized for.
+   */
+  | { readonly kind: "capability" };
 
 type AppHttpRouteKind = AppHttpRoute["kind"];
 
@@ -29,12 +34,16 @@ const SESSION_PATHS: ReadonlySet<string> = new Set([
   "/oauth/token",
 ]);
 
+// The asset and upload route prefixes, spelled out because `EnvironmentAuth` imports this file
+// and the asset modules sit far above it; the tests pin them to the routes' own constants.
+const CAPABILITY_PREFIXES = ["/api/assets/", "/api/attachments/upload/"] as const;
+
 const THREAD_PATH = /^\/api\/orchestration\/threads\/([^/]+)(?:\/(?:bounded|history|transcript))?$/;
 
 /** The app credential only reaches the socket; everything it does is an RPC. */
 const ROUTES_BY_SUBJECT: Record<AppSubject["kind"], ReadonlySet<AppHttpRouteKind>> = {
   app: new Set(["session", "socket"]),
-  embed: new Set(["session", "socket", "shell", "projects", "thread"]),
+  embed: new Set(["session", "socket", "shell", "projects", "thread", "capability"]),
 };
 
 const isThreadId = Schema.is(ThreadId);
@@ -58,6 +67,7 @@ export const classifyAppHttpPath = (path: string): AppHttpRoute | null => {
   if (path === "/ws") return { kind: "socket" };
   if (path === "/api/orchestration/shell") return { kind: "shell" };
   if (path === "/api/projects") return { kind: "projects" };
+  if (CAPABILITY_PREFIXES.some((prefix) => path.startsWith(prefix))) return { kind: "capability" };
   const thread = THREAD_PATH.exec(path);
   const threadId = thread?.[1] === undefined ? null : decodePathSegment(thread[1]);
   return threadId !== null && isThreadId(threadId) && threadId === threadId.trim()

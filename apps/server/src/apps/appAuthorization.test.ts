@@ -17,6 +17,9 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
+import { ASSET_ROUTE_PREFIX } from "../assets/AssetAccess.ts";
+import { ATTACHMENT_UPLOAD_ROUTE_PREFIX } from "../assets/AttachmentUpload.ts";
+import { createAttachmentId, createPendingAttachmentId } from "../attachmentStore.ts";
 import type { AuthenticatedSession } from "../auth/EnvironmentAuth.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import { type AppAuthorizationDeps, EMBED_TOKEN_SCOPES, makeWith } from "./appAuthorization.ts";
@@ -234,6 +237,140 @@ describe("app RPC allowlist", () => {
     }),
   );
 
+  it.effect("serves an embed asset URLs for its own threads and project files only", () =>
+    Effect.gen(function* () {
+      const asset = (resource: Record<string, unknown>) =>
+        allowed(embedSession, W.assetsCreateUrl, { resource });
+      const attachment = (threadId: ThreadId) =>
+        asset({ _tag: "attachment", attachmentId: createAttachmentId(threadId, "html") });
+      expect(yield* attachment(rocketThread)).toBe(true);
+      expect(yield* attachment(rocketSecondThread)).toBe(false);
+      expect(yield* attachment(otherAppThread)).toBe(false);
+      expect(yield* attachment(normalThread)).toBe(false);
+      expect(
+        yield* asset({ _tag: "attachment", attachmentId: createPendingAttachmentId(".png") }),
+      ).toBe(false);
+      expect(yield* asset({ _tag: "attachment", attachmentId: "rocket-thread" })).toBe(false);
+
+      const image = (threadId: ThreadId) =>
+        asset({ _tag: "tool-output-image", threadId, itemId: "item-1", index: 0 });
+      expect(yield* image(rocketThread)).toBe(true);
+      expect(yield* image(otherAppThread)).toBe(false);
+      expect(yield* image(normalThread)).toBe(false);
+
+      const media = (threadId: ThreadId, path: string) =>
+        asset({ _tag: "media-file", threadId, path });
+      expect(yield* media(rocketThread, "/work/rocket/plots/apogee.png")).toBe(true);
+      expect(yield* media(rocketThread, "plots/apogee.png")).toBe(true);
+      expect(yield* media(rocketThread, "/work/rocket-2/apogee.png")).toBe(false);
+      expect(yield* media(rocketThread, "/work/other/apogee.png")).toBe(false);
+      expect(yield* media(rocketThread, "/work/rocket/../other/apogee.png")).toBe(false);
+      expect(yield* media(rocketThread, "../other/apogee.png")).toBe(false);
+      expect(yield* media(rocketThread, "~/apogee.png")).toBe(false);
+      expect(yield* media(otherAppThread, "plots/apogee.png")).toBe(false);
+      expect(yield* media(normalThread, "plots/apogee.png")).toBe(false);
+
+      const draft = (cwd: string, path: string) =>
+        asset({ _tag: "draft-workspace-file", cwd, path });
+      expect(yield* draft("/work/rocket", "plots/apogee.png")).toBe(true);
+      expect(yield* draft("/work/rocket", "/etc/hosts")).toBe(false);
+      expect(yield* draft("/work/other", "plots/apogee.png")).toBe(false);
+
+      const favicon = (cwd: string) => asset({ _tag: "project-favicon", cwd });
+      expect(yield* favicon("/work/rocket")).toBe(true);
+      expect(yield* favicon("/work/other")).toBe(false);
+      expect(yield* favicon("/work/normal")).toBe(false);
+
+      expect(yield* asset({ _tag: "native-app-icon", app: { _tag: "app-id", appId: "x" } })).toBe(
+        true,
+      );
+      expect(
+        yield* asset({ _tag: "github-media", cwd: "/work/rocket", url: "https://github.com/x" }),
+      ).toBe(false);
+      expect(
+        yield* allowed(appSession, W.assetsCreateUrl, {
+          resource: { _tag: "tool-output-image", threadId: rocketThread, itemId: "i", index: 0 },
+        }),
+      ).toBe(false);
+    }),
+  );
+
+  it.effect("gives the embed chat view its project's status, notes and Contextual reads", () =>
+    Effect.gen(function* () {
+      expect(yield* allowed(embedSession, W.subscribeServerLifecycle, {})).toBe(true);
+      expect(yield* allowed(appSession, W.subscribeServerLifecycle, {})).toBe(false);
+
+      const vcs = (cwd: string) => allowed(embedSession, W.subscribeVcsStatus, { cwd });
+      expect(yield* vcs("/work/rocket")).toBe(true);
+      expect(yield* vcs("/work/rocket-2")).toBe(false);
+      expect(yield* vcs("/work/other")).toBe(false);
+      expect(yield* vcs("/work/normal")).toBe(false);
+
+      const notes = (input: Record<string, unknown>) =>
+        allowed(embedSession, W.threadNotesList, input);
+      expect(yield* notes({ projectId: rocketProject })).toBe(true);
+      expect(yield* notes({ projectId: otherAppProject })).toBe(false);
+      expect(yield* notes({ projectId: normalProject })).toBe(false);
+      expect(yield* notes({})).toBe(false);
+      expect(yield* allowed(embedSession, W.threadNotesCreate, { threadId: rocketThread })).toBe(
+        false,
+      );
+
+      for (const method of [
+        W.contextualStatus,
+        W.contextualDisclosures,
+        W.contextualConflicts,
+      ] as const) {
+        expect(yield* allowed(embedSession, method, { threadId: rocketThread })).toBe(true);
+        expect(yield* allowed(embedSession, method, { threadId: otherAppThread })).toBe(false);
+        expect(yield* allowed(embedSession, method, { threadId: normalThread })).toBe(false);
+        expect(yield* allowed(appSession, method, { threadId: rocketThread })).toBe(false);
+      }
+      for (const [method, payload] of [
+        [W.contextualUpdateThreadSettings, { threadId: rocketThread }],
+        [W.contextualRefresh, { threadId: rocketThread }],
+        [W.contextualExclude, { threadId: rocketThread }],
+        [W.contextualProjectSettings, { projectId: rocketProject }],
+        [W.contextualSubscribe, { afterSequence: 0, threadId: rocketThread }],
+        [W.contextualSources, {}],
+      ] as const) {
+        expect(yield* allowed(embedSession, method, payload)).toBe(false);
+      }
+    }),
+  );
+
+  it.effect("lets an embed mark its threads read and resume their queues", () =>
+    Effect.gen(function* () {
+      for (const type of [
+        "thread.visit",
+        "thread.mark-unread",
+        "queue.resume",
+        "thread.user-input.dismiss",
+      ]) {
+        const dispatch = (threadId: ThreadId) =>
+          allowed(embedSession, O.dispatchCommand, command({ type, threadId }));
+        expect(yield* dispatch(rocketThread)).toBe(true);
+        expect(yield* dispatch(otherAppThread)).toBe(false);
+        expect(yield* dispatch(normalThread)).toBe(false);
+      }
+    }),
+  );
+
+  it.effect("names a refused command's type", () =>
+    Effect.gen(function* () {
+      const error = yield* authorization
+        .authorizeRpc(
+          embedSession,
+          O.dispatchCommand,
+          command({ type: "thread.archive", threadId: rocketThread }),
+        )
+        .pipe(Effect.flip);
+      expect(error.message).toBe(
+        `This connected app cannot call ${O.dispatchCommand} (thread.archive) here.`,
+      );
+    }),
+  );
+
   it.effect("limits embed file search to the project root", () =>
     Effect.gen(function* () {
       const search = (cwd: string) =>
@@ -301,6 +438,19 @@ describe("app HTTP authorization", () => {
       expect(yield* httpAllowed(embedSession, "/api/projects")).toBe(true);
       expect(yield* httpAllowed(embedSession, "/api/projects/mutate")).toBe(false);
       expect(yield* httpAllowed(embedSession, "/api/auth/clients")).toBe(false);
+    }),
+  );
+
+  it.effect("lets an embed load the signed asset and upload URLs it was issued", () =>
+    Effect.gen(function* () {
+      const asset = `${ASSET_ROUTE_PREFIX}/signed-token/card.html`;
+      const upload = `${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/signed-token`;
+      expect(yield* httpAllowed(embedSession, asset)).toBe(true);
+      expect(yield* httpAllowed(embedSession, upload)).toBe(true);
+      expect(yield* httpAllowed(appSession, asset)).toBe(false);
+      expect(yield* httpAllowed(appSession, upload)).toBe(false);
+      expect(yield* httpAllowed(embedSession, ASSET_ROUTE_PREFIX)).toBe(false);
+      expect(yield* httpAllowed(embedSession, "/api/assetsx/signed-token")).toBe(false);
     }),
   );
 
