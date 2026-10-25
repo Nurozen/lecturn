@@ -141,6 +141,8 @@ class FakeServer {
   readonly projects = new Map<string, { readonly projectId: string; readonly title: string }>();
   readonly threads = new Map<string, Thread>();
   lease: { url: string; bearer: string } | null = null;
+  /** Keyed `project:<id>` or `thread:<id>`, as the server's in-memory store. */
+  readonly hostContext = new Map<string, string>();
   exports = 0;
   readonly imported: Array<string> = [];
   readonly sessions: Array<{ closed: boolean }> = [];
@@ -255,6 +257,13 @@ class FakeServer {
       setThreadAppData: async (threadId, appData, subtitle) => {
         live();
         this.touch(threadId, { appData, ...(subtitle === undefined ? {} : { subtitle }) });
+      },
+      updateHostContext: async (target, text) => {
+        live();
+        const key =
+          "threadId" in target ? `thread:${target.threadId}` : `project:${target.projectId}`;
+        if (text.length === 0) this.hostContext.delete(key);
+        else this.hostContext.set(key, text);
       },
       exportThreads: async (projectIds) => {
         live();
@@ -665,6 +674,61 @@ describe("connect", () => {
     expect(w.userServer.imported).toEqual(["s-1"]);
     expect(modes().at(-1)?.threadIdMap).toEqual({ "s-1": "copy:env-sidecar:s-1" });
     expect(w.userServer.lease).toEqual(LIVE);
+  });
+
+  it("carries host context to the new server on a switch, before the mode event, and back on fallback", async () => {
+    const w = world();
+    w.state.userRunning = true;
+    const { connection, events } = await open(w);
+    const { projectId: sidecarProject } = await connection.ensureWorkspace("/ws/a", "A");
+    w.sidecar.addThread("/ws/a", "s-1", { historyRevision: 2 });
+    await connection.updateHostContext({ projectId: sidecarProject }, "page: assembly");
+    await connection.updateHostContext({ threadId: "s-1" }, "selected: fin-1");
+    const { projectId: sidecarB } = await connection.ensureWorkspace("/ws/b", "B");
+    await connection.updateHostContext({ projectId: sidecarB }, "page: sim");
+    await expect(
+      connection.updateHostContext({ projectId: sidecarB }, "x".repeat(4 * 1024 + 1)),
+    ).rejects.toThrow(/4096 UTF-8 bytes/);
+    // Empty text is the way back out; a cleared entry is not carried.
+    await connection.updateHostContext({ projectId: sidecarB }, "");
+    expect(Object.fromEntries(w.sidecar.hostContext)).toEqual({
+      [`project:${sidecarProject}`]: "page: assembly",
+      "thread:s-1": "selected: fin-1",
+    });
+
+    let atModeEvent: Record<string, string> | undefined;
+    connection.status.subscribe((event) => {
+      if (event.type === "mode") atModeEvent = Object.fromEntries(w.userServer.hostContext);
+    });
+    w.grant();
+    await w.clock.beat();
+    expect(connection.mode).toBe("user-server");
+    const userProject = w.userServer.projectId("/ws/a")!;
+    const carried = {
+      [`project:${userProject}`]: "page: assembly",
+      "thread:copy:env-sidecar:s-1": "selected: fin-1",
+    };
+    expect(Object.fromEntries(w.userServer.hostContext)).toEqual(carried);
+    expect(atModeEvent).toEqual(carried);
+    expect(events.some((event) => event.type === "mode")).toBe(true);
+
+    // A host still holding the sidecar's project id reaches the server new turns start on.
+    await connection.updateHostContext({ projectId: sidecarProject }, "page: fins");
+    expect(w.userServer.hostContext.get(`project:${userProject}`)).toBe("page: fins");
+    // A thread made on the user server has no sidecar counterpart to carry to.
+    w.userServer.addThread("/ws/a", "u-1");
+    await connection.updateHostContext({ threadId: "u-1" }, "selected: nose");
+
+    await w.clock.beat();
+    w.state.userRunning = false;
+    w.sidecar.hostContext.clear();
+    await w.clock.beat();
+    await w.clock.beat();
+    expect(connection.mode).toBe("sidecar");
+    expect(Object.fromEntries(w.sidecar.hostContext)).toEqual({
+      [`project:${sidecarProject}`]: "page: fins",
+      "thread:s-1": "selected: fin-1",
+    });
   });
 
   it("stays on the sidecar after a deny until the app asks again", async () => {

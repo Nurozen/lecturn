@@ -8,6 +8,7 @@ import {
   type ConnectedAppThreadSummary,
   type ConnectedAppThreadsStreamEvent,
 } from "@lecturn/contracts/apps";
+import { APP_HOST_CONTEXT_MAX_BYTES } from "@lecturn/contracts/appsRpcCore";
 import * as Schema from "effect/Schema";
 
 import type {
@@ -44,12 +45,14 @@ import {
 import {
   CredentialRejectedError,
   exchangeSeedToken,
+  type HostContextTarget,
   openServerSession,
   type ServerSession,
 } from "./serverSession.ts";
 import { type SidecarOptions, startSidecar } from "./sidecar.ts";
 
 export { exchangeSeedToken, issueWebSocketTicket } from "./serverSession.ts";
+export type { HostContextTarget } from "./serverSession.ts";
 
 export interface ConnectOptions {
   readonly registration: typeof AppRegistration.Encoded;
@@ -112,6 +115,12 @@ export interface LecturnConnection extends EmbedConnectionSource {
     appData: string | null,
     subtitle?: string | null,
   ): Promise<void>;
+  /**
+   * What the app shows now (selection, page), read into the target's next
+   * turns; at most 4 KB, and empty text clears it. The last text per
+   * workspace and per thread follows a live switch to the new server.
+   */
+  updateHostContext(target: HostContextTarget, text: string): Promise<void>;
   /** After the user denied pairing, asks the user server again. */
   requestPairingAgain(): Promise<void>;
   /** Clears the live leases, and stops the sidecar only when this connection started it. */
@@ -224,6 +233,11 @@ export async function createConnection(
   const projects = new Map<string, { readonly root: string; readonly environmentId: string }>();
   const listeners = new Set<(event: ConnectionEvent) => void>();
   const subscriptions = new Set<ThreadSubscription>();
+  // Servers keep host context in memory only, so the helper carries it across
+  // a switch: project entries by workspace root, thread entries in the active
+  // server's ids.
+  const projectContexts = new Map<string, string>();
+  let threadContexts = new Map<string, string>();
 
   const requireActive = () => {
     if (active === null) throw new Error("The Lecturn connection is not attached to a server.");
@@ -313,6 +327,32 @@ export async function createConnection(
       subscription.projectId = projectId;
       subscription.stop = target.subscribeThreads(projectId, subscription.listener);
     }
+  };
+
+  const remember = <K>(entries: Map<K, string>, key: K, text: string) => {
+    if (text.length === 0) entries.delete(key);
+    else entries.set(key, text);
+  };
+  /** Threads with no counterpart on `target` lose their entry: there is no thread to read it. */
+  const carryHostContext = (target: ServerSession, threadIdMap: Record<string, string>) => {
+    threadContexts = new Map(
+      [...threadContexts].flatMap(([threadId, text]) => {
+        const mapped = threadIdMap[threadId];
+        return mapped === undefined ? [] : [[mapped, text] as const];
+      }),
+    );
+    const projectIds = projectIdsOn(target.environmentId);
+    const sends = [
+      ...[...projectContexts].flatMap(([root, text]) => {
+        const projectId = projectIds[root];
+        return projectId === undefined ? [] : [target.updateHostContext({ projectId }, text)];
+      }),
+      ...[...threadContexts].map(([threadId, text]) =>
+        target.updateHostContext({ threadId }, text),
+      ),
+    ];
+    // A context the new server refuses or is slow to take must not hold up the switch.
+    return withTimeout(Promise.allSettled(sends), CLOSE_TIMEOUT_MS);
   };
 
   /** Sidecar thread id to its user-server copy, for every workspace the helper knows. */
@@ -414,6 +454,7 @@ export async function createConnection(
     threadCopies = map;
     draining = sidecar !== null;
     moveSubscriptions(session);
+    await carryHostContext(session, map);
     emitMode(session, map);
   };
 
@@ -439,7 +480,9 @@ export async function createConnection(
     const session = await enterSidecar();
     moveSubscriptions(session);
     // Copies made on the user server map back to the sidecar threads they came from.
-    emitMode(session, invert(threadCopies));
+    const map = invert(threadCopies);
+    await carryHostContext(session, map);
+    emitMode(session, map);
   };
 
   /** Stops the sidecar once no turn runs on it; until then a turn in flight finishes there. */
@@ -713,6 +756,23 @@ export async function createConnection(
     },
     setThreadAppData: (threadId, appData, subtitle) =>
       requireActive().setThreadAppData(threadId, appData, subtitle),
+    updateHostContext: async (target, text) => {
+      // Refused here, before it is remembered and carried to every later server.
+      if (Buffer.byteLength(text, "utf8") > APP_HOST_CONTEXT_MAX_BYTES) {
+        throw new Error(`Host context is limited to ${APP_HOST_CONTEXT_MAX_BYTES} UTF-8 bytes.`);
+      }
+      const session = requireActive();
+      if ("threadId" in target) {
+        remember(threadContexts, target.threadId, text);
+        return session.updateHostContext(target, text);
+      }
+      const root = projects.get(target.projectId)?.root;
+      if (root === undefined) return sessionFor(target.projectId).updateHostContext(target, text);
+      remember(projectContexts, root, text);
+      // New turns start on the active server, whichever server's id the host still holds.
+      const projectId = projectIdsOn(session.environmentId)[root] ?? target.projectId;
+      return session.updateHostContext({ projectId }, text);
+    },
     requestPairingAgain: async () => {
       if (pairing !== "denied") return;
       pairing = "none";
