@@ -1,3 +1,4 @@
+import { isAppProject } from "@lecturn/client-runtime/state/app-projects";
 import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 import type { DesktopAppActivationRequest } from "@lecturn/contracts";
 import { useEffect, useEffectEvent, useRef } from "react";
@@ -43,7 +44,10 @@ export function DesktopAppActivationCoordinator() {
       },
       findProject: (environmentId, workspaceRoot) =>
         findProjectByPath(
-          readProjects().filter((project) => project.environmentId === environmentId),
+          // An app project on the same folder coexists with a normal one and never answers for it.
+          readProjects().filter(
+            (project) => project.environmentId === environmentId && !isAppProject(project),
+          ),
           workspaceRoot,
         ) ?? null,
       createProject: async (environmentId, workspaceRoot) => {

@@ -9,7 +9,8 @@ import {
   normalizeProjectThreadWorkspace,
   staveThreadStartMessage,
 } from "@lecturn/client-runtime/state/projectGit";
-import { withoutArchivedStaveProjects } from "@lecturn/client-runtime/state/stave-archive";
+import { projectsForProjectsMode } from "@lecturn/client-runtime/state/app-projects";
+import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
 import { toastManager } from "../components/ui/toast";
 import { DEFAULT_SERVER_SETTINGS, type ScopedProjectRef, type ThreadId } from "@lecturn/contracts";
 import { useRouter } from "@tanstack/react-router";
@@ -439,6 +440,27 @@ export function useNewThreadHandler() {
   };
 }
 
+/**
+ * The target of a new thread with no thread or draft in view: the first listed
+ * project. An archived Stave space starts no threads, and an app project is
+ * only ever the target from its own thread (the active thread wins first).
+ */
+export function resolveDefaultNewThreadProjectRef(
+  projects: ReadonlyArray<EnvironmentProject>,
+  projectOrder: ReadonlyArray<string>,
+): ScopedProjectRef | null {
+  const [defaultProject] = orderItemsByPreferredIds({
+    items: projectsForProjectsMode(projects),
+    preferredIds: projectOrder,
+    getId: getProjectOrderKey,
+    getPreferenceIds: (project) => [
+      getProjectOrderKey(project),
+      legacyProjectCwdPreferenceKey(project.workspaceRoot),
+    ],
+  });
+  return defaultProject ? scopeProjectRef(defaultProject.environmentId, defaultProject.id) : null;
+}
+
 export function useHandleNewThread() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const routeTarget = useThreadRouteTarget();
@@ -455,19 +477,7 @@ export function useHandleNewThread() {
   );
   const projects = useProjects();
   const handleNewThread = useNewThreadHandler();
-  // The default target is a listed project: an archived Stave space starts no threads.
-  const [defaultProject] = orderItemsByPreferredIds({
-    items: withoutArchivedStaveProjects(projects),
-    preferredIds: projectOrder,
-    getId: getProjectOrderKey,
-    getPreferenceIds: (project) => [
-      getProjectOrderKey(project),
-      legacyProjectCwdPreferenceKey(project.workspaceRoot),
-    ],
-  });
-  const defaultProjectRef = defaultProject
-    ? scopeProjectRef(defaultProject.environmentId, defaultProject.id)
-    : null;
+  const defaultProjectRef = resolveDefaultNewThreadProjectRef(projects, projectOrder);
 
   return {
     activeDraftThread,

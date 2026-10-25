@@ -150,7 +150,10 @@ vi.mock("react", () => ({
   useCallback: <T>(callback: T) => callback,
   useMemo: <T>(factory: () => T) => factory(),
 }));
-vi.mock("../components/Sidebar.logic", () => ({ orderItemsByPreferredIds: () => [] }));
+// Keeps the input order, so the first listed project is the default target.
+vi.mock("../components/Sidebar.logic", () => ({
+  orderItemsByPreferredIds: (input: { readonly items: ReadonlyArray<unknown> }) => [...input.items],
+}));
 vi.mock("../composerDraftStore", () => {
   const useComposerDraftStore = Object.assign(() => null, {
     getState: () => testState.draftStore,
@@ -211,7 +214,8 @@ vi.mock("../uiStateStore", () => ({
 }));
 vi.mock("./useSettings", () => ({ useClientSettings: () => ({}) }));
 
-import { useNewThreadHandler } from "./useHandleNewThread";
+import { startNewThreadFromContext } from "../lib/chatThreadActions";
+import { resolveDefaultNewThreadProjectRef, useNewThreadHandler } from "./useHandleNewThread";
 
 describe("useNewThreadHandler", () => {
   it("opens a remote project with that machine’s model and workspace defaults", async () => {
@@ -360,4 +364,44 @@ describe.each([
       );
     },
   );
+});
+
+describe("new-thread targets around app projects", () => {
+  const project = (id: string, extra: object = {}) =>
+    ({
+      id,
+      environmentId: "environment-primary",
+      title: id,
+      workspaceRoot: "/work/rocket",
+      ...extra,
+    }) as unknown as Parameters<typeof resolveDefaultNewThreadProjectRef>[0][number];
+  const appProject = project("app-project", {
+    appBinding: { appId: "dev.example.rocket", workspaceRoot: "/work/rocket" },
+  });
+  const normalProject = project("normal-project");
+
+  it("never defaults to an app project, even when it sorts first", () => {
+    expect(resolveDefaultNewThreadProjectRef([appProject, normalProject], [])).toEqual({
+      environmentId: "environment-primary",
+      projectId: "normal-project",
+    });
+  });
+
+  it("has no default when only app projects exist", () => {
+    expect(resolveDefaultNewThreadProjectRef([appProject], [])).toBeNull();
+  });
+
+  it("keeps a new thread from an app thread in that app's project", async () => {
+    const handleNewThread = vi.fn(async () => null);
+    await startNewThreadFromContext({
+      activeDraftThread: null,
+      activeThread: { environmentId: "environment-primary", projectId: "app-project" },
+      defaultProjectRef: resolveDefaultNewThreadProjectRef([appProject, normalProject], []),
+      handleNewThread,
+    } as unknown as Parameters<typeof startNewThreadFromContext>[0]);
+    expect(handleNewThread).toHaveBeenCalledWith({
+      environmentId: "environment-primary",
+      projectId: "app-project",
+    });
+  });
 });

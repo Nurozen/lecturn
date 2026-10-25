@@ -5,7 +5,7 @@ import { useSidebarAccountStyle } from "./sidebar/useSidebarAccountStyle";
 import { SidebarHierarchyPanel } from "./sidebar/SidebarHierarchyPanel";
 import { StaveLifecycleBadge } from "./stave/StaveLifecycleBadge";
 import { useSagaSidebarTree } from "./stave/useSagaSidebarTree";
-import { withoutArchivedStaveProjects } from "@lecturn/client-runtime/state/stave-archive";
+import { projectsForProjectsMode } from "@lecturn/client-runtime/state/app-projects";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@lecturn/shared/threadPullRequests";
 import { Spinner } from "~/components/ui/spinner";
@@ -3377,10 +3377,10 @@ function useLegacySidebarProjects() {
       derivePhysicalProjectKey(project),
     ]),
   );
-  // Archived Stave spaces (and so their threads) leave the sidebar; they come
-  // back through New project → Stave. The order above keeps them, so a manual
-  // reorder does not forget where they sat.
-  const listedProjects = withoutArchivedStaveProjects(orderedProjects);
+  // Archived Stave spaces and app projects (and so their threads) leave the
+  // sidebar; archives come back through New project → Stave. The order above
+  // keeps them, so a manual reorder does not forget where they sat.
+  const listedProjects = projectsForProjectsMode(orderedProjects);
   const sidebarProjects: SidebarProjectSnapshot[] = namedSnapshotsPerAccount(
     segmentation,
     buildSidebarProjectSnapshots,
