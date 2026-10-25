@@ -1,6 +1,7 @@
 import { ContextualMessageDisclosure } from "../contextual/ContextualDisclosure";
 import { EmbedUserAvatar } from "../embed/EmbedUserAvatar";
 import { useEmbedPresentation } from "../../embed/EmbedPresentationContext";
+import { AppClosedThreadBanner } from "../apps/AppClosedThreadBanner";
 import { AppThreadTitle } from "../apps/AppThreadTitle";
 import { AppToolWorkRow } from "../apps/AppToolWorkRow";
 import { appToolRowOutcome } from "../apps/AppToolWorkRow.logic";
@@ -1546,6 +1547,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const listHeader = (
     <>
       {parentThreadLink === null ? listHeaderLeadingContent : null}
+      <AppClosedThreadBanner threadRef={citationThreadRef} />
       <AppThreadTitle threadRef={citationThreadRef} />
       {historyControls ? (
         <TimelineHistoryControl {...historyControls} />
