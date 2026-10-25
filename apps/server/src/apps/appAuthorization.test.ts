@@ -27,6 +27,7 @@ import {
   AppProjectService,
   AppRegistryService,
   AppsNotImplemented,
+  HeadlessToolHost,
   ThreadCopyService,
 } from "./services.ts";
 import { type AppSubject, formatAppSubject, formatEmbedSubject } from "./subjects.ts";
@@ -357,6 +358,7 @@ describe("apps.createEmbedThread", () => {
       Effect.provide(
         Layer.mergeAll(
           Layer.mock(AppRegistryService)({}),
+          Layer.mock(HeadlessToolHost)({}),
           Layer.mock(AppLeaseService)({}),
           Layer.mock(AppHostContextStore)({}),
           Layer.mock(ThreadCopyService)({}),

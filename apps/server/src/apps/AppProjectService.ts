@@ -45,7 +45,7 @@ const unavailable = (message: string) => (cause: unknown) =>
     message: `${message}: ${cause instanceof Error ? cause.message : String(cause)}`,
   });
 
-const RUNNING_STATUSES: ReadonlySet<OrchestrationV2ThreadShell["status"]> = new Set([
+export const RUNNING_STATUSES: ReadonlySet<OrchestrationV2ThreadShell["status"]> = new Set([
   "preparing",
   "queued",
   "starting",

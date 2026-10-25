@@ -46,6 +46,7 @@ import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderS
 import { makeAgentDeviceEnvironmentResolver } from "../device/AgentDeviceEnvironment.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
+import { appCredentialFields } from "../apps/appMcpCredential.ts";
 import * as EventSink from "./EventSink.ts";
 import * as CommandOutputHub from "./CommandOutputHub.ts";
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
@@ -512,6 +513,7 @@ export const layerWithOptions = (
                   providerInstanceId,
                   browserToolsAvailable,
                   capabilities,
+                  ...(yield* appCredentialFields(projectionStore, projectService, threadId)),
                 });
                 yield* mcpSessions.set({
                   ...credential.config,

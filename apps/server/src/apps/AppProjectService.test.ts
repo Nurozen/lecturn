@@ -39,6 +39,7 @@ import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolv
 import * as ServerSettings from "../serverSettings.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as AppProjectService from "./AppProjectService.ts";
+import * as AppRuntimeState from "./AppRuntimeState.ts";
 import * as AppsOrchestrationHooks from "./AppsOrchestrationHooks.ts";
 import { AppProjectService as AppProjects } from "./services.ts";
 
@@ -67,7 +68,9 @@ const layerMetadata = Layer.merge(
 
 const layerTest = Layer.mergeAll(
   AppProjectService.layer,
-  AppsOrchestrationHooks.layer.pipe(Layer.provide(LecturnOrchestrationHooks.layer)),
+  AppsOrchestrationHooks.layer.pipe(
+    Layer.provide(Layer.merge(LecturnOrchestrationHooks.layer, AppRuntimeState.layer)),
+  ),
 ).pipe(
   Layer.provideMerge(
     Layer.mergeAll(
