@@ -37,6 +37,13 @@ const appClosed = check("app-row-closed", {
   probes: [{ kind: "text", selector: id("sidebar-app-state"), equals: "Closed" }],
 });
 
+/** With one app selected, its header carries the state chip in place of the app row. */
+const appHeaderClosed = check("app-header-closed", {
+  kind: "some",
+  selector: id("app-header"),
+  probes: [{ kind: "text", selector: id("sidebar-app-state"), equals: "Closed" }],
+});
+
 const closedBanner = check("closed-banner", { kind: "count", selector: id("app-closed-banner") });
 
 const fullAccess = check("full-access", {
@@ -65,8 +72,12 @@ const selectedThread = check("selected-thread-row", {
   max: 1,
 });
 
-/** Ready means the card has its tool result (`data-state="saved"`), drawn three stats and a curve. */
-const readyCard = (form?: "wide" | "narrow") =>
+/**
+ * Ready means the card has its tool result (`data-state="saved"`), drawn three stats and its
+ * chart. The Supervised thread stages the counter's first call, whose chart is one point; the
+ * later threads draw a curve.
+ */
+const readyCard = (form?: "wide" | "narrow", minPoints = 2) =>
   check(form === undefined ? "card-ready" : `card-ready-${form}`, {
     kind: "some",
     selector: id("mcp-app-card"),
@@ -80,7 +91,7 @@ const readyCard = (form?: "wide" | "narrow") =>
             selector: `[data-card-layout${form === undefined ? "" : `="${form}"`}][data-state="saved"]`,
           },
           { kind: "count", selector: "[data-card-stat]", min: 3, max: 3 },
-          { kind: "chart-points", selector: "[data-card-chart] polyline", min: 2 },
+          { kind: "chart-points", selector: "[data-card-chart] polyline", min: minPoints },
         ],
       },
     ],
@@ -144,7 +155,7 @@ export function barAppStagingChecks(
     case "apps-list":
       return [mode("Apps"), appClosed];
     case "apps-app-selected":
-      return [mode("Apps"), appClosed, ...sidebarSectionChecks(manifest)];
+      return [mode("Apps"), appHeaderClosed, ...sidebarSectionChecks(manifest)];
     case "apps-desktop-mockup-scene":
       return [
         mode("Apps"),
@@ -167,7 +178,7 @@ export function barAppStagingChecks(
         noApproval,
       ];
     case "app-thread-supervised":
-      return [selectedThread, closedBanner, pendingApproval, readyCard()];
+      return [selectedThread, closedBanner, pendingApproval, readyCard(undefined, 1)];
     case "app-thread-full-access":
       return [selectedThread, closedBanner, readyCard(), fullAccess, noApproval];
     case "settings-connected-apps":

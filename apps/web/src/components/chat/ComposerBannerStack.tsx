@@ -12,6 +12,8 @@ const DISMISS_TRANSITION_MS = 220;
 
 export interface ComposerBannerStackItem {
   readonly id: string;
+  /** Marks the notice for end-to-end probes. */
+  readonly testId?: string;
   readonly variant: ComposerBannerVariant;
   readonly priority?: "urgent" | "activity" | "notice";
   readonly icon: ReactNode;
@@ -342,6 +344,7 @@ function ComposerBannerStackAlert({
   return (
     <ComposerBanner.Root
       role="alert"
+      data-testid={item.testId}
       placement={attached ? "attached" : "floating"}
       variant={item.variant}
       density="comfortable"

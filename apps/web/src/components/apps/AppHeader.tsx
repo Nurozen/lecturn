@@ -43,7 +43,7 @@ export function AppHeader({
           {presentation.name}
         </span>
         {presentation.chip ? (
-          <Badge variant={presentation.chip.variant} size="sm">
+          <Badge variant={presentation.chip.variant} size="sm" data-testid="sidebar-app-state">
             {presentation.chip.label}
           </Badge>
         ) : null}

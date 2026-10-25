@@ -83,9 +83,11 @@ const APP_THREAD_READY = [
   "[data-timeline-ready] [data-timeline-row-id]",
   '[data-testid="mcp-app-card"]',
 ];
-// Apps mode is entered through the app deep-link query (`appLinkPath`), never through saved UI state.
-const APP_THREAD_PATH = (threadParam: string) =>
-  `/{environmentId}/{${threadParam}}?sidebar=apps&app={appId}`;
+// Apps mode is entered through the app deep-link query (`appLinkPath`), never through saved UI
+// state. `app=` scopes the sidebar to that app (its header in place of the app row); the
+// desktop mockup draws the All apps scope, so its scene leaves the app out.
+const APP_THREAD_PATH = (threadParam: string, scope: "app" | "all" = "app") =>
+  `/{environmentId}/{${threadParam}}?sidebar=apps${scope === "app" ? "&app={appId}" : ""}`;
 
 /** The CP3 after-captures (A38); every one but Projects mode needs `seed-bar-fixture.ts --app`. */
 export const BAR_APP_WEB_SCENES = {
@@ -110,7 +112,7 @@ export const BAR_APP_WEB_SCENES = {
   "apps-desktop-mockup-scene": {
     description:
       "The desktop mockup as drawn: pinned app thread in Full access, closed banner, two tool rows, wide card",
-    path: APP_THREAD_PATH("mockupThreadId"),
+    path: APP_THREAD_PATH("mockupThreadId", "all"),
     readySelectors: APP_THREAD_READY,
     clock: "staged",
   },

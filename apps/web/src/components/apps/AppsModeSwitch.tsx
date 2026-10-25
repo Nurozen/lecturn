@@ -22,7 +22,7 @@ export function AppsModeSwitch() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
   return (
     <>
-      <div className="px-px">
+      <div className="px-px" data-testid="sidebar-mode-control">
         <ToggleGroup
           aria-label="Sidebar mode"
           value={[mode]}
@@ -36,7 +36,13 @@ export function AppsModeSwitch() {
           }}
         >
           {MODES.map((candidate) => (
-            <ToggleGroupItem key={candidate.value} value={candidate.value} className="flex-1">
+            <ToggleGroupItem
+              key={candidate.value}
+              value={candidate.value}
+              data-testid="sidebar-mode-option"
+              data-selected={candidate.value === mode}
+              className="flex-1"
+            >
               {candidate.label}
             </ToggleGroupItem>
           ))}

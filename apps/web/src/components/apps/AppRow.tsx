@@ -15,10 +15,12 @@ import { useAppPresentation } from "./useAppsSidebarApps";
 
 function AppRowAction({
   label,
+  testId,
   onClick,
   children,
 }: {
   readonly label: string;
+  readonly testId: string;
   readonly onClick: () => void;
   readonly children: ReactNode;
 }) {
@@ -31,6 +33,7 @@ function AppRowAction({
             size="icon-xs"
             variant="ghost-muted"
             aria-label={label}
+            data-testid={testId}
             onClick={onClick}
           />
         }
@@ -66,12 +69,13 @@ export function AppRow({
   return (
     <div
       data-thread-selection-safe
-      data-testid="app-row"
+      data-testid="sidebar-app-row"
       className="lecturn-project-header flex items-center gap-1 pt-2"
     >
       <button
         type="button"
         data-lecturn-hover
+        data-testid="sidebar-app-expand"
         className="rounded p-1 text-muted-foreground hover:bg-sidebar-row-hover"
         aria-label={`${collapsed ? "Expand" : "Collapse"} ${presentation.name}`}
         aria-expanded={!collapsed}
@@ -89,11 +93,15 @@ export function AppRow({
         className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left text-xs font-medium text-sidebar-foreground"
         onClick={onSelect}
       >
-        <AppIcon iconDataUrl={presentation.iconDataUrl} />
-        <span className="min-w-0 truncate">{presentation.name}</span>
+        <span data-testid="sidebar-app-icon" className="contents">
+          <AppIcon iconDataUrl={presentation.iconDataUrl} />
+        </span>
+        <span className="min-w-0 truncate" data-testid="sidebar-app-name">
+          {presentation.name}
+        </span>
       </button>
       {presentation.chip ? (
-        <Badge variant={presentation.chip.variant} size="sm" data-testid="app-row-status">
+        <Badge variant={presentation.chip.variant} size="sm" data-testid="sidebar-app-state">
           {presentation.chip.label}
         </Badge>
       ) : null}
@@ -105,6 +113,7 @@ export function AppRow({
       {target ? (
         <AppRowAction
           label={`New thread in ${target.project.title}`}
+          testId="sidebar-app-new-thread"
           onClick={() =>
             onNewThread(scopeProjectRef(target.project.environmentId, target.project.id))
           }
@@ -115,6 +124,7 @@ export function AppRow({
       {openUrl ? (
         <AppRowAction
           label={`Open in ${presentation.name}`}
+          testId="sidebar-app-open"
           onClick={() => openAppUrl(openUrl, presentation.openUrlTemplate)}
         >
           <ExternalLinkIcon aria-hidden />

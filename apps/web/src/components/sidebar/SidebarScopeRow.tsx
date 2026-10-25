@@ -28,9 +28,9 @@ export function SidebarScopeRow({
   const { addLabel } = sidebarScopeRowModel({ kind, selectedLabel: null });
   const AddIcon = ADD_ICONS[kind];
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1" data-testid="sidebar-scope-row">
       {children}
-      <SidebarHeaderIconButton label={addLabel} onClick={onAdd}>
+      <SidebarHeaderIconButton label={addLabel} onClick={onAdd} data-testid="sidebar-scope-add">
         <AddIcon />
       </SidebarHeaderIconButton>
     </div>
@@ -62,9 +62,11 @@ export function SidebarScopeTrigger({
       {...rest}
       className={cn("min-w-0 flex-1", className)}
     >
-      {icon ?? <FolderIcon />}
-      <span className="min-w-0 flex-1 truncate">{model.label}</span>
-      <ChevronDownIcon className="size-3.5" />
+      {icon ?? <FolderIcon data-testid="sidebar-scope-icon" />}
+      <span className="min-w-0 flex-1 truncate" data-testid="sidebar-scope-label">
+        {model.label}
+      </span>
+      <ChevronDownIcon className="size-3.5" data-testid="sidebar-scope-chevron" />
     </SidebarMenuButton>
   );
 }
