@@ -31,6 +31,7 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import { OtlpTracer, OtlpSerialization } from "effect/observability";
 
 import * as ServerConfig from "./config.ts";
+import * as FrameAncestors from "./apps/frameAncestors.ts";
 import { ASSET_ROUTE_PREFIX, readMcpAppHtml, resolveAsset } from "./assets/AssetAccess.ts";
 import { githubMediaResponse } from "./assets/GitHubMediaFetch.ts";
 import { statMediaFile, streamMediaFile, type OpenMediaFile } from "./assets/MediaFile.ts";
@@ -597,7 +598,10 @@ const streamStaticFile = (file: FileSystem.File, size: bigint) =>
   );
 
 const handleStaticAndDevRequest = Effect.fn("handleStaticAndDevRequest")(
-  function* (immutableBuildAssets: ReadonlySet<string>) {
+  function* (
+    immutableBuildAssets: ReadonlySet<string>,
+    frameAncestors: FrameAncestors.FrameAncestorsHeaders,
+  ) {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const url = HttpServerRequest.toURL(request);
 
@@ -677,6 +681,7 @@ const handleStaticAndDevRequest = Effect.fn("handleStaticAndDevRequest")(
       immutableBuildAssets.has(relativePath);
     const headers: Record<string, string> = {
       "Cache-Control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
+      ...(isHtml ? yield* frameAncestors(url.value.pathname) : {}),
     };
     // Deployments can preserve HTML size and mtime while changing its bundle URLs.
     const modifiedAt = isHtml ? undefined : Option.getOrUndefined(fileInfo.mtime);
@@ -725,7 +730,9 @@ const handleStaticAndDevRequest = Effect.fn("handleStaticAndDevRequest")(
 );
 
 export const layerStaticAndDevRoute = Layer.unwrap(
-  loadImmutableBuildAssets.pipe(
-    Effect.map((assets) => HttpRouter.add("GET", "*", handleStaticAndDevRequest(assets))),
+  Effect.all([loadImmutableBuildAssets, FrameAncestors.make]).pipe(
+    Effect.map(([assets, frameAncestors]) =>
+      HttpRouter.add("GET", "*", handleStaticAndDevRequest(assets, frameAncestors)),
+    ),
   ),
 );
