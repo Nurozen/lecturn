@@ -11,6 +11,9 @@
  * MCP Apps variables, and the curve from `--color-ring-primary`, which Lecturn
  * sets to the thread gold and an embedding host to its own accent.
  *
+ * The `data-card-*` attributes are the structure hooks the bar checklists
+ * probe (`scripts/bar/checklists`); keep them when restyling.
+ *
  * Expected tool result: `structuredContent: { count, by?, history? }`.
  */
 export const COUNTER_CARD_URI = "ui://ex/counter-card";
@@ -91,22 +94,22 @@ const COUNTER_CARD_HTML = `<!doctype html>
 </head>
 <body>
 <div class="card" data-state="pending">
-  <div class="head">
-    <div class="icon" aria-hidden="true">
+  <div class="head" data-card-title>
+    <div class="icon" aria-hidden="true" data-card-icon>
       <svg viewBox="0 0 16 16" width="16" height="16"><path d="M2 13 6 8l3 3 5-7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </div>
     <div class="titles">
       <div class="title">Counter</div>
-      <div class="subtitle" id="subtitle">Running</div>
+      <div class="subtitle" id="subtitle" data-card-subtitle>Running</div>
     </div>
-    <span class="chip" id="chip">Running</span>
+    <span class="chip" id="chip" data-card-chip>Running</span>
   </div>
   <div class="stats">
-    <div class="stat"><div class="stat-label">Count</div><div class="stat-value" id="count">–</div></div>
-    <div class="stat"><div class="stat-label">Change</div><div class="stat-value" id="change">–</div></div>
-    <div class="stat"><div class="stat-label">Calls</div><div class="stat-value" id="calls">–</div></div>
+    <div class="stat" data-card-stat><div class="stat-label">Count</div><div class="stat-value" id="count">–</div></div>
+    <div class="stat" data-card-stat><div class="stat-label">Change</div><div class="stat-value" id="change">–</div></div>
+    <div class="stat" data-card-stat><div class="stat-label">Calls</div><div class="stat-value" id="calls">–</div></div>
   </div>
-  <svg id="chart" viewBox="0 0 300 100" preserveAspectRatio="none" role="img" aria-label="Counter history">
+  <svg id="chart" data-card-chart viewBox="0 0 300 100" preserveAspectRatio="none" role="img" aria-label="Counter history">
     <line class="grid" x1="0" y1="99.5" x2="300" y2="99.5"/>
     <path class="area" id="area" d=""/>
     <polyline class="curve" id="curve" points="" vector-effect="non-scaling-stroke"/>
@@ -119,6 +122,12 @@ const COUNTER_CARD_HTML = `<!doctype html>
   var nextId = 1;
   var card = document.querySelector(".card");
   var byId = function (id) { return document.getElementById(id); };
+
+  // The stylesheet's query, so data-card-layout always names the form drawn.
+  var wide = window.matchMedia("(min-width: 560px)");
+  function syncLayout() { card.dataset.cardLayout = wide.matches ? "wide" : "narrow"; }
+  syncLayout();
+  wide.addEventListener("change", syncLayout);
 
   function post(message) { window.parent.postMessage(Object.assign({ jsonrpc: "2.0" }, message), "*"); }
   function request(method, params) {
