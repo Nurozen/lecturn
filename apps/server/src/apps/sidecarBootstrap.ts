@@ -21,7 +21,6 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import type * as ServerConfig from "../config.ts";
-import { isProcessAlive } from "../serverRuntimeState.ts";
 import { formatAppSubject } from "./subjects.ts";
 
 /** Desktop fields keep driving config resolution; the sidecar envelope travels on to the registry. */
@@ -93,6 +92,20 @@ export interface AppSidecarParentProbe {
   readonly isAlive: (pid: number) => boolean;
   readonly openPipe: (fd: number) => NodeStream.Readable;
 }
+
+// Kept local rather than imported from `serverRuntimeState.ts`: that module
+// reaches `auth/EnvironmentAuth.ts` through `startupAccess.ts`, and
+// `PairingGrantStore.ts` imports this file, so the import closed a cycle that
+// left `EnvironmentAuth.layer` built from an undefined `PairingGrantStore.layer`.
+const isProcessAlive = (pid: number): boolean => {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code === "EPERM";
+  }
+};
 
 const defaultParentProbe: AppSidecarParentProbe = {
   parentPid: () => process.ppid,
