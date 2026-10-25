@@ -83,6 +83,14 @@ const layerProjectService = Layer.mock(ProjectService.ProjectService)({
   getById: () => Effect.succeedNone,
 });
 
+const layerProviderInstances = Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
+  getInstance: (id) => Effect.succeed(id === instanceId ? providerInstance : undefined),
+  listInstances: Effect.succeed([providerInstance]),
+  listUnavailable: Effect.succeed([]),
+  streamChanges: Stream.empty,
+  subscribeChanges: Effect.never,
+});
+
 const layerRuntime = Layer.mergeAll(RuntimeLayer.layer, RuntimeLayer.layerEventSink).pipe(
   Layer.provideMerge(EffectOutbox.layer),
   Layer.provide(McpSessionRegistryTestkit.layer),
@@ -91,15 +99,7 @@ const layerRuntime = Layer.mergeAll(RuntimeLayer.layer, RuntimeLayer.layerEventS
   Layer.provide(Layer.mock(CheckpointStore.CheckpointStore)({})),
   Layer.provide(layerConfig),
   Layer.provide(ServerSettings.layerTest()),
-  Layer.provide(
-    Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
-      getInstance: (id) => Effect.succeed(id === instanceId ? providerInstance : undefined),
-      listInstances: Effect.succeed([providerInstance]),
-      listUnavailable: Effect.succeed([]),
-      streamChanges: Stream.empty,
-      subscribeChanges: Effect.never,
-    }),
-  ),
+  Layer.provide(layerProviderInstances),
   Layer.provide(
     Layer.mock(GitWorkflow.GitWorkflowService)({
       pruneWorktrees: () => Effect.void,
@@ -123,6 +123,7 @@ const layerAppsDependencies = Layer.mergeAll(
   ProjectionStore.layer,
   OrchestrationEventStore.layer,
   layerProjectService,
+  layerProviderInstances,
   Layer.mock(SessionStore.SessionStore)({
     cookieName: "lecturn_session",
     legacyCookieName: undefined,

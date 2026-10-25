@@ -13,8 +13,11 @@ import {
   ProviderInstanceId,
   ProviderThreadId,
   ProviderTurnId,
+  type RuntimeMode,
+  type ServerProvider,
   ThreadId,
 } from "@lecturn/contracts";
+import type { ProviderInstance } from "@lecturn/provider-core/server/driver";
 import { MCP_APP_OUTPUT_KEY } from "@lecturn/shared/mcpApp";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -23,15 +26,17 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { McpSchema, Tool, Toolkit } from "effect/ai";
 import { HttpRouter, HttpServer } from "effect/http";
 import * as NetAddress from "effect/net/NetAddress";
 
 import * as AppRuntimeState from "../../../apps/AppRuntimeState.ts";
-import type * as AppToolGate from "../../../apps/AppToolGate.ts";
+import * as AppToolGate from "../../../apps/AppToolGate.ts";
 import { makeHeadlessReaper } from "../../../apps/headlessReaper.ts";
 import * as HeadlessToolHostLayer from "../../../apps/HeadlessToolHost.ts";
 import * as LiveToolClientLayer from "../../../apps/LiveToolClient.ts";
@@ -53,6 +58,9 @@ import {
 } from "../../../apps/testing/headlessAppFixture.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
+import * as ProjectStore from "../../../orchestration-v2/ProjectStore.ts";
+import * as RuntimePolicy from "../../../orchestration-v2/RuntimePolicy.ts";
+import * as ProviderInstanceRegistry from "../../../provider/ProviderInstanceRegistry.ts";
 import * as McpHttpServer from "../../McpHttpServer.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpSessionRegistry from "../../McpSessionRegistry.ts";
@@ -106,25 +114,68 @@ const thread: OrchestrationV2AppThread = {
   deletedAt: null,
 };
 
-const layerProjection = Layer.mock(ProjectionStore.ProjectionStoreV2)({
-  getThread: () => Effect.succeed(thread),
-  getRunningTurnContext: () =>
-    Effect.succeed({
-      run: undefined,
-      providerThread: undefined,
-      providerTurn: {
-        id: turnId,
-        providerThreadId: ProviderThreadId.make("provider-thread-1"),
-        nodeId: NodeId.make("node-1"),
-        runAttemptId: null,
-        nativeTurnRef: null,
-        ordinal: 1,
-        status: "running",
-        startedAt: at,
-        completedAt: null,
-      },
-    }),
-});
+const layerProjectionFor = (calling: OrchestrationV2AppThread) =>
+  Layer.mock(ProjectionStore.ProjectionStoreV2)({
+    getThread: () => Effect.succeed(calling),
+    getRunningTurnContext: () =>
+      Effect.succeed({
+        run: undefined,
+        providerThread: undefined,
+        providerTurn: {
+          id: turnId,
+          providerThreadId: ProviderThreadId.make("provider-thread-1"),
+          nodeId: NodeId.make("node-1"),
+          runAttemptId: null,
+          nativeTurnRef: null,
+          ordinal: 1,
+          status: "running",
+          startedAt: at,
+          completedAt: null,
+        },
+      }),
+  });
+const layerProjection = layerProjectionFor(thread);
+
+/**
+ * The real runtime policy over a provider that supports only
+ * `supportedRuntimeModes` (all of them when undefined).
+ */
+const layerRuntimePolicyFor = (supportedRuntimeModes?: ReadonlyArray<RuntimeMode>) =>
+  RuntimePolicy.layerFromProjectStore.pipe(
+    Layer.provide(
+      Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
+        getInstance: () =>
+          Effect.succeed({
+            snapshot: { getSnapshot: Effect.succeed({ supportedRuntimeModes } as ServerProvider) },
+          } as ProviderInstance),
+        listInstances: Effect.succeed([]),
+        listUnavailable: Effect.succeed([]),
+        streamChanges: Stream.empty,
+        subscribeChanges: Effect.never,
+      }),
+    ),
+    Layer.provide(
+      Layer.mock(ProjectStore.ProjectStoreV2)({
+        get: () =>
+          Effect.succeed(
+            Option.some({
+              projectId,
+              title: "Counters",
+              workspaceRoot,
+              defaultModelSelection: null,
+              defaultThreadEnvMode: null,
+              autoPull: false,
+              faviconPath: null,
+              projectIcon: null,
+              scripts: [],
+              createdAt: "2026-10-25T12:00:00.000Z",
+              updatedAt: "2026-10-25T12:00:00.000Z",
+              deletedAt: null,
+            }),
+          ),
+      }),
+    ),
+  );
 
 const tool = (fields: ConstructorParameters<typeof McpSchema.Tool>[0]) =>
   new McpSchema.Tool(fields);
@@ -191,6 +242,8 @@ const registrationFor = (liveToolsDeclared: boolean): AppRegistration => ({
 const withToolkit = <A, E>(
   options: {
     readonly registration?: AppRegistration;
+    readonly thread?: OrchestrationV2AppThread;
+    readonly supportedRuntimeModes?: ReadonlyArray<RuntimeMode>;
     readonly cachedHeadless?: ReadonlyArray<McpSchema.Tool>;
     readonly decide?: (input: AppToolGate.AppToolGateInput) => AppToolGate.AppToolGateDecision;
     readonly approval?: AppToolApproval.AppToolApprovalResult;
@@ -214,7 +267,8 @@ const withToolkit = <A, E>(
     });
     const services = Layer.mergeAll(
       fake.layer,
-      layerProjection,
+      layerProjectionFor(options.thread ?? thread),
+      layerRuntimePolicyFor(options.supportedRuntimeModes),
       Layer.mock(AppLeaseService)({ current: () => Effect.succeedNone }),
       Layer.mock(LiveToolClient)({
         call: (_lease: AppLease, request) =>
@@ -425,6 +479,45 @@ it.effect(
     }),
 );
 
+it.effect("gates on the provider's resolved mode, not the thread's stored one", () =>
+  Effect.gen(function* () {
+    const fullAccess: OrchestrationV2AppThread = { ...thread, runtimeMode: "full-access" };
+    const options = {
+      cachedHeadless: cachedTools,
+      thread: fullAccess,
+      decide: AppToolGate.decide,
+    } as const;
+
+    // The provider cannot run Full access, so RuntimePolicy runs it supervised.
+    yield* withToolkit(
+      { ...options, supportedRuntimeModes: ["approval-required"] },
+      (toolkit, harness) =>
+        Effect.gen(function* () {
+          yield* toolkit.call(appScope, "ex_gated_job", {}, {});
+          expect(harness.gateInputs.map((input) => input.runtimeMode)).toEqual([
+            "approval-required",
+          ]);
+          expect(harness.approvals.map((request) => request.info.source)).toEqual(["static"]);
+          expect(
+            harness.forwarded.map((request) => request.meta[APP_TOOL_APPROVAL_META_KEY]),
+          ).toEqual([{ approved: true, requestId: "request-7" }]);
+        }),
+    );
+
+    yield* withToolkit(
+      { ...options, supportedRuntimeModes: ["approval-required", "full-access"] },
+      (toolkit, harness) =>
+        Effect.gen(function* () {
+          yield* toolkit.call(appScope, "ex_gated_job", {}, {});
+          expect(harness.approvals).toEqual([]);
+          expect(
+            harness.forwarded.map((request) => request.meta[APP_TOOL_APPROVAL_META_KEY]),
+          ).toEqual([{ approved: true }]);
+        }),
+    );
+  }),
+);
+
 it.effect("answers a closed app's live tool without gating or contacting it", () =>
   withToolkit(
     { registration: registrationFor(true), cachedHeadless: cachedTools },
@@ -495,13 +588,14 @@ const withFreshRegistration = <A, E>(
         workspaceRoot: workspace.workspaceRoot,
       });
       const apps = yield* Layer.build(
-        AppToolkitLayer.layer.pipe(
+        AppToolkitLayer.layerWithRuntimePolicy.pipe(
           Layer.provideMerge(HeadlessToolHostLayer.layer),
           Layer.provideMerge(AppRuntimeState.layer),
           Layer.provide(
             Layer.mergeAll(
               fake.layer,
               layerProjection,
+              layerRuntimePolicyFor(),
               LiveToolClientLayer.layer,
               Layer.mock(AppLeaseService)({ current: () => Effect.succeedNone }),
               Layer.mock(AppToolApprovalService)({}),

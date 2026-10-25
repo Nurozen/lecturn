@@ -46,6 +46,8 @@ import {
 } from "../../../apps/services.ts";
 import * as AppToolGate from "../../../apps/AppToolGate.ts";
 import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
+import * as ProjectStore from "../../../orchestration-v2/ProjectStore.ts";
+import * as RuntimePolicy from "../../../orchestration-v2/RuntimePolicy.ts";
 import { appInvocationScope, type McpAppInvocationScope } from "../../McpInvocationContext.ts";
 import * as AppCardEnvelope from "./AppCardEnvelope.ts";
 import * as AppToolApproval from "./appToolApproval.ts";
@@ -164,6 +166,7 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
   const headless = yield* HeadlessToolHost;
   const live = yield* LiveToolClient;
   const projection = yield* ProjectionStore.ProjectionStoreV2;
+  const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
 
   const grantedApp = (appId: AppId) =>
     registry
@@ -230,15 +233,18 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
           message: `Project ${scope.app.projectId} does not belong to ${scope.app.appId}.`,
         });
       }
-      const running = yield* projection
-        .getRunningTurnContext(scope.thread.threadId)
-        .pipe(Effect.option);
+      const running = Option.getOrUndefined(
+        yield* projection.getRunningTurnContext(scope.thread.threadId).pipe(Effect.option),
+      );
       return {
-        projectId: scope.app.projectId,
-        threadId: scope.thread.threadId,
-        workspaceRoot: binding.value.workspaceRoot,
-        turnId: Option.getOrUndefined(running)?.providerTurn?.id ?? null,
-      } satisfies AppToolContextMeta;
+        meta: {
+          projectId: scope.app.projectId,
+          threadId: scope.thread.threadId,
+          workspaceRoot: binding.value.workspaceRoot,
+          turnId: running?.providerTurn?.id ?? null,
+        } satisfies AppToolContextMeta,
+        runModelSelection: running?.run?.modelSelection,
+      };
     });
 
   const call: AppToolkit["Service"]["call"] = (invocation, name, args, meta) =>
@@ -287,12 +293,27 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
               new AppsError({ code: "unavailable", message: "Could not read the calling thread." }),
           ),
         );
+      const context = yield* contextMeta(scope);
+      // The stored mode is what the user picked; the provider may run a lower
+      // one (RuntimePolicy downgrades unsupported modes), and app tools must
+      // not be more permissive than the provider's own tools.
+      const policy = yield* runtimePolicy
+        .resolve({ thread, modelSelection: context.runModelSelection ?? thread.modelSelection })
+        .pipe(
+          Effect.mapError(
+            () =>
+              new AppsError({
+                code: "unavailable",
+                message: "Could not resolve the calling thread's runtime mode.",
+              }),
+          ),
+        );
       const gate = (stage: AppToolGate.AppToolGateInput["stage"]) =>
         extensions.decide({
           stage,
           gated: stage === "app" || registration.gatedTools.includes(bare),
-          runtimeMode: thread.runtimeMode,
-          interactionMode: thread.interactionMode,
+          runtimeMode: policy.runtimeMode,
+          interactionMode: policy.interactionMode,
           ceiling: record.status.runtimeCeiling,
         });
       const approve = (
@@ -323,14 +344,13 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
           }
         });
 
-      const context = yield* contextMeta(scope);
       const forward = (approval: AppToolApprovalMeta) => {
         const request: AppToolCallRequest = {
           name: bare,
           arguments: args,
           meta: {
             ...withoutLecturnKeys(meta),
-            [APP_TOOL_CONTEXT_META_KEY]: context,
+            [APP_TOOL_CONTEXT_META_KEY]: context.meta,
             [APP_TOOL_APPROVAL_META_KEY]: approval,
           },
         };
@@ -412,4 +432,13 @@ const layerToolSource = Layer.effect(
   }),
 );
 
-export const layer = layerToolSource.pipe(Layer.provideMerge(layerToolkit));
+/** The toolkit over a caller-supplied runtime policy. */
+export const layerWithRuntimePolicy = layerToolSource.pipe(Layer.provideMerge(layerToolkit));
+
+// RuntimeLayer keeps its RuntimePolicyV2 internal; this one is a stateless
+// read over the same project store and provider registry.
+const layerRuntimePolicy = RuntimePolicy.layerFromProjectStore.pipe(
+  Layer.provide(ProjectStore.layer),
+);
+
+export const layer = layerWithRuntimePolicy.pipe(Layer.provide(layerRuntimePolicy));
