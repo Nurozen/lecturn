@@ -1,4 +1,5 @@
 import type { ToolActivityIcon, ToolActivitySource } from "@lecturn/contracts";
+import { resolveAppToolPresentation } from "@lecturn/shared/appToolPresentation";
 import { resolveLecturnMcpToolDefinition } from "@lecturn/shared/lecturnMcpToolPresentation";
 
 export function normalizeMcpText(value: unknown, maxLength = 160): string | undefined {
@@ -38,6 +39,16 @@ export function mcpToolPresentation(input: {
     typeof input.toolName === "string" ? /^mcp__(.+?)__(.+)$/i.exec(input.toolName) : null;
   const server = normalizeMcpText(input.serverName ?? qualified?.[1] ?? input.serverDisplayName);
   const tool = normalizeMcpText(qualified?.[2] ?? input.toolName);
+  const app =
+    server && tool ? resolveAppToolPresentation({ serverName: server, toolName: tool }) : null;
+  if (app) {
+    // The prefixed name is what the agent called and what the app documents.
+    return {
+      title: normalizeMcpText(input.title) ?? app.toolName,
+      ...(app.toolSource.icon ? { toolIcon: app.toolSource.icon } : {}),
+      toolSource: app.toolSource,
+    };
+  }
   if (server && tool && resolveLecturnMcpToolDefinition(`${server}.${tool}`)) return {};
   const title =
     normalizeMcpText(input.title) ??
