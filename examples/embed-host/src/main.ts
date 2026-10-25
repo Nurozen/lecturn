@@ -23,6 +23,7 @@ import * as Electron from "electron";
 
 import { iconDataUrl } from "./icon.ts";
 import { LIVE_GATED_TOOLS, startLiveMcp } from "./liveMcp.ts";
+import { makePaneHeader } from "./paneHeader.ts";
 import { hostTheme } from "./theme.ts";
 
 const env = process.env;
@@ -43,9 +44,10 @@ const freezeClock = freezeClockEnv ? { freezeClock: Number(freezeClockEnv) } : {
 // Electron itself in Node mode.
 const bundledNode = process.execPath;
 const counterServerPath = NodePath.join(here, "counter-mcp.mjs");
-// Matches the sidebar column in renderer/index.html, so the pane is placed
-// right before the renderer's first rect report arrives.
+// Match the sidebar column and pane header in renderer/index.html, so the
+// pane is placed right before the renderer's first rect report arrives.
 const SIDEBAR_WIDTH = 320;
+const PANE_HEADER_HEIGHT = 48;
 
 async function main() {
   await Electron.app.whenReady();
@@ -69,9 +71,15 @@ async function main() {
   const status = (text: string) => win.webContents.send("embed-host:status", text);
   const paneRect = () => {
     const { width, height } = win.getContentBounds();
-    return { x: SIDEBAR_WIDTH, y: 0, width: Math.max(0, width - SIDEBAR_WIDTH), height };
+    return {
+      x: SIDEBAR_WIDTH,
+      y: PANE_HEADER_HEIGHT,
+      width: Math.max(0, width - SIDEBAR_WIDTH),
+      height: Math.max(0, height - PANE_HEADER_HEIGHT),
+    };
   };
   status("Starting Lecturn…");
+  const header = makePaneHeader(win);
 
   // lecturn:begin
   const lecturn = await connect({
@@ -111,6 +119,9 @@ async function main() {
     ...freezeClock,
   });
   embed.on("lecturn/navigate", ({ ref }) => win.webContents.send("embed-host:focus", ref));
+  lecturn.subscribeThreads(projectId, header.onThreads);
+  embed.on("lecturn/thread.changed", header.onThreadChanged);
+  header.setMenu([{ label: "New thread", click: () => embed.newThread() }]);
   embed.on("error", (error) => console.error(`[embed-host] ${error.reason}: ${error.message}`));
 
   let closed = false;
@@ -125,6 +136,12 @@ async function main() {
   // lecturn:end
 
   status(`Lecturn ${lecturn.mode} · ws-a`);
+  // A sidecar has no signed-in Lecturn client to open the thread in; a user's own server does.
+  header.setThreadUrl((threadId) =>
+    lecturn.mode === "user-server"
+      ? new URL(`/${lecturn.environmentId}/${threadId}`, lecturn.origin).href
+      : null,
+  );
 
   // Driven from Playwright's electronApp.evaluate by e2e/.
   Object.assign(globalThis, {
