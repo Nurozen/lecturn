@@ -849,7 +849,7 @@ describe("ChatMarkdown thread find", () => {
 });
 
 describe("app references", () => {
-  it("draws an app's references as chips that hand the reference to the app, and leaves code alone", async () => {
+  it("draws an app's references as chips that hand the reference to the app, and leaves links alone", async () => {
     const activated: string[] = [];
     const { container } = await render(
       <AppReferencesContext
@@ -857,13 +857,38 @@ describe("app references", () => {
       >
         <ChatMarkdown
           cwd="/tmp/project"
-          text={"Updated rw:c/fins. See `rw:c/nose` and [docs](https://example.test/rw:c/tube)."}
+          text={"Updated rw:c/fins. See [docs](https://example.test/rw:c/tube)."}
         />
       </AppReferencesContext>,
     );
     const chips = [...container.querySelectorAll<HTMLButtonElement>("button[data-app-ref]")];
     expect(chips.map((chip) => chip.dataset.appRef)).toEqual(["rw:c/fins"]);
-    expect(container.querySelector("code")?.textContent).toBe("rw:c/nose");
+    await act(async () => chips[0]?.click());
+    expect(activated).toEqual(["rw:c/fins"]);
+  });
+
+  it("draws a code span that holds only a reference as a chip, and keeps other code literal", async () => {
+    const activated: string[] = [];
+    const { container } = await render(
+      <AppReferencesContext
+        value={{ refPrefixes: ["rw:"], iconUrl: null, activate: (ref) => activated.push(ref) }}
+      >
+        <ChatMarkdown
+          cwd="/tmp/project"
+          text={[
+            "`rw:c/fins` has span **`0.034`**; `rw:c/nose and more`; `xx:c/tube`.",
+            "",
+            "```",
+            "rw:c/body",
+            "```",
+          ].join("\n")}
+        />
+      </AppReferencesContext>,
+    );
+    const chips = [...container.querySelectorAll<HTMLButtonElement>("button[data-app-ref]")];
+    expect(chips.map((chip) => chip.dataset.appRef)).toEqual(["rw:c/fins"]);
+    const code = [...container.querySelectorAll("code")].map((node) => node.textContent?.trim());
+    expect(code).toEqual(["0.034", "rw:c/nose and more", "xx:c/tube", "rw:c/body"]);
     await act(async () => chips[0]?.click());
     expect(activated).toEqual(["rw:c/fins"]);
   });

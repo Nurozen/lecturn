@@ -75,6 +75,21 @@ export function splitAppReferences(
   return segments;
 }
 
+/**
+ * The reference an inline code span names when the span holds that reference and nothing else.
+ * Agents often quote references as code; a span with any other text stays code.
+ */
+export function wholeAppReference(text: string, refPrefixes: ReadonlyArray<string>): string | null {
+  const trimmed = text.trim();
+  const [match, ...rest] = findAppReferences(trimmed, refPrefixes);
+  return match !== undefined &&
+    rest.length === 0 &&
+    match.start === 0 &&
+    match.end === trimmed.length
+    ? match.ref
+    : null;
+}
+
 // A link scheme of its own so markdown renders a reference as a chip without guessing at text.
 export const APP_REFERENCE_PROTOCOL = "lecturn-app-ref";
 const APP_REFERENCE_HREF_PREFIX = `${APP_REFERENCE_PROTOCOL}://v1/`;

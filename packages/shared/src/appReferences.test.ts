@@ -11,6 +11,7 @@ import {
   parseAppReferenceHref,
   promptWithAppReferences,
   splitAppReferences,
+  wholeAppReference,
 } from "./appReferences.ts";
 
 const refs = (text: string, prefixes: ReadonlyArray<string> = ["rw:"]) =>
@@ -86,6 +87,24 @@ describe("splitAppReferences", () => {
   it("returns one text segment without references and none for empty text", () => {
     expect(splitAppReferences("plain", ["rw:"])).toEqual([{ type: "text", text: "plain" }]);
     expect(splitAppReferences("", ["rw:"])).toEqual([]);
+  });
+});
+
+describe("wholeAppReference", () => {
+  it("names the reference a code span holds alone, ignoring surrounding space", () => {
+    expect(wholeAppReference("rw:c/fins", ["rw:"])).toBe("rw:c/fins");
+    expect(wholeAppReference("  rw:c/fins ", ["other:", "rw:"])).toBe("rw:c/fins");
+  });
+
+  it("refuses spans with other text, several references, unknown prefixes or no body", () => {
+    expect(wholeAppReference("rw:c/fins and more", ["rw:"])).toBeNull();
+    expect(wholeAppReference("see rw:c/fins", ["rw:"])).toBeNull();
+    expect(wholeAppReference("rw:c/fins rw:c/nose", ["rw:"])).toBeNull();
+    expect(wholeAppReference("rw:c/fins.", ["rw:"])).toBeNull();
+    expect(wholeAppReference("xx:c/fins", ["rw:"])).toBeNull();
+    expect(wholeAppReference("rw:c/fins", [])).toBeNull();
+    expect(wholeAppReference("rw:", ["rw:"])).toBeNull();
+    expect(wholeAppReference("", ["rw:"])).toBeNull();
   });
 });
 
