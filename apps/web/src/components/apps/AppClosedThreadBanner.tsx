@@ -7,19 +7,31 @@ import { useQuietThreadShell } from "../../state/entities";
 import { Button } from "../ui/button";
 import { appClosedBannerPlacement, useAppClosedBannerState } from "./useAppClosedBanner";
 
+function useAppClosedThreadBannerState(threadRef: ScopedThreadRef | null) {
+  const embedded = useEmbedPresentation() !== null;
+  const placement = appClosedBannerPlacement({ embedded, threadId: threadRef?.threadId ?? null });
+  const shell = useQuietThreadShell(placement === "thread" ? threadRef : null);
+  return useAppClosedBannerState(
+    shell === null ? null : scopeProjectRef(shell.environmentId, shell.projectId),
+    shell?.id ?? null,
+  );
+}
+
+/**
+ * The banner lives in the timeline's header, which an empty timeline skips for its placeholder, so
+ * the timeline keeps its list (and this header) while there is a notice to show.
+ */
+export function useAppClosedThreadBannerShown(threadRef: ScopedThreadRef | null): boolean {
+  return useAppClosedThreadBannerState(threadRef) !== null;
+}
+
 /** The closed-app notice heading an app thread in full Lecturn; the embed shows it by the composer. */
 export function AppClosedThreadBanner({
   threadRef,
 }: {
   readonly threadRef: ScopedThreadRef | null;
 }) {
-  const embedded = useEmbedPresentation() !== null;
-  const placement = appClosedBannerPlacement({ embedded, threadId: threadRef?.threadId ?? null });
-  const shell = useQuietThreadShell(placement === "thread" ? threadRef : null);
-  const state = useAppClosedBannerState(
-    shell === null ? null : scopeProjectRef(shell.environmentId, shell.projectId),
-    shell?.id ?? null,
-  );
+  const state = useAppClosedThreadBannerState(threadRef);
   if (state === null) return null;
   const { banner, open } = state;
   return (
