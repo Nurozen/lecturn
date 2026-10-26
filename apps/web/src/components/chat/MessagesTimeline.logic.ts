@@ -1422,6 +1422,12 @@ export function deriveMessagesTimelineRows(input: {
   legacyForkCreatedAt?: string | null;
   /** The embed pane: see `openLatestTurnRunId`. */
   keepLatestTurnOpen?: boolean;
+  /**
+   * The embed pane while its composer card asks the user to answer the turn. The card is the one
+   * place that says so, so no working, thinking or still-live row ticks beside it; calls that are
+   * really running stay live.
+   */
+  waitingOnUser?: boolean;
 }): MessagesTimelineRow[] {
   const timelineEntries = timelineRowEntries(input.timelineEntries);
   const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>();
@@ -1457,6 +1463,7 @@ export function deriveMessagesTimelineRows(input: {
     isWorking: input.isWorking,
   });
   const runlessWorkActive = input.isWorking && input.runlessWorkActive === true;
+  const waitingOnUser = input.isWorking && input.waitingOnUser === true;
   const openRunId = openLatestTurnRunId(
     timelineEntries,
     input.keepLatestTurnOpen,
@@ -1541,7 +1548,8 @@ export function deriveMessagesTimelineRows(input: {
   );
   const latestToolKeepsActivityLive =
     latestRunningToolEntry !== undefined ||
-    (latestVisibleToolEntry !== undefined &&
+    (!waitingOnUser &&
+      latestVisibleToolEntry !== undefined &&
       workEntryIndicatesToolSuccess(latestVisibleToolEntry.entry));
   const latestToolFailed =
     latestRunningToolEntry === undefined &&
@@ -1576,6 +1584,7 @@ export function deriveMessagesTimelineRows(input: {
     activeWorkRow !== null || latestToolFailed ? activeToolEntries.map((entry) => entry.id) : [],
   );
   const appendWorkingRow = () => {
+    if (waitingOnUser) return;
     nextRows.push({
       kind: "working",
       id: "working-indicator-row",
@@ -2035,6 +2044,7 @@ export function deriveMessagesTimelineRows(input: {
   }
   if (
     input.isWorking &&
+    !waitingOnUser &&
     !setupOwnsWorkingSlot &&
     !hasActiveCompaction &&
     (!hasActivityRow || latestToolFailed)
