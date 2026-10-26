@@ -94,7 +94,7 @@ import {
   formatAssistantCitationForComposer,
   replaceTextRange,
 } from "../../composer-logic";
-import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
+import { idleComposerPlaceholder } from "../../composerPlaceholder";
 import { listContinuationForEnter, listIndentForTab } from "../../composer-list-continuation";
 import {
   deriveComposerSendState,
@@ -1364,6 +1364,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   } | null;
   isRunning: boolean;
   canInterrupt: boolean;
+  approvalPending: boolean;
   followUpBehavior: "queue" | "steer";
   canSteer: boolean;
   alternateShortcutLabel: string | null;
@@ -1408,6 +1409,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         pendingAction={props.pendingAction}
         isRunning={props.isRunning}
         canInterrupt={props.canInterrupt}
+        approvalPending={props.approvalPending}
         followUpBehavior={props.followUpBehavior}
         canSteer={props.canSteer}
         alternateShortcutLabel={props.alternateShortcutLabel}
@@ -6547,6 +6549,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         )}
                         options={activePendingApproval.options}
                         moreTestId={appApprovalTestId(activePendingApproval, "more")}
+                        onStopTurn={canInterrupt ? handleInterruptPrimaryActionStable : undefined}
                         canRespond={activePendingApproval.responseCapability === "live"}
                         onRespondToApproval={onRespondToApproval}
                       />
@@ -7304,15 +7307,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               ? "Choose a project above to start a thread"
                               : showProviderUnavailable
                                 ? "Enable a provider in Settings to send a message"
-                                : phase === "disconnected"
-                                  ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                  : embedComposerPlaceholder !== null
-                                    ? embedComposerPlaceholder
-                                    : isComposerResting
-                                      ? showComposerAttachAction
-                                        ? "Ask for changes, send follow-ups, or attach files"
-                                        : "Ask for changes or send a follow-up"
-                                      : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                                : idleComposerPlaceholder({
+                                    hostPlaceholder: embedComposerPlaceholder,
+                                    hasSession: phase !== "disconnected",
+                                    resting: isComposerResting,
+                                    canAttach: showComposerAttachAction,
+                                  })
                     }
                     disabled={
                       isConnecting ||
@@ -7411,6 +7411,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     pendingAction={pendingPrimaryAction}
                     isRunning={phase === "running"}
                     canInterrupt={canInterrupt}
+                    approvalPending={activePendingApproval !== null}
                     followUpBehavior={settings.followUpBehavior}
                     canSteer={!isCompacting}
                     alternateShortcutLabel={shortcutLabelForCommand(

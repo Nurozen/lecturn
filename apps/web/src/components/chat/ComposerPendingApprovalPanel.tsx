@@ -87,8 +87,9 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
  * (`data-app-tool-approval`, ComposerBanner): the actions sit beside it while
  * the tool's whole name fits next to them, and otherwise wrap below the reason.
  * The reason takes no width of its own, so a long one truncates instead of
- * pushing the actions down. The embed pane is too narrow for the whole name, and
- * its mockup keeps the actions on the title's row, so there the title truncates too.
+ * pushing the actions down. The embed's mockup keeps the actions on the title's row, so there the
+ * reason takes a line of its own under both (embedComposer.css) and the title truncates only once
+ * the compact actions leave it no room.
  */
 function ConnectedAppToolApproval({
   approval,
@@ -129,13 +130,17 @@ function ConnectedAppToolApproval({
         ) : null}
       </span>
       {notResumable ? (
-        <span className="block w-0 min-w-full truncate text-2xs text-muted-foreground">
+        <span
+          className="block w-0 min-w-full truncate text-2xs text-muted-foreground"
+          data-app-approval-detail
+        >
           {NOT_RESUMABLE_DETAIL}
         </span>
       ) : reason ? (
         <span
           aria-label="Reason"
           className="block w-0 min-w-full truncate font-mono text-2xs text-muted-foreground"
+          data-app-approval-detail
           data-testid="app-approval-reason"
         >
           {reason}

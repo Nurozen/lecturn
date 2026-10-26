@@ -127,6 +127,9 @@ export const EMBED_THEME_VARS = [
   "--ring",
   // The running turn's stop button.
   "--destructive",
+  // Success marks, such as the check on a finished tool row.
+  "--success",
+  "--success-foreground",
   "--radius",
   "--font-sans",
   "--font-mono",

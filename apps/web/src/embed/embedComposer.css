@@ -35,13 +35,37 @@ html[data-lecturn-embed]
   border-top-right-radius: 0;
 }
 
-/* Decline, Approve and the menu keep the title's row at any pane width; the title and reason
-   truncate instead (ComposerPendingApprovalPanel). */
+/* The tool's name has the priority on the title's row: the shield takes only its own width, the
+   compact Decline, Approve and menu keep that row at any pane width, and the reason gets the full
+   width of a second line, so at 352 px "Approve <tool>" shows whole and only a narrower pane
+   truncates it (ComposerPendingApprovalPanel). */
+html[data-lecturn-embed] [data-chat-composer-top-drawer]:has([data-app-tool-approval]) {
+  padding-inline: 0.375rem;
+}
+
+html[data-lecturn-embed] [data-composer-banner-row]:has([data-app-tool-approval]) {
+  --composer-banner-icon-column: 1rem;
+  display: grid;
+  grid-template-columns: var(--composer-banner-icon-column) minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.25rem;
+  row-gap: 0.125rem;
+}
+
+html[data-lecturn-embed] [data-app-tool-approval] {
+  display: contents;
+}
+
+html[data-lecturn-embed] [data-app-tool-approval] > [data-app-approval-detail] {
+  grid-column: 2 / -1;
+  grid-row: 2;
+}
+
 html[data-lecturn-embed]
   [data-composer-banner-row]:has([data-app-tool-approval])
   > [data-slot="composer-banner-actions"] {
-  flex-shrink: 0;
   flex-wrap: nowrap;
+  gap: 0.25rem;
 }
 
 /* Contextual is text only, as drawn, wherever its label shows; an icon-only resting block keeps

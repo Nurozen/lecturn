@@ -2,7 +2,7 @@ import "~/index.css";
 import "../../embed/embed.css";
 
 import { RegistryProvider } from "@effect/atom-react";
-import { scopeProjectRef } from "@lecturn/client-runtime/environment";
+import { parseScopedThreadKey, scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { EnvironmentId, MessageId, ProjectId, RunId } from "@lecturn/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
 import { act, createRef, type ComponentProps } from "react";
@@ -12,6 +12,7 @@ import { page } from "vite-plus/test/browser";
 
 import { EmbedPresentationContext } from "../../embed/EmbedPresentationContext";
 import { serverEnvironment } from "../../state/server";
+import { environmentThreadShells } from "../../state/threads";
 import { MessagesTimeline } from "../chat/MessagesTimeline";
 
 type TimelineProps = ComponentProps<typeof MessagesTimeline>;
@@ -24,6 +25,20 @@ const PANE_WIDTH = 352;
 const EARLIER = RunId.make("run-earlier");
 const LATEST = RunId.make("run-latest");
 const APP_SOURCE = { key: "app:rocketwright", name: "RocketWright", kind: "integration" };
+
+const codexProvider = {
+  instanceId: "codex",
+  driver: "codex",
+  enabled: true,
+  installed: true,
+  version: null,
+  status: "ready",
+  auth: {},
+  checkedAt: "2026-10-25T10:00:00.000Z",
+  models: [{ slug: "gpt-6", name: "GPT-6", isCustom: false, capabilities: null }],
+  slashCommands: [],
+  skills: [],
+} as never;
 
 const providers = [
   {
@@ -131,11 +146,18 @@ async function renderTimeline(options: {
   embedded: boolean;
   width: number;
   toolSource?: ToolSource;
+  /** Without runs the thread is a copied or imported one, as on CP-W1's pages 02, 04 and 05. */
+  runs?: TimelineProps["runs"];
+  providers?: ReadonlyArray<never>;
+  /** The thread's own model, as its shell carries it. */
+  threadInstanceId?: string;
 }) {
   await page.viewport(options.width, 900);
   if (options.embedded) document.documentElement.dataset.lecturnEmbed = "";
   container.style.cssText = `height: 900px; width: ${options.width}px; display: flex; flex-direction: column;`;
   threadCount += 1;
+  const routeThreadKey = `environment-local:embed-thread-${threadCount}`;
+  const threadRef = parseScopedThreadKey(routeThreadKey)!;
   const timeline = (
     <MessagesTimeline
       isWorking={false}
@@ -143,8 +165,8 @@ async function renderTimeline(options: {
       listRef={createRef<LegendListRef | null>()}
       latestRun={{ runId: LATEST, status: "completed", startedAt: at(30), completedAt: at(50) }}
       turnDiffSummaries={[]}
-      runs={runs}
-      routeThreadKey={`environment-local:embed-thread-${threadCount}`}
+      runs={options.runs ?? runs}
+      routeThreadKey={routeThreadKey}
       onOpenTurnDiff={() => {}}
       onOpenThread={() => {}}
       onForkFromRun={async () => {}}
@@ -171,7 +193,23 @@ async function renderTimeline(options: {
   await act(async () =>
     root.render(
       <RegistryProvider
-        initialValues={[[serverEnvironment.providersValueAtom(ENVIRONMENT_ID), providers]]}
+        initialValues={[
+          [serverEnvironment.providersValueAtom(ENVIRONMENT_ID), options.providers ?? providers],
+          ...(options.threadInstanceId === undefined
+            ? []
+            : ([
+                [
+                  environmentThreadShells.quietThreadShellAtom(threadRef),
+                  {
+                    environmentId: ENVIRONMENT_ID,
+                    id: threadRef.threadId,
+                    projectId: presentation.projectRef.projectId,
+                    providerInstanceId: options.threadInstanceId,
+                    modelSelection: { instanceId: options.threadInstanceId, model: "gpt-6" },
+                  },
+                ],
+              ] as const)),
+        ]}
       >
         {options.embedded ? (
           <EmbedPresentationContext value={presentation}>{timeline}</EmbedPresentationContext>
@@ -318,5 +356,35 @@ describe("embed timeline at the pane width", () => {
   it("leaves replies unnamed outside the embed", async () => {
     await renderTimeline({ embedded: false, width: PANE_WIDTH });
     expect(container.querySelector("[data-testid='embed-agent-name']")).toBeNull();
+  });
+});
+
+describe.each([352, 320])("the agent's name in an imported thread at %i px", (width) => {
+  const agentNames = () =>
+    Array.from(container.querySelectorAll<HTMLElement>("[data-testid='embed-agent-name']")).map(
+      (name) => name.textContent,
+    );
+
+  it("takes the thread's model provider when the thread has no runs", async () => {
+    await renderTimeline({
+      embedded: true,
+      width,
+      runs: [],
+      providers: [codexProvider, ...(providers as ReadonlyArray<never>)],
+      threadInstanceId: "codex",
+    });
+    expect(agentNames()).toEqual(["Codex", "Codex"]);
+  });
+
+  it("falls back to the environment's default provider", async () => {
+    await renderTimeline({ embedded: true, width, runs: [] });
+    expect(agentNames()).toEqual(["Claude", "Claude"]);
+  });
+
+  it("draws no name line when no provider can be named", async () => {
+    await renderTimeline({ embedded: true, width, runs: [], providers: [] });
+    expect(agentNames()).toEqual([]);
+    const reply = byText("[data-message-role='assistant']", "proposed fin set")!;
+    expect(reply.querySelector("p:empty")).toBeNull();
   });
 });

@@ -156,6 +156,17 @@ describe("host theme", () => {
     expect(context.styles?.variables).toEqual({ "--destructive": "#61b5ad" });
   });
 
+  it("lets the host map the success colour of tool checks", () => {
+    const variables = { "--success": "#61b5ad", "--success-foreground": "#61b5ad" };
+    const context = decode({
+      theme: "dark",
+      displayMode: "inline",
+      locale: "en",
+      styles: { variables },
+    });
+    expect(context.styles?.variables).toEqual(variables);
+  });
+
   it("takes a composer placeholder, and a null one only as a change", () => {
     const base = { theme: "dark", displayMode: "inline", locale: "en" };
     expect(decode({ ...base, composerPlaceholder: "Ask for changes…" }).composerPlaceholder).toBe(

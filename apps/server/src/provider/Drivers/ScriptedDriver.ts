@@ -5,7 +5,11 @@
  *
  * @module provider/Drivers/ScriptedDriver
  */
-import { makeProviderSettingsSchema, TextGenerationError } from "@lecturn/contracts";
+import {
+  makeProviderSettingsSchema,
+  type ServerProviderModel,
+  TextGenerationError,
+} from "@lecturn/contracts";
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -54,9 +58,30 @@ const SCRIPTED_PRESENTATION = {
   supportedRuntimeModes: ["approval-required", "auto-accept-edits", "auto", "full-access"],
 } as const;
 
+// The adapter ignores effort; it is offered so a composer over this provider draws the controls
+// real providers have (model | effort | access), which bar captures compare against.
 const SCRIPTED_MODELS = [
-  { slug: "scripted", name: "Scripted", isCustom: false, isDefault: true, capabilities: null },
-];
+  {
+    slug: "scripted",
+    name: "Scripted",
+    isCustom: false,
+    isDefault: true,
+    capabilities: {
+      optionDescriptors: [
+        {
+          id: "effort",
+          label: "Reasoning",
+          type: "select",
+          options: [
+            { id: "low", label: "Low" },
+            { id: "medium", label: "Medium" },
+            { id: "high", label: "High", isDefault: true },
+          ],
+        },
+      ],
+    },
+  },
+] satisfies ReadonlyArray<ServerProviderModel>;
 
 export type ScriptedDriverEnv =
   | FileSystem.FileSystem

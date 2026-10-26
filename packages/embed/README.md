@@ -162,8 +162,9 @@ later. `styles.variables` sets Lecturn's own CSS variables, and unknown names ar
 `--background`, `--foreground`, `--card`, `--card-foreground`, `--popover`,
 `--popover-foreground`, `--muted`, `--muted-foreground`, `--secondary`, `--secondary-foreground`,
 `--border`, `--input`, `--primary`, `--primary-foreground`, `--accent`, `--accent-foreground`,
-`--ring`, `--destructive` (the stop button of a running turn), `--radius`, `--font-sans`,
-`--font-mono`.
+`--ring`, `--destructive` (the stop button of a running turn), `--success` and
+`--success-foreground` (success marks, such as the check on a finished tool call), `--radius`,
+`--font-sans`, `--font-mono`.
 
 `styles.css.fonts` may carry only `@font-face` rules whose sources are `data:` URLs, at most
 200 KB, because the view cannot fetch fonts from your origin. The whole theme must fit Lecturn's

@@ -5,6 +5,7 @@ import {
 } from "@lecturn/contracts";
 import { memo } from "react";
 import { EllipsisIcon, TriangleAlertIcon } from "lucide-react";
+import { useEmbedPresentation } from "../../embed/EmbedPresentationContext";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -17,6 +18,8 @@ interface ComposerPendingApprovalActionsProps {
   disabled?: boolean;
   options?: ReadonlyArray<ProviderApprovalOption> | undefined;
   moreTestId?: string | undefined;
+  /** The embed's composer keeps its send arrow while the card asks, so the menu offers the stop. */
+  onStopTurn?: (() => void) | undefined;
   onRespondToApproval: (
     requestId: RuntimeRequestId,
     decision: ProviderApprovalDecision,
@@ -37,8 +40,11 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
   disabled = false,
   options = DEFAULT_APPROVAL_OPTIONS,
   moreTestId,
+  onStopTurn,
   onRespondToApproval,
 }: ComposerPendingApprovalActionsProps) {
+  const embedded = useEmbedPresentation() !== null;
+  const stopTurn = embedded ? onStopTurn : undefined;
   const primaryOptions = options.filter(
     (option) => option.decision === "decline" || option.decision === "accept",
   );
@@ -52,7 +58,8 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
         const button = (
           <Button
             key={option.decision}
-            size="xs"
+            // The embed pane is narrow: compact buttons leave the tool's name room to show whole.
+            size={embedded ? "micro" : "xs"}
             variant={option.decision === "accept" ? "default" : "outline"}
             disabled={disabled || isResponding || !canRespond}
             aria-description={option.warning}
@@ -75,13 +82,13 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
           button
         );
       })}
-      {moreOptions.length > 0 ? (
+      {moreOptions.length > 0 || stopTurn !== undefined ? (
         <Menu>
           <MenuTrigger
             disabled={disabled || isResponding}
             render={
               <Button
-                size="icon-xs"
+                size={embedded ? "icon-micro" : "icon-xs"}
                 variant="outline"
                 aria-label="More approval options"
                 data-testid={moreTestId}
@@ -117,6 +124,18 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
                 item
               );
             })}
+            {stopTurn !== undefined ? (
+              <MenuItem
+                disabled={disabled}
+                onClick={() => {
+                  if (!disabled) stopTurn();
+                }}
+                variant="ghost"
+                className="mb-1 last:mb-0"
+              >
+                Stop turn
+              </MenuItem>
+            ) : null}
           </MenuPopup>
         </Menu>
       ) : null}
