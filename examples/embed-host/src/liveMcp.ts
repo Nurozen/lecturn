@@ -24,6 +24,8 @@ export const LIVE_GATED_TOOLS = [WINDOW_FLASH_TOOL];
 const APPROVAL_META_KEY = "lecturn/approval";
 const APPROVAL_REQUIRED_META_KEY = "lecturn/approval-required";
 const CONTEXT_META_KEY = "lecturn/context";
+// The tool row's secondary text in Lecturn.
+const SUMMARY_META_KEY = "lecturn/summary";
 const MAX_BODY_BYTES = 1024 * 1024;
 
 export interface FlashRecord {
@@ -142,6 +144,7 @@ export async function startLiveMcp(options: LiveMcpOptions): Promise<LiveMcpServ
     return {
       content: [{ type: "text", text: `Flashed the window ${flash.color}.` }],
       structuredContent: { flashes: count },
+      _meta: { [SUMMARY_META_KEY]: `Flashed ${flash.color}` },
     };
   };
 
