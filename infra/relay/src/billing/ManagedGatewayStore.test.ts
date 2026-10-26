@@ -13,6 +13,7 @@ import { operationId } from "./BillingStore.ts";
 import * as ManagedAccess from "./ManagedAccess.ts";
 import * as ManagedReservations from "./ManagedReservations.ts";
 import { makeManagedGatewayStore, type ManagedGatewayStoreConfig } from "./ManagedGatewayStore.ts";
+import { makeManagedSuspensions } from "./ManagedSuspensions.ts";
 const databaseUrl = process.env.BILLING_TEST_DATABASE_URL;
 const database = Layer.effect(RelayDb, PgDrizzle.makeWithDefaults()).pipe(
   Layer.provide(
@@ -90,20 +91,24 @@ const providerFixture = Effect.gen(function* () {
     sync: Effect.Effect<void>;
     ensureCapacity: Effect.Effect<void>;
     deleteDns: Effect.Effect<void, Provider.ManagedEndpointDnsClientError>;
+    updateDns: (id: string) => Effect.Effect<void, Provider.ManagedEndpointDnsClientError>;
+    lookupTunnel: Effect.Effect<void, Provider.ManagedEndpointTunnelClientError>;
     getToken: Effect.Effect<string, Provider.ManagedEndpointTunnelClientError>;
   } = {
     sync: Effect.void,
     ensureCapacity: Effect.void,
     deleteDns: Effect.void,
+    updateDns: () => Effect.void,
+    lookupTunnel: Effect.void,
     getToken: Effect.succeed("connector-token"),
   };
   const events: string[] = [];
-  const tunnels = new Map<string, { id: string; name: string }>();
+  const tunnels = new Map<string, { id: string; name: string; status?: string }>();
+  const deletedTunnels = new Map<string, { id: string; name: string; deletedAt: string }>();
   const records = new Map<
     string,
     { id: string; name: string; type: string; content: string; proxied: boolean }
   >();
-  let nextTunnel = 0;
   let nextRecord = 0;
   const unavailable = () =>
     new ManagedAccess.ManagedAccessUnavailable({ message: "Gateway unavailable" });
@@ -184,23 +189,25 @@ const providerFixture = Effect.gen(function* () {
     Effect.provideService(Provider.ManagedEndpointTunnelClient, {
       list: () => Effect.sync(() => ({ result: [...tunnels.values()] })),
       create: ({ name }) =>
-        Effect.sync(() => {
-          const tunnel = { id: `tunnel-${++nextTunnel}`, name };
+        Effect.gen(function* () {
+          const id = yield* operationId;
+          const tunnel = {
+            id: `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`,
+            name,
+          };
           tunnels.set(tunnel.id, tunnel);
           return tunnel;
         }),
       get: (tunnelId) =>
-        Effect.suspend(() => {
-          const tunnel = tunnels.get(tunnelId);
-          return tunnel
-            ? Effect.succeed(tunnel)
-            : Effect.fail(
-                new Provider.ManagedEndpointTunnelClientError({
-                  operation: "get",
-                  tunnelId,
-                  cause: { _tag: "NotFound" },
-                }),
-              );
+        Effect.gen(function* () {
+          yield* hooks.lookupTunnel;
+          const tunnel = tunnels.get(tunnelId) ?? deletedTunnels.get(tunnelId);
+          if (tunnel) return tunnel;
+          return yield* new Provider.ManagedEndpointTunnelClientError({
+            operation: "get",
+            tunnelId,
+            cause: { _tag: "NotFound" },
+          });
         }),
       putConfiguration: () => Effect.void,
       getToken: () => Effect.suspend(() => hooks.getToken),
@@ -219,7 +226,19 @@ const providerFixture = Effect.gen(function* () {
           records.set(record.id, record);
           return record;
         }),
-      updateRecord: () => Effect.die("Gateway DNS must not overwrite conflicting records"),
+      updateRecord: (id, input) =>
+        Effect.gen(function* () {
+          yield* hooks.updateDns(id);
+          const prior = records.get(id);
+          if (!prior)
+            return yield* new Provider.ManagedEndpointDnsClientError({
+              operation: "update-record",
+              dnsRecordId: id,
+              cause: { _tag: "NotFound" },
+            });
+          events.push(`update-dns:${id}`);
+          records.set(id, { ...prior, ...input });
+        }),
       deleteRecord: (id) =>
         Effect.suspend(() => hooks.deleteDns).pipe(
           Effect.andThen(
@@ -232,7 +251,55 @@ const providerFixture = Effect.gen(function* () {
     }),
     Effect.provide(NodeCrypto.layer),
   );
-  return { ...setup, allocations, provider, input, hooks, events, tunnels, records };
+  return {
+    ...setup,
+    allocations,
+    provider,
+    input,
+    hooks,
+    events,
+    tunnels,
+    deletedTunnels,
+    records,
+  };
+});
+const retiredProviderFixture = Effect.gen(function* () {
+  const setup = yield* providerFixture;
+  const { sql, provider, input, tunnels, deletedTunnels, allocations, records } = setup;
+  const initial = yield* provider.provision(input);
+  const retiredTunnelId = initial.runtime.tunnelId!;
+  const priorRecords = [...records.values()].map((record) => ({ ...record }));
+  yield* sql`UPDATE relay_billing_accounts SET state='{"suspended":true}'::jsonb WHERE user_id=${input.userId}`;
+  yield* sql`UPDATE relay_billing_enforcement_control SET enabled=true WHERE id=1`;
+  const suspensions = yield* makeManagedSuspensions({
+    enabled: () => Effect.succeed(true),
+    enforcementUsers: [input.userId],
+    provider: {
+      rotate: () => Effect.void,
+      disconnect: () => Effect.void,
+      remove: (id) =>
+        Effect.sync(() => {
+          const tunnel = tunnels.get(id)!;
+          deletedTunnels.set(id, { ...tunnel, deletedAt: "2026-10-24T05:25:30.956Z" });
+          tunnels.delete(id);
+        }),
+    },
+  });
+  yield* suspensions
+    .drain()
+    .pipe(
+      Effect.ensuring(
+        sql`UPDATE relay_billing_enforcement_control SET enabled=false WHERE id=1`.pipe(
+          Effect.orDie,
+        ),
+      ),
+    );
+  const retiredAllocation = (yield* allocations.get(input))!;
+  expect(retiredAllocation).toMatchObject({ tunnelId: null, readyAt: null });
+  expect(retiredAllocation.dnsRecordId).not.toBeNull();
+  expect([...records.values()]).toEqual(priorRecords);
+  yield* sql`UPDATE relay_billing_accounts SET state='{"accessUntil":100}'::jsonb WHERE user_id=${input.userId}`;
+  return { ...setup, initial, retiredTunnelId, priorRecords, retiredAllocation };
 });
 describe.skipIf(!databaseUrl)("ManagedGatewayStore PostgreSQL", () => {
   it.effect(
@@ -422,6 +489,199 @@ describe.skipIf(!databaseUrl)("ManagedGatewayStore PostgreSQL", () => {
       }),
     ),
   );
+  it.effect.each(["tombstone", "not-found"] as const)(
+    "recovers both retained billing-retirement CNAMEs after %s",
+    (deletedLookup) =>
+      run(
+        Effect.gen(function* () {
+          const { provider, input, initial, priorRecords, deletedTunnels, allocations, records } =
+            yield* retiredProviderFixture;
+          if (deletedLookup === "not-found") deletedTunnels.clear();
+          const recovered = yield* provider.provision(input);
+          expect(recovered.runtime.tunnelId).not.toBe(initial.runtime.tunnelId);
+          expect([...records.keys()]).toEqual(priorRecords.map((record) => record.id));
+          for (const prior of priorRecords)
+            expect(records.get(prior.id)).toEqual({
+              ...prior,
+              content: `${recovered.runtime.tunnelId}.cfargotunnel.com`,
+            });
+          expect(yield* allocations.get(input)).toMatchObject({
+            tunnelId: recovered.runtime.tunnelId,
+            dnsRecordId: priorRecords[0]!.id,
+            origin,
+            readyAt: expect.any(String),
+          });
+        }),
+      ),
+  );
+  it.effect.each(["healthy", "down", "inactive"])(
+    "does not repoint retained DNS while its previous tunnel is %s",
+    (status) =>
+      run(
+        Effect.gen(function* () {
+          const {
+            provider,
+            input,
+            retiredTunnelId,
+            deletedTunnels,
+            tunnels,
+            records,
+            priorRecords,
+          } = yield* retiredProviderFixture;
+          const prior = deletedTunnels.get(retiredTunnelId)!;
+          tunnels.set(retiredTunnelId, { id: prior.id, name: prior.name, status });
+          expect(yield* provider.provision(input).pipe(Effect.flip)).toMatchObject({
+            _tag: "ManagedEndpointProvisioningFailed",
+            stage: "ensure-dns-record",
+          });
+          expect([...records.values()]).toEqual(priorRecords);
+        }),
+      ),
+  );
+  it.effect.each(["public", "origin"] as const)(
+    "does not adopt a different %s DNS record after retirement",
+    (target) =>
+      run(
+        Effect.gen(function* () {
+          const { provider, input, records, priorRecords } = yield* retiredProviderFixture;
+          const prior = priorRecords[target === "public" ? 0 : 1]!;
+          const foreign = { ...prior, id: "another-enrollment-record" };
+          records.delete(prior.id);
+          records.set(foreign.id, foreign);
+          expect(yield* provider.provision(input).pipe(Effect.flip)).toMatchObject({
+            _tag: "ManagedEndpointProvisioningFailed",
+            stage: target === "public" ? "ensure-dns-record" : "gateway-enrollment",
+          });
+          expect(records.get(foreign.id)).toEqual(foreign);
+        }),
+      ),
+  );
+  it.effect("refuses an ambiguous, unproxied, or non-tunnel retained DNS target", () =>
+    run(
+      Effect.gen(function* () {
+        const { provider, input, records, priorRecords } = yield* retiredProviderFixture;
+        const prior = priorRecords[0]!;
+        for (const conflicting of [
+          [{ ...prior }, { ...prior, id: "duplicate" }],
+          [{ ...prior, proxied: false }],
+          [{ ...prior, content: "retired-tunnel.other.example.com" }],
+        ]) {
+          records.clear();
+          for (const record of [...conflicting, priorRecords[1]!]) records.set(record.id, record);
+          expect(yield* provider.provision(input).pipe(Effect.flip)).toMatchObject({
+            _tag: "ManagedEndpointProvisioningFailed",
+            stage: "ensure-dns-record",
+          });
+          expect([...records.values()]).toEqual([...conflicting, priorRecords[1]!]);
+        }
+      }),
+    ),
+  );
+  it.effect("a failed tunnel lookup is not evidence that retained DNS can be repointed", () =>
+    run(
+      Effect.gen(function* () {
+        const { provider, input, hooks, records, priorRecords } = yield* retiredProviderFixture;
+        hooks.lookupTunnel = Effect.fail(
+          new Provider.ManagedEndpointTunnelClientError({
+            operation: "get",
+            cause: { status: 503 },
+          }),
+        );
+        expect(yield* provider.provision(input).pipe(Effect.flip)).toMatchObject({
+          _tag: "ManagedEndpointProvisioningFailed",
+          stage: "ensure-dns-record",
+        });
+        expect([...records.values()]).toEqual(priorRecords);
+      }),
+    ),
+  );
+  it.effect(
+    "retries an interrupted retarget using the checkpointed tunnel and both record IDs",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const { provider, input, hooks, records, priorRecords, allocations, tunnels } =
+            yield* retiredProviderFixture;
+          const originRecordId = priorRecords[1]!.id;
+          hooks.updateDns = (id) =>
+            id === originRecordId
+              ? Effect.fail(
+                  new Provider.ManagedEndpointDnsClientError({
+                    operation: "update-record",
+                    dnsRecordId: id,
+                    cause: "interrupted origin update",
+                  }),
+                )
+              : Effect.void;
+          expect(yield* provider.provision(input).pipe(Effect.flip)).toMatchObject({
+            _tag: "ManagedEndpointProvisioningFailed",
+            stage: "gateway-enrollment",
+          });
+          const checkpoint = (yield* allocations.get(input))!;
+          expect(checkpoint.tunnelId).not.toBeNull();
+          expect(checkpoint.readyAt).toBeNull();
+          expect(records.get(priorRecords[0]!.id)?.content).toBe(
+            `${checkpoint.tunnelId}.cfargotunnel.com`,
+          );
+          expect(records.get(originRecordId)).toEqual(priorRecords[1]);
+          hooks.updateDns = () => Effect.void;
+          const recovered = yield* provider.provision(input);
+          expect(recovered.runtime.tunnelId).toBe(checkpoint.tunnelId);
+          expect(tunnels.size).toBe(1);
+          for (const prior of priorRecords)
+            expect(records.get(prior.id)).toEqual({
+              ...prior,
+              content: `${recovered.runtime.tunnelId}.cfargotunnel.com`,
+            });
+        }),
+      ),
+  );
+  it.effect("rejects an obsolete recovery before changing either retained DNS record", () =>
+    run(
+      Effect.gen(function* () {
+        const { provider, input, hooks, store, records, priorRecords, events } =
+          yield* retiredProviderFixture;
+        const waiting = yield* Deferred.make<void>();
+        const resume = yield* Deferred.make<void>();
+        hooks.sync = Deferred.succeed(waiting, undefined).pipe(
+          Effect.andThen(Deferred.await(resume)),
+        );
+        const obsolete = yield* provider.provision(input).pipe(Effect.result, Effect.forkChild);
+        yield* Deferred.await(waiting);
+        const prior = (yield* store.get(input.userId, input.environmentId))!;
+        yield* store.registerPending(prior);
+        yield* Deferred.succeed(resume, undefined);
+        expect((yield* Fiber.join(obsolete))._tag).toBe("Failure");
+        expect([...records.values()]).toEqual(priorRecords);
+        expect(events).toEqual([]);
+      }),
+    ),
+  );
+  it.effect("holds account and allocation locks while retargeting a retired gateway", () =>
+    run(
+      Effect.gen(function* () {
+        const { provider, input, hooks, sql } = yield* retiredProviderFixture;
+        const updating = yield* Deferred.make<void>();
+        const resume = yield* Deferred.make<void>();
+        hooks.updateDns = () =>
+          Deferred.succeed(updating, undefined).pipe(Effect.andThen(Deferred.await(resume)));
+        const recovery = yield* provider.provision(input).pipe(Effect.forkChild);
+        yield* Deferred.await(updating);
+        expect(
+          (yield* Effect.result(
+            sql`SELECT user_id FROM relay_managed_gateway_accounts WHERE user_id=${input.userId} FOR UPDATE NOWAIT`,
+          ))._tag,
+        ).toBe("Failure");
+        expect(
+          (yield* Effect.result(
+            sql`SELECT user_id FROM relay_managed_endpoint_allocations WHERE user_id=${input.userId} AND environment_id=${input.environmentId} FOR UPDATE NOWAIT`,
+          ))._tag,
+        ).toBe("Failure");
+        yield* Deferred.succeed(resume, undefined);
+        yield* Fiber.join(recovery);
+      }),
+    ),
+  );
   it.effect("a token failure preserves provider checkpoints for deprovision cleanup", () =>
     run(
       Effect.gen(function* () {
@@ -437,7 +697,7 @@ describe.skipIf(!databaseUrl)("ManagedGatewayStore PostgreSQL", () => {
           stage: "get-tunnel-token",
         });
         expect(yield* allocations.get(input)).toMatchObject({
-          tunnelId: "tunnel-1",
+          tunnelId: [...tunnels.keys()][0],
           dnsRecordId: "dns-1",
           readyAt: null,
           generation: 2,
