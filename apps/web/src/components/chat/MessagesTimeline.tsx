@@ -1,6 +1,7 @@
 import { ContextualMessageDisclosure } from "../contextual/ContextualDisclosure";
 import { EmbedAgentName } from "../embed/EmbedAgentName";
 import { EmbedUserAvatar } from "../embed/EmbedUserAvatar";
+import { useEmbedTimelineWaitingOnUser } from "../embed/embedPendingApprovalRows";
 import { useEmbedPresentation } from "../../embed/EmbedPresentationContext";
 import { AppClosedThreadBanner } from "../apps/AppClosedThreadBanner";
 import { AppThreadTitle, AppThreadTitleBeside } from "../apps/AppThreadTitle";
@@ -1085,6 +1086,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     supportsConversationRollback,
     worktreeSetup,
     keepLatestTurnOpen,
+    waitingOnUser: useEmbedTimelineWaitingOnUser(awaitingUser),
   });
   const rows = useStableRows(rawRows, listIdentityKey);
   // Run status/timestamps churn on every stream event; the shared row context
@@ -3898,13 +3900,15 @@ function toolIconAcceptsTint(
 }
 
 function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
-  const { isCompacting, isPreparingWorktree, backgroundWorktreeSetup } =
+  const { isCompacting, isPreparingWorktree, backgroundWorktreeSetup, awaitingUser } =
     use(TimelineRowActivityCtx);
   const shimmer = isPreparingWorktree || isCompacting;
   const label = isPreparingWorktree ? (
     "Setting up worktree…"
   ) : isCompacting ? (
     <CompactingLabel />
+  ) : awaitingUser ? (
+    "Waiting for you"
   ) : row.createdAt ? (
     <>
       Working for <WorkingTimer createdAt={row.createdAt} />
