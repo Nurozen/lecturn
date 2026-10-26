@@ -33,18 +33,15 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
   const warning = options.find((option) => option.warning)?.warning;
   const canRespond = props.approval.responseCapability === "live";
   const disabled = !canRespond || props.respondingApprovalId === props.approval.requestId;
-  const { eyebrow, title, detail, monoDetail } = pendingApprovalCardText(props.approval);
+  const { eyebrow, title, detail, detailMaxLines } = pendingApprovalCardText(props.approval);
   return (
     <GlassCard tone="accent" radius={24} className="gap-2.5 p-4" opaque>
       <Text className="font-lecturn-medium text-xs text-primary">{eyebrow}</Text>
       <Text className="font-lecturn-bold text-lg text-foreground">{title}</Text>
       {detail ? (
         <Text
-          className={
-            monoDetail
-              ? "font-mono text-sm leading-normal text-foreground-secondary"
-              : "font-sans text-sm leading-normal text-foreground-secondary"
-          }
+          className="font-sans text-sm leading-normal text-foreground-secondary"
+          numberOfLines={detailMaxLines}
         >
           {detail}
         </Text>

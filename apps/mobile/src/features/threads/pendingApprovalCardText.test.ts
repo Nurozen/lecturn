@@ -29,12 +29,23 @@ describe("pendingApprovalCardText", () => {
       eyebrow: "RocketWright · Approval needed",
       title: "Approve Simulate engine",
       detail: "Simulates 120 s of burn",
-      monoDetail: true,
+      detailMaxLines: 2,
     });
   });
 
   it("falls back to the called name when the tool declares no title", () => {
     expect(pendingApprovalCardText(appApproval).title).toBe("Approve rw_engine_simulate");
+  });
+
+  it("gives a long app reason whole, for the card to wrap to two lines", () => {
+    const reason = "Simulates a full burn of the selected motor ".repeat(4).trim();
+    const text = pendingApprovalCardText({
+      ...appApproval,
+      connectedAppTool: { ...appApproval.connectedAppTool, reason },
+    });
+
+    expect(text.detail).toBe(reason);
+    expect(text.detailMaxLines).toBe(2);
   });
 
   it("keeps the provider's prompt for other approvals", () => {
@@ -47,7 +58,7 @@ describe("pendingApprovalCardText", () => {
       eyebrow: "Approval needed",
       title: "command",
       detail: "Run vp test",
-      monoDetail: false,
+      detailMaxLines: undefined,
     });
   });
 });

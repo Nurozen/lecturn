@@ -6,8 +6,8 @@ export interface PendingApprovalCardText {
   readonly eyebrow: string;
   readonly title: string;
   readonly detail: string | null;
-  /** An app's reason is its own words about the call, set apart from Lecturn's copy. */
-  readonly monoDetail: boolean;
+  /** An app's reason is prose for the user, kept to a short note under the title. */
+  readonly detailMaxLines: number | undefined;
 }
 
 /**
@@ -24,13 +24,13 @@ export function pendingApprovalCardText(
       eyebrow: "Approval needed",
       title: approval.appName ?? approval.requestKind,
       detail: approval.detail ?? null,
-      monoDetail: false,
+      detailMaxLines: undefined,
     };
   }
   return {
     eyebrow: `${appTool.appName} · Approval needed`,
     title: appToolApprovalLabel(appTool),
     detail: appTool.reason?.trim() || null,
-    monoDetail: true,
+    detailMaxLines: 2,
   };
 }

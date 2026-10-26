@@ -26,7 +26,7 @@ export function appApprovalTestId(
 }
 
 /**
- * The mono line under "Approve <tool>". Static gates carry no reason, so they
+ * The reason line under "Approve <tool>". Static gates carry no reason, so they
  * get no line rather than a filler.
  */
 export function appApprovalReasonLine(approval: PendingApproval): string | null {
