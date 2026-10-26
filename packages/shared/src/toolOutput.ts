@@ -9,6 +9,11 @@ import {
   readHtmlRenderReference,
   type HtmlRenderReference,
 } from "./htmlRender.ts";
+import {
+  APP_TOOL_SUMMARY_META_KEY,
+  appToolSummaryFromMeta,
+  isAppToolSource,
+} from "./appToolPresentation.ts";
 import { lecturnMcpToolName } from "./lecturnMcpToolName.ts";
 import { resolveLecturnMcpToolId } from "./lecturnMcpToolPresentation.ts";
 import { MCP_APP_OUTPUT_KEY, readMcpAppReference, type McpAppReference } from "./mcpApp.ts";
@@ -44,6 +49,20 @@ interface CompactToolOutput {
   [MCP_APP_OUTPUT_KEY]?: McpAppReference;
   thread?: { threadId: string };
   threads?: Array<{ threadId?: string; status?: "rolled_back" }>;
+  /** The result's own `_meta` shape, so compacting a compacted output finds it again. */
+  _meta?: { [APP_TOOL_SUMMARY_META_KEY]: string };
+}
+
+/**
+ * Adapters record the MCP result itself, or (Codex, for a card it captured)
+ * the result beside the card reference.
+ */
+function resultSummary(value: unknown): string | undefined {
+  if (!Predicate.isObject(value)) return undefined;
+  return (
+    appToolSummaryFromMeta(value._meta) ??
+    (Predicate.isObject(value.result) ? appToolSummaryFromMeta(value.result._meta) : undefined)
+  );
 }
 
 function readResult(value: unknown, budget: ResultReadBudget, depth = 0): ResultEnvelope {
@@ -163,6 +182,9 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
       }
     }
   }
+  // Kept over everything below: it is at most 120 characters.
+  const summary = resultSummary(value);
+  if (summary !== undefined) output._meta = { [APP_TOOL_SUMMARY_META_KEY]: summary };
   const oversized = () => encoder.encode(JSON.stringify(output)).byteLength > MAX_METADATA_BYTES;
   if (oversized()) {
     delete output.threads;
@@ -176,6 +198,15 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
   }
   if (oversized()) delete output[MCP_APP_OUTPUT_KEY];
   return Object.keys(output).length === 0 ? undefined : output;
+}
+
+/** The summary a connected app gave this call of its tool, for the row's secondary text. */
+export function appToolSummaryFromToolItem(item: {
+  readonly toolSource?: Parameters<typeof isAppToolSource>[0];
+  readonly output?: unknown;
+}): string | undefined {
+  if (!isAppToolSource(item.toolSource)) return undefined;
+  return resultSummary(compactDynamicToolOutput(item.output));
 }
 
 export function htmlRenderFromToolItem(item: {

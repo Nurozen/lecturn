@@ -42,9 +42,10 @@ export function mcpToolPresentation(input: {
   const app =
     server && tool ? resolveAppToolPresentation({ serverName: server, toolName: tool }) : null;
   if (app) {
-    // The prefixed name is what the agent called and what the app documents.
+    // The app's declared title reads best; without one, the prefixed name is
+    // what the agent called and what the app documents.
     return {
-      title: normalizeMcpText(input.title) ?? app.toolName,
+      title: app.title ?? normalizeMcpText(input.title) ?? app.toolName,
       ...(app.toolSource.icon ? { toolIcon: app.toolSource.icon } : {}),
       toolSource: app.toolSource,
     };

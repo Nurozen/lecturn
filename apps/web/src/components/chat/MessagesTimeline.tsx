@@ -55,6 +55,7 @@ import {
   liveThoughtLine,
   resolveWorkEntryToolPresentation,
   resolveViewedImageAsset,
+  workEntryAppToolSummary,
   workEntryViewedImagePath,
 } from "@lecturn/client-runtime/work-log/presentation";
 import { resolveWorkGroupScrollAnchor } from "@lecturn/client-runtime/work-log/scroll-anchor";
@@ -5827,6 +5828,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       data-v2-item-type={workEntry.projectedItem?.item.type}
       data-v2-item-visibility={workEntry.projectedItem?.visibility}
       data-app-tool-outcome={appToolOutcome}
+      data-app-tool-summary={workEntryAppToolSummary(workEntry)}
       {...rowToggleProps}
       icon={
         <span

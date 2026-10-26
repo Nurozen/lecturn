@@ -10,6 +10,7 @@ import {
   type AppStatusStreamEvent,
   appGrantFingerprintSource,
 } from "@lecturn/contracts";
+import { appToolTitle } from "@lecturn/shared/appToolPresentation";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -175,6 +176,7 @@ export const make = Effect.gen(function* () {
   const environment = yield* ServerEnvironment.ServerEnvironmentIdentity;
   const layerScope = yield* Effect.scope;
   const statusChanges = yield* PubSub.unbounded<AppStatusStreamEvent>();
+  const toolDefinitionChanges = yield* PubSub.unbounded<AppId>();
   const liveRefreshes = yield* FiberMap.make<AppId>();
 
   // The cause is logged here; clients only learn that storage failed.
@@ -555,7 +557,31 @@ export const make = Effect.gen(function* () {
         repository.setCachedTools({ appId, tier, tools: definitions, now }),
       );
       if (!updated) return yield* notFound(`No connected app is registered as ${appId}.`);
+      yield* PubSub.publish(toolDefinitionChanges, appId);
     });
+
+  /** Headless tools win a name both tiers list, as they do in AppToolkit's listing. */
+  const toolTitlesOf = (appId: AppId) =>
+    storage(repository.get(appId)).pipe(
+      Effect.map((found) => {
+        const titles = new Map<string, string>();
+        if (Option.isNone(found)) return titles;
+        const record = found.value;
+        const seen = new Set<string>();
+        for (const tool of [
+          ...(record.cachedHeadlessTools ?? []),
+          ...(record.registration.liveTools ? (record.cachedLiveTools ?? []) : []),
+        ]) {
+          if (seen.has(tool.name)) continue;
+          seen.add(tool.name);
+          const title = appToolTitle(tool);
+          if (title !== undefined) titles.set(tool.name, title);
+        }
+        return titles;
+      }),
+      // A row without its title still reads as the tool's name.
+      Effect.orElseSucceed(() => new Map<string, string>()),
+    );
 
   const seedSidecarGrant: AppRegistryService["Service"]["seedSidecarGrant"] = ({ registration }) =>
     Effect.gen(function* () {
@@ -665,7 +691,15 @@ export const make = Effect.gen(function* () {
     Effect.forkScoped({ startImmediately: true }),
   );
 
-  yield* syncAppToolPresentations(streamStatus).pipe(Effect.forkScoped({ startImmediately: true }));
+  yield* syncAppToolPresentations(
+    Stream.merge(
+      streamStatus,
+      Stream.fromPubSub(toolDefinitionChanges).pipe(
+        Stream.map((appId) => ({ type: "tools", appId }) as const),
+      ),
+    ),
+    toolTitlesOf,
+  ).pipe(Effect.forkScoped({ startImmediately: true }));
 
   // A sidecar exists only for its app, so a registration it cannot serve
   // stops it instead of running without the app.

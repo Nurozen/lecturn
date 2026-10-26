@@ -21,8 +21,11 @@ import {
   type ThreadImportOrigin,
 } from "@lecturn/contracts";
 import { resolveUserMessagePresentation } from "@lecturn/client-runtime/user-message";
-import { appToolSource } from "@lecturn/shared/appToolPresentation";
-import { summarizeToolGroup } from "@lecturn/client-runtime/work-log/presentation";
+import { appToolRawName, appToolSource } from "@lecturn/shared/appToolPresentation";
+import {
+  summarizeToolGroup,
+  workEntryAppToolSummary,
+} from "@lecturn/client-runtime/work-log/presentation";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -3103,5 +3106,48 @@ describe("MCP apps", () => {
       "mcp-app",
       "message",
     ]);
+  });
+});
+
+describe("connected-app tool rows", () => {
+  const source = appToolSource({
+    appId: "dev.rocketwright.app",
+    name: "RocketWright",
+    toolPrefix: "rw",
+  });
+  const appCall = (title: string, output?: unknown): OrchestrationV2TurnItem =>
+    ({
+      ...base("item-motors", "2026-06-20T00:00:02.500Z", 2),
+      type: "dynamic_tool",
+      title,
+      toolName: "mcp__lecturn__rw_motor_search",
+      toolSource: source,
+      input: { query: "H128" },
+      ...(output === undefined ? {} : { output }),
+    }) as OrchestrationV2TurnItem;
+  const activityOf = (item: OrchestrationV2TurnItem) => {
+    const entry = buildThreadFeed([projected(item, 0)]).find(
+      (candidate) => candidate.type === "activity-group",
+    );
+    return entry?.type === "activity-group" ? entry.activities[0] : undefined;
+  };
+  const rawName = (activity: ThreadFeedActivity | undefined) => {
+    const item = activity?.projectedItem.item;
+    return item?.type === "dynamic_tool" ? appToolRawName(item) : undefined;
+  };
+
+  it("labels the row with the tool's title and the app's summary, keeping the called name", () => {
+    const activity = activityOf(
+      appCall("Find motors", { _meta: { "lecturn/summary": "3 candidates" } }),
+    );
+    expect(activity && workEntryRowLabel(activity.workEntry)).toBe("Find motors");
+    expect(activity && workEntryAppToolSummary(activity.workEntry)).toBe("3 candidates");
+    expect(rawName(activity)).toBe("rw_motor_search");
+  });
+
+  it("keeps today's row when the app declared neither", () => {
+    const activity = activityOf(appCall("rw_motor_search"));
+    expect(activity && workEntryAppToolSummary(activity.workEntry)).toBeUndefined();
+    expect(rawName(activity)).toBeUndefined();
   });
 });

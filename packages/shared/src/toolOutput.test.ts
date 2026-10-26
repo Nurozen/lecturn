@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { MCP_APP_OUTPUT_KEY, readMcpAppToolOutcome } from "./mcpApp.ts";
 import {
+  appToolSummaryFromToolItem,
   compactDynamicToolOutput,
   mcpAppFromToolItem,
   MAX_TOOL_OUTPUT_IMAGES,
@@ -270,5 +271,42 @@ describe("toolOutputImages", () => {
       { mimeType: "image/jpeg" },
       { mimeType: "image/png" },
     ]);
+  });
+});
+
+describe("appToolSummaryFromToolItem", () => {
+  const toolSource = {
+    key: "app:dev.rocketwright.app",
+    name: "RocketWright",
+    kind: "integration",
+  } as const;
+  const summary = { "lecturn/summary": "3 candidates" };
+
+  it("reads an app's summary from the result each adapter records, and from the wire form", () => {
+    for (const output of [
+      { content: [{ type: "text", text: "{}" }], structuredContent: { ok: true }, _meta: summary },
+      { [MCP_APP_OUTPUT_KEY]: { attachmentId: "a" }, result: { content: [], _meta: summary } },
+    ]) {
+      const wire = compactDynamicToolOutput(output);
+      expect(wire?._meta).toEqual(summary);
+      expect(appToolSummaryFromToolItem({ toolSource, output })).toBe("3 candidates");
+      expect(appToolSummaryFromToolItem({ toolSource, output: wire })).toBe("3 candidates");
+    }
+  });
+
+  it("shows nothing for other tools or a summary that is not one short line", () => {
+    const output = { content: [], _meta: summary };
+    expect(appToolSummaryFromToolItem({ output })).toBeUndefined();
+    expect(
+      appToolSummaryFromToolItem({
+        toolSource: { ...toolSource, key: "mcp:rocketwright" },
+        output,
+      }),
+    ).toBeUndefined();
+    for (const value of ["x".repeat(121), " ", 3]) {
+      expect(
+        appToolSummaryFromToolItem({ toolSource, output: { _meta: { "lecturn/summary": value } } }),
+      ).toBeUndefined();
+    }
   });
 });
