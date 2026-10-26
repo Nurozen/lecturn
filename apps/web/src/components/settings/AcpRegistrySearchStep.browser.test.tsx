@@ -163,7 +163,9 @@ it("shows the loading, error, and empty states", async () => {
 
 it("submits a typed query at once and refreshes when the same query is submitted again", async () => {
   await render();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   await userEvent.fill(searchBox(), "Codex");
+  expect(lastQuery()).toBe("");
   await userEvent.keyboard("{Enter}");
   expect(lastQuery()).toBe("Codex");
   expect(state.refresh).not.toHaveBeenCalled();
