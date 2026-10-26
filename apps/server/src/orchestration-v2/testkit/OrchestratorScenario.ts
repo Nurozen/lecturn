@@ -69,6 +69,7 @@ export type OrchestratorV2ScenarioStep =
       readonly threadId: ThreadId;
       readonly runId: OrchestrationV2Run["id"];
       readonly status: OrchestrationV2Run["status"];
+      readonly afterReplayLabel?: string;
     }
   | {
       readonly type: "await_run_turn_item";
@@ -569,6 +570,19 @@ export function runOrchestratorV2Scenario(
             scenario: scenario.name,
             step: `finish_held_run:${step.runId}:no_replay_gate`,
           });
+        }
+        if (step.afterReplayLabel !== undefined) {
+          const label = step.afterReplayLabel;
+          const processed = yield* Effect.promise(() => gate.waitForProcessed(label)).pipe(
+            Effect.timeoutOption(Duration.millis(SCENARIO_WAIT_DEADLINE_MS)),
+            Effect.provideService(Clock.Clock, Clock.Clock.defaultValue()),
+          );
+          if (Option.isNone(processed)) {
+            return yield* new OrchestratorV2ScenarioStepError({
+              scenario: scenario.name,
+              step: `finish_held_run:${step.runId}:unprocessed_replay_label:${label}`,
+            });
+          }
         }
         while (true) {
           // The run settles only through the latest armed debounce; a rearm (a

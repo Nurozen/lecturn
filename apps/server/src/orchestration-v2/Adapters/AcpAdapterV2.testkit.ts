@@ -175,6 +175,44 @@ function holdGatedReplayLines(
     );
 }
 
+const isReplaySessionUpdate = Schema.is(
+  Schema.Struct({
+    kind: Schema.Literal("notification"),
+    method: Schema.Literal("session/update"),
+    params: Schema.Struct({ _meta: Schema.Struct({ eventId: Schema.String }) }),
+  }),
+);
+
+type SessionUpdateHandler = Parameters<
+  AcpSessionRuntime.AcpSessionRuntime["Service"]["handleSessionUpdate"]
+>[0];
+
+export function withAcpReplaySessionUpdateReceipts(
+  transcript: AcpReplayTranscript,
+  replayGate: ProviderReplayGate,
+  handler: SessionUpdateHandler,
+): SessionUpdateHandler {
+  const labels = new Map(
+    transcript.entries.flatMap((entry) =>
+      entry.type === "emit_inbound" &&
+      entry.label !== undefined &&
+      isReplaySessionUpdate(entry.frame)
+        ? [[entry.frame.params._meta.eventId, entry.label] as const]
+        : [],
+    ),
+  );
+  return (notification) =>
+    handler(notification).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          const eventId = notification._meta?.eventId;
+          const label = typeof eventId === "string" ? labels.get(eventId) : undefined;
+          if (label !== undefined) replayGate.recordProcessed(label);
+        }),
+      ),
+    );
+}
+
 export function makeAcpReplayRuntime(input: {
   readonly transcript: AcpReplayTranscript;
   readonly statusPath: string;
@@ -233,8 +271,19 @@ export function makeAcpReplayRuntime(input: {
           ),
         ),
       );
-      return yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(
+      const runtime = yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(
         Effect.provide(context),
       );
+      const replayGate = input.replayGate;
+      if (replayGate === undefined) return runtime;
+      return {
+        ...runtime,
+        // Stdout emission precedes adapter projection. A clock barrier must wait
+        // for the consumer, including any deferred-finalize rearm, to finish.
+        handleSessionUpdate: (handler) =>
+          runtime.handleSessionUpdate(
+            withAcpReplaySessionUpdateReceipts(input.transcript, replayGate, handler),
+          ),
+      };
     });
 }
