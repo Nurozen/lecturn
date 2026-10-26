@@ -476,6 +476,10 @@ export const layer = Api.make(
             ),
           recordOriginDns: (input) => available(store.recordOriginDns(input)),
           checkpointAllocation: (input) => available(store.checkpointAllocation(input)),
+          withAllocation: (input, effect) =>
+            store
+              .withAllocation(input, effect)
+              .pipe(Effect.catchTags({ BillingError: () => Effect.fail(gatewayUnavailable()) })),
           markReady: (input) =>
             Effect.gen(function* () {
               const mapping = yield* mappingFor(input.userId, input.environmentId);

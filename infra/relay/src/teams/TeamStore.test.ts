@@ -274,7 +274,20 @@ describe("Teams PostgreSQL numeric decoding", () => {
       billing_state: { operation: { createdAt: 1789410878 } },
     });
   });
-  it.each(["", "1.5", "9007199254740993", "not-a-number", Infinity])(
+  it("normalizes binary PostgreSQL bigint values without changing other fields", () => {
+    expect(
+      decodeTeamDatabaseRow<{
+        created_at: number;
+        access_until: number | null;
+        organization_id: string;
+      }>({
+        created_at: 1789410878n,
+        access_until: null,
+        organization_id: "1789410878",
+      }),
+    ).toEqual({ created_at: 1789410878, access_until: null, organization_id: "1789410878" });
+  });
+  it.each(["", "1.5", "9007199254740993", 9007199254740993n, "not-a-number", Infinity])(
     "rejects invalid or lossy database integers: %s",
     (created_at) => expect(() => decodeTeamDatabaseRow({ created_at })).toThrow(),
   );

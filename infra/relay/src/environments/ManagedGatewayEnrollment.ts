@@ -1,5 +1,7 @@
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
+import type * as Option from "effect/Option";
+import type { RelayManagedEndpointOrigin } from "@lecturn/contracts/relay";
 import type { ManagedAccessUnavailable } from "../billing/ManagedAccess.ts";
 
 export interface GatewayEnrollmentMapping {
@@ -21,8 +23,12 @@ interface Generation extends Identity {
 export type GatewayAllocationCheckpoint = Generation &
   (
     | { readonly step: "tunnel"; readonly tunnelId: string }
-    | { readonly step: "dns"; readonly dnsRecordId: string }
-    | { readonly step: "ready" }
+    | { readonly step: "dns"; readonly tunnelId: string; readonly dnsRecordId: string }
+    | {
+        readonly step: "ready";
+        readonly tunnelId: string;
+        readonly origin: RelayManagedEndpointOrigin;
+      }
   );
 type Operation<A> = Effect.Effect<A, ManagedAccessUnavailable>;
 
@@ -36,6 +42,10 @@ export class ManagedGatewayEnrollment extends Context.Service<
       input: Identity & { readonly publicHostname: string; readonly originHostname: string },
     ) => Operation<GatewayEnrollmentMapping>;
     readonly checkpointAllocation: (input: GatewayAllocationCheckpoint) => Operation<boolean>;
+    readonly withAllocation: <A, E, R>(
+      input: Identity & { readonly generation?: number },
+      effect: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<Option.Option<A>, E | ManagedAccessUnavailable, R>;
     readonly recordOriginDns: (
       input: Generation & { readonly originDnsRecordId: string },
     ) => Operation<boolean>;

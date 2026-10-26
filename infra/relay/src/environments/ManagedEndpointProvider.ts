@@ -5,6 +5,7 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Hex from "effect/encoding/Hex";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -1199,21 +1200,8 @@ export const make = Effect.gen(function* () {
               }),
           ),
         );
-        for (const recordId of [releaseMapping.originDnsRecordId, allocation.dnsRecordId]) {
-          if (recordId)
-            yield* ignoreNotFound(dns.deleteRecord(recordId)).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ManagedEndpointDeprovisioningFailed({
-                    ...input,
-                    stage: "delete-dns-record",
-                    cause,
-                  }),
-              ),
-            );
-        }
       }
-      const released = yield* allocations
+      const releaseTunnel = allocations
         .withClaimedTunnel(
           {
             userId: input.userId,
@@ -1242,14 +1230,14 @@ export const make = Effect.gen(function* () {
                 ),
               );
             if (finalGeneration === null) {
-              return false;
+              return Exit.succeed(false);
             }
             // A delete whose response is lost (a timeout) may still have
             // removed the tunnel. Ask Cloudflare before rolling back: if the
             // tunnel is gone, the delete happened and the claim, including any
             // released marker, must commit, since no later sweep can find
             // this tunnel again to retry.
-            return yield* deleteTunnel.pipe(
+            const deleted = yield* deleteTunnel.pipe(
               Effect.as(true),
               Effect.catchIf(
                 (error) => isManagedEndpointTunnelInUse(error.cause),
@@ -1258,6 +1246,32 @@ export const make = Effect.gen(function* () {
               Effect.catchTags({
                 ManagedEndpointDeprovisioningFailed: (failure) =>
                   confirmTunnelGone(failure).pipe(Effect.as(true)),
+              }),
+            );
+            if (!deleted) return Exit.succeed(false);
+            // The tunnel is gone. Commit its claim and released marker even if
+            // DNS cleanup fails; rethrow that failure after both locks release.
+            return yield* Effect.exit(
+              Effect.gen(function* () {
+                if (releaseMapping) {
+                  for (const recordId of [
+                    releaseMapping.originDnsRecordId,
+                    allocation.dnsRecordId,
+                  ]) {
+                    if (recordId)
+                      yield* ignoreNotFound(dns.deleteRecord(recordId)).pipe(
+                        Effect.mapError(
+                          (cause) =>
+                            new ManagedEndpointDeprovisioningFailed({
+                              ...input,
+                              stage: "delete-dns-record",
+                              cause,
+                            }),
+                        ),
+                      );
+                  }
+                }
+                return true;
               }),
             );
           }),
@@ -1275,11 +1289,27 @@ export const make = Effect.gen(function* () {
               ),
           }),
         );
+      const released = yield* releaseMapping && gateway
+        ? gateway.withAllocation(input, releaseTunnel).pipe(
+            Effect.map(Option.flatten),
+            Effect.catchTags({
+              ManagedAccessUnavailable: (cause) =>
+                Effect.fail(
+                  new ManagedEndpointDeprovisioningFailed({
+                    ...input,
+                    stage: "claim-release",
+                    tunnelId,
+                    cause,
+                  }),
+                ),
+            }),
+          )
+        : releaseTunnel;
       // The recorded tunnelId is now stale, but the allocation row is left
       // untouched deliberately: connect/status authorization requires a fully
       // recorded allocation, and an offline environment must keep reporting
       // "offline" (health probe fails) rather than "not authorized".
-      return Option.getOrElse(released, () => false);
+      return yield* Option.getOrElse(released, () => Exit.succeed(false));
     }),
     syncOrigin: Effect.fn("relay.managed_endpoint_provider.sync_origin")(function* (input) {
       yield* Effect.annotateCurrentSpan({
@@ -1481,145 +1511,161 @@ export const make = Effect.gen(function* () {
           : null;
       if (gatewayMapping && gateway) yield* gateway.sync(input.userId);
 
-      const tunnelResponse = yield* tunnels.list({ name: tunnelName, isDeleted: false }).pipe(
-        Effect.map((tunnels) => tunnels.result),
-        Effect.map(Arr.findFirst((tunnel) => tunnel.name === tunnelName)),
-        Effect.flatMap(
-          Option.match({
-            onSome: (tunnel) => Effect.succeed(tunnel),
-            onNone: () => tunnels.create({ name: tunnelName, configSrc: "cloudflare" }),
-          }),
-        ),
-        Effect.mapError(
-          (cause) =>
-            new ManagedEndpointProvisioningFailed({
-              userId: input.userId,
-              environmentId: input.environmentId,
-              stage: "ensure-tunnel",
-              hostname,
-              tunnelName,
-              cause,
+      const provisionTunnel = Effect.gen(function* () {
+        const tunnelResponse = yield* tunnels.list({ name: tunnelName, isDeleted: false }).pipe(
+          Effect.map((tunnels) => tunnels.result),
+          Effect.map(Arr.findFirst((tunnel) => tunnel.name === tunnelName)),
+          Effect.flatMap(
+            Option.match({
+              onSome: (tunnel) => Effect.succeed(tunnel),
+              onNone: () => tunnels.create({ name: tunnelName, configSrc: "cloudflare" }),
             }),
-        ),
-      );
-      if (!tunnelResponse.id || tunnelResponse.name !== tunnelName) {
-        return yield* new ManagedEndpointProvisioningFailed({
-          userId: input.userId,
-          environmentId: input.environmentId,
-          stage: "validate-tunnel-response",
-          reason: "invalid-tunnel-response",
-          hostname,
-          tunnelName,
-          ...(tunnelResponse.id ? { returnedTunnelId: tunnelResponse.id } : {}),
-          ...(tunnelResponse.name ? { returnedTunnelName: tunnelResponse.name } : {}),
-        });
-      }
-      const tunnel = { id: tunnelResponse.id, name: tunnelResponse.name };
-      // Gateway allocations checkpoint through the gateway store under their
-      // enrollment generation. Legacy allocations guard each step with the
-      // allocation generation and hold the claimed tunnel row while writing.
-      let tunnelGeneration = 0;
-      if (gatewayMapping && gateway) {
-        const current = yield* gateway.get(input);
-        if (!current || current.deleting || current.generation !== gatewayMapping.generation)
-          return yield* new ManagedAccess.ManagedAccessUnavailable({
-            message: "Managed gateway enrollment changed before tunnel configuration.",
-          });
-        yield* gateway
-          .checkpointAllocation({
-            userId: input.userId,
-            environmentId: input.environmentId,
-            generation: gatewayMapping.generation,
-            step: "tunnel",
-            tunnelId: tunnel.id,
-          })
-          .pipe(
-            Effect.flatMap((recorded) =>
-              recorded
-                ? Effect.void
-                : Effect.fail(
-                    new ManagedAccess.ManagedAccessUnavailable({
-                      message: "Managed gateway allocation changed before its tunnel checkpoint.",
-                    }),
-                  ),
-            ),
-            Effect.mapError(
-              (cause) =>
-                new ManagedEndpointProvisioningFailed({
-                  userId: input.userId,
-                  environmentId: input.environmentId,
-                  stage: "record-tunnel",
-                  hostname,
-                  tunnelName,
-                  tunnelId: tunnel.id,
-                  cause,
-                }),
-            ),
-          );
-      } else {
-        const recordedGeneration = yield* allocations
-          .recordTunnel({
-            userId: input.userId,
-            environmentId: input.environmentId,
-            tunnelId: tunnel.id,
-            generation: allocation.generation,
-          })
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new ManagedEndpointProvisioningFailed({
-                  userId: input.userId,
-                  environmentId: input.environmentId,
-                  stage: "record-tunnel",
-                  hostname,
-                  tunnelName,
-                  tunnelId: tunnel.id,
-                  cause,
-                }),
-            ),
-          );
-        if (recordedGeneration === null) {
-          // A newer provision can adopt this tunnel by name at any point after
-          // our claim fails. Leave it available for that provision or a retry.
+          ),
+          Effect.mapError(
+            (cause) =>
+              new ManagedEndpointProvisioningFailed({
+                userId: input.userId,
+                environmentId: input.environmentId,
+                stage: "ensure-tunnel",
+                hostname,
+                tunnelName,
+                cause,
+              }),
+          ),
+        );
+        if (!tunnelResponse.id || tunnelResponse.name !== tunnelName) {
           return yield* new ManagedEndpointProvisioningFailed({
             userId: input.userId,
             environmentId: input.environmentId,
-            stage: "record-tunnel",
-            reason: "claim-lost",
+            stage: "validate-tunnel-response",
+            reason: "invalid-tunnel-response",
             hostname,
             tunnelName,
-            tunnelId: tunnel.id,
+            ...(tunnelResponse.id ? { returnedTunnelId: tunnelResponse.id } : {}),
+            ...(tunnelResponse.name ? { returnedTunnelName: tunnelResponse.name } : {}),
           });
         }
-        tunnelGeneration = recordedGeneration;
-      }
-      const withTunnelClaim = <A, E, R>(
-        effect: Effect.Effect<A, E, R>,
-      ): Effect.Effect<
-        Option.Option<A>,
-        E | ManagedEndpointAllocations.ManagedEndpointAllocationPersistenceError,
-        R
-      > =>
-        gatewayMapping && gateway
-          ? Effect.asSome(effect)
-          : allocations.withClaimedTunnel(
-              {
-                userId: input.userId,
-                environmentId: input.environmentId,
-                tunnelId: tunnel.id,
-                generation: tunnelGeneration,
-              },
-              effect,
+        const tunnel = { id: tunnelResponse.id, name: tunnelResponse.name };
+        // Gateway allocations checkpoint through the gateway store under their
+        // enrollment generation. Legacy allocations guard each step with the
+        // allocation generation and hold the claimed tunnel row while writing.
+        let tunnelGeneration = 0;
+        if (gatewayMapping && gateway) {
+          const current = yield* gateway.get(input);
+          if (!current || current.deleting || current.generation !== gatewayMapping.generation)
+            return yield* new ManagedAccess.ManagedAccessUnavailable({
+              message: "Managed gateway enrollment changed before tunnel configuration.",
+            });
+          yield* gateway
+            .checkpointAllocation({
+              userId: input.userId,
+              environmentId: input.environmentId,
+              generation: gatewayMapping.generation,
+              step: "tunnel",
+              tunnelId: tunnel.id,
+            })
+            .pipe(
+              Effect.flatMap((recorded) =>
+                recorded
+                  ? Effect.void
+                  : Effect.fail(
+                      new ManagedAccess.ManagedAccessUnavailable({
+                        message: "Managed gateway allocation changed before its tunnel checkpoint.",
+                      }),
+                    ),
+              ),
+              Effect.mapError(
+                (cause) =>
+                  new ManagedEndpointProvisioningFailed({
+                    userId: input.userId,
+                    environmentId: input.environmentId,
+                    stage: "record-tunnel",
+                    hostname,
+                    tunnelName,
+                    tunnelId: tunnel.id,
+                    cause,
+                  }),
+              ),
             );
+        } else {
+          const recordedGeneration = yield* allocations
+            .recordTunnel({
+              userId: input.userId,
+              environmentId: input.environmentId,
+              tunnelId: tunnel.id,
+              generation: allocation.generation,
+            })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ManagedEndpointProvisioningFailed({
+                    userId: input.userId,
+                    environmentId: input.environmentId,
+                    stage: "record-tunnel",
+                    hostname,
+                    tunnelName,
+                    tunnelId: tunnel.id,
+                    cause,
+                  }),
+              ),
+            );
+          if (recordedGeneration === null) {
+            // A newer provision can adopt this tunnel by name at any point after
+            // our claim fails. Leave it available for that provision or a retry.
+            return yield* new ManagedEndpointProvisioningFailed({
+              userId: input.userId,
+              environmentId: input.environmentId,
+              stage: "record-tunnel",
+              reason: "claim-lost",
+              hostname,
+              tunnelName,
+              tunnelId: tunnel.id,
+            });
+          }
+          tunnelGeneration = recordedGeneration;
+        }
+        const withTunnelClaim = <A, E, R>(
+          effect: Effect.Effect<A, E, R>,
+        ): Effect.Effect<
+          Option.Option<A>,
+          E | ManagedEndpointAllocations.ManagedEndpointAllocationPersistenceError,
+          R
+        > =>
+          gatewayMapping && gateway
+            ? Effect.asSome(effect)
+            : allocations.withClaimedTunnel(
+                {
+                  userId: input.userId,
+                  environmentId: input.environmentId,
+                  tunnelId: tunnel.id,
+                  generation: tunnelGeneration,
+                },
+                effect,
+              );
 
-      const configured = yield* withTunnelClaim(
-        tunnels
-          .putConfiguration(tunnel.id, {
-            ingress: managedEndpointIngress({ hostname, origin: input.origin, gatewayMapping }),
-          })
-          .pipe(
-            Effect.mapError(
-              (cause) =>
+        const configured = yield* withTunnelClaim(
+          tunnels
+            .putConfiguration(tunnel.id, {
+              ingress: managedEndpointIngress({ hostname, origin: input.origin, gatewayMapping }),
+            })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ManagedEndpointProvisioningFailed({
+                    userId: input.userId,
+                    environmentId: input.environmentId,
+                    stage: "configure-tunnel",
+                    hostname,
+                    tunnelName,
+                    tunnelId: tunnel.id,
+                    cause,
+                  }),
+              ),
+            ),
+        ).pipe(
+          Effect.catchTags({
+            ManagedEndpointAllocationPersistenceError: (cause) =>
+              Effect.fail(
                 new ManagedEndpointProvisioningFailed({
                   userId: input.userId,
                   environmentId: input.environmentId,
@@ -1629,192 +1675,71 @@ export const make = Effect.gen(function* () {
                   tunnelId: tunnel.id,
                   cause,
                 }),
-            ),
-          ),
-      ).pipe(
-        Effect.catchTags({
-          ManagedEndpointAllocationPersistenceError: (cause) =>
-            Effect.fail(
-              new ManagedEndpointProvisioningFailed({
-                userId: input.userId,
-                environmentId: input.environmentId,
-                stage: "configure-tunnel",
-                hostname,
-                tunnelName,
-                tunnelId: tunnel.id,
-                cause,
-              }),
-            ),
-        }),
-      );
-      if (Option.isNone(configured)) {
-        return yield* new ManagedEndpointProvisioningFailed({
-          userId: input.userId,
-          environmentId: input.environmentId,
-          stage: "configure-tunnel",
-          reason: "claim-lost",
-          hostname,
-          tunnelName,
-          tunnelId: tunnel.id,
-        });
-      }
-
-      const dnsRecord = {
-        type: "CNAME",
-        name: hostname,
-        content: `${tunnel.id}.cfargotunnel.com`,
-        ttl: 1,
-        proxied: true,
-      } as const;
-
-      let dnsRecordId: string;
-      let dnsGeneration = 0;
-      if (gatewayMapping && gateway) {
-        dnsRecordId = yield* ensureGatewayDnsRecord(dnsRecord).pipe(
-          Effect.mapError(
-            (cause) =>
-              new ManagedEndpointProvisioningFailed({
-                userId: input.userId,
-                environmentId: input.environmentId,
-                stage: "ensure-dns-record",
-                hostname,
-                tunnelName,
-                tunnelId: tunnel.id,
-                ...(allocation.dnsRecordId === null ? {} : { dnsRecordId: allocation.dnsRecordId }),
-                cause,
-              }),
-          ),
+              ),
+          }),
         );
-        const recordedDnsRecordId = dnsRecordId;
-        yield* gateway
-          .checkpointAllocation({
+        if (Option.isNone(configured)) {
+          return yield* new ManagedEndpointProvisioningFailed({
             userId: input.userId,
             environmentId: input.environmentId,
-            generation: gatewayMapping.generation,
-            step: "dns",
-            dnsRecordId: recordedDnsRecordId,
-          })
-          .pipe(
-            Effect.flatMap((recorded) =>
-              recorded
-                ? Effect.void
-                : Effect.fail(
-                    new ManagedAccess.ManagedAccessUnavailable({
-                      message: "Managed gateway allocation changed before its DNS checkpoint.",
-                    }),
-                  ),
-            ),
+            stage: "configure-tunnel",
+            reason: "claim-lost",
+            hostname,
+            tunnelName,
+            tunnelId: tunnel.id,
+          });
+        }
+
+        const dnsRecord = {
+          type: "CNAME",
+          name: hostname,
+          content: `${tunnel.id}.cfargotunnel.com`,
+          ttl: 1,
+          proxied: true,
+        } as const;
+
+        let dnsRecordId: string;
+        let dnsGeneration = 0;
+        if (gatewayMapping && gateway) {
+          dnsRecordId = yield* ensureGatewayDnsRecord(dnsRecord).pipe(
             Effect.mapError(
               (cause) =>
                 new ManagedEndpointProvisioningFailed({
                   userId: input.userId,
                   environmentId: input.environmentId,
-                  stage: "record-dns",
+                  stage: "ensure-dns-record",
                   hostname,
                   tunnelName,
                   tunnelId: tunnel.id,
-                  dnsRecordId: recordedDnsRecordId,
+                  ...(allocation.dnsRecordId === null
+                    ? {}
+                    : { dnsRecordId: allocation.dnsRecordId }),
                   cause,
                 }),
             ),
           );
-
-        const originDnsRecordId = yield* ensureGatewayDnsRecord({
-          ...dnsRecord,
-          name: gatewayMapping.originHostname,
-        }).pipe(
-          Effect.mapError(
-            (cause) =>
-              new ManagedEndpointProvisioningFailed({
-                ...input,
-                stage: "gateway-enrollment",
-                cause,
-              }),
-          ),
-        );
-        const recorded = yield* gateway.recordOriginDns({
-          userId: input.userId,
-          environmentId: input.environmentId,
-          generation: gatewayMapping.generation,
-          originDnsRecordId,
-        });
-        if (!recorded)
-          return yield* new ManagedAccess.ManagedAccessUnavailable({
-            message: "Managed gateway enrollment changed during DNS setup.",
-          });
-      } else {
-        const recordedDns = yield* allocations
-          .withClaimedTunnel(
-            {
+          const recordedDnsRecordId = dnsRecordId;
+          yield* gateway
+            .checkpointAllocation({
               userId: input.userId,
               environmentId: input.environmentId,
+              generation: gatewayMapping.generation,
+              step: "dns",
               tunnelId: tunnel.id,
-              generation: tunnelGeneration,
-            },
-            Effect.gen(function* () {
-              const ensuredDnsRecordId = yield* ensureDnsRecord(
-                hostname,
-                allocation.dnsRecordId,
-                dnsRecord,
-              ).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new ManagedEndpointProvisioningFailed({
-                      userId: input.userId,
-                      environmentId: input.environmentId,
-                      stage: "ensure-dns-record",
-                      hostname,
-                      tunnelName,
-                      tunnelId: tunnel.id,
-                      ...(allocation.dnsRecordId === null
-                        ? {}
-                        : { dnsRecordId: allocation.dnsRecordId }),
-                      cause,
-                    }),
-                ),
-              );
-              const recordedGeneration = yield* allocations
-                .recordDns({
-                  userId: input.userId,
-                  environmentId: input.environmentId,
-                  dnsRecordId: ensuredDnsRecordId,
-                  tunnelId: tunnel.id,
-                  generation: tunnelGeneration,
-                })
-                .pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new ManagedEndpointProvisioningFailed({
-                        userId: input.userId,
-                        environmentId: input.environmentId,
-                        stage: "record-dns",
-                        hostname,
-                        tunnelName,
-                        tunnelId: tunnel.id,
-                        dnsRecordId: ensuredDnsRecordId,
-                        cause,
+              dnsRecordId: recordedDnsRecordId,
+            })
+            .pipe(
+              Effect.flatMap((recorded) =>
+                recorded
+                  ? Effect.void
+                  : Effect.fail(
+                      new ManagedAccess.ManagedAccessUnavailable({
+                        message: "Managed gateway allocation changed before its DNS checkpoint.",
                       }),
-                  ),
-                );
-              if (recordedGeneration === null) {
-                return yield* new ManagedEndpointProvisioningFailed({
-                  userId: input.userId,
-                  environmentId: input.environmentId,
-                  stage: "record-dns",
-                  reason: "claim-lost",
-                  hostname,
-                  tunnelName,
-                  tunnelId: tunnel.id,
-                  dnsRecordId: ensuredDnsRecordId,
-                });
-              }
-              return { dnsRecordId: ensuredDnsRecordId, dnsGeneration: recordedGeneration };
-            }),
-          )
-          .pipe(
-            Effect.catchTags({
-              ManagedEndpointAllocationPersistenceError: (cause) =>
-                Effect.fail(
+                    ),
+              ),
+              Effect.mapError(
+                (cause) =>
                   new ManagedEndpointProvisioningFailed({
                     userId: input.userId,
                     environmentId: input.environmentId,
@@ -1822,86 +1747,219 @@ export const make = Effect.gen(function* () {
                     hostname,
                     tunnelName,
                     tunnelId: tunnel.id,
+                    dnsRecordId: recordedDnsRecordId,
                     cause,
                   }),
-                ),
-            }),
-          );
-        if (Option.isNone(recordedDns)) {
-          return yield* new ManagedEndpointProvisioningFailed({
-            userId: input.userId,
-            environmentId: input.environmentId,
-            stage: "record-dns",
-            reason: "claim-lost",
-            hostname,
-            tunnelName,
-            tunnelId: tunnel.id,
-          });
-        }
-        dnsRecordId = recordedDns.value.dnsRecordId;
-        dnsGeneration = recordedDns.value.dnsGeneration;
-      }
+              ),
+            );
 
-      const connectorToken = yield* tunnels.getToken(tunnel.id).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ManagedEndpointProvisioningFailed({
-              userId: input.userId,
-              environmentId: input.environmentId,
-              stage: "get-tunnel-token",
-              hostname,
-              tunnelName,
-              tunnelId: tunnel.id,
-              dnsRecordId,
-              cause,
-            }),
-        ),
-      );
-      const markReadyFailed = (cause?: unknown) =>
-        new ManagedEndpointProvisioningFailed({
-          userId: input.userId,
-          environmentId: input.environmentId,
-          stage: "mark-allocation-ready",
-          hostname,
-          tunnelName,
-          tunnelId: tunnel.id,
-          dnsRecordId,
-          ...(cause === undefined ? { reason: "claim-lost" as const } : { cause }),
-        });
-      if (gatewayMapping && gateway) {
-        yield* gateway
-          .checkpointAllocation({
+          const originDnsRecordId = yield* ensureGatewayDnsRecord({
+            ...dnsRecord,
+            name: gatewayMapping.originHostname,
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ManagedEndpointProvisioningFailed({
+                  ...input,
+                  stage: "gateway-enrollment",
+                  cause,
+                }),
+            ),
+          );
+          const recorded = yield* gateway.recordOriginDns({
             userId: input.userId,
             environmentId: input.environmentId,
             generation: gatewayMapping.generation,
-            step: "ready",
-          })
-          .pipe(
-            Effect.flatMap((recorded) =>
-              recorded
-                ? Effect.void
-                : Effect.fail(
-                    new ManagedAccess.ManagedAccessUnavailable({
-                      message: "Managed gateway allocation changed before activation.",
+            originDnsRecordId,
+          });
+          if (!recorded)
+            return yield* new ManagedAccess.ManagedAccessUnavailable({
+              message: "Managed gateway enrollment changed during DNS setup.",
+            });
+        } else {
+          const recordedDns = yield* allocations
+            .withClaimedTunnel(
+              {
+                userId: input.userId,
+                environmentId: input.environmentId,
+                tunnelId: tunnel.id,
+                generation: tunnelGeneration,
+              },
+              Effect.gen(function* () {
+                const ensuredDnsRecordId = yield* ensureDnsRecord(
+                  hostname,
+                  allocation.dnsRecordId,
+                  dnsRecord,
+                ).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ManagedEndpointProvisioningFailed({
+                        userId: input.userId,
+                        environmentId: input.environmentId,
+                        stage: "ensure-dns-record",
+                        hostname,
+                        tunnelName,
+                        tunnelId: tunnel.id,
+                        ...(allocation.dnsRecordId === null
+                          ? {}
+                          : { dnsRecordId: allocation.dnsRecordId }),
+                        cause,
+                      }),
+                  ),
+                );
+                const recordedGeneration = yield* allocations
+                  .recordDns({
+                    userId: input.userId,
+                    environmentId: input.environmentId,
+                    dnsRecordId: ensuredDnsRecordId,
+                    tunnelId: tunnel.id,
+                    generation: tunnelGeneration,
+                  })
+                  .pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new ManagedEndpointProvisioningFailed({
+                          userId: input.userId,
+                          environmentId: input.environmentId,
+                          stage: "record-dns",
+                          hostname,
+                          tunnelName,
+                          tunnelId: tunnel.id,
+                          dnsRecordId: ensuredDnsRecordId,
+                          cause,
+                        }),
+                    ),
+                  );
+                if (recordedGeneration === null) {
+                  return yield* new ManagedEndpointProvisioningFailed({
+                    userId: input.userId,
+                    environmentId: input.environmentId,
+                    stage: "record-dns",
+                    reason: "claim-lost",
+                    hostname,
+                    tunnelName,
+                    tunnelId: tunnel.id,
+                    dnsRecordId: ensuredDnsRecordId,
+                  });
+                }
+                return { dnsRecordId: ensuredDnsRecordId, dnsGeneration: recordedGeneration };
+              }),
+            )
+            .pipe(
+              Effect.catchTags({
+                ManagedEndpointAllocationPersistenceError: (cause) =>
+                  Effect.fail(
+                    new ManagedEndpointProvisioningFailed({
+                      userId: input.userId,
+                      environmentId: input.environmentId,
+                      stage: "record-dns",
+                      hostname,
+                      tunnelName,
+                      tunnelId: tunnel.id,
+                      cause,
                     }),
                   ),
-            ),
-            Effect.mapError(markReadyFailed),
-          );
-      } else {
-        const ready = yield* allocations
-          .markReady({
+              }),
+            );
+          if (Option.isNone(recordedDns)) {
+            return yield* new ManagedEndpointProvisioningFailed({
+              userId: input.userId,
+              environmentId: input.environmentId,
+              stage: "record-dns",
+              reason: "claim-lost",
+              hostname,
+              tunnelName,
+              tunnelId: tunnel.id,
+            });
+          }
+          dnsRecordId = recordedDns.value.dnsRecordId;
+          dnsGeneration = recordedDns.value.dnsGeneration;
+        }
+
+        const connectorToken = yield* tunnels.getToken(tunnel.id).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ManagedEndpointProvisioningFailed({
+                userId: input.userId,
+                environmentId: input.environmentId,
+                stage: "get-tunnel-token",
+                hostname,
+                tunnelName,
+                tunnelId: tunnel.id,
+                dnsRecordId,
+                cause,
+              }),
+          ),
+        );
+        const markReadyFailed = (cause?: unknown) =>
+          new ManagedEndpointProvisioningFailed({
             userId: input.userId,
             environmentId: input.environmentId,
+            stage: "mark-allocation-ready",
+            hostname,
+            tunnelName,
             tunnelId: tunnel.id,
-            generation: dnsGeneration,
-            origin: input.origin,
-          })
-          .pipe(Effect.mapError(markReadyFailed));
-        if (!ready) {
-          return yield* markReadyFailed();
+            dnsRecordId,
+            ...(cause === undefined ? { reason: "claim-lost" as const } : { cause }),
+          });
+        if (gatewayMapping && gateway) {
+          yield* gateway
+            .checkpointAllocation({
+              userId: input.userId,
+              environmentId: input.environmentId,
+              generation: gatewayMapping.generation,
+              step: "ready",
+              tunnelId: tunnel.id,
+              origin: input.origin,
+            })
+            .pipe(
+              Effect.flatMap((recorded) =>
+                recorded
+                  ? Effect.void
+                  : Effect.fail(
+                      new ManagedAccess.ManagedAccessUnavailable({
+                        message: "Managed gateway allocation changed before activation.",
+                      }),
+                    ),
+              ),
+              Effect.mapError(markReadyFailed),
+            );
+        } else {
+          const ready = yield* allocations
+            .markReady({
+              userId: input.userId,
+              environmentId: input.environmentId,
+              tunnelId: tunnel.id,
+              generation: dnsGeneration,
+              origin: input.origin,
+            })
+            .pipe(Effect.mapError(markReadyFailed));
+          if (!ready) {
+            return yield* markReadyFailed();
+          }
         }
-      }
+
+        return { tunnel, connectorToken };
+      });
+      const { tunnel, connectorToken } = yield* gatewayMapping && gateway
+        ? gateway
+            .withAllocation(
+              { ...input, generation: gatewayMapping.generation },
+              // External tunnel/DNS changes cannot roll back. Preserve their
+              // checkpoints for retry or unlink cleanup if a later step fails.
+              Effect.exit(provisionTunnel),
+            )
+            .pipe(
+              Effect.flatMap(Effect.fromOption),
+              Effect.catchTags({
+                NoSuchElementError: () =>
+                  new ManagedAccess.ManagedAccessUnavailable({
+                    message: "Managed gateway enrollment changed before provisioning.",
+                  }),
+              }),
+              Effect.flatten,
+            )
+        : provisionTunnel;
 
       yield* managedAccess.check(input.userId, "managedConnect", undefined, input.environmentId);
       const completed = yield* reservations.complete(reservation).pipe(

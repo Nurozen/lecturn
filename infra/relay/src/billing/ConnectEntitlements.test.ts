@@ -47,6 +47,42 @@ describe("Connect access policy", () => {
       computeConnectEntitlement({ ...facts, paidThrough: null, trialEnd: 200 }, 205, 10).allowed,
     ).toBe(false);
   });
+  it.each(["active", "past_due"])(
+    "carries a fixed renewal deadline across the paid boundary for %s subscriptions",
+    (status) => {
+      const facts = { ...base, status, paidThrough: 200 };
+      expect(computeConnectEntitlement(facts, 199, 10)).toMatchObject({
+        reason: "paid",
+        validUntil: 210,
+      });
+      for (const now of [200, 209])
+        expect(computeConnectEntitlement(facts, now, 10)).toMatchObject({
+          reason: "grace",
+          validUntil: 210,
+        });
+      expect(computeConnectEntitlement(facts, 210, 10).allowed).toBe(false);
+      expect(computeConnectEntitlement(facts, 200, 0).allowed).toBe(false);
+    },
+  );
+  it("does not extend renewal access past cancellation, termination, or financial suspension", () => {
+    for (const boundary of [{ cancelAt: 205 }, { endedAt: 205 }]) {
+      const facts = { ...base, paidThrough: 200, ...boundary };
+      expect(computeConnectEntitlement(facts, 199, 10).validUntil).toBe(205);
+      expect(computeConnectEntitlement(facts, 204, 10).reason).toBe("grace");
+      expect(computeConnectEntitlement(facts, 205, 10).allowed).toBe(false);
+    }
+    expect(
+      computeConnectEntitlement({ ...base, paidThrough: 200, suspended: true }, 205, 10).reason,
+    ).toBe("suspended");
+  });
+  it.each(["trialing", "canceled", "unpaid", "incomplete", "incomplete_expired", "paused"])(
+    "does not add renewal grace for %s subscriptions",
+    (status) => {
+      const facts = { ...base, status, paidThrough: 200 };
+      expect(computeConnectEntitlement(facts, 199, 10).validUntil).toBe(200);
+      expect(computeConnectEntitlement(facts, 200, 10).allowed).toBe(false);
+    },
+  );
   it("suspension and terminal timestamps override paid access", () => {
     expect(
       computeConnectEntitlement({ ...base, paidThrough: 300, suspended: true }, 100).reason,

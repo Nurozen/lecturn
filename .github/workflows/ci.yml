@@ -193,6 +193,20 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.test != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: relay_tests
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d relay_tests"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -253,6 +267,22 @@ jobs:
             for package in $TEST_PACKAGES; do filters+=(--filter "$package"); done
           fi
           vp run --parallel --concurrency-limit 4 "${filters[@]}" test
+
+      - name: Test relay PostgreSQL integration
+        env:
+          TEST_PACKAGES: ${{ needs.changes.outputs.test_packages }}
+          POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
+          BILLING_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/relay_tests
+        run: |
+          if [[ -n "$TEST_PACKAGES" && " $TEST_PACKAGES " != *" lecturn-relay "* ]]; then
+            exit 0
+          fi
+          for migration in infra/relay/migrations/postgres/*/migration.sql; do
+            docker exec -i "$POSTGRES_SERVICE_ID" psql -U postgres -d relay_tests -v ON_ERROR_STOP=1 < "$migration"
+          done
+          mapfile -t tests < <(git grep -l BILLING_TEST_DATABASE_URL -- ':(glob)infra/relay/src/**/*.test.ts')
+          test "${#tests[@]}" -gt 0
+          vp test run --no-file-parallelism "${tests[@]}"
 
   # The web suite is the largest outside the server. In the shared Test job it
   # started last and ran alone for about 40s after everything else finished.
