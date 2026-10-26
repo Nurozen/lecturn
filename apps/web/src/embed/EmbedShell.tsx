@@ -7,8 +7,10 @@ import { AnchoredToastProvider, ToastProvider } from "../components/ui/toast";
 import { startEmbedBridge } from "./bridge";
 import { readEmbedSwitcherVisible } from "./embedAuth";
 import { EmbedPresentationContext } from "./EmbedPresentationContext";
+import { installEmbedComposerPlaceholder } from "./embedComposerPlaceholder";
 import { installEmbedTheme } from "./embedTheme";
 import "./embed.css";
+import "./embedComposer.css";
 
 /**
  * The embed's whole chrome. It must not import the app shell (sidebar, command palette,
@@ -26,7 +28,15 @@ export function EmbedShell({
   readonly panel: EmbedPanel | null;
 }) {
   const presentation = { projectRef: scopeProjectRef(environmentId, projectId) };
-  useEffect(() => installEmbedTheme(startEmbedBridge()), []);
+  useEffect(() => {
+    const bridge = startEmbedBridge();
+    const uninstallTheme = installEmbedTheme(bridge);
+    const uninstallPlaceholder = installEmbedComposerPlaceholder(bridge);
+    return () => {
+      uninstallTheme();
+      uninstallPlaceholder();
+    };
+  }, []);
   return (
     <ToastProvider>
       <AnchoredToastProvider>

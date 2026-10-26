@@ -53,7 +53,11 @@ export function EmbedComposerFooter({
         {controls}
       </div>
       {stacked && contextual ? (
-        <div data-testid="embed-composer-footer-row" className="-ms-2.5 flex min-w-0 items-center">
+        <div
+          data-testid="embed-composer-footer-row"
+          data-embed-composer-contextual-row
+          className="-ms-2.5 flex min-w-0 items-center"
+        >
           {contextual}
         </div>
       ) : null}

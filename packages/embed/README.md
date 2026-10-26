@@ -162,7 +162,8 @@ later. `styles.variables` sets Lecturn's own CSS variables, and unknown names ar
 `--background`, `--foreground`, `--card`, `--card-foreground`, `--popover`,
 `--popover-foreground`, `--muted`, `--muted-foreground`, `--secondary`, `--secondary-foreground`,
 `--border`, `--input`, `--primary`, `--primary-foreground`, `--accent`, `--accent-foreground`,
-`--ring`, `--radius`, `--font-sans`, `--font-mono`.
+`--ring`, `--destructive` (the stop button of a running turn), `--radius`, `--font-sans`,
+`--font-mono`.
 
 `styles.css.fonts` may carry only `@font-face` rules whose sources are `data:` URLs, at most
 200 KB, because the view cannot fetch fonts from your origin. The whole theme must fit Lecturn's
@@ -174,6 +175,9 @@ later. `styles.variables` sets Lecturn's own CSS variables, and unknown names ar
   `newThread({ title?, appData? })`, `openProviders()`, `setTheme(theme)`.
 - From the view: `lecturn/navigate` (`{ ref }`), `lecturn/thread.changed` (`{ threadId }`),
   `lecturn/turn.state` (`{ threadId, state }`), `lecturn/ready` (`{ threadId }`), and `error`.
+- `composerPlaceholder` (at most 200 characters) replaces the prompt shown in the empty composer,
+  for example `"Ask for changes…"`; `setComposerPlaceholder(text | null)` changes it later, and
+  `null` brings back Lecturn's own. Prompts for approvals and questions stay Lecturn's.
 - `switcher: false` hides the view's own thread switcher when your app lists threads itself.
   `lecturn.listThreads(projectId)` and `lecturn.subscribeThreads(projectId, listener)` give you
   that list. `setThreadAppData(threadId, appData, subtitle?)` stores up to 1 KB of your own data

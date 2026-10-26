@@ -130,6 +130,24 @@ describe("host messages", () => {
     ]);
   });
 
+  it("keeps the host's composer placeholder across other changes until the host clears it", async () => {
+    const { guest } = await initialized();
+    const change = (params: object) =>
+      guest.receive({ jsonrpc: "2.0", method: "ui/notifications/host-context-changed", params });
+
+    change({ composerPlaceholder: "Ask for changes…" });
+    change({ theme: "light" });
+    expect(guest.hostContext()).toEqual({
+      ...hostContext,
+      theme: "light",
+      composerPlaceholder: "Ask for changes…",
+    });
+
+    change({ composerPlaceholder: null });
+    expect(guest.hostContext()).toEqual({ ...hostContext, theme: "light" });
+    expect(guest.hostContext()).not.toHaveProperty("composerPlaceholder");
+  });
+
   it("ignores messages over the envelope cap", async () => {
     const { guest, onHostCommand } = await initialized();
     guest.receive({

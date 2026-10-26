@@ -105,9 +105,15 @@ describe("handshake", () => {
       locale: "en-US",
       styles: { variables: theme.variables, css: { fonts: theme.fontsCss } },
     });
+    // Every token the file sends survives decode; tokens it leaves out keep Lecturn's values.
     expect(Object.keys(hostContext.styles?.variables ?? {}).toSorted()).toEqual(
-      [...EMBED_THEME_VARS].toSorted(),
+      Object.keys(theme.variables).toSorted(),
     );
+    expect(
+      Object.keys(theme.variables).every((name) =>
+        (EMBED_THEME_VARS as ReadonlyArray<string>).includes(name),
+      ),
+    ).toBe(true);
     expect(hostContext.styles?.variables?.["--background"]).toBe("#1b1e20");
     expect(isDataUrlFontFaceCss(theme.fontsCss)).toBe(true);
     const check = checkEmbedMessageSize({
@@ -137,6 +143,30 @@ describe("host theme", () => {
       styles: { variables: { "--background": "#1b1e20", "--lecturn-thread-gold": "red" } },
     });
     expect(context.styles?.variables).toEqual({ "--background": "#1b1e20" });
+  });
+
+  it("lets the host map the stop button's colour", () => {
+    const context = decode({
+      theme: "dark",
+      displayMode: "inline",
+      locale: "en",
+      styles: { variables: { "--destructive": "#61b5ad" } },
+    });
+    expect(context.styles?.variables).toEqual({ "--destructive": "#61b5ad" });
+  });
+
+  it("takes a composer placeholder, and a null one only as a change", () => {
+    const base = { theme: "dark", displayMode: "inline", locale: "en" };
+    expect(decode({ ...base, composerPlaceholder: "Ask for changes…" }).composerPlaceholder).toBe(
+      "Ask for changes…",
+    );
+    expect("composerPlaceholder" in decode(base)).toBe(false);
+    expect(() => decode({ ...base, composerPlaceholder: "" })).toThrow();
+    expect(() => decode({ ...base, composerPlaceholder: "x".repeat(201) })).toThrow();
+    expect(() => decode({ ...base, composerPlaceholder: null })).toThrow();
+    const changed = Schema.is(EMBED_HOST_NOTIFICATIONS["ui/notifications/host-context-changed"]);
+    expect(changed({ composerPlaceholder: null })).toBe(true);
+    expect(changed({ composerPlaceholder: "Ask for changes…" })).toBe(true);
   });
 
   it("caps fonts at 200 KB of UTF-8", () => {

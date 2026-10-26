@@ -15,6 +15,7 @@ import {
   type EmbedGuestRequestParams,
   type EmbedGuestRequestResult,
   type EmbedHostContext,
+  type EmbedHostContextChanged,
   type EmbedHostNotificationMethod,
   type EmbedHostNotificationParams,
   type EmbedJsonRpcId,
@@ -182,7 +183,15 @@ export function makeEmbedGuest(options: EmbedGuestOptions): EmbedGuest {
     const decoded = hostNotificationDecoders[method]?.(params ?? {});
     if (decoded === undefined || decoded._tag === "None") return;
     if (method === "ui/notifications/host-context-changed") {
-      if (context !== null) setContext({ ...context, ...(decoded.value as object) });
+      if (context === null) return;
+      const { composerPlaceholder, ...changed } = decoded.value as EmbedHostContextChanged;
+      const { composerPlaceholder: current, ...rest } = context;
+      const placeholder = composerPlaceholder === undefined ? current : composerPlaceholder;
+      setContext({
+        ...rest,
+        ...changed,
+        ...(placeholder ? { composerPlaceholder: placeholder } : {}),
+      });
       return;
     }
     options.onHostCommand?.({ method, params: decoded.value } as EmbedHostCommand);

@@ -143,6 +143,7 @@ import { AppRefChipStrip } from "../embed/AppRefChipStrip";
 import { EmbedComposerFooter, useEmbedComposerFooterStacked } from "../embed/EmbedComposerFooter";
 import { foldAppRefChips, useAppRefChipStore } from "../embed/appRefChipStore";
 import type { EmbedMention } from "../../embed/hostCommands";
+import { useEmbedComposerPlaceholder } from "../../embed/embedComposerPlaceholder";
 import { ComposerStashMenu } from "./ComposerStashMenu";
 import { useComposerMenuState } from "./useComposerMenuState";
 import { useComposerTriggerState } from "./useComposerTriggerState";
@@ -4850,6 +4851,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const embedFooterStacked = useEmbedComposerFooterStacked(
     !composerControlsCollapsed && !showProviderUnavailable,
   );
+  const embedComposerPlaceholder = useEmbedComposerPlaceholder();
   const [restingActionsElement, setRestingActionsElement] = useState<HTMLDivElement | null>(null);
   const [restingActionsWidth, setRestingActionsWidth] = useState<number | null>(null);
   useLayoutEffect(() => {
@@ -7304,11 +7306,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                 ? "Enable a provider in Settings to send a message"
                                 : phase === "disconnected"
                                   ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                  : isComposerResting
-                                    ? showComposerAttachAction
-                                      ? "Ask for changes, send follow-ups, or attach files"
-                                      : "Ask for changes or send a follow-up"
-                                    : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                                  : embedComposerPlaceholder !== null
+                                    ? embedComposerPlaceholder
+                                    : isComposerResting
+                                      ? showComposerAttachAction
+                                        ? "Ask for changes, send follow-ups, or attach files"
+                                        : "Ask for changes or send a follow-up"
+                                      : "Ask anything, @tag files/folders, $use skills, or / for commands"
                     }
                     disabled={
                       isConnecting ||
