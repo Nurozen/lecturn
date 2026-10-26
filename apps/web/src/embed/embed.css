@@ -128,6 +128,13 @@ html[data-lecturn-embed]
   white-space: nowrap;
 }
 
+/* Row text sets its own desktop size (14 px body), but the rows inherit the page's 16 px root, so
+   a host probing a row container in its narrow pane reads phone-scale type. Here the rows start
+   from the body size, so container and text agree. */
+html[data-lecturn-embed] [data-timeline-row-kind] {
+  font-size: var(--text-sm);
+}
+
 /* A sidecar thread already continued in the user's Lecturn reads back here but takes no new
    turns (D33); EmbedView marks it and shows where it continues instead of the composer. */
 [data-embed-continued="true"] [data-chat-composer-overlay="true"] {
