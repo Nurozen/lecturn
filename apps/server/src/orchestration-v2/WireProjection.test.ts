@@ -24,6 +24,7 @@ import {
 } from "./WireProjection.ts";
 import { threadShellFromProjection } from "./ProjectionStore.ts";
 import { MAX_TOOL_OUTPUT_IMAGES, toolOutputImages } from "@lecturn/shared/toolOutput";
+import { MCP_APP_OUTPUT_KEY } from "@lecturn/shared/mcpApp";
 
 const decodeTurnItem = Schema.decodeUnknownSync(OrchestrationV2TurnItem);
 const encodeTurnItemJson = Schema.encodeSync(OrchestrationV2TurnItemJson);
@@ -175,6 +176,39 @@ describe("orchestration V2 wire projection", () => {
     expect(projected).not.toBe(item);
     expect(JSON.stringify(projected).length).toBeLessThan(2_000);
     expect(projected).not.toHaveProperty("output");
+  });
+
+  it("keeps an oversized app result's card and summary", () => {
+    const card = {
+      attachmentId: "thread-1-render-html",
+      server: "lecturn",
+      tool: "rw_viewport_render",
+      resourceUri: "ui://rw/render-card",
+    };
+    const summary = { "lecturn/summary": "Iso view" };
+    const image = { type: "image", data: "A".repeat(400_000), mimeType: "image/png" };
+    for (const output of [
+      {
+        content: [image],
+        structuredContent: { [MCP_APP_OUTPUT_KEY]: card, result: { content: [image] } },
+        _meta: summary,
+      },
+      // The envelope as text, beside a body too large to parse.
+      {
+        content: [
+          { type: "text", text: JSON.stringify({ [MCP_APP_OUTPUT_KEY]: card, result: {} }) },
+          { type: "text", text: "x".repeat(100_000) },
+        ],
+        _meta: summary,
+      },
+    ]) {
+      const projected = projectTurnItemForWire({ ...base, output });
+      expect(projected).toMatchObject({
+        outputOmitted: true,
+        output: { [MCP_APP_OUTPUT_KEY]: card, _meta: summary },
+      });
+      expect(JSON.stringify(projected).length).toBeLessThan(2_000);
+    }
   });
 
   it("omits even small dynamic tool results while retaining input", () => {

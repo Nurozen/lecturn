@@ -126,6 +126,7 @@ import {
   MCP_APP_RESOURCE_SCHEME,
 } from "@lecturn/shared/mcpApp";
 import { snapshotMcpApp } from "../../mcpApps/McpAppSnapshot.ts";
+import { codexMcpToolResult } from "./codexMcpToolResult.ts";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
@@ -455,7 +456,7 @@ export interface CodexDynamicToolProjection extends McpToolPresentation {
 function codexMcpToolOutput(
   item: Extract<CodexDynamicToolItem, { readonly type: "mcpToolCall" }>,
 ): unknown | undefined {
-  const resultOutput = mcpToolResultOutput(item.result);
+  const resultOutput = mcpToolResultOutput(codexMcpToolResult(item.result));
 
   if (item.error === null || item.error === undefined) {
     return resultOutput;
@@ -3911,7 +3912,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   ? artifacts.turnItem
                   : {
                       ...artifacts.turnItem,
-                      output: { [MCP_APP_OUTPUT_KEY]: reference, result: item.result },
+                      output: {
+                        [MCP_APP_OUTPUT_KEY]: reference,
+                        result: codexMcpToolResult(item.result),
+                      },
                     };
               yield* emitProviderEvent({
                 type: "node.updated",
