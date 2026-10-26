@@ -1,6 +1,10 @@
+import { OrchestrationMessageContext } from "@lecturn/contracts";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  appReferenceContextRecords,
+  appReferenceLabelsFromRecords,
   expandAppOpenUrl,
   findAppReferences,
   formatAppReferenceHref,
@@ -141,5 +145,64 @@ describe("promptWithAppReferences", () => {
       "Look at rw:c/fins",
     );
     expect(promptWithAppReferences("Hi", [])).toBe("Hi");
+  });
+});
+
+const encodeContextJson = Schema.encodeUnknownSync(Schema.toCodecJson(OrchestrationMessageContext));
+const decodeContextJson = Schema.decodeUnknownSync(Schema.toCodecJson(OrchestrationMessageContext));
+
+describe("app reference labels on a message", () => {
+  it("survive the wire and storage as message context, beside the message's other records", () => {
+    const records = appReferenceContextRecords([
+      { ref: "rw:c/fins", label: "Fins" },
+      { ref: "rw:cfg/baseline", label: "  Baseline config  " },
+    ]);
+    const wire = JSON.parse(
+      JSON.stringify(
+        encodeContextJson({
+          version: 1,
+          records: [
+            ...records,
+            {
+              version: 1,
+              contextId: "skill_1",
+              kind: "skill",
+              label: "Review",
+              name: "review",
+            },
+          ],
+        }),
+      ),
+    );
+    const stored = decodeContextJson(wire);
+    expect(appReferenceLabelsFromRecords(stored.records)).toEqual([
+      { ref: "rw:c/fins", label: "Fins" },
+      { ref: "rw:cfg/baseline", label: "Baseline config" },
+    ]);
+    expect(stored.records.map((record) => record.kind)).toEqual(["app-ref", "app-ref", "skill"]);
+  });
+
+  it("stores only labels that name something other than the reference, once each", () => {
+    expect(
+      appReferenceContextRecords([
+        { ref: "rw:c/fins", label: "rw:c/fins" },
+        { ref: "rw:c/nose", label: "   " },
+        { ref: "rw:c/tail", label: "Tail" },
+        { ref: "rw:c/tail", label: "Tail again" },
+      ]).map((record) => [record.contextId, record.label]),
+    ).toEqual([["app-ref-1", "Tail"]]);
+    expect(appReferenceContextRecords([{ ref: "rw:c/x", label: "x".repeat(300) }])[0]?.label).toBe(
+      "x".repeat(200),
+    );
+  });
+
+  it("ignores other kinds and malformed payloads", () => {
+    expect(
+      appReferenceLabelsFromRecords([
+        { version: 1, contextId: "a", kind: "app-ref", label: "A", payload: { ref: 7 } },
+        { version: 1, contextId: "b", kind: "app-ref", label: "B", payload: null },
+        { version: 1, contextId: "c", kind: "future", label: "C", payload: { ref: "rw:c/c" } },
+      ] as never),
+    ).toEqual([]);
   });
 });

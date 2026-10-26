@@ -15,6 +15,7 @@ import {
   EventId,
   MessageId,
   type ModelSelection,
+  type OrchestrationMessageContext,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadProjection,
   type ProjectId,
@@ -31,6 +32,10 @@ import {
 import type { ProviderInstance } from "@lecturn/provider-core/server/driver";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import type * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
+import {
+  appReferenceContextRecords,
+  appReferenceLabelsFromRecords,
+} from "@lecturn/shared/appReferences";
 import { mcpAppFromToolItem } from "@lecturn/shared/toolOutput";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -254,7 +259,12 @@ const writeFile = (relativePath: string, bytes: Uint8Array | string) =>
 const writeTurn = (
   threadId: ThreadId,
   turn: number,
-  options: { readonly image?: boolean; readonly card?: boolean } = {},
+  options: {
+    readonly image?: boolean;
+    readonly card?: boolean;
+    readonly userText?: string;
+    readonly context?: OrchestrationMessageContext;
+  } = {},
 ) =>
   Effect.gen(function* () {
     const sink = yield* EventSink.EventSinkV2;
@@ -308,7 +318,10 @@ const writeTurn = (
       createdAt: time,
       updatedAt: time,
     });
-    const user = message("user", `question ${turn}`);
+    const user = {
+      ...message("user", options.userText ?? `question ${turn}`),
+      ...(options.context === undefined ? {} : { context: options.context }),
+    };
     const assistant = message("assistant", `answer ${turn}`);
     const events: Array<OrchestrationV2DomainEvent> = [
       {
@@ -333,6 +346,7 @@ const writeTurn = (
           messageId: user.id,
           inputIntent: "turn_start",
           text: user.text,
+          ...(options.context === undefined ? {} : { context: options.context }),
           attachments,
         },
       },
@@ -607,6 +621,56 @@ describe("ThreadCopyService", () => {
           }),
         );
       }),
+  );
+
+  it.effect("carries the labels a user's reference chips stored on a message into the copy", () =>
+    Effect.gen(function* () {
+      const sidecar = yield* startEnvironment("sidecar");
+      const user = yield* startEnvironment("user");
+      const context = {
+        version: 1 as const,
+        records: appReferenceContextRecords([
+          { ref: "rw:c/fins", label: "Fins" },
+          { ref: "rw:cfg/baseline", label: "Baseline" },
+        ]),
+      };
+      const source = yield* sidecar.run(
+        Effect.gen(function* () {
+          const thread = yield* createSourceThread("/work/rocket", "Fin study");
+          yield* writeTurn(thread.threadId, 1, {
+            userText: "rw:c/fins rw:cfg/baseline\n\nSize these.",
+            context,
+          });
+          return thread;
+        }),
+      );
+      const bundle = yield* sidecar.run(exportAll);
+      yield* sidecar.stop;
+      yield* user.run(importBundle(bundle));
+
+      yield* user.run(
+        Effect.gen(function* () {
+          const projection = yield* projectionOf(
+            copyThreadId(sidecar.environmentId, source.threadId),
+          );
+          const message = projection.messages.find((entry) => entry.role === "user");
+          const item = projection.visibleTurnItems.find(
+            (row) => row.item.type === "user_message",
+          )?.item;
+          const expected = [
+            { ref: "rw:c/fins", label: "Fins" },
+            { ref: "rw:cfg/baseline", label: "Baseline" },
+          ];
+          assert.strictEqual(message?.text, "rw:c/fins rw:cfg/baseline\n\nSize these.");
+          assert.deepEqual(
+            appReferenceLabelsFromRecords(message?.context?.records ?? []),
+            expected,
+          );
+          assert.ok(item?.type === "user_message");
+          assert.deepEqual(appReferenceLabelsFromRecords(item.context?.records ?? []), expected);
+        }),
+      );
+    }),
   );
 
   it.effect("a second import of the same bundle changes nothing", () =>

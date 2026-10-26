@@ -236,6 +236,31 @@ describe("embed bridge", { concurrent: false }, () => {
     ]);
   });
 
+  it("asks the host to name references in batches it allows, keeping only names for what it asked", async () => {
+    const { win, posted, deliver, answer } = makeFrameWindow();
+    const bridge = startDeclared(win);
+    answer("ui/initialize", initializeResult);
+    await flushMicrotasks();
+
+    const refs = Array.from({ length: 65 }, (_, index) => `rw:c/${index}`);
+    const described = bridge?.describeRefs(refs);
+    await flushMicrotasks();
+    const first = posted.find((entry) => entry.message.method === "lecturn/appRefs.describe");
+    expect(first?.message.params).toEqual({ refs: refs.slice(0, 64) });
+    deliver({
+      jsonrpc: "2.0",
+      id: first?.message.id,
+      result: { labels: { "rw:c/0": "Fins", "rw:other": "Not asked" } },
+    });
+    await flushMicrotasks();
+    await flushMicrotasks();
+    const second = posted.findLast((entry) => entry.message.method === "lecturn/appRefs.describe");
+    expect(second?.message.params).toEqual({ refs: ["rw:c/64"] });
+    deliver({ jsonrpc: "2.0", id: second?.message.id, result: { labels: { "rw:c/64": "Nose" } } });
+
+    await expect(described).resolves.toEqual({ "rw:c/0": "Fins", "rw:c/64": "Nose" });
+  });
+
   it.effect("asks the host for a new token before expiry, then reconnects with it", () =>
     Effect.gen(function* () {
       const { win, onPost, deliver, answer } = makeFrameWindow();

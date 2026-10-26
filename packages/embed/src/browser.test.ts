@@ -211,4 +211,60 @@ describe("mountEmbed", () => {
     await settled();
     expect(posted).toEqual([]);
   });
+
+  it("names the guest's references through the host's resolver, keeping only answers it can show", async () => {
+    const asked: Array<ReadonlyArray<string>> = [];
+    const { posted, fromGuest, settled, handshake } = harness({
+      onDescribeRefs: async (refs) => {
+        asked.push(refs);
+        return {
+          "rw:c/fins": "  Fins  ",
+          "rw:cfg/baseline": "",
+          "rw:not-asked": "Stray",
+          ...({ "rw:c/nose": 7 } as unknown as Record<string, string>),
+        };
+      },
+    });
+    await handshake();
+    const describe = (id: string, refs: unknown) =>
+      fromGuest({ jsonrpc: "2.0", id, method: "lecturn/appRefs.describe", params: { refs } });
+    describe("d1", ["rw:c/fins", "rw:cfg/baseline", "rw:c/nose"]);
+    describe("d2", []);
+    await settled();
+
+    expect(asked).toEqual([["rw:c/fins", "rw:cfg/baseline", "rw:c/nose"]]);
+    const reply = (id: string) => posted.find((entry) => entry.message.id === id)?.message;
+    expect(reply("d1")?.result).toEqual({ labels: { "rw:c/fins": "Fins" } });
+    expect(reply("d2")?.error?.code).toBe(-32602);
+  });
+
+  it("tells the guest no reference has a name when the host has no resolver or it fails", async () => {
+    const plain = harness();
+    await plain.handshake();
+    plain.fromGuest({
+      jsonrpc: "2.0",
+      id: "d1",
+      method: "lecturn/appRefs.describe",
+      params: { refs: ["rw:c/fins"] },
+    });
+    await plain.settled();
+    expect(plain.posted.find((entry) => entry.message.id === "d1")?.message.result).toEqual({
+      labels: {},
+    });
+
+    const failing = harness({
+      onDescribeRefs: () => {
+        throw new Error("lookup failed");
+      },
+    });
+    await failing.handshake();
+    failing.fromGuest({
+      jsonrpc: "2.0",
+      id: "d2",
+      method: "lecturn/appRefs.describe",
+      params: { refs: ["rw:c/fins"] },
+    });
+    await failing.settled();
+    expect(failing.posted.find((entry) => entry.message.id === "d2")?.message.error).toBeDefined();
+  });
 });

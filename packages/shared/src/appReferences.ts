@@ -1,3 +1,10 @@
+import type {
+  ComposerContextId,
+  ComposerContextKind,
+  ComposerContextRecord,
+  UnknownContextRecord,
+} from "@lecturn/contracts";
+
 /**
  * Splits text into plain runs and app references such as `rw:c/fins`, for an
  * app's registered `refPrefixes`. Kept apart from `composerInlineTokens`, whose
@@ -120,4 +127,52 @@ export function promptWithAppReferences(prompt: string, refs: ReadonlyArray<stri
   if (added.length === 0) return prompt;
   const line = added.join(" ");
   return prompt.trim().length === 0 ? line : `${line}\n\n${prompt}`;
+}
+
+/** A reference with the name its app gave it, as the host's chip showed it. */
+export interface AppReferenceLabel {
+  readonly ref: string;
+  readonly label: string;
+}
+
+/**
+ * Labels ride on the message as context records of a kind of their own. Lecturn renders no record
+ * chip for it and the agent never reads it: only referenced records reach either, and nothing in
+ * the text references these. The reference itself stays in the text.
+ */
+export const APP_REFERENCE_CONTEXT_KIND = "app-ref";
+// The bound `ContextLabel` puts on every record (COMPOSER_CONTEXT_LABEL_MAX_CHARS).
+const CONTEXT_LABEL_MAX_CHARS = 200;
+
+export function appReferenceContextRecords(
+  labels: ReadonlyArray<AppReferenceLabel>,
+): UnknownContextRecord[] {
+  const seen = new Set<string>();
+  const records: UnknownContextRecord[] = [];
+  for (const { ref, label } of labels) {
+    const name = label.trim().slice(0, CONTEXT_LABEL_MAX_CHARS);
+    if (ref.length === 0 || name.length === 0 || name === ref || seen.has(ref)) continue;
+    seen.add(ref);
+    records.push({
+      version: 1,
+      contextId: `app-ref-${records.length + 1}` as ComposerContextId,
+      kind: APP_REFERENCE_CONTEXT_KIND as ComposerContextKind,
+      label: name,
+      payload: { ref },
+    });
+  }
+  return records;
+}
+
+export function appReferenceLabelsFromRecords(
+  records: ReadonlyArray<ComposerContextRecord>,
+): AppReferenceLabel[] {
+  return records.flatMap((record) => {
+    if (record.kind !== APP_REFERENCE_CONTEXT_KIND || !("payload" in record)) return [];
+    const payload = record.payload as { readonly ref?: unknown } | null;
+    const ref = typeof payload === "object" && payload !== null ? payload.ref : undefined;
+    return typeof ref === "string" && ref.length > 0 && record.label.length > 0
+      ? [{ ref, label: record.label }]
+      : [];
+  });
 }

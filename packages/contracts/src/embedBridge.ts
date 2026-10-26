@@ -269,12 +269,25 @@ export const EmbedNavigateParams = Schema.Struct({ ref });
 export const EmbedThreadChangedParams = Schema.Struct({ threadId: Schema.NullOr(threadId) });
 export const EmbedTurnStateParams = Schema.Struct({ threadId, state: EmbedTurnState });
 export const EmbedReadyParams = Schema.Struct({ threadId: Schema.NullOr(threadId) });
+/** Most references one `lecturn/appRefs.describe` names; the guest splits a longer list. */
+export const EMBED_DESCRIBE_REFS_MAX = 64;
+const refLabel = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256));
+export const EmbedDescribeRefsParams = Schema.Struct({
+  refs: Schema.Array(ref).check(Schema.isMinLength(1), Schema.isMaxLength(EMBED_DESCRIBE_REFS_MAX)),
+});
+/** Labels by reference; a reference the host cannot name is left out and shows as itself. */
+export const EmbedDescribeRefsResult = Schema.Struct({
+  labels: Schema.Record(Schema.String, refLabel),
+});
+export type EmbedDescribeRefsResult = typeof EmbedDescribeRefsResult.Type;
 
 /** Requests the guest sends to the host, with their results. */
 export const EMBED_GUEST_REQUESTS = {
   "ui/initialize": { params: EmbedInitializeParams, result: EmbedInitializeResult },
   "ui/open-link": { params: EmbedOpenLinkParams, result: empty },
   "lecturn/token.refresh": { params: empty, result: EmbedTokenRefreshResult },
+  // Names the app references a thread shows that no message stored a label for.
+  "lecturn/appRefs.describe": { params: EmbedDescribeRefsParams, result: EmbedDescribeRefsResult },
 } as const;
 
 /** Notifications the guest sends to the host. */

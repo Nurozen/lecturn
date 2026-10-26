@@ -6,6 +6,8 @@ export type { EmbedViewErrorReason } from "./electron/errors.ts";
 export type {
   EmbedBridgeEvent,
   EmbedBridgeEvents,
+  EmbedDescribeRefs,
+  EmbedRefLabels,
   EmbedThemeInput,
 } from "./electron/hostBridge.ts";
 export { mountEmbedView } from "./electron/mountEmbedView.ts";

@@ -27,6 +27,7 @@ import {
   createEmbedHostSession,
   type EmbedBridgeEvent,
   type EmbedBridgeEvents,
+  type EmbedDescribeRefs,
   type EmbedThemeInput,
   hostContextFor,
 } from "./hostBridge.ts";
@@ -56,6 +57,11 @@ interface MountEmbedViewBaseOptions {
   readonly bounds: Electron.Rectangle;
   readonly switcher?: boolean;
   readonly webPreferences?: EmbedWebPreferences;
+  /**
+   * Names the references a thread shows that no message stored a name for, such as ones the agent
+   * wrote. Without it, or for a reference it leaves out, the chip shows the reference itself.
+   */
+  readonly onDescribeRefs?: EmbedDescribeRefs;
   /** Test only: pins the guest's Date to this epoch millisecond value. */
   readonly freezeClock?: number;
 }
@@ -188,6 +194,7 @@ export function mountEmbedView(
       }
       await Electron.shell.openExternal(url);
     },
+    ...(options.onDescribeRefs === undefined ? {} : { describeRefs: options.onDescribeRefs }),
     emit: (event, payload) => {
       if (event === "lecturn/thread.changed") {
         const changed = payload as EmbedBridgeEvents["lecturn/thread.changed"];

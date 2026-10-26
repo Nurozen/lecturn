@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
 import {
+  EMBED_DESCRIBE_REFS_MAX,
   EMBED_FONTS_CSS_MAX_BYTES,
   EMBED_GUEST_NOTIFICATIONS,
   EMBED_GUEST_REQUESTS,
@@ -200,6 +201,7 @@ describe("method payloads", () => {
       "ui/initialize": embedInitializeParams(),
       "ui/open-link": { url: "rw:c/fins" },
       "lecturn/token.refresh": {},
+      "lecturn/appRefs.describe": { refs: ["rw:c/fins", "rw:cfg/baseline"] },
       "ui/notifications/initialized": {},
       "ui/notifications/size-changed": { height: 640 },
       "lecturn/navigate": { ref: "rw:c/fins" },
@@ -231,5 +233,15 @@ describe("method payloads", () => {
     expect(is({ appData: "x".repeat(1024) })).toBe(true);
     expect(is({ appData: "x".repeat(1025) })).toBe(false);
     expect(isTurnState({ threadId: "t", state: "busy" })).toBe(false);
+  });
+
+  it("bounds a label request and its answer", () => {
+    const { params, result } = EMBED_GUEST_REQUESTS["lecturn/appRefs.describe"];
+    const refs = (count: number) => Array.from({ length: count }, (_, index) => `rw:c/${index}`);
+    expect(Schema.is(params)({ refs: [] })).toBe(false);
+    expect(Schema.is(params)({ refs: refs(EMBED_DESCRIBE_REFS_MAX) })).toBe(true);
+    expect(Schema.is(params)({ refs: refs(EMBED_DESCRIBE_REFS_MAX + 1) })).toBe(false);
+    expect(Schema.is(result)({ labels: { "rw:c/fins": "Fins" } })).toBe(true);
+    expect(Schema.is(result)({ labels: { "rw:c/fins": "" } })).toBe(false);
   });
 });

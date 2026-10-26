@@ -1,6 +1,10 @@
 import { makeEmbedGuest, type EmbedHostCommand } from "@lecturn/client-runtime/embed/guest";
 import { matchesAppEmbedOrigin, type AppEmbedOrigin } from "@lecturn/contracts";
-import type { EmbedHostContext, EmbedTurnState } from "@lecturn/contracts/embedBridge";
+import {
+  EMBED_DESCRIBE_REFS_MAX,
+  type EmbedHostContext,
+  type EmbedTurnState,
+} from "@lecturn/contracts/embedBridge";
 
 import { readEmbedParentOrigin } from "./embedAuth";
 import { setEmbedTokenRefresher } from "./embedPrimaryAuth";
@@ -83,6 +87,8 @@ export interface EmbedBridge {
   readonly navigate: (ref: string) => void;
   /** Asks the host to open a link outside the view (`ui/open-link`); the host may refuse it. */
   readonly openLink: (url: string) => Promise<void>;
+  /** Asks the host what its references are called; refs it cannot name are left out. */
+  readonly describeRefs: (refs: ReadonlyArray<string>) => Promise<Readonly<Record<string, string>>>;
   readonly authorizeHost: (embedOrigins: ReadonlyArray<AppEmbedOrigin>) => void;
   readonly dispose: () => void;
 }
@@ -149,6 +155,18 @@ export function createEmbedBridge(transport: EmbedTransport, win: BridgeWindow):
     },
     async openLink(url) {
       await guest.request("ui/open-link", { url });
+    },
+    async describeRefs(refs) {
+      const labels: Record<string, string> = {};
+      for (let start = 0; start < refs.length; start += EMBED_DESCRIBE_REFS_MAX) {
+        const chunk = refs.slice(start, start + EMBED_DESCRIBE_REFS_MAX);
+        const result = await guest.request("lecturn/appRefs.describe", { refs: chunk });
+        for (const ref of chunk) {
+          const label = Object.hasOwn(result.labels, ref) ? result.labels[ref] : undefined;
+          if (label !== undefined) labels[ref] = label;
+        }
+      }
+      return labels;
     },
     authorizeHost: transport.authorize,
     dispose() {

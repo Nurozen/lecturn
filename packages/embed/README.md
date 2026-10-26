@@ -178,6 +178,9 @@ later. `styles.variables` sets Lecturn's own CSS variables, and unknown names ar
 - `composerPlaceholder` (at most 200 characters) replaces the prompt shown in the empty composer,
   for example `"Ask for changes…"`; `setComposerPlaceholder(text | null)` changes it later, and
   `null` brings back Lecturn's own. Prompts for approvals and questions stay Lecturn's.
+- `onDescribeRefs(refs)` (a mount option) names references the view shows without a label, such
+  as ones the agent wrote. Return `{ [ref]: label }` for the ones you know; the rest show as
+  written. A chip you inserted keeps its label on the sent message, so the view never asks for it.
 - `switcher: false` hides the view's own thread switcher when your app lists threads itself.
   `lecturn.listThreads(projectId)` and `lecturn.subscribeThreads(projectId, listener)` give you
   that list. `setThreadAppData(threadId, appData, subtitle?)` stores up to 1 KB of your own data

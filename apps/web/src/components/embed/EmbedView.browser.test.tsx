@@ -8,6 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 const state = vi.hoisted(() => ({
   threads: [] as Array<Record<string, unknown>>,
   projection: null as unknown,
+  visibleItems: [] as unknown[],
+  describe: null as null | ((refs: ReadonlyArray<string>) => Promise<Record<string, string>>),
+  describeCalls: [] as Array<ReadonlyArray<string>>,
   appContext: null as unknown,
   commandListener: null as ((command: unknown) => void) | null,
   bridgeCalls: [] as Array<[string, unknown]>,
@@ -34,6 +37,10 @@ vi.mock(import("../../embed/bridge"), async (original) => {
       state.bridgeCalls.push(["openLink", url]);
     },
     authorizeHost: (origins: unknown) => state.bridgeCalls.push(["authorize", origins]),
+    describeRefs: (refs: ReadonlyArray<string>) => {
+      state.describeCalls.push(refs);
+      return state.describe === null ? Promise.resolve({}) : state.describe(refs);
+    },
   };
   return {
     ...(await original()),
@@ -47,6 +54,7 @@ vi.mock(import("../../state/entities"), async (original) => ({
   useQuietThreadShell: (() => null) as never,
   useThreadProjection: (() =>
     state.projection === null ? null : { projection: state.projection }) as never,
+  useThreadVisibleTurnItems: (() => state.visibleItems) as never,
 }));
 vi.mock(import("../../state/apps"), async (original) => ({
   ...(await original()),
@@ -84,6 +92,7 @@ vi.mock(import("../ChatView"), async () => {
       return (
         <div data-testid="chat-view">
           <AppRefChip reference="rw:c/fins" />
+          <AppRefChip reference="rw:cfg/baseline" />
           <div data-chat-composer-overlay="true">composer</div>
         </div>
       );
@@ -100,7 +109,10 @@ vi.mock(import("./EmbedProvidersPanel"), () => ({
   )) as never,
 }));
 
+import { appReferenceContextRecords } from "@lecturn/shared/appReferences";
+
 import { appsEnvironment } from "../../state/apps";
+import { __resetAppRefLabelsForTests } from "./appRefLabels";
 import { EmbedView } from "./EmbedView";
 
 const environmentId = EnvironmentId.make("env-1");
@@ -133,6 +145,9 @@ beforeEach(() => {
   Object.assign(state, {
     threads: [shell("thread-1", "2026-10-25T01:00:00.000Z")],
     projection: null,
+    visibleItems: [],
+    describe: null,
+    describeCalls: [],
     appContext,
     commandListener: null,
     bridgeCalls: [],
@@ -149,6 +164,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  __resetAppRefLabelsForTests();
   vi.unstubAllGlobals();
 });
 
@@ -166,6 +182,15 @@ const render = (
       />,
     ),
   );
+const chipText = (ref: string) =>
+  container.querySelector(`[data-app-ref="${ref}"]`)?.textContent ?? null;
+const sentMessage = (labels: ReadonlyArray<{ ref: string; label: string }>) => ({
+  item: {
+    type: "user_message",
+    text: labels.map((entry) => entry.ref).join(" "),
+    context: { version: 1, records: appReferenceContextRecords(labels) },
+  },
+});
 const hostSends = (command: EmbedHostCommand) =>
   act(async () => {
     state.commandListener?.(command);
@@ -327,5 +352,39 @@ describe("EmbedView", () => {
     await render({ threadId: null, switcher: true });
     expect(container.textContent).toContain("New thread");
     expect(container.textContent).toContain("Thread thread-latest");
+  });
+
+  it("names the thread's references through the host, asking once for all the chips on screen", async () => {
+    state.describe = async () => ({ "rw:c/fins": "Fins", "rw:cfg/baseline": "Baseline config" });
+    await render({ threadId: "thread-1" });
+    expect(state.describeCalls).toEqual([["rw:c/fins", "rw:cfg/baseline"]]);
+    expect(chipText("rw:c/fins")).toBe("Fins");
+    expect(chipText("rw:cfg/baseline")).toBe("Baseline config");
+
+    // The answer is kept for the thread: a re-render asks nothing more.
+    await render({ threadId: "thread-1" });
+    expect(state.describeCalls).toHaveLength(1);
+    // Clicking a named chip still hands the host the reference itself.
+    const chip = container.querySelector<HTMLButtonElement>('button[data-app-ref="rw:c/fins"]');
+    await act(async () => chip?.click());
+    expect(state.bridgeCalls).toContainEqual(["navigate", "rw:c/fins"]);
+  });
+
+  it("shows the label a sent chip stored, and asks the host only about the rest", async () => {
+    state.visibleItems = [sentMessage([{ ref: "rw:c/fins", label: "Fins" }])];
+    state.describe = async () => ({});
+    await render({ threadId: "thread-1" });
+    expect(chipText("rw:c/fins")).toBe("Fins");
+    expect(state.describeCalls).toEqual([["rw:cfg/baseline"]]);
+    // A reference the host has no name for stays as written.
+    expect(chipText("rw:cfg/baseline")).toBe("rw:cfg/baseline");
+  });
+
+  it("falls back to the reference itself when the host cannot answer", async () => {
+    state.describe = () => Promise.reject(new Error("Unknown method lecturn/appRefs.describe."));
+    await render({ threadId: "thread-1" });
+    expect(state.describeCalls).toHaveLength(1);
+    expect(chipText("rw:c/fins")).toBe("rw:c/fins");
+    expect(chipText("rw:cfg/baseline")).toBe("rw:cfg/baseline");
   });
 });

@@ -4,6 +4,7 @@ import {
   EMBED_MAX_MESSAGE_BYTES,
   EMBED_MAX_PENDING_REQUESTS,
   EMBED_NOT_INITIALIZED_ERROR_CODE,
+  EmbedDescribeRefsResult,
   EmbedInitializeResult,
   embedInitializeParams,
   EmbedJsonRpcMessage,
@@ -84,6 +85,7 @@ const resultDecoders: { readonly [M in EmbedGuestRequestMethod]: (value: unknown
   "ui/initialize": Schema.decodeUnknownSync(EmbedInitializeResult),
   "ui/open-link": () => ({}),
   "lecturn/token.refresh": Schema.decodeUnknownSync(EmbedTokenRefreshResult),
+  "lecturn/appRefs.describe": Schema.decodeUnknownSync(EmbedDescribeRefsResult),
 };
 const hostNotificationDecoders = Object.fromEntries(
   Object.entries(EMBED_HOST_NOTIFICATIONS).map(([method, schema]) => [
