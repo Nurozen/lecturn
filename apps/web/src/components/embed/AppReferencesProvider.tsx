@@ -9,10 +9,12 @@ import { useAppEmbedContext } from "../../state/apps";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useProject, useQuietThreadShell } from "../../state/entities";
 import { AppReferencesContext } from "./AppReferencesContext";
+import { AppRefStoredLabels, appRefLabelScope } from "./AppRefStoredLabels";
 
 /**
  * App references in a full Lecturn thread. Only threads of an app-bound project subscribe to the
- * app's context, and the app opens only from the machine it runs on.
+ * app's context, and the app opens only from the machine it runs on. Chips show the labels their
+ * messages stored; with no host to ask, any other reference shows as itself.
  */
 export function AppReferencesProvider({
   environmentId,
@@ -37,6 +39,7 @@ export function AppReferencesProvider({
       : {
           refPrefixes: context.refPrefixes,
           iconUrl: context.iconDataUrl,
+          labelScope: appRefLabelScope(environmentId, threadId),
           activate:
             template === null || !local
               ? null
@@ -49,5 +52,12 @@ export function AppReferencesProvider({
                   if (url !== null) openAppUrl(url, template);
                 },
         };
-  return <AppReferencesContext value={value}>{children}</AppReferencesContext>;
+  return (
+    <AppReferencesContext value={value}>
+      {value === null ? null : (
+        <AppRefStoredLabels environmentId={environmentId} threadId={threadId} />
+      )}
+      {children}
+    </AppReferencesContext>
+  );
 }

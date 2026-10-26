@@ -23,7 +23,8 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import ChatView from "../ChatView";
 import type { ChatComposerHandle } from "../chat/ChatComposer";
 import { toastManager } from "../ui/toast";
-import { AppReferencesContext } from "./AppReferencesContext";
+import { AppReferencesContext, type DescribeAppReferences } from "./AppReferencesContext";
+import { AppRefStoredLabels, appRefLabelScope } from "./AppRefStoredLabels";
 import { EmbedProvidersPanel } from "./EmbedProvidersPanel";
 import { EmbedThreadSwitcher } from "./EmbedThreadSwitcher";
 
@@ -96,6 +97,10 @@ function EmbedContinuedNotice({
   );
 }
 
+// Module-level so every render hands chips the same function and they do not ask again.
+const describeHostRefs: DescribeAppReferences = async (refs) =>
+  (await readEmbedBridge()?.describeRefs(refs)) ?? {};
+
 /** A full-pane view that replaces the chat until the user goes back to it. */
 export type EmbedPanel = "providers";
 
@@ -141,6 +146,9 @@ export function EmbedView({
           refPrefixes: appContext.refPrefixes,
           iconUrl: appContext.iconDataUrl,
           activate: (ref: string) => readEmbedBridge()?.navigate(ref),
+          labelScope:
+            shownThreadId === null ? null : appRefLabelScope(environmentId, shownThreadId),
+          describe: describeHostRefs,
         };
 
   const composerRef = useRef<ChatComposerHandle | null>(null);
@@ -196,6 +204,9 @@ export function EmbedView({
     <AppReferencesContext value={appReferences}>
       <ComposerHandleContext value={composerRef}>
         <EmbedThreadReporter environmentId={environmentId} threadId={shownThreadId} />
+        {shownThreadId === null ? null : (
+          <AppRefStoredLabels environmentId={environmentId} threadId={shownThreadId} />
+        )}
         <main
           className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background"
           data-embed-continued={continuedIn === null ? undefined : "true"}

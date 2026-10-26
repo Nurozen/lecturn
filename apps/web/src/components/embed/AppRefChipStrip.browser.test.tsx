@@ -1,14 +1,20 @@
-import { scopeProjectRef } from "@lecturn/client-runtime/environment";
-import { EnvironmentId, ProjectId } from "@lecturn/contracts";
+import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
+import { EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
+import { appReferenceLabelsFromRecords } from "@lecturn/shared/appReferences";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { EmbedPresentationContext } from "../../embed/EmbedPresentationContext";
+import { buildMessageContext } from "../../lib/composerContextRecords";
+import { AppRefChip } from "./AppRefChip";
 import { AppRefChipStrip } from "./AppRefChipStrip";
-import { foldAppRefChips, useAppRefChipStore } from "./appRefChipStore";
+import { appRefLabelsForSend, foldAppRefChips, useAppRefChipStore } from "./appRefChipStore";
+import { __resetAppRefLabelsForTests } from "./appRefLabels";
+import { AppReferencesContext } from "./AppReferencesContext";
 
-const TARGET = "thread:env-1:thread-1";
+const THREAD = scopeThreadRef(EnvironmentId.make("env-1"), ThreadId.make("thread-1"));
+const TARGET = "env-1:thread-1";
 const presentation = {
   projectRef: scopeProjectRef(EnvironmentId.make("env-1"), ProjectId.make("project-1")),
 };
@@ -26,6 +32,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   useAppRefChipStore.setState({ chipsByTarget: {} });
+  __resetAppRefLabelsForTests();
   vi.unstubAllGlobals();
 });
 
@@ -110,5 +117,42 @@ describe("AppRefChipStrip", () => {
     settle(true);
     expect(sent).toEqual(["yes"]);
     expect(useAppRefChipStore.getState().chipsByTarget[TARGET]).toHaveLength(1);
+  });
+
+  it("stores the labels of the chips a sent message names, and its bubble shows them", async () => {
+    await renderStrip();
+    await insert("rw:c/fins", "Fins");
+    await insert("rw:c/nose", "rw:c/nose");
+    await insert("rw:c/tail", "Tail");
+    const promptRef = { current: "Check these." };
+    const context = await act(async () => {
+      const settle = foldAppRefChips(TARGET, promptRef);
+      // A chip whose reference the sent text does not name stores nothing.
+      const sent = promptRef.current.replace(" rw:c/tail", "");
+      const built = buildMessageContext({
+        terminalContexts: [],
+        reviewComments: [],
+        previewAnnotations: [],
+        appRefs: appRefLabelsForSend(THREAD, sent),
+      });
+      settle(true);
+      return built;
+    });
+    expect(appReferenceLabelsFromRecords(context?.records ?? [])).toEqual([
+      { ref: "rw:c/fins", label: "Fins" },
+    ]);
+
+    // Full Lecturn has no host to ask, so the label comes only from what the message stored.
+    await act(async () =>
+      root.render(
+        <AppReferencesContext
+          value={{ refPrefixes: ["rw:"], iconUrl: null, activate: null, labelScope: TARGET }}
+        >
+          <AppRefChip reference="rw:c/fins" />
+          <AppRefChip reference="rw:c/nose" />
+        </AppReferencesContext>,
+      ),
+    );
+    expect(chipLabels()).toEqual(["Fins", "rw:c/nose"]);
   });
 });

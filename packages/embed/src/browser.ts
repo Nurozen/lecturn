@@ -9,6 +9,7 @@ import {
   createEmbedHostSession,
   type EmbedBridgeEvent,
   type EmbedBridgeEvents,
+  type EmbedDescribeRefs,
   type EmbedThemeInput,
   hostContextFor,
 } from "./electron/hostBridge.ts";
@@ -20,6 +21,8 @@ export type { EmbedViewErrorReason } from "./electron/errors.ts";
 export type {
   EmbedBridgeEvent,
   EmbedBridgeEvents,
+  EmbedDescribeRefs,
+  EmbedRefLabels,
   EmbedThemeInput,
 } from "./electron/hostBridge.ts";
 export type { EmbedTarget } from "./target.ts";
@@ -34,6 +37,11 @@ export interface MountEmbedOptions {
   readonly onTokenRefresh: () => Promise<EmbedTokenRefreshResult>;
   /** A card's `ui/open-link`. Without it, http(s) and `lecturn://apps` links open in a new tab. */
   readonly onOpenLink?: (url: string) => void | Promise<void>;
+  /**
+   * Names the references a thread shows that no message stored a name for, such as ones the agent
+   * wrote. Without it, or for a reference it leaves out, the chip shows the reference itself.
+   */
+  readonly onDescribeRefs?: EmbedDescribeRefs;
 }
 
 type BridgeListener<E extends EmbedBridgeEvent | "error"> = (
@@ -111,6 +119,7 @@ export function mountEmbed(container: HTMLElement, options: MountEmbedOptions): 
       }
       win.open(url, "_blank", "noopener,noreferrer");
     },
+    ...(options.onDescribeRefs === undefined ? {} : { describeRefs: options.onDescribeRefs }),
     emit: (event, payload) => emit(event, payload),
     emitError,
   });

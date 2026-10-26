@@ -13,6 +13,7 @@ import {
   embedInitializeResult,
   EmbedJsonRpcMessage,
   embedMessageBytes,
+  EmbedDescribeRefsParams,
   EmbedOpenLinkParams,
   type EmbedJsonRpcId,
   type EmbedTokenRefreshResult,
@@ -55,6 +56,8 @@ const decodeMessage = Schema.decodeUnknownOption(EmbedJsonRpcMessage);
 const decodeHostContext = Schema.decodeUnknownOption(EmbedHostContext);
 const decodeInitializeParams = Schema.decodeUnknownOption(EmbedInitializeParams);
 const decodeOpenLinkParams = Schema.decodeUnknownOption(EmbedOpenLinkParams);
+const decodeDescribeRefsParams = Schema.decodeUnknownOption(EmbedDescribeRefsParams);
+const MAX_REF_LABEL_CHARS = 256;
 const guestNotificationDecoders = Object.fromEntries(
   Object.entries(EMBED_GUEST_NOTIFICATIONS).map(([method, schema]) => [
     method,
@@ -95,11 +98,32 @@ export function assertHostContextFits(context: EmbedHostContext): void {
   if (!check.fits) throw new EmbedViewError("message-too-large", check.message);
 }
 
+/** The host's names for its references, by reference; a reference left out shows as itself. */
+export type EmbedRefLabels = Readonly<Record<string, string>>;
+export type EmbedDescribeRefs = (
+  refs: ReadonlyArray<string>,
+) => EmbedRefLabels | Promise<EmbedRefLabels>;
+
+/** Keeps the names the guest would accept for the references it asked about, and nothing else. */
+function sanitizeRefLabels(refs: ReadonlyArray<string>, labels: unknown): EmbedRefLabels {
+  if (typeof labels !== "object" || labels === null) return {};
+  const accepted: Record<string, string> = {};
+  for (const ref of refs) {
+    const label = Object.hasOwn(labels, ref) ? (labels as Record<string, unknown>)[ref] : undefined;
+    if (typeof label !== "string") continue;
+    const name = label.trim().slice(0, MAX_REF_LABEL_CHARS);
+    if (name.length > 0) accepted[ref] = name;
+  }
+  return accepted;
+}
+
 export interface EmbedHostSessionDeps {
   /** Delivers one JSON-RPC message to the current guest document. */
   readonly send: (message: unknown) => void;
   readonly refreshToken: () => Promise<EmbedTokenRefreshResult>;
   readonly openLink: (url: string) => Promise<void>;
+  /** Without it the guest hears that no reference has a name, and shows each one as itself. */
+  readonly describeRefs?: EmbedDescribeRefs;
   readonly emit: <E extends EmbedBridgeEvent>(event: E, params: EmbedBridgeEvents[E]) => void;
   readonly emitError: (error: EmbedViewError) => void;
 }
@@ -174,6 +198,19 @@ export function createEmbedHostSession(
             INVALID_PARAMS,
             cause instanceof Error ? cause.message : "The link was not opened.",
           );
+        }
+      }
+      case "lecturn/appRefs.describe": {
+        const decoded = decodeDescribeRefsParams(params);
+        if (decoded._tag === "None") {
+          return fail(epoch, id, INVALID_PARAMS, "Invalid lecturn/appRefs.describe params.");
+        }
+        if (deps.describeRefs === undefined) return reply(epoch, id, { labels: {} });
+        try {
+          const labels = await deps.describeRefs(decoded.value.refs);
+          return reply(epoch, id, { labels: sanitizeRefLabels(decoded.value.refs, labels) });
+        } catch {
+          return fail(epoch, id, INTERNAL_ERROR, "The host could not name these references.");
         }
       }
       default:

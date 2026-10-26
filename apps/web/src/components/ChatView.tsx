@@ -37,6 +37,7 @@ import * as DateTime from "effect/DateTime";
 import { restorePlanFollowUpComposer } from "./ChatView.logic";
 import { assistantCitationsToPlainText } from "@lecturn/shared/assistantCitations";
 import { useQueuedRunEdit } from "./chat/useQueuedRunEdit";
+import { appRefLabelsForSend } from "./embed/appRefChipStore";
 import { useFollowEndWhenDrawerDocks } from "./chat/dockedDrawerFollow";
 import {
   isPaintOnlyThreadTimeline,
@@ -6566,6 +6567,7 @@ export default function ChatView(props: ChatViewProps) {
           reviewComments: composerReviewComments,
           previewAnnotations: composerPreviewAnnotations,
           threadContexts: composerThreadContexts,
+          appRefs: appRefLabelsForSend(composerDraftTarget, followUp.text),
         }),
         interactionMode: followUp.interactionMode,
       });
@@ -6694,6 +6696,7 @@ export default function ChatView(props: ChatViewProps) {
         promptForSend,
       )
       .trim();
+    const outgoingAppRefLabels = appRefLabelsForSend(composerDraftTarget, messageTextForSend);
     // Records bind attachments by the id each side knows: the local id for the optimistic
     // row, the upload id (or local id on the data-URL path) on the wire; the server
     // rebinds them to the persisted id.
@@ -6703,6 +6706,7 @@ export default function ChatView(props: ChatViewProps) {
         reviewComments: composerReviewCommentsSnapshot,
         previewAnnotations: composerPreviewAnnotationsSnapshot,
         threadContexts: composerThreadContextsSnapshot,
+        appRefs: outgoingAppRefLabels,
         attachments: composerAttachmentsSnapshot.map((attachment, index) => ({
           attachment,
           attachmentId: attachmentIds[index] ?? attachment.id,

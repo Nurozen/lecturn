@@ -1,7 +1,10 @@
-import { promptWithAppReferences } from "@lecturn/shared/appReferences";
+import type { ScopedThreadRef } from "@lecturn/contracts";
+import { promptWithAppReferences, type AppReferenceLabel } from "@lecturn/shared/appReferences";
 import { create } from "zustand";
 
+import { composerTargetKey, type DraftId } from "../../composerDraftStore";
 import type { EmbedMention } from "../../embed/hostCommands";
+import { useAppRefLabelStore } from "./appRefLabels";
 
 export type AppRefChipEntry = EmbedMention;
 
@@ -75,4 +78,25 @@ export function foldAppRefChips(
     if (didDispatch) useAppRefChipStore.getState().clear(targetKey);
     if (promptRef.current === folded) promptRef.current = typed;
   };
+}
+
+/**
+ * The labels of the target's chips that a sent message names, to store on it so its bubble shows
+ * them. Read while the send runs, before the fold's settle clears the chips. This tab's thread
+ * shows them at once, ahead of the server's copy of the message.
+ */
+export function appRefLabelsForSend(
+  target: ScopedThreadRef | DraftId,
+  text: string,
+): ReadonlyArray<AppReferenceLabel> {
+  const targetKey = composerTargetKey(target);
+  const chips = useAppRefChipStore.getState().chipsByTarget[targetKey] ?? EMPTY_CHIPS;
+  if (chips.length === 0) return EMPTY_CHIPS;
+  const words = new Set(text.split(/\s+/u));
+  const labels = chips.flatMap(({ ref, label }) => {
+    const name = label.trim();
+    return name.length > 0 && name !== ref && words.has(ref) ? [{ ref, label: name }] : [];
+  });
+  if (labels.length > 0) useAppRefLabelStore.getState().remember(targetKey, labels);
+  return labels;
 }
