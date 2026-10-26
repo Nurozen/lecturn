@@ -72,9 +72,9 @@ export const teamHasAccess = (account: TeamAccount, time: number) =>
   (account.access_until ?? 0) > time &&
   (account.access_window_start ?? 0) <= time;
 
-/** Raw PgClient bigint values are decimal strings; Drizzle's number mode does not apply. */
+/** Raw PgClient integers bypass Drizzle's number mode. */
 export type TeamDatabaseRow<T> = {
-  [K in keyof T]: T[K] extends number | null ? T[K] | string : T[K];
+  [K in keyof T]: T[K] extends number | null ? T[K] | string | bigint : T[K];
 };
 const teamNumericFields = new Set([
   "purchased_seats",
@@ -95,7 +95,7 @@ export function decodeTeamDatabaseRow<T>(row: TeamDatabaseRow<T>): T {
     if (!teamNumericFields.has(key) || result[key] === null) continue;
     const value = result[key];
     if (
-      (typeof value !== "number" && typeof value !== "string") ||
+      (typeof value !== "number" && typeof value !== "string" && typeof value !== "bigint") ||
       (typeof value === "string" && !/^-?\d+$/.test(value)) ||
       !Number.isSafeInteger(Number(value))
     )
