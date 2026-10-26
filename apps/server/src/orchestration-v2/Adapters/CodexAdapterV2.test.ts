@@ -42,6 +42,7 @@ import * as Effect from "effect/Effect";
 import * as Predicate from "effect/Predicate";
 import * as FileSystem from "effect/FileSystem";
 import { MCP_APP_OUTPUT_KEY, readMcpAppReference } from "@lecturn/shared/mcpApp";
+import { appToolSummaryFromToolItem } from "@lecturn/shared/toolOutput";
 import { resolveAttachmentPathById } from "../../attachmentStore.ts";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -1126,6 +1127,49 @@ describe("CodexAdapterV2 dynamic tool projection", () => {
         },
         status: "completed",
       });
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("keeps an app result's lecturn/* _meta so its row reads the call's summary", () =>
+    Effect.gen(function* () {
+      const toolSource = {
+        key: "app:dev.rocketwright",
+        name: "RocketWright",
+        kind: "integration" as const,
+      };
+      const result = {
+        content: [{ type: "text", text: '{"status":"clean"}' }],
+        structuredContent: { status: "clean" },
+        _meta: {
+          "lecturn/summary": "Clean",
+          "lecturn/toolSource": toolSource,
+          "openai/outputTemplate": "ui://widget",
+        },
+      };
+      const call = {
+        type: "mcpToolCall" as const,
+        id: "design-check",
+        server: "lecturn",
+        tool: "rw_design_check",
+        status: "completed" as const,
+        arguments: {},
+        result,
+      };
+      const kept = {
+        content: result.content,
+        structuredContent: result.structuredContent,
+        _meta: { "lecturn/summary": "Clean", "lecturn/toolSource": toolSource },
+      };
+      const projection = yield* CodexAdapterV2.projectCodexDynamicToolItem(call);
+      assert.deepEqual(projection.output, kept);
+      assert.equal(appToolSummaryFromToolItem({ toolSource, output: projection.output }), "Clean");
+      const failed = yield* CodexAdapterV2.projectCodexDynamicToolItem({
+        ...call,
+        status: "failed",
+        error: { message: "Model is invalid" },
+      });
+      assert.deepEqual(failed.output, { error: "Model is invalid", result: kept });
+      assert.equal(appToolSummaryFromToolItem({ toolSource, output: failed.output }), "Clean");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

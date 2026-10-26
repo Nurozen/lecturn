@@ -90,6 +90,22 @@ describe("Pi MCP tool results", () => {
     },
   );
 
+  it("hands Lecturn's result _meta to the host in details, never to scripts", async () => {
+    const content = [{ type: "text", text: "Clean" }];
+    const result = {
+      content,
+      _meta: { "lecturn/summary": "Clean", "openai/outputTemplate": "ui://x" },
+    };
+    const bridge = await loadMcpBridge({ result });
+    const output = await bridge.tools[0]!.execute("summary", {});
+    assert.deepEqual(output.structuredContent, { content });
+    assert.deepEqual(output.details, {
+      server: "lecturn",
+      tool: bridge.tools[0]!.name.replace("mcp__lecturn__", ""),
+      _meta: { "lecturn/summary": "Clean" },
+    });
+  });
+
   it("uses structured output as model text when content is empty", async () => {
     const result = { content: [], structuredContent: { count: 2 } };
     const bridge = await loadMcpBridge({ result });

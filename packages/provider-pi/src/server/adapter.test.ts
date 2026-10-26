@@ -1974,6 +1974,24 @@ describe("PiAdapterV2", () => {
               ],
             },
           },
+          // The bridge hands Lecturn's result `_meta` over in details.
+          {
+            toolName: "mcp__lecturn__rw_design_check",
+            result: {
+              content,
+              structuredContent: { content, structuredContent: { status: "clean" } },
+              details: {
+                server: "lecturn",
+                tool: "rw_design_check",
+                _meta: { "lecturn/summary": "Clean" },
+              },
+            },
+            expected: {
+              content,
+              structuredContent: { status: "clean" },
+              _meta: { "lecturn/summary": "Clean" },
+            },
+          },
         ];
         for (const [index, test] of cases.entries()) {
           for (const phase of ["update", "end"] as const) {

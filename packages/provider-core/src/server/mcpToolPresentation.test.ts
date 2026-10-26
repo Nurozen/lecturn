@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { setRegisteredAppToolPresentations } from "@lecturn/shared/appToolPresentation";
-import { mcpToolPresentation } from "./mcpToolPresentation.ts";
+import { mcpToolPresentation, mcpToolResultOutput } from "./mcpToolPresentation.ts";
 
 describe("mcpToolPresentation", () => {
   it("uses supplied names and logos while retaining the server identity", () => {
@@ -149,5 +149,38 @@ describe("mcpToolPresentation", () => {
     } finally {
       setRegisteredAppToolPresentations([]);
     }
+  });
+});
+
+describe("mcpToolResultOutput", () => {
+  const content = [{ type: "text", text: "3 motors" }];
+
+  it("keeps structured content, else the content blocks", () => {
+    expect(mcpToolResultOutput({ content, structuredContent: { count: 3 } })).toEqual({
+      count: 3,
+    });
+    expect(mcpToolResultOutput({ content, structuredContent: null })).toEqual(content);
+    expect(mcpToolResultOutput({ content, _meta: { "openai/outputTemplate": "ui://x" } })).toEqual(
+      content,
+    );
+    expect(mcpToolResultOutput(null)).toBeUndefined();
+  });
+
+  it("keeps a result's lecturn/* _meta in its MCP shape, without other keys", () => {
+    expect(
+      mcpToolResultOutput({
+        content,
+        structuredContent: { count: 3 },
+        _meta: { "lecturn/summary": "3 candidates", "openai/outputTemplate": "ui://x" },
+      }),
+    ).toEqual({
+      content,
+      structuredContent: { count: 3 },
+      _meta: { "lecturn/summary": "3 candidates" },
+    });
+    expect(mcpToolResultOutput({ content, _meta: { "lecturn/summary": "3 candidates" } })).toEqual({
+      content,
+      _meta: { "lecturn/summary": "3 candidates" },
+    });
   });
 });
