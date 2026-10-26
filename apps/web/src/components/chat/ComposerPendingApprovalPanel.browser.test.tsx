@@ -47,9 +47,20 @@ const approval: PendingApproval = {
 };
 
 // The banner as ChatComposer draws a pending approval.
-async function render(width: number, reason = approval.connectedAppTool!.reason) {
+async function render(
+  width: number,
+  reason = approval.connectedAppTool!.reason,
+  toolTitle?: string,
+) {
   container.style.width = `${width}px`;
-  const shown = { ...approval, connectedAppTool: { ...approval.connectedAppTool!, reason } };
+  const shown = {
+    ...approval,
+    connectedAppTool: {
+      ...approval.connectedAppTool!,
+      reason,
+      ...(toolTitle === undefined ? {} : { toolTitle }),
+    },
+  };
   await act(async () =>
     root.render(
       <ComposerBanner.Root variant="warning" density="spacious">
@@ -121,5 +132,15 @@ describe("ComposerPendingApprovalPanel for a connected app's tool", () => {
     expect(titleBox.height).toBeLessThan(20);
     expect(reasonBox.top).toBeGreaterThanOrEqual(titleBox.bottom);
     expect(actionsBox.top).toBeGreaterThanOrEqual(reasonBox.bottom);
+  });
+
+  it("names the tool by its declared title when it has one", async () => {
+    await render(380, approval.connectedAppTool!.reason, "Flash window");
+    const { title } = layout();
+
+    expect(title.textContent).toBe("Approve Flash window");
+    expect(
+      container.querySelector('[data-app-tool-approval="true"]')?.getAttribute("aria-label"),
+    ).toBe("Approve Flash window");
   });
 });

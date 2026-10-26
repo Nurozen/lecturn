@@ -1,4 +1,5 @@
 import type { ConnectedAppToolApprovalInfo } from "@lecturn/contracts";
+import { appToolApprovalLabel } from "@lecturn/shared/appToolPresentation";
 import { memo } from "react";
 import { type PendingApproval } from "../../session-logic";
 import { cn } from "~/lib/utils";
@@ -102,7 +103,7 @@ function ConnectedAppToolApproval({
   pendingCount: number;
   className: string | undefined;
 }) {
-  const label = `Approve ${tool.toolName}`;
+  const label = appToolApprovalLabel(tool);
   const reason = appApprovalReasonLine(approval);
   const notResumable = approval.responseCapability === "not_resumable";
   const embedded = useEmbedPresentation() !== null;

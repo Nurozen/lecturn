@@ -9,6 +9,7 @@ import { View } from "react-native";
 import { GlassCard } from "../../components/GlassCard";
 import { AppText as Text } from "../../components/ui/AppText";
 import type { PendingApproval } from "../../lib/threadActivity";
+import { pendingApprovalCardText } from "./pendingApprovalCardText";
 
 export interface PendingApprovalCardProps {
   readonly canOperateThread: boolean;
@@ -32,24 +33,15 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
   const warning = options.find((option) => option.warning)?.warning;
   const canRespond = props.approval.responseCapability === "live";
   const disabled = !canRespond || props.respondingApprovalId === props.approval.requestId;
-  // A connected app's gated tool waits on this answer, not the provider, so name the app and
-  // the tool, and give the app's own reason in place of the generic prompt.
-  const appTool = props.approval.connectedAppTool;
-  const detail = appTool ? appTool.reason?.trim() || null : props.approval.detail;
+  const { eyebrow, title, detail, monoDetail } = pendingApprovalCardText(props.approval);
   return (
     <GlassCard tone="accent" radius={24} className="gap-2.5 p-4" opaque>
-      <Text className="font-lecturn-medium text-xs text-primary">
-        {appTool ? `${appTool.appName} · Approval needed` : "Approval needed"}
-      </Text>
-      <Text className="font-lecturn-bold text-lg text-foreground">
-        {appTool
-          ? `Approve ${appTool.toolName}`
-          : (props.approval.appName ?? props.approval.requestKind)}
-      </Text>
+      <Text className="font-lecturn-medium text-xs text-primary">{eyebrow}</Text>
+      <Text className="font-lecturn-bold text-lg text-foreground">{title}</Text>
       {detail ? (
         <Text
           className={
-            appTool
+            monoDetail
               ? "font-mono text-sm leading-normal text-foreground-secondary"
               : "font-sans text-sm leading-normal text-foreground-secondary"
           }

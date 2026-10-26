@@ -144,7 +144,24 @@ const layerApps = Layer.unwrap(
           const state = states.get(appId) ?? "granted";
           return state === "removed"
             ? Option.none()
-            : Option.some({ status: appStatus(appId, "App", state) } as never);
+            : Option.some({
+                status: appStatus(appId, "App", state),
+                registration: { toolPrefix: "rw", liveTools: true },
+              } as never);
+        }),
+      cachedTools: () =>
+        Effect.succeed({
+          headless: Option.some([
+            { name: "engine_simulate", title: "Simulate engine", inputSchema: { type: "object" } },
+            { name: "motor_search", inputSchema: { type: "object" } },
+          ] as never),
+          live: Option.some([
+            {
+              name: "view_open",
+              annotations: { title: "Open view" },
+              inputSchema: { type: "object" },
+            },
+          ] as never),
         }),
     });
   }),
@@ -425,7 +442,7 @@ it.layer(layerTest)("AppToolApprovalService", (it) => {
         kind: "permission",
         status: "pending",
         responseCapability: { type: "live", providerSessionId: turn.providerSessionId },
-        connectedAppTool: info,
+        connectedAppTool: { ...info, toolTitle: "Simulate engine" },
       });
       assert.isDefined(request);
       if (request === undefined) return;
@@ -446,7 +463,7 @@ it.layer(layerTest)("AppToolApprovalService", (it) => {
         nodeId: request.nodeId,
         requestKind: "permission",
         appName: "RocketWright",
-        prompt: "Approve rw_engine_simulate · Simulates 120 s of burn",
+        prompt: "Approve Simulate engine · Simulates 120 s of burn",
         options: [
           { decision: "decline", label: "Decline" },
           { decision: "accept", label: "Approve" },
@@ -454,6 +471,40 @@ it.layer(layerTest)("AppToolApprovalService", (it) => {
         ],
       });
       yield* Fiber.interrupt(call);
+    }),
+  );
+
+  it.effect("titles the request from the app's tool definitions, else keeps the called name", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const shown = (toolName: string) =>
+        Effect.gen(function* () {
+          const turn = yield* seedRunningTurn(`title-${toolName}`);
+          const { call, requestId } = yield* requestApproval(turn, {
+            ...info,
+            toolName,
+            reason: null,
+          });
+          const projection = yield* orchestrator.getThreadProjection(turn.threadId);
+          yield* Fiber.interrupt(call);
+          const request = projection.runtimeRequests.find((entry) => entry.id === requestId);
+          const item = projection.turnItems.find(
+            (entry) => entry.type === "approval_request" && entry.requestId === requestId,
+          );
+          return {
+            toolTitle: request?.connectedAppTool?.toolTitle,
+            prompt: item?.type === "approval_request" ? item.prompt : undefined,
+          };
+        });
+
+      assert.deepEqual(yield* shown("rw_view_open"), {
+        toolTitle: "Open view",
+        prompt: "Approve Open view",
+      });
+      assert.deepEqual(yield* shown("rw_motor_search"), {
+        toolTitle: undefined,
+        prompt: "Approve rw_motor_search",
+      });
     }),
   );
 

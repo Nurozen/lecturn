@@ -54,6 +54,14 @@ export function appToolTitle(tool: {
   );
 }
 
+/** An app tool approval's heading: the tool's declared title, else the name the agent called. */
+export function appToolApprovalLabel(tool: {
+  readonly toolName: string;
+  readonly toolTitle?: string | undefined;
+}): string {
+  return `Approve ${tool.toolTitle?.trim() || tool.toolName}`;
+}
+
 /** The summary an app put in a tool result's `_meta`, if it is valid. */
 export function appToolSummaryFromMeta(meta: unknown): string | undefined {
   return isRecord(meta)
