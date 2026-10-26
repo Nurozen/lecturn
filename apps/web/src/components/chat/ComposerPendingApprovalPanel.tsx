@@ -2,6 +2,7 @@ import type { ConnectedAppToolApprovalInfo } from "@lecturn/contracts";
 import { memo } from "react";
 import { type PendingApproval } from "../../session-logic";
 import { cn } from "~/lib/utils";
+import { useEmbedPresentation } from "../../embed/EmbedPresentationContext";
 import { appApprovalReasonLine } from "./composerApprovalState";
 
 const NOT_RESUMABLE_DETAIL = "Provider process is gone — interrupt or restart the run to respond.";
@@ -86,7 +87,8 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
  * (`data-app-tool-approval`, ComposerBanner): the actions sit beside it while
  * the tool's whole name fits next to them, and otherwise wrap below the reason.
  * The reason takes no width of its own, so a long one truncates instead of
- * pushing the actions down.
+ * pushing the actions down. The embed pane is too narrow for the whole name, and
+ * its mockup keeps the actions on the title's row, so there the title truncates too.
  */
 function ConnectedAppToolApproval({
   approval,
@@ -102,16 +104,20 @@ function ConnectedAppToolApproval({
   const label = `Approve ${tool.toolName}`;
   const reason = appApprovalReasonLine(approval);
   const notResumable = approval.responseCapability === "not_resumable";
+  const embedded = useEmbedPresentation() !== null;
   return (
     <span
       aria-label={label}
-      className={cn("flex min-w-0 grow flex-col gap-0.5", className)}
+      className={cn("flex min-w-0 grow flex-col gap-0.5", embedded && "basis-0", className)}
       data-app-tool-approval="true"
       role="group"
     >
       <span className="flex min-w-0 items-center gap-2 text-xs">
         <span
-          className="min-w-0 font-medium wrap-anywhere text-warning"
+          className={cn(
+            "min-w-0 font-medium text-warning",
+            embedded ? "truncate" : "wrap-anywhere",
+          )}
           data-testid="app-approval-title"
         >
           {label}

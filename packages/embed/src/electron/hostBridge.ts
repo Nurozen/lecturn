@@ -68,18 +68,24 @@ const hostNotificationDecoders = Object.fromEntries(
   ]),
 );
 
-export function hostContextFor(theme: EmbedThemeInput, locale: string): EmbedHostContext {
+/** `composerPlaceholder` replaces the idle composer prompt; null or absent keeps Lecturn's. */
+export function hostContextFor(
+  theme: EmbedThemeInput,
+  locale: string,
+  composerPlaceholder: string | null = null,
+): EmbedHostContext {
   const input = typeof theme === "string" ? { theme } : theme;
   const decoded = decodeHostContext({
     theme: input.theme,
     displayMode: "inline",
     locale,
     ...(input.styles === undefined ? {} : { styles: input.styles }),
+    ...(composerPlaceholder === null ? {} : { composerPlaceholder }),
   });
   if (decoded._tag === "None") {
     throw new EmbedViewError(
       "bridge-message-rejected",
-      "The embed theme is not a valid host context (EmbedHostContext).",
+      "The embed theme or composer placeholder is not a valid host context (EmbedHostContext).",
     );
   }
   return decoded.value;
@@ -259,6 +265,9 @@ export function createEmbedHostSession(
       const changed: EmbedHostContextChanged = {
         theme: next.theme,
         ...(next.styles === undefined ? {} : { styles: next.styles }),
+        ...(next.composerPlaceholder === context.composerPlaceholder
+          ? {}
+          : { composerPlaceholder: next.composerPlaceholder ?? null }),
       };
       context = next;
       deliver({ jsonrpc: "2.0", method: "ui/notifications/host-context-changed", params: changed });

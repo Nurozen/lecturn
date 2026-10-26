@@ -51,6 +51,8 @@ interface MountEmbedViewBaseOptions {
   readonly projectId: string;
   readonly threadId?: string;
   readonly theme: EmbedThemeInput;
+  /** Replaces the idle composer prompt (up to 200 characters); without it Lecturn's own shows. */
+  readonly composerPlaceholder?: string;
   readonly bounds: Electron.Rectangle;
   readonly switcher?: boolean;
   readonly webPreferences?: EmbedWebPreferences;
@@ -84,6 +86,8 @@ export interface EmbedBridge {
   newThread(params?: EmbedHostNotificationParams<"lecturn/thread.new">): void;
   openProviders(): void;
   setTheme(theme: EmbedThemeInput): void;
+  /** Null hands the idle composer prompt back to Lecturn's wording. */
+  setComposerPlaceholder(placeholder: string | null): void;
   setBounds(bounds: Electron.Rectangle): void;
   setVisible(visible: boolean): void;
   retarget(projectId: string, threadId?: string): Promise<void>;
@@ -131,7 +135,9 @@ export function mountEmbedView(
 ): EmbedBridge {
   const source: EmbedTargetSource = options.connection ?? options.target;
   const locale = Intl.DateTimeFormat().resolvedOptions().locale;
-  const initialContext = hostContextFor(options.theme, locale);
+  let theme = options.theme;
+  let composerPlaceholder = options.composerPlaceholder ?? null;
+  const initialContext = hostContextFor(theme, locale, composerPlaceholder);
   assertHostContextFits(initialContext);
 
   const view = new Electron.WebContentsView({
@@ -433,9 +439,15 @@ export function mountEmbedView(
       requireLive();
       session.notify("lecturn/providers.open", {});
     },
-    setTheme: (theme) => {
+    setTheme: (next) => {
       requireLive();
-      session.setHostContext(hostContextFor(theme, locale));
+      session.setHostContext(hostContextFor(next, locale, composerPlaceholder));
+      theme = next;
+    },
+    setComposerPlaceholder: (next) => {
+      requireLive();
+      session.setHostContext(hostContextFor(theme, locale, next));
+      composerPlaceholder = next;
     },
     setBounds: (bounds) => view.setBounds(bounds),
     setVisible: (visible) => view.setVisible(visible),

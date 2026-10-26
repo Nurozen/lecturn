@@ -105,6 +105,31 @@ describe("mountEmbed", () => {
     expect(posted.every((entry) => entry.targetOrigin === GUEST_ORIGIN)).toBe(true);
   });
 
+  it("sends the composer placeholder in the handshake, keeps it across theme changes and clears it", async () => {
+    const { bridge, posted, handshake } = harness({ composerPlaceholder: "Ask for changes…" });
+    await handshake();
+    expect(posted[0]?.message.result.hostContext.composerPlaceholder).toBe("Ask for changes…");
+
+    bridge.setTheme("light");
+    expect(posted.at(-1)?.message.params).toEqual({ theme: "light" });
+    bridge.setComposerPlaceholder(null);
+    expect(posted.at(-1)?.message.params).toEqual({ theme: "light", composerPlaceholder: null });
+    bridge.setComposerPlaceholder("Describe the change…");
+    expect(posted.at(-1)?.message.params).toEqual({
+      theme: "light",
+      composerPlaceholder: "Describe the change…",
+    });
+    expect(() => bridge.setComposerPlaceholder("x".repeat(201))).toThrow(/composer placeholder/);
+    bridge.setTheme("dark");
+    expect(posted.at(-1)?.message.params).toEqual({ theme: "dark" });
+  });
+
+  it("leaves the placeholder out of the handshake when the host sets none", async () => {
+    const { posted, handshake } = harness();
+    await handshake();
+    expect(posted[0]?.message.result.hostContext).not.toHaveProperty("composerPlaceholder");
+  });
+
   it("ignores messages from other frames and other origins", async () => {
     const { posted, fromGuest, settled } = harness();
     fromGuest(initialize("x"), { source: {} });

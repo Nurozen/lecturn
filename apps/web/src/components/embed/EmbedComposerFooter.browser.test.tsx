@@ -1,5 +1,6 @@
 import "~/index.css";
 import "../../embed/embed.css";
+import "../../embed/embedComposer.css";
 
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { EnvironmentId, ProjectId } from "@lecturn/contracts";
@@ -190,6 +191,42 @@ describe("EmbedComposerFooter", () => {
       getComputedStyle(container.querySelector('[data-testid="embed-composer-inline-actions"]')!)
         .display,
     ).toBe("contents");
+  });
+
+  it("draws Contextual as text only, without its sparkles icon", async () => {
+    const contextual = (
+      <button type="button">
+        <svg data-testid="sparkles" className="size-3.5" />
+        <span data-composer-control-label>Contextual · Off</span>
+      </button>
+    );
+    await render(
+      <EmbedComposerFooter stacked contextual={contextual} className="flex">
+        {controlsChild}
+        {actionsChild}
+      </EmbedComposerFooter>,
+      true,
+    );
+    const icon = container.querySelector('[data-testid="sparkles"]')!;
+    expect(getComputedStyle(icon).display).toBe("none");
+
+    // The resting row keeps the icon only while it is all the control shows.
+    await render(
+      <div data-chat-composer-footer-controls="true">
+        <div data-resting-block="contextual" data-composer-block-icon-only="false">
+          {contextual}
+        </div>
+        <div data-resting-block="contextual" data-composer-block-icon-only="true">
+          {contextual}
+        </div>
+      </div>,
+      true,
+    );
+    const [labelled, iconOnly] = Array.from(
+      container.querySelectorAll('[data-testid="sparkles"]'),
+    ) as [Element, Element];
+    expect(getComputedStyle(labelled).display).toBe("none");
+    expect(getComputedStyle(iconOnly).display).not.toBe("none");
   });
 
   it("renders the plain footer div outside the embed", async () => {

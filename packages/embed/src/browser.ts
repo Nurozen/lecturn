@@ -28,6 +28,8 @@ export interface MountEmbedOptions {
   readonly url: string;
   readonly token: string;
   readonly theme: EmbedThemeInput;
+  /** Replaces the idle composer prompt (up to 200 characters); without it Lecturn's own shows. */
+  readonly composerPlaceholder?: string;
   /** False hides the view's own thread switcher, for hosts that list threads themselves. */
   readonly switcher?: boolean;
   /** Mints the next embed token; the view asks ahead of expiry. */
@@ -48,6 +50,8 @@ export interface EmbedBridge {
   newThread(params?: EmbedHostNotificationParams<"lecturn/thread.new">): void;
   openProviders(): void;
   setTheme(theme: EmbedThemeInput): void;
+  /** Null hands the idle composer prompt back to Lecturn's wording. */
+  setComposerPlaceholder(placeholder: string | null): void;
   setVisible(visible: boolean): void;
   /** Loads another target in the same frame; what was queued for the old one is dropped. */
   retarget(target: Pick<EmbedTarget, "url" | "token">): void;
@@ -94,7 +98,9 @@ export function mountEmbed(container: HTMLElement, options: MountEmbedOptions): 
   };
   const emitError = (error: EmbedViewError) => emit("error", error);
 
-  const initialContext = hostContextFor(options.theme, locale);
+  let theme = options.theme;
+  let composerPlaceholder = options.composerPlaceholder ?? null;
+  const initialContext = hostContextFor(theme, locale, composerPlaceholder);
   assertHostContextFits(initialContext);
   const session = createEmbedHostSession(initialContext, {
     send: (message) => {
@@ -160,9 +166,15 @@ export function mountEmbed(container: HTMLElement, options: MountEmbedOptions): 
       requireLive();
       session.notify("lecturn/providers.open", {});
     },
-    setTheme: (theme) => {
+    setTheme: (next) => {
       requireLive();
-      session.setHostContext(hostContextFor(theme, locale));
+      session.setHostContext(hostContextFor(next, locale, composerPlaceholder));
+      theme = next;
+    },
+    setComposerPlaceholder: (next) => {
+      requireLive();
+      session.setHostContext(hostContextFor(theme, locale, next));
+      composerPlaceholder = next;
     },
     setVisible: (visible) => {
       iframe.hidden = !visible;

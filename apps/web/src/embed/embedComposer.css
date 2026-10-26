@@ -1,0 +1,56 @@
+/* The composer's approval card and Contextual control as the embed mockup draws them. Kept apart
+   from embed.css, which themes the whole pane. */
+
+/* The card (ChatComposer's top drawer) is as wide as the composer and sits on it instead of
+   tucking its bottom under it, so all of its ~60 px shows. */
+html[data-lecturn-embed]
+  [data-slot="composer-banner-attachment"]:has(
+    [data-chat-composer-top-drawer] [data-composer-banner-layout="approval"]
+  ) {
+  width: 100%;
+  margin-bottom: 0;
+}
+
+html[data-lecturn-embed]
+  [data-chat-composer-top-drawer]:has([data-composer-banner-layout="approval"]) {
+  --chat-composer-attachment-overlap: 0px;
+}
+
+/* The fade hides the part the composer would cover; nothing is covered now. The composer's top
+   edge is the seam. */
+html[data-lecturn-embed]
+  [data-chat-composer-top-drawer]:has([data-composer-banner-layout="approval"])::before {
+  -webkit-mask-image: none;
+  mask-image: none;
+  border-bottom-width: 0;
+}
+
+/* Square top corners under the card, so card and composer read as one outline. */
+html[data-lecturn-embed]
+  [data-slot="composer-shell"]:has(
+    [data-chat-composer-top-drawer] [data-composer-banner-layout="approval"]
+  )
+  :is([data-slot="composer-host"], [data-chat-composer-main-surface]) {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+/* Decline, Approve and the menu keep the title's row at any pane width; the title and reason
+   truncate instead (ComposerPendingApprovalPanel). */
+html[data-lecturn-embed]
+  [data-composer-banner-row]:has([data-app-tool-approval])
+  > [data-slot="composer-banner-actions"] {
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+}
+
+/* Contextual is text only, as drawn, wherever its label shows; an icon-only resting block keeps
+   the icon, since it is all that control has left. */
+html[data-lecturn-embed]
+  :is(
+    [data-embed-composer-contextual-row],
+    [data-resting-block="contextual"][data-composer-block-icon-only="false"]
+  )
+  svg:has(+ [data-composer-control-label]) {
+  display: none;
+}

@@ -125,6 +125,8 @@ export const EMBED_THEME_VARS = [
   "--accent",
   "--accent-foreground",
   "--ring",
+  // The running turn's stop button.
+  "--destructive",
   "--radius",
   "--font-sans",
   "--font-mono",
@@ -174,22 +176,33 @@ export const EmbedHostStyles = Schema.Struct({
 });
 export type EmbedHostStyles = typeof EmbedHostStyles.Type;
 
+/** The host's wording for the idle composer prompt; Lecturn's own stays without it. */
+export const EmbedComposerPlaceholder = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(200),
+);
+
 const hostContextFields = {
   theme: Schema.Literals(["light", "dark"]),
   displayMode: Schema.Literal("inline"),
   locale: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
   styles: Schema.optionalKey(EmbedHostStyles),
+  composerPlaceholder: Schema.optionalKey(EmbedComposerPlaceholder),
 };
 
 export const EmbedHostContext = Schema.Struct(hostContextFields);
 export type EmbedHostContext = typeof EmbedHostContext.Type;
 
-/** `host-context-changed` carries only the keys that changed, as in MCP Apps. */
+/**
+ * `host-context-changed` carries only the keys that changed, as in MCP Apps. A key left out keeps
+ * its value, so a null placeholder is how the host hands the prompt back to Lecturn's wording.
+ */
 export const EmbedHostContextChanged = Schema.Struct({
   theme: Schema.optionalKey(hostContextFields.theme),
   displayMode: Schema.optionalKey(hostContextFields.displayMode),
   locale: Schema.optionalKey(hostContextFields.locale),
   styles: Schema.optionalKey(EmbedHostStyles),
+  composerPlaceholder: Schema.optionalKey(Schema.NullOr(EmbedComposerPlaceholder)),
 });
 export type EmbedHostContextChanged = typeof EmbedHostContextChanged.Type;
 
