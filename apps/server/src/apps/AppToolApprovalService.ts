@@ -26,6 +26,7 @@ import {
   type ThreadId,
 } from "@lecturn/contracts";
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
+import { appToolApprovalLabel, appToolTitle } from "@lecturn/shared/appToolPresentation";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -92,8 +93,8 @@ export const refusalMessage = (
 
 export const approvalPrompt = (info: ConnectedAppToolApprovalInfo) =>
   info.reason === null || info.reason.trim().length === 0
-    ? `Approve ${info.toolName}`
-    : `Approve ${info.toolName} · ${info.reason.trim()}`;
+    ? appToolApprovalLabel(info)
+    : `${appToolApprovalLabel(info)} · ${info.reason.trim()}`;
 
 const NOT_RAISED: AppToolApprovalAnswer = { outcome: "cancelled", requestId: null };
 
@@ -188,6 +189,29 @@ const make = Effect.gen(function* () {
         Effect.logWarning("Could not re-check the app behind an approval", { appId, cause }),
       ),
     );
+
+  /**
+   * Names the tool by its declared title on every client, read from the
+   * definitions the toolkit lists (headless first, as there). A title that
+   * cannot be read leaves the request on the tool's name.
+   */
+  const withToolTitle = (info: ConnectedAppToolApprovalInfo) =>
+    Effect.gen(function* () {
+      if (info.toolTitle !== undefined) return info;
+      const found = yield* apps.get(info.appId);
+      if (Option.isNone(found)) return info;
+      const { registration } = found.value;
+      const prefix = `${registration.toolPrefix}_`;
+      if (!info.toolName.startsWith(prefix)) return info;
+      const bare = info.toolName.slice(prefix.length);
+      const cached = yield* apps.cachedTools(info.appId);
+      const tool = [
+        ...Option.getOrElse(cached.headless, () => []),
+        ...(registration.liveTools ? Option.getOrElse(cached.live, () => []) : []),
+      ].find((definition) => definition.name === bare);
+      const toolTitle = tool === undefined ? undefined : appToolTitle(tool);
+      return toolTitle === undefined ? info : { ...info, toolTitle };
+    }).pipe(Effect.orElseSucceed(() => info));
 
   const settleFromEvents = (
     threadId: ThreadId,
@@ -370,7 +394,8 @@ const make = Effect.gen(function* () {
     request: (context, info) =>
       Effect.scoped(
         Effect.gen(function* () {
-          const raised = yield* buildRequest(context, info).pipe(
+          const shown = yield* withToolTitle(info);
+          const raised = yield* buildRequest(context, shown).pipe(
             Effect.mapError(unavailable("Could not prepare the app tool approval")),
           );
           if (raised === undefined) return NOT_RAISED;

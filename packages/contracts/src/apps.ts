@@ -393,6 +393,8 @@ export const ConnectedAppToolApprovalInfo = Schema.Struct({
   appName: AppRegistration.fields.name,
   /** Prefixed, as the agent called it. */
   toolName: shortText(128),
+  /** The tool's declared MCP title, which clients show in place of `toolName`. */
+  toolTitle: Schema.optionalKey(shortText(80)),
   reason: Schema.NullOr(Schema.String.check(Schema.isMaxLength(2000))),
   source: Schema.Literals(["static", "app"]),
 });

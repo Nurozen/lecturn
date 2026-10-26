@@ -140,8 +140,9 @@ Every call carries `_meta["lecturn/context"]`
 - A tool whose definition has `_meta.ui.resourceUri` renders its MCP App resource as a card in
   every Lecturn client. Without `"model"` in `_meta.ui.visibility`, agents do not see the tool.
   Other `_meta` keys in definitions are dropped.
-- Give each tool a `title` (or `annotations.title`), such as `"Find motors"`: tool rows show it
-  in place of the prefixed name, which stays in the row's details. Up to 80 characters.
+- Give each tool a `title` (or `annotations.title`), such as `"Find motors"`: tool rows and
+  approvals show it in place of the prefixed name, which stays in the row's details. Up to 80
+  characters.
 - To say what one call found, return `_meta["lecturn/summary"]`, such as `"3 candidates"`. The
   row reads `Find motors · 3 candidates`. It must be one line of plain text, at most 120
   characters; anything else is dropped. Providers that keep a result's `_meta` (Codex, Claude)
