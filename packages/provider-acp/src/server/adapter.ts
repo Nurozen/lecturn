@@ -58,6 +58,8 @@ import type * as EffectAcpSchema from "effect-acp/compat";
 
 import { formatReadToolLabel, formatSearchToolLabel } from "@lecturn/shared/toolActivity";
 import * as ProviderHost from "@lecturn/provider-core/server/ProviderHost";
+import { acpAppInstructions } from "./appInstructions.ts";
+import { acpLecturnMcpToolRawOutput, acpMcpToolCallArgs } from "./appToolOutput.ts";
 import { makeAcpMcpOverAcpBridge, type AcpMcpOverAcpBridge } from "./mcpOverAcpBridge.ts";
 import {
   mcpToolPresentation,
@@ -297,6 +299,12 @@ export interface AcpAdapterV2Flavor {
   ) => AcpAdapterV2SubagentUpdate | undefined;
   readonly normalizeToolCall?: (toolCall: AcpToolCallState) => AcpToolCallState;
   readonly extractProposedPlanMarkdown?: (toolCall: AcpToolCallState) => string | undefined;
+  /**
+   * Lecturn: the name the agent's own tool list gives a tool on Lecturn's MCP
+   * server, where it is known. App instructions name the app's tools that way,
+   * because an agent that calls the server's bare name gets "not found".
+   */
+  readonly lecturnMcpToolName?: (tool: string) => string;
   /**
    * Lecturn: in plan interaction, a completed turn that captured no proposed
    * plan proposes its final assistant message instead.
@@ -3143,6 +3151,18 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               });
             }
           } else if (mcpIdentity !== undefined) {
+            const mcpOutput = acpLecturnMcpToolRawOutput({
+              threadId: context.input.threadId,
+              callId: toolCall.toolCallId,
+              server: mcpIdentity.server,
+              tool: mcpIdentity.tool,
+              args: acpMcpToolCallArgs(mcpIdentity.input, rawInputRecord),
+              status,
+              startedAtMillis: DateTime.toEpochMillis(startedAt),
+              nowMillis: DateTime.toEpochMillis(now),
+              rawOutput,
+            });
+            const mcpOutputRecord = unknownRecord(mcpOutput);
             turnItem = {
               ...base,
               title: null,
@@ -3150,7 +3170,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 serverName: mcpIdentity.server,
                 toolName: mcpIdentity.tool,
                 source: unknownRecord(
-                  (unknownRecord(rawOutputRecord?.result) ?? rawOutputRecord)?._meta,
+                  (unknownRecord(mcpOutputRecord?.result) ?? mcpOutputRecord)?._meta,
                 )?.source,
               }),
               type: "dynamic_tool",
@@ -3160,7 +3180,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 unknownRecord(rawInputRecord?.arguments) ??
                 rawInputRecord ??
                 {},
-              ...(rawOutput === undefined ? {} : { output: acpMcpToolCallOutput(rawOutput) }),
+              ...(mcpOutput === undefined ? {} : { output: acpMcpToolCallOutput(mcpOutput) }),
             };
             yield* emitProviderEvent({ type: "turn_item.updated", driver, turnItem });
             yield* rearmDeferredFinalize(context);
@@ -6430,12 +6450,15 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           sessionId: string,
         ) {
           const prompt: Array<EffectAcpSchema.ContentBlock> = [];
+          const appInstructions = acpAppInstructions({
+            instructions: turnInput.appInstructions,
+            app: (yield* mcpSessions.read(turnInput.threadId))?.app,
+            toolName: flavor.lecturnMcpToolName,
+          });
           const instructionState = lecturnAcpInstructionState({
             interactionMode: turnInput.runtimePolicy.interactionMode,
             hasLecturnMcp: (yield* readAdapterMcpContext(turnInput.threadId)).servers.length > 0,
-            ...(turnInput.appInstructions === undefined
-              ? {}
-              : { appInstructions: turnInput.appInstructions }),
+            ...(appInstructions === undefined ? {} : { appInstructions }),
           });
           const previousInstructionState = (yield* Ref.get(promptInstructionStates)).get(sessionId);
           const messageText = providerMessageTextWithAttachmentPaths({
@@ -6446,9 +6469,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           const text = lecturnAcpPromptWithInstructions({
             prompt: messageText,
             state: instructionState,
-            ...(turnInput.appInstructions === undefined
-              ? {}
-              : { appInstructions: turnInput.appInstructions }),
+            ...(appInstructions === undefined ? {} : { appInstructions }),
             ...(previousInstructionState === undefined
               ? {}
               : { previousState: previousInstructionState }),

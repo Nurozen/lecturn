@@ -9,6 +9,11 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@lecturn/contracts";
+import {
+  claimServedAppToolResult,
+  resetServedAppToolResults,
+} from "@lecturn/shared/appToolResults";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -222,6 +227,20 @@ it.effect("routes app tool calls to the app with the caller's scope and meta", (
       expect(fake.calls).toEqual([
         { threadId: appThreadId, appId: app.appId, name: "ex_increment", args: { by: 2 }, meta },
       ]);
+      // An ACP agent that reports no result for the call gets the one served here.
+      expect(
+        claimServedAppToolResult(
+          {
+            threadId: appThreadId,
+            tool: "ex_increment",
+            args: { by: 2 },
+            callId: "acp-call",
+            startedAt: 0,
+          },
+          yield* Clock.currentTimeMillis,
+        ),
+      ).toEqual(answer.result);
+      resetServedAppToolResults();
 
       // A plain thread's credential never reaches the app, even by guessing the name.
       const refused = yield* plain.callTool("ex_increment", { by: 3 });

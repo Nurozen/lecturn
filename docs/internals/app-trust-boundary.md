@@ -124,10 +124,14 @@ one line of plain text of at most 120 characters. Clients read it, like the tool
 stamps on the turn item, only on rows whose source is an app.
 
 Adapters store a result's `lecturn/*` `_meta` keys with the tool item, and drop its other `_meta`
-keys. Claude and Codex always get them. ACP gets them when the agent puts the MCP result in
-`rawOutput`, and Pi's bridge passes them in `details`, which the model never sees. Cursor's SDK
-reports no result `_meta` and OpenCode reports results as text, so their app rows show the title
-with no summary.
+keys. Claude and Codex always get them. Pi's bridge passes them in `details`, which the model never
+sees. ACP reads the MCP result from `rawOutput`, but some agents (Grok) end the call with text or
+nothing. The interceptor keeps each result it served, briefly and process-wide in
+[appToolResults.ts][served-results], and the ACP adapter fills such a row from it. It matches by
+thread, tool and arguments, oldest first, and only to a result served after the agent announced the
+call. Matching by name and order is fragile across adapters, so it stays limited to ACP rows that
+came without a result. Cursor's SDK reports no result `_meta` and OpenCode reports results as text,
+so their app rows show the title with no summary.
 
 Headless definitions are cached. The registration's `listArgs`, the preferred path, runs a command
 that prints the definitions and exits. It must not take an app-side lock. A throwaway lister could
@@ -226,14 +230,14 @@ provider thread got Lecturn's MCP server, through `McpProviderSessions.reportAct
 missing or failed activation, the apps hook writes one "tools unavailable" notice per thread and
 provider thread.
 
-| Adapter                                          | Instructions                                  | Native prompt for app tools                                                                                                           | Notes                                                                                                |
-| ------------------------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Claude                                           | `systemPrompt.append` (part of the query key) | None: `mcp__lecturn__*` is pre-approved                                                                                               | Init failure reports activation failed                                                               |
-| Codex                                            | `developer_instructions`                      | Off per tool (`approval_mode = "approve"`) for the app's tools on app threads; a server-wide default would also change built-in tools | MCP startup failure reports activation failed                                                        |
-| ACP: registry agents, Grok, Copilot, Antigravity | Prompt block, re-sent when its digest changes | `clientPolicy` allows calls naming Lecturn's server and an app tool; never commands, file mutations or calls with locations           |                                                                                                      |
-| Cursor                                           | Appended per turn                             | None                                                                                                                                  | The SDK takes no MCP tool timeout, so its 60 s default applies; users are told to answer within 60 s |
-| OpenCode                                         | v2 session instructions, v1 system prompt     | None                                                                                                                                  | 65 min tool timeout. An external server never installs the MCP config, so it reports not activated   |
-| Pi, Muse                                         | Not delivered                                 | None                                                                                                                                  | Activation only                                                                                      |
+| Adapter                                          | Instructions                                  | Native prompt for app tools                                                                                                           | Notes                                                                                                       |
+| ------------------------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Claude                                           | `systemPrompt.append` (part of the query key) | None: `mcp__lecturn__*` is pre-approved                                                                                               | Init failure reports activation failed                                                                      |
+| Codex                                            | `developer_instructions`                      | Off per tool (`approval_mode = "approve"`) for the app's tools on app threads; a server-wide default would also change built-in tools | MCP startup failure reports activation failed                                                               |
+| ACP: registry agents, Grok, Copilot, Antigravity | Prompt block, re-sent when its digest changes | `clientPolicy` allows calls naming Lecturn's server and an app tool; never commands, file mutations or calls with locations           | The block names the app's tools as the agent lists them where the flavor knows it (Grok: `lecturn__<tool>`) |
+| Cursor                                           | Appended per turn                             | None                                                                                                                                  | The SDK takes no MCP tool timeout, so its 60 s default applies; users are told to answer within 60 s        |
+| OpenCode                                         | v2 session instructions, v1 system prompt     | None                                                                                                                                  | 65 min tool timeout. An external server never installs the MCP config, so it reports not activated          |
+| Pi, Muse                                         | Not delivered                                 | None                                                                                                                                  | Activation only                                                                                             |
 
 [subjects]: ../../apps/server/src/apps/subjects.ts
 [auth-sessions]: ../../apps/server/src/persistence/AuthSessions.ts
@@ -247,6 +251,7 @@ provider thread.
 [frame-ancestors]: ../../apps/server/src/apps/frameAncestors.ts
 [contracts-apps]: ../../packages/contracts/src/apps.ts
 [interceptor]: ../../apps/server/src/mcp/toolkits/app/AppToolInterceptor.ts
+[served-results]: ../../packages/shared/src/appToolResults.ts
 [gate]: ../../apps/server/src/apps/AppToolGate.ts
 [approval-service]: ../../apps/server/src/apps/AppToolApprovalService.ts
 [runtime-layer]: ../../apps/server/src/orchestration-v2/runtimeLayer.ts
