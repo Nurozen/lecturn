@@ -569,10 +569,11 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  // Gateway records are immutable while their tunnel exists. An obsolete provision must never
-  // re-resolve a hostname and overwrite a newer enrollment's DNS target.
+  // Called under the gateway's account/allocation claim. Billing retirement retains both
+  // record IDs, so only those owned records may move away from a conclusively retired tunnel.
   const ensureGatewayDnsRecord = Effect.fnUntraced(function* (
     record: ManagedEndpointCnameRecordInput,
+    ownedRecordId: string | null,
   ) {
     const verify = (
       records: ReadonlyArray<{
@@ -591,13 +592,42 @@ export const make = Effect.gen(function* () {
       );
       return matching && records.length === 1 ? matching.id : false;
     };
-    const existing = verify(yield* dns.listRecords(record.name));
-    if (existing === false)
+    const records = yield* dns.listRecords(record.name);
+    const existing = verify(records);
+    if (existing === false) {
+      const prior = records.length === 1 ? records[0] : undefined;
+      const retiredTunnelId =
+        prior?.id === ownedRecordId &&
+        prior.type === record.type &&
+        prior.proxied === record.proxied
+          ? /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.cfargotunnel\.com$/iu.exec(
+              prior.content ?? "",
+            )?.[1]
+          : undefined;
+      if (prior && retiredTunnelId) {
+        const retired = yield* tunnels.get(retiredTunnelId).pipe(
+          Effect.map(
+            (tunnel) =>
+              tunnel.id === retiredTunnelId &&
+              typeof tunnel.deletedAt === "string" &&
+              tunnel.deletedAt.length > 0,
+          ),
+          Effect.catchTags({
+            ManagedEndpointTunnelClientError: (error) =>
+              isManagedEndpointNotFound(error.cause) ? Effect.succeed(true) : Effect.fail(error),
+          }),
+        );
+        if (retired) {
+          yield* dns.updateRecord(prior.id, record);
+          return prior.id;
+        }
+      }
       return yield* new ManagedEndpointDnsClientError({
         operation: "create-record",
         hostname: record.name,
         cause: new Error("Gateway DNS target changed; wait for cleanup before retrying"),
       });
+    }
     if (existing !== null) return existing;
     return yield* dns.createRecord(record).pipe(
       Effect.map((created) => created.id),
@@ -1701,7 +1731,7 @@ export const make = Effect.gen(function* () {
         let dnsRecordId: string;
         let dnsGeneration = 0;
         if (gatewayMapping && gateway) {
-          dnsRecordId = yield* ensureGatewayDnsRecord(dnsRecord).pipe(
+          dnsRecordId = yield* ensureGatewayDnsRecord(dnsRecord, allocation.dnsRecordId).pipe(
             Effect.mapError(
               (cause) =>
                 new ManagedEndpointProvisioningFailed({
@@ -1753,10 +1783,10 @@ export const make = Effect.gen(function* () {
               ),
             );
 
-          const originDnsRecordId = yield* ensureGatewayDnsRecord({
-            ...dnsRecord,
-            name: gatewayMapping.originHostname,
-          }).pipe(
+          const originDnsRecordId = yield* ensureGatewayDnsRecord(
+            { ...dnsRecord, name: gatewayMapping.originHostname },
+            gatewayMapping.originDnsRecordId,
+          ).pipe(
             Effect.mapError(
               (cause) =>
                 new ManagedEndpointProvisioningFailed({
