@@ -136,17 +136,21 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
   };
   const result = readResult(value, budget);
   const output: CompactToolOutput = result.failed ? { isError: true } : {};
-  const data = budget.exceeded ? undefined : result.data;
+  const { data } = result;
+  // A card reference stands on its own, so bulk past the budget (an image, a
+  // long body) must not cost the row its card. IDs and counts could be partial.
   if (data !== undefined) {
+    const htmlRender = readHtmlRenderReference(data.htmlRender);
+    if (htmlRender !== undefined) output.htmlRender = htmlRender;
+    const mcpApp = readMcpAppReference(data[MCP_APP_OUTPUT_KEY]);
+    if (mcpApp !== undefined) output[MCP_APP_OUTPUT_KEY] = mcpApp;
+  }
+  if (data !== undefined && !budget.exceeded) {
     for (const key of ["threadId", "messageId", "taskId", "scheduledTaskId"] as const) {
       const id = boundedId(data[key]);
       if (id !== undefined) output[key] = id;
     }
     if (data.status === "rolled_back") output.status = "rolled_back";
-    const htmlRender = readHtmlRenderReference(data.htmlRender);
-    if (htmlRender !== undefined) output.htmlRender = htmlRender;
-    const mcpApp = readMcpAppReference(data[MCP_APP_OUTPUT_KEY]);
-    if (mcpApp !== undefined) output[MCP_APP_OUTPUT_KEY] = mcpApp;
     const nestedThreadId = Predicate.isObject(data.thread)
       ? boundedId(data.thread.threadId)
       : undefined;

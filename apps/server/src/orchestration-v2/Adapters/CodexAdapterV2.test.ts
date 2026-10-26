@@ -42,7 +42,11 @@ import * as Effect from "effect/Effect";
 import * as Predicate from "effect/Predicate";
 import * as FileSystem from "effect/FileSystem";
 import { MCP_APP_OUTPUT_KEY, readMcpAppReference } from "@lecturn/shared/mcpApp";
-import { appToolSummaryFromToolItem } from "@lecturn/shared/toolOutput";
+import {
+  appToolSummaryFromToolItem,
+  mcpAppFromToolItem,
+  toolOutputImages,
+} from "@lecturn/shared/toolOutput";
 import { resolveAttachmentPathById } from "../../attachmentStore.ts";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -66,6 +70,8 @@ import * as Orchestrator from "../Orchestrator.ts";
 import * as ProviderReplayHarness from "../testkit/ProviderReplayHarness.ts";
 import * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
 import type * as ProviderContinuationRequests from "@lecturn/provider-core/server/ProviderContinuationRequests";
+import { stripUnservedToolOutputImageBytes } from "../toolOutputImageBytes.ts";
+import { projectTurnItemForDetail, projectTurnItemForWire } from "../WireProjection.ts";
 import * as CodexAdapterV2 from "./CodexAdapterV2.ts";
 import { makeReplayServerConfig, withCodexReplayChildMetadata } from "./CodexAdapterV2.testkit.ts";
 import * as CodexAdapterV2Testkit from "./CodexAdapterV2.testkit.ts";
@@ -1171,6 +1177,88 @@ describe("CodexAdapterV2 dynamic tool projection", () => {
       assert.deepEqual(failed.output, { error: "Model is invalid", result: kept });
       assert.equal(appToolSummaryFromToolItem({ toolSource, output: failed.output }), "Clean");
     }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "restores an image result Codex passes as JSON text, so its row keeps summary and card",
+    () =>
+      Effect.gen(function* () {
+        const toolSource = {
+          key: "app:dev.rocketwright",
+          name: "RocketWright",
+          kind: "integration" as const,
+        };
+        const data = "A".repeat(400_000);
+        const image = { type: "image", data, mimeType: "image/png" };
+        const card = {
+          attachmentId: "thread-1-render-html",
+          server: "lecturn",
+          tool: "rw_viewport_render",
+          resourceUri: "ui://rw/render-card",
+        };
+        const mcpResult = {
+          content: [image],
+          structuredContent: { [MCP_APP_OUTPUT_KEY]: card, result: { content: [image] } },
+          _meta: { "lecturn/summary": "Iso view", "lecturn/toolSource": toolSource },
+        };
+        const call = {
+          type: "mcpToolCall" as const,
+          id: "render",
+          server: "lecturn",
+          tool: "rw_viewport_render",
+          status: "completed" as const,
+          arguments: { view: "iso" },
+          result: { content: [{ type: "text", text: JSON.stringify(mcpResult) }] },
+        };
+        const projection = yield* CodexAdapterV2.projectCodexDynamicToolItem(call);
+        assert.deepEqual(projection.output, mcpResult);
+
+        const now = DateTime.makeUnsafe("2026-10-26T00:00:00.000Z");
+        const stored = stripUnservedToolOutputImageBytes({
+          id: TurnItemId.make("render"),
+          type: "dynamic_tool",
+          threadId: ThreadId.make("thread-1"),
+          runId: null,
+          nodeId: null,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 1,
+          status: "completed",
+          title: "Render view",
+          toolName: projection.toolName,
+          toolSource,
+          input: projection.input,
+          output: projection.output,
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        });
+        const wire = projectTurnItemForWire(stored);
+        const wireOutput = wire.type === "dynamic_tool" ? wire.output : undefined;
+        assert.deepEqual(wireOutput, {
+          [MCP_APP_OUTPUT_KEY]: card,
+          _meta: { "lecturn/summary": "Iso view" },
+        });
+        assert.equal(appToolSummaryFromToolItem({ toolSource, output: wireOutput }), "Iso view");
+        assert.deepEqual(
+          mcpAppFromToolItem({ toolName: projection.toolName, output: wireOutput }),
+          card,
+        );
+        const detail = projectTurnItemForDetail(stored);
+        const detailOutput = detail.type === "dynamic_tool" ? detail.output : undefined;
+        assert.deepEqual(toolOutputImages(detailOutput), [{ mimeType: "image/png" }]);
+        assert.isFalse(JSON.stringify([wire, detail]).includes("AAAAAAAA"));
+
+        // A tool whose own text merely looks like a result is left alone.
+        const text = [{ type: "text", text: '{"content":[{"type":"paragraph","text":"Hi"}]}' }];
+        const plain = yield* CodexAdapterV2.projectCodexDynamicToolItem({
+          ...call,
+          result: { content: text },
+        });
+        assert.deepEqual(plain.output, text);
+      }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("preserves namespaced dynamic tool output", () =>
