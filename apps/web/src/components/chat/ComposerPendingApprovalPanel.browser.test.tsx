@@ -114,11 +114,15 @@ describe("ComposerPendingApprovalPanel for a connected app's tool", () => {
     expect(actionsCenter(actionsBox)).toBeLessThan(reasonBox.bottom);
   });
 
-  it("truncates a long reason rather than wrapping the actions", async () => {
+  it("wraps a long reason to two sans lines, then truncates, without moving the actions", async () => {
     await render(560, "Flashes the Embed Host window ".repeat(8));
     const { titleBox, reasonBox, actionsBox } = layout();
+    const reason = container.querySelector<HTMLElement>('[data-testid="app-approval-reason"]')!;
+    const style = getComputedStyle(reason);
 
-    expect(reasonBox.height).toBeLessThan(20);
+    expect(style.fontFamily).toBe(getComputedStyle(layout().title).fontFamily);
+    expect(reasonBox.height).toBeCloseTo(2 * Number.parseFloat(style.lineHeight), 0);
+    expect(reason.scrollHeight).toBeGreaterThan(reason.clientHeight);
     expect(actionsBox.left).toBeGreaterThanOrEqual(reasonBox.right);
     expect(actionsCenter(actionsBox)).toBeLessThan(reasonBox.bottom);
     expect(actionsCenter(actionsBox)).toBeGreaterThan(titleBox.top);

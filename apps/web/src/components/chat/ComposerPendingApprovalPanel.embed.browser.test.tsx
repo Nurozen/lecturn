@@ -38,28 +38,63 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+const options: NonNullable<PendingApproval["options"]> = [
+  { decision: "decline", label: "Decline" },
+  { decision: "accept", label: "Approve" },
+  { decision: "cancel", label: "Cancel" },
+];
+
 const approval: PendingApproval = {
   requestId: RuntimeRequestId.make("approval-1"),
   requestKind: "permission",
   createdAt: "2026-10-25T00:00:00.000Z",
   responseCapability: "live",
-  options: [
-    { decision: "decline", label: "Decline" },
-    { decision: "accept", label: "Approve" },
-    { decision: "cancel", label: "Cancel" },
-  ],
+  options,
   connectedAppTool: {
     appId: AppId.make("dev.rocketwright"),
     appName: "RocketWright",
     toolName: "rw_engine_simulate",
-    reason: "engine_simulate duration not set (defaults to a full burn of the selected motor)",
+    reason: "Duration not set: a full motor burn",
     source: "app",
   },
 };
 
+const LONG_REASON =
+  "engine_simulate duration not set, so it defaults to a full burn of the selected motor; " +
+  "a liquid engine may run for several minutes before the result card renders.";
+
+const withReason = (reason: string): PendingApproval => ({
+  ...approval,
+  connectedAppTool: { ...approval.connectedAppTool!, reason },
+});
+
+const commandApproval: PendingApproval = {
+  requestId: RuntimeRequestId.make("approval-2"),
+  requestKind: "command",
+  createdAt: "2026-10-25T00:00:00.000Z",
+  responseCapability: "live",
+  detail: "vp test run apps/web/src/components/chat",
+  options,
+};
+
+// The computed family of each Tailwind font utility, for telling prose from code.
+function fontFamilyOf(utility: "font-sans" | "font-mono") {
+  const probe = document.createElement("span");
+  probe.className = utility;
+  container.append(probe);
+  const family = getComputedStyle(probe).fontFamily;
+  probe.remove();
+  return family;
+}
+
 // The composer as ChatView and ChatComposer nest it while an approval is pending: the card is the
 // top drawer in the banner dock, and the composer's main surface follows it.
-async function render(width: number, embedded = true, onStopTurn?: () => void) {
+async function render(
+  width: number,
+  embedded = true,
+  onStopTurn?: () => void,
+  shown: PendingApproval = approval,
+) {
   // The pane is the embed's whole viewport, so the phone breakpoints apply as they do there.
   await page.viewport(width, 800);
   if (embedded) document.documentElement.dataset.lecturnEmbed = "";
@@ -82,14 +117,14 @@ async function render(width: number, embedded = true, onStopTurn?: () => void) {
                         <ShieldIcon />
                       </ComposerBanner.Icon>
                       <ComposerBanner.Content>
-                        <ComposerPendingApprovalPanel approval={approval} pendingCount={1} />
+                        <ComposerPendingApprovalPanel approval={shown} pendingCount={1} />
                       </ComposerBanner.Content>
                       <ComposerBanner.Actions>
                         <ComposerPendingApprovalActions
-                          requestId={approval.requestId}
+                          requestId={shown.requestId}
                           canRespond
                           isResponding={false}
-                          options={approval.options}
+                          options={shown.options}
                           onStopTurn={onStopTurn}
                           onRespondToApproval={async () => undefined}
                         />
@@ -185,6 +220,38 @@ describe.each([352, 320])("the embed's approval card in a %i px pane", (width) =
     expect(card.bottom).toBeLessThanOrEqual(composer.top + 0.5);
     expect(card.height).toBeGreaterThanOrEqual(52);
     expect(card.height).toBeLessThanOrEqual(68);
+  });
+});
+
+describe("an app's long reason in a 352 px embed pane", () => {
+  it("reads as sans prose on two lines, then truncates, and the card grows by one line", async () => {
+    await render(352);
+    const oneLine = measure();
+    await render(352, true, undefined, withReason(LONG_REASON));
+    const m = measure();
+    const reason = container.querySelector<HTMLElement>('[data-testid="app-approval-reason"]')!;
+    const style = getComputedStyle(reason);
+    const lineHeight = Number.parseFloat(style.lineHeight);
+
+    expect(style.fontFamily).toBe(fontFamilyOf("font-sans"));
+    expect(style.fontFamily).not.toBe(fontFamilyOf("font-mono"));
+    expect(style.fontSize).toBe("12px");
+    expect(m.reasonBox.height).toBeCloseTo(2 * lineHeight, 0);
+    // Clamped: the rest of the reason is cut off with an ellipsis.
+    expect(reason.scrollHeight).toBeGreaterThan(reason.clientHeight);
+    expect(m.card.height - oneLine.card.height).toBeCloseTo(lineHeight, 0);
+    expectActionsOnTitleRow(m);
+  });
+});
+
+describe("a provider command approval in a 352 px embed pane", () => {
+  it("keeps its command in monospace", async () => {
+    await render(352, true, undefined, commandApproval);
+    const detail = container.querySelector<HTMLElement>('[aria-label="Command"]')!;
+
+    expect(detail.textContent).toBe("vp test run apps/web/src/components/chat");
+    expect(getComputedStyle(detail).fontFamily).toBe(fontFamilyOf("font-mono"));
+    expect(container.querySelector('[data-testid="app-approval-reason"]')).toBeNull();
   });
 });
 
