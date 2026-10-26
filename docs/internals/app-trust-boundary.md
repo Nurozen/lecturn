@@ -123,6 +123,12 @@ approvals or cards. The one exception is `lecturn/summary`, the row's secondary 
 one line of plain text of at most 120 characters. Clients read it, like the tool title the server
 stamps on the turn item, only on rows whose source is an app.
 
+Adapters store a result's `lecturn/*` `_meta` keys with the tool item, and drop its other `_meta`
+keys. Claude and Codex always get them. ACP gets them when the agent puts the MCP result in
+`rawOutput`, and Pi's bridge passes them in `details`, which the model never sees. Cursor's SDK
+reports no result `_meta` and OpenCode reports results as text, so their app rows show the title
+with no summary.
+
 Headless definitions are cached. The registration's `listArgs`, the preferred path, runs a command
 that prints the definitions and exits. It must not take an app-side lock. A throwaway lister could
 take the project lock from a session the app started itself, as RocketWright's would. Without
@@ -186,6 +192,12 @@ A thread is copied again only when its `historyRevision` has passed the revision
 taken at. The revision moves on messages, turn items and terminal provider-turn events, never on
 metadata such as `appData`, subtitles or `continuedIn`. Otherwise the helper's own writes would
 trigger re-copies.
+
+A copy keeps its source's runtime mode, interaction mode and model, so it is never more permissive
+than its source. If the source's provider is missing on the destination, the copy takes the
+destination's default model and ends with a notice that says so. Replacing a copy can make its
+modes stricter, never looser. A bundle from before these fields existed gets the destination's
+defaults.
 
 Project and thread ids differ per server. Hosts key mounts, caches and rail state by workspace
 root, and follow `mode` events (`projectIdsByWorkspaceRoot`, `threadIdMap`); a mount built from a

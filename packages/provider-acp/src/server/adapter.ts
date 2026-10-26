@@ -59,7 +59,10 @@ import type * as EffectAcpSchema from "effect-acp/compat";
 import { formatReadToolLabel, formatSearchToolLabel } from "@lecturn/shared/toolActivity";
 import * as ProviderHost from "@lecturn/provider-core/server/ProviderHost";
 import { makeAcpMcpOverAcpBridge, type AcpMcpOverAcpBridge } from "./mcpOverAcpBridge.ts";
-import { mcpToolPresentation } from "@lecturn/provider-core/server/mcpToolPresentation";
+import {
+  mcpToolPresentation,
+  mcpToolResultOutput,
+} from "@lecturn/provider-core/server/mcpToolPresentation";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import * as McpProviderSession from "@lecturn/provider-core/server/mcpSession";
 import {
@@ -675,9 +678,7 @@ function acpMcpToolCallOutput(rawOutput: unknown): unknown {
   const record = unknownRecord(rawOutput);
   if (record === undefined) return rawOutput;
   if (!("result" in record) && !("error" in record)) return rawOutput;
-  const result = unknownRecord(record.result);
-  const resultOutput =
-    result === undefined ? undefined : (result.structuredContent ?? result.content ?? undefined);
+  const resultOutput = mcpToolResultOutput(record.result);
   const errorMessage = unknownRecord(record.error)?.message;
   if (typeof errorMessage !== "string") {
     return resultOutput ?? rawOutput;

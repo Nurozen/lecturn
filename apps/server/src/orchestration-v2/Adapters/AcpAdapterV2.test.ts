@@ -1428,6 +1428,20 @@ describe("AcpAdapterV2", () => {
                       _meta: { is_mcp_tool_call: true },
                     },
                     {
+                      sessionUpdate: "tool_call",
+                      toolCallId: "parent-design-check",
+                      title: "Check design",
+                      status: "completed",
+                      rawInput: { server: "lecturn", tool: "rw_design_check" },
+                      rawOutput: {
+                        result: {
+                          _meta: { "lecturn/summary": "Clean", "openai/outputTemplate": "ui://x" },
+                          content: [{ type: "text", text: "Clean" }],
+                        },
+                      },
+                      _meta: { is_mcp_tool_call: true },
+                    },
+                    {
                       sessionUpdate: "agent_message_chunk",
                       content: { type: "text", text: " → decider → event)." },
                       _meta: { "cognition.ai/streamingMessageId": "parent-message" },
@@ -1586,6 +1600,17 @@ describe("AcpAdapterV2", () => {
         });
         assert.deepEqual(item?.toolIcon, item?.toolSource?.icon);
       }
+      // An app row's summary rides in the result's `_meta`; other keys stay out.
+      const parentApp = items.find(
+        (item) =>
+          item.threadId === threadId &&
+          item.type === "dynamic_tool" &&
+          item.toolName === "lecturn.rw_design_check",
+      );
+      assert.deepEqual(parentApp?.type === "dynamic_tool" ? parentApp.output : undefined, {
+        content: [{ type: "text", text: "Clean" }],
+        _meta: { "lecturn/summary": "Clean" },
+      });
       assert.isTrue(
         items.some(
           (item) =>
@@ -1610,7 +1635,7 @@ describe("AcpAdapterV2", () => {
       const parentTools = items.filter(
         (item) => item.threadId === threadId && item.type === "dynamic_tool",
       );
-      assert.equal(parentTools.length, 2);
+      assert.equal(parentTools.length, 3);
       assert.equal(parentTools[0]?.title, "Parent tool finished");
     }).pipe(Effect.provide(layerTest), Effect.scoped),
   );

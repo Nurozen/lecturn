@@ -1,6 +1,7 @@
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import { AgentScope } from "@lecturn/shared/AgentScope";
 import { getModelSelectionStringOptionValue } from "@lecturn/shared/model";
+import { lecturnResultMeta } from "@lecturn/shared/appToolPresentation";
 import { readToolOutputImage } from "@lecturn/shared/toolOutput";
 import * as Predicate from "effect/Predicate";
 import {
@@ -256,6 +257,10 @@ function piToolOutput(result: unknown, toolName: string): unknown {
     recordString(details, "server") !== undefined &&
     recordString(details, "tool") !== undefined &&
     Array.isArray(recordField(structured, "content"));
+  // The bridge moves Lecturn's `_meta` keys into details; the row reads them from `_meta`.
+  const meta = isMcpResult ? lecturnResultMeta(recordField(details, "_meta")) : undefined;
+  const withMeta = <T extends object>(output: T) =>
+    meta === undefined ? output : { ...output, _meta: meta };
   if (isMcpResult) {
     structured = recordField(structured, "structuredContent");
   }
@@ -284,7 +289,7 @@ function piToolOutput(result: unknown, toolName: string): unknown {
     }
   }
   if (structured !== undefined && !isBoundedStructuredToolValue(structured)) {
-    return {
+    return withMeta({
       content: [
         ...content,
         {
@@ -292,7 +297,7 @@ function piToolOutput(result: unknown, toolName: string): unknown {
           text: "Structured output omitted because it exceeds the stored result limit.",
         },
       ],
-    };
+    });
   }
   if (
     !isMcpResult &&
@@ -302,10 +307,10 @@ function piToolOutput(result: unknown, toolName: string): unknown {
     const text = contentText(content);
     return text.length > 0 ? text : undefined;
   }
-  return {
+  return withMeta({
     content,
     ...(structured === undefined ? {} : { structuredContent: structured }),
-  };
+  });
 }
 
 function providerRef(

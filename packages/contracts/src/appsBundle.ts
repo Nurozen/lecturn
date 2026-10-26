@@ -14,10 +14,12 @@ import {
 } from "./apps.ts";
 import { EnvironmentId, IsoDateTime, NonNegativeInt, ThreadId } from "./baseSchemas.ts";
 import { ChatAttachmentId } from "./chatAttachment.ts";
+import { ModelSelection } from "./modelSelection.ts";
 import {
   OrchestrationV2ConversationMessageJson,
   OrchestrationV2TurnItemJson,
 } from "./orchestrationV2.ts";
+import { ProviderInteractionMode, RuntimeMode } from "./providerPolicy.ts";
 
 const hasNoOmittedOutput = (items: ReadonlyArray<object>) =>
   items.every((item) => !("outputOmitted" in item) || item.outputOmitted !== true);
@@ -31,6 +33,11 @@ export const ConnectedAppThreadBundleThread = Schema.Struct({
   appData: Schema.NullOr(ConnectedAppThreadData),
   subtitle: Schema.NullOr(ConnectedAppThreadSubtitle),
   pinned: Schema.Boolean,
+  // The source's settings, so a copy is never more permissive than its source.
+  // Optional: bundles written before they were carried still import.
+  runtimeMode: Schema.optionalKey(RuntimeMode),
+  interactionMode: Schema.optionalKey(ProviderInteractionMode),
+  modelSelection: Schema.optionalKey(ModelSelection),
   messages: Schema.Array(OrchestrationV2ConversationMessageJson),
   // Wire turn items may withhold large output; a copy must carry it all.
   turnItems: Schema.Array(OrchestrationV2TurnItemJson).check(

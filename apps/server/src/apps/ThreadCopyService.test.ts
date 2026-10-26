@@ -11,6 +11,8 @@ import {
   type ChatAttachment,
   CommandId,
   ConnectedAppThreadBundleV1,
+  DEFAULT_MODEL,
+  DEFAULT_RUNTIME_MODE,
   EnvironmentId,
   EventId,
   MessageId,
@@ -1043,6 +1045,108 @@ describe("ThreadCopyService", () => {
       yield* user.run(importBundle(empty));
       assert.deepEqual(yield* user.run(attachmentFiles), []);
       assert.deepEqual(yield* user.run(stagingEntries), []);
+    }),
+  );
+
+  it.effect.each(["approval-required", "auto"] as const)(
+    "a copy of a %s thread keeps its access mode on a server that defaults to Full access",
+    (runtimeMode) =>
+      Effect.gen(function* () {
+        const sidecar = yield* startEnvironment("sidecar");
+        const user = yield* startEnvironment("user");
+        const source = yield* sidecar.run(
+          Effect.gen(function* () {
+            const thread = yield* createSourceThread("/work/rocket", "Thread");
+            yield* writeTurn(thread.threadId, 1);
+            yield* Effect.flatMap(Orchestrator.OrchestratorV2, (orchestrator) =>
+              orchestrator.dispatch({
+                type: "thread.runtime-mode.set",
+                commandId: CommandId.make(`${thread.threadId}:mode`),
+                threadId: thread.threadId,
+                runtimeMode,
+              }),
+            );
+            return thread;
+          }),
+        );
+        const bundle = yield* sidecar.run(exportAll);
+        assert.strictEqual(bundle.projects[0]!.threads[0]!.runtimeMode, runtimeMode);
+        yield* user.run(importBundle(bundle));
+
+        const copy = yield* user.run(
+          projectionOf(copyThreadId(sidecar.environmentId, source.threadId)),
+        );
+        assert.strictEqual(DEFAULT_RUNTIME_MODE, "full-access");
+        assert.strictEqual(copy.thread.runtimeMode, runtimeMode);
+        assert.deepEqual(
+          copy.thread.modelSelection,
+          bundle.projects[0]!.threads[0]!.modelSelection,
+        );
+        assert.isFalse(copy.visibleTurnItems.some((row) => row.item.type === "system_notice"));
+      }),
+  );
+
+  it.effect("a copy whose provider is missing here takes the default model and says so", () =>
+    Effect.gen(function* () {
+      const sidecar = yield* startEnvironment("sidecar");
+      const user = yield* startEnvironment("user");
+      const source = yield* sidecar.run(createSourceThread("/work/rocket", "Thread"));
+      yield* sidecar.run(writeTurn(source.threadId, 1));
+      const exported = yield* sidecar.run(exportAll);
+      // As a sidecar running the scripted provider exports it.
+      const [project] = exported.projects;
+      const bundle = {
+        ...exported,
+        projects: [
+          {
+            ...project!,
+            threads: project!.threads.map((thread) => ({
+              ...thread,
+              runtimeMode: "approval-required" as const,
+              modelSelection: { instanceId: ProviderInstanceId.make("scripted"), model: "script" },
+            })),
+          },
+        ],
+      };
+      yield* user.run(importBundle(bundle));
+
+      const copy = yield* user.run(
+        projectionOf(copyThreadId(sidecar.environmentId, source.threadId)),
+      );
+      assert.deepEqual(copy.thread.modelSelection, { instanceId, model: DEFAULT_MODEL });
+      assert.strictEqual(copy.thread.providerInstanceId, instanceId);
+      assert.strictEqual(copy.thread.runtimeMode, "approval-required");
+      const last = copy.visibleTurnItems.at(-1)?.item;
+      assert.strictEqual(last?.type, "system_notice");
+      assert.strictEqual(
+        last?.type === "system_notice" ? last.message : undefined,
+        `scripted is not available here, so this copy uses Codex (${DEFAULT_MODEL}).`,
+      );
+      assert.deepEqual(transcript(copy), ["question 1", "answer 1"]);
+
+      // A re-copy in place keeps the one notice.
+      yield* sidecar.run(writeTurn(source.threadId, 2));
+      const next = yield* sidecar.run(exportAll);
+      yield* user.run(
+        importBundle({
+          ...next,
+          projects: next.projects.map((entry) => ({
+            ...entry,
+            threads: entry.threads.map((thread) => ({
+              ...thread,
+              modelSelection: bundle.projects[0]!.threads[0]!.modelSelection,
+            })),
+          })),
+        }),
+      );
+      const recopied = yield* user.run(
+        projectionOf(copyThreadId(sidecar.environmentId, source.threadId)),
+      );
+      assert.deepEqual(transcript(recopied), ["question 1", "answer 1", "question 2", "answer 2"]);
+      assert.lengthOf(
+        recopied.visibleTurnItems.filter((row) => row.item.type === "system_notice"),
+        1,
+      );
     }),
   );
 

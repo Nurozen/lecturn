@@ -90,3 +90,16 @@ describe("tool output images", () => {
     }
   });
 });
+
+describe("tool output text", () => {
+  it("reads an app result's text, not the summary Lecturn keeps beside it", () => {
+    const content = [{ type: "text", text: '{"status":"clean"}' }];
+    const _meta = { "lecturn/summary": "Clean" };
+    for (const output of [
+      { content, _meta },
+      { content, structuredContent: { status: "clean" }, _meta },
+    ]) {
+      expect(turnItemOutputText({ ...screenshot, output })).toBe('{\n  "status": "clean"\n}');
+    }
+  });
+});

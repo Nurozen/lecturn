@@ -69,6 +69,19 @@ export function appToolSummaryFromMeta(meta: unknown): string | undefined {
     : undefined;
 }
 
+const LECTURN_META_KEY_PREFIX = "lecturn/";
+
+/**
+ * The `lecturn/*` keys of a tool result's `_meta` (the toolkit's summary and
+ * source), or undefined when there are none. Other servers' keys stay out of
+ * stored tool items.
+ */
+export function lecturnResultMeta(meta: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(meta)) return undefined;
+  const kept = Object.entries(meta).filter(([key]) => key.startsWith(LECTURN_META_KEY_PREFIX));
+  return kept.length === 0 ? undefined : Object.fromEntries(kept);
+}
+
 /**
  * `ToolActivityIcon.logoUrl` is capped here, and every turn item carries its
  * source, so a larger icon is left off the row instead of bloating the item.

@@ -28,14 +28,18 @@ import {
   DEFAULT_MODEL,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
+  type ModelSelection,
   type OrchestrationV2AppThread,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadShell,
   type OrchestrationV2TurnItem,
   type ProjectId,
+  PROVIDER_DISPLAY_NAMES,
+  type ProviderDriverKind,
   ProviderInstanceId,
   type ThreadId,
+  TurnItemId,
 } from "@lecturn/contracts";
 import { resolveProjectSettings } from "@lecturn/shared/projectSettings";
 import * as Clock from "effect/Clock";
@@ -58,12 +62,14 @@ import {
 } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import { interactionModeRank, runtimeModeRank } from "../orchestration-v2/DispatchModeLimit.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { AppProjectService, AppRegistryService, ThreadCopyService } from "./services.ts";
 import {
@@ -89,6 +95,19 @@ const FALLBACK_MODEL_SELECTION = {
   instanceId: ProviderInstanceId.make("codex"),
   model: DEFAULT_MODEL,
 };
+
+const stricter = <M extends string>(rank: Record<M, number>, a: M, b: M | undefined): M =>
+  b === undefined || rank[a] <= rank[b] ? a : b;
+
+const providerName = (instanceId: string, driverKind?: ProviderDriverKind) =>
+  PROVIDER_DISPLAY_NAMES[driverKind ?? (instanceId as ProviderDriverKind)] ?? instanceId;
+
+/**
+ * Derived, so a re-import upserts the same notice. A replace leaves it where
+ * it was: items keep the position they first took.
+ */
+const modelFallbackNoticeId = (threadId: ThreadId) =>
+  TurnItemId.make(`turn-item:apps:copy-model-fallback:${threadId}`);
 
 const sha256 = (bytes: Uint8Array | string) =>
   NodeCrypto.createHash("sha256").update(bytes).digest("hex");
@@ -142,6 +161,7 @@ const make = Effect.gen(function* () {
   const registry = yield* AppRegistryService;
   const projectService = yield* ProjectService.ProjectService;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const providers = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
   const config = yield* ServerConfig.ServerConfig;
   const environment = yield* ServerEnvironment.ServerEnvironmentIdentity;
   const fs = yield* FileSystem.FileSystem;
@@ -258,6 +278,9 @@ const make = Effect.gen(function* () {
       appData: shell.appData ?? null,
       subtitle: shell.appSubtitle ?? null,
       pinned: shell.pinnedAt != null,
+      runtimeMode: shell.runtimeMode,
+      interactionMode: shell.interactionMode,
+      modelSelection: shell.modelSelection,
       messages,
       turnItems: items,
     } satisfies ConnectedAppThreadBundleThread;
@@ -514,8 +537,20 @@ const make = Effect.gen(function* () {
     return { type: "create", threadId, title: yield* titleOf(threadId) } satisfies ThreadPlan;
   });
 
+  const availableInstance = (instanceId: ProviderInstanceId) =>
+    providers
+      .getInstance(instanceId)
+      .pipe(Effect.map((instance) => (instance?.enabled === true ? instance : undefined)));
+
+  /**
+   * A copy keeps its source's modes and model. The one exception is a model
+   * whose provider this server lacks: the copy takes this server's default
+   * model and says so (`fallbackNotice`). A bundle without the source's
+   * settings gets this server's defaults, as before they were carried.
+   */
   const threadDefaults = Effect.fn("ThreadCopyService.threadDefaults")(function* (
     projectId: ProjectId,
+    thread: ConnectedAppThreadBundleThread,
   ) {
     const project = yield* projectService.getById(projectId);
     const settings = yield* serverSettings.getSettings;
@@ -524,9 +559,20 @@ const make = Effect.gen(function* () {
       projectId,
       Option.getOrNull(project),
     ).settings;
+    const defaultModel: ModelSelection = defaults.defaultModelSelection ?? FALLBACK_MODEL_SELECTION;
+    const source = thread.modelSelection;
+    const kept =
+      source !== undefined && (yield* availableInstance(source.instanceId)) !== undefined;
+    let fallbackNotice: string | undefined;
+    if (source !== undefined && !kept) {
+      const fallback = yield* availableInstance(defaultModel.instanceId);
+      fallbackNotice = `${providerName(source.instanceId)} is not available here, so this copy uses ${providerName(defaultModel.instanceId, fallback?.driverKind)} (${defaultModel.model}).`;
+    }
     return {
-      modelSelection: defaults.defaultModelSelection ?? FALLBACK_MODEL_SELECTION,
-      runtimeMode: defaults.defaultRuntimeMode,
+      modelSelection: kept ? source : defaultModel,
+      runtimeMode: thread.runtimeMode ?? defaults.defaultRuntimeMode,
+      interactionMode: thread.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
+      fallbackNotice,
     };
   });
 
@@ -610,6 +656,7 @@ const make = Effect.gen(function* () {
     const eventPrefix = `${EVENT_PREFIX}:${threadId}:r${thread.historyRevision}`;
 
     let threadEvent: OrchestrationV2DomainEvent;
+    let fallbackNotice: string | undefined;
     if (plan.type === "replace") {
       const { current } = plan;
       const metadata = threadAppMetadataOf(current);
@@ -624,12 +671,21 @@ const make = Effect.gen(function* () {
           ...(metadata.continuedIn === undefined ? {} : { continuedIn: metadata.continuedIn }),
           ...appFields(thread, copiedFrom),
           title: plan.title,
+          // A source made stricter since the last copy makes the copy stricter;
+          // a looser source never loosens what the copy already has.
+          runtimeMode: stricter(runtimeModeRank, current.runtimeMode, thread.runtimeMode),
+          interactionMode: stricter(
+            interactionModeRank,
+            current.interactionMode,
+            thread.interactionMode,
+          ),
           updatedAt,
           ...sectionFields(thread, current.pinnedAt ?? null),
         },
       };
     } else {
-      const defaults = yield* threadDefaults(input.projectId);
+      const defaults = yield* threadDefaults(input.projectId, thread);
+      fallbackNotice = defaults.fallbackNotice;
       threadEvent = {
         id: EventId.make(`${eventPrefix}:thread`),
         type: "thread.created",
@@ -646,7 +702,7 @@ const make = Effect.gen(function* () {
           providerInstanceId: defaults.modelSelection.instanceId,
           modelSelection: defaults.modelSelection,
           runtimeMode: defaults.runtimeMode,
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          interactionMode: defaults.interactionMode,
           branch: null,
           worktreePath: null,
           linkedPullRequest: null,
@@ -689,6 +745,34 @@ const make = Effect.gen(function* () {
           occurredAt: item.updatedAt,
           payload: item,
         })),
+        ...(fallbackNotice === undefined
+          ? []
+          : [
+              {
+                id: EventId.make(`${eventPrefix}:model-fallback`),
+                type: "turn-item.updated" as const,
+                threadId,
+                occurredAt: now,
+                payload: {
+                  id: modelFallbackNoticeId(threadId),
+                  threadId,
+                  runId: null,
+                  nodeId: null,
+                  providerThreadId: null,
+                  providerTurnId: null,
+                  nativeItemRef: null,
+                  parentItemId: null,
+                  ordinal: history.items.length + 1,
+                  type: "system_notice" as const,
+                  status: "completed" as const,
+                  title: fallbackNotice,
+                  message: fallbackNotice,
+                  startedAt: now,
+                  completedAt: now,
+                  updatedAt: now,
+                },
+              } satisfies OrchestrationV2DomainEvent,
+            ]),
       ],
     });
   });
