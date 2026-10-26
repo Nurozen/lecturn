@@ -29,6 +29,7 @@ import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
 import * as RuntimePolicy from "../RuntimePolicy.ts";
+import { acpAppInstructions } from "@lecturn/provider-acp/server/appInstructions";
 import { acpPermissionDisposition } from "@lecturn/provider-acp/server/clientPolicy";
 import {
   AcpProviderCapabilitiesV2,
@@ -140,6 +141,29 @@ describe("GrokAdapterV2 capabilities", () => {
     assert.isTrue(flavor.terminateRuntimeProcessGroupOnInterrupt);
     assert.isUndefined(flavor.restartRuntimeOnEveryInterrupt);
     assert.isTrue(flavor.preserveRuntimeOnSettledInterrupt);
+  });
+
+  it("names app tools in the form Grok's use_tool takes, not the bare name it rejects", () => {
+    const flavor = makeGrokAcpAdapterFlavor(
+      {
+        makeRuntime: () => Effect.never,
+      } as unknown as Parameters<typeof makeGrokAcpAdapterFlavor>[0],
+      "/home/ada",
+    );
+
+    assert.equal(
+      acpAppInstructions({
+        instructions: "You can increment a counter and flash the host window.",
+        app: {
+          appId: "dev.example.embedhost",
+          toolPrefix: "ex",
+          toolNames: ["ex_counter_increment", "ex_window_flash"],
+        },
+        toolName: flavor.lecturnMcpToolName,
+      }),
+      "You can increment a counter and flash the host window.\n\n" +
+        "Call this app's tools by these exact names: `lecturn__ex_counter_increment`, `lecturn__ex_window_flash`.",
+    );
   });
 
   it("terminalizes only foreground tools under the actual Grok flavor", () => {

@@ -255,6 +255,8 @@ export function makeGrokAcpAdapterFlavor(
     // still accepts image content blocks (verified with real screenshots).
     supportsImagePrompts: true,
     supportsCompaction: true,
+    // Grok's `use_tool` takes the server-qualified name (seen in live app runs).
+    lecturnMcpToolName: (tool) => `lecturn__${tool}`,
     resolveModelId: (selection) => resolveGrokAcpBaseModelId(selection.model),
     applyModelSelection: ({ runtime, startResult, modelSelection }) =>
       Effect.gen(function* () {

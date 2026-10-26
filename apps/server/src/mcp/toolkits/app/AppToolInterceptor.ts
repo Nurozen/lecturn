@@ -1,3 +1,5 @@
+import { recordServedAppToolResult } from "@lecturn/shared/appToolResults";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -166,7 +168,12 @@ const answerAppCall = (
     if (!isToolNotFound(answer, params.name)) return undefined;
     const tools = yield* source.listFor(scope);
     if (!tools.some((tool) => tool.name === params.name)) return undefined;
-    const result = yield* source.call(scope, params.name, params.arguments ?? {}, params._meta);
+    const args = params.arguments ?? {};
+    const result = yield* source.call(scope, params.name, args, params._meta);
+    recordServedAppToolResult(
+      { threadId: scope.thread.threadId, tool: params.name, args, result },
+      yield* Clock.currentTimeMillis,
+    );
     return { jsonrpc: "2.0", id: answer.id, result };
   }).pipe(
     Effect.catchCause((cause) =>

@@ -11,6 +11,10 @@
       "types": "./src/server/adapter.ts",
       "import": "./src/server/adapter.ts"
     },
+    "./server/appInstructions": {
+      "types": "./src/server/appInstructions.ts",
+      "import": "./src/server/appInstructions.ts"
+    },
     "./server/clientPolicy": {
       "types": "./src/server/clientPolicy.ts",
       "import": "./src/server/clientPolicy.ts"

@@ -128,6 +128,8 @@ function makeCounter(root: string) {
     return {
       content: [{ type: "text", text: `The counter is now ${value}.` }],
       structuredContent: { count: value, by, history: calls.map((call) => call.value) },
+      // The tool row's secondary text in Lecturn.
+      _meta: { "lecturn/summary": `Now ${value} (+${by})` },
     };
   };
 

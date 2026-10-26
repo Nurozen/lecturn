@@ -390,12 +390,12 @@ async function switcherScenes(run: EmbedHostRun, runner: ReturnType<typeof scene
   const page = embedPage(guest);
 
   await page.send("Count to two, then flash the window");
-  await page.waitForApproval("ex_window_flash", TURN_TIMEOUT_MS);
+  await page.waitForApproval("Flash window", TURN_TIMEOUT_MS);
   await page.loadedCards(2, TURN_TIMEOUT_MS);
   await mentionFromHost(stage, "Counter A");
   await runner.scene(stage, "embed-host-approval");
 
-  await page.approve("ex_window_flash", UI_TIMEOUT_MS);
+  await page.approve("Flash window", UI_TIMEOUT_MS);
   await page.waitForReply("Counted to two and flashed the window.", TURN_TIMEOUT_MS);
   await runner.scene(stage, "embed-host-timeline");
 
@@ -439,7 +439,7 @@ async function mockupScene(
   const page = embedPage(guest);
 
   await page.send("Read the counter, then add one and flash the window.");
-  await page.waitForApproval("ex_window_flash", TURN_TIMEOUT_MS);
+  await page.waitForApproval("Flash window", TURN_TIMEOUT_MS);
   await page.loadedCards(1, TURN_TIMEOUT_MS);
   await page.waitForReply("The counter passes the check.", TURN_TIMEOUT_MS);
   await mentionFromHost(stage, "Counter A");
@@ -477,7 +477,7 @@ async function mockupScene(
     );
   }
 
-  await page.approve("ex_window_flash", UI_TIMEOUT_MS);
+  await page.approve("Flash window", UI_TIMEOUT_MS);
   await page.waitForReply("Flashed the window.", TURN_TIMEOUT_MS);
 }
 

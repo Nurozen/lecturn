@@ -145,8 +145,8 @@ Every call carries `_meta["lecturn/context"]`
   characters.
 - To say what one call found, return `_meta["lecturn/summary"]`, such as `"3 candidates"`. The
   row reads `Find motors · 3 candidates`. It must be one line of plain text, at most 120
-  characters; anything else is dropped. Providers that keep a result's `_meta` (Codex, Claude)
-  carry it; on the others the row shows the title alone.
+  characters; anything else is dropped. Codex, Claude, Grok and other ACP agents carry it;
+  on Cursor and OpenCode the row shows the title alone.
 
 On Cursor, a call waiting for approval fails after 60 seconds, because Cursor's tool timeout
 cannot be raised.

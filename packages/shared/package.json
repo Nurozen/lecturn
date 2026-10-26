@@ -419,6 +419,10 @@
       "types": "./src/appToolPresentation.ts",
       "import": "./src/appToolPresentation.ts"
     },
+    "./appToolResults": {
+      "types": "./src/appToolResults.ts",
+      "import": "./src/appToolResults.ts"
+    },
     "./lecturnMcpToolPresentation": {
       "types": "./src/lecturnMcpToolPresentation.ts",
       "import": "./src/lecturnMcpToolPresentation.ts"

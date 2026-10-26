@@ -18,8 +18,9 @@ export interface CounterCard {
 }
 
 export function embedPage(guest: Page) {
-  const approvalGroup = (toolName: string) =>
-    guest.locator(`[data-app-tool-approval="true"][aria-label="Approve ${toolName}"]`);
+  // Approval cards name an app tool by its declared MCP title (FIXI), not its id.
+  const approvalGroup = (toolTitle: string) =>
+    guest.locator(`[data-app-tool-approval="true"][aria-label="Approve ${toolTitle}"]`);
   const cardRows = guest.locator('[data-timeline-row-kind="mcp-app"]');
 
   const readCard = async (row: Locator): Promise<CounterCard | undefined> => {
@@ -65,13 +66,13 @@ export function embedPage(guest: Page) {
         .waitFor({ state: "visible", timeout: 30_000 });
     },
 
-    async waitForApproval(toolName: string, timeoutMs: number) {
-      await approvalGroup(toolName).waitFor({ state: "attached", timeout: timeoutMs });
+    async waitForApproval(toolTitle: string, timeoutMs: number) {
+      await approvalGroup(toolTitle).waitFor({ state: "attached", timeout: timeoutMs });
     },
 
-    /** Clicks Approve on the banner row that asks for `toolName`, then waits for it to go. */
-    async approve(toolName: string, timeoutMs: number) {
-      const group = approvalGroup(toolName);
+    /** Clicks Approve on the banner row that asks for `toolTitle`, then waits for it to go. */
+    async approve(toolTitle: string, timeoutMs: number) {
+      const group = approvalGroup(toolTitle);
       await group.waitFor({ state: "attached", timeout: timeoutMs });
       const row = guest.locator("[data-composer-banner-row]", { has: group });
       await row.getByRole("button", { name: "Approve", exact: true }).click({ timeout: 15_000 });

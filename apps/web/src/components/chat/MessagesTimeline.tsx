@@ -3,7 +3,10 @@ import { EmbedAgentName } from "../embed/EmbedAgentName";
 import { EmbedUserAvatar } from "../embed/EmbedUserAvatar";
 import { useEmbedTimelineWaitingOnUser } from "../embed/embedPendingApprovalRows";
 import { useEmbedPresentation } from "../../embed/EmbedPresentationContext";
-import { AppClosedThreadBanner } from "../apps/AppClosedThreadBanner";
+import {
+  AppClosedThreadBanner,
+  useAppClosedThreadBannerShown,
+} from "../apps/AppClosedThreadBanner";
 import { AppThreadTitle, AppThreadTitleBeside } from "../apps/AppThreadTitle";
 import { appThreadTitleRowId } from "../apps/AppThreadTitle.logic";
 import { AppToolWorkRow } from "../apps/AppToolWorkRow";
@@ -1669,12 +1672,14 @@ const ConversationTimeline = memo(function ConversationTimeline({
     if (scrollNode) forwardWheelToTimeline(event, scrollNode);
   };
 
+  const appClosedBannerShown = useAppClosedThreadBannerShown(citationThreadRef);
   if (
     rows.length === 0 &&
     !isWorking &&
     parentThreadLink === null &&
     historyControls === undefined &&
-    footer === null
+    footer === null &&
+    !appClosedBannerShown
   ) {
     if (hideEmptyPlaceholder) {
       return <div className="h-full min-h-0 bg-background" data-timeline-loading="true" />;
