@@ -8,6 +8,7 @@ import { ShieldIcon } from "lucide-react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { page } from "vite-plus/test/browser";
 
 import { EmbedPresentationContext } from "../../embed/EmbedPresentationContext";
 import type { PendingApproval } from "../../session-logic";
@@ -58,7 +59,9 @@ const approval: PendingApproval = {
 
 // The composer as ChatView and ChatComposer nest it while an approval is pending: the card is the
 // top drawer in the banner dock, and the composer's main surface follows it.
-async function render(width: number, embedded = true) {
+async function render(width: number, embedded = true, onStopTurn?: () => void) {
+  // The pane is the embed's whole viewport, so the phone breakpoints apply as they do there.
+  await page.viewport(width, 800);
   if (embedded) document.documentElement.dataset.lecturnEmbed = "";
   container.style.width = `${width}px`;
   const composer = (
@@ -87,6 +90,7 @@ async function render(width: number, embedded = true) {
                           canRespond
                           isResponding={false}
                           options={approval.options}
+                          onStopTurn={onStopTurn}
                           onRespondToApproval={async () => undefined}
                         />
                       </ComposerBanner.Actions>
@@ -134,25 +138,44 @@ function measure() {
   };
 }
 
-describe.each([352, 320])("the embed's approval card in a %i px pane", (width) => {
-  it("keeps Decline, Approve and the menu on the title's row and truncates the title", async () => {
-    await render(width);
-    const { title, titleBox, reasonBox, buttonBoxes, buttonLabels } = measure();
+function expectActionsOnTitleRow(m: ReturnType<typeof measure>) {
+  expect(m.buttonLabels).toEqual(["Decline", "Approve", "More approval options"]);
+  expect(m.titleBox.height).toBeLessThan(20);
+  for (const button of m.buttonBoxes) {
+    expect(button.left).toBeGreaterThanOrEqual(m.titleBox.right);
+    expect(button.right).toBeLessThanOrEqual(m.card.right);
+    expect(button.bottom).toBeGreaterThan(m.titleBox.top);
+    expect(button.top).toBeLessThan(m.titleBox.bottom);
+  }
+  // One row: the buttons share a line.
+  expect(new Set(m.buttonBoxes.map((box) => Math.round(box.top))).size).toBe(1);
+  // The reason has a line of its own, under the buttons too.
+  expect(m.reasonBox.top).toBeGreaterThanOrEqual(Math.max(...m.buttonBoxes.map((b) => b.bottom)));
+  expect(m.reasonBox.left).toBeCloseTo(m.titleBox.left, 0);
+  expect(m.reasonBox.right).toBeGreaterThan(m.buttonBoxes[2]!.left);
+}
 
-    expect(buttonLabels).toEqual(["Decline", "Approve", "More approval options"]);
-    expect(title.scrollWidth).toBeGreaterThan(title.clientWidth);
-    expect(titleBox.height).toBeLessThan(20);
-    for (const button of buttonBoxes) {
-      expect(button.left).toBeGreaterThanOrEqual(titleBox.right);
-      expect(button.top).toBeLessThan(reasonBox.bottom);
-      expect(button.bottom).toBeGreaterThan(titleBox.top);
-    }
-    // One row: the buttons share a line.
-    expect(new Set(buttonBoxes.map((box) => Math.round(box.top))).size).toBe(1);
-    expect(reasonBox.top).toBeGreaterThanOrEqual(titleBox.bottom);
-    expect(reasonBox.right).toBeLessThanOrEqual(buttonBoxes[0]!.left);
+describe("the embed's approval card in a 352 px pane", () => {
+  it("shows the whole tool name beside compact Decline, Approve and menu", async () => {
+    await render(352);
+    const m = measure();
+    expectActionsOnTitleRow(m);
+    expect(m.title.textContent).toBe("Approve rw_engine_simulate");
+    expect(m.title.scrollWidth).toBeLessThanOrEqual(m.title.clientWidth);
   });
+});
 
+describe("the embed's approval card in a 320 px pane", () => {
+  it("keeps the actions on the title's row and cuts the name only at its end", async () => {
+    await render(320);
+    const m = measure();
+    expectActionsOnTitleRow(m);
+    // Truncation starts just under the 352 px pane: most of the name still shows.
+    expect(m.title.clientWidth).toBeGreaterThanOrEqual(m.title.scrollWidth * 0.85);
+  });
+});
+
+describe.each([352, 320])("the embed's approval card in a %i px pane", (width) => {
   it("spans the composer and sits on it, about 60 px tall", async () => {
     await render(width);
     const { card, composer } = measure();
@@ -165,7 +188,30 @@ describe.each([352, 320])("the embed's approval card in a %i px pane", (width) =
   });
 });
 
+describe.each([352, 320])("the embed approval card's menu in a %i px pane", (width) => {
+  it("offers Stop turn, which stops the running turn", async () => {
+    const onStopTurn = vi.fn();
+    await render(width, true, onStopTurn);
+    await act(async () =>
+      container.querySelector<HTMLElement>('[aria-label="More approval options"]')!.click(),
+    );
+    const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(items.map((item) => item.textContent?.trim())).toEqual(["Cancel", "Stop turn"]);
+    await act(async () => items[1]!.click());
+    expect(onStopTurn).toHaveBeenCalledOnce();
+  });
+});
+
 describe("the approval card outside the embed", () => {
+  it("offers no Stop turn, since its composer keeps the stop button", async () => {
+    await render(352, false, () => undefined);
+    await act(async () =>
+      container.querySelector<HTMLElement>('[aria-label="More approval options"]')!.click(),
+    );
+    const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(items.map((item) => item.textContent?.trim())).toEqual(["Cancel"]);
+  });
+
   it("keeps its inset, tucked drawer and whole tool name", async () => {
     await render(352, false);
     const { title, card, composer, titleBox, buttonBoxes } = measure();

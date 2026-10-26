@@ -46,6 +46,21 @@ describe("ScriptedDriver", () => {
         snapshot.models.map((model) => model.slug),
         ["scripted"],
       );
+      // An effort select like real providers', so the composer draws model | effort | access.
+      const effort = snapshot.models[0]?.capabilities?.optionDescriptors?.find(
+        (descriptor) => descriptor.id === "effort",
+      );
+      assert.equal(effort?.type, "select");
+      assert.deepEqual(
+        effort?.type === "select"
+          ? effort.options.map((option) => [option.id, option.isDefault === true])
+          : [],
+        [
+          ["low", false],
+          ["medium", false],
+          ["high", true],
+        ],
+      );
     }).pipe(
       Effect.scoped,
       Effect.provide(
