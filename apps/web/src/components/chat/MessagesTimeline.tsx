@@ -1,4 +1,5 @@
 import { ContextualMessageDisclosure } from "../contextual/ContextualDisclosure";
+import { EmbedAgentName } from "../embed/EmbedAgentName";
 import { EmbedUserAvatar } from "../embed/EmbedUserAvatar";
 import { useEmbedPresentation } from "../../embed/EmbedPresentationContext";
 import { AppClosedThreadBanner } from "../apps/AppClosedThreadBanner";
@@ -1021,6 +1022,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
 
   // Find the fold that hides the match: imported turns have no run id but still
   // fold under a synthetic key, so the match's own run id cannot open them.
+  const keepLatestTurnOpen = useEmbedPresentation() !== null;
   const findFoldRunIds = findActive
     ? timelineTurnFoldRunIdsByEntryId({
         timelineEntries,
@@ -1028,6 +1030,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         runningRunId,
         isWorking,
         runlessWorkActive,
+        keepLatestTurnOpen,
       })
     : null;
   const activeFindRunId = activeFindMatch
@@ -1080,6 +1083,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     turnDiffSummaries,
     supportsConversationRollback,
     worktreeSetup,
+    keepLatestTurnOpen,
   });
   const rows = useStableRows(rawRows, listIdentityKey);
   // Run status/timestamps churn on every stream event; the shared row context
@@ -1578,6 +1582,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
           runningRunId,
           isWorking,
           runlessWorkActive,
+          keepLatestTurnOpen,
         });
       const entryById = new Map(timelineEntries.map((entry) => [entry.id, entry]));
       return readThreadFindPosition(
@@ -1624,6 +1629,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     findFoldRunIds,
     findPositionReaderRef,
     isWorking,
+    keepLatestTurnOpen,
     latestRun,
     rows,
     runlessWorkActive,
@@ -2947,6 +2953,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
     <>
       <div className="relative min-w-0 px-1 py-0.5">
         <MessageAuthorHeading>Lecturn</MessageAuthorHeading>
+        {row.startsReply ? <EmbedAgentName runId={row.message.runId} timeline={ctx} /> : null}
         <div data-thread-find-text="true">
           <AssistantCitationSource
             messageId={row.message.id}
