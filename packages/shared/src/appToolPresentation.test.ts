@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import {
   appToolPresentationMap,
+  appToolRawName,
+  appToolSource,
+  appToolTitle,
   MAX_APP_TOOL_ICON_URL_LENGTH,
   resolveAppToolPresentation,
   setRegisteredAppToolPresentations,
@@ -91,5 +94,38 @@ describe("resolveAppToolPresentation", () => {
     setRegisteredAppToolPresentations([rocketwright]);
     expect(resolveLecturnMcpToolDefinition(openCodeName)).toBeNull();
     expect(resolveLecturnMcpToolPresentation("mcp__lecturn__task_status")).not.toBeNull();
+  });
+});
+
+describe("app tool titles", () => {
+  it("reads MCP's title, then the annotation title, as one plain line", () => {
+    expect(appToolTitle({ title: " Find\n motors ", annotations: { title: "Other" } })).toBe(
+      "Find motors",
+    );
+    expect(appToolTitle({ annotations: { title: "Check design" } })).toBe("Check design");
+    expect(appToolTitle({ title: "x".repeat(81), annotations: { title: "Fallback" } })).toBe(
+      "Fallback",
+    );
+    expect(appToolTitle({ title: 7, annotations: [] })).toBeUndefined();
+  });
+
+  it("titles a registered app's tool and keeps its called name for the detail", () => {
+    const titled = appToolPresentationMap([
+      { ...rocketwright, toolTitles: new Map([["motor_search", "Find motors"]]) },
+    ]);
+    expect(resolveAppToolPresentation({ toolName: "lecturn.rw_motor_search" }, titled)?.title).toBe(
+      "Find motors",
+    );
+    expect(
+      resolveAppToolPresentation({ toolName: "lecturn.rw_simulate" }, titled)?.title,
+    ).toBeUndefined();
+
+    const row = {
+      toolSource: appToolSource(rocketwright),
+      toolName: "mcp__lecturn__rw_motor_search",
+    };
+    expect(appToolRawName({ ...row, title: "Find motors" })).toBe("rw_motor_search");
+    expect(appToolRawName({ ...row, title: "rw_motor_search" })).toBeUndefined();
+    expect(appToolRawName({ ...row, toolSource: undefined, title: "Find motors" })).toBeUndefined();
   });
 });

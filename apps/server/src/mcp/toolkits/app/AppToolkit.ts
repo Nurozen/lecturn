@@ -25,6 +25,11 @@ import {
   type AppToolContextMeta,
   type ToolActivitySource,
 } from "@lecturn/contracts";
+import {
+  APP_TOOL_SUMMARY_META_KEY,
+  appToolSummaryFromMeta,
+  appToolTitle,
+} from "@lecturn/shared/appToolPresentation";
 import { MCP_APP_OUTPUT_KEY } from "@lecturn/shared/mcpApp";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -91,8 +96,10 @@ const presentTool = (prefix: string, tool: McpSchema.Tool): McpSchema.Tool => {
     ...(typeof ui?.resourceUri === "string" ? { resourceUri: ui.resourceUri } : {}),
     ...(Array.isArray(ui?.visibility) ? { visibility: ui.visibility } : {}),
   };
+  const title = appToolTitle(tool);
   return new McpSchema.Tool({
     name: `${prefix}_${tool.name}`,
+    ...(title === undefined ? {} : { title }),
     inputSchema: tool.inputSchema,
     ...(tool.description === undefined ? {} : { description: tool.description }),
     ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
@@ -118,13 +125,14 @@ const omit = <T extends Readonly<Record<string, unknown>>>(
 /**
  * The approval signal is Lecturn's to act on, and a card reference is
  * Lecturn's to attach: an app-supplied one would point a card at any
- * attachment.
+ * attachment. The row summary is kept only as one short line of plain text.
  */
 const sanitizeResult = (
   result: McpSchema.CallToolResult,
   toolSource: ToolActivitySource,
 ): McpSchema.CallToolResult => {
   const structured = result.structuredContent;
+  const summary = appToolSummaryFromMeta(result._meta);
   return new McpSchema.CallToolResult({
     content: result.content,
     ...(result.isError === undefined ? {} : { isError: result.isError }),
@@ -136,7 +144,12 @@ const sanitizeResult = (
             : structured,
         }),
     _meta: {
-      ...omit(result._meta ?? {}, [APP_TOOL_APPROVAL_REQUIRED_META_KEY, MCP_APP_OUTPUT_KEY]),
+      ...omit(result._meta ?? {}, [
+        APP_TOOL_APPROVAL_REQUIRED_META_KEY,
+        MCP_APP_OUTPUT_KEY,
+        APP_TOOL_SUMMARY_META_KEY,
+      ]),
+      ...(summary === undefined ? {} : { [APP_TOOL_SUMMARY_META_KEY]: summary }),
       [APP_TOOL_SOURCE_META_KEY]: toolSource,
     },
   });

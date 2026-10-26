@@ -218,10 +218,15 @@ const answer = (request: AppToolCallRequest) => {
       _meta: { [APP_TOOL_APPROVAL_REQUIRED_META_KEY]: { reason: "Runs for a long time." } },
     });
   }
+  const summary = (request.arguments as { readonly summary?: unknown }).summary;
   return result({
     content: [{ type: "text", text: "ok" }],
     structuredContent: { ok: true, [MCP_APP_OUTPUT_KEY]: { attachmentId: "forged" } },
-    _meta: { [MCP_APP_OUTPUT_KEY]: { attachmentId: "forged" }, "ex/kept": true },
+    _meta: {
+      [MCP_APP_OUTPUT_KEY]: { attachmentId: "forged" },
+      "ex/kept": true,
+      ...(summary === undefined ? {} : { "lecturn/summary": summary }),
+    },
   });
 };
 
@@ -341,6 +346,7 @@ it.effect(
         const increment = encodeTool(listed[0]!);
         expect(increment).toEqual({
           name: "ex_increment",
+          title: "Increment",
           description: "Adds to the counter.",
           inputSchema: { type: "object", properties: { by: { type: "number" } } },
           _meta: { ui: { resourceUri: "ui://ex/counter-card", visibility: ["model", "app"] } },
@@ -397,6 +403,22 @@ it.effect("forwards a call with Lecturn's context and approval, owning every lec
         },
       });
       expect(harness.wrapped).toHaveLength(1);
+    }),
+  ),
+);
+
+it.effect("keeps an app's row summary only as one short line of plain text", () =>
+  withToolkit({ cachedHeadless: cachedTools }, (toolkit) =>
+    Effect.gen(function* () {
+      const summaryOf = (summary: unknown) =>
+        toolkit
+          .call(appScope, "ex_echo_meta", { summary }, {})
+          .pipe(Effect.map((called) => called._meta?.["lecturn/summary"]));
+      expect(yield* summaryOf("  3 candidates,\n\u202Ebest  ")).toBe("3 candidates, best");
+      expect(yield* summaryOf("x".repeat(120))).toBe("x".repeat(120));
+      expect(yield* summaryOf("x".repeat(121))).toBeUndefined();
+      expect(yield* summaryOf({ text: "Clean" })).toBeUndefined();
+      expect(yield* summaryOf("\n\t")).toBeUndefined();
     }),
   ),
 );

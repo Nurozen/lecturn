@@ -12,6 +12,8 @@ import {
 } from "@lecturn/contracts";
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
+import { setRegisteredAppToolPresentations } from "@lecturn/shared/appToolPresentation";
+import { appToolSummaryFromToolItem } from "@lecturn/shared/toolOutput";
 import { checkpointWorkspace } from "@lecturn/provider-testing/replayWorkspace";
 import * as TestProviderHost from "@lecturn/provider-testing/TestProviderHost";
 import * as Deferred from "effect/Deferred";
@@ -29,6 +31,7 @@ import * as EffectWorker from "../EffectWorker.ts";
 import * as Orchestrator from "../Orchestrator.ts";
 import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
 import * as ProviderReplayHarness from "../testkit/ProviderReplayHarness.ts";
+import { projectTurnItemForWire } from "../WireProjection.ts";
 import { makeScriptedAdapterV2, waitForFile } from "./ScriptedAdapterV2.ts";
 import { scriptFromFile, scriptFromMessage, substitute } from "./scriptedScript.ts";
 
@@ -40,6 +43,7 @@ interface ToolResult {
   readonly content: ReadonlyArray<unknown>;
   readonly structuredContent?: unknown;
   readonly isError?: boolean;
+  readonly _meta?: Record<string, unknown>;
 }
 
 interface RecordedCall {
@@ -310,6 +314,38 @@ describe("ScriptedAdapterV2", () => {
       );
       assert.deepEqual(yield* assistantTexts, ["Simulation finished."]);
     }).pipe(Effect.scoped, Effect.provide(layerScripted({ fake })));
+  });
+
+  it.live("records a titled app tool's row with its title and the app's summary", () => {
+    const fake = makeFakeMcp({
+      rw_motor_search: () => ({
+        content: [{ type: "text", text: "3 motors" }],
+        _meta: { "lecturn/summary": "3 candidates" },
+      }),
+    });
+    setRegisteredAppToolPresentations([
+      {
+        appId: "dev.rocketwright.app",
+        name: "RocketWright",
+        toolPrefix: "rw",
+        toolTitles: new Map([["motor_search", "Find motors"]]),
+      },
+    ]);
+    return Effect.gen(function* () {
+      yield* startTurn(fenced([{ toolCall: { name: "rw_motor_search", arguments: {} } }]));
+      yield* persisted(isTerminal);
+      const item = (yield* projection).turnItems.find((row) => row.type === "dynamic_tool");
+      assert.equal(item?.type === "dynamic_tool" && item.toolName, "lecturn.rw_motor_search");
+      assert.equal(item?.title, "Find motors");
+      assert.equal(item?.toolSource?.key, "app:dev.rocketwright.app");
+      // Clients read the wire form; a thread copy carries the stored one.
+      assert.equal(appToolSummaryFromToolItem(projectTurnItemForWire(item!)), "3 candidates");
+      assert.equal(appToolSummaryFromToolItem(item!), "3 candidates");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(layerScripted({ fake })),
+      Effect.ensuring(Effect.sync(() => setRegisteredAppToolPresentations([]))),
+    );
   });
 
   it.live("falls back to the scripts file keyed by turn index", () => {

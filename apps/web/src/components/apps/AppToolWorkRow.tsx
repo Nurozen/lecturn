@@ -7,6 +7,8 @@ import type { AppToolRowOutcome } from "./AppToolWorkRow.logic";
 
 type AppToolWorkRowProps = ComponentProps<typeof WorkLogRow> & {
   readonly "data-app-tool-outcome"?: AppToolRowOutcome | undefined;
+  /** The app's summary of this call, read after the tool's title. */
+  readonly "data-app-tool-summary"?: string | undefined;
 };
 
 /**
@@ -23,9 +25,12 @@ export function AppToolWorkRow({
   const ariaExpanded = rowProps["aria-expanded"];
   const expanded = ariaExpanded === true || ariaExpanded === "true";
   const outcome = rowProps["data-app-tool-outcome"];
+  const summary = rowProps["data-app-tool-summary"];
+  const ariaLabel = rowProps["aria-label"];
   return (
     <WorkLogRow
       {...rowProps}
+      {...(summary && ariaLabel ? { "aria-label": `${ariaLabel}, ${summary}` } : {})}
       data-testid="app-tool-row"
       icon={
         <ChevronRightIcon
@@ -40,7 +45,14 @@ export function AppToolWorkRow({
       }
       label={
         // max-content keeps the mark beside the label, minmax(0) still lets a long label truncate.
-        <span className="grid min-w-0 grid-cols-[auto_minmax(0,max-content)_auto] items-center justify-start gap-1.5">
+        <span
+          className={cn(
+            "grid min-w-0 items-center justify-start gap-1.5",
+            summary
+              ? "grid-cols-[auto_minmax(0,max-content)_minmax(0,max-content)_auto]"
+              : "grid-cols-[auto_minmax(0,max-content)_auto]",
+          )}
+        >
           {/* `contents` keeps the grid's cells as they were; the wrappers only carry the hooks. */}
           <span data-testid="app-tool-row-icon" className="contents">
             {icon}
@@ -51,6 +63,15 @@ export function AppToolWorkRow({
           <span data-testid="app-tool-row-label" className="contents *:self-baseline">
             {label}
           </span>
+          {summary ? (
+            <span
+              data-testid="app-tool-row-summary"
+              className="min-w-0 self-baseline truncate text-sm leading-relaxed text-muted-foreground"
+            >
+              <span aria-hidden>· </span>
+              {summary}
+            </span>
+          ) : null}
           {outcome === "succeeded" ? (
             <CircleCheckIcon
               role="img"

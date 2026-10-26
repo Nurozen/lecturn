@@ -8,13 +8,57 @@ export interface AppToolPresentationApp {
   readonly name: string;
   readonly toolPrefix: string;
   readonly iconDataUrl?: string;
+  /** Titles the app's tools declare, keyed by the unprefixed tool name. */
+  readonly toolTitles?: ReadonlyMap<string, string>;
 }
 
 export interface AppToolPresentation {
   readonly app: AppToolPresentationApp;
   /** The prefixed name the agent called, e.g. `rw_simulate`. */
   readonly toolName: string;
+  /** What the tool row reads instead of `toolName`, when the tool declares one. */
+  readonly title?: string;
   readonly toolSource: ToolActivitySource;
+}
+
+export const MAX_APP_TOOL_TITLE_LENGTH = 80;
+
+/** Where an app puts a short, per-call summary for its tool row, in the tool result's `_meta`. */
+export const APP_TOOL_SUMMARY_META_KEY = "lecturn/summary";
+export const MAX_APP_TOOL_SUMMARY_LENGTH = 120;
+
+// Control and bidi-override characters could hide or reorder the text beside them.
+const UNSAFE_TEXT = /[\p{Cc}\u200E\u200F\u202A-\u202E\u2066-\u2069]+/gu;
+
+/** One line of plain text, or undefined when there is none or it is over `maxLength`. */
+function plainLine(value: unknown, maxLength: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.replace(UNSAFE_TEXT, " ").replace(/\s+/gu, " ").trim();
+  return text.length > 0 && text.length <= maxLength ? text : undefined;
+}
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** MCP's display title for a tool: `title`, else the older `annotations.title`. */
+export function appToolTitle(tool: {
+  readonly title?: unknown;
+  readonly annotations?: unknown;
+}): string | undefined {
+  return (
+    plainLine(tool.title, MAX_APP_TOOL_TITLE_LENGTH) ??
+    plainLine(
+      isRecord(tool.annotations) ? tool.annotations.title : undefined,
+      MAX_APP_TOOL_TITLE_LENGTH,
+    )
+  );
+}
+
+/** The summary an app put in a tool result's `_meta`, if it is valid. */
+export function appToolSummaryFromMeta(meta: unknown): string | undefined {
+  return isRecord(meta)
+    ? plainLine(meta[APP_TOOL_SUMMARY_META_KEY], MAX_APP_TOOL_SUMMARY_LENGTH)
+    : undefined;
 }
 
 /**
@@ -75,7 +119,14 @@ function appForLocalToolName(
   const separator = localName.indexOf("_");
   if (separator <= 0 || separator === localName.length - 1) return null;
   const app = apps.get(localName.slice(0, separator));
-  return app === undefined ? null : { app, toolName: localName, toolSource: appToolSource(app) };
+  if (app === undefined) return null;
+  const title = app.toolTitles?.get(localName.slice(separator + 1));
+  return {
+    app,
+    toolName: localName,
+    ...(title === undefined ? {} : { title }),
+    toolSource: appToolSource(app),
+  };
 }
 
 /**
@@ -100,4 +151,18 @@ export function resolveAppToolPresentation(
   }
   const localName = lecturnMcpToolName(toolName);
   return localName === null ? null : appForLocalToolName(localName, apps);
+}
+
+/**
+ * The name the agent called, for a row that reads the tool's title instead,
+ * so the expanded row still shows what ran.
+ */
+export function appToolRawName(item: {
+  readonly toolSource?: ToolActivitySource | undefined;
+  readonly toolName?: string | null | undefined;
+  readonly title?: string | null | undefined;
+}): string | undefined {
+  if (!isAppToolSource(item.toolSource)) return undefined;
+  const name = lecturnMcpToolName(item.toolName) ?? item.toolName?.trim();
+  return name && name !== item.title?.trim() ? name : undefined;
 }

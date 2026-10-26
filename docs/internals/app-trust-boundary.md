@@ -115,11 +115,13 @@ not registered there. [AppToolInterceptor.ts][interceptor] wraps the transport t
 to `tools/list` and routes a `tools/call` the built-in toolkits do not know. Built-in tools win a
 name clash.
 
-Definitions pass through an allowlist: description, input schema, annotations,
+Definitions pass through an allowlist: title, description, input schema, annotations,
 `_meta.ui.resourceUri` and `_meta.ui.visibility`. Other `_meta` keys could change how a provider
 treats a tool (Claude's `anthropic/requiresUserInteraction` is one), so they are dropped. Any
 `lecturn/*` key or card reference an app returns is stripped, so an app cannot spoof Lecturn's
-approvals or cards.
+approvals or cards. The one exception is `lecturn/summary`, the row's secondary text, kept only as
+one line of plain text of at most 120 characters. Clients read it, like the tool title the server
+stamps on the turn item, only on rows whose source is an app.
 
 Headless definitions are cached. The registration's `listArgs`, the preferred path, runs a command
 that prints the definitions and exits. It must not take an app-side lock. A throwaway lister could

@@ -131,6 +131,21 @@ describe("mcpToolPresentation", () => {
           ?.key,
       ).toBe("mcp:rocketwright");
       expect(mcpToolPresentation({ serverName: "lecturn", toolName: "task_status" })).toEqual({});
+      setRegisteredAppToolPresentations([
+        {
+          appId: "dev.rocketwright.app",
+          name: "RocketWright",
+          toolPrefix: "rw",
+          iconDataUrl: icon,
+          toolTitles: new Map([["simulate", "Simulate flight"]]),
+        },
+      ]);
+      expect(
+        mcpToolPresentation({ toolName: "mcp__lecturn__rw_simulate", title: "rw_simulate" }).title,
+      ).toBe("Simulate flight");
+      expect(
+        mcpToolPresentation({ serverName: "lecturn", toolName: "rw_motor_search" }).title,
+      ).toBe("rw_motor_search");
     } finally {
       setRegisteredAppToolPresentations([]);
     }
