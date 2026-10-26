@@ -630,7 +630,7 @@ export function attachFlow(input: {
         { assistantText: SUPERVISED_REPLY },
       ]),
     );
-    await lecturn.approve("ex_window_flash", TURN_TIMEOUT_MS);
+    await lecturn.approve("Flash window", TURN_TIMEOUT_MS);
     log("approved ex_window_flash in the web client");
     await assistantReplied(user.origin, token, copy.copyThreadId, SUPERVISED_REPLY);
     const supervised = await until("the Supervised flash", UI_TIMEOUT_MS, async () => {
