@@ -71,6 +71,7 @@ describe("median", () => {
 
 describe("perfFailures", () => {
   const passing = {
+    reducedMotion: false,
     sidecarColdStartMs: 4_100,
     mount: {
       samplesMs: [1500, 1600, 2600],
@@ -79,7 +80,16 @@ describe("perfFailures", () => {
       maxMs: 2600,
     },
     idle: [
-      { scene: "embed-idle", idleMs: 5000, pids: [GUEST], frames: 0, framesByName: {}, trace: "t" },
+      {
+        scene: "embed-idle",
+        idleMs: 5000,
+        prefersReducedMotion: false,
+        runningAnimations: [],
+        pids: [GUEST],
+        frames: 0,
+        framesByName: {},
+        trace: "t",
+      },
     ],
     appsRunningThreads: 0,
   };
@@ -90,6 +100,7 @@ describe("perfFailures", () => {
 
   it("names each missed target", () => {
     const failures = perfFailures({
+      reducedMotion: false,
       sidecarColdStartMs: 6_500,
       mount: { ...passing.mount, medianMs: 2_100 },
       idle: [
@@ -105,6 +116,15 @@ describe("perfFailures", () => {
     expect(failures.join("\n")).toMatch(/apps-list-idle: the trace names no renderer/);
     expect(failures.join("\n")).toMatch(/2 threads still working/);
   });
+
+  it("fails a scene whose page did not take the run's reduced-motion setting", () => {
+    const reduced = { ...passing.idle[0]!, prefersReducedMotion: true };
+    expect(perfFailures({ ...passing, reducedMotion: true, idle: [reduced] })).toEqual([]);
+    expect(perfFailures({ ...passing, reducedMotion: true }).join("\n")).toMatch(
+      /embed-idle: the page answered prefers-reduced-motion: reduce with false, but the run asked for true/,
+    );
+    expect(perfFailures({ ...passing, idle: [reduced] })).toHaveLength(1);
+  });
 });
 
 describe("parsePerfArgs", () => {
@@ -115,7 +135,9 @@ describe("parsePerfArgs", () => {
       out: "/tmp/perf-home/perf",
       idleMs: 5000,
       samples: 5,
+      reducedMotion: false,
     });
+    expect(parsePerfArgs(["--home", "/tmp/h", "--reduced-motion"]).reducedMotion).toBe(true);
     expect(() => parsePerfArgs([])).toThrow(/--home/);
     expect(() => parsePerfArgs(["--home", "/tmp/h", "--idle-ms", "10"])).toThrow(/--idle-ms/);
     expect(() => parsePerfArgs(["--home", "/tmp/h", "--samples", "0"])).toThrow(/--samples/);
