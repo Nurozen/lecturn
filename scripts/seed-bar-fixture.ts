@@ -266,6 +266,27 @@ export const BAR_FIXTURE: ReadonlyArray<BarFixtureProject> = [
   },
 ];
 
+/**
+ * The fixture moved so `BAR_FIXTURE_NOW` falls on `now`. A simulator has no
+ * clock to freeze, so its captures draw the ages a frozen browser draws only
+ * when the seeded times are relative to the real clock.
+ */
+export function barFixtureRelativeTo(
+  now: number,
+  fixture: ReadonlyArray<BarFixtureProject> = BAR_FIXTURE,
+): ReadonlyArray<BarFixtureProject> {
+  const offsetMs = now - Date.parse(BAR_FIXTURE_NOW);
+  const shift = (iso: string) => new Date(Date.parse(iso) + offsetMs).toISOString();
+  return fixture.map((project) => ({
+    ...project,
+    createdAt: shift(project.createdAt),
+    threads: project.threads.map((thread) => ({
+      ...thread,
+      turns: thread.turns.map((turn) => ({ ...turn, at: shift(turn.at) })),
+    })),
+  }));
+}
+
 export const barProjectId = (project: BarFixtureProject) => ProjectId.make(`bar-${project.key}`);
 export const barThreadId = (thread: BarFixtureThread) => ThreadId.make(`bar-${thread.key}`);
 
@@ -829,6 +850,8 @@ export interface SeedBarFixtureResult {
   readonly server: BarServer | null;
   /** Present with `app`: the staged connected-app states the after-captures read. */
   readonly app: BarAppManifest | null;
+  /** Present with `app`: Embed Host's credential, for a capture that holds its live lease. */
+  readonly appCredential: string | null;
 }
 
 /**
@@ -843,6 +866,8 @@ export async function seedBarFixture(
     readonly fixture?: ReadonlyArray<BarFixtureProject>;
     /** Also pair Embed Host, import its history and stage its live states (A38). */
     readonly app?: boolean;
+    /** Seed times relative to the real clock, for captures that cannot freeze one (A43). */
+    readonly agesRelativeToNow?: boolean;
   },
 ): Promise<SeedBarFixtureResult> {
   const baseDir = NodePath.resolve(input.baseDir);
@@ -850,7 +875,11 @@ export async function seedBarFixture(
   if (NodeFS.existsSync(barDatabasePath(baseDir))) {
     throw new Error(`${barDatabasePath(baseDir)} already exists; seed a fresh base directory.`);
   }
-  const fixture = input.fixture ?? BAR_FIXTURE;
+  const seededAt = Date.now();
+  const fixture =
+    input.agesRelativeToNow === true
+      ? barFixtureRelativeTo(seededAt, input.fixture)
+      : (input.fixture ?? BAR_FIXTURE);
   await NodeFSP.mkdir(baseDir, { recursive: true });
   for (const project of fixture) {
     await NodeFSP.mkdir(barWorkspaceRoot(baseDir, project), { recursive: true });
@@ -884,23 +913,24 @@ export async function seedBarFixture(
   await Effect.runPromise(
     seedBarFixtureOffline(baseDir, fixture).pipe(Effect.provide(barStoreLayer(baseDir))),
   );
-  if (input.restart === false) return { baseDir, server: null, app: null };
+  if (input.restart === false) return { baseDir, server: null, app: null, appCredential: null };
   const server = await startBarServer({ ...input, baseDir, env });
-  if (!app) return { baseDir, server, app: null };
+  if (!app) return { baseDir, server, app: null, appCredential: null };
   try {
     const hopper = fixture.find((project) => project.key === "hopper-38mm");
     if (hopper === undefined) {
       throw new Error("The app fixture stages its approval in hopper-38mm.");
     }
-    const manifest = await stageBarAppFixture({
+    const { manifest, credential } = await stageBarAppFixture({
       baseDir,
       origin: server.origin,
       projectsApprovalProjectId: barProjectId(hopper),
       issueToken: (scopes, label) => issueBarToken(baseDir, scopes, label, input.serverRoot),
       fetchShell: async () =>
         fetchBarShellSnapshot(server.origin, await issueBarReadToken(baseDir, input.serverRoot)),
+      ...(input.agesRelativeToNow === true ? { historyRelativeTo: seededAt } : {}),
     });
-    return { baseDir, server, app: manifest };
+    return { baseDir, server, app: manifest, appCredential: credential };
   } catch (error) {
     await server.stop();
     throw error;

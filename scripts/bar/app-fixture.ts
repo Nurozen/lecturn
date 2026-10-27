@@ -189,6 +189,8 @@ export const BAR_APP_PINNED_IMPORTS: Readonly<Partial<Record<BarAppWorkspaceKey,
 interface RawBundleThread {
   readonly sourceThreadId: string;
   readonly pinned: boolean;
+  readonly messages: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  readonly turnItems: ReadonlyArray<Readonly<Record<string, unknown>>>;
 }
 interface RawBundleProject {
   readonly workspaceRoot: string;
@@ -197,27 +199,59 @@ interface RawBundleProject {
 }
 interface RawBundle {
   readonly appId: string;
+  readonly exportedAt: string;
   readonly projects: ReadonlyArray<RawBundleProject>;
+}
+
+/** How long before the seeding clock the imported history reads as exported, when moved. */
+export const BAR_APP_HISTORY_AGE_MS = 60 * 60 * 1000;
+
+const THREAD_TIMES = ["createdAt", "updatedAt"] as const;
+const ITEM_TIMES = ["createdAt", "updatedAt", "startedAt", "completedAt"] as const;
+
+function shiftTimes<T extends object>(record: T, keys: ReadonlyArray<string>, offsetMs: number): T {
+  const shifted: Record<string, unknown> = { ...(record as Readonly<Record<string, unknown>>) };
+  for (const key of keys) {
+    const value = shifted[key];
+    if (typeof value === "string") {
+      shifted[key] = new Date(Date.parse(value) + offsetMs).toISOString();
+    }
+  }
+  return shifted as T;
 }
 
 /**
  * The checked-in bundle, retargeted at this app and base dir. Every thread
  * arrives unpinned (so settled): the pins are made with the pin command, as a
- * user makes them, so `thread.pinned` is in the event log.
+ * user makes them, so `thread.pinned` is in the event log. With `relativeTo`,
+ * every time moves so the export lands `BAR_APP_HISTORY_AGE_MS` before it.
  */
-export function barAppBundle(raw: unknown, baseDir: string): ConnectedAppThreadBundleV1 {
+export function barAppBundle(
+  raw: unknown,
+  baseDir: string,
+  relativeTo?: number,
+): ConnectedAppThreadBundleV1 {
   const bundle = raw as RawBundle;
   if (bundle.projects.length !== BAR_APP_WORKSPACE_KEYS.length) {
     throw new Error(`The app bundle has ${bundle.projects.length} workspaces, expected 2.`);
   }
+  const offsetMs =
+    relativeTo === undefined
+      ? 0
+      : relativeTo - BAR_APP_HISTORY_AGE_MS - Date.parse(bundle.exportedAt);
   return decodeBundle({
-    ...bundle,
+    ...shiftTimes(bundle, ["exportedAt"], offsetMs),
     appId: BAR_APP_ID,
     projects: bundle.projects.map((project, index) => ({
       ...project,
       title: BAR_APP_WORKSPACE_KEYS[index],
       workspaceRoot: barAppWorkspaceRoot(baseDir, BAR_APP_WORKSPACE_KEYS[index]!),
-      threads: project.threads.map((thread) => ({ ...thread, pinned: false })),
+      threads: project.threads.map((thread) => ({
+        ...shiftTimes(thread, THREAD_TIMES, offsetMs),
+        pinned: false,
+        messages: thread.messages.map((message) => shiftTimes(message, ITEM_TIMES, offsetMs)),
+        turnItems: thread.turnItems.map((item) => shiftTimes(item, ITEM_TIMES, offsetMs)),
+      })),
     })),
   });
 }
@@ -585,6 +619,17 @@ async function pairBarApp(input: {
   return poll.credential.token;
 }
 
+/** Where the example host's live MCP records each flash it was asked for. */
+export const barAppFlashLogPath = (baseDir: string) =>
+  NodePath.join(baseDir, "bar-app-flashes.json");
+
+/**
+ * Embed Host's live tools, leased until `close`: the app reads Running, and a
+ * gated flash that is approved reaches the host (A43, B2.6).
+ */
+export const leaseBarAppLiveTools = (origin: string, credential: string, baseDir: string) =>
+  leaseLiveTools(origin, credential, barAppFlashLogPath(baseDir));
+
 /** Keeps the live lease alive while live-tool threads run; Lecturn drops it after its TTL. */
 async function leaseLiveTools(origin: string, credential: string, flashLogPath: string) {
   const live = await startLiveMcp({ flashLogPath });
@@ -613,6 +658,10 @@ async function leaseLiveTools(origin: string, credential: string, flashLogPath: 
     },
   };
 }
+
+/** Every app the server knows, with its pairing state and live lease. */
+export const listBarApps = (origin: string, token: string) =>
+  rpc(origin, token, "apps.list", (client) => client[A.appsList]({}));
 
 const dispatch = (origin: string, token: string, command: OrchestrationV2Command) =>
   rpc(origin, token, command.type, (client) => client[O.dispatchCommand](command));
@@ -740,6 +789,14 @@ export interface StageBarAppFixtureInput {
   readonly projectsApprovalProjectId: ProjectId;
   readonly issueToken: (scopes: ReadonlyArray<string>, label: string) => Promise<string>;
   readonly fetchShell: () => Promise<ShellForCheck>;
+  /** Moves the imported history's times relative to this clock (see `barAppBundle`). */
+  readonly historyRelativeTo?: number;
+}
+
+export interface BarAppStaging {
+  readonly manifest: BarAppManifest;
+  /** The paired app's own credential, which a later live lease needs. */
+  readonly credential: string;
 }
 
 /**
@@ -747,7 +804,7 @@ export interface StageBarAppFixtureInput {
  * that leaves the app closed: the gated call is raised while the host's live
  * tools are leased, and the approval it waits on outlives the lease.
  */
-export async function stageBarAppFixture(input: StageBarAppFixtureInput): Promise<BarAppManifest> {
+export async function stageBarAppFixture(input: StageBarAppFixtureInput): Promise<BarAppStaging> {
   const { baseDir, origin } = input;
   const admin = await input.issueToken(
     ["access:read", "access:write", "orchestration:read", "orchestration:operate"],
@@ -767,6 +824,7 @@ export async function stageBarAppFixture(input: StageBarAppFixtureInput): Promis
   const bundle = barAppBundle(
     JSON.parse(await NodeFSP.readFile(BAR_APP_BUNDLE_PATH, "utf8")),
     baseDir,
+    input.historyRelativeTo,
   );
   const imported = await rpc(origin, credential, "apps.importThreads", (client) =>
     client[A.appsImportThreads]({ bundle }),
@@ -790,10 +848,10 @@ export async function stageBarAppFixture(input: StageBarAppFixtureInput): Promis
 
   const scriptsPath = barAppServerEnv(baseDir).LECTURN_SCRIPTED_PROVIDER_SCRIPTS!;
   const threadIds = {} as Record<BarAppStagedThread["key"], ThreadId>;
-  let lease: Awaited<ReturnType<typeof leaseLiveTools>> | null = await leaseLiveTools(
+  let lease: Awaited<ReturnType<typeof leaseLiveTools>> | null = await leaseBarAppLiveTools(
     origin,
     credential,
-    NodePath.join(baseDir, "bar-app-flashes.json"),
+    baseDir,
   );
   let approvalRaisedAt: number | null = null;
   try {
@@ -944,5 +1002,5 @@ export async function stageBarAppFixture(input: StageBarAppFixtureInput): Promis
     throw new Error(`The staged app fixture drifted:\n- ${problems.join("\n- ")}`);
   }
   await NodeFSP.writeFile(barAppManifestPath(baseDir), `${JSON.stringify(manifest, null, 2)}\n`);
-  return manifest;
+  return { manifest, credential };
 }

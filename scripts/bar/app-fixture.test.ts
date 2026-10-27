@@ -6,6 +6,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import { assert, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 
 import {
   BAR_FIXTURE,
@@ -14,10 +15,12 @@ import {
   barWorkspaceRoot,
   fetchBarShellSnapshot,
   issueBarReadToken,
+  issueBarToken,
   seedBarFixture,
 } from "../seed-bar-fixture.ts";
 import {
   BAR_APP_BUNDLE_PATH,
+  BAR_APP_HISTORY_AGE_MS,
   BAR_APP_ID,
   BAR_APP_STAGED_THREADS,
   BAR_PENDING_APP_ID,
@@ -30,6 +33,8 @@ import {
   barAppWorkspaceRoot,
   barPendingAppRegistration,
   expectedBarAppSections,
+  leaseBarAppLiveTools,
+  listBarApps,
   readBarAppManifest,
 } from "./app-fixture.ts";
 import { barAppStagingChecks, sidebarSectionChecks } from "./app-scenes.ts";
@@ -39,6 +44,11 @@ import {
   parseCaptureWebArgs,
   resolveScenePath,
 } from "./capture-web.ts";
+import {
+  barAppDeepLink,
+  barAppThreadDeepLink,
+  mobileAppSceneProblems,
+} from "./mobile-app-scenes.ts";
 import { type ProbeRoot, stagingProblems } from "./probe-dom.ts";
 
 const SERVER_TEST_TIMEOUT_MS = 300_000;
@@ -59,6 +69,38 @@ it("retargets the checked-in bundle at this app and base dir, unpinned", () => {
     bundle.projects.every((project) => project.threads.every((thread) => !thread.pinned)),
   );
   assert.isAbove(bundle.assets.length, 0);
+});
+
+it("moves the imported history to an hour before the seeding clock, every time alike", () => {
+  const raw = rawBundle() as { exportedAt: string };
+  const now = Date.parse("2026-11-02T08:30:00.000Z");
+  const moved = barAppBundle(raw, "/fixture", now);
+  const original = barAppBundle(raw, "/fixture");
+  const offset = now - BAR_APP_HISTORY_AGE_MS - Date.parse(raw.exportedAt);
+  // Thread times stay ISO strings; message times decode to DateTime.
+  const millis = (time: string | DateTime.DateTime) =>
+    typeof time === "string" ? Date.parse(time) : DateTime.toEpochMillis(time);
+  const times = (bundle: typeof moved) =>
+    bundle.projects.flatMap((project) =>
+      project.threads.flatMap((thread) => [
+        millis(thread.createdAt),
+        millis(thread.updatedAt),
+        ...thread.messages.flatMap((message) => [
+          millis(message.createdAt),
+          millis(message.updatedAt),
+        ]),
+      ]),
+    );
+  assert.equal(Date.parse(moved.exportedAt), now - BAR_APP_HISTORY_AGE_MS);
+  const before = times(original);
+  const after = times(moved);
+  assert.isAbove(before.length, 0);
+  assert.isTrue(before.every(Number.isFinite));
+  assert.deepEqual(
+    after,
+    before.map((time) => time + offset),
+  );
+  assert.isTrue(after.every((time) => time < now));
 });
 
 it("places one pinned thread per workspace, the staged threads as active and the rest settled", () => {
@@ -189,6 +231,40 @@ it("accepts the live states as staged and names each kind of drift", () => {
   assert.deepEqual(barAppLiveStateProblems(copilotAnswered, manifest), [
     "run38 is not waiting on its approval",
   ]);
+});
+
+it("links the mobile Apps scene to the app's thread list and to one of its threads", () => {
+  assert.equal(barAppDeepLink("lecturn", manifest), "lecturn://apps/dev.example.embedhost");
+  assert.equal(
+    barAppThreadDeepLink("lecturn-dev", manifest, "supervised"),
+    "lecturn-dev://apps/dev.example.embedhost/threads/env/supervised",
+  );
+});
+
+it("holds the mobile Apps scene to the live states and to Embed Host's lease", () => {
+  const now = Date.parse(manifest.approvalExpiresAt) - 1;
+  const leased = [{ appId: BAR_APP_ID, state: "granted", live: { expiresAt: "later" } }];
+  const closed = [{ appId: BAR_APP_ID, state: "granted", live: null }];
+  const scene = { manifest, snapshot: stagedShell(), now };
+  assert.deepEqual(mobileAppSceneProblems({ ...scene, apps: leased, running: true }), []);
+  assert.deepEqual(mobileAppSceneProblems({ ...scene, apps: closed, running: false }), []);
+  assert.deepEqual(mobileAppSceneProblems({ ...scene, apps: closed, running: true }), [
+    "Embed Host should read Running, but its lease is clear",
+  ]);
+  assert.match(
+    mobileAppSceneProblems({ ...scene, apps: [], running: true }).join(),
+    /Embed Host is undefined, not granted/u,
+  );
+  assert.match(
+    mobileAppSceneProblems({ ...scene, apps: leased, running: true, now: now + 1 }).join(),
+    /staged approval expired/u,
+  );
+  const released = stagedShell();
+  released.threads[4] = shellThread("wa", "b");
+  assert.match(
+    mobileAppSceneProblems({ ...scene, snapshot: released, apps: leased, running: true }).join(),
+    /1 app threads are working/u,
+  );
 });
 
 it("refuses to capture once the staged approval or the pairing request has expired", () => {
@@ -427,7 +503,7 @@ it(
     // A home inside a repository: the fixture workspaces must still read as no repository.
     NodeChildProcess.execFileSync("git", ["init", "--quiet", root]);
     const baseDir = NodePath.join(await NodeFSP.realpath(root), "home");
-    const { server, app } = await seedBarFixture({ baseDir, app: true });
+    const { server, app, appCredential } = await seedBarFixture({ baseDir, app: true });
     try {
       assert.isNotNull(app);
       assert.deepEqual(await readBarAppManifest(baseDir), app);
@@ -463,6 +539,18 @@ it(
         ),
       ) as ReadonlyArray<unknown>;
       assert.lengthOf(calls, 3);
+      // The mobile Apps scene leases the live tools again, so Embed Host reads Running.
+      const check = await issueBarToken(baseDir, ["access:read", "orchestration:read"], "check");
+      const closed = await listBarApps(server!.origin, check);
+      const scene = { manifest: app!, snapshot, now: Date.parse(app!.stagedAt) };
+      assert.deepEqual(mobileAppSceneProblems({ ...scene, apps: closed, running: false }), []);
+      const lease = await leaseBarAppLiveTools(server!.origin, appCredential!, baseDir);
+      try {
+        const leased = await listBarApps(server!.origin, check);
+        assert.deepEqual(mobileAppSceneProblems({ ...scene, apps: leased, running: true }), []);
+      } finally {
+        await lease.close();
+      }
     } finally {
       await server?.stop();
       await NodeFSP.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

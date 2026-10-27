@@ -130,7 +130,7 @@ const config: ShowcaseConfig = {
       appearance: "dark",
       theme: DEFAULT_SHOWCASE_THEME,
       barFixture: true,
-      scenes: ["threads"],
+      scenes: ["threads", "apps"],
       storeAsset: {
         store: "apple",
         directory: "bar/iphone-15",
