@@ -23,8 +23,17 @@ import {
   projectDomainEventForWire,
 } from "./WireProjection.ts";
 import { threadShellFromProjection } from "./ProjectionStore.ts";
-import { MAX_TOOL_OUTPUT_IMAGES, toolOutputImages } from "@lecturn/shared/toolOutput";
-import { MCP_APP_OUTPUT_KEY } from "@lecturn/shared/mcpApp";
+import {
+  appToolSummaryFromToolItem,
+  MAX_TOOL_OUTPUT_IMAGES,
+  mcpAppFromToolItem,
+  toolOutputImages,
+} from "@lecturn/shared/toolOutput";
+import { MCP_APP_OUTPUT_KEY, readMcpAppToolOutcome } from "@lecturn/shared/mcpApp";
+import { mcpToolResultOutput } from "@lecturn/provider-core/server/mcpToolPresentation";
+import { codexMcpToolResult } from "./Adapters/codexMcpToolResult.ts";
+import { codexTruncatedMcpResult } from "./Adapters/CodexAdapterV2.testkit.ts";
+import { stripUnservedToolOutputImageBytes } from "./toolOutputImageBytes.ts";
 
 const decodeTurnItem = Schema.decodeUnknownSync(OrchestrationV2TurnItem);
 const encodeTurnItemJson = Schema.encodeSync(OrchestrationV2TurnItemJson);
@@ -209,6 +218,59 @@ describe("orchestration V2 wire projection", () => {
       });
       expect(JSON.stringify(projected).length).toBeLessThan(2_000);
     }
+  });
+
+  it("keeps the card and summary of an app result Codex cut to its event limit", () => {
+    const card = {
+      attachmentId: "thread-1-render-html",
+      server: "lecturn",
+      tool: "rw_viewport_render",
+      resourceUri: "ui://rw/render-card",
+    };
+    const toolSource = {
+      key: "app:dev.rocketwright.app",
+      name: "RocketWright",
+      kind: "integration" as const,
+    };
+    const summary = { "lecturn/summary": "Iso view" };
+    const caption = { type: "text", text: "viewport_render: 900x650" };
+    const result = {
+      content: [{ type: "image", mimeType: "image/png" }, caption],
+      structuredContent: { path: "renders/window/viewport_render.png" },
+    };
+    const item = stripUnservedToolOutputImageBytes({
+      ...base,
+      toolName: "lecturn.rw_viewport_render",
+      toolSource,
+      output: mcpToolResultOutput(
+        codexMcpToolResult(
+          codexTruncatedMcpResult({
+            content: [
+              { type: "image", data: "A".repeat(1_200_000), mimeType: "image/png" },
+              caption,
+            ],
+            structuredContent: { [MCP_APP_OUTPUT_KEY]: card, result },
+            _meta: { ...summary, "lecturn/toolSource": toolSource },
+          }),
+        ),
+      ),
+    });
+    // The cut spliced the image's bytes, so none are stored or served.
+    expect(toolOutputImages(item.type === "dynamic_tool" ? item.output : null)).toEqual([]);
+    const wire = projectTurnItemForWire(item);
+    expect(wire).toMatchObject({
+      outputOmitted: true,
+      output: { [MCP_APP_OUTPUT_KEY]: card, _meta: summary },
+    });
+    const output = wire.type === "dynamic_tool" ? wire.output : undefined;
+    expect(appToolSummaryFromToolItem({ toolSource, output })).toBe("Iso view");
+    expect(mcpAppFromToolItem({ toolName: "lecturn.rw_viewport_render", output })).toEqual(card);
+    // The card is replayed the app's result, which names the picture it fetches.
+    const detail = projectTurnItemForDetail(item);
+    expect(readMcpAppToolOutcome(detail.type === "dynamic_tool" ? detail.output : null)).toEqual({
+      result,
+    });
+    expect(JSON.stringify([item, wire, detail]).length).toBeLessThan(6_000);
   });
 
   it("omits even small dynamic tool results while retaining input", () => {

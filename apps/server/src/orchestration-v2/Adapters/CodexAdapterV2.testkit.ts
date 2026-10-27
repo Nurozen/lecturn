@@ -278,3 +278,26 @@ export const CodexOrchestratorReplayHarness: OrchestratorV2ProviderReplayHarness
     );
   },
 };
+
+const CODEX_MCP_EVENT_RESULT_MAX_BYTES = 1024 * 1024;
+
+/**
+ * What Codex's app server reports for an MCP result whose JSON passes its event
+ * limit (`truncate_mcp_tool_result` in codex-rs): the head and tail of that
+ * JSON around a marker, as one text block, with the other members dropped.
+ */
+export function codexTruncatedMcpResult(result: unknown) {
+  const serialized = JSON.stringify(result);
+  const half = CODEX_MCP_EVENT_RESULT_MAX_BYTES / 2;
+  const removed = serialized.length - 2 * half;
+  return {
+    content: [
+      {
+        type: "text",
+        text: `${serialized.slice(0, half)}…${removed} chars truncated…${serialized.slice(-half)}`,
+      },
+    ],
+    structuredContent: null,
+    _meta: null,
+  };
+}

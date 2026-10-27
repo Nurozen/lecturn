@@ -1261,6 +1261,88 @@ describe("CodexAdapterV2 dynamic tool projection", () => {
       }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("keeps what survives of an image result Codex cut to its event limit", () =>
+    Effect.gen(function* () {
+      const toolSource = {
+        key: "app:dev.rocketwright.app",
+        name: "RocketWright",
+        kind: "integration" as const,
+      };
+      const meta = { "lecturn/summary": "Iso view", "lecturn/toolSource": toolSource };
+      const call = {
+        type: "mcpToolCall" as const,
+        id: "render",
+        server: "lecturn",
+        tool: "rw_viewport_render",
+        status: "completed" as const,
+        arguments: { view: "iso", width: 900, height: 650 },
+      };
+      // CP-W3's rw_viewport_render as Codex reported it, the image shortened:
+      // the card sat beside the image's second copy, in the part Codex cut.
+      const structured =
+        '{"width":900,"height":650,"backend":"webgpu","adapter":"webgpu","path":"renders/window/viewport_render.82b8ff7859675ec5.png"}';
+      const marker = "…983297 chars truncated…";
+      const live = {
+        content: [
+          {
+            type: "text",
+            text: [
+              '{"content":[{"type":"image","data":"iVBORw0KGgoAAAANSUhEUgAAA4QAAAKKCAYAAABlM5X/',
+              "A".repeat(4_000),
+              marker,
+              "A".repeat(4_000),
+              'ErkJggg==","mimeType":"image/png"},{"type":"text","text":',
+              JSON.stringify(`viewport_render: ${structured}`),
+              `}],"structuredContent":${structured}}},"_meta":${JSON.stringify(meta)}}`,
+            ].join(""),
+          },
+        ],
+        structuredContent: null,
+        _meta: null,
+      };
+      const projection = yield* CodexAdapterV2.projectCodexDynamicToolItem({
+        ...call,
+        result: live,
+      });
+      assert.deepEqual(projection.output, {
+        content: [{ type: "text", text: marker }],
+        _meta: meta,
+      });
+      assert.equal(
+        appToolSummaryFromToolItem({ toolSource, output: projection.output }),
+        "Iso view",
+      );
+
+      // The envelope as Lecturn now sends it, the image's bytes carried once.
+      const card = {
+        attachmentId: "thread-1-render-html",
+        server: "lecturn",
+        tool: "rw_viewport_render",
+        resourceUri: "ui://rw/render-card",
+      };
+      const caption = { type: "text", text: `viewport_render: ${structured}` };
+      const envelope = {
+        [MCP_APP_OUTPUT_KEY]: card,
+        result: {
+          content: [{ type: "image", mimeType: "image/png" }, caption],
+          structuredContent: JSON.parse(structured),
+        },
+      };
+      const cut = yield* CodexAdapterV2.projectCodexDynamicToolItem({
+        ...call,
+        result: CodexAdapterV2Testkit.codexTruncatedMcpResult({
+          content: [{ type: "image", data: "A".repeat(1_200_000), mimeType: "image/png" }, caption],
+          structuredContent: envelope,
+          _meta: meta,
+        }),
+      });
+      const output = cut.output as Record<string, unknown>;
+      assert.deepEqual(output.structuredContent, envelope);
+      assert.deepEqual(output._meta, meta);
+      assert.isBelow(JSON.stringify(output).length, 2_000);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("preserves namespaced dynamic tool output", () =>
     Effect.gen(function* () {
       const projection = yield* CodexAdapterV2.projectCodexDynamicToolItem({
