@@ -1,7 +1,6 @@
 import { ContextualMessageDisclosure } from "../contextual/ContextualDisclosure";
 import { EmbedAgentName } from "../embed/EmbedAgentName";
 import { EmbedUserAvatar } from "../embed/EmbedUserAvatar";
-import { useEmbedTimelineWaitingOnUser } from "../embed/embedPendingApprovalRows";
 import { useEmbedPresentation } from "../../embed/EmbedPresentationContext";
 import {
   AppClosedThreadBanner,
@@ -1027,7 +1026,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
 
   // Find the fold that hides the match: imported turns have no run id but still
   // fold under a synthetic key, so the match's own run id cannot open them.
-  const keepLatestTurnOpen = useEmbedPresentation() !== null;
+  const embedded = useEmbedPresentation() !== null;
+  const keepLatestTurnOpen = embedded;
   const findFoldRunIds = findActive
     ? timelineTurnFoldRunIdsByEntryId({
         timelineEntries,
@@ -1089,7 +1089,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     supportsConversationRollback,
     worktreeSetup,
     keepLatestTurnOpen,
-    waitingOnUser: useEmbedTimelineWaitingOnUser(awaitingUser),
+    waitingOnUser: awaitingUser,
+    hideWaitingRow: embedded,
   });
   const rows = useStableRows(rawRows, listIdentityKey);
   // Run status/timestamps churn on every stream event; the shared row context

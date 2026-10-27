@@ -34,7 +34,7 @@ import {
   type PendingApproval,
 } from "../../session-logic";
 import { MessagesTimeline } from "../chat/MessagesTimeline";
-import { useEmbedTimelineEntries } from "./embedPendingApprovalRows";
+import { useComposerCardTimelineEntries } from "./embedPendingApprovalRows";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const THREAD_ID = ThreadId.make("approval-wait-thread");
@@ -186,7 +186,7 @@ function entriesFor(stage: Stage, parallel: boolean, raced: boolean) {
 /** ChatView's wiring: the composer card's approvals filter the entries and mark the turn as waiting. */
 function Timeline(props: { stage: Stage; parallel: boolean; raced: boolean; threadKey: string }) {
   const approvals = props.stage === "pending" ? [approval] : [];
-  const timelineEntries = useEmbedTimelineEntries(
+  const timelineEntries = useComposerCardTimelineEntries(
     entriesFor(props.stage, props.parallel, props.raced),
     approvals,
   );
@@ -326,15 +326,19 @@ describe(`a turn held on an app approval in a ${PANE_WIDTH} px embed pane`, () =
 });
 
 describe("the same turn in full Lecturn", () => {
-  it("keeps the call's row and stops the working timer while the approval waits", async () => {
+  it("leaves the held call and its approval to the card and stops the working timer", async () => {
     const render = await mount(false);
 
     await render("pending");
-    expect(text()).toContain("rw_engine_simulate");
+    expect(text()).not.toContain("rw_engine_simulate");
+    expect(text()).toContain("rw_motor_search");
     expect(text()).toContain("Waiting for you");
     expect(text()).not.toContain("Working for");
+    // The parallel call really runs.
+    expect(liveMarks()).toBe(1);
 
     await render("approved");
+    expect(text()).toContain("rw_engine_simulate");
     expect(text()).toContain("Working for");
     expect(text()).not.toContain("Waiting for you");
   });
@@ -351,15 +355,31 @@ async function expandSettledTurn() {
   }
 }
 
+describe.each([false, true])(
+  "a waiting app approval in full Lecturn, raced before its call: %s",
+  (raced) => {
+    it("repeats the card nowhere in the timeline, folded or expanded, and nothing ticks", async () => {
+      const render = await mount(false, false, raced);
+
+      await render("pending");
+      expect(text()).not.toContain("rw_engine_simulate");
+      expect(text()).toContain("Waiting for you");
+      expect(liveMarks()).toBe(0);
+      const live = container.querySelector<HTMLElement>(
+        '[data-timeline-row-kind="work-live"] button',
+      );
+      expect(live).not.toBeNull();
+      await act(async () => live?.click());
+      await expect.poll(workRows).toEqual(["rw_design_check"]);
+      expect(text()).not.toContain("rw_engine_simulate");
+
+      await render("approved");
+      await expect.poll(workRows).toEqual(["rw_design_check", "rw_engine_simulate", "approval"]);
+    });
+  },
+);
+
 describe("an approval that committed before the call it holds", () => {
-  it("is the live row in full Lecturn while it waits, as when the call landed first", async () => {
-    const render = await mount(false, true, true);
-
-    await render("pending");
-    const liveRow = container.querySelector('[data-timeline-row-kind="work-live"]');
-    expect(liveRow?.textContent).toContain("Approve rw_engine_simulate");
-  });
-
   it("sits just below that call in full Lecturn once answered and settled", async () => {
     const render = await mount(false, true, true);
 
