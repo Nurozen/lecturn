@@ -3,6 +3,10 @@ import type {
   ThreadPendingUserInput,
   ThreadUserInputQuestion,
 } from "@lecturn/client-runtime/state/thread-requests";
+import {
+  withoutApprovalCardRows,
+  type CardApproval,
+} from "@lecturn/client-runtime/state/app-tool-approval-placement";
 import { turnItemIsWorkspacePreparation } from "@lecturn/client-runtime/state/turn-item-presentation";
 import { formatSubagentDisplayTitle } from "@lecturn/client-runtime/state/subagent-display";
 import { isLiveSubagentTurnItem } from "@lecturn/client-runtime/state/subagentRuntime";
@@ -1905,13 +1909,20 @@ export function buildPendingUserInputAnswers(
 }
 
 export function buildThreadFeed(
-  visibleTurnItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
+  projectedTurnItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
   options?: {
     readonly anchoredMessages?: ReadonlyArray<LocalThreadMessage>;
     readonly attempts?: ReadonlyArray<OrchestrationV2RunAttempt>;
     readonly nodes?: ReadonlyArray<OrchestrationV2ExecutionNode>;
+    /** Those the composer's approval card is asking, so the feed does not ask them again. */
+    readonly cardApprovals?: ReadonlyArray<CardApproval>;
   },
 ): ThreadFeedEntry[] {
+  const visibleTurnItems = withoutApprovalCardRows(
+    projectedTurnItems,
+    options?.cardApprovals ?? [],
+    (row) => row.item,
+  );
   const entries: RawThreadFeedEntry[] = [];
   const attemptByRootNodeId = new Map(
     (options?.attempts ?? []).map((attempt) => [attempt.rootNodeId, attempt] as const),

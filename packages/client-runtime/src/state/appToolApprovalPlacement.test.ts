@@ -18,6 +18,7 @@ import {
   appToolApprovalsOf,
   createAppToolApprovalPlacer,
   placeAppToolApprovals,
+  withoutApprovalCardRows,
 } from "./appToolApprovalPlacement.ts";
 
 const threadId = ThreadId.make("thread-approval-placement");
@@ -205,5 +206,53 @@ describe("createAppToolApprovalPlacer", () => {
 
     const unrelated = rows([call("held-call", 1)]);
     expect(placer(unrelated, [])).toBe(unrelated);
+  });
+});
+
+describe("withoutApprovalCardRows", () => {
+  const asked = (asking: OrchestrationV2RuntimeRequest) => ({
+    requestId: asking.id,
+    ...(asking.connectedAppTool === undefined ? {} : { connectedAppTool: asking.connectedAppTool }),
+  });
+  const beside = (
+    placed: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
+    approvals: ReadonlyArray<OrchestrationV2RuntimeRequest>,
+    options?: { readonly hideProviderApprovals?: boolean },
+  ) => withoutApprovalCardRows(placed, approvals.map(asked), (row) => row.item, options);
+
+  it("leaves a waiting app approval and the call it holds out, then brings back the call first", () => {
+    const before = [call("earlier-call", 1, { completedAt: 2 }), reply("reply", 3)];
+    const waiting = place(
+      [...before, approval("approval", 4), call("held-call", 5), reply("after", 6)],
+      [request("approval")],
+    );
+    expect(ids(beside(waiting, [request("approval")]))).toEqual(["earlier-call", "reply", "after"]);
+
+    const answered = place(
+      [...before, approval("approval", 4, 8), call("held-call", 5), reply("after", 6)],
+      [request("approval", "resolved")],
+    );
+    expect(ids(beside(answered, []))).toEqual([
+      "earlier-call",
+      "reply",
+      "held-call",
+      "approval",
+      "after",
+    ]);
+  });
+
+  it("keeps a provider's waiting approval row unless the pane hides every one", () => {
+    const { connectedAppTool: _, ...providerRequest } = request("approval");
+    const shown = rows([call("call", 1), approval("approval", 2)]);
+    expect(beside(shown, [providerRequest])).toBe(shown);
+    expect(ids(beside(shown, [providerRequest], { hideProviderApprovals: true }))).toEqual([
+      "call",
+    ]);
+  });
+
+  it("hands back the same rows when the card asks nothing they show", () => {
+    const shown = rows([call("call", 1, { tool: "lecturn.rw_design_check" }), reply("reply", 2)]);
+    expect(beside(shown, [])).toBe(shown);
+    expect(beside(shown, [request("approval")])).toBe(shown);
   });
 });

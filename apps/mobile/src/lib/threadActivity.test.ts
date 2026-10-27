@@ -24,6 +24,7 @@ import {
   type ThreadImportOrigin,
 } from "@lecturn/contracts";
 import { createAppToolApprovalPlacer } from "@lecturn/client-runtime/state/app-tool-approval-placement";
+import { derivePendingThreadRequests } from "@lecturn/client-runtime/state/thread-requests";
 import { resolveUserMessagePresentation } from "@lecturn/client-runtime/user-message";
 import { appToolRawName, appToolSource } from "@lecturn/shared/appToolPresentation";
 import {
@@ -3228,5 +3229,48 @@ describe("an app approval that committed before the call it holds", () => {
         "item-approval",
       ]);
     }
+  });
+
+  it("leaves the approval and the call it holds to the composer card until it is answered", () => {
+    const place = createAppToolApprovalPlacer();
+    const feedAt = (answered: boolean, callDone: string | null) => {
+      const items = [userMessage(), engineApproval(answered), engineCall(callDone)];
+      const requests = [request(answered)];
+      const { approvals } = derivePendingThreadRequests({
+        runtimeRequests: requests,
+        turnItems: items,
+      });
+      return feedItemIds(
+        buildThreadFeed(
+          place(
+            items.map((item, position) => projected(item, position)),
+            requests,
+          ),
+          { cardApprovals: approvals },
+        ),
+      );
+    };
+    expect(feedAt(false, null)).toEqual(["message-user"]);
+    expect(feedAt(true, null)).toEqual(["message-user", "item-engine", "item-approval"]);
+    expect(feedAt(true, "2026-06-20T00:00:06.000Z")).toEqual([
+      "message-user",
+      "item-engine",
+      "item-approval",
+    ]);
+  });
+
+  it("keeps a provider's own waiting approval in the feed beside its card", () => {
+    const { connectedAppTool: _, ...providerRequest } = request(false);
+    const items = [userMessage(), engineApproval(false)];
+    const { approvals } = derivePendingThreadRequests({
+      runtimeRequests: [providerRequest],
+      turnItems: items,
+    });
+    expect(approvals).toHaveLength(1);
+    const feed = buildThreadFeed(
+      items.map((item, position) => projected(item, position)),
+      { cardApprovals: approvals },
+    );
+    expect(feedItemIds(feed)).toEqual(["message-user", "item-approval"]);
   });
 });

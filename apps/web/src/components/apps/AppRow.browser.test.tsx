@@ -16,7 +16,7 @@ import {
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 
 import { makeThreadFixture } from "../../test-fixtures";
 
@@ -98,9 +98,9 @@ function thread(id: string, title: string, running: boolean): EnvironmentThreadS
 
 const selectedThread = thread("t-counter", "Counter baseline", false);
 
-function app(): AppsSidebarApp {
+function app(name = status.name): AppsSidebarApp {
   return buildAppsSidebarApps({
-    statuses: [{ environmentId: MAC, app: status }],
+    statuses: [{ environmentId: MAC, app: { ...status, name } }],
     projects: [project],
     threads: [
       selectedThread,
@@ -327,6 +327,27 @@ describe("Apps sidebar rows at the default sidebar width", () => {
       <AppHeader app={app()} onBack={noop} onNewThread={noop} />,
     );
     readsWhole(container.querySelector('[data-testid="app-header-name"]'));
+  });
+
+  it("reads a truncated app name whole in the same tooltip on its row and its selected header", async () => {
+    const name = "RocketWright Motor Bench";
+    const openPopup = () =>
+      document.querySelector('[data-slot="tooltip-popup"][data-open]')?.textContent ?? null;
+    const views = {
+      "sidebar-app-name": () => appRow(app(name)),
+      "app-header-name": () => <AppHeader app={app(name)} onBack={noop} onNewThread={noop} />,
+    };
+    for (const [nameTestId, view] of Object.entries(views)) {
+      await render(SIDEBAR_GROUP_WIDTH, view());
+      const shown = container.querySelector<HTMLElement>(`[data-testid="${nameTestId}"]`)!;
+      expect(shown.scrollWidth).toBeGreaterThan(shown.clientWidth);
+      expect(openPopup()).toBeNull();
+
+      await userEvent.hover(shown);
+      await vi.waitFor(() => expect(openPopup()).toBe(name));
+      await userEvent.unhover(shown);
+      await vi.waitFor(() => expect(openPopup()).toBeNull());
+    }
   });
 
   it("reads the selected and unselected thread titles whole under a workspace", async () => {

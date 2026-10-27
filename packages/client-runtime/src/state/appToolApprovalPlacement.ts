@@ -119,6 +119,53 @@ export function claimHeldAppToolCalls<Row>(
   return held;
 }
 
+/** An approval the composer's card is asking; an app's names the tool whose call it holds. */
+export interface CardApproval {
+  readonly requestId: RuntimeRequestId;
+  readonly connectedAppTool?: { readonly toolName: string };
+}
+
+/**
+ * The rows beside the composer's approval card. A waiting app approval's own row repeats the card
+ * word for word, and the call it holds is not running but waiting on the card, so both stay out
+ * until it is answered; then the call comes back with its approval below it. A provider's own
+ * waiting approval row stays unless `hideProviderApprovals`, since its card shows the command under
+ * a generic title.
+ */
+export function withoutApprovalCardRows<Row>(
+  rows: ReadonlyArray<Row>,
+  approvals: ReadonlyArray<CardApproval>,
+  itemOf: (row: Row) => OrchestrationV2TurnItem | undefined,
+  options?: { readonly hideProviderApprovals?: boolean },
+): ReadonlyArray<Row> {
+  const hidden =
+    options?.hideProviderApprovals === true
+      ? approvals
+      : approvals.filter((approval) => approval.connectedAppTool !== undefined);
+  if (hidden.length === 0) return rows;
+  const appApprovals = hidden.flatMap((approval) =>
+    approval.connectedAppTool === undefined
+      ? []
+      : [
+          {
+            requestId: approval.requestId,
+            toolName: approval.connectedAppTool.toolName,
+            pending: true,
+          },
+        ],
+  );
+  const heldCalls = new Set(
+    claimHeldAppToolCalls(rows, appApprovals, itemOf).map((held) => held.callIndex),
+  );
+  const asked = new Set<string>(hidden.map((approval) => approval.requestId));
+  const kept = rows.filter((row, index) => {
+    if (heldCalls.has(index)) return false;
+    const item = itemOf(row);
+    return item?.type !== "approval_request" || !asked.has(item.requestId);
+  });
+  return kept.length === rows.length ? rows : kept;
+}
+
 export function appToolApprovalsOf(requests: RuntimeRequests): ReadonlyArray<AppToolApproval> {
   return requests.flatMap((request) =>
     request.connectedAppTool === undefined
