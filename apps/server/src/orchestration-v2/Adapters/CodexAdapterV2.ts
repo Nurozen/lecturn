@@ -456,7 +456,7 @@ export interface CodexDynamicToolProjection extends McpToolPresentation {
 function codexMcpToolOutput(
   item: Extract<CodexDynamicToolItem, { readonly type: "mcpToolCall" }>,
 ): unknown | undefined {
-  const resultOutput = mcpToolResultOutput(codexMcpToolResult(item.result));
+  const resultOutput = mcpToolResultOutput(codexMcpToolResult(item));
 
   if (item.error === null || item.error === undefined) {
     return resultOutput;
@@ -3914,7 +3914,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                       ...artifacts.turnItem,
                       output: {
                         [MCP_APP_OUTPUT_KEY]: reference,
-                        result: codexMcpToolResult(item.result),
+                        result: codexMcpToolResult(item),
                       },
                     };
               yield* emitProviderEvent({
