@@ -20,6 +20,7 @@ import {
   APP_TOOL_CONTEXT_META_KEY,
   type AppId,
   type AppRegistration,
+  type AppRuntimeCeiling,
   AppsError,
   type AppToolApprovalMeta,
   type AppToolContextMeta,
@@ -270,14 +271,21 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
         });
       }
       const { appId, projectId } = scope.app;
-      const found = yield* grantedApp(appId);
-      if (Option.isNone(found)) {
-        return yield* new AppsError({
-          code: "forbidden",
-          message: `${appId} is not a granted connected app.`,
-        });
-      }
-      const record = found.value;
+      const requireGranted = grantedApp(appId).pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () =>
+              Effect.fail(
+                new AppsError({
+                  code: "forbidden",
+                  message: `${appId} is not a granted connected app.`,
+                }),
+              ),
+            onSome: Effect.succeed,
+          }),
+        ),
+      );
+      const record = yield* requireGranted;
       const { registration } = record;
       const toolSource = toolSourceFor(registration);
       const bare = name.startsWith(`${registration.toolPrefix}_`)
@@ -297,36 +305,51 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
         return errorResult(`${registration.name} is closed; open it to use ${name}.`);
       }
 
-      const thread = yield* projection
-        .getThread(scope.thread.threadId)
-        .pipe(
-          Effect.mapError(
-            () =>
-              new AppsError({ code: "unavailable", message: "Could not read the calling thread." }),
-          ),
-        );
       const context = yield* contextMeta(scope);
       // The stored mode is what the user picked; the provider may run a lower
       // one (RuntimePolicy downgrades unsupported modes), and app tools must
       // not be more permissive than the provider's own tools.
-      const policy = yield* runtimePolicy
-        .resolve({ thread, modelSelection: context.runModelSelection ?? thread.modelSelection })
-        .pipe(
+      const resolvePolicy = Effect.gen(function* () {
+        const thread = yield* projection.getThread(scope.thread.threadId).pipe(
           Effect.mapError(
             () =>
               new AppsError({
                 code: "unavailable",
-                message: "Could not resolve the calling thread's runtime mode.",
+                message: "Could not read the calling thread.",
               }),
           ),
         );
-      const gate = (stage: AppToolGate.AppToolGateInput["stage"]) =>
+        return yield* runtimePolicy
+          .resolve({ thread, modelSelection: context.runModelSelection ?? thread.modelSelection })
+          .pipe(
+            Effect.mapError(
+              () =>
+                new AppsError({
+                  code: "unavailable",
+                  message: "Could not resolve the calling thread's runtime mode.",
+                }),
+            ),
+          );
+      });
+      const policy = yield* resolvePolicy;
+      const gate = (
+        stage: AppToolGate.AppToolGateInput["stage"],
+        ceiling: AppRuntimeCeiling,
+        modes: typeof policy,
+      ) =>
         extensions.decide({
           stage,
           gated: stage === "app" || registration.gatedTools.includes(bare),
-          runtimeMode: policy.runtimeMode,
-          interactionMode: policy.interactionMode,
-          ceiling: record.status.runtimeCeiling,
+          runtimeMode: modes.runtimeMode,
+          interactionMode: modes.interactionMode,
+          ceiling,
+        });
+      // The user can change the app's ceiling and the thread's mode while a
+      // call waits on them or on the app, so later decisions read both again.
+      const gateNow = (stage: AppToolGate.AppToolGateInput["stage"]) =>
+        Effect.gen(function* () {
+          const current = yield* requireGranted;
+          return gate(stage, current.status.runtimeCeiling, yield* resolvePolicy);
         });
       const approve = (
         decision: AppToolGate.AppToolGateDecision,
@@ -356,7 +379,10 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
           }
         });
 
-      const forward = (approval: AppToolApprovalMeta) =>
+      const forward = (
+        approval: AppToolApprovalMeta,
+        stage: AppToolGate.AppToolGateInput["stage"],
+      ) =>
         Effect.gen(function* () {
           const request: AppToolCallRequest = {
             name: bare,
@@ -367,13 +393,14 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
               [APP_TOOL_APPROVAL_META_KEY]: approval,
             },
           };
-          // An approval can wait for minutes, so the grant and lease read
-          // before it are stale: an app revoked or closed meanwhile is not contacted.
-          if (Option.isNone(yield* grantedApp(appId))) {
-            return yield* new AppsError({
-              code: "forbidden",
-              message: `${appId} is not a granted connected app.`,
-            });
+          // An approval can wait for minutes, so everything read before it is
+          // stale: an app revoked or closed meanwhile is not contacted, and an
+          // approved call is gated again on the ceiling and mode it has now.
+          if (approval.requestId === undefined) {
+            yield* requireGranted;
+          } else {
+            const decision = yield* gateNow(stage);
+            if (decision.kind === "refuse") return { request, refused: decision.reason } as const;
           }
           if (appTool.tier === "headless") {
             return { request, result: yield* headless.call(appId, projectId, request) };
@@ -401,7 +428,11 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
         });
 
       // 3 and 4. Static gate.
-      const first = yield* approve(gate("static"), "static", null);
+      const first = yield* approve(
+        gate("static", record.status.runtimeCeiling, policy),
+        "static",
+        null,
+      );
       if ("refused" in first) {
         return yield* refuse(
           { name: bare, arguments: args, meta: withoutLecturnKeys(meta) },
@@ -410,16 +441,18 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
       }
 
       // 5. Forward.
-      let sent = yield* forward(first.approval);
+      let sent = yield* forward(first.approval, "static");
+      if ("refused" in sent) return yield* refuse(sent.request, sent.refused);
 
       // 6. App-decided gate.
       const reason = approvalRequiredReason(sent.result);
       if (reason !== undefined && !first.approval.approved) {
-        const second = yield* approve(gate("app"), "app", reason);
+        const second = yield* approve(yield* gateNow("app"), "app", reason);
         if ("refused" in second) return yield* refuse(sent.request, second.refused);
         // The app already said it needs approval; a gate that lets the call
         // through without asking (Full access) is approving it.
-        sent = yield* forward({ ...second.approval, approved: true });
+        sent = yield* forward({ ...second.approval, approved: true }, "app");
+        if ("refused" in sent) return yield* refuse(sent.request, sent.refused);
       }
 
       // 7. Envelope.

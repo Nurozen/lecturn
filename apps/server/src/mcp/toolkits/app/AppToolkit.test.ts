@@ -6,6 +6,7 @@ import {
   APP_TOOL_APPROVAL_REQUIRED_META_KEY,
   APP_TOOL_CONTEXT_META_KEY,
   type AppRegistration,
+  type AppRuntimeCeiling,
   EnvironmentId,
   NodeId,
   type OrchestrationV2AppThread,
@@ -257,6 +258,10 @@ const withToolkit = <A, E>(
     readonly leased?: boolean;
     /** The user revokes the app while its approval card is waiting. */
     readonly revokeDuringApproval?: boolean;
+    /** The user changes the app's ceiling in Settings while its approval card is waiting. */
+    readonly ceilingDuringApproval?: AppRuntimeCeiling;
+    /** The user changes the app's ceiling while the app is handling the first call. */
+    readonly ceilingDuringFirstCall?: AppRuntimeCeiling;
   },
   body: (toolkit: AppToolkit["Service"], harness: Harness) => Effect.Effect<A, E>,
 ) =>
@@ -300,7 +305,14 @@ const withToolkit = <A, E>(
             Effect.as(cachedTools),
           ),
         call: (_appId, _projectId, request) =>
-          Effect.sync(() => harness.forwarded.push(request)).pipe(Effect.as(answer(request))),
+          Effect.sync(() => harness.forwarded.push(request)).pipe(
+            Effect.tap((count) =>
+              count === 1 && options.ceilingDuringFirstCall !== undefined
+                ? Ref.set(fake.ceiling, options.ceilingDuringFirstCall)
+                : Effect.void,
+            ),
+            Effect.as(answer(request)),
+          ),
       }),
     );
     const toolkit = yield* AppToolkitLayer.makeAppToolkit({
@@ -314,6 +326,11 @@ const withToolkit = <A, E>(
             options.revokeDuringApproval === true
               ? Ref.set(fake.state, "revoked").pipe(Effect.andThen(Ref.set(lease, Option.none())))
               : Effect.void,
+          ),
+          Effect.andThen(
+            options.ceilingDuringApproval === undefined
+              ? Effect.void
+              : Ref.set(fake.ceiling, options.ceilingDuringApproval),
           ),
           Effect.as(options.approval ?? { approved: true, requestId: "request-7" }),
         ),
@@ -433,15 +450,15 @@ it.effect("asks before a statically gated call and forwards it approved with the
       Effect.gen(function* () {
         yield* toolkit.call(appScope, "ex_gated_job", {}, {});
 
-        expect(harness.gateInputs).toEqual([
-          {
-            stage: "static",
-            gated: true,
-            runtimeMode: "approval-required",
-            interactionMode: "default",
-            ceiling: null,
-          },
-        ]);
+        const staticGate = {
+          stage: "static",
+          gated: true,
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          ceiling: null,
+        } as const;
+        // Gated again once approved, on what the app and thread hold by then.
+        expect(harness.gateInputs).toEqual([staticGate, staticGate]);
         expect(harness.approvals.map((request) => request.info)).toEqual([
           { appId, appName: "Counter", toolName: "ex_gated_job", reason: null, source: "static" },
         ]);
@@ -542,6 +559,7 @@ it.effect("gates on the provider's resolved mode, not the thread's stored one", 
           yield* toolkit.call(appScope, "ex_gated_job", {}, {});
           expect(harness.gateInputs.map((input) => input.runtimeMode)).toEqual([
             "approval-required",
+            "approval-required",
           ]);
           expect(harness.approvals.map((request) => request.info.source)).toEqual(["static"]);
           expect(
@@ -599,6 +617,47 @@ it.effect("never contacts an app revoked while its gated live call waited for ap
         expect(harness.approvals).toHaveLength(1);
         expect(harness.liveCalls).toEqual([]);
         expect(exit._tag).toBe("Failure");
+      }),
+  ),
+);
+
+it.effect("never forwards a gated call whose app was limited to Read-only while it waited", () =>
+  withToolkit(
+    { cachedHeadless: cachedTools, decide: AppToolGate.decide, ceilingDuringApproval: "read-only" },
+    (toolkit, harness) =>
+      Effect.gen(function* () {
+        const called = yield* toolkit.call(appScope, "ex_gated_job", {}, {});
+
+        expect(harness.approvals).toHaveLength(1);
+        expect(harness.forwarded).toEqual([]);
+        expect(called).toMatchObject({
+          isError: true,
+          content: [{ type: "text", text: AppToolGate.READ_ONLY_REFUSAL }],
+        });
+        expect(harness.wrapped.map((input) => input.refusal)).toEqual([
+          AppToolGate.READ_ONLY_REFUSAL,
+        ]);
+      }),
+  ),
+);
+
+it.effect("gates an app-decided call on the ceiling the app has when it asks", () =>
+  withToolkit(
+    {
+      registration: { ...registrationFor(false), gatedTools: [] },
+      cachedHeadless: cachedTools,
+      decide: AppToolGate.decide,
+      ceilingDuringFirstCall: "read-only",
+    },
+    (toolkit, harness) =>
+      Effect.gen(function* () {
+        const called = yield* toolkit.call(appScope, "ex_gated_job", {}, {});
+
+        expect(harness.approvals).toEqual([]);
+        expect(
+          harness.forwarded.map((request) => request.meta[APP_TOOL_APPROVAL_META_KEY]),
+        ).toEqual([{ approved: false }]);
+        expect(called.content).toEqual([{ type: "text", text: AppToolGate.READ_ONLY_REFUSAL }]);
       }),
   ),
 );

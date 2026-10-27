@@ -3,6 +3,7 @@ import { assert, it } from "@effect/vitest";
 import {
   AppId,
   type AppGrantState,
+  type AppRuntimeCeiling,
   type AppStatus,
   type AppStatusStreamEvent,
   CommandId,
@@ -120,23 +121,29 @@ class TestAppStatus extends Context.Service<
   {
     readonly events: PubSub.PubSub<AppStatusStreamEvent>;
     readonly states: Map<AppId, AppGrantState | "removed">;
+    readonly ceilings: Map<AppId, AppRuntimeCeiling>;
   }
 >()("lecturn/apps/AppToolApprovalService.test/TestAppStatus") {}
 
-const appStatus = (appId: AppId, name: string, state: AppGrantState) =>
-  ({ appId, name, state }) as AppStatus;
+const appStatus = (
+  appId: AppId,
+  name: string,
+  state: AppGrantState,
+  runtimeCeiling: AppRuntimeCeiling = null,
+) => ({ appId, name, state, runtimeCeiling }) as AppStatus;
 
 const layerAppStatus = Layer.effect(
   TestAppStatus,
   Effect.map(PubSub.unbounded<AppStatusStreamEvent>(), (events) => ({
     events,
     states: new Map(),
+    ceilings: new Map(),
   })),
 );
 
 const layerApps = Layer.unwrap(
   Effect.gen(function* () {
-    const { events, states } = yield* TestAppStatus;
+    const { events, states, ceilings } = yield* TestAppStatus;
     return Layer.mock(AppRegistryService)({
       streamStatus: Stream.fromPubSub(events),
       get: (appId) =>
@@ -145,7 +152,7 @@ const layerApps = Layer.unwrap(
           return state === "removed"
             ? Option.none()
             : Option.some({
-                status: appStatus(appId, "App", state),
+                status: appStatus(appId, "App", state, ceilings.get(appId) ?? null),
                 registration: { toolPrefix: "rw", liveTools: true },
               } as never);
         }),
@@ -821,6 +828,73 @@ it.layer(layerTest)("AppToolApprovalService", (it) => {
         { status: "resolved", decision: "cancel" },
       );
     }),
+  );
+
+  it.effect(
+    "limiting an app to Read-only cancels its waiting approvals; asking ceilings keep them",
+    () =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const appId = AppId.make("dev.limited.app");
+        const turn = yield* seedRunningTurn("limit");
+        const limited = yield* requestApproval(turn, { ...info, appId, appName: "Limitee" });
+        const supervised = yield* requestApproval(turn);
+
+        const apps = yield* TestAppStatus;
+        // Published first, so it has been handled once the later cancel lands.
+        apps.ceilings.set(info.appId, "approval-required");
+        yield* PubSub.publish(apps.events, {
+          type: "upsert",
+          app: appStatus(info.appId, "RocketWright", "granted", "approval-required"),
+        });
+        apps.ceilings.set(appId, "read-only");
+        yield* PubSub.publish(apps.events, {
+          type: "upsert",
+          app: appStatus(appId, "Limitee", "granted", "read-only"),
+        });
+
+        assert.deepEqual(yield* Fiber.join(limited.call), {
+          outcome: "cancelled",
+          requestId: limited.requestId,
+          reason: "Limitee was limited to Read-only",
+        });
+        const projection = yield* orchestrator.getThreadProjection(turn.threadId);
+        const request = projection.runtimeRequests.find((entry) => entry.id === limited.requestId);
+        assert.deepInclude(request, { status: "resolved", decision: "cancel" });
+        assert.equal(
+          projection.turnItems.find(
+            (item) => item.type === "approval_request" && item.requestId === limited.requestId,
+          )?.status,
+          "cancelled",
+        );
+        assert.equal(
+          projection.runtimeRequests.find((entry) => entry.id === supervised.requestId)?.status,
+          "pending",
+        );
+        assert.equal(projection.runs.find((run) => run.id === turn.runId)?.status, "running");
+        yield* Fiber.interrupt(supervised.call);
+      }),
+  );
+
+  it.effect(
+    "an approval raised just after its app was limited to Read-only is cancelled at once",
+    () =>
+      Effect.gen(function* () {
+        const appId = AppId.make("dev.late-limit.app");
+        (yield* TestAppStatus).ceilings.set(appId, "read-only");
+        const turn = yield* seedRunningTurn("late-limit");
+        const { call, requestId } = yield* requestApproval(turn, {
+          ...info,
+          appId,
+          appName: "Latecomer",
+        });
+
+        assert.deepEqual(yield* Fiber.join(call), {
+          outcome: "cancelled",
+          requestId,
+          reason: "Latecomer was limited to Read-only",
+        });
+      }),
   );
 
   it.effect("cancels without raising anything when the thread has no running turn", () =>
