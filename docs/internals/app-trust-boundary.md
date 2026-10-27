@@ -139,11 +139,13 @@ Adapters store a result's `lecturn/*` `_meta` keys with the tool item, and drop 
 keys. Claude and Codex always get them. Pi's bridge passes them in `details`, which the model never
 sees. ACP reads the MCP result from `rawOutput`, but some agents (Grok) end the call with text or
 nothing. The interceptor keeps each result it served, briefly and process-wide in
-[appToolResults.ts][served-results], and the ACP adapter fills such a row from it. It matches by
-thread, tool and arguments, oldest first, and only to a result served after the agent announced the
-call. Matching by name and order is fragile across adapters, so it stays limited to ACP rows that
-came without a result. Cursor's SDK reports no result `_meta` and OpenCode reports results as text,
-so their app rows show the title with no summary.
+[appToolResults.ts][served-results], and the ACP adapter fills such a row from it. The interceptor
+cannot tell an ACP caller from any other, so the store drops image and audio blocks to stay small; a
+filled row has its card, summary and text but not the media. It matches by thread, tool and
+arguments, oldest first, and only to a result served after the agent announced the call. Matching by
+name and order is fragile across adapters, so it stays limited to ACP rows that came without a
+result. Cursor's SDK reports no result `_meta` and OpenCode reports results as text, so their app
+rows show the title with no summary.
 
 Headless definitions are cached. The registration's `listArgs`, the preferred path, runs a command
 that prints the definitions and exits. It must not take an app-side lock. A throwaway lister could
