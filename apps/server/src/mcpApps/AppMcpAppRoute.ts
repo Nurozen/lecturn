@@ -24,6 +24,7 @@ import {
   type ProjectId,
   type ThreadId,
 } from "@lecturn/contracts";
+import { expandAppOpenUrl } from "@lecturn/shared/appReferences";
 import {
   MCP_APP_OUTPUT_KEY,
   mcpAppToolCallableByApp,
@@ -120,17 +121,6 @@ const presentTool = (prefix: string, tool: McpSchema.Tool) => ({
 
 const toolTitle = (tool: McpSchema.Tool) =>
   tool.title ?? (typeof tool.annotations?.title === "string" ? tool.annotations.title : undefined);
-
-/** `{workspaceRoot}` and `{threadId}` are the template's only placeholders. */
-export const expandOpenUrl = (
-  template: string | undefined,
-  values: { readonly workspaceRoot: string; readonly threadId: ThreadId },
-) =>
-  template === undefined
-    ? null
-    : template
-        .replaceAll("{workspaceRoot}", encodeURIComponent(values.workspaceRoot))
-        .replaceAll("{threadId}", encodeURIComponent(values.threadId));
 
 /**
  * Reads one of a granted app's resources, from its headless process first and
@@ -263,10 +253,13 @@ export const make = Effect.gen(function* () {
         ...(found === undefined ? {} : { tool: presentTool(registration.toolPrefix, found.tool) }),
         connectedApp: {
           refPrefixes: registration.refPrefixes,
-          openUrl: expandOpenUrl(registration.openUrlTemplate, {
-            workspaceRoot: card.workspaceRoot,
-            threadId: card.thread.id,
-          }),
+          openUrl:
+            registration.openUrlTemplate === undefined
+              ? null
+              : expandAppOpenUrl(registration.openUrlTemplate, {
+                  workspaceRoot: card.workspaceRoot,
+                  threadId: card.thread.id,
+                }),
         },
       } satisfies McpAppToolInfo;
     },

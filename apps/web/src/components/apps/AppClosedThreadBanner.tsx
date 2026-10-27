@@ -35,7 +35,7 @@ export function AppClosedThreadBanner({
   if (state === null) return null;
   const { banner, open } = state;
   return (
-    <div className="messages-timeline-row-frame">
+    <div className="messages-timeline-row-frame pt-(--chat-banner-lane-height)">
       <div className="chat-content-lane pb-5">
         <div
           role="status"

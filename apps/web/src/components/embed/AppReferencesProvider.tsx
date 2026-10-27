@@ -3,10 +3,9 @@ import type { EnvironmentId, ThreadId } from "@lecturn/contracts";
 import { expandAppOpenUrl } from "@lecturn/shared/appReferences";
 import type { ReactNode } from "react";
 
-import { isLocalEnvironmentDisabled } from "../../localEnvironment";
 import { openAppUrl } from "../../lib/openAppUrl";
+import { useCanOpenApp } from "../apps/useAppClosedBanner";
 import { useAppEmbedContext } from "../../state/apps";
-import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useProject, useQuietThreadShell } from "../../state/entities";
 import { AppReferencesContext } from "./AppReferencesContext";
 import { AppRefStoredLabels, appRefLabelScope } from "./AppRefStoredLabels";
@@ -29,8 +28,7 @@ export function AppReferencesProvider({
   const projectRef = shell === null ? null : scopeProjectRef(environmentId, shell.projectId);
   const binding = useProject(projectRef)?.appBinding ?? null;
   const context = useAppEmbedContext(binding === null ? null : projectRef);
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const local = !isLocalEnvironmentDisabled() && environmentId === primaryEnvironmentId;
+  const canOpenApp = useCanOpenApp(environmentId);
 
   const template = context?.openUrlTemplate ?? null;
   const value =
@@ -41,7 +39,7 @@ export function AppReferencesProvider({
           iconUrl: context.iconDataUrl,
           labelScope: appRefLabelScope(environmentId, threadId),
           activate:
-            template === null || !local
+            template === null || !canOpenApp
               ? null
               : (ref: string) => {
                   const url = expandAppOpenUrl(template, {

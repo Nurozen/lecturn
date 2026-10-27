@@ -4,7 +4,9 @@
  * embed Lecturn's chat. Mobile imports this module, so it must stay
  * Hermes-safe and must not import orchestrationV2.ts, which imports it.
  */
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as SchemaGetter from "effect/SchemaGetter";
 
 import { AuthMcpClientAccess } from "./auth.ts";
 import {
@@ -130,6 +132,66 @@ export const AppIconDataUrl = Schema.String.check(
 );
 export type AppIconDataUrl = typeof AppIconDataUrl.Type;
 
+const URL_SCHEME = /^([a-z][a-z0-9+.-]*):/i;
+
+// An app opens at a scheme of its own or over http(s), never at one of these: they run script,
+// reach files or shares, re-enter a browser engine, or are Windows handlers with a history of
+// remote code execution. A scheme list rather than an allowlist because each app brings its own.
+const REFUSED_APP_URL_SCHEMES = new Set([
+  "about",
+  "blob",
+  "chrome",
+  "chrome-extension",
+  "data",
+  "devtools",
+  "file",
+  "filesystem",
+  "ftp",
+  "javascript",
+  "ms-msdt",
+  "ms-officecmd",
+  "search",
+  "search-ms",
+  "smb",
+  "vbscript",
+  "view-source",
+  "ws",
+  "wss",
+]);
+
+// Lecturn's own schemes come back in as deep links; an app never needs them to open itself.
+const LECTURN_SCHEME = /^lecturn(?:-dev|-preview)?$/;
+
+/**
+ * The lower-cased scheme `value` starts with, when an app may open at it. Read from the raw text,
+ * not a parsed URL, which would drop the tabs and spaces that hide `java\tscript:`.
+ */
+export function appOpenUrlScheme(value: string): string | null {
+  const scheme = URL_SCHEME.exec(value)?.[1]?.toLowerCase();
+  return scheme === undefined || REFUSED_APP_URL_SCHEMES.has(scheme) || LECTURN_SCHEME.test(scheme)
+    ? null
+    : scheme;
+}
+
+/**
+ * Whether a client may open `url` for an app registered with `openUrlTemplate`. Clients ask
+ * before every open, since a registration stored or served before the template check can name
+ * any scheme.
+ */
+export function appOpenUrlAllowed(url: string, openUrlTemplate: string): boolean {
+  const scheme = appOpenUrlScheme(url);
+  return scheme !== null && scheme === appOpenUrlScheme(openUrlTemplate);
+}
+
+/** Placeholders `{workspaceRoot}`, `{threadId}` and, for an app reference, `{ref}`. */
+export const AppOpenUrlTemplate = shortText(2048).check(
+  Schema.makeFilter((value: string) => appOpenUrlScheme(value) !== null, {
+    expected: "a URL in the app's own scheme or http(s), such as myapp://open?thread={threadId}",
+  }),
+);
+
+const isAppOpenUrlTemplate = Schema.is(AppOpenUrlTemplate);
+
 /** Message text starting with one of these renders as an app reference chip. */
 export const AppRefPrefix = Schema.String.check(
   Schema.isMaxLength(16),
@@ -142,8 +204,7 @@ export const AppRegistration = Schema.Struct({
   name: shortText(64),
   iconDataUrl: AppIconDataUrl,
   toolPrefix: AppToolPrefix,
-  /** Placeholders `{workspaceRoot}` and `{threadId}`. */
-  openUrlTemplate: Schema.optionalKey(shortText(2048)),
+  openUrlTemplate: Schema.optionalKey(AppOpenUrlTemplate),
   refPrefixes: Schema.Array(AppRefPrefix).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
   headlessTools: Schema.optionalKey(AppHeadlessTools),
   liveTools: Schema.Boolean,
@@ -152,6 +213,20 @@ export const AppRegistration = Schema.Struct({
   instructions: Schema.optionalKey(Schema.String.check(maxUtf8Bytes(8 * 1024))),
 });
 export type AppRegistration = typeof AppRegistration.Type;
+
+/**
+ * A registration read back from storage or an older server, which may predate the open URL
+ * check: a refused template is dropped rather than failing the whole record.
+ */
+export const StoredAppRegistration = Schema.Struct({
+  ...AppRegistration.fields,
+  openUrlTemplate: Schema.optionalKey(Schema.String).pipe(
+    Schema.decodeTo(Schema.optionalKey(Schema.String), {
+      decode: SchemaGetter.transformOptional(Option.filter(isAppOpenUrlTemplate)),
+      encode: SchemaGetter.passthrough(),
+    }),
+  ),
+});
 
 /** sha256 hex of `appGrantFingerprintSource`. */
 export const AppGrantFingerprint = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/));
@@ -197,7 +272,7 @@ export type AppPairingRequestId = typeof AppPairingRequestId.Type;
 
 export const AppPendingPairingRequest = Schema.Struct({
   requestId: AppPairingRequestId,
-  registration: AppRegistration,
+  registration: StoredAppRegistration,
   requestedAt: IsoDateTime,
 });
 export type AppPendingPairingRequest = typeof AppPendingPairingRequest.Type;

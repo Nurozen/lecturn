@@ -11,7 +11,6 @@ import {
   type AppStatus,
   type EnvironmentId,
 } from "@lecturn/contracts";
-import { expandAppOpenUrl } from "@lecturn/shared/appReferences";
 
 import type { HomeAppWorkspaceHeaderListItem, HomeGroupDisplayState } from "../home/homeListItems";
 import {
@@ -203,7 +202,7 @@ function latestActivity(
   );
 }
 
-/** The header's + and open-in act on the workspace the user touched last. */
+/** The header's + acts on the workspace the user touched last. */
 export function appCardTargetWorkspace(
   card: Pick<AppCard, "workspaces">,
 ): EnvironmentProject | null {
@@ -214,45 +213,23 @@ export function appCardTargetWorkspace(
   return best?.project ?? null;
 }
 
-export function appOpenUrl(input: {
-  readonly template: string | null;
-  readonly binding: AppBinding | undefined;
-  readonly threadId: string | null;
-}): string | null {
-  if (input.template === null || input.binding === undefined) return null;
-  return expandAppOpenUrl(input.template, {
-    workspaceRoot: input.binding.workspaceRoot,
-    threadId: input.threadId,
-  });
-}
-
 export interface AppClosedBannerState {
   readonly title: string;
-  readonly openLabel: string;
-  readonly openUrl: string | null;
 }
 
 /**
  * Closed means granted with no live lease. A revoked or unpaired app has no tools at all, so
- * "closed" would mislead.
+ * "closed" would mislead. It offers no way to open the app: the app runs on the server's machine,
+ * never on the phone.
  */
 export function appClosedBannerState(input: {
   readonly context: AppEmbedContext | null;
   readonly binding: AppBinding | undefined;
-  readonly threadId: string;
 }): AppClosedBannerState | null {
   const { context } = input;
   if (context === null || input.binding === undefined) return null;
   if (context.state !== "granted" || context.live !== null) return null;
-  return {
-    title: `${context.name} closed: live tools unavailable`,
-    openLabel: `Open in ${context.name}`,
-    openUrl: appOpenUrl({
-      template: context.openUrlTemplate,
-      binding: input.binding,
-      threadId: input.threadId,
-    }),
-  };
+  return { title: `${context.name} closed: live tools unavailable` };
 }
 
 const STATUS_SUBTITLE: Partial<Record<ThreadListV2Status, string>> = {

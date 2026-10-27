@@ -5,13 +5,15 @@ import {
   AppId,
   type AppEmbedContext,
   EnvironmentId,
+  MessageId,
   ProjectId,
   ThreadId,
 } from "@lecturn/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
-import { act, createRef, type ComponentProps } from "react";
+import { act, createRef, useState, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { userEvent } from "vite-plus/test/browser";
 
 const MAC = EnvironmentId.make("mac");
 const PROJECT = ProjectId.make("hopper-38mm");
@@ -56,6 +58,7 @@ const context = (overrides: Partial<AppEmbedContext> = {}): AppEmbedContext => (
   ...overrides,
 });
 
+const REVOKED_TURN_ERROR = "Turn failed: Rocket was revoked (approval cancelled).";
 let threadCount = 0;
 let root: Root;
 let container: HTMLDivElement;
@@ -73,14 +76,44 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function renderEmptyAppThread(threadError: string | null = null) {
+type TimelineProps = ComponentProps<typeof MessagesTimeline>;
+
+function ChatCanvas({
+  timeline,
+  threadError,
+}: {
+  readonly timeline: TimelineProps;
+  readonly threadError: string | null;
+}) {
+  const [error, setError] = useState(threadError);
+  // The chat canvas as ChatView lays it out: the banner lane over the timeline.
+  return (
+    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+      <ChatBannerLane>
+        <ThreadErrorBanner error={error} onDismiss={() => setError(null)} />
+      </ChatBannerLane>
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <MessagesTimeline {...timeline} />
+      </div>
+    </div>
+  );
+}
+
+async function renderAppThread({
+  threadError = null,
+  timelineEntries = [],
+}: {
+  readonly threadError?: string | null;
+  readonly timelineEntries?: TimelineProps["timelineEntries"];
+} = {}) {
   threadCount += 1;
-  const threadRef = scopeThreadRef(MAC, ThreadId.make(`t-empty-${threadCount}`));
-  const props: ComponentProps<typeof MessagesTimeline> = {
-    timelineEntries: [],
+  const threadRef = scopeThreadRef(MAC, ThreadId.make(`t-app-${threadCount}`));
+  const listRef = createRef<LegendListRef | null>();
+  const props: TimelineProps = {
+    timelineEntries,
     isWorking: false,
     activeTurnInProgress: false,
-    listRef: createRef<LegendListRef | null>(),
+    listRef,
     latestRun: null,
     turnDiffSummaries: [],
     runs: [],
@@ -106,23 +139,36 @@ async function renderEmptyAppThread(threadError: string | null = null) {
     onIsAtEndChange: () => {},
     onManualNavigation: () => {},
   };
-  // The chat canvas as ChatView lays it out: the banner lane over the timeline.
-  await act(async () =>
-    root.render(
-      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-        <ChatBannerLane threadRef={threadRef}>
-          <ThreadErrorBanner error={threadError} onDismiss={() => {}} />
-        </ChatBannerLane>
-        <div className="relative flex min-h-0 flex-1 flex-col">
-          <MessagesTimeline {...props} />
-        </div>
-      </div>,
-    ),
-  );
+  await act(async () => root.render(<ChatCanvas timeline={props} threadError={threadError} />));
+  return listRef;
 }
+
+const CREATED_AT = "2026-10-26T12:00:00.000Z";
+const reply = (index: number): TimelineProps["timelineEntries"][number] => ({
+  id: `entry-${index}`,
+  kind: "message",
+  createdAt: CREATED_AT,
+  message: {
+    id: MessageId.make(`message-${index}`),
+    role: "assistant",
+    text: `Reply ${index}. ${"The counter moved once and the flash was refused. ".repeat(6)}`,
+    runId: null,
+    createdAt: CREATED_AT,
+    updatedAt: CREATED_AT,
+    streaming: false,
+  },
+});
+
+/** A finished thread a little taller than the screen, so the notice and the end are both close. */
+const SLIGHTLY_OVERFLOWING_THREAD = Array.from({ length: 10 }, (_, index) => reply(index));
 
 const banner = () => container.querySelector<HTMLElement>('[data-testid="app-closed-banner"]');
 const threadErrorAlert = () => container.querySelector<HTMLElement>('[data-slot="alert"]');
+const nextFrames = async (count: number) => {
+  for (let frame = 0; frame < count; frame += 1) {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+};
 const placeholder = () =>
   [...container.querySelectorAll<HTMLElement>("p")].find((node) =>
     node.textContent?.includes("Send a message to start the conversation."),
@@ -142,7 +188,7 @@ function concealer(element: HTMLElement | null) {
 describe("AppClosedThreadBanner on an empty app thread", () => {
   it("heads a thread with no messages yet when its app is closed", async () => {
     embedContext = context();
-    await renderEmptyAppThread();
+    await renderAppThread();
 
     await vi.waitFor(() => expect(banner()?.textContent).toContain("Rocket closed"));
     await vi.waitFor(() => expect(concealer(banner())).toBeNull());
@@ -151,7 +197,7 @@ describe("AppClosedThreadBanner on an empty app thread", () => {
 
   it("heads it when the app's access was revoked", async () => {
     embedContext = context({ state: "revoked" });
-    await renderEmptyAppThread();
+    await renderAppThread();
 
     await vi.waitFor(() => expect(banner()?.textContent).toContain("Rocket access revoked"));
     await vi.waitFor(() => expect(concealer(banner())).toBeNull());
@@ -159,7 +205,7 @@ describe("AppClosedThreadBanner on an empty app thread", () => {
 
   it("keeps a thread error from covering the revoked notice", async () => {
     embedContext = context({ state: "revoked" });
-    await renderEmptyAppThread("Turn failed: Rocket was revoked (approval cancelled).");
+    await renderAppThread({ threadError: REVOKED_TURN_ERROR });
 
     await vi.waitFor(() => expect(concealer(banner())).toBeNull());
     expect(concealer(threadErrorAlert())).toBeNull();
@@ -172,9 +218,59 @@ describe("AppClosedThreadBanner on an empty app thread", () => {
 
   it("keeps the start placeholder while the app is running", async () => {
     embedContext = context({ live: { expiresAt: "2026-10-26T12:00:00.000Z" } });
-    await renderEmptyAppThread();
+    await renderAppThread();
 
     await vi.waitFor(() => expect(concealer(placeholder())).toBeNull());
     expect(banner()).toBeNull();
+  });
+});
+
+describe("AppClosedThreadBanner when the thread error is dismissed", () => {
+  async function renderRevokedThreadWithError() {
+    embedContext = context({ state: "revoked" });
+    const listRef = await renderAppThread({
+      threadError: REVOKED_TURN_ERROR,
+      timelineEntries: SLIGHTLY_OVERFLOWING_THREAD,
+    });
+    await vi.waitFor(() => expect(concealer(banner())).toBeNull());
+    const viewport = listRef.current!.getScrollableNode()!;
+    await vi.waitFor(() => expect(viewport.scrollHeight).toBeGreaterThan(viewport.clientHeight));
+    expect(viewport.scrollHeight - viewport.clientHeight).toBeLessThan(viewport.clientHeight);
+    return viewport;
+  }
+
+  const distanceFromEnd = (viewport: HTMLElement) =>
+    viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+
+  async function dismissThreadError() {
+    await userEvent.click(container.querySelector<HTMLElement>('[aria-label="Dismiss error"]')!);
+    await vi.waitFor(() => expect(threadErrorAlert()).toBeNull());
+    // The list re-pins to the end from an animation frame after it re-measures.
+    await nextFrames(4);
+  }
+
+  it("keeps the revoked notice in view for a reader at the top", async () => {
+    const viewport = await renderRevokedThreadWithError();
+    await vi.waitFor(() => expect(distanceFromEnd(viewport)).toBeLessThanOrEqual(1));
+    await act(async () => viewport.scrollTo({ top: 0 }));
+    await nextFrames(2);
+    expect(viewport.scrollTop).toBe(0);
+
+    await dismissThreadError();
+
+    const notice = banner()!.getBoundingClientRect();
+    const visible = viewport.getBoundingClientRect();
+    expect(viewport.scrollTop).toBe(0);
+    expect(notice.top).toBeGreaterThanOrEqual(visible.top);
+    expect(notice.bottom).toBeLessThanOrEqual(visible.bottom);
+  });
+
+  it("keeps a reader at the end at the end", async () => {
+    const viewport = await renderRevokedThreadWithError();
+    await vi.waitFor(() => expect(distanceFromEnd(viewport)).toBeLessThanOrEqual(1));
+
+    await dismissThreadError();
+
+    expect(distanceFromEnd(viewport)).toBeLessThanOrEqual(1);
   });
 });

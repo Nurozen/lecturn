@@ -4,6 +4,7 @@ import type {
   ComposerContextRecord,
   UnknownContextRecord,
 } from "@lecturn/contracts";
+import { appOpenUrlAllowed } from "@lecturn/contracts/apps";
 
 /**
  * Splits text into plain runs and app references such as `rw:c/fins`, for an
@@ -119,14 +120,15 @@ const OPEN_URL_PLACEHOLDER = /\{(workspaceRoot|threadId|ref)\}/g;
 /**
  * Fills an app's `openUrlTemplate`. Values are percent-encoded because the template is a URL and
  * a workspace path or reference may hold `&`, `#` or spaces. A template that does not yield a URL
- * opens nothing.
+ * in a scheme an app may open at opens nothing.
  */
 export function expandAppOpenUrl(template: string, values: AppOpenUrlValues): string | null {
   const url = template.replace(OPEN_URL_PLACEHOLDER, (_match, key: keyof AppOpenUrlValues) =>
     encodeURIComponent(values[key] ?? ""),
   );
   try {
-    return new URL(url).toString();
+    const href = new URL(url).toString();
+    return appOpenUrlAllowed(href, template) ? href : null;
   } catch {
     return null;
   }

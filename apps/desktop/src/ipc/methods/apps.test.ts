@@ -40,6 +40,10 @@ describe("parseAppOpenUrl", () => {
   it("refuses schemes no app owns even when the template names them", () => {
     for (const [url, openUrlTemplate] of [
       ["file:///etc/passwd", "file:///{workspaceRoot}"],
+      ["javascript:alert(1)", "javascript:alert({threadId})"],
+      ["data:text/html,x", "data:text/html,{threadId}"],
+      ["vbscript:msgbox(1)", "vbscript:msgbox({threadId})"],
+      ["blob:https://example.com/1", "blob:https://example.com/{threadId}"],
       ["smb://host/share", "smb://host/{workspaceRoot}"],
       ["search-ms:query=x", "search-ms:query={ref}"],
       ["lecturn://threads/env/thread", "lecturn://threads/{threadId}"],

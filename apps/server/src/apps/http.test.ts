@@ -166,6 +166,14 @@ it.layer(NodeServices.layer)("pairing routes", (it) => {
           ),
         );
         expect(badBody.status).toBe(400);
+        const scriptUrl = yield* client.execute(
+          HttpClientRequest.post(APPS_PAIRING_REQUESTS_PATH).pipe(
+            HttpClientRequest.bodyJsonUnsafe(
+              registrationInput({ openUrlTemplate: "javascript:alert(document.cookie)" }),
+            ),
+          ),
+        );
+        expect(scriptUrl.status).toBe(400);
 
         const created = (yield* json(yield* postRegistration(client))) as { requestId: string };
         expect((yield* pollRequest(client, created.requestId)).status).toBe(400);

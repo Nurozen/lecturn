@@ -11,12 +11,16 @@ import {
   WS_METHODS as W,
   type AppBinding,
 } from "@lecturn/contracts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { symlinksSupported } from "@lecturn/shared/testing/symlinks";
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 
 import { ASSET_ROUTE_PREFIX } from "../assets/AssetAccess.ts";
 import { ATTACHMENT_UPLOAD_ROUTE_PREFIX } from "../assets/AttachmentUpload.ts";
@@ -28,7 +32,12 @@ import {
 } from "../attachmentStore.ts";
 import type { AuthenticatedSession } from "../auth/EnvironmentAuth.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
-import { type AppAuthorizationDeps, EMBED_TOKEN_SCOPES, makeWith } from "./appAuthorization.ts";
+import {
+  type AppAuthorizationDeps,
+  EMBED_TOKEN_SCOPES,
+  canonicalPathOnDisk,
+  makeWith,
+} from "./appAuthorization.ts";
 import * as AppsRpcHandlers from "./AppsRpcHandlers.ts";
 import {
   AppAuthorization,
@@ -106,6 +115,10 @@ const fakeDeps: AppAuthorizationDeps = {
     );
   },
   projectIdForNote: (noteId) => Effect.succeed(Option.fromUndefinedOr(noteProjects.get(noteId))),
+  worktreePathForThread: () => Effect.succeedNone,
+  // A disk with no links, where every path exists; the real one is tested on disk below.
+  canonicalPath: (target, from) =>
+    Effect.succeedSome(from === undefined || target.startsWith("/") ? target : `${from}/${target}`),
   issueEmbedSession: (input) =>
     Effect.sync(() => {
       issued.push(input);
@@ -248,8 +261,9 @@ describe("app RPC allowlist", () => {
     Effect.gen(function* () {
       const dispatch = (fields: Record<string, unknown>) =>
         allowed(embedSession, O.dispatchCommand, command(fields));
-      expect(yield* dispatch({ type: "message.dispatch", threadId: rocketThread })).toBe(true);
-      expect(yield* dispatch({ type: "message.dispatch", threadId: normalThread })).toBe(false);
+      const message = { type: "message.dispatch", dispatchMode: { type: "start_immediately" } };
+      expect(yield* dispatch({ ...message, threadId: rocketThread })).toBe(true);
+      expect(yield* dispatch({ ...message, threadId: normalThread })).toBe(false);
       expect(yield* dispatch({ type: "runtime-request.respond", threadId: rocketThread })).toBe(
         true,
       );
@@ -274,11 +288,79 @@ describe("app RPC allowlist", () => {
       ).toBe(false);
 
       const launch = (fields: Record<string, unknown>) =>
-        allowed(embedSession, O.launchThread, { projectId: rocketProject, ...fields });
+        allowed(embedSession, O.launchThread, {
+          projectId: rocketProject,
+          workspaceStrategy: { type: "root" },
+          ...fields,
+        });
       expect(yield* launch({ threadId: rocketThread, reuseExistingThread: true })).toBe(true);
       expect(yield* launch({ threadId: missingThread, reuseExistingThread: true })).toBe(false);
       expect(yield* launch({ threadId: rocketThread })).toBe(false);
       expect(yield* launch({})).toBe(false);
+    }),
+  );
+
+  it.effect("keeps an embed's threads on their project's own workspace", () =>
+    Effect.gen(function* () {
+      const elsewhere = { type: "existing_worktree", worktreePath: "/work/other" };
+      const newWorktree = { type: "worktree", baseRef: "main" };
+      const onBranch = { type: "root", branch: "feature" };
+
+      const launch = (workspaceStrategy: Record<string, unknown>) =>
+        allowed(embedSession, O.launchThread, {
+          projectId: rocketProject,
+          threadId: rocketThread,
+          reuseExistingThread: true,
+          workspaceStrategy,
+        });
+      expect(yield* launch({ type: "root" })).toBe(true);
+      expect(yield* launch(elsewhere)).toBe(false);
+      expect(yield* launch(newWorktree)).toBe(false);
+      expect(yield* launch(onBranch)).toBe(false);
+
+      const send = (dispatchMode: Record<string, unknown>) =>
+        allowed(
+          embedSession,
+          O.dispatchCommand,
+          command({
+            type: "message.dispatch",
+            threadId: rocketThread,
+            attachments: [],
+            dispatchMode,
+          }),
+        );
+      expect(yield* send({ type: "start_immediately" })).toBe(true);
+      expect(yield* send({ type: "defer_start" })).toBe(true);
+      expect(yield* send({ type: "defer_start", workspaceStrategy: { type: "root" } })).toBe(true);
+      expect(yield* send({ type: "defer_start", workspaceStrategy: elsewhere })).toBe(false);
+      expect(yield* send({ type: "defer_start", workspaceStrategy: newWorktree })).toBe(false);
+      expect(yield* send({ type: "defer_start", workspaceStrategy: onBranch })).toBe(false);
+    }),
+  );
+
+  it.effect("checks a launch's initial attachments as it checks a dispatch's", () =>
+    Effect.gen(function* () {
+      const attachment = (id: string) => ({
+        type: "file",
+        id,
+        name: "notes.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 10,
+      });
+      const launch = (id: string) =>
+        allowed(embedSession, O.launchThread, {
+          projectId: rocketProject,
+          threadId: rocketThread,
+          reuseExistingThread: true,
+          workspaceStrategy: { type: "root" },
+          initialMessage: { text: "Read this", attachments: [attachment(id)] },
+        });
+      const stored = (threadId: ThreadId) => createAttachmentId(threadId, "pdf") ?? "unparseable";
+      expect(yield* launch(createPendingAttachmentId(".pdf"))).toBe(true);
+      expect(yield* launch(stored(rocketThread))).toBe(true);
+      expect(yield* launch(stored(rocketSecondThread))).toBe(false);
+      expect(yield* launch(stored(otherAppThread))).toBe(false);
+      expect(yield* launch(stored(normalThread))).toBe(false);
     }),
   );
 
@@ -436,7 +518,12 @@ describe("app RPC allowlist", () => {
         allowed(
           embedSession,
           O.dispatchCommand,
-          command({ type: "message.dispatch", threadId: rocketThread, ...fields }),
+          command({
+            type: "message.dispatch",
+            threadId: rocketThread,
+            dispatchMode: { type: "start_immediately" },
+            ...fields,
+          }),
         );
       expect(yield* send({ attachments: [attachment(createPendingAttachmentId(".png"))] })).toBe(
         true,
@@ -555,6 +642,85 @@ describe("app RPC allowlist", () => {
       yield* untouched.authorizeRpc(session("owner"), W.projectsWriteFile, {});
       yield* untouched.authorizeHttp(session("owner"), "/api/projects/mutate");
     }),
+  );
+});
+
+describe("embed media paths on disk", () => {
+  const diskProject = ProjectId.make("disk-project");
+  const diskThread = ThreadId.make("disk-thread");
+  const diskWorktreeThread = ThreadId.make("disk-worktree-thread");
+
+  /** A workspace whose links point out of it, and a worktree thread beside it. */
+  const plant = Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-embed-root-" });
+    const worktree = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-embed-worktree-" });
+    const outside = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-embed-outside-" });
+    yield* fs.makeDirectory(path.join(root, "plots"));
+    yield* fs.writeFileString(path.join(root, "plots", "apogee.png"), "plot");
+    yield* fs.writeFileString(path.join(worktree, "drag.png"), "plot");
+    yield* fs.writeFileString(path.join(outside, "private.pdf"), "private");
+    yield* fs.symlink(path.join(outside, "private.pdf"), path.join(root, "link.pdf"));
+    yield* fs.symlink(outside, path.join(root, "linked"));
+    yield* fs.symlink(path.join(outside, "private.pdf"), path.join(worktree, "link.pdf"));
+    yield* fs.symlink(path.join(root, "missing.pdf"), path.join(root, "dangling.pdf"));
+    const onDisk = makeWith({
+      ...fakeDeps,
+      resolveAppForProject: (projectId) =>
+        Effect.succeed(
+          projectId === diskProject ? Option.some(binding(rocketwright, root)) : Option.none(),
+        ),
+      projectIdForThread: (threadId) =>
+        Effect.succeed(
+          threadId === diskThread || threadId === diskWorktreeThread
+            ? Option.some(diskProject)
+            : Option.none(),
+        ),
+      worktreePathForThread: (threadId) =>
+        Effect.succeed(threadId === diskWorktreeThread ? Option.some(worktree) : Option.none()),
+      canonicalPath: yield* canonicalPathOnDisk,
+    });
+    const asset = (resource: Record<string, unknown>) =>
+      onDisk
+        .authorizeRpc(session(formatEmbedSubject(rocketwright, diskProject)), W.assetsCreateUrl, {
+          resource,
+        })
+        .pipe(
+          Effect.as(true),
+          Effect.catchTags({ EnvironmentAuthorizationError: () => Effect.succeed(false) }),
+        );
+    return { root, worktree, asset, join: path.join };
+  });
+
+  it.effect.skipIf(!symlinksSupported)(
+    "refuses project paths whose links lead outside the workspace they are read from",
+    () =>
+      Effect.gen(function* () {
+        const { root, worktree, asset, join } = yield* plant;
+        const media = (threadId: ThreadId, path: string) =>
+          asset({ _tag: "media-file", threadId, path });
+        expect(yield* media(diskThread, join(root, "plots", "apogee.png"))).toBe(true);
+        expect(yield* media(diskThread, "plots/apogee.png")).toBe(true);
+        expect(yield* media(diskThread, join(root, "link.pdf"))).toBe(false);
+        expect(yield* media(diskThread, "link.pdf")).toBe(false);
+        expect(yield* media(diskThread, join(root, "linked", "private.pdf"))).toBe(false);
+        expect(yield* media(diskThread, "linked/private.pdf")).toBe(false);
+        // A path that cannot be resolved cannot be shown to stay inside.
+        expect(yield* media(diskThread, "dangling.pdf")).toBe(false);
+        expect(yield* media(diskThread, "plots/missing.png")).toBe(false);
+
+        // A worktree thread reads relative paths from its worktree, never through its links.
+        expect(yield* media(diskWorktreeThread, "drag.png")).toBe(true);
+        expect(yield* media(diskWorktreeThread, "link.pdf")).toBe(false);
+        expect(yield* media(diskWorktreeThread, join(worktree, "drag.png"))).toBe(false);
+
+        const draft = (path: string) => asset({ _tag: "draft-workspace-file", cwd: root, path });
+        expect(yield* draft("plots/apogee.png")).toBe(true);
+        expect(yield* draft(join(root, "plots", "apogee.png"))).toBe(true);
+        expect(yield* draft(join(root, "link.pdf"))).toBe(false);
+        expect(yield* draft(join(root, "linked", "private.pdf"))).toBe(false);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
 
