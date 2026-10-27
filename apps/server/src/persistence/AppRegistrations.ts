@@ -115,6 +115,15 @@ export class AppRegistrationRepository extends Context.Service<
     readonly listPendingPairingRequests: (
       now: DateTime.Utc,
     ) => Effect.Effect<ReadonlyArray<AppPairingRequestRecord>, AppRegistrationRepositoryError>;
+    /**
+     * For apps left `pairing-requested` with no unexpired request: restores a
+     * grant a changed registration suspended, and removes an app never
+     * granted. Its pairing requests stay, so the app's poll reads "expired".
+     * Returns the apps it changed.
+     */
+    readonly settleLapsedPairings: (
+      now: DateTime.Utc,
+    ) => Effect.Effect<ReadonlyArray<AppId>, AppRegistrationRepositoryError>;
     /** Decides a pending request; `false` when it was not pending. */
     readonly decidePairingRequest: (input: {
       readonly requestId: string;
@@ -158,6 +167,7 @@ const RawPairingRequestRow = Schema.Struct({
   createdAt: Schema.Unknown,
 });
 
+const decodeAppIdRows = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ appId: AppId })));
 const decodeRegistrationRow = Schema.decodeUnknownEffect(AppRegistrationRecord);
 const decodePairingRequestRow = Schema.decodeUnknownEffect(AppPairingRequestRecord);
 const encodeRegistration = Schema.encodeEffect(RegistrationJson);
@@ -381,6 +391,42 @@ export const make = Effect.gen(function* () {
         Effect.mapError(toRepositoryError("AppRegistrationRepository.listPendingPairingRequests")),
       );
 
+  const settleLapsedPairings: AppRegistrationRepository["Service"]["settleLapsedPairings"] = (
+    now,
+  ) => {
+    const at = DateTime.formatIso(now);
+    return sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const restored = yield* sql`
+            UPDATE app_registrations SET state = 'granted', updated_at = ${at}
+            WHERE state = 'pairing-requested' AND granted_fingerprint IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM app_pairing_requests AS request
+                WHERE request.app_id = app_registrations.app_id
+                  AND request.state = 'pending' AND request.expires_at > ${at}
+              )
+            RETURNING app_id AS "appId"
+          `;
+          const removed = yield* sql`
+            DELETE FROM app_registrations
+            WHERE state = 'pairing-requested' AND granted_fingerprint IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM app_pairing_requests AS request
+                WHERE request.app_id = app_registrations.app_id
+                  AND request.state = 'pending' AND request.expires_at > ${at}
+              )
+            RETURNING app_id AS "appId"
+          `;
+          return yield* decodeAppIdRows([...restored, ...removed]);
+        }),
+      )
+      .pipe(
+        Effect.map((rows) => rows.map((row) => row.appId)),
+        Effect.mapError(toRepositoryError("AppRegistrationRepository.settleLapsedPairings")),
+      );
+  };
+
   const decidePairingRequest: AppRegistrationRepository["Service"]["decidePairingRequest"] = ({
     requestId,
     state,
@@ -416,6 +462,7 @@ export const make = Effect.gen(function* () {
     createPairingRequest,
     getPairingRequest,
     listPendingPairingRequests,
+    settleLapsedPairings,
     decidePairingRequest,
     claimCredentialDelivery,
   });

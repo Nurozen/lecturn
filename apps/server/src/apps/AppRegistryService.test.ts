@@ -11,6 +11,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { McpSchema } from "effect/ai";
 
 import * as SessionStore from "../auth/SessionStore.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { DeviceToolkit } from "../mcp/toolkits/device/tools.ts";
 import { EnvironmentToolkit } from "../mcp/toolkits/environment/tools.ts";
 import { HtmlToolkit } from "../mcp/toolkits/html/tools.ts";
@@ -44,6 +45,9 @@ const liveLease = { url: "http://127.0.0.1:4100/mcp", bearer: "live-bearer", ttl
 
 type Registry = AppRegistryService["Service"];
 
+/** Past a request's 10-minute expiry and the second the server waits before settling it. */
+const lapse = TestClock.adjust("601 seconds");
+
 const poll = (registry: Registry, created: { requestId: string; pollSecret: string }) =>
   registry.pollPairingRequest({ requestId: created.requestId, pollSecret: created.pollSecret });
 
@@ -63,7 +67,7 @@ const grant = (registry: Registry, input: typeof registration) =>
   });
 
 it.layer(NodeServices.layer)("AppRegistryService", (it) => {
-  it.effect("shows a new app's pairing request until it expires", () => {
+  it.effect("shows a new app's pairing request until it expires, then drops the app", () => {
     const { layer } = makeLayer();
     return Effect.gen(function* () {
       const registry = yield* AppRegistryService;
@@ -86,9 +90,22 @@ it.layer(NodeServices.layer)("AppRegistryService", (it) => {
 
       yield* TestClock.adjust("10 minutes");
       assert.deepEqual(yield* poll(created.pollSecret), { state: "expired" });
-      // Clients drop the prompt from this upsert; they keep no timers of their own.
-      const expired = yield* Queue.take(events);
-      assert.isTrue(expired.type === "upsert" && expired.app.pendingRequest === null);
+      // Clients drop the app from this event; they keep no timers of their own.
+      yield* TestClock.adjust("1 second");
+      assert.deepEqual(yield* Queue.take(events), { type: "remove", appId: registration.appId });
+      assert.deepEqual(yield* registry.list, []);
+      assert.deepEqual(yield* poll(created.pollSecret), { state: "expired" });
+
+      // Asking again starts over as a new app.
+      const again = yield* registry.createPairingRequest(registration);
+      const renewed = yield* Queue.take(events);
+      assert.strictEqual(renewed.type === "upsert" && renewed.app.state, "pairing-requested");
+      assert.strictEqual(
+        renewed.type === "upsert" && renewed.app.pendingRequest?.requestId,
+        again.requestId,
+      );
+      yield* registry.decidePairing({ requestId: again.requestId, decision: "grant" });
+      assert.isTrue(yield* registry.isGranted(registration.appId));
     }).pipe(Effect.provide(layer));
   });
 
@@ -353,11 +370,83 @@ it.layer(NodeServices.layer)("AppRegistryService", (it) => {
       assert.strictEqual(denied.state, "denied");
       assert.deepEqual(yield* poll(registry, first), { state: "denied" });
 
+      // The denial stands while the app asks again, and after an unanswered request lapses.
+      const lapsed = yield* registry.createPairingRequest(registration);
+      const asking = Option.getOrThrow(yield* registry.get(registration.appId)).status;
+      assert.strictEqual(asking.state, "denied");
+      assert.strictEqual(asking.pendingRequest?.requestId, lapsed.requestId);
+      yield* lapse;
+      const settled = Option.getOrThrow(yield* registry.get(registration.appId)).status;
+      assert.strictEqual(settled.state, "denied");
+      assert.isNull(settled.pendingRequest);
+
       const second = yield* registry.createPairingRequest(registration);
-      assert.strictEqual(yield* stateOf(registry), "pairing-requested");
       yield* registry.decidePairing({ requestId: second.requestId, decision: "grant" });
       assert.isDefined((yield* poll(registry, second)).credential);
     }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("restores the approved grant when a changed request lapses unanswered", () => {
+    const { layer } = makeLayer();
+    return Effect.gen(function* () {
+      const registry = yield* AppRegistryService;
+      const sessions = yield* SessionStore.SessionStore;
+      const token = yield* grant(registry, registration);
+      const changed = makeRegistration({
+        headlessTools: { ...registration.headlessTools, args: ["serve"] },
+      });
+      yield* registry.createPairingRequest(changed);
+      assert.isFalse(yield* registry.isGranted(registration.appId));
+
+      const events = yield* streamQueue(registry.streamStatus);
+      yield* Queue.take(events);
+      yield* lapse;
+      const restored = yield* Queue.take(events);
+      assert.strictEqual(restored.type === "upsert" && restored.app.state, "granted");
+      assert.isTrue(restored.type === "upsert" && restored.app.pendingRequest === null);
+      assert.isTrue(yield* registry.isGranted(registration.appId));
+      const record = Option.getOrThrow(yield* registry.get(registration.appId));
+      assert.deepEqual(record.registration.headlessTools, registration.headlessTools);
+      assert.strictEqual((yield* sessions.verify(token)).subject, "app:dev.example.app");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("settles pairing requests across a server restart", () => {
+    const { layerOverDatabase } = makeLayer();
+    const other = makeRegistration({ appId: "dev.other.app", name: "Other", toolPrefix: "ot" });
+    return Effect.gen(function* () {
+      const run = <A, E>(effect: Effect.Effect<A, E, AppRegistryService>) =>
+        effect.pipe(Effect.provide(layerOverDatabase, { local: true }));
+      yield* run(
+        Effect.gen(function* () {
+          const registry = yield* AppRegistryService;
+          yield* registry.createPairingRequest(registration);
+          yield* registry.createPairingRequest(other);
+        }),
+      );
+      yield* TestClock.adjust("5 minutes");
+      yield* run(
+        Effect.gen(function* () {
+          const registry = yield* AppRegistryService;
+          yield* registry.createPairingRequest(other);
+        }),
+      );
+
+      // Stopped past the first request's expiry, while the second still waits.
+      yield* TestClock.adjust("6 minutes");
+      yield* run(
+        Effect.gen(function* () {
+          const registry = yield* AppRegistryService;
+          const events = yield* streamQueue(registry.streamStatus);
+          const snapshot = yield* Queue.take(events);
+          assert.deepEqual(snapshot.type === "snapshot" && snapshot.apps.map((app) => app.appId), [
+            other.appId,
+          ]);
+          yield* TestClock.adjust("241 seconds");
+          assert.deepEqual(yield* Queue.take(events), { type: "remove", appId: other.appId });
+        }),
+      );
+    }).pipe(Effect.provide(SqlitePersistence.layerMemory));
   });
 
   it.effect("retires an app's credentials when it pairs again, is denied, or is revoked", () => {
