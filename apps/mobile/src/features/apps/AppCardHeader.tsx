@@ -61,7 +61,6 @@ export function AppCardHeader(props: {
   readonly onToggle: () => void;
   readonly onOpenDetails: () => void;
   readonly onNewThread: (() => void) | null;
-  readonly onOpenInApp: (() => void) | null;
 }) {
   const { accent, dark } = useGlassPalette();
   const { card, collapsed } = props.item;
@@ -158,12 +157,6 @@ export function AppCardHeader(props: {
           label={`New ${card.name} thread`}
           disabled={props.onNewThread === null}
           onPress={() => props.onNewThread?.()}
-        />
-        <HeaderAction
-          icon="arrow.up.right.square"
-          label={`Open in ${card.name}`}
-          disabled={props.onOpenInApp === null}
-          onPress={() => props.onOpenInApp?.()}
         />
       </View>
     </View>

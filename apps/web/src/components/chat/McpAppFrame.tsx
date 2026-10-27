@@ -1,4 +1,4 @@
-import type { EnvironmentId, McpAppToolInfo, ThreadId, TurnItemId } from "@lecturn/contracts";
+import type { EnvironmentId, ThreadId, TurnItemId } from "@lecturn/contracts";
 import {
   connectedAppCardTheme,
   makeMcpAppHost,
@@ -27,7 +27,7 @@ import { flushSync } from "react-dom";
 import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
 import { APP_VERSION } from "~/branding";
 import { isEmbedLocation } from "~/embed/embedAuth";
-import { readLocalApi } from "~/localApi";
+import { useAppReferences } from "~/components/embed/AppReferencesContext";
 import { isConfirmDialogActive, requestConfirmDialog } from "~/confirmDialog";
 import { useHtmlRenderTheme } from "~/hooks/useHtmlRenderTheme";
 import { Button } from "~/components/ui/button";
@@ -150,7 +150,7 @@ export function McpAppFrame(props: {
     reportFailure: false,
   });
   const [toolDefinition, setToolDefinition] = useState<unknown>(undefined);
-  const [appLinks, setAppLinks] = useState<McpAppToolInfo["connectedApp"]>(undefined);
+  const appReferences = useAppReferences();
 
   // Read by the host on every message, so it always sees current values
   // without being rebuilt (which would drop the app's session).
@@ -164,7 +164,7 @@ export function McpAppFrame(props: {
     updateModelContext,
     displayMode,
     toolDefinition,
-    appLinks,
+    appReferences,
   };
   const hostRef = useRef<McpAppHost | null>(null);
   const latest = useRef(live);
@@ -218,7 +218,6 @@ export function McpAppFrame(props: {
       .then((info) => {
         if (cancelled || info._tag !== "Success") return;
         if (info.value.tool !== undefined) setToolDefinition(info.value.tool);
-        setAppLinks(info.value.connectedApp);
       });
     return () => {
       cancelled = true;
@@ -324,25 +323,24 @@ export function McpAppFrame(props: {
         }
         window.open(url, "_blank", "noopener,noreferrer");
       },
-      // In full Lecturn a reference opens the app itself, at this thread; the
+      // In full Lecturn a reference opens the app itself, as a chip in the thread does; the
       // embed's own navigation is the bridge's (lecturn/navigate).
       ...(app.server === LECTURN_MCP_APP_SERVER && !isEmbedLocation()
         ? {
             openAppRef: {
-              refPrefixes: () => latest.current.appLinks?.refPrefixes ?? [],
-              open: async () => {
+              refPrefixes: () => latest.current.appReferences?.refPrefixes ?? [],
+              open: async (ref) => {
                 if (
                   document.activeElement !== frameRef.current ||
                   !navigator.userActivation?.isActive
                 ) {
                   throw new McpAppHostRefusal("Links open only from a click in the app.");
                 }
-                const url = latest.current.appLinks?.openUrl;
-                const api = readLocalApi();
-                if (url == null || api === undefined) {
+                const activate = latest.current.appReferences?.activate;
+                if (activate == null) {
                   throw new McpAppHostRefusal("This app has no link Lecturn can open.");
                 }
-                await api.shell.openExternal(url);
+                activate(ref);
               },
             },
           }

@@ -243,8 +243,9 @@ describe("orchestration V2 wire projection", () => {
       toolName: "lecturn.rw_viewport_render",
       toolSource,
       output: mcpToolResultOutput(
-        codexMcpToolResult(
-          codexTruncatedMcpResult({
+        codexMcpToolResult({
+          server: "lecturn",
+          result: codexTruncatedMcpResult({
             content: [
               { type: "image", data: "A".repeat(1_200_000), mimeType: "image/png" },
               caption,
@@ -252,7 +253,7 @@ describe("orchestration V2 wire projection", () => {
             structuredContent: { [MCP_APP_OUTPUT_KEY]: card, result },
             _meta: { ...summary, "lecturn/toolSource": toolSource },
           }),
-        ),
+        }),
       ),
     });
     // The cut spliced the image's bytes, so none are stored or served.

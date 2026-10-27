@@ -3,7 +3,13 @@
  * event-sourced: grants and cached tool definitions are environment state,
  * and lease heartbeats would churn an event log (spec R1.2).
  */
-import { AppGrantState, AppId, AppRegistration, AppRuntimeCeiling } from "@lecturn/contracts";
+import {
+  AppGrantState,
+  AppId,
+  type AppRegistration,
+  AppRuntimeCeiling,
+  StoredAppRegistration,
+} from "@lecturn/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -19,7 +25,7 @@ import { PersistenceDecodeError, PersistenceSqlError } from "./Errors.ts";
 export type AppRegistrationRepositoryError = PersistenceSqlError | PersistenceDecodeError;
 
 const ToolsJson = Schema.NullOr(Schema.fromJsonString(Schema.Array(McpSchema.Tool)));
-const RegistrationJson = Schema.fromJsonString(AppRegistration);
+const RegistrationJson = Schema.fromJsonString(StoredAppRegistration);
 
 export const AppRegistrationRecord = Schema.Struct({
   appId: AppId,

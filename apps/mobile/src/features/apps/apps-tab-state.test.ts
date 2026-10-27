@@ -482,25 +482,17 @@ describe("closed banner", () => {
     state: "granted" as const,
   };
 
-  it("shows for a granted app without a live lease, with an encoded open link", () => {
-    expect(appClosedBannerState({ context, binding, threadId: "t-1" })).toEqual({
+  it("shows for a granted app without a live lease, with no way to open it on the phone", () => {
+    expect(appClosedBannerState({ context, binding })).toEqual({
       title: "RocketWright closed: live tools unavailable",
-      openLabel: "Open in RocketWright",
-      openUrl: "rocketwright://open?root=%2Fwork%2Fhopper%2038&thread=t-1",
     });
   });
 
   it("stays hidden while the app runs, after a revoke, and on normal projects", () => {
     expect(
-      appClosedBannerState({
-        context: { ...context, live: { expiresAt: NOW } },
-        binding,
-        threadId: "t-1",
-      }),
+      appClosedBannerState({ context: { ...context, live: { expiresAt: NOW } }, binding }),
     ).toBeNull();
-    expect(
-      appClosedBannerState({ context: { ...context, state: "revoked" }, binding, threadId: "t-1" }),
-    ).toBeNull();
-    expect(appClosedBannerState({ context, binding: undefined, threadId: "t-1" })).toBeNull();
+    expect(appClosedBannerState({ context: { ...context, state: "revoked" }, binding })).toBeNull();
+    expect(appClosedBannerState({ context, binding: undefined })).toBeNull();
   });
 });

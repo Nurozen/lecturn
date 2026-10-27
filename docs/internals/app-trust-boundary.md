@@ -102,6 +102,12 @@ registration with a different fingerprint pauses the grant until the user decide
 registration waits on its pairing request meanwhile. Name, icon, instructions and gated tools are
 the app's own presentation and policy, so changing them does not ask again.
 
+The open URL template is presentation too, but it is the one field a client navigates to, and a
+browser runs a `javascript:` URL inside Lecturn's own page. Registration accepts only the app's own
+scheme or http(s) (`AppOpenUrlTemplate`), and every path that opens an app goes through
+`expandAppOpenUrl` and the client's `openAppUrl`, which check the URL again with
+`appOpenUrlAllowed`: rows stored, and servers released, before the check can hold any scheme.
+
 A pairing request is unauthenticated, from any loopback process, so one nobody answers must leave
 no trace: `pairing-requested` holds only while a request waits. When it lapses the registry
 restores a paused grant and drops an app never granted, and a denied or revoked app never leaves

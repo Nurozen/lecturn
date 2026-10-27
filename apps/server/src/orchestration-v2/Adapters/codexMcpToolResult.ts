@@ -1,4 +1,9 @@
+import { lecturnResultMeta } from "@lecturn/shared/appToolPresentation";
+import { MCP_APP_OUTPUT_KEY } from "@lecturn/shared/mcpApp";
 import * as Predicate from "effect/Predicate";
+
+/** The name Codex runs Lecturn's MCP server under (see `codexThreadRuntimeParams`). */
+const CODEX_LECTURN_MCP_SERVER = "lecturn";
 
 const MCP_CONTENT_BLOCK_TYPES = new Set(["text", "image", "audio", "resource", "resource_link"]);
 // Codex serializes a result's members as content, structuredContent, isError,
@@ -22,7 +27,6 @@ function wholeResult(text: string): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
-  // A tool whose own text happens to be JSON stays as it was.
   return Predicate.isObject(parsed) &&
     Array.isArray(parsed.content) &&
     parsed.content.every(isMcpContentBlock)
@@ -77,16 +81,39 @@ function truncatedResult(
 }
 
 /**
+ * The toolkit stamps Lecturn's `_meta` on every app tool result, as its last
+ * member, so it survives Codex's cut too. Anything else is a tool's own text,
+ * however much it looks like a serialized result, and is kept whole.
+ */
+function isLecturnAppResult(result: Record<string, unknown>): boolean {
+  return (
+    lecturnResultMeta(result._meta) !== undefined ||
+    (Predicate.isObject(result.structuredContent) && MCP_APP_OUTPUT_KEY in result.structuredContent)
+  );
+}
+
+/**
  * Codex replaces an MCP result whose JSON passes its event limit (1 MiB, which
  * an app tool's image reaches) with one text block holding the head and tail
  * of that JSON around a `…N chars truncated…` marker, and drops its
  * `structuredContent` and `_meta`. Every reader of tool output expects the MCP
  * shape: the row's `lecturn/summary`, the card envelope, image serving and the
  * stored-image strip. Behind that string they find nothing, and the string is
- * too large to store or to parse on the wire, so the result is restored here.
+ * too large to store or to parse on the wire, so an app tool's result is
+ * restored here.
  */
-export function codexMcpToolResult(result: unknown): unknown {
-  if (!Predicate.isObject(result) || result.structuredContent != null) return result;
+export function codexMcpToolResult(call: {
+  readonly server: string;
+  readonly result?: unknown;
+}): unknown {
+  const { result } = call;
+  if (
+    call.server !== CODEX_LECTURN_MCP_SERVER ||
+    !Predicate.isObject(result) ||
+    result.structuredContent != null
+  ) {
+    return result;
+  }
   const blocks = result.content;
   if (!Array.isArray(blocks) || blocks.length !== 1) return result;
   const [block] = blocks;
@@ -99,10 +126,10 @@ export function codexMcpToolResult(result: unknown): unknown {
     return result;
   }
   const marker = [...block.text.matchAll(TRUNCATION_MARKER)].at(-1);
-  const restored =
+  const parsed =
     marker === undefined ? wholeResult(block.text) : truncatedResult(block.text, marker);
-  if (restored === undefined) return result;
-  return restored._meta == null && result._meta != null
-    ? { ...restored, _meta: result._meta }
-    : restored;
+  if (parsed === undefined) return result;
+  const restored =
+    parsed._meta == null && result._meta != null ? { ...parsed, _meta: result._meta } : parsed;
+  return isLecturnAppResult(restored) ? restored : result;
 }

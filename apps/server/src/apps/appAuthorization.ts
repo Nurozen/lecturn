@@ -22,6 +22,7 @@ import {
   type ChatAttachment,
   type EnvironmentId,
   type OrchestrationV2Command,
+  type OrchestrationV2ThreadLaunchWorkspaceStrategy,
   type ProjectId,
   ThreadId,
   type ThreadNoteId,
@@ -30,8 +31,10 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as SqlClient from "effect/sql/SqlClient";
 import type * as Rpc from "effect/rpc/Rpc";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
@@ -66,8 +69,11 @@ export type AccessTarget =
   | { readonly threadId: ThreadId }
   /** A filesystem path that must be the embed token's project root. */
   | { readonly projectRoot: string }
-  /** A file path that must stay inside the embed token's project root. */
-  | { readonly projectPath: string }
+  /**
+   * A file path that must stay inside the embed token's project root, through any links.
+   * A relative path is read from `relativeTo`'s workspace when given, else the root.
+   */
+  | { readonly projectPath: string; readonly relativeTo?: ThreadId }
   /** A stored attachment, owned by the thread whose history references it. */
   | { readonly attachmentId: string }
   /** A saved note, owned by the project of the thread it quotes. */
@@ -159,11 +165,26 @@ const commandReferences = (command: OrchestrationV2Command): ReadonlyArray<Acces
   }
 };
 
+/**
+ * Preparation binds the thread to whatever worktree or branch a strategy names, and provider
+ * turns and relative asset paths then run there. Unchecked, an embed could aim its thread at any
+ * directory, so it keeps the project root, as `TITLE_UPDATE_KEYS` already keeps it there.
+ */
+const staysInProjectRoot = (strategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined) =>
+  strategy === undefined || (strategy.type === "root" && strategy.branch === undefined);
+
 const commandTargets = (command: OrchestrationV2Command): ReadonlyArray<AccessTarget> | null => {
   if (!EMBED_COMMAND_TYPES.has(command.type) || !("threadId" in command)) return null;
   if (
     command.type === "thread.metadata.update" &&
     Object.keys(command).some((key) => !TITLE_UPDATE_KEYS.has(key))
+  ) {
+    return null;
+  }
+  if (
+    command.type === "message.dispatch" &&
+    command.dispatchMode.type === "defer_start" &&
+    !staysInProjectRoot(command.dispatchMode.workspaceStrategy)
   ) {
     return null;
   }
@@ -183,7 +204,10 @@ const assetTargets = ({ resource }: AssetCreateUrlInput): ReadonlyArray<AccessTa
     case "tool-output-image":
       return [{ threadId: resource.threadId }];
     case "media-file":
-      return [{ threadId: resource.threadId }, { projectPath: resource.path }];
+      return [
+        { threadId: resource.threadId },
+        { projectPath: resource.path, relativeTo: resource.threadId },
+      ];
     case "draft-workspace-file":
       return [{ projectRoot: resource.cwd }, { projectPath: resource.path }];
     case "project-favicon":
@@ -233,8 +257,12 @@ export const APP_RPC_RULES: AppRpcTable = {
   [O.searchThread]: { resolve: "threadId", ...embed },
   // Only an existing thread: any create from an embed goes through apps.createEmbedThread.
   [O.launchThread]: {
-    resolve: ({ projectId, threadId, reuseExistingThread }) =>
-      threadId === undefined || reuseExistingThread !== true ? null : [{ projectId }, { threadId }],
+    resolve: ({ projectId, threadId, reuseExistingThread, workspaceStrategy, initialMessage }) =>
+      threadId === undefined ||
+      reuseExistingThread !== true ||
+      !staysInProjectRoot(workspaceStrategy)
+        ? null
+        : [{ projectId }, { threadId }, ...storedAttachmentTargets(initialMessage?.attachments)],
     ...embed,
   },
   [O.dispatchCommand]: { resolve: commandTargets, ...embed },
@@ -335,10 +363,7 @@ const withoutTrailingSlashes = (path: string) => path.replace(/[/\\]+$/, "") || 
 
 const isAbsolutePath = (path: string) => /^(?:[/\\]|[A-Za-z]:[/\\])/.test(path);
 
-/**
- * Textual only: a relative path resolves against the thread's own workspace,
- * and the asset service still confines and canonicalizes what it serves.
- */
+/** Textual; `ownsProjectPath` also checks where the path's links lead. */
 const isInsideRoot = (root: string, path: string) => {
   if (path.startsWith("~") || path.split(/[/\\]/).includes("..")) return false;
   if (!isAbsolutePath(path)) return true;
@@ -363,6 +388,12 @@ export interface AppAuthorizationDeps {
   readonly projectIdForNote: (
     noteId: ThreadNoteId,
   ) => Effect.Effect<Option.Option<ProjectId>, AppsFailure>;
+  /** `None` when the thread runs in its project's root, or does not exist. */
+  readonly worktreePathForThread: (
+    threadId: ThreadId,
+  ) => Effect.Effect<Option.Option<string>, AppsFailure>;
+  /** Where `path`, read from `from`, really is after its links; `None` when it does not resolve. */
+  readonly canonicalPath: (path: string, from?: string) => Effect.Effect<Option.Option<string>>;
   readonly issueEmbedSession: (input: {
     readonly subject: string;
     readonly ttl: Duration.Duration;
@@ -414,19 +445,34 @@ export const makeWith = (deps: AppAuthorizationDeps): AppAuthorization["Service"
             ),
           );
 
-  const ownsProjectPath = (subject: AppSubject, path: string) =>
-    subject.kind !== "embed"
-      ? Effect.succeed(false)
-      : deps
-          .resolveAppForProject(subject.projectId)
-          .pipe(
-            Effect.map((binding) =>
-              Option.exists(
-                binding,
-                (bound) => bound.appId === subject.appId && isInsideRoot(bound.workspaceRoot, path),
-              ),
-            ),
-          );
+  /**
+   * The asset service signs whatever file a path's links lead to, so the path must stay inside
+   * the workspace it is read from after them as well as by its text. Absolute paths name the
+   * project root; relative ones the thread's own workspace, as the asset service reads them.
+   */
+  const ownsProjectPath = Effect.fnUntraced(function* (
+    subject: AppSubject,
+    { projectPath, relativeTo }: Extract<AccessTarget, { readonly projectPath: string }>,
+  ) {
+    if (subject.kind !== "embed") return false;
+    const binding = yield* deps.resolveAppForProject(subject.projectId);
+    if (Option.isNone(binding) || binding.value.appId !== subject.appId) return false;
+    const root = binding.value.workspaceRoot;
+    if (!isInsideRoot(root, projectPath)) return false;
+    const workspace =
+      isAbsolutePath(projectPath) || relativeTo === undefined
+        ? root
+        : Option.getOrElse(yield* deps.worktreePathForThread(relativeTo), () => root);
+    const [canonicalWorkspace, canonicalFile] = yield* Effect.all([
+      deps.canonicalPath(workspace),
+      deps.canonicalPath(projectPath, workspace),
+    ]);
+    return (
+      Option.isSome(canonicalWorkspace) &&
+      Option.isSome(canonicalFile) &&
+      isInsideRoot(canonicalWorkspace.value, canonicalFile.value)
+    );
+  });
 
   const ownsAttachment = (subject: AppSubject, attachmentId: string) =>
     deps.threadIdForAttachment(attachmentId).pipe(
@@ -459,7 +505,7 @@ export const makeWith = (deps: AppAuthorizationDeps): AppAuthorization["Service"
         : "projectRoot" in target
           ? ownsProjectRoot(subject, target.projectRoot)
           : "projectPath" in target
-            ? ownsProjectPath(subject, target.projectPath)
+            ? ownsProjectPath(subject, target)
             : "noteId" in target
               ? ownsNote(subject, target.noteId)
               : ownsAttachment(subject, target.attachmentId);
@@ -599,6 +645,14 @@ const makeThreadIdForAttachment = (
     Effect.mapError(() => unavailable("Attachment lookup failed.")),
   );
 
+export const canonicalPathOnDisk = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const canonicalPath: AppAuthorizationDeps["canonicalPath"] = (target, from) =>
+    Effect.option(fileSystem.realPath(from === undefined ? target : path.resolve(from, target)));
+  return canonicalPath;
+});
+
 /** Embedding is local-only, so the page is served from this server's own loopback origin. */
 const resolveEmbedOrigin = (config: ServerConfig.ServerConfig["Service"]) => {
   if (config.devUrl !== undefined) return config.devUrl.origin;
@@ -616,6 +670,7 @@ export const layer = Layer.effect(
     const environment = yield* ServerEnvironment.ServerEnvironmentIdentity;
     const config = yield* ServerConfig.ServerConfig;
     const sql = yield* SqlClient.SqlClient;
+    const canonicalPath = yield* canonicalPathOnDisk;
     return makeWith({
       resolveAppForProject: projects.resolveAppForProject,
       projectIdForThread: (threadId) =>
@@ -632,6 +687,13 @@ export const layer = Layer.effect(
           Effect.map((rows) => Option.fromUndefinedOr(rows[0]?.project_id)),
           Effect.mapError(() => unavailable("Note lookup failed.")),
         ),
+      worktreePathForThread: (threadId) =>
+        projections.getThreadShell(threadId).pipe(
+          Effect.map((shell) => Option.fromNullOr(shell?.worktreePath ?? null)),
+          Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeedNone }),
+          Effect.mapError(() => unavailable("Thread lookup failed.")),
+        ),
+      canonicalPath,
       issueEmbedSession: ({ subject, ttl, label }) =>
         sessions
           .issue({
