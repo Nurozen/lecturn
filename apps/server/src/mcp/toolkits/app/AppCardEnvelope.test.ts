@@ -76,7 +76,7 @@ const plainTool = new McpSchema.Tool({ name: "echo_meta", inputSchema: { type: "
 const okResult = new McpSchema.CallToolResult({
   content: [{ type: "text", text: "count 3" }],
   structuredContent: { count: 3 },
-  _meta: { "lecturn/toolSource": { key: `app:${appId}` } },
+  _meta: { "lecturn/summary": "count 3" },
 });
 
 const decodeRead = Schema.decodeUnknownSync(McpSchema.ReadResourceResult);

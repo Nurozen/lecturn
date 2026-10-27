@@ -19,12 +19,10 @@ import {
   APP_TOOL_APPROVAL_REQUIRED_META_KEY,
   APP_TOOL_CONTEXT_META_KEY,
   type AppId,
-  type AppRegistration,
   type AppRuntimeCeiling,
   AppsError,
   type AppToolApprovalMeta,
   type AppToolContextMeta,
-  type ToolActivitySource,
 } from "@lecturn/contracts";
 import {
   APP_TOOL_SUMMARY_META_KEY,
@@ -58,12 +56,6 @@ import { appInvocationScope, type McpAppInvocationScope } from "../../McpInvocat
 import * as AppCardEnvelope from "./AppCardEnvelope.ts";
 import * as AppToolApproval from "./appToolApproval.ts";
 import { AppToolSource } from "./AppToolInterceptor.ts";
-
-/** Where the work log reads the app's name and icon for its tool rows. */
-export const APP_TOOL_SOURCE_META_KEY = "lecturn/toolSource";
-
-/** `ToolActivityIcon.logoUrl` caps URLs here; larger icons are left out. */
-const MAX_TOOL_SOURCE_ICON_LENGTH = 4096;
 
 export interface AppToolkitExtensions {
   readonly decide: (input: AppToolGate.AppToolGateInput) => AppToolGate.AppToolGateDecision;
@@ -124,14 +116,13 @@ const omit = <T extends Readonly<Record<string, unknown>>>(
 ) => Object.fromEntries(Object.entries(record).filter(([key]) => !keys.includes(key)));
 
 /**
- * The approval signal is Lecturn's to act on, and a card reference is
+ * Adapters store a result's `lecturn/*` keys with the tool item, so an app
+ * could otherwise forge Lecturn's approval or context there; the row summary
+ * is the only one kept, as one short line of plain text. A card reference is
  * Lecturn's to attach: an app-supplied one would point a card at any
- * attachment. The row summary is kept only as one short line of plain text.
+ * attachment.
  */
-const sanitizeResult = (
-  result: McpSchema.CallToolResult,
-  toolSource: ToolActivitySource,
-): McpSchema.CallToolResult => {
+const sanitizeResult = (result: McpSchema.CallToolResult): McpSchema.CallToolResult => {
   const structured = result.structuredContent;
   const summary = appToolSummaryFromMeta(result._meta);
   return new McpSchema.CallToolResult({
@@ -145,28 +136,14 @@ const sanitizeResult = (
             : structured,
         }),
     _meta: {
-      ...omit(result._meta ?? {}, [
-        APP_TOOL_APPROVAL_REQUIRED_META_KEY,
-        MCP_APP_OUTPUT_KEY,
-        APP_TOOL_SUMMARY_META_KEY,
-      ]),
+      ...omit(withoutLecturnKeys(result._meta ?? {}), [MCP_APP_OUTPUT_KEY]),
       ...(summary === undefined ? {} : { [APP_TOOL_SUMMARY_META_KEY]: summary }),
-      [APP_TOOL_SOURCE_META_KEY]: toolSource,
     },
   });
 };
 
 const errorResult = (text: string) =>
   new McpSchema.CallToolResult({ isError: true, content: [{ type: "text", text }] });
-
-const toolSourceFor = (registration: AppRegistration): ToolActivitySource => ({
-  key: `app:${registration.appId}`,
-  name: registration.name,
-  kind: "integration",
-  ...(registration.iconDataUrl.length <= MAX_TOOL_SOURCE_ICON_LENGTH
-    ? { icon: { _tag: "themed-logo", logoUrl: registration.iconDataUrl } }
-    : {}),
-});
 
 const notImplemented = (method: string) =>
   new AppsNotImplemented({ service: "AppToolkit", method });
@@ -287,7 +264,6 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
       );
       const record = yield* requireGranted;
       const { registration } = record;
-      const toolSource = toolSourceFor(registration);
       const bare = name.startsWith(`${registration.toolPrefix}_`)
         ? name.slice(registration.toolPrefix.length + 1)
         : undefined;
@@ -462,7 +438,7 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
         tier: appTool.tier,
         tool: appTool.tool,
         request: sent.request,
-        result: sanitizeResult(sent.result, toolSource),
+        result: sanitizeResult(sent.result),
       });
     });
 
