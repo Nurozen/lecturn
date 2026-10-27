@@ -9,7 +9,11 @@
  * - No frames while the embed view or Apps mode sits idle, from a CDP
  *   Performance trace of each page's renderer.
  *
- *   node scripts/bar/perf.ts --home <fresh temp dir> [--out <dir>] [--idle-ms 5000] [--samples 5] [--browser-path <chrome>]
+ *   node scripts/bar/perf.ts --home <fresh temp dir> [--out <dir>] [--idle-ms 5000] [--samples 5] [--browser-path <chrome>] [--reduced-motion]
+ *
+ * `--reduced-motion` traces the idle scenes with `prefers-reduced-motion:
+ * reduce` emulated. That stops the motion which honors it, the sidebar's
+ * ornaments among it, so the frames left are the ones that ignore it.
  *
  * Needs `vp run --filter embed-host build` (it builds the server and the web
  * client too). Everything it starts lives under --home and is stopped before
@@ -157,6 +161,10 @@ export function median(values: ReadonlyArray<number>): number {
 export interface IdleSceneResult {
   readonly scene: string;
   readonly idleMs: number;
+  /** What the page's own `matchMedia` answered just before its trace. */
+  readonly prefersReducedMotion: boolean;
+  /** The page's running animations at trace start, as `name on tag.class`. */
+  readonly runningAnimations: ReadonlyArray<string>;
   readonly pids: ReadonlyArray<number>;
   readonly frames: number;
   readonly framesByName: Readonly<Record<string, number>>;
@@ -166,6 +174,8 @@ export interface IdleSceneResult {
 export interface PerfResult {
   readonly measuredAt: string;
   readonly targets: typeof PERF_TARGETS;
+  /** `--reduced-motion`: the idle scenes emulate `prefers-reduced-motion: reduce`. */
+  readonly reducedMotion: boolean;
   readonly sidecarColdStartMs: number;
   readonly mount: {
     /** Composer interactive, from the `mountEmbedView` call, per measured mount. */
@@ -195,6 +205,11 @@ export function perfFailures(
     );
   }
   for (const scene of result.idle) {
+    if (scene.prefersReducedMotion !== result.reducedMotion) {
+      failures.push(
+        `${scene.scene}: the page answered prefers-reduced-motion: reduce with ${scene.prefersReducedMotion}, but the run asked for ${result.reducedMotion}`,
+      );
+    }
     if (scene.pids.length === 0)
       failures.push(`${scene.scene}: the trace names no renderer for the page`);
     else if (scene.frames > PERF_TARGETS.idleFrames) {
@@ -218,11 +233,12 @@ export function parsePerfArgs(args: ReadonlyArray<string>) {
       "idle-ms": { type: "string", default: "5000" },
       samples: { type: "string", default: "5" },
       "browser-path": { type: "string" },
+      "reduced-motion": { type: "boolean", default: false },
     },
   });
   if (values.home === undefined) {
     throw new Error(
-      "Usage: node scripts/bar/perf.ts --home <fresh temp dir> [--out <dir>] [--idle-ms 5000] [--samples 5] [--browser-path <chrome>]",
+      "Usage: node scripts/bar/perf.ts --home <fresh temp dir> [--out <dir>] [--idle-ms 5000] [--samples 5] [--browser-path <chrome>] [--reduced-motion]",
     );
   }
   const idleMs = Number(values["idle-ms"]);
@@ -238,6 +254,7 @@ export function parsePerfArgs(args: ReadonlyArray<string>) {
     idleMs,
     samples,
     browserPath: values["browser-path"],
+    reducedMotion: values["reduced-motion"],
   } as const;
 }
 
@@ -301,6 +318,22 @@ async function traceIdle(cdp: CDPSession, idleMs: number): Promise<ReadonlyArray
 const blurFocus = (page: Page) =>
   page.evaluate("document.activeElement instanceof HTMLElement && document.activeElement.blur()");
 
+/** Proves the emulation reached the page, and names what could still draw frames. */
+const MOTION_STATE = `(() => ({
+  prefersReducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
+  runningAnimations: document
+    .getAnimations({ subtree: true })
+    .filter((animation) => animation.playState === "running")
+    .map((animation) => {
+      const name = animation.animationName ?? animation.transitionProperty ?? (animation.id || "animation");
+      const target = animation.effect?.target;
+      const label = target instanceof Element
+        ? target.tagName.toLowerCase() + [...target.classList].map((name) => "." + name).join("")
+        : "?";
+      return name + " on " + label;
+    }),
+}))()`;
+
 async function idleScene(input: {
   readonly scene: string;
   readonly page: Page;
@@ -312,6 +345,10 @@ async function idleScene(input: {
 }): Promise<IdleSceneResult> {
   await blurFocus(input.page);
   await sleep(SETTLE_MS);
+  const motion = (await input.page.evaluate(MOTION_STATE)) as Pick<
+    IdleSceneResult,
+    "prefersReducedMotion" | "runningAnimations"
+  >;
   const events = await traceIdle(input.cdp, input.idleMs);
   const pids = new Set([
     ...rendererPidsForUrl(events, input.matchesUrl),
@@ -323,6 +360,7 @@ async function idleScene(input: {
   return {
     scene: input.scene,
     idleMs: input.idleMs,
+    ...motion,
     pids: [...pids],
     frames: frames.total,
     framesByName: frames.byName,
@@ -344,6 +382,7 @@ async function measureEmbed(input: {
   readonly out: string;
   readonly idleMs: number;
   readonly samples: number;
+  readonly reducedMotion: boolean;
 }): Promise<{ mount: PerfResult["mount"]; idle: IdleSceneResult }> {
   const root = await freshDir(NodePath.join(input.home, "embed-host"));
   const dirs: EmbedHostDirs = {
@@ -412,6 +451,7 @@ async function measureEmbed(input: {
     const guestPid = await run.app.evaluate(() =>
       (globalThis as HostGlobals).embedHost!.embed.webContents.getOSProcessId(),
     );
+    await guest.emulateMedia({ reducedMotion: input.reducedMotion ? "reduce" : "no-preference" });
     const cdp = await run.app.context().newCDPSession(guest);
     const idle = await idleScene({
       scene: "embed-idle",
@@ -457,6 +497,7 @@ async function measureAppsMode(input: {
   readonly out: string;
   readonly idleMs: number;
   readonly browserPath: string | undefined;
+  readonly reducedMotion: boolean;
 }): Promise<{ idle: ReadonlyArray<IdleSceneResult>; runningThreads: number }> {
   const baseDir = await freshDir(NodePath.join(input.home, "apps-fixture"));
   const seeded = await seedBarFixture({ baseDir, app: true });
@@ -478,6 +519,7 @@ async function measureAppsMode(input: {
       const context = await browser.newContext({
         viewport: { width: 1440, height: 900 },
         colorScheme: "dark",
+        reducedMotion: input.reducedMotion ? "reduce" : "no-preference",
       });
       const page = await context.newPage();
       await page.goto(server.pairingUrl);
@@ -529,13 +571,16 @@ async function main(): Promise<void> {
   );
   const apps = await measureAppsMode(args);
   const measured = {
+    reducedMotion: args.reducedMotion,
     sidecarColdStartMs,
     mount: embed.mount,
     idle: [embed.idle, ...apps.idle],
     appsRunningThreads: apps.runningThreads,
   };
   for (const scene of measured.idle)
-    console.log(`${scene.scene}: ${scene.frames} frame events in ${scene.idleMs} ms`);
+    console.log(
+      `${scene.scene}: ${scene.frames} frame events in ${scene.idleMs} ms (reduced motion ${scene.prefersReducedMotion}, ${scene.runningAnimations.length} running animations)`,
+    );
   const failures = perfFailures(measured);
   const result: PerfResult = {
     measuredAt: new Date().toISOString(),
