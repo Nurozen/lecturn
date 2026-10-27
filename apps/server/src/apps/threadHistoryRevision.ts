@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
 /**
- * Each thread's `historyRevision` (plan D33): the sequence of its last
+ * Each thread's `historyRevision`: the sequence of its last
  * message, turn item or terminal provider turn. A turn can end without a new
  * item, so terminal provider turns count; metadata events (app data, title,
  * pin) never do, which is what keeps them from causing a re-copy. A thread with

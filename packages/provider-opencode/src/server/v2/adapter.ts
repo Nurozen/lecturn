@@ -545,7 +545,7 @@ const LOST_BACKGROUND =
   "Lecturn lost its connection to OpenCode while this subagent ran, so its result is not shown.";
 const INVENTORY_TIMEOUT = "5 seconds";
 // Above Lecturn's hour-long wait tools, as Claude and Codex are; it also
-// covers a connected app's 10-minute approval wait (D28).
+// covers a connected app's 10-minute approval wait.
 const LECTURN_MCP_TOOL_TIMEOUT_MS = 65 * 60 * 1_000;
 const ACTIVE_CHECK_TIMEOUT = "5 seconds";
 /** Answers that mean the server refused a prompt; any other failure may have been accepted. */

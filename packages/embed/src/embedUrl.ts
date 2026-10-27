@@ -19,7 +19,7 @@ export function embedGuestUrl(
 
 /**
  * Links the view may hand to the OS: web pages, and Lecturn's own deep links
- * (a thread continued in Lecturn opens there, D33).
+ * (a thread continued in Lecturn opens there).
  */
 export function isExternalLink(url: string): boolean {
   let parsed: URL;

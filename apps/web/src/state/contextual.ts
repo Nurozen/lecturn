@@ -14,7 +14,7 @@ import { isEmbedLocation } from "../embed/embedAuth";
 export const contextualEnvironment = createContextualEnvironmentAtoms(connectionAtomRuntime, {
   followChanges: !isEmbedLocation(),
 });
-/** An embedded chat shows its thread's Contextual state but cannot change it (R2.3). */
+/** An embedded chat shows its thread's Contextual state but cannot change it. */
 const EMBED_CONTEXTUAL_ACCESS = { operate: false, administer: false, funding: false } as const;
 export function useContextualAccess(environmentId: EnvironmentId | null) {
   const primaryId = usePrimaryEnvironmentId();

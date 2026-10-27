@@ -1,5 +1,5 @@
 /**
- * Who may ask to pair (D11): only a process on this machine talking to the
+ * Who may ask to pair: only a process on this machine talking to the
  * server directly. Each check closes a different door:
  *
  * - `Origin`: browsers attach it to cross-origin requests, so refusing it keeps

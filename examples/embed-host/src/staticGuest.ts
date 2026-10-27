@@ -3,7 +3,7 @@ import * as NodeHttp from "node:http";
 
 const HOST_CONTEXT_CHANGED = "ui/notifications/host-context-changed";
 
-// Stands in for the Lecturn embed route until the sidecar lands (plan A18). It
+// Stands in for the Lecturn embed route so staticMain.ts runs without a server. It
 // exposes window.__embedProbe so a Playwright check can read the guest's clock
 // and font state without a bridge.
 const GUEST_PAGE = `<!doctype html>

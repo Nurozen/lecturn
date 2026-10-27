@@ -39,9 +39,9 @@ export function latestCopies(
 }
 
 /**
- * New threads, and threads with history newer than their copy (D33). Only
+ * New threads, and threads with history newer than their copy. Only
  * `historyRevision` counts: subtitle and `continuedIn` writes move
- * `updatedAt` but are not history (decision 13).
+ * `updatedAt` but are not history.
  */
 export function threadsToCopy<T extends ThreadSummary>(
   sidecarThreads: ReadonlyArray<T>,

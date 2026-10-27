@@ -1,6 +1,6 @@
 // @effect-diagnostics preferSchemaOverJson:off
 /**
- * Test-only provider (R10b, D22): replays a JSON script per turn and makes
+ * Test-only provider: replays a JSON script per turn and makes
  * real MCP calls against the session Lecturn configured, so the app toolkit,
  * gating and `lecturn/context` run as they do for a model.
  */

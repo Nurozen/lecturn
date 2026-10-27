@@ -251,7 +251,7 @@ describe("apps tab items", () => {
     makeThread("Dusty", liquid, { settledOverride: "settled", settledAt: NOW }),
   ];
 
-  it("draws the mockup tree with Pinned and Active labels and a collapsed Settled shelf", () => {
+  it("draws the app tree with Pinned and Active labels and a collapsed Settled shelf", () => {
     const { items } = build({ projects: [hopper, liquid], threads });
     expect(summarize(items)).toEqual([
       "app RocketWright",

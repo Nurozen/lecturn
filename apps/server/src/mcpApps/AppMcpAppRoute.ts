@@ -1,5 +1,5 @@
 /**
- * Requests from connected-app cards (D3): `McpAppRequests` hands every card
+ * Requests from connected-app cards: `McpAppRequests` hands every card
  * whose server is Lecturn's own here. The app serves them, headless first and
  * then live, so cards keep working in stopped, non-Codex and copied threads,
  * none of which has a provider session that could.

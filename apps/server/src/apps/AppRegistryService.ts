@@ -91,7 +91,7 @@ export const RESERVED_APP_TOOL_PREFIXES: ReadonlySet<string> = new Set([
 
 const sha256Hex = (value: string) => NodeCrypto.createHash("sha256").update(value).digest("hex");
 
-/** The re-approval key (R1.4): the exact command, env and frame origins the user approved. */
+/** The re-approval key: the exact command, env and frame origins the user approved. */
 export const registrationFingerprint = (registration: AppRegistration) =>
   sha256Hex(appGrantFingerprintSource(registration));
 
@@ -321,7 +321,7 @@ export const make = Effect.gen(function* () {
         );
       } else {
         // A changed command or frame origin is not what the user approved, so
-        // the grant is suspended until they decide (R1.4). Denied and revoked
+        // the grant is suspended until they decide. Denied and revoked
         // apps keep their state, which an unanswered request then leaves standing.
         const suspend =
           existing.state === "pairing-requested" ||

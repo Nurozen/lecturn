@@ -456,7 +456,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
         } as never);
         expect(session.subject).toBe("app:dev.rocketwright.app");
         expect(session.scopes).toEqual(["apps:host"]);
-        // Read-only lives in the registry; the claim holds runtime modes only (D2).
+        // Read-only lives in the registry; the claim holds runtime modes only.
         expect((yield* sessions.verify(readOnly.token)).runtimeModeCeiling).toBeUndefined();
 
         const capped = yield* issue("auto-accept-edits");

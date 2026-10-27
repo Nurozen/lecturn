@@ -137,7 +137,7 @@ describe("EmbedComposerFooter", () => {
     expect(measureRestingComposerControls(controls)?.keepsBlocks).toBe(true);
   });
 
-  it("puts attach and send at the end of the one-line input, as the embed mockup draws them", async () => {
+  it("puts attach and send at the end of the one-line input", async () => {
     await render(composer(true), true);
 
     const editor = container.querySelector<HTMLElement>('[data-testid="composer-editor"]')!;

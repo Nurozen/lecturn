@@ -15,7 +15,7 @@ import {
   withEmbedHostTheme,
 } from "./embedTheme";
 
-// The token file RocketWright generates (D17, decision 14): its full variable set plus fonts.
+// The token file RocketWright generates: its full variable set plus fonts.
 const rocketwright = JSON.parse(
   NodeFS.readFileSync(
     new URL("../../../../examples/embed-host/src/rocketwright-theme.json", import.meta.url),

@@ -124,7 +124,7 @@ export class ThreadAppMetadataRefusedError extends Schema.TaggedError<ThreadAppM
 }
 
 /**
- * Lecturn's own clients never send app fields (D32): the apps service sets
+ * Lecturn's own clients never send app fields: the apps service sets
  * them on the server for the owning app. This runs on the client dispatch
  * path only, so server-built commands are unaffected.
  */

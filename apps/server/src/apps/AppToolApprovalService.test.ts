@@ -534,7 +534,7 @@ it.layer(layerTest)("AppToolApprovalService", (it) => {
       });
       yield* worker.drain();
 
-      // The effect is still enqueued and runs; only the adapter call is skipped (D1).
+      // The effect is still enqueued and runs; only the adapter call is skipped.
       assert.deepEqual(
         (yield* outbox.listByCommandId(commandId)).map((effect) => [
           effect.request.type,

@@ -1,6 +1,6 @@
 /**
- * Test-only `scripted` provider (R10b). It ships in the server build so bars
- * can drive a packaged server, but is registered only with
+ * Test-only `scripted` provider. It ships in the server build so end-to-end
+ * runs can drive a packaged server, but is registered only with
  * `LECTURN_TEST_PROVIDERS=1`.
  *
  * @module provider/Drivers/ScriptedDriver
@@ -59,7 +59,7 @@ const SCRIPTED_PRESENTATION = {
 } as const;
 
 // The adapter ignores effort; it is offered so a composer over this provider draws the controls
-// real providers have (model | effort | access), which bar captures compare against.
+// real providers have (model | effort | access), so tests over it see the real layout.
 const SCRIPTED_MODELS = [
   {
     slug: "scripted",

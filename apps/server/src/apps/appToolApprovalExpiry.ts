@@ -1,7 +1,7 @@
 /**
  * Decides `runtime-request.app-expire` for the orchestrator: an unanswered
  * connected-app approval moves to `expired` and its card closes, under the
- * thread lock, so it cannot race the user's answer (D1). A request that is no
+ * thread lock, so it cannot race the user's answer. A request that is no
  * longer pending is refused, which leaves whatever settled it in place.
  */
 import type {

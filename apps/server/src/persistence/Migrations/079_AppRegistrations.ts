@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
 // Idempotent because Migrations.ts re-runs it whenever another build's ledger
-// holds a different migration at this id (D31).
+// holds a different migration at this id.
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 

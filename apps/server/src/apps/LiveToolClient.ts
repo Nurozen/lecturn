@@ -1,5 +1,5 @@
 /**
- * The Streamable-HTTP MCP client for an app's live endpoint (R4.3), shaped
+ * The Streamable-HTTP MCP client for an app's live endpoint, shaped
  * like `callAcpMcpTool` (AcpMcpStdioBridge.ts). Every operation opens its own
  * MCP session and ends it, so nothing outlives a lease and a restarted app
  * never sees a session id from its previous run.

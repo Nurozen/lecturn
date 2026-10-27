@@ -1,6 +1,6 @@
 /**
- * Whether an app tool call may go ahead, must ask the user, or is refused
- * (D1, D2). AppToolkit asks before forwarding a call (`static`) and again when
+ * Whether an app tool call may go ahead, must ask the user, or is refused.
+ * AppToolkit asks before forwarding a call (`static`) and again when
  * the app answers `lecturn/approval-required` (`app`).
  *
  * This is the only place app tools are gated: Claude pre-approves every

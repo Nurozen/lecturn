@@ -1,5 +1,5 @@
 /**
- * Stops headless tool processes that have sat idle (D5). There is no
+ * Stops headless tool processes that have sat idle. There is no
  * "provider session released" signal, so the existing onRunTerminal hook arms
  * a watch for the run's app project; the watch closes each of the project's
  * processes once no run is active there and the last call ended long enough

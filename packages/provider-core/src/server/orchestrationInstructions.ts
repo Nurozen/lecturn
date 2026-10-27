@@ -72,7 +72,7 @@ export interface LecturnAcpInstructionState {
 
 /**
  * Lecturn: how every adapter labels a connected app's registered
- * instructions (D7). `undefined` when the thread's app registered none.
+ * instructions. `undefined` when the thread's app registered none.
  */
 export function connectedAppInstructionsSection(
   appInstructions: string | undefined,

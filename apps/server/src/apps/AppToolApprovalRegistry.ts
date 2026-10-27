@@ -1,5 +1,5 @@
 /**
- * Pending connected-app tool approvals, keyed by runtime request id (D1).
+ * Pending connected-app tool approvals, keyed by runtime request id.
  *
  * State only. A gated MCP tool call registers its request and waits here
  * (`McpHttpServer` branch); the user's answer arrives as

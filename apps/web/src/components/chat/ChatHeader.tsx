@@ -121,7 +121,7 @@ export const ChatHeader = memo(function ChatHeader({
   // is the nearer origin, and it carries the import chip itself.
   const importedFrom = forkOrigin === null ? (threadShell?.importedFrom ?? null) : null;
   const importChip = importedFrom === null ? null : buildImportChip(importedFrom);
-  // A connected app's thread copied from its sidecar (D33); the app is the project's.
+  // A connected app's thread copied from its sidecar; the app is the project's.
   const copiedFrom = forkOrigin === null ? (threadShell?.source.copiedFrom ?? null) : null;
   const copyAppContext = useAppEmbedContext(
     copiedFrom === null || threadShell === null

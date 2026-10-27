@@ -363,7 +363,7 @@ export function mountEmbedView(
   Electron.ipcMain.on(EMBED_PANE_RECT_CHANNEL, onPaneRect);
   Electron.ipcMain.on(EMBED_HOST_BRIDGE_CHANNEL, onHostBridge);
 
-  // Hosts that mount from a connection need no code for a live switch (D36).
+  // Hosts that mount from a connection need no code for a live switch.
   const stopFollowing =
     options.connection === undefined
       ? () => undefined

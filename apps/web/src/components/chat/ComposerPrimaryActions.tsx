@@ -135,7 +135,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     }) === "queue";
   const alternateAction = alternateComposerDispatchAction(followUpBehavior);
   const isSendDisabled = !canOperateThread || sendDisabledReason !== null;
-  // The embed's mockup keeps the idle send arrow while its approval card asks; the card's menu
+  // The embed keeps the idle send arrow while its approval card asks; the card's menu
   // offers the stop instead (ComposerPendingApprovalActions).
   const embedded = useEmbedPresentation() !== null;
   const embedApprovalHoldsSend = approvalPending && embedded;

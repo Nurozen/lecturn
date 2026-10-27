@@ -1,6 +1,6 @@
 /**
- * Runs each granted app's headless tool command, one process per app project
- * (D5). A process starts on the first call or empty-cache listing and stays
+ * Runs each granted app's headless tool command, one process per app project.
+ * A process starts on the first call or empty-cache listing and stays
  * up between calls; the idle reaper (headlessReaper.ts, run from the
  * onRunTerminal hook) closes it later. The process table is the shared
  * AppRuntimeState one, so that hook sees what this host runs.

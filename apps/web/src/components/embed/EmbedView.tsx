@@ -56,7 +56,7 @@ function EmbedThreadReporter({
 }
 
 /**
- * A sidecar thread the helper copied to the user's Lecturn (D33). Its history stays readable
+ * A sidecar thread the helper copied to the user's Lecturn. Its history stays readable
  * here, but new turns belong to the copy, so the composer is hidden and this points there.
  */
 function EmbedContinuedNotice({

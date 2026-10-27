@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 /**
- * Spec B3: a client that is not an app pays at most 2% more shell bytes per
+ * A client that is not an app pays at most 2% more shell bytes per
  * update once the fixture app (Embed Host) is registered and its history
  * imported. Both worlds run the same workload on the same non-app threads
  * through the real shell subscription, and every item the client receives is
@@ -68,7 +68,6 @@ import { filterShellStream } from "./appStreamFilter.ts";
 import { AppAuthorization, AppRegistryService, ThreadCopyService } from "./services.ts";
 import * as ThreadCopyServiceLayer from "./ThreadCopyService.ts";
 
-/** Spec B3. */
 const MAX_GROWTH = 0.02;
 
 const driver = ProviderDriverKind.make("codex");
@@ -354,7 +353,7 @@ const measureWorld = Effect.fn(function* (withFixtureApp: boolean) {
 const meanBytes = (updates: WorldMeasurement["updates"]) =>
   updates.reduce((sum, update) => sum + update.bytes, 0) / updates.length;
 
-describe("shell payload for a client that is not an app (B3)", () => {
+describe("shell payload for a client that is not an app", () => {
   it.live(
     `grows at most ${MAX_GROWTH * 100}% per update with the fixture app registered`,
     () =>
@@ -376,14 +375,14 @@ describe("shell payload for a client that is not an app (B3)", () => {
           }
         }
 
-        // I5: app fields are optional keys, omitted on every non-app row.
+        // App fields are optional keys, omitted on every non-app row.
         assert.deepEqual([...withApp.userRowBytes], [...without.userRowBytes]);
 
         const before = meanBytes(without.updates);
         const after = meanBytes(withApp.updates);
         const growth = (after - before) / before;
         yield* Effect.logInfo(
-          `B3 shell bytes per update for a non-app client: ${before.toFixed(1)} without the fixture app, ${after.toFixed(1)} with it (${(growth * 100).toFixed(2)}%)`,
+          `Shell bytes per update for a non-app client: ${before.toFixed(1)} without the fixture app, ${after.toFixed(1)} with it (${(growth * 100).toFixed(2)}%)`,
         );
         assert.isAtMost(growth, MAX_GROWTH);
       }),

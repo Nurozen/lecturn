@@ -423,7 +423,7 @@ export interface ProviderAdapterV2TurnInput {
   readonly appContext?: ReadonlyArray<{ readonly key: string; readonly text: string }>;
   /**
    * Lecturn: a connected app's registered instructions on its own threads.
-   * Each adapter appends them where it has a system-prompt hook (D7).
+   * Each adapter appends them where it has a system-prompt hook.
    */
   readonly appInstructions?: string;
 }

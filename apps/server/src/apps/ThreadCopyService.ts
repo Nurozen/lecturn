@@ -1,13 +1,13 @@
 // @effect-diagnostics nodeBuiltinImport:off
 /**
- * Lecturn-to-Lecturn thread copy (spec R8, plan A23 and D33): an app exports
+ * Lecturn-to-Lecturn thread copy: an app exports
  * its threads from one environment (usually its sidecar) and imports them into
  * another as history-only threads.
  *
  * A copy is `historyOrigin: "v1_import"` with run-less items and no provider
  * thread, so continuing it starts a fresh provider session that receives the
  * copied history as a full-thread handoff, and forking it cuts the copied
- * history like any imported thread. `importedFrom` is left alone (R8.3).
+ * history like any imported thread. `importedFrom` is left alone.
  *
  * Interrupted imports: assets are staged under the bundle's hash before any
  * thread is written, and each thread commits in one transaction. A rerun
@@ -537,7 +537,7 @@ const make = Effect.gen(function* () {
     `.pipe(Effect.map((rows) => rows.length > 0));
 
   /**
-   * D33: an up-to-date copy is skipped. A newer source replaces a copy that
+   * An up-to-date copy is skipped. A newer source replaces a copy that
    * is still history only; a copy the user has continued is never touched,
    * and the newer history becomes a thread of its own.
    *

@@ -1,5 +1,5 @@
 // Playwright's page.clock cannot reach a WebContentsView, so captures pin time
-// with this shim through Page.addScriptToEvaluateOnNewDocument (D24). Like
+// with this shim through Page.addScriptToEvaluateOnNewDocument. Like
 // clock.setFixedTime it fixes Date only; timers and performance keep running so
 // loaders and socket backoff still progress.
 export function freezeClockScript(fixedTimeMs: number): string {

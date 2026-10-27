@@ -80,7 +80,7 @@ function AppEnvironmentSection(props: {
   );
 }
 
-/** The way out on mobile (D30): revoke and re-pair; the rest of an app's settings stay on web and desktop. */
+/** The way out on mobile: revoke and re-pair; the rest of an app's settings stay on web and desktop. */
 export function AppDetailSheet(props: {
   readonly card: AppCard;
   readonly environmentLabels: ReadonlyMap<string, string>;

@@ -1,6 +1,6 @@
 /**
  * Raises a connected-app tool approval inside the calling provider turn and
- * waits for the user's answer (D1).
+ * waits for the user's answer.
  *
  * The request is an ordinary `permission` request with a `live` capability on
  * the calling session, so clients that predate connected apps still decode

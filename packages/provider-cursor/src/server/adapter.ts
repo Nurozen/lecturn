@@ -2225,7 +2225,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
             });
           }
           // Cursor has no system prompt hook, so a connected app's instructions
-          // ride every turn beside the runtime instructions (D7).
+          // ride every turn beside the runtime instructions.
           const text = [
             userText,
             buildRuntimeInstructions({ harness: "Cursor", model: turnInput.modelSelection.model }),

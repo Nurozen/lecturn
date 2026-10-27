@@ -1277,7 +1277,7 @@ describe("CodexAdapterV2 dynamic tool projection", () => {
         status: "completed" as const,
         arguments: { view: "iso", width: 900, height: 650 },
       };
-      // CP-W3's rw_viewport_render as Codex reported it, the image shortened:
+      // A real rw_viewport_render result as Codex reported it, the image shortened:
       // the card sat beside the image's second copy, in the part Codex cut.
       const structured =
         '{"width":900,"height":650,"backend":"webgpu","adapter":"webgpu","path":"renders/window/viewport_render.82b8ff7859675ec5.png"}';

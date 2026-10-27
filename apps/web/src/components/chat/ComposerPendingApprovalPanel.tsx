@@ -89,7 +89,7 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
  * the tool's whole name fits next to them, and otherwise wrap below the reason.
  * The reason is prose the app wrote for the user, not a command, so it reads as
  * text and wraps to a second line before truncating. It takes no width of its
- * own, so a long one never pushes the actions down. The embed's mockup keeps
+ * own, so a long one never pushes the actions down. The embed keeps
  * the actions on the title's row, so there the reason takes a line of its own
  * under both (embedComposer.css) and the title truncates only once the compact
  * actions leave it no room.

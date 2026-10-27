@@ -1,6 +1,6 @@
 // @effect-diagnostics preferSchemaOverJson:off
 /**
- * The scripted test provider's step grammar (R10b, D22). A turn's script is
+ * The scripted test provider's step grammar. A turn's script is
  * a fenced `scripted` JSON block in its user message, or the entry for its
  * run ordinal in the file `LECTURN_SCRIPTED_PROVIDER_SCRIPTS` names.
  */

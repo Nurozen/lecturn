@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalConsole:off -- A plain Electron host with no Effect runtime.
-// The A9 spike harness: a static guest page on two loopback origins, for checking Playwright reach,
-// retarget, the frozen clock and font loading without a Lecturn server. `electron dist/static-main.mjs`.
+// A static guest page on two loopback origins, for checking Playwright reach, retarget, the
+// frozen clock and font loading without a Lecturn server. `electron dist/static-main.mjs`.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Electron from "electron";
@@ -40,7 +40,7 @@ async function fontFaceCss(files: ReadonlyArray<string>): Promise<string> {
 async function main() {
   await Electron.app.whenReady();
   // Two loopback origins so a retarget crosses origins like the sidecar to
-  // user-server switch does (D36).
+  // user-server switch does.
   const guests = [await startStaticGuest(), await startStaticGuest()];
   let guestIndex = 0;
   const currentOrigin = () => guests[guestIndex]!.origin;
@@ -68,7 +68,7 @@ async function main() {
   bridge.on("error", (error) => console.error(`[embed-host] ${error.reason}: ${error.message}`));
   win.on("resize", () => bridge.setBounds(paneBounds()));
 
-  // Driven from Playwright's electronApp.evaluate for the A9 manual checks.
+  // Driven from Playwright's electronApp.evaluate for manual checks.
   Object.assign(globalThis, {
     embedHost: {
       bridge,

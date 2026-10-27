@@ -22,7 +22,8 @@ function configuredRelayUrl(): string {
 const layerWebHttpClient = makeWebRemoteHttpClientLayer((input, init) =>
   globalThis.fetch(input, init),
 );
-// The connection mints WebSocket tickets and loads snapshots through this client (D14).
+// The connection mints WebSocket tickets and loads snapshots through this client, so the embed's
+// must never carry the user's cookies.
 const layerHttpClient = isEmbedLocation()
   ? EmbedHttpLayer.layerWithoutCookies(layerWebHttpClient)
   : layerWebHttpClient;

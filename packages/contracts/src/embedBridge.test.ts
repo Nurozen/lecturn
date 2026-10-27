@@ -96,7 +96,7 @@ describe("handshake", () => {
     expect(check.bytes).toBeGreaterThan(EMBED_FONTS_CSS_MAX_BYTES);
   });
 
-  // The example host sends RocketWright's generated token file verbatim (D35),
+  // The example host sends RocketWright's generated token file verbatim,
   // so a real host's full set, fonts included, is held to the same limits.
   it("fits a host context built from the embed-host theme file", () => {
     const theme = embedHostTheme;

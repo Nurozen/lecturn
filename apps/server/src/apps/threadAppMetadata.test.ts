@@ -643,7 +643,7 @@ it.layer(TestLayer)("thread app metadata through orchestration", (it) => {
       yield* service.setThreadAppData(app, { threadId, appData: "live", subtitle: "Max-Q" });
       yield* service.markThreadsCopied(app, { entries: [{ threadId, continuedIn }] });
 
-      // A23's import writes a copy as one thread.created carrying copiedFrom.
+      // Thread copy imports a copy as one thread.created carrying copiedFrom.
       const template = (yield* orchestrator.getThreadProjection(threadId)).thread;
       const copyId = ThreadId.make("copy:environment:sidecar:thread:source");
       const copiedFrom = {

@@ -1984,8 +1984,8 @@ export function buildThreadFeed(
         app,
       };
       const activity = toFeedActivity(row, attemptId);
-      // App cards sit under their tool's row, as the app mockups draw them; other MCP Apps replace
-      // it. Prominent keeps that row on its own and out of the run fold, beside its card.
+      // App cards sit under their tool's row; other MCP Apps replace it. Prominent keeps that row
+      // on its own and out of the run fold, beside its card.
       if (isAppToolSource(activity.workEntry.toolSource)) {
         const rowEntry: RawThreadFeedEntry = {
           type: "activity",

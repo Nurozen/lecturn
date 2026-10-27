@@ -241,10 +241,11 @@ it to exit.
 ## Per-adapter decisions
 
 Each adapter makes three decisions. It delivers the app's `instructions`. It keeps the provider's
-own approval prompt off app tools, which Lecturn already gates. And it reports whether the
-provider thread got Lecturn's MCP server, through `McpProviderSessions.reportActivation`. On a
-missing or failed activation, the apps hook writes one "tools unavailable" notice per thread and
-provider thread.
+own approval prompt off app tools, which Lecturn already gates. And it reports whether the provider
+thread got Lecturn's MCP server: `reportThreadMcpActivation` in
+[McpProviderSessions.ts][mcp-sessions] after it loads the thread, or an `mcp-activation-failed`
+signal when the server fails to start. On a missing or failed activation, the apps hook writes one
+"tools unavailable" notice per thread and provider thread.
 
 | Adapter                                          | Instructions                                  | Native prompt for app tools                                                                                                           | Notes                                                                                                       |
 | ------------------------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -269,6 +270,7 @@ provider thread.
 [registry]: ../../apps/server/src/apps/AppRegistryService.ts
 [interceptor]: ../../apps/server/src/mcp/toolkits/app/AppToolInterceptor.ts
 [served-results]: ../../packages/shared/src/appToolResults.ts
+[mcp-sessions]: ../../packages/provider-core/src/server/McpProviderSessions.ts
 [gate]: ../../apps/server/src/apps/AppToolGate.ts
 [approval-service]: ../../apps/server/src/apps/AppToolApprovalService.ts
 [runtime-layer]: ../../apps/server/src/orchestration-v2/runtimeLayer.ts

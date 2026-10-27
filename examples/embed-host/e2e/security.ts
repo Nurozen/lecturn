@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetch:off globalTimers:off globalDate:off -- Test harness driving a real Electron app and server; it runs no Effect runtime of its own.
 /**
- * Spec B2 steps 7 and 8, on whichever server the host is using (the sidecar
+ * Scenario steps 7 and 8, on whichever server the host is using (the sidecar
  * when `--steps 7,8` runs on its own, the user server after steps 3-5):
  *
  *   7. Revoke the app as Settings does. Its credential and embed token are

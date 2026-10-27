@@ -106,8 +106,8 @@ function tool(id: string, label: string, runId: RunId, time: string, toolSource:
 }
 
 /**
- * Two finished turns, each the mockup's shape: a request, two tool calls, a prose reply. Without a
- * source the calls are what CP-W1's copied fixture threads carry; app calls never fold (A27a).
+ * Two finished turns, each a request, two tool calls and a prose reply. Without a source the calls
+ * are plain tool calls, as a copied thread carries them; app calls never fold.
  */
 function turns(toolSource: ToolSource): Entry[] {
   return [
@@ -146,7 +146,7 @@ async function renderTimeline(options: {
   embedded: boolean;
   width: number;
   toolSource?: ToolSource;
-  /** Without runs the thread is a copied or imported one, as on CP-W1's pages 02, 04 and 05. */
+  /** Without runs the thread is a copied or imported one. */
   runs?: TimelineProps["runs"];
   providers?: ReadonlyArray<never>;
   /** The thread's own model, as its shell carries it. */
@@ -263,7 +263,7 @@ function toolLabel() {
   );
 }
 
-/** Every size the type probe and the mockup read: prose, its row container, bubble, tool row, fold. */
+/** The font size of each timeline part: prose, its row container, bubble, tool row, fold. */
 async function measureTypeScale() {
   const prose = byText("[data-message-role='assistant'] .chat-markdown p", "proposed fin set");
   const sizes = {
