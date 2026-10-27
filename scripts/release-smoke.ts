@@ -25,6 +25,7 @@ const workspaceFiles = [
   "oxlint-plugin-lecturn/package.json",
   "packages/client-runtime/package.json",
   "packages/contracts/package.json",
+  "packages/embed/package.json",
   "packages/shared/package.json",
   "packages/ssh/package.json",
   "packages/tailscale/package.json",
@@ -242,6 +243,7 @@ try {
     "apps/desktop/package.json",
     "apps/web/package.json",
     "packages/contracts/package.json",
+    "packages/embed/package.json",
   ]) {
     assertPackageVersion(NodePath.resolve(tempRoot, relativePath), "9.9.9-smoke.0");
   }
