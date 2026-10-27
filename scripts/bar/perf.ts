@@ -32,6 +32,7 @@ import {
   type HostGlobals,
   launchEmbedHost,
 } from "../../examples/embed-host/e2e/harness.ts";
+import { createEmbedThread } from "../../examples/embed-host/e2e/embedRpc.ts";
 import { connect } from "../../packages/embed/src/node.ts";
 import { AppRegistration } from "../../packages/contracts/src/index.ts";
 import {
@@ -359,6 +360,17 @@ async function measureEmbed(input: {
   }
   const run = await launchEmbedHost({ dirs });
   try {
+    // A fresh project has no thread, and the embed has no draft composer, so a project
+    // mount shows a composer only once the project has a thread to open.
+    const target = await run.app.evaluate(() =>
+      (globalThis as HostGlobals).embedHost!.embedTarget(),
+    );
+    await createEmbedThread({
+      origin: run.host.origin,
+      embedToken: target.token,
+      projectId: run.host.projectId,
+      title: "Perf",
+    });
     const guest = await run.guestPage("/embed/");
     await guest.waitForFunction(COMPOSER_INTERACTIVE, undefined, { timeout: COMPOSER_TIMEOUT_MS });
 
