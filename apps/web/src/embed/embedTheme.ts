@@ -34,7 +34,7 @@ type RootElement = Pick<HTMLElement, "dataset" | "classList"> & {
 // which shares this origin; in the embed the host owns the look, so none of it may stay behind.
 const ROOT_APPEARANCE_PREFIXES = ["--app-theme-", "--boot-"];
 
-export function clearRootAppearanceOverrides(
+function clearRootAppearanceOverrides(
   root: RootElement,
   body: { readonly style: Pick<CSSStyleDeclaration, "removeProperty"> } | null,
 ): void {
@@ -184,7 +184,7 @@ export function withEmbedHostTheme(theme: HtmlRenderTheme, embed: EmbedTheme): H
   };
 }
 
-export function embedThemeFromHostContext(context: EmbedHostContext): EmbedTheme {
+function embedThemeFromHostContext(context: EmbedHostContext): EmbedTheme {
   return { appearance: context.theme, variables: context.styles?.variables ?? {} };
 }
 
@@ -194,7 +194,7 @@ export interface EmbedDocument {
   readonly fonts: FontSet;
 }
 
-export function applyEmbedHostContext(doc: EmbedDocument, context: EmbedHostContext): void {
+function applyEmbedHostContext(doc: EmbedDocument, context: EmbedHostContext): void {
   clearRootAppearanceOverrides(doc.documentElement, doc.body);
   const theme = embedThemeFromHostContext(context);
   applyEmbedThemeToRoot(doc.documentElement, theme);

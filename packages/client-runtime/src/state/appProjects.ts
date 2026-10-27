@@ -24,7 +24,7 @@ export function isAppProject(project: AppBindingLike): boolean {
   return project.appBinding !== undefined;
 }
 
-export function appIdOfProject(project: AppBindingLike): AppId | null {
+function appIdOfProject(project: AppBindingLike): AppId | null {
   return project.appBinding?.appId ?? null;
 }
 
@@ -43,7 +43,7 @@ export function projectsForProjectsMode<Project extends ListedProjectLike>(
  * Keys of the projects Projects mode hides: app projects and archived Stave spaces. Their
  * threads leave with them, while a thread whose project has not loaded yet stays listed.
  */
-export function projectsModeHiddenProjectKeys(
+function projectsModeHiddenProjectKeys(
   projects: ReadonlyArray<ListedProjectLike>,
 ): ReadonlySet<string> {
   const hidden = new Set<string>();

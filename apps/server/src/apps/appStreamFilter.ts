@@ -20,14 +20,14 @@ import { AppAuthorization } from "./services.ts";
 import { type AppSubject, parseAppSubject } from "./subjects.ts";
 
 /** Project shells carry their binding, so ownership needs no lookup. */
-export const ownsProjectShell = (
+const ownsProjectShell = (
   subject: AppSubject,
   project: Pick<OrchestrationProjectShell, "id" | "appBinding">,
 ): boolean =>
   project.appBinding?.appId === subject.appId &&
   (subject.kind === "app" || project.id === subject.projectId);
 
-export const filterShellSnapshot = (
+const filterShellSnapshot = (
   subject: AppSubject,
   snapshot: OrchestrationV2ShellSnapshot,
 ): OrchestrationV2ShellSnapshot => {

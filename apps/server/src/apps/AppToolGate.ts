@@ -50,7 +50,7 @@ export const READ_ONLY_REFUSAL =
   "This app is limited to Read-only in Settings > Connected apps, so tools that need approval do not run.";
 
 /** The mode the call runs under: the thread's mode capped by the app's ceiling. */
-export const effectiveAccess = (
+const effectiveAccess = (
   input: Pick<AppToolGateInput, "runtimeMode" | "interactionMode" | "ceiling">,
 ): AuthMcpClientAccess => {
   if (!KNOWN_INTERACTION_MODES.has(input.interactionMode)) return "read-only";

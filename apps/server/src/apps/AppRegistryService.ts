@@ -92,7 +92,7 @@ export const RESERVED_APP_TOOL_PREFIXES: ReadonlySet<string> = new Set([
 const sha256Hex = (value: string) => NodeCrypto.createHash("sha256").update(value).digest("hex");
 
 /** The re-approval key: the exact command, env and frame origins the user approved. */
-export const registrationFingerprint = (registration: AppRegistration) =>
+const registrationFingerprint = (registration: AppRegistration) =>
   sha256Hex(appGrantFingerprintSource(registration));
 
 const sameSecretHash = (expected: string, actual: string) => {
@@ -169,7 +169,7 @@ const toEmbedContext = (status: AppStatus): AppEmbedContext => ({
   embedOrigins: status.embedOrigins,
 });
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const repository = yield* AppRegistrationRepository;
   const leases = yield* AppLeaseService;
   const liveTools = yield* LiveToolClient;

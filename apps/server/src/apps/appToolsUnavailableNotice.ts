@@ -24,14 +24,12 @@ import * as Option from "effect/Option";
 import type { EventSinkV2Shape } from "../orchestration-v2/EventSink.ts";
 import type { ProjectionStoreV2Shape } from "../orchestration-v2/ProjectionStore.ts";
 
-export const appToolsUnavailableMessage = (appName: string, providerName: string) =>
+const appToolsUnavailableMessage = (appName: string, providerName: string) =>
   `${appName} tools unavailable with ${providerName}`;
 
 /** Derived, so a restarted server finds the notice it already wrote. */
-export const appToolsUnavailableNoticeId = (
-  threadId: ThreadId,
-  providerThreadId: ProviderThreadId,
-) => TurnItemId.make(`turn-item:apps:tools-unavailable:${threadId}:${providerThreadId}`);
+const appToolsUnavailableNoticeId = (threadId: ThreadId, providerThreadId: ProviderThreadId) =>
+  TurnItemId.make(`turn-item:apps:tools-unavailable:${threadId}:${providerThreadId}`);
 
 const isUnavailable = (signal: McpActivationSignal) =>
   signal.type === "mcp-activation-failed" || !signal.mcpActivated;

@@ -30,7 +30,7 @@ export interface SidecarOptions {
 }
 
 /** The server exits with this code when another process owns its state dir. */
-export const SIDECAR_EXIT_STATE_DIR_OWNED = 78;
+const SIDECAR_EXIT_STATE_DIR_OWNED = 78;
 
 const BOOTSTRAP_FD = 3;
 /** Never written; the server exits at its end-of-file, which only this process's exit causes. */
@@ -93,7 +93,7 @@ export function sidecarArgs(serverEntry: string, baseDir: string): Array<string>
   ];
 }
 
-export function makeSidecarEnvelope(
+function makeSidecarEnvelope(
   registration: AppRegistration,
   appSeedToken: string,
 ): AppSidecarBootstrap {

@@ -16,7 +16,7 @@ import * as Stream from "effect/Stream";
 
 import { type AppLease, AppLeaseService } from "./services.ts";
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const leases = yield* Ref.make(new Map<AppId, AppLease>());
   const changes = yield* PubSub.unbounded<{
     readonly appId: AppId;

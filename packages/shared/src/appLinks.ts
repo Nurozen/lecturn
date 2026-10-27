@@ -17,9 +17,9 @@ const APP_LINK_PATH = /^\/([^/]+)(?:\/threads\/([^/]+)\/([^/]+))?\/?$/;
 const APP_ROUTE_PATH = /^\/apps\/([^/]+)\/?$/;
 const THREAD_ROUTE_PATH = /^\/([^/]+)\/([^/]+)\/?$/;
 
-export const APPS_SIDEBAR_PARAM = "sidebar";
-export const APPS_SIDEBAR_VALUE = "apps";
-export const APP_ID_PARAM = "app";
+const APPS_SIDEBAR_PARAM = "sidebar";
+const APPS_SIDEBAR_VALUE = "apps";
+const APP_ID_PARAM = "app";
 
 export const isAppId = (value: string) => value.length <= APP_ID_MAX_LENGTH && APP_ID.test(value);
 

@@ -55,7 +55,7 @@ function pointsAtProviderSetup(status: ServerProvider): boolean {
   );
 }
 
-export function embedProviderStatusMessage(status: ServerProvider): string {
+function embedProviderStatusMessage(status: ServerProvider): string {
   if (!pointsAtProviderSetup(status)) return getProviderStatusMessage(status);
   const name = resolveProviderInstanceDisplayName(status);
   return status.installed

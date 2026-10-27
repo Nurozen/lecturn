@@ -157,7 +157,7 @@ export interface AppReferenceLabel {
  * chip for it and the agent never reads it: only referenced records reach either, and nothing in
  * the text references these. The reference itself stays in the text.
  */
-export const APP_REFERENCE_CONTEXT_KIND = "app-ref";
+const APP_REFERENCE_CONTEXT_KIND = "app-ref";
 // The bound `ContextLabel` puts on every record (COMPOSER_CONTEXT_LABEL_MAX_CHARS).
 const CONTEXT_LABEL_MAX_CHARS = 200;
 

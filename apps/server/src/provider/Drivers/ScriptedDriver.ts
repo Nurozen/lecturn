@@ -43,7 +43,7 @@ import {
 } from "../../orchestration-v2/Adapters/ScriptedAdapterV2.ts";
 import { ProviderDriverError } from "../Errors.ts";
 
-export const TEST_PROVIDERS_ENV = "LECTURN_TEST_PROVIDERS";
+const TEST_PROVIDERS_ENV = "LECTURN_TEST_PROVIDERS";
 
 export const ScriptedSettings = makeProviderSettingsSchema({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),

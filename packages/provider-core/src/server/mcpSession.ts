@@ -28,18 +28,6 @@ export interface McpProviderSessionConfig {
   };
 }
 
-/** Whether `toolName`, as Lecturn's MCP server lists it, is this thread's app's. */
-export function isLecturnAppToolName(
-  app: McpProviderSessionConfig["app"],
-  toolName: string,
-): boolean {
-  return (
-    app !== undefined &&
-    toolName.length > app.toolPrefix.length + 1 &&
-    toolName.startsWith(`${app.toolPrefix}_`)
-  );
-}
-
 export function withAgentDeviceEnvironment(
   base: NodeJS.ProcessEnv,
   config:

@@ -67,7 +67,7 @@ export const requestPath = (url: string): string => {
   return end === -1 ? url : url.slice(0, end);
 };
 
-export const classifyAppHttpPath = (path: string): AppHttpRoute | null => {
+const classifyAppHttpPath = (path: string): AppHttpRoute | null => {
   if (SESSION_PATHS.has(path)) return { kind: "session" };
   if (path === "/ws") return { kind: "socket" };
   if (path === "/api/orchestration/shell") return { kind: "shell" };

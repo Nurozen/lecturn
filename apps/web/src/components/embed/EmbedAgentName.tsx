@@ -35,7 +35,7 @@ export function EmbedAgentName(props: EmbedAgentNameProps) {
 }
 
 /** The first candidate this environment can name; null rather than an empty line. */
-export function embedAgentDisplayName(
+function embedAgentDisplayName(
   providers: ReadonlyArray<ServerProvider>,
   candidates: ReadonlyArray<ProviderInstanceId | null | undefined>,
 ): string | null {

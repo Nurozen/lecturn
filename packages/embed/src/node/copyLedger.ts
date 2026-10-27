@@ -73,7 +73,7 @@ export type AttachLedger = typeof AttachLedger.Type;
 const decodeLedger = Schema.decodeUnknownOption(Schema.fromJsonString(AttachLedger));
 const EMPTY_LEDGER: AttachLedger = { version: 1, workspaces: {}, pendingCopy: false };
 
-export const attachLedgerPath = (baseDir: string) => NodePath.join(baseDir, "embed-attach.json");
+const attachLedgerPath = (baseDir: string) => NodePath.join(baseDir, "embed-attach.json");
 
 export async function readAttachLedger(baseDir: string): Promise<AttachLedger> {
   try {

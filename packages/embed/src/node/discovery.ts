@@ -38,7 +38,7 @@ export const WELL_KNOWN_ENVIRONMENT_PATH = "/.well-known/lecturn/environment";
  * Worktree dev servers run with an explicit home and so use `userdata`; only a
  * dev server started without one lands in `dev` (apps/server/src/config.ts).
  */
-export const SERVER_STATE_VARIANTS = ["userdata", "dev"] as const;
+const SERVER_STATE_VARIANTS = ["userdata", "dev"] as const;
 export type ServerStateVariant = (typeof SERVER_STATE_VARIANTS)[number];
 
 export const serverRuntimeStatePath = (home: string, variant: ServerStateVariant): string =>

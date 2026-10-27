@@ -21,11 +21,11 @@ export interface AppToolPresentation {
   readonly toolSource: ToolActivitySource;
 }
 
-export const MAX_APP_TOOL_TITLE_LENGTH = 80;
+const MAX_APP_TOOL_TITLE_LENGTH = 80;
 
 /** Where an app puts a short, per-call summary for its tool row, in the tool result's `_meta`. */
 export const APP_TOOL_SUMMARY_META_KEY = "lecturn/summary";
-export const MAX_APP_TOOL_SUMMARY_LENGTH = 120;
+const MAX_APP_TOOL_SUMMARY_LENGTH = 120;
 
 // Control and bidi-override characters could hide or reorder the text beside them.
 const UNSAFE_TEXT = /[\p{Cc}\u200E\u200F\u202A-\u202E\u2066-\u2069]+/gu;

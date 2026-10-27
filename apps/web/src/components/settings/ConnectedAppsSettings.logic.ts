@@ -23,7 +23,7 @@ export function connectedAppStatus(app: Pick<AppStatus, "state" | "live">): {
   return { label: APP_STATUS_LABEL[phase], tone: STATUS_TONE[phase] };
 }
 
-export const RUNTIME_CEILING_NONE = "none";
+const RUNTIME_CEILING_NONE = "none";
 export type RuntimeCeilingKey = typeof RUNTIME_CEILING_NONE | NonNullable<AppRuntimeCeiling>;
 
 export const RUNTIME_CEILING_OPTIONS: ReadonlyArray<{

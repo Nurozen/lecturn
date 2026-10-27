@@ -3,7 +3,7 @@ import { useEffectEvent, useLayoutEffect, useRef } from "react";
 // The approval, question or plan drawer ChatComposer docks above its input.
 const DOCKED_DRAWER_SELECTOR = '[data-chat-composer-top-drawer="true"]';
 
-export function dockedDrawerHeight(overlay: HTMLElement | null): number {
+function dockedDrawerHeight(overlay: HTMLElement | null): number {
   let height = 0;
   for (const drawer of overlay?.querySelectorAll<HTMLElement>(DOCKED_DRAWER_SELECTOR) ?? []) {
     height += drawer.getBoundingClientRect().height;
@@ -11,7 +11,7 @@ export function dockedDrawerHeight(overlay: HTMLElement | null): number {
   return height;
 }
 
-export function shouldFollowDockedDrawer(input: {
+function shouldFollowDockedDrawer(input: {
   readonly previousHeight: number;
   readonly height: number;
   readonly followingEnd: boolean;

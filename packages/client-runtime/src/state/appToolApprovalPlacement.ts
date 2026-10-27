@@ -68,7 +68,7 @@ function couldBeHeld(
  * Each approval, in order, claims an unclaimed call of its tool in its run: the
  * latest before its row, else the first after it.
  */
-export function claimHeldAppToolCalls<Row>(
+function claimHeldAppToolCalls<Row>(
   rows: ReadonlyArray<Row>,
   approvals: ReadonlyArray<AppToolApproval>,
   itemOf: (row: Row) => OrchestrationV2TurnItem | undefined,

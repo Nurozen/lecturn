@@ -217,7 +217,7 @@ const assetTargets = ({ resource }: AssetCreateUrlInput): ReadonlyArray<AccessTa
 const app = { app: true, embed: false } as const;
 const embed = { app: false, embed: true } as const;
 
-export const APP_RPC_RULES: AppRpcTable = {
+const APP_RPC_RULES: AppRpcTable = {
   [A.appsEnsureWorkspace]: { resolve: "none", ...app },
   [A.appsSetLiveLease]: { resolve: "none", ...app },
   [A.appsClearLiveLease]: { resolve: "none", ...app },

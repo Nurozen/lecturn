@@ -11,8 +11,8 @@
  */
 import * as Schema from "effect/Schema";
 
-export const EMBED_MCP_APPS_PROTOCOL_VERSION = "2026-01-26";
-export const EMBED_LECTURN_BRIDGE_VERSION = 1;
+const EMBED_MCP_APPS_PROTOCOL_VERSION = "2026-01-26";
+const EMBED_LECTURN_BRIDGE_VERSION = 1;
 // Same limits as the MCP Apps host (client-runtime mcpApps/host.ts), so either
 // side can reuse the other's framing.
 export const EMBED_MAX_MESSAGE_BYTES = 256 * 1024;

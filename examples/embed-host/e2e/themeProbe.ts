@@ -64,7 +64,7 @@ export function parseFontFaceFamilies(css: string): ReadonlyArray<string> {
   return [...families];
 }
 
-export function firstFontFamily(list: string): string {
+function firstFontFamily(list: string): string {
   return unquote(list.split(",")[0] ?? "");
 }
 

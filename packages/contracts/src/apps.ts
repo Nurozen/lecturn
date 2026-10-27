@@ -106,9 +106,9 @@ export const AppHeadlessTools = Schema.Struct({
 export type AppHeadlessTools = typeof AppHeadlessTools.Type;
 
 const PNG_DATA_URL_PREFIX = "data:image/png;base64,";
-export const APP_ICON_MAX_BYTES = 64 * 1024;
+const APP_ICON_MAX_BYTES = 64 * 1024;
 
-export function base64DecodedByteLength(base64: string): number {
+function base64DecodedByteLength(base64: string): number {
   const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
   return Math.floor((base64.length * 3) / 4) - padding;
 }
@@ -166,7 +166,7 @@ const LECTURN_SCHEME = /^lecturn(?:-dev|-preview)?$/;
  * The lower-cased scheme `value` starts with, when an app may open at it. Read from the raw text,
  * not a parsed URL, which would drop the tabs and spaces that hide `java\tscript:`.
  */
-export function appOpenUrlScheme(value: string): string | null {
+function appOpenUrlScheme(value: string): string | null {
   const scheme = URL_SCHEME.exec(value)?.[1]?.toLowerCase();
   return scheme === undefined || REFUSED_APP_URL_SCHEMES.has(scheme) || LECTURN_SCHEME.test(scheme)
     ? null

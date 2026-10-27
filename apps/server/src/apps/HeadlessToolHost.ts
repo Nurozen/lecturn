@@ -38,7 +38,7 @@ import {
 } from "./headlessMcpProcess.ts";
 import { AppProjectService, AppRegistryService, HeadlessToolHost } from "./services.ts";
 
-export const headlessProcessKey = (appId: AppId, projectId: ProjectId): HeadlessProcessKey =>
+const headlessProcessKey = (appId: AppId, projectId: ProjectId): HeadlessProcessKey =>
   `${appId} ${projectId}`;
 
 interface Slot {

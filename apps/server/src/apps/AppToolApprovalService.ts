@@ -61,7 +61,7 @@ const APPROVAL_OPTIONS: ReadonlyArray<ProviderApprovalOption> = [
 export const APPROVAL_TTL = Duration.minutes(10);
 
 /** What the waiting call returns once its request leaves `pending`. */
-export const outcomeFromRequest = (
+const outcomeFromRequest = (
   request: Pick<OrchestrationV2RuntimeRequest, "status" | "decision">,
 ): AppToolApprovalOutcome | undefined => {
   switch (request.status) {

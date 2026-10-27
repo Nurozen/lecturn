@@ -14,7 +14,7 @@ import * as Ref from "effect/Ref";
 
 import { AppRuntimeState, type HeadlessProcessKey } from "./AppRuntimeState.ts";
 
-export const HEADLESS_IDLE_TIMEOUT = Duration.seconds(60);
+const HEADLESS_IDLE_TIMEOUT = Duration.seconds(60);
 
 export interface HeadlessReaper {
   readonly onProjectRunEnded: (projectId: ProjectId) => Effect.Effect<void>;

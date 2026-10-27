@@ -9,7 +9,7 @@ import * as Duration from "effect/Duration";
 import type * as SessionStore from "../auth/SessionStore.ts";
 import { formatAppSubject } from "./subjects.ts";
 
-export const APP_CREDENTIAL_TTL = Duration.days(30);
+const APP_CREDENTIAL_TTL = Duration.days(30);
 
 export const issueAppCredential = (
   sessions: SessionStore.SessionStore["Service"],

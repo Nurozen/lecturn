@@ -352,7 +352,7 @@ function resolveAgentAwarenessRelayPublishSnapshot(input: {
 }
 
 /** A push names the app as well, since app projects are hidden in Projects mode. */
-export function appProjectTitle(appName: string, projectTitle: string): string {
+function appProjectTitle(appName: string, projectTitle: string): string {
   return appName === projectTitle ? appName : `${appName}: ${projectTitle}`;
 }
 

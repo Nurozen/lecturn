@@ -13,7 +13,7 @@ const OMIT_CREDENTIALS: RequestInit = { credentials: "omit" };
  * fiber, and some consumers build a client from one layer and run it in a runtime that never saw
  * that layer's `RequestInit`, so the setting is pinned to the client itself.
  */
-export function withoutCookies(client: HttpClient.HttpClient): HttpClient.HttpClient {
+function withoutCookies(client: HttpClient.HttpClient): HttpClient.HttpClient {
   return HttpClient.transformResponse(
     client,
     Effect.provideService(FetchHttpClient.RequestInit, OMIT_CREDENTIALS),

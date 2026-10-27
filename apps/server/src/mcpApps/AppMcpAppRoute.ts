@@ -152,7 +152,7 @@ export const makeAppResourceReader = Effect.gen(function* () {
     });
 });
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const registry = yield* AppRegistryService;
   const projects = yield* AppProjectService;
   const leases = yield* AppLeaseService;

@@ -28,7 +28,7 @@ import {
   type AppToolTier,
 } from "../services.ts";
 
-export const FIXTURE_SERVER = NodeURL.fileURLToPath(
+const FIXTURE_SERVER = NodeURL.fileURLToPath(
   new URL("./HeadlessMcpServer.fixture.mjs", import.meta.url),
 );
 

@@ -51,12 +51,12 @@ import {
 } from "./scriptedScript.ts";
 
 export const SCRIPTED_PROVIDER = ProviderDriverKind.make("scripted");
-export const SCRIPTED_PROVIDER_SCRIPTS_ENV = "LECTURN_SCRIPTED_PROVIDER_SCRIPTS";
+const SCRIPTED_PROVIDER_SCRIPTS_ENV = "LECTURN_SCRIPTED_PROVIDER_SCRIPTS";
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 const DEFAULT_POLL_TRIES = 30;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 
-export const ScriptedProviderCapabilitiesV2 = {
+const ScriptedProviderCapabilitiesV2 = {
   runtimePolicy: { enforcement: "native" },
   sessions: {
     supportsMultipleProviderThreadsPerSession: false,
