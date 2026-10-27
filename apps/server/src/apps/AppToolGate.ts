@@ -78,6 +78,16 @@ export const decide = (input: AppToolGateInput): AppToolGateDecision => {
   }
 };
 
+/** Under this ceiling every call that needs approval is refused, whatever the thread's mode. */
+export const ceilingRefusesApprovals = (ceiling: AppRuntimeCeiling) =>
+  decide({
+    stage: "app",
+    gated: true,
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    ceiling,
+  }).kind === "refuse";
+
 /**
  * The `rtc` claim for an app's credential. The claim only holds a
  * `RuntimeMode`, so Read-only stays in the registry, where `decide` reads it;

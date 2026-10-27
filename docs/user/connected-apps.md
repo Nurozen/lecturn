@@ -62,8 +62,9 @@ A request you do not answer expires after 10 minutes, and the tool call fails.
 
 The permission mode picker has no Read-only mode, so Read-only is set per app: **Settings →
 Connected apps**, the app's **Runtime ceiling**. With Read-only, tools that need approval are
-refused and the app's other tools still run. A ceiling also caps the thread's mode: with
-**Supervised**, the app's tools ask even in a **Full access** thread.
+refused and the app's other tools still run. Setting Read-only also cancels the app's approval
+requests that are still waiting. A ceiling also caps the thread's mode: with **Supervised**, the
+app's tools ask even in a **Full access** thread.
 
 Cursor waits at most 60 seconds for a tool call, so on Cursor threads answer an app tool's
 approval within 60 seconds or the call fails.

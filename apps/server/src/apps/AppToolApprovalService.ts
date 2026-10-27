@@ -9,12 +9,14 @@
  *
  * Every way a request can end is a committed `runtime-request.updated`: the
  * answer, an interrupt or Stop of the run (which cancels the run's pending
- * requests), expiry, and the app being revoked or removed. The call reads its
- * outcome from that event, so it ends exactly when the card does.
+ * requests), expiry, the app being revoked or removed, and its ceiling being
+ * lowered to one that refuses the call. The call reads its outcome from that
+ * event, so it ends exactly when the card does.
  */
 import {
   type AppId,
   AppsError,
+  type AppStatus,
   CommandId,
   type ConnectedAppToolApprovalInfo,
   type OrchestrationV2DomainEvent,
@@ -39,6 +41,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
 import { AppToolApprovalRegistry, outcomeFromDecision } from "./AppToolApprovalRegistry.ts";
+import { ceilingRefusesApprovals } from "./AppToolGate.ts";
 import {
   type AppToolApprovalAnswer,
   type AppToolApprovalContext,
@@ -149,21 +152,30 @@ const make = Effect.gen(function* () {
 
   const revokedReason = (appName: string) => `${appName} was revoked`;
   const removedReason = (appName: string) => `${appName} was removed`;
+  const limitedReason = (appName: string) => `${appName} was limited to Read-only`;
 
-  // The registry sits below this service, so revoke and delete arrive as status changes.
+  // Every waiting call is gated, so a ceiling that refuses gated calls refuses them all.
+  const shutOutReason = (status: Pick<AppStatus, "state" | "runtimeCeiling">) =>
+    status.state === "revoked"
+      ? revokedReason
+      : ceilingRefusesApprovals(status.runtimeCeiling)
+        ? limitedReason
+        : undefined;
+
+  const cancelIfStatusShutsOut = (status: AppStatus) => {
+    const reason = shutOutReason(status);
+    return reason === undefined ? Effect.void : cancelForApp(status.appId, reason);
+  };
+
+  // The registry sits below this service, so revoke, delete and ceiling
+  // changes arrive as status changes.
   yield* apps.streamStatus.pipe(
     Stream.runForEach((event) => {
       switch (event.type) {
         case "snapshot":
-          return Effect.forEach(
-            event.apps.filter((app) => app.state === "revoked"),
-            (app) => cancelForApp(app.appId, revokedReason),
-            { discard: true },
-          );
+          return Effect.forEach(event.apps, cancelIfStatusShutsOut, { discard: true });
         case "upsert":
-          return event.app.state === "revoked"
-            ? cancelForApp(event.app.appId, revokedReason)
-            : Effect.void;
+          return cancelIfStatusShutsOut(event.app);
         case "remove":
           return cancelForApp(event.appId, removedReason);
       }
@@ -174,15 +186,14 @@ const make = Effect.gen(function* () {
     Effect.forkScoped({ startImmediately: true }),
   );
 
-  // A revoke that landed between the caller's grant check and the commit
-  // published its status before this request was waiting.
+  // A revoke or lowered ceiling that landed between the caller's gate and the
+  // commit published its status before this request was waiting.
   const cancelIfShutOut = (appId: AppId) =>
     apps.get(appId).pipe(
       Effect.flatMap(
         Option.match({
           onNone: () => cancelForApp(appId, removedReason),
-          onSome: ({ status }) =>
-            status.state === "revoked" ? cancelForApp(appId, revokedReason) : Effect.void,
+          onSome: ({ status }) => cancelIfStatusShutsOut(status),
         }),
       ),
       Effect.catch((cause) =>

@@ -28,6 +28,7 @@ import * as Schema from "effect/Schema";
 import { McpSchema } from "effect/ai";
 
 import * as AppRuntimeState from "../apps/AppRuntimeState.ts";
+import * as AppToolGate from "../apps/AppToolGate.ts";
 import {
   type AppLease,
   AppLeaseService,
@@ -134,6 +135,10 @@ interface Options {
   readonly gatedLive?: boolean;
   /** The user revokes the app while its approval card is waiting. */
   readonly revokeDuringApproval?: boolean;
+  /** The user changes the app's ceiling in Settings while its approval card is waiting. */
+  readonly ceilingDuringApproval?: AppRuntimeCeiling;
+  /** The user changes the app's ceiling while the app is handling the first call. */
+  readonly ceilingDuringFirstCall?: AppRuntimeCeiling;
   readonly headlessReadFails?: boolean;
   readonly approval?: AppToolApprovalAnswer;
   readonly threadProjectId?: ProjectId;
@@ -184,6 +189,7 @@ const withCards = <A, E>(
     };
     let state = options.state ?? "granted";
     let leased = options.leased === true;
+    let ceiling = options.ceiling ?? null;
     const thread = {
       id: threadId,
       projectId: options.threadProjectId ?? projectId,
@@ -210,7 +216,7 @@ const withCards = <A, E>(
               ? Option.some({
                   status: {
                     ...statusOf(registration, state),
-                    runtimeCeiling: options.ceiling ?? null,
+                    runtimeCeiling: ceiling,
                   },
                   registration,
                 })
@@ -228,7 +234,11 @@ const withCards = <A, E>(
       }),
       Layer.mock(HeadlessToolHost)({
         call: (_appId, _projectId, request) =>
-          Effect.sync(() => log.forwarded.push(request)).pipe(Effect.as(answer(request))),
+          Effect.sync(() => {
+            if (log.forwarded.push(request) === 1 && options.ceilingDuringFirstCall !== undefined) {
+              ceiling = options.ceilingDuringFirstCall;
+            }
+          }).pipe(Effect.as(answer(request))),
         readResource: (_appId, _projectId, uri) =>
           options.headlessReadFails === true
             ? Effect.fail(new AppsError({ code: "unavailable", message: "no process" }))
@@ -252,6 +262,8 @@ const withCards = <A, E>(
               state = "revoked";
               leased = false;
             }
+            if (options.ceilingDuringApproval !== undefined)
+              ceiling = options.ceilingDuringApproval;
           }).pipe(
             Effect.as(
               options.approval ?? {
@@ -307,6 +319,8 @@ const withCards = <A, E>(
   }).pipe(Effect.scoped);
 
 const target = { threadId, itemId };
+
+const errorResult = (text: string) => ({ isError: true, content: [{ type: "text", text }] });
 
 const reason = <A, R>(effect: Effect.Effect<A, McpAppRequestError, R>) =>
   effect.pipe(
@@ -556,6 +570,30 @@ describe("AppMcpAppRoute", () => {
             expect(exit._tag).toBe("Failure");
           }),
       ),
+  );
+
+  it.effect("never forwards a card's gated call whose app was limited to Read-only meanwhile", () =>
+    withCards({ running: true, ceilingDuringApproval: "read-only" }, (requests, log) =>
+      Effect.gen(function* () {
+        const called = yield* requests.callTool({ ...target, name: "gated_job", arguments: {} });
+        expect(log.approvals).toHaveLength(1);
+        expect(log.forwarded).toEqual([]);
+        expect(called).toEqual(errorResult(AppToolGate.READ_ONLY_REFUSAL));
+      }),
+    ),
+  );
+
+  it.effect("gates a card's app-decided call on the ceiling the app has when it asks", () =>
+    withCards({ running: true, ceilingDuringFirstCall: "read-only" }, (requests, log) =>
+      Effect.gen(function* () {
+        const called = yield* requests.callTool({ ...target, name: "app_decides", arguments: {} });
+        expect(log.approvals).toEqual([]);
+        expect(log.forwarded.map((request) => request.meta[APP_TOOL_APPROVAL_META_KEY])).toEqual([
+          { approved: false },
+        ]);
+        expect(called).toEqual(errorResult(AppToolGate.READ_ONLY_REFUSAL));
+      }),
+    ),
   );
 
   it.effect("reads headless first, then live, and reports an app it cannot reach", () =>

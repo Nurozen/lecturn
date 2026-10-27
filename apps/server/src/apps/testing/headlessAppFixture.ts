@@ -7,6 +7,7 @@ import * as NodeURL from "node:url";
 import {
   AppId,
   type AppRegistration,
+  type AppRuntimeCeiling,
   type AppStatus,
   type AppStatusStreamEvent,
   ProjectId,
@@ -124,6 +125,7 @@ export const makeFakeApps = (input: {
 }) =>
   Effect.gen(function* () {
     const state = yield* Ref.make<AppStatus["state"]>("granted");
+    const ceiling = yield* Ref.make<AppRuntimeCeiling>(null);
     const cache = yield* Ref.make<AppCachedTools>({
       headless: Option.fromNullishOr(input.cachedHeadless),
       live: Option.fromNullishOr(input.cachedLive),
@@ -139,11 +141,11 @@ export const makeFakeApps = (input: {
 
     const registry = Layer.mock(AppRegistryService)({
       get: (appId) =>
-        Ref.get(state).pipe(
-          Effect.map((current) =>
+        Effect.all([Ref.get(state), Ref.get(ceiling)]).pipe(
+          Effect.map(([current, runtimeCeiling]) =>
             appId === input.registration.appId
               ? Option.some({
-                  status: statusOf(input.registration, current),
+                  status: { ...statusOf(input.registration, current), runtimeCeiling },
                   registration: input.registration,
                 })
               : Option.none(),
@@ -193,6 +195,7 @@ export const makeFakeApps = (input: {
       cacheWrites,
       cache,
       state,
+      ceiling,
       publishStatus,
     };
   });

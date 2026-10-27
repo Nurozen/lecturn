@@ -175,7 +175,9 @@ shipped client, including old mobile builds, already renders and answers that sh
 instead of the provider, which never raised the request. The respond effect is still enqueued;
 only the adapter call is skipped, so tests assert "no adapter respond call". An unanswered request
 expires after 10 minutes through the internal `runtime-request.app-expire` command, and
-interrupting or stopping the run cancels it.
+interrupting or stopping the run cancels it. So do revoking or removing the app and lowering its
+ceiling to Read-only. The answer can come minutes after the gate ran, so an approved call is gated
+again on the app's current grant, ceiling and the thread's resolved mode just before it is sent.
 
 ## Shared state lives below the runtime
 
