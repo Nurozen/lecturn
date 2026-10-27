@@ -142,10 +142,12 @@ import {
 } from "../../provider/claudeUsageLimits.ts";
 import type { ManagedServerProvider } from "@lecturn/provider-core/server/snapshot";
 import { mergeProviderInstanceEnvironment } from "@lecturn/provider-core/server/instanceEnvironment";
+import { LECTURN_ORCHESTRATION_INSTRUCTIONS } from "@lecturn/provider-core/server/orchestrationInstructions";
 import {
-  connectedAppInstructionsSection,
-  LECTURN_ORCHESTRATION_INSTRUCTIONS,
-} from "@lecturn/provider-core/server/orchestrationInstructions";
+  makeClaudeMcpActivation,
+  withConnectedAppInstructions,
+} from "./connectedAppAdapterHooks.ts";
+export { claudeLecturnMcpStartupFailure } from "./connectedAppAdapterHooks.ts";
 import { buildRuntimeInstructions } from "@lecturn/provider-core/server/runtimeInstructions";
 import {
   mcpToolPresentation,
@@ -1058,11 +1060,6 @@ function claudeLiveSelectionFlagSettings(
   };
 }
 
-function appInstructionsAppend(appInstructions: string | undefined): string {
-  const section = connectedAppInstructionsSection(appInstructions);
-  return section === undefined ? "" : `\n\n${section}`;
-}
-
 export function makeClaudeQueryOptions(input: {
   readonly modelSelection: ModelSelection;
   readonly nativeThreadId: string;
@@ -1166,10 +1163,11 @@ export function makeClaudeQueryOptions(input: {
     systemPrompt: {
       type: "preset" as const,
       preset: "claude_code" as const,
-      append:
+      append: withConnectedAppInstructions(
         buildRuntimeInstructions({ harness: "Claude Code" }) +
-        (input.mcpServers === undefined ? "" : LECTURN_ORCHESTRATION_INSTRUCTIONS) +
-        appInstructionsAppend(input.appInstructions),
+          (input.mcpServers === undefined ? "" : LECTURN_ORCHESTRATION_INSTRUCTIONS),
+        input.appInstructions,
+      ),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
   };
@@ -2087,16 +2085,6 @@ function isClaudeNonSubagentTask(message: SDKMessage): boolean {
 
 function isClaudeBackgroundTasksChangedMessage(message: SDKMessage): boolean {
   return message.type === "system" && (message.subtype as string) === "background_tasks_changed";
-}
-
-/** Claude connects MCP servers per process and reports how it went in `init`. */
-export function claudeLecturnMcpStartupFailure(message: SDKMessage): string | undefined {
-  if (message.type !== "system" || message.subtype !== "init") return undefined;
-  // An unlisted server is not evidence: older CLIs list only configured ones.
-  const status = message.mcp_servers.find((server) => server.name === "lecturn")?.status;
-  return status === "failed" || status === "needs-auth"
-    ? `Claude reported Lecturn's MCP server as ${status}.`
-    : undefined;
 }
 
 function isClaudeTurnStartMessage(message: SDKMessage): boolean {
@@ -3374,23 +3362,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
   adapterOptions: ClaudeAdapterV2Options,
 ) {
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
-  // Each query's options carry the thread's session as `mcpServers`, so the
-  // session decides; a failed connect shows up later in `init`.
-  const reportClaudeMcpActivation = (
-    threadId: ThreadId,
-    providerThreadId: OrchestrationV2ProviderThread["id"],
-  ) =>
-    mcpSessions.read(threadId).pipe(
-      Effect.flatMap((session) =>
-        McpProviderSessions.reportThreadMcpActivation({
-          mcpSessions,
-          threadId,
-          providerThreadId,
-          driver: CLAUDE_PROVIDER,
-          mcpActivated: session !== undefined,
-        }),
-      ),
-    );
+  const claudeMcpActivation = makeClaudeMcpActivation(mcpSessions, CLAUDE_PROVIDER);
   const { attachmentsDir, fileSystem, path, crypto, idAllocator, queryRunner } = adapterOptions;
   const subagentModelCatalog = scopeClaudeModelCatalog(
     BUNDLED_CLAUDE_MODEL_CATALOG,
@@ -8087,9 +8059,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           });
           // The system prompt is fixed for a process's life, so changed app
           // instructions need a new one, as a changed policy does.
-          const queryPolicyKey =
-            claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides) +
-            appInstructionsAppend(turnInput.appInstructions);
+          const queryPolicyKey = withConnectedAppInstructions(
+            claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides),
+            turnInput.appInstructions,
+          );
           const compiledSelection = compileClaudeModelSelection(turnInput.modelSelection);
           const resumeSessionAt = yield* getNativeConversationHeadId(turnInput.providerThread);
           const existing = yield* Ref.get(queryContext);
@@ -8265,19 +8238,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   ) {
                     context.permissionMode = message.permissionMode;
                   }
-                  const mcpFailure =
-                    mcpSession === undefined ? undefined : claudeLecturnMcpStartupFailure(message);
-                  return (
-                    mcpFailure === undefined
-                      ? Effect.void
-                      : mcpSessions.reportActivation({
-                          type: "mcp-activation-failed",
-                          threadId: turnInput.threadId,
-                          providerThreadId: turnInput.providerThread.id,
-                          driver: CLAUDE_PROVIDER,
-                          reason: mcpFailure,
-                        })
-                  ).pipe(Effect.andThen(handleSdkMessage({ query: querySession, message })));
+                  return claudeMcpActivation
+                    .onMessage(turnInput, mcpSession, message)
+                    .pipe(Effect.andThen(handleSdkMessage({ query: querySession, message })));
                 }),
               ),
             ),
@@ -8846,7 +8809,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 nativeThreadId,
                 now: createdAt,
               });
-              yield* reportClaudeMcpActivation(
+              yield* claudeMcpActivation.report(
                 threadInput.threadId,
                 threadInput.existingProviderThread?.id ?? providerThread.id,
               );
@@ -8869,7 +8832,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               const updatedAt = yield* DateTime.now;
               const appThreadId = threadInput.providerThread.appThreadId;
               if (appThreadId !== null) {
-                yield* reportClaudeMcpActivation(appThreadId, threadInput.providerThread.id);
+                yield* claudeMcpActivation.report(appThreadId, threadInput.providerThread.id);
               }
               return {
                 ...threadInput.providerThread,
