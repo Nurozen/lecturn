@@ -4,9 +4,8 @@ import { useRouter } from "@tanstack/react-router";
 import { ArrowLeftIcon, ExternalLinkIcon, PlusIcon, SettingsIcon } from "lucide-react";
 
 import { openAppUrl } from "../../lib/openAppUrl";
-import { Badge } from "../ui/badge";
 import { AppIcon } from "./AppIcon";
-import { AppRowAction, AppRowTrailing } from "./AppRow";
+import { AppRowAction, AppRowTrailing, AppWorkingBadge } from "./AppRow";
 import { appTargetWorkspace, appWorkspaceOpenUrl, type AppsSidebarApp } from "./AppsSidebar.logic";
 import { useCanOpenApp } from "./useAppClosedBanner";
 import { useAppPresentation } from "./useAppsSidebarApps";
@@ -33,7 +32,7 @@ export function AppHeader({
     <div
       data-thread-selection-safe
       data-testid="app-header"
-      className="group/app-row flex min-w-0 items-center gap-1 pb-2"
+      className="flex min-w-0 items-center gap-1 pb-2"
     >
       <AppRowAction label="Back to all apps" onClick={onBack}>
         <ArrowLeftIcon aria-hidden />
@@ -47,11 +46,7 @@ export function AppHeader({
       <AppRowTrailing
         chip={presentation.chip}
         working={
-          app.workingCount > 0 ? (
-            <Badge variant="info" size="sm" data-testid="app-header-working">
-              {app.workingCount} working
-            </Badge>
-          ) : null
+          <AppWorkingBadge app={app} state={presentation.state} testId="app-header-working" />
         }
       >
         {target ? (

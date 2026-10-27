@@ -194,7 +194,8 @@ async function render(width: number, children: ReactNode) {
   await act(async () =>
     root.render(
       <TooltipProvider>
-        <div style={{ width }}>{children}</div>
+        {/* Clear of the page's corner, where the test pointer rests, so nothing is hovered. */}
+        <div style={{ width, margin: 200 }}>{children}</div>
       </TooltipProvider>,
     ),
   );
@@ -207,31 +208,55 @@ function readsWhole(element: Element | null) {
   expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
 }
 
+/** Seen with nothing hovered or focused: laid out, painted, inside its row and on top. */
+function visibleAtRest(element: Element | null, row: Element) {
+  expect(element).not.toBeNull();
+  const box = element!.getBoundingClientRect();
+  const rowBox = row.getBoundingClientRect();
+  expect(box.width).toBeGreaterThan(0);
+  expect(box.height).toBeGreaterThan(0);
+  expect(box.left).toBeGreaterThanOrEqual(rowBox.left);
+  expect(box.right).toBeLessThanOrEqual(rowBox.right + 0.5);
+  for (let node: Element | null = element; node !== null; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    expect(style.opacity).toBe("1");
+    expect(style.visibility).toBe("visible");
+  }
+  const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  expect(element!.contains(hit)).toBe(true);
+}
+
+const appRow = (subject: AppsSidebarApp) => (
+  <AppsGroup>
+    <li className="list-none">
+      <AppRow app={subject} collapsed={false} onToggle={noop} onSelect={noop} onNewThread={noop} />
+    </li>
+  </AppsGroup>
+);
+
 describe("Apps sidebar rows at the default sidebar width", () => {
-  it("keeps the app name whole beside the Closed chip and the working count", async () => {
+  it("shows the chip, the working count and both actions at rest, as a project header does", async () => {
     const subject = app();
     expect(subject.workingCount).toBe(3);
-    await render(
-      SIDEBAR_GROUP_WIDTH,
-      <AppsGroup>
-        <li className="list-none">
-          <AppRow
-            app={subject}
-            collapsed={false}
-            onToggle={noop}
-            onSelect={noop}
-            onNewThread={noop}
-          />
-        </li>
-      </AppsGroup>,
-    );
+    await render(SIDEBAR_GROUP_WIDTH, appRow(subject));
 
+    const row = container.querySelector('[data-testid="sidebar-app-row"]')!;
+    expect(row.querySelector('[data-testid="sidebar-app-state"]')?.textContent).toBe("Closed");
+    expect(row.querySelector('[data-testid="app-row-working"]')?.textContent).toBe("3 working");
+    for (const testId of [
+      "sidebar-app-state",
+      "app-row-working",
+      "sidebar-app-new-thread",
+      "sidebar-app-open",
+    ]) {
+      visibleAtRest(row.querySelector(`[data-testid="${testId}"]`), row);
+    }
+    // The name keeps a readable start, as a long project name does, and reads whole once the
+    // sidebar is a little wider.
+    const name = row.querySelector<HTMLElement>('[data-testid="sidebar-app-name"]')!;
+    expect(name.clientWidth).toBeGreaterThanOrEqual(40);
+    await render(SIDEBAR_GROUP_WIDTH + 48, appRow(subject));
     readsWhole(container.querySelector('[data-testid="sidebar-app-name"]'));
-    expect(container.querySelector('[data-testid="sidebar-app-state"]')?.textContent).toBe(
-      "Closed",
-    );
-    expect(container.querySelector('[data-testid="sidebar-app-new-thread"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="sidebar-app-open"]')).not.toBeNull();
   });
 
   it("keeps a pending app's name whole beside its pairing chip", async () => {
@@ -275,16 +300,33 @@ describe("Apps sidebar rows at the default sidebar width", () => {
     expect(note.scrollHeight).toBeLessThanOrEqual(note.clientHeight);
   });
 
-  it("keeps the selected app's name whole in its one-row header", async () => {
+  it("shows New thread, Open in and settings at rest in the selected app's one-row header", async () => {
     await render(SIDEBAR_GROUP_WIDTH, <AppHeader app={app()} onBack={noop} onNewThread={noop} />);
 
     const header = container.querySelector('[data-testid="app-header"]')!;
-    readsWhole(header.querySelector('[data-testid="app-header-name"]'));
     expect(header.querySelector('[data-testid="app-header-working"]')?.textContent).toBe(
       "3 working",
     );
+    for (const label of [
+      "Back to all apps",
+      "New thread in hopper-38mm",
+      "Open in RocketWright",
+      "RocketWright settings",
+    ]) {
+      visibleAtRest(header.querySelector(`[aria-label="${label}"]`), header);
+    }
+    visibleAtRest(header.querySelector('[data-testid="sidebar-app-state"]'), header);
+    expect(
+      header.querySelector<HTMLElement>('[data-testid="app-header-name"]')!.clientWidth,
+    ).toBeGreaterThanOrEqual(40);
     // One row: the actions sit level with the name rather than stacked under it.
     expect(header.getBoundingClientRect().height).toBeLessThan(40);
+
+    await render(
+      SIDEBAR_GROUP_WIDTH + 48,
+      <AppHeader app={app()} onBack={noop} onNewThread={noop} />,
+    );
+    readsWhole(container.querySelector('[data-testid="app-header-name"]'));
   });
 
   it("reads the selected and unselected thread titles whole under a workspace", async () => {
