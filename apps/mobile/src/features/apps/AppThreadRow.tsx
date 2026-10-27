@@ -8,7 +8,9 @@ import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText } from "../../components/ui/AppText";
 import { relativeTime } from "../../lib/time";
 import { useGlassPalette } from "../../lib/useGlassPalette";
+import { ThreadStatusBadge } from "../threads/thread-list-v2-items";
 import type { ThreadRowProviderInstance } from "../threads/thread-provider-instance";
+import { resolveThreadStatusBadge } from "../threads/thread-status-badge";
 import { appThreadSubtitle, isAppThreadBusy } from "./apps-tab-state";
 
 export const AppThreadRow = memo(function AppThreadRow(props: {
@@ -21,17 +23,19 @@ export const AppThreadRow = memo(function AppThreadRow(props: {
   const { accent } = useGlassPalette();
   const busy = isAppThreadBusy(thread);
   const subtitle = appThreadSubtitle(thread);
+  // The thread list's badge, so a thread waiting on approval reads apart from a working one.
+  const badge = resolveThreadStatusBadge(thread);
   const age = relativeTime(thread.latestUserMessageAt ?? thread.updatedAt);
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={[thread.title, subtitle, age].filter(Boolean).join(", ")}
+      accessibilityLabel={[thread.title, badge?.label, subtitle, age].filter(Boolean).join(", ")}
       accessibilityState={{ selected: props.selected === true }}
       onPress={() => props.onSelectThread(thread)}
-      className="py-1"
+      className="mx-[14px] mb-2"
       style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
     >
-      <GlassCard radius={18} className="min-h-[60px] flex-row items-center gap-3 px-4 py-2.5">
+      <GlassCard className="min-h-[60px] flex-row items-center gap-3 px-4 py-2.5">
         <View className="h-8 w-8 items-center justify-center" accessible={false}>
           {busy ? (
             <View
@@ -58,7 +62,11 @@ export const AppThreadRow = memo(function AppThreadRow(props: {
               <ProviderIcon provider={props.providerInstance.driverKind} size={18} />
             </View>
           ) : null}
-          <AppText className="text-sm text-foreground-muted">{age}</AppText>
+          {badge !== undefined ? (
+            <ThreadStatusBadge label={badge} />
+          ) : (
+            <AppText className="text-sm text-foreground-muted">{age}</AppText>
+          )}
         </View>
       </GlassCard>
     </Pressable>

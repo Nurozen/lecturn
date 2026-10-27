@@ -2,24 +2,28 @@ import { useAtomValue } from "@effect/atom-react";
 import type { AppId, EnvironmentId } from "@lecturn/contracts";
 import { LegendList } from "@legendapp/list/react-native";
 import { useNavigation } from "@react-navigation/native";
-import { memo, useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
-import { Pressable, View, type ScrollViewProps } from "react-native";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { View, type ScrollViewProps } from "react-native";
 
-import { GlassCard } from "../../components/GlassCard";
-import { SymbolView } from "../../components/ui/AppSymbol";
+import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { AppText } from "../../components/ui/AppText";
 import { EmptyState } from "../../components/ui/EmptyState";
-import { themeColorWithAlpha } from "../../lib/mobileTheme";
-import { useGlassPalette } from "../../lib/useGlassPalette";
+import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useAppStatusesByEnvironment } from "../../state/apps";
 import { useAppProjects, useAppThreadShells } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
 import { threadListEnvironmentsAtom } from "../../state/server";
 import { HierarchyRow } from "../home/HierarchyRow";
 import { useHomeThreadSelection } from "../home/home-thread-navigation";
-import type { HomeAppWorkspaceHeaderListItem, HomeGroupDisplayState } from "../home/homeListItems";
+import {
+  DEFAULT_GROUP_DISPLAY_STATE,
+  nextGroupDisplayState,
+  type HomeGroupDisplayAction,
+  type HomeGroupDisplayState,
+} from "../home/homeListItems";
 import { buildSidebarHierarchy } from "../threads/sidebar-hierarchy";
-import { ThreadHierarchyChevron } from "../threads/thread-list-items";
+import { ThreadListGroupHeader } from "../threads/thread-list-items";
+import { ThreadListV2SettledShelfHeader } from "../threads/thread-list-v2-items";
 import { useThreadRowProviderInstanceResolver } from "../threads/thread-provider-instance";
 import { openConnectedApp } from "./AppClosedBanner";
 import { AppCardHeader } from "./AppCardHeader";
@@ -31,66 +35,28 @@ import {
   appCardFrames,
   appCardTargetWorkspace,
   appOpenUrl,
+  appScreenTitle,
   buildAppCards,
   buildAppsTabItems,
   type AppCard,
-  type AppSettledShelfItem,
+  type AppSectionLabel,
   type AppsTabItem,
 } from "./apps-tab-state";
 
-const AppWorkspaceHeader = memo(function AppWorkspaceHeader(props: {
-  readonly item: HomeAppWorkspaceHeaderListItem;
-  readonly onToggle: (key: string, collapsed: boolean) => void;
-}) {
-  const { item } = props;
-  const { accent } = useGlassPalette();
-  const title = item.machineLabel
-    ? `${item.project.title} · ${item.machineLabel}`
-    : item.project.title;
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={title}
-      accessibilityState={{ expanded: !item.collapsed }}
-      onPress={() => props.onToggle(item.groupKey, !item.collapsed)}
-      className="py-1.5"
-      style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
-    >
-      <GlassCard
-        radius={18}
-        className="min-h-[52px] flex-row items-center gap-3 px-4 py-3"
-        style={{ borderColor: themeColorWithAlpha(accent, 0.35) }}
-      >
-        <SymbolView name="folder" size={20} tintColorClassName="accent-icon-muted" />
-        <AppText className="min-w-0 flex-1 text-base text-foreground" numberOfLines={1}>
-          {title}
-        </AppText>
-        <ThreadHierarchyChevron expanded={!item.collapsed} size={14} />
-      </GlassCard>
-    </Pressable>
-  );
-});
+// Whole points keep the connector, drawn at its middle, on the pixel grid.
+const SECTION_LABEL_HEIGHT = 32;
 
-function AppSettledShelfRow(props: {
-  readonly item: AppSettledShelfItem;
-  readonly onToggle: (key: string, collapsed: boolean) => void;
-}) {
-  const { item } = props;
+function AppThreadSectionLabel(props: { readonly label: AppSectionLabel }) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${item.count} settled ${item.count === 1 ? "thread" : "threads"}`}
-      accessibilityHint={`${item.expanded ? "Collapses" : "Expands"} the settled threads.`}
-      accessibilityState={{ expanded: item.expanded }}
-      onPress={() => props.onToggle(item.key, item.expanded)}
-      className="py-1"
-      style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
-    >
-      <GlassCard radius={18} className="min-h-[48px] flex-row items-center gap-3 px-4 py-2.5">
-        <ThreadHierarchyChevron expanded={item.expanded} size={14} />
-        <AppText className="text-base text-foreground-secondary">Settled ({item.count})</AppText>
-      </GlassCard>
-    </Pressable>
+    <View className="justify-center px-[14px]" style={{ height: SECTION_LABEL_HEIGHT }}>
+      <AppText
+        accessibilityRole="header"
+        className="text-sm text-foreground-secondary"
+        numberOfLines={1}
+      >
+        {props.label}
+      </AppText>
+    </View>
   );
 }
 
@@ -161,6 +127,16 @@ export function AppsTree(props: {
       return next;
     });
   }, []);
+  const updateWorkspaceDisplay = useCallback((key: string, action: HomeGroupDisplayAction) => {
+    setDisplayStates((previous) => {
+      const next = new Map(previous);
+      next.set(
+        key,
+        nextGroupDisplayState(previous.get(key) ?? DEFAULT_GROUP_DISPLAY_STATE, action),
+      );
+      return next;
+    });
+  }, []);
 
   const newThread = useCallback(
     (card: AppCard) => {
@@ -204,24 +180,46 @@ export function AppsTree(props: {
       case "app-pairing":
         return <AppPairingRow item={item} />;
       case "app-workspace-header":
-        return <AppWorkspaceHeader item={item} onToggle={setCollapsed} />;
-      case "app-section-label":
         return (
-          <AppText className="py-2 pl-1 text-sm text-foreground-secondary">{item.label}</AppText>
+          <ThreadListGroupHeader
+            variant="compact"
+            project={item.project}
+            title={
+              item.machineLabel
+                ? `${item.project.title} · ${item.machineLabel}`
+                : item.project.title
+            }
+            threadCount={item.threadCount}
+            collapsed={item.collapsed}
+            isFirst={item.isFirst}
+            groupKey={item.groupKey}
+            onGroupAction={updateWorkspaceDisplay}
+          />
         );
       case "app-thread":
         return (
-          <AppThreadRow
-            thread={item.thread}
-            providerInstance={resolveProviderInstance(item.thread)}
-            onSelectThread={selectThread}
-          />
+          <>
+            {item.sectionLabel !== null ? (
+              <AppThreadSectionLabel label={item.sectionLabel} />
+            ) : null}
+            <AppThreadRow
+              thread={item.thread}
+              providerInstance={resolveProviderInstance(item.thread)}
+              onSelectThread={selectThread}
+            />
+          </>
         );
       case "app-settled-shelf":
-        return <AppSettledShelfRow item={item} onToggle={setCollapsed} />;
+        return (
+          <ThreadListV2SettledShelfHeader
+            count={item.count}
+            expanded={item.expanded}
+            onToggle={() => setCollapsed(item.key, item.expanded)}
+          />
+        );
       case "app-empty":
         return (
-          <AppText className="py-3 pl-1 text-sm text-foreground-muted">{item.message}</AppText>
+          <AppText className="px-[14px] py-3 text-sm text-foreground-muted">{item.message}</AppText>
         );
     }
   };
@@ -231,7 +229,11 @@ export function AppsTree(props: {
       <LegendList
         data={items}
         keyExtractor={(item) => item.key}
-        getItemType={(item) => item.type}
+        getItemType={(item) =>
+          item.type === "app-thread" && item.sectionLabel !== null
+            ? "app-thread-labelled"
+            : item.type
+        }
         estimatedItemSize={64}
         drawDistance={1_000}
         recycleItems
@@ -259,7 +261,14 @@ export function AppsTree(props: {
             settled={false}
             frame={frames.get(item.key)}
             guides={guides.get(item.key)}
-            connector={item.type !== "app-thread" && item.type !== "app-empty"}
+            connector={
+              item.type === "app-thread" ? item.sectionLabel !== null : item.type !== "app-empty"
+            }
+            connectorTop={
+              item.type === "app-thread" && item.sectionLabel !== null
+                ? SECTION_LABEL_HEIGHT / 2
+                : undefined
+            }
           >
             {renderRow(item)}
           </HierarchyRow>
@@ -291,8 +300,13 @@ export function AppsTree(props: {
 
 /** One app's workspaces and threads, the target of `lecturn://apps/<appId>`. */
 export function AppThreadsScreen(props: { readonly appId: AppId }) {
+  const { environments } = useEnvironments();
+  const statuses = useAppStatusesByEnvironment(environments);
+  const title = appScreenTitle(statuses, props.appId) ?? "";
   return (
     <View className="flex-1 bg-screen">
+      <NativeStackScreenOptions options={{ title }} />
+      <ArcaneBackdrop />
       <AppsTree appId={props.appId} searchQuery="" contentBottomInset={24} />
     </View>
   );

@@ -49,10 +49,16 @@ export function AppClosedBanner(props: { readonly thread: EnvironmentThreadShell
           accessibilityLabel={banner.openLabel}
           hitSlop={8}
           onPress={() => void openConnectedApp({ url: openUrl, appName: context.name })}
-          className="flex-row items-center gap-1"
+          // Capped so the title keeps room; a long app name ellipsizes at the label's tail.
+          className="max-w-[50%] shrink flex-row items-center gap-1"
           style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
         >
-          <AppText className="text-sm font-lecturn-medium text-warning-foreground">Open</AppText>
+          <AppText
+            className="shrink text-sm font-lecturn-medium text-warning-foreground"
+            numberOfLines={1}
+          >
+            {banner.openLabel}
+          </AppText>
           <SymbolView
             name="arrow.up.right.square"
             size={14}

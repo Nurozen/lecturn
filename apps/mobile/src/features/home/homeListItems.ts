@@ -63,7 +63,10 @@ export interface HomeAppWorkspaceHeaderListItem {
   readonly project: EnvironmentProject;
   /** Set only when the app's workspaces span more than one environment. */
   readonly machineLabel: string | null;
+  readonly threadCount: number;
   readonly collapsed: boolean;
+  /** First workspace in its app's box. */
+  readonly isFirst: boolean;
   readonly depth?: number;
 }
 
@@ -125,7 +128,9 @@ export function homeListItemsAreEqual(previous: HomeListItem, item: HomeListItem
         previous.groupKey === item.groupKey &&
         previous.project === item.project &&
         previous.machineLabel === item.machineLabel &&
-        previous.collapsed === item.collapsed
+        previous.threadCount === item.threadCount &&
+        previous.collapsed === item.collapsed &&
+        previous.isFirst === item.isFirst
       );
   }
 }
