@@ -1249,13 +1249,16 @@ const ConversationTimeline = memo(function ConversationTimeline({
   // whole timeline once, after that work, instead of flashing measured rows on.
   const [initialLayoutReady, setInitialLayoutReady] = useState(false);
   const [hasRevealed, setHasRevealed] = useState(false);
+  // LegendList never reports load without rows, so a mounted list holding only
+  // its header (a closed app's banner on an empty thread) has nothing to wait for.
+  const layoutReady = initialLayoutReady || (rows.length === 0 && timelineViewportElement !== null);
   useEffect(() => {
-    if (hasRevealed || !initialLayoutReady || citationHistoryLoading) return;
+    if (hasRevealed || !layoutReady || citationHistoryLoading) return;
     // The load callback can precede the container's visibility commit. Give it
     // a frame, and wait for cold-thread details rather than showing shell rows.
     const frame = requestAnimationFrame(() => setHasRevealed(true));
     return () => cancelAnimationFrame(frame);
-  }, [initialLayoutReady, citationHistoryLoading, hasRevealed]);
+  }, [layoutReady, citationHistoryLoading, hasRevealed]);
   useLayoutEffect(() => {
     if (hasRevealed && timelineViewportElement) revealTimeline(timelineViewportElement);
   }, [hasRevealed, timelineViewportElement]);
