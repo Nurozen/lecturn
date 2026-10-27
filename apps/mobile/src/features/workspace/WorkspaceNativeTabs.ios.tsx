@@ -9,12 +9,18 @@ import {
 } from "react-native-screens";
 
 import { WorkspaceTabsContext, useWorkspaceTabs } from "./WorkspaceTabsContext";
-import { WORKSPACE_TABS, isWorkspaceTab, type WorkspaceTab } from "./workspace-tabs-state";
+import {
+  WORKSPACE_TABS,
+  isWorkspaceTab,
+  workspaceComposeTabTitle,
+  type WorkspaceTab,
+} from "./workspace-tabs-state";
 import { NativeWorkspaceTabActivityContext } from "../../native/v5-workspace-context";
 import { useSystemWorkspaceTabBar } from "./useSystemWorkspaceTabBar";
 
 const PULL_REQUEST_ICON = require("../../../assets/icons/pull-request.png");
 const COMPOSE_TAB = "compose";
+const COMPOSE_TAB_TITLE = workspaceComposeTabTitle(Platform.Version);
 
 const TAB_ITEMS = {
   threads: {
@@ -132,7 +138,8 @@ export function WorkspaceNativeTabs(props: {
           <Tabs.Screen
             key={COMPOSE_TAB}
             screenKey={COMPOSE_TAB}
-            title="New chat"
+            title={COMPOSE_TAB_TITLE}
+            tabBarItemAccessibilityLabel="New chat"
             preventNativeSelection
             ios={{
               role: "search",
