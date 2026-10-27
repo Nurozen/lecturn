@@ -4,6 +4,7 @@ import { useRouter } from "@tanstack/react-router";
 import { ArrowLeftIcon, ExternalLinkIcon, PlusIcon, SettingsIcon } from "lucide-react";
 
 import { openAppUrl } from "../../lib/openAppUrl";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AppIcon } from "./AppIcon";
 import { AppRowAction, AppRowTrailing, AppWorkingBadge } from "./AppRow";
 import { appTargetWorkspace, appWorkspaceOpenUrl, type AppsSidebarApp } from "./AppsSidebar.logic";
@@ -37,12 +38,21 @@ export function AppHeader({
       <AppRowAction label="Back to all apps" onClick={onBack}>
         <ArrowLeftIcon aria-hidden />
       </AppRowAction>
-      <span className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-xs font-medium text-sidebar-foreground">
-        <AppIcon iconDataUrl={presentation.iconDataUrl} />
-        <span className="min-w-0 truncate" data-testid="app-header-name">
-          {presentation.name}
-        </span>
-      </span>
+      {/* With its actions shown at rest a long name truncates at the default width, as the
+          app's row does, so the same tooltip reads it whole. */}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-xs font-medium text-sidebar-foreground" />
+          }
+        >
+          <AppIcon iconDataUrl={presentation.iconDataUrl} />
+          <span className="min-w-0 truncate" data-testid="app-header-name">
+            {presentation.name}
+          </span>
+        </TooltipTrigger>
+        <TooltipPopup side="right">{presentation.name}</TooltipPopup>
+      </Tooltip>
       <AppRowTrailing
         chip={presentation.chip}
         working={
