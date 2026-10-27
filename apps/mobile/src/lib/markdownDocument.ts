@@ -1,3 +1,8 @@
+import {
+  findAppReferences,
+  formatAppReferenceHref,
+  wholeAppReference,
+} from "@lecturn/shared/appReferences";
 import type { Root, RootContent } from "mdast";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
@@ -200,6 +205,57 @@ export function markdownWithTableBreaks(markdown: string): string {
       markdown.slice(lineStart + header.length + cells.length);
   }
   return markdown;
+}
+
+// A reference inside a link is that link's text. Fenced code and HTML hold no text nodes.
+const APP_REFERENCE_SKIPPED_NODES = new Set(["link", "linkReference"]);
+const LINK_TEXT_PUNCTUATION = /[\\*_~|]/g;
+
+function appReferenceLink(ref: string): string {
+  return `[${ref.replace(LINK_TEXT_PUNCTUATION, "\\$&")}](${formatAppReferenceHref(ref)})`;
+}
+
+/**
+ * Turns app references such as `rw:c/fins` into links the native renderer draws as chips, as
+ * web's remarkAppReferences does. Agents quote references as code even when told not to, so a
+ * code span holding only a reference becomes one too; any other code stays literal.
+ */
+export function markdownWithAppReferences(
+  markdown: string,
+  refPrefixes: ReadonlyArray<string>,
+): string {
+  if (findAppReferences(markdown, refPrefixes).length === 0) return markdown;
+  const edits: Array<{ start: number; end: number; content: string }> = [];
+  const visit = (node: MarkdownNode) => {
+    if (APP_REFERENCE_SKIPPED_NODES.has(node.type)) return;
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (node.type === "inlineCode") {
+      const ref = wholeAppReference(node.value, refPrefixes);
+      if (ref !== null && start !== undefined && end !== undefined)
+        edits.push({ start, end, content: appReferenceLink(ref) });
+    } else if (node.type === "text") {
+      if (start === undefined || end === undefined) return;
+      for (const match of findAppReferences(markdown.slice(start, end), refPrefixes)) {
+        // Offsets index the source, so a reference spelled with an escape or entity is left as
+        // written rather than chipped under a name the reader never sees.
+        if (!node.value.includes(match.ref)) continue;
+        edits.push({
+          start: start + match.start,
+          end: start + match.end,
+          content: appReferenceLink(match.ref),
+        });
+      }
+    } else if ("children" in node) node.children.forEach(visit);
+  };
+  visit(parser.parse(markdown));
+  let result = "";
+  let cursor = 0;
+  for (const edit of edits) {
+    result += markdown.slice(cursor, edit.start) + edit.content;
+    cursor = edit.end;
+  }
+  return result + markdown.slice(cursor);
 }
 
 export function parseMarkdownDocument(markdown: string): Root {
