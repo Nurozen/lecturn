@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import * as Option from "effect/Option";
 
+import { shouldBundleCliDependency } from "../../../scripts/lib/cli-external-packages.ts";
 import serverPackageJson from "../package.json" with { type: "json" };
 import { buildPublishManifest, createVpPmPublishArgs } from "./cli.ts";
 
@@ -32,6 +33,25 @@ it("builds the default manifest from the workspace package.json", () => {
     "overrides",
   ]);
   assert.isFalse(Object.values(manifest.dependencies).some((spec) => spec.startsWith("catalog:")));
+});
+
+it("publishes bundled workspace modules without private registry dependencies", () => {
+  const manifest = buildPublishManifest({ version: "1.2.3", workspaceConfig });
+
+  assert.isUndefined(manifest.dependencies["@lecturn/provider-acp"]);
+  assert.isUndefined(manifest.dependencies["@lecturn/source-control-github"]);
+  for (const [name, spec] of Object.entries(serverPackageJson.dependencies)) {
+    if (spec.startsWith("workspace:")) {
+      assert.isTrue(shouldBundleCliDependency(name), `${name} must be bundled before omitting it`);
+      assert.isUndefined(manifest.dependencies[name], name);
+    }
+  }
+  assert.isFalse(
+    Object.values(manifest.dependencies).some((spec) => spec.startsWith("workspace:")),
+  );
+  assert.equal(manifest.dependencies["node-pty"], serverPackageJson.dependencies["node-pty"]);
+  assert.equal(manifest.dependencies["@cursor/sdk"], serverPackageJson.dependencies["@cursor/sdk"]);
+  assert.equal(manifest.dependencies["effect"], workspaceConfig.catalog["effect"]);
 });
 
 it("applies package name, bin name and repository overrides", () => {

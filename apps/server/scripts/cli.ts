@@ -312,7 +312,12 @@ export const buildPublishManifest = (input: PublishManifestInput): PackageJson =
     engines: serverPackageJson.engines,
     files: serverPackageJson.files,
     dependencies: resolveCatalogDependencies(
-      serverPackageJson.dependencies,
+      // Workspace modules are bundled into dist; consumers cannot install these private packages.
+      Object.fromEntries(
+        Object.entries(serverPackageJson.dependencies).filter(
+          ([, spec]) => !spec.startsWith("workspace:"),
+        ),
+      ),
       workspaceCatalog,
       "apps/server",
     ),
