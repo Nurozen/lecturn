@@ -206,11 +206,13 @@ import {
   isContextCompactionActivityGroup,
   isContextHandoffActivityGroup,
   isSecretRequestActivityGroup,
+  threadWorkGroupDetailsId,
   type ThreadFeedEntry,
   type ThreadFeedLatestRun,
 } from "../../lib/threadActivity";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import {
+  isThreadFeedTailDisclosure,
   resolveThreadFeedLiveFollow,
   type ThreadFeedLiveFollowEvent,
   type ThreadWorkGroupScrollPosition,
@@ -2300,6 +2302,10 @@ function ThreadFeedView(props: ThreadFeedProps) {
       props.latestRun,
     ],
   );
+  const presentedFeedRef = useRef(presentedFeed);
+  useLayoutEffect(() => {
+    presentedFeedRef.current = presentedFeed;
+  }, [presentedFeed]);
   const setupAnchorIndex = presentedFeed.findIndex(
     (entry) => entry.type === "message" && entry.message.role === "user",
   );
@@ -2457,10 +2463,22 @@ function ThreadFeedView(props: ThreadFeedProps) {
     });
   }, [props.listRef, transitionEndFollow]);
 
-  const suspendEndScrollMaintenanceForDisclosure = useCallback((anchorKey: string | null) => {
-    disclosureAnchorKeyRef.current = anchorKey;
-    setDisclosureToggleSettling(true);
-  }, []);
+  const suspendEndScrollMaintenanceForDisclosure = useCallback(
+    (anchorKey: string | null, detailsKey?: string) => {
+      // At the tail the revealed rows have nowhere to go but under the composer
+      // overlays, so a follower stays pinned to the end like streamed growth.
+      if (
+        anchorKey !== null &&
+        endFollowEnabledRef.current &&
+        isThreadFeedTailDisclosure(presentedFeedRef.current, anchorKey, detailsKey)
+      ) {
+        return;
+      }
+      disclosureAnchorKeyRef.current = anchorKey;
+      setDisclosureToggleSettling(true);
+    },
+    [],
+  );
 
   // Start the quiet-frame countdown after React has committed the disclosure.
   // Every measured item-size change restarts it, so end maintenance cannot
@@ -2510,7 +2528,10 @@ function ThreadFeedView(props: ThreadFeedProps) {
 
   const onToggleWorkGroup = useCallback(
     (groupId: string, anchorKey?: string) => {
-      suspendEndScrollMaintenanceForDisclosure(anchorKey ?? `work-toggle:${groupId}`);
+      suspendEndScrollMaintenanceForDisclosure(
+        anchorKey ?? `work-toggle:${groupId}`,
+        threadWorkGroupDetailsId(groupId),
+      );
       setInteractionState((current) => ({
         ...current,
         expandedWorkGroups: {

@@ -1668,6 +1668,10 @@ function appendActivityGroupRows(
   flushGroupableRun(true);
 }
 
+export function threadWorkGroupDetailsId(groupId: string) {
+  return `work-details:${groupId}`;
+}
+
 function appendToolGroupRows(
   result: ThreadFeedEntry[],
   sourceGroup: Extract<ThreadFeedEntry, { readonly type: "activity-group" }>,
@@ -1767,7 +1771,7 @@ function appendToolGroupRows(
   if (!expanded) return;
   result.push({
     type: "activity-group",
-    id: `work-details:${groupId}`,
+    id: threadWorkGroupDetailsId(groupId),
     createdAt: activities[0]!.createdAt,
     runId: activities[0]!.runId,
     activities: activities.map((activity) => ({

@@ -27,6 +27,16 @@ export function workspaceTabSearchLabel(tab: WorkspaceTab): string {
       : "Search pull requests";
 }
 
+/**
+ * From iOS 26.1 the compose tab is a UISearchTab that shows only its icon, and a
+ * title written after the tabs are installed makes UIKit fit the other titles to
+ * a four-slot bar. Earlier releases render it as an ordinary labelled tab.
+ */
+export function workspaceComposeTabTitle(iosVersion: string | number): string | undefined {
+  const [major = 0, minor = 0] = String(iosVersion).split(".").map(Number);
+  return major > 26 || (major === 26 && minor >= 1) ? undefined : "New chat";
+}
+
 function emptyTab(): WorkspaceTabState {
   return { query: "", searchMode: "resting", scrollOffset: 0, searchEntryOffset: 0 };
 }

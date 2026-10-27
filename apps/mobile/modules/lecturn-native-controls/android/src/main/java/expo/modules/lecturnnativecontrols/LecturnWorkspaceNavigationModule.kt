@@ -25,6 +25,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.sp
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.modules.Module
@@ -154,12 +156,18 @@ class LecturnWorkspaceNavigationView(
                     onClick = { onTabSelected(mapOf("tab" to tab)) },
                     icon = { tabIcon(tab) },
                     label = {
-                      val title = when (tab) {
-                        "threads" -> "Chats"
-                        "apps" -> "Apps"
-                        else -> "Pull requests"
+                      // Three equal slots leave "Pull requests" too wide at larger
+                      // text sizes; the short label matches the iOS tab bar.
+                      val (title, description) = when (tab) {
+                        "threads" -> "Chats" to "Chats"
+                        "apps" -> "Apps" to "Apps"
+                        else -> "Pulls" to "Pull requests"
                       }
-                      Text(title, fontSize = (12 * textScale).sp)
+                      Text(
+                        title,
+                        modifier = Modifier.semantics { contentDescription = description },
+                        fontSize = (12 * textScale).sp,
+                      )
                     },
                     colors = NavigationBarItemDefaults.colors(
                       selectedIconColor = Color(selectedColor),

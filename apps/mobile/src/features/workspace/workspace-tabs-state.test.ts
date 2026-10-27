@@ -3,6 +3,7 @@ import {
   WORKSPACE_TABS,
   initialWorkspaceTabsState,
   isWorkspaceTab,
+  workspaceComposeTabTitle,
   workspaceTabsReducer,
   workspaceToolbarHeight,
 } from "./workspace-tabs-state";
@@ -104,5 +105,15 @@ describe("workspace root navigation", () => {
     );
     expect(WORKSPACE_TABS.every(isWorkspaceTab)).toBe(true);
     expect(isWorkspaceTab("compose")).toBe(false);
+  });
+});
+
+describe("workspaceComposeTabTitle", () => {
+  it("titles the compose tab only where it is an ordinary tab", () => {
+    expect(workspaceComposeTabTitle("18.5")).toBe("New chat");
+    expect(workspaceComposeTabTitle("26.0")).toBe("New chat");
+    expect(workspaceComposeTabTitle("26.1")).toBeUndefined();
+    expect(workspaceComposeTabTitle("26.4.1")).toBeUndefined();
+    expect(workspaceComposeTabTitle("27")).toBeUndefined();
   });
 });
