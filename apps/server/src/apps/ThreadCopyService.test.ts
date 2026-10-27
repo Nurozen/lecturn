@@ -267,13 +267,16 @@ const writeTurn = (
     readonly card?: boolean;
     readonly userText?: string;
     readonly context?: OrchestrationMessageContext;
+    /** Another thread's upload and card, referenced as a forged history would. */
+    readonly borrowed?: { readonly image: ChatAttachment; readonly cardId: string };
   } = {},
 ) =>
   Effect.gen(function* () {
     const sink = yield* EventSink.EventSinkV2;
     const runId = RunId.make(`${threadId}:run:${turn}`);
     const time = at(turn * 10);
-    const attachments: Array<ChatAttachment> = [];
+    const attachments: Array<ChatAttachment> =
+      options.borrowed === undefined ? [] : [options.borrowed.image];
     if (options.image === true) {
       const attachment: ChatAttachment = {
         type: "image",
@@ -289,8 +292,10 @@ const writeTurn = (
       );
       attachments.push(attachment);
     }
-    const cardId = options.card === true ? createAttachmentId(threadId, "html")! : null;
-    if (cardId !== null) yield* writeFile(`${cardId}.html`, CARD_HTML);
+    const cardId =
+      options.borrowed?.cardId ??
+      (options.card === true ? createAttachmentId(threadId, "html")! : null);
+    if (options.card === true && cardId !== null) yield* writeFile(`${cardId}.html`, CARD_HTML);
     const base = (suffix: string, ordinal: number) => ({
       id: TurnItemId.make(`${threadId}:t${turn}:${suffix}`),
       threadId,
@@ -1207,6 +1212,15 @@ const createPersonalThread = (threadId: ThreadId) =>
     return projectId;
   });
 
+/** The upload and the card a thread's latest turn references. */
+const referencesOf = (threadId: ThreadId) =>
+  Effect.map(projectionOf(threadId), (projection) => ({
+    image: projection.messages.findLast((message) => message.role === "user")!.attachments[0]!,
+    cardId: projection.visibleTurnItems
+      .map((row) => mcpAppFromToolItem(row.item as never))
+      .findLast((card) => card !== undefined)!.attachmentId,
+  }));
+
 const otherApp = AppId.make("dev.other-app");
 
 describe("thread copy ownership", () => {
@@ -1374,6 +1388,55 @@ describe("thread copy ownership", () => {
       assert.strictEqual(after.thread.projectId, projectId);
       assert.isUndefined(after.thread.copiedFrom);
       assert.deepEqual(transcript(after), ["question 1", "answer 1"]);
+    }),
+  );
+
+  it.effect(
+    "a copied reference whose bytes the bundle lacks never reaches another thread's file",
+    () =>
+      Effect.gen(function* () {
+        const sidecar = yield* startEnvironment("sidecar");
+        const user = yield* startEnvironment("user");
+        const personal = "personal-thread" as ThreadId;
+        yield* user.run(createPersonalThread(personal));
+        yield* user.run(writeTurn(personal, 1, { image: true, card: true }));
+        const borrowed = yield* user.run(referencesOf(personal));
+
+        // The sidecar has no such files, so its bundle carries the references without bytes.
+        const source = yield* sidecar.run(createSourceThread("/work/rocket", "Thread"));
+        yield* sidecar.run(writeTurn(source.threadId, 1, { borrowed }));
+        const bundle = yield* sidecar.run(exportAll);
+        assert.deepEqual(bundle.assets, []);
+        yield* user.run(importBundle(bundle));
+
+        const copied = yield* user.run(
+          referencesOf(copyThreadId(app, sidecar.environmentId, source.threadId)),
+        );
+        assert.notStrictEqual(copied.image.id, borrowed.image.id);
+        assert.notStrictEqual(copied.cardId, borrowed.cardId);
+        assert.deepEqual((yield* user.run(exportAll)).assets, []);
+      }),
+  );
+
+  it.effect("exports only the files the app's own threads hold", () =>
+    Effect.gen(function* () {
+      const user = yield* startEnvironment("user");
+      const personal = "personal-thread" as ThreadId;
+      yield* user.run(createPersonalThread(personal));
+      yield* user.run(writeTurn(personal, 1, { image: true, card: true }));
+      const borrowed = yield* user.run(referencesOf(personal));
+
+      // The app's own card, then a tool result and upload naming the other thread's files.
+      const own = yield* user.run(createSourceThread("/work/rocket", "Thread"));
+      yield* user.run(writeTurn(own.threadId, 1, { card: true }));
+      const ownCard = (yield* user.run(referencesOf(own.threadId))).cardId;
+      yield* user.run(writeTurn(own.threadId, 2, { borrowed }));
+
+      const bundle = yield* user.run(exportAll);
+      assert.deepEqual(
+        bundle.assets.map((asset) => asset.sourceAttachmentId),
+        [ownCard],
+      );
     }),
   );
 });
