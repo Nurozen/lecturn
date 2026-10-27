@@ -314,7 +314,15 @@ it("captures the Bar iPhone 15 only in Bar fixture runs", () => {
       capture.scenes,
       capture.appearance,
     ]),
-    [["iphone-15-bar", "com.apple.CoreSimulator.SimDeviceType.iPhone-15", ["threads"], "dark"]],
+    [
+      [
+        "iphone-15-bar",
+        "com.apple.CoreSimulator.SimDeviceType.iPhone-15",
+        // The apps scene opens its link in the running app, so it never comes first.
+        ["threads", "apps"],
+        "dark",
+      ],
+    ],
   );
 });
 

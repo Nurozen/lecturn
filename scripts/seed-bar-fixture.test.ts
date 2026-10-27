@@ -14,7 +14,9 @@ import * as ProjectionMaintenance from "../apps/server/src/orchestration-v2/Proj
 import {
   assertIsolatedBaseDir,
   BAR_FIXTURE,
+  BAR_FIXTURE_NOW,
   type BarFixtureProject,
+  barFixtureRelativeTo,
   barProjectId,
   barServerStartTimeoutMs,
   barStoreLayer,
@@ -76,6 +78,28 @@ it("pins every seeded event to the fixture's own timestamps", () => {
     ),
   );
   assert.isAbove(toolItems.length, 0);
+});
+
+it("moves every fixture time so a simulator draws the ages a frozen browser draws", () => {
+  const now = Date.parse("2026-11-02T08:30:00.000Z");
+  const moved = barFixtureRelativeTo(now);
+  const age = (iso: string, clock: number) => clock - Date.parse(iso);
+  for (const [index, project] of BAR_FIXTURE.entries()) {
+    const shifted = moved[index]!;
+    assert.equal(age(shifted.createdAt, now), age(project.createdAt, Date.parse(BAR_FIXTURE_NOW)));
+    for (const [threadIndex, thread] of project.threads.entries()) {
+      const copy = shifted.threads[threadIndex]!;
+      assert.equal(
+        age(barThreadUpdatedAt(copy), now),
+        age(barThreadUpdatedAt(thread), Date.parse(BAR_FIXTURE_NOW)),
+      );
+      assert.equal(
+        age(barThreadCreatedAt(copy), now),
+        age(barThreadCreatedAt(thread), Date.parse(BAR_FIXTURE_NOW)),
+      );
+    }
+  }
+  assert.deepEqual(barFixtureRelativeTo(Date.parse(BAR_FIXTURE_NOW)), BAR_FIXTURE);
 });
 
 it("refuses the shared Lecturn home", () =>

@@ -20,6 +20,8 @@ export const SHOWCASE_SCENES = [
   "environments",
   "pr-watch",
   "agent-activity",
+  // Bar fixture only: Embed Host's thread list through `lecturn://apps/<appId>` (A43).
+  "apps",
 ] as const;
 export type ShowcaseScene = (typeof SHOWCASE_SCENES)[number];
 

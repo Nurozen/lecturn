@@ -29,6 +29,7 @@ import {
   SHOWCASE_THREADS,
   seedShowcaseEnvironment,
 } from "./mobile-showcase-environment.ts";
+import type { BarAppManifest } from "./bar/app-fixture.ts";
 
 const REPO_ROOT = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
 const MOBILE_ROOT = NodePath.join(REPO_ROOT, "apps/mobile");
@@ -1015,6 +1016,42 @@ async function waitForBarFixtureFrame(
   throw new Error(`The Bar fixture frame did not settle within ${timeoutMs}ms.`);
 }
 
+/** The staged Embed Host fixture an `apps` scene draws, with the server it runs on. */
+interface BarAppScene {
+  readonly manifest: BarAppManifest;
+  readonly origin: string;
+  readonly baseDir: string;
+}
+
+/** Throws unless the server still holds the live states the `apps` scene draws, Running. */
+async function assertBarAppScene(barApp: BarAppScene): Promise<void> {
+  const [{ fetchBarShellSnapshot, issueBarToken }, { listBarApps }, { mobileAppSceneProblems }] =
+    await Promise.all([
+      import("./seed-bar-fixture.ts"),
+      import("./bar/app-fixture.ts"),
+      import("./bar/mobile-app-scenes.ts"),
+    ]);
+  const token = await issueBarToken(
+    barApp.baseDir,
+    ["access:read", "orchestration:read"],
+    "bar-mobile-apps-check",
+  );
+  const [snapshot, apps] = await Promise.all([
+    fetchBarShellSnapshot(barApp.origin, token),
+    listBarApps(barApp.origin, token),
+  ]);
+  const problems = mobileAppSceneProblems({
+    manifest: barApp.manifest,
+    snapshot,
+    apps,
+    running: true,
+    now: Date.now(),
+  });
+  if (problems.length > 0) {
+    throw new Error(`The apps scene is not staged:\n- ${problems.join("\n- ")}`);
+  }
+}
+
 function iosAxe(): string {
   return NodeProcess.env.AXE_PATH ?? "axe";
 }
@@ -1144,6 +1181,7 @@ async function captureIos(
   pairingUrls: ReadonlyArray<string>,
   registerCleanup: (cleanup: IosCaptureCleanup) => void,
   barFixtureBaseDir?: string,
+  barApp?: BarAppScene,
 ): Promise<void> {
   const { simulator, createdByRunner } = await ensureIosSimulator(capture.device);
   const startedByRunner = simulator.state !== "Booted";
@@ -1203,6 +1241,21 @@ async function captureIos(
   for (const [sceneIndex, scene] of capture.scenes.entries()) {
     if (sceneIndex > 0) await NodeFSP.rm(readyPath, { force: true });
     await NodeFSP.writeFile(scenePath, scene);
+    if (scene === "apps") {
+      if (barApp === undefined) throw new Error("The apps scene needs the Bar app fixture.");
+      if (sceneIndex === 0) {
+        throw new Error("The apps scene opens a link in the running app; capture threads first.");
+      }
+      await assertBarAppScene(barApp);
+      const { barAppDeepLink } = await import("./bar/mobile-app-scenes.ts");
+      // The app is in front, so iOS hands it the link without a confirmation prompt.
+      await runCommand("xcrun", [
+        "simctl",
+        "openurl",
+        simulator.udid,
+        barAppDeepLink(APP_SCHEME, barApp.manifest),
+      ]);
+    }
     const waitForScene = (timeoutMs?: number) => {
       if (barFixtureBaseDir !== undefined) {
         return waitForBarFixtureFrame(simulator.udid, barFixtureBaseDir, timeoutMs);
@@ -1231,6 +1284,8 @@ async function captureIos(
     }
     if (scene === "agent-activity") await presentIosLockScreen(simulator.udid);
     await delay(scene === "review" ? Math.max(config.settleDelayMs, 8_000) : config.settleDelayMs);
+    // Again just before the frame is kept: a hold or an approval can lapse while it settles.
+    if (scene === "apps" && barApp !== undefined) await assertBarAppScene(barApp);
     const destination = NodePath.join(
       showcaseCaptureDirectory(outputDirectory, capture),
       `${scene}.png`,
@@ -1581,17 +1636,46 @@ async function main(): Promise<void> {
   let metro: NodeChildProcess.ChildProcess | null = null;
   let barFixtureServer: { readonly pid: number; readonly stop: () => Promise<void> } | null = null;
   let barFixtureBaseDir: string | undefined;
+  let barApp: BarAppScene | undefined;
+  let barAppLease: { readonly close: () => Promise<void> } | null = null;
   const iosCleanups: IosCaptureCleanup[] = [];
   const androidCleanups: AndroidCaptureCleanup[] = [];
 
   try {
+    // Built before any environment is seeded: the Bar app fixture's staged approval
+    // lapses ten minutes after seeding, sooner than a cold native build ends.
+    const iosAppPath = hasIos
+      ? options.skipBuild
+        ? await existingArtifact(IOS_APP_PATH)
+        : await buildIos()
+      : null;
+    const androidAbis = captures.flatMap((capture) =>
+      capture.device.platform === "android" && capture.device.abi ? [capture.device.abi] : [],
+    );
+    const androidApkPath = hasAndroid
+      ? options.skipBuild
+        ? await existingArtifact(ANDROID_APK_PATH)
+        : await buildAndroid([...new Set(androidAbis)])
+      : null;
     if (options.barFixture) {
       // Loaded lazily: the seeder pulls in the server's orchestration stores.
       const { seedBarFixture } = await import("./seed-bar-fixture.ts");
       barFixtureBaseDir = NodePath.join(showcaseRootDir, "environments", "bar");
-      const { server } = await seedBarFixture({ baseDir: barFixtureBaseDir, host: "127.0.0.1" });
+      const { server, app, appCredential } = await seedBarFixture({
+        baseDir: barFixtureBaseDir,
+        host: "127.0.0.1",
+        app: captures.some((capture) => capture.scenes.includes("apps")),
+        // A simulator clock cannot be frozen, so relative ages come from the seeded times.
+        agesRelativeToNow: true,
+      });
       if (server === null) throw new Error("The Bar fixture server did not start.");
       barFixtureServer = server;
+      if (app !== null && appCredential !== null) {
+        // The mockup draws Embed Host Running: hold its live lease through the captures.
+        const { leaseBarAppLiveTools } = await import("./bar/app-fixture.ts");
+        barAppLease = await leaseBarAppLiveTools(server.origin, appCredential, barFixtureBaseDir);
+        barApp = { manifest: app, origin: server.origin, baseDir: barFixtureBaseDir };
+      }
       const environmentId = await waitForFileContent(
         NodePath.join(barFixtureBaseDir, "userdata", "environment-id"),
         "Bar fixture environment id",
@@ -1642,20 +1726,6 @@ async function main(): Promise<void> {
       ]);
     }
 
-    const iosAppPath = hasIos
-      ? options.skipBuild
-        ? await existingArtifact(IOS_APP_PATH)
-        : await buildIos()
-      : null;
-    const androidAbis = captures.flatMap((capture) =>
-      capture.device.platform === "android" && capture.device.abi ? [capture.device.abi] : [],
-    );
-    const androidApkPath = hasAndroid
-      ? options.skipBuild
-        ? await existingArtifact(ANDROID_APK_PATH)
-        : await buildAndroid([...new Set(androidAbis)])
-      : null;
-
     for (const capture of captures) {
       const pairingHost = capture.device.platform === "ios" ? "127.0.0.1" : "10.0.2.2";
       const pairingUrls = await Promise.all(
@@ -1674,6 +1744,7 @@ async function main(): Promise<void> {
           pairingUrls,
           (cleanup) => iosCleanups.push(cleanup),
           barFixtureBaseDir,
+          barApp,
         );
       } else {
         await captureAndroid(
@@ -1725,6 +1796,7 @@ async function main(): Promise<void> {
           await runCommand("xcrun", ["simctl", "delete", cleanup.udid]).catch(() => undefined);
         }
       }
+      await barAppLease?.close().catch(() => undefined);
       await Promise.all([
         ...(metro ? [stopProcess(metro)] : []),
         ...showcaseServers.map((server) => stopProcess(server)),
