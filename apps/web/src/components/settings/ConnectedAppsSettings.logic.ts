@@ -109,9 +109,11 @@ export function connectedAppAccess(
     },
   ];
   if (app.gatedTools.length > 0) {
+    // Named as agents call them, as the Gated tools list below names them.
+    const names = app.gatedTools.map((tool) => `${app.toolPrefix}_${tool}`).join(", ");
     access.push({
       title: "Gated tools",
-      detail: `${app.gatedTools.join(", ")} follow the runtime ceiling below.`,
+      detail: `${names} ${app.gatedTools.length === 1 ? "follows" : "follow"} the runtime ceiling below.`,
     });
   }
   if (app.embedOrigins.length > 0) {
