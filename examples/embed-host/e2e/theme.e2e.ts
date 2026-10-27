@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Test harness driving a real Electron app; it runs no Effect runtime.
 /**
- * The live theme probe (scripts/bar/theme-probe.ts) against the real embed
+ * The theme probe (themeProbe.ts) against the real embed
  * guest, with RocketWright's full generated token set and fonts as sent: every
  * allowlisted variable's computed value equals the sent one, every sent font
  * is loaded and used, and the pane background pixel is exactly `--background`.
@@ -12,22 +12,21 @@ import * as NodeModule from "node:module";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
-import {
-  collectGuestTheme,
-  evaluateThemeProbe,
-  samplePixel,
-  type SentEmbedTheme,
-} from "../../../scripts/bar/theme-probe.ts";
 import { embedHostDir } from "../scripts/electronLauncher.ts";
 import { type HostGlobals, launchEmbedHost, removeDirs } from "./harness.ts";
 import type { E2eContext } from "./run.ts";
+import {
+  collectGuestTheme,
+  evaluateThemeProbe,
+  type RgbaImage,
+  samplePixel,
+  type SentEmbedTheme,
+} from "./themeProbe.ts";
 
-type Png = Parameters<typeof samplePixel>[0];
-
-// pngjs is a dependency of the repo's scripts package, which owns the probe.
+// pngjs is a dependency of the repo's scripts package; this example does not install it.
 const { PNG } = NodeModule.createRequire(
-  NodePath.resolve(embedHostDir, "../../scripts/bar/theme-probe.ts"),
-)("pngjs") as { readonly PNG: { readonly sync: { read(buffer: Buffer): Png } } };
+  NodePath.resolve(embedHostDir, "../../scripts/package.json"),
+)("pngjs") as { readonly PNG: { readonly sync: { read(buffer: Buffer): RgbaImage } } };
 
 const THEME_TIMEOUT_MS = 15_000;
 

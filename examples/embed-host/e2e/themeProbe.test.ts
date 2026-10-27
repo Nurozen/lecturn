@@ -1,17 +1,14 @@
-import { assert, it } from "@effect/vitest";
-import { PNG } from "pngjs";
+import { assert, it } from "vite-plus/test";
 
 import {
   EMBED_THEME_VARS,
   evaluateThemeProbe,
-  type GuestEvaluator,
   type ObservedGuestTheme,
   parseCssColor,
   parseFontFaceFamilies,
-  probeGuestTheme,
   samplePixel,
   type SentEmbedTheme,
-} from "./theme-probe.ts";
+} from "./themeProbe.ts";
 
 const FONTS_CSS = [
   '@font-face { font-family: "RW Sans"; font-weight: 400; src: url(data:font/woff2;base64,AAAA) format("woff2"); }',
@@ -98,22 +95,9 @@ it("parses font-face families and css colors", () => {
   assert.isNull(parseCssColor("oklch(0.2 0.01 250)"));
 });
 
-it("samples the capture at the given point", async () => {
-  const capture = new PNG({ width: 4, height: 4 });
-  capture.data.fill(0);
-  const offset = (2 * 4 + 1) * 4;
-  capture.data.set([27, 30, 32, 255], offset);
+it("samples the capture at the given point", () => {
+  const capture = { width: 4, height: 4, data: new Uint8Array(4 * 4 * 4) };
+  capture.data.set([27, 30, 32, 255], (2 * 4 + 1) * 4);
   assert.deepEqual(samplePixel(capture, 1, 2), [27, 30, 32]);
   assert.throws(() => samplePixel(capture, 4, 0), /outside/u);
-
-  const guest: GuestEvaluator = {
-    evaluate: async () => OBSERVED as never,
-  };
-  const report = await probeGuestTheme({
-    guest,
-    sent: SENT,
-    capture,
-    backgroundPoint: { x: 1, y: 2 },
-  });
-  assert.isTrue(report.passed);
 });

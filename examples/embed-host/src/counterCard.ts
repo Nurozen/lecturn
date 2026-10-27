@@ -3,7 +3,7 @@
  * server answers `resources/read` for it with `counterCardResource()`, and
  * Lecturn captures it into the thread when `counter_increment` runs.
  *
- * It has the run card's structure from both approved mockups (content is
+ * It has the structure of a real app's result card (content is
  * illustrative): a title row with an icon, a saved state, three stats and a
  * line chart of the counter's history. At 560 px or wider it takes the desktop
  * form ("Saved result" under the title, three boxed tiles); narrower, the embed
@@ -13,8 +13,8 @@
  * MCP Apps variables, and the curve from `--color-ring-primary`, which Lecturn
  * sets to the thread gold and an embedding host to its own accent.
  *
- * The `data-card-*` attributes are the structure hooks the bar checklists
- * probe (`scripts/bar/checklists`); keep them when restyling.
+ * counterCard.test.ts reads the `data-card-*` attributes; keep them when
+ * restyling.
  *
  * Expected tool result: `structuredContent: { count, by?, history? }`.
  */

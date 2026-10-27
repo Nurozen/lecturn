@@ -33,11 +33,6 @@ export interface ShowcaseIosDevice {
   readonly appearance: ShowcaseAppearance;
   readonly theme: ShowcaseTheme;
   readonly orientation?: "portrait" | "landscape";
-  /**
-   * Captures the Lecturn Apps Bar fixture instead of the store showcase. Only
-   * `--bar-fixture` runs select it, so store screenshot runs never include it.
-   */
-  readonly barFixture?: boolean;
   readonly scenes: ReadonlyArray<ShowcaseScene>;
   readonly storeAsset: ShowcaseStoreAssetSpec;
 }
@@ -118,24 +113,6 @@ const config: ShowcaseConfig = {
         directory: "apple/iphone-6.5",
         width: 1284,
         height: 2778,
-        minimumUploadCount: 1,
-        maximumUploadCount: 10,
-      },
-    },
-    {
-      id: "iphone-15-bar",
-      platform: "ios",
-      simulator: "Lecturn Bar iPhone 15",
-      simulatorDeviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-15",
-      appearance: "dark",
-      theme: DEFAULT_SHOWCASE_THEME,
-      barFixture: true,
-      scenes: ["threads", "apps"],
-      storeAsset: {
-        store: "apple",
-        directory: "bar/iphone-15",
-        width: 1179,
-        height: 2556,
         minimumUploadCount: 1,
         maximumUploadCount: 10,
       },
