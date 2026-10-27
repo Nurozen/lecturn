@@ -25,7 +25,6 @@ import { buildSidebarHierarchy } from "../threads/sidebar-hierarchy";
 import { ThreadListGroupHeader } from "../threads/thread-list-items";
 import { ThreadListV2SettledShelfHeader } from "../threads/thread-list-v2-items";
 import { useThreadRowProviderInstanceResolver } from "../threads/thread-provider-instance";
-import { openConnectedApp } from "./AppClosedBanner";
 import { AppCardHeader } from "./AppCardHeader";
 import { AppDetailSheet } from "./AppDetailSheet";
 import { AppPairingRow } from "./AppPairingRow";
@@ -34,7 +33,6 @@ import {
   appCardCollapseKey,
   appCardFrames,
   appCardTargetWorkspace,
-  appOpenUrl,
   appScreenTitle,
   buildAppCards,
   buildAppsTabItems,
@@ -154,16 +152,6 @@ export function AppsTree(props: {
     },
     [navigation],
   );
-  const openInApp = useCallback((card: AppCard) => {
-    const project = appCardTargetWorkspace(card);
-    const url = appOpenUrl({
-      template: card.primary?.app.openUrlTemplate ?? null,
-      binding: project?.appBinding,
-      threadId: null,
-    });
-    if (url === null) return null;
-    return () => void openConnectedApp({ url, appName: card.name });
-  }, []);
 
   const renderRow = (item: AppsTabItem) => {
     switch (item.type) {
@@ -174,7 +162,6 @@ export function AppsTree(props: {
             onToggle={() => setCollapsed(appCardCollapseKey(item.card.appId), !item.collapsed)}
             onOpenDetails={() => setDetailAppId(item.card.appId)}
             onNewThread={newThread(item.card)}
-            onOpenInApp={openInApp(item.card)}
           />
         );
       case "app-pairing":
