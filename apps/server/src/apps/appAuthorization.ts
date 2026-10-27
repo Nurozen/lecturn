@@ -1,5 +1,5 @@
 /**
- * Default-deny authorization for `app:` and `embed:` sessions (spec R2.3).
+ * Default-deny authorization for `app:` and `embed:` sessions.
  * Scopes have already been checked by the time this runs; this decides which
  * methods such a session may call at all and which projects it may touch.
  * A method missing from `APP_RPC_RULES` is refused, so a new RPC is closed
@@ -52,12 +52,7 @@ import { ProjectionStoreV2 } from "../orchestration-v2/ProjectionStore.ts";
 import { formatHostForUrl, isWildcardHost } from "../startupAccess.ts";
 import { appHttpRouteFor } from "./appHttpAuthorization.ts";
 import * as AppStreamFilter from "./appStreamFilter.ts";
-import {
-  AppAuthorization,
-  type AppsFailure,
-  AppProjectService,
-  type AppsNotImplemented,
-} from "./services.ts";
+import { AppAuthorization, AppProjectService } from "./services.ts";
 import { type AppSubject, formatEmbedSubject, parseAppSubject } from "./subjects.ts";
 
 type WsRpc = RpcGroup.Rpcs<typeof WsRpcGroup>;
@@ -98,7 +93,7 @@ export interface AppRpcRule<P> {
 
 type AppRpcTable = { readonly [M in WsRpcMethod]?: AppRpcRule<PayloadOf<M>> };
 
-/** What an embedded chat may do to its own threads; creation goes through `apps.createEmbedThread` (D32). */
+/** What an embedded chat may do to its own threads; creation goes through `apps.createEmbedThread`. */
 const EMBED_COMMAND_TYPES: ReadonlySet<OrchestrationV2Command["type"]> = new Set([
   "message.dispatch",
   "run.interrupt",
@@ -267,7 +262,7 @@ export const APP_RPC_RULES: AppRpcTable = {
   },
   [O.dispatchCommand]: { resolve: commandTargets, ...embed },
   // App cards in the pane: each call names the tool call that produced the card, and the
-  // environment resolves the card's server from that item (D3).
+  // environment resolves the card's server from that item.
   [W.mcpAppsReadResource]: { resolve: "threadId", ...embed },
   [W.mcpAppsToolInfo]: { resolve: "threadId", ...embed },
   [W.mcpAppsCallTool]: { resolve: "threadId", ...embed },
@@ -279,7 +274,7 @@ export const APP_RPC_RULES: AppRpcTable = {
     ...embed,
   },
   // The web client's connection handshake: it opens on the config stream and probes with
-  // server.probe, so an embed that can read the config needs both (D31).
+  // server.probe, so an embed that can read the config needs both.
   [W.serverGetConfig]: { resolve: "none", ...embed },
   [W.subscribeServerConfig]: { resolve: "none", ...embed },
   [W.serverProbe]: { resolve: "none", ...embed },
@@ -288,7 +283,7 @@ export const APP_RPC_RULES: AppRpcTable = {
   [W.serverReportClientActivity]: { resolve: "none", ...embed },
   [W.projectsSearchEntries]: { resolve: ({ cwd }) => [{ projectRoot: cwd }], ...embed },
   [W.assetsCreateUrl]: { resolve: assetTargets, ...embed },
-  // The welcome event carries no project data beyond what serverGetConfig already shows (D31).
+  // The welcome event carries no project data beyond what serverGetConfig already shows.
   [W.subscribeServerLifecycle]: { resolve: "none", ...embed },
   [W.subscribeVcsStatus]: { resolve: ({ cwd }) => [{ projectRoot: cwd }], ...embed },
   // Without a project the list spans every project.
@@ -375,33 +370,30 @@ const isInsideRoot = (root: string, path: string) => {
 export interface AppAuthorizationDeps {
   readonly resolveAppForProject: (
     projectId: ProjectId,
-  ) => Effect.Effect<Option.Option<AppBinding>, AppsFailure>;
+  ) => Effect.Effect<Option.Option<AppBinding>, AppsError>;
   /** `None` when the thread does not exist. */
   readonly projectIdForThread: (
     threadId: ThreadId,
-  ) => Effect.Effect<Option.Option<ProjectId>, AppsFailure>;
+  ) => Effect.Effect<Option.Option<ProjectId>, AppsError>;
   /** `None` for a pending upload or an attachment no thread's history references. */
   readonly threadIdForAttachment: (
     attachmentId: string,
-  ) => Effect.Effect<Option.Option<ThreadId>, AppsFailure>;
+  ) => Effect.Effect<Option.Option<ThreadId>, AppsError>;
   /** `None` when the note does not exist. */
   readonly projectIdForNote: (
     noteId: ThreadNoteId,
-  ) => Effect.Effect<Option.Option<ProjectId>, AppsFailure>;
+  ) => Effect.Effect<Option.Option<ProjectId>, AppsError>;
   /** `None` when the thread runs in its project's root, or does not exist. */
   readonly worktreePathForThread: (
     threadId: ThreadId,
-  ) => Effect.Effect<Option.Option<string>, AppsFailure>;
+  ) => Effect.Effect<Option.Option<string>, AppsError>;
   /** Where `path`, read from `from`, really is after its links; `None` when it does not resolve. */
   readonly canonicalPath: (path: string, from?: string) => Effect.Effect<Option.Option<string>>;
   readonly issueEmbedSession: (input: {
     readonly subject: string;
     readonly ttl: Duration.Duration;
     readonly label: string;
-  }) => Effect.Effect<
-    { readonly token: string; readonly expiresAt: DateTime.DateTime },
-    AppsFailure
-  >;
+  }) => Effect.Effect<{ readonly token: string; readonly expiresAt: DateTime.DateTime }, AppsError>;
   readonly environmentId: Effect.Effect<EnvironmentId>;
   /** The origin the embed page is served from. */
   readonly embedOrigin: string;
@@ -497,7 +489,7 @@ export const makeWith = (deps: AppAuthorizationDeps): AppAuthorization["Service"
   const ownsTarget = (
     subject: AppSubject,
     target: AccessTarget,
-  ): Effect.Effect<boolean, AppsFailure> =>
+  ): Effect.Effect<boolean, AppsError> =>
     "projectId" in target
       ? ownsProject(subject, target.projectId)
       : "threadId" in target
@@ -515,11 +507,11 @@ export const makeWith = (deps: AppAuthorizationDeps): AppAuthorization["Service"
       Effect.map((owned) => owned.every(Boolean)),
     );
 
-  /** A lookup failure denies; only `AppsNotImplemented` survives, so the caller can say why. */
+  /** A lookup failure denies. */
   const decide = (
-    allowed: Effect.Effect<boolean, AppsFailure>,
+    allowed: Effect.Effect<boolean, AppsError>,
     deny: () => EnvironmentAuthorizationError,
-  ): Effect.Effect<void, EnvironmentAuthorizationError | AppsNotImplemented> =>
+  ): Effect.Effect<void, EnvironmentAuthorizationError> =>
     allowed.pipe(
       Effect.catchTags({ AppsError: () => Effect.succeed(false) }),
       Effect.flatMap((ok) => (ok ? Effect.void : Effect.fail(deny()))),
@@ -625,7 +617,7 @@ const makeThreadIdForAttachment = (
         return Option.none<ThreadId>();
       }
       // Besides the exact id, only ids the segment reshapes: anything outside its alphabet
-      // (copies are `copy:<env>:<thread>`) or longer than it keeps.
+      // (copies are `copy:<appId>:<env>:<thread>`) or longer than it keeps.
       const rows = yield* sql<{ readonly thread_id: ThreadId }>`
         SELECT thread_id FROM orchestration_v2_projection_threads
         WHERE thread_id = ${segment}

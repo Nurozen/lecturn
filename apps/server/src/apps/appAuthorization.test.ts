@@ -1,6 +1,7 @@
 import {
   APPS_WS_METHODS as A,
   AppId,
+  AppsError,
   AuthOrchestrationReadScope,
   AuthSessionId,
   EnvironmentId,
@@ -45,7 +46,6 @@ import {
   AppLeaseService,
   AppProjectService,
   AppRegistryService,
-  AppsNotImplemented,
   HeadlessToolHost,
   ThreadCopyService,
 } from "./services.ts";
@@ -613,22 +613,17 @@ describe("app RPC allowlist", () => {
     }),
   );
 
-  it.effect("surfaces an unfinished project lookup so the socket can explain the denial", () =>
+  it.effect("denies a call whose project lookup fails", () =>
     Effect.gen(function* () {
-      const unfinished = makeWith({
+      const failing = makeWith({
         ...fakeDeps,
         resolveAppForProject: () =>
-          Effect.fail(
-            new AppsNotImplemented({
-              service: "AppProjectService",
-              method: "resolveAppForProject",
-            }),
-          ),
+          Effect.fail(new AppsError({ code: "unavailable", message: "lookup failed" })),
       });
-      const error = yield* unfinished
+      const error = yield* failing
         .authorizeRpc(embedSession, O.subscribeThread, { threadId: rocketThread })
         .pipe(Effect.flip);
-      expect(error._tag).toBe("AppsNotImplemented");
+      expect(error._tag).toBe("EnvironmentAuthorizationError");
     }),
   );
 

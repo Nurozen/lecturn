@@ -4,11 +4,7 @@
  * projects it may touch. Every other session gets the plain scope layer, so
  * ordinary clients pay nothing per call.
  */
-import {
-  EnvironmentAuthorizationError,
-  RpcScopeAuthorization,
-  authScopeRequiredResponse,
-} from "@lecturn/contracts";
+import { RpcScopeAuthorization } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
@@ -31,20 +27,7 @@ export const layer = (
           );
           return (effect, options) => {
             const method = options.rpc._tag;
-            const authorized = apps.authorizeRpc(session, method, options.payload).pipe(
-              Effect.catchTags({
-                // An unfinished check denies rather than lets the call through.
-                AppsNotImplemented: () => {
-                  const requiredScope = RpcAuthorization.requiredScopeForRpcMethod(method);
-                  return Effect.fail(
-                    new EnvironmentAuthorizationError({
-                      message: `Connected apps cannot call ${method} yet.`,
-                      ...authScopeRequiredResponse(requiredScope),
-                    }),
-                  );
-                },
-              }),
-            );
+            const authorized = apps.authorizeRpc(session, method, options.payload);
             return checkScopes(Effect.andThen(authorized, effect), options);
           };
         }),

@@ -1,11 +1,10 @@
 /**
- * Service tags for connected apps (plan interface I6). Each service has one
- * layer file and one owning step; `AppsLayer.ts` composes them. The tags live
- * together so a service's consumers never import another owner's layer file.
+ * Service tags for connected apps. Each service has its own layer file and
+ * `AppsLayer.ts` composes them; the tags live together so a service's
+ * consumers never import another service's layer file.
  *
- * Operations fail with `AppsError` (the wire error, whose `code` already
- * names the categories every transport shows) or `AppsNotImplemented` while a
- * service is still a stub. Transports map `AppsNotImplemented` once.
+ * Operations fail with `AppsError`, the wire error, whose `code` already names
+ * the categories every transport shows.
  */
 import type {
   AppBinding,
@@ -48,7 +47,6 @@ import * as Context from "effect/Context";
 import type * as DateTime from "effect/DateTime";
 import type * as Effect from "effect/Effect";
 import type * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import type * as Stream from "effect/Stream";
 import type { McpSchema } from "effect/ai";
@@ -56,17 +54,6 @@ import type { McpSchema } from "effect/ai";
 import type { AuthenticatedSession } from "../auth/EnvironmentAuth.ts";
 import type { McpInvocationScope } from "../mcp/McpInvocationContext.ts";
 import type { AppSubject } from "./subjects.ts";
-
-export class AppsNotImplemented extends Schema.TaggedError<AppsNotImplemented>()(
-  "AppsNotImplemented",
-  { service: Schema.String, method: Schema.String },
-) {
-  override get message(): string {
-    return `${this.service}.${this.method} is not implemented yet.`;
-  }
-}
-
-export type AppsFailure = AppsError | AppsNotImplemented;
 
 export type AppToolTier = "headless" | "live";
 
@@ -101,14 +88,6 @@ export interface AppToolCallRequest {
   readonly meta: Readonly<Record<string, unknown>>;
 }
 
-/** A `tools/call` from an MCP App card (A21), outside any provider turn. */
-export interface AppCardToolCall {
-  readonly appId: AppId;
-  readonly threadId: ThreadId;
-  readonly name: string;
-  readonly arguments: Readonly<Record<string, unknown>>;
-}
-
 export interface AppToolApprovalContext {
   readonly threadId: ThreadId;
   readonly providerSessionId: string;
@@ -129,34 +108,32 @@ export class AppRegistryService extends Context.Service<
   {
     readonly createPairingRequest: (
       registration: AppRegistration,
-    ) => Effect.Effect<AppPairingRequestCreated, AppsFailure>;
+    ) => Effect.Effect<AppPairingRequestCreated, AppsError>;
     readonly pollPairingRequest: (input: {
       readonly requestId: AppPairingRequestId;
       readonly pollSecret: string;
-    }) => Effect.Effect<AppPairingPoll, AppsFailure>;
-    readonly decidePairing: (
-      input: AppsDecidePairingInput,
-    ) => Effect.Effect<AppStatus, AppsFailure>;
-    readonly revoke: (appId: AppId) => Effect.Effect<AppStatus, AppsFailure>;
-    readonly delete: (input: AppsDeleteInput) => Effect.Effect<void, AppsFailure>;
+    }) => Effect.Effect<AppPairingPoll, AppsError>;
+    readonly decidePairing: (input: AppsDecidePairingInput) => Effect.Effect<AppStatus, AppsError>;
+    readonly revoke: (appId: AppId) => Effect.Effect<AppStatus, AppsError>;
+    readonly delete: (input: AppsDeleteInput) => Effect.Effect<void, AppsError>;
     readonly setRuntimeCeiling: (
       input: AppsSetRuntimeCeilingInput,
-    ) => Effect.Effect<AppStatus, AppsFailure>;
-    readonly list: Effect.Effect<ReadonlyArray<AppStatus>, AppsFailure>;
-    readonly streamStatus: Stream.Stream<AppStatusStreamEvent, AppsFailure>;
-    readonly get: (appId: AppId) => Effect.Effect<Option.Option<AppRecord>, AppsFailure>;
-    readonly isGranted: (appId: AppId) => Effect.Effect<boolean, AppsFailure>;
-    readonly cachedTools: (appId: AppId) => Effect.Effect<AppCachedTools, AppsFailure>;
+    ) => Effect.Effect<AppStatus, AppsError>;
+    readonly list: Effect.Effect<ReadonlyArray<AppStatus>, AppsError>;
+    readonly streamStatus: Stream.Stream<AppStatusStreamEvent, AppsError>;
+    readonly get: (appId: AppId) => Effect.Effect<Option.Option<AppRecord>, AppsError>;
+    readonly isGranted: (appId: AppId) => Effect.Effect<boolean, AppsError>;
+    readonly cachedTools: (appId: AppId) => Effect.Effect<AppCachedTools, AppsError>;
     readonly setCachedTools: (
       appId: AppId,
       tier: AppToolTier,
       definitions: ReadonlyArray<McpSchema.Tool>,
-    ) => Effect.Effect<void, AppsFailure>;
-    readonly seedSidecarGrant: (envelope: AppSidecarBootstrap) => Effect.Effect<void, AppsFailure>;
+    ) => Effect.Effect<void, AppsError>;
+    readonly seedSidecarGrant: (envelope: AppSidecarBootstrap) => Effect.Effect<void, AppsError>;
     /** The app that owns `projectId`, for the embed banner; fails `not-found` for other projects. */
     readonly streamEmbedContext: (
       projectId: ProjectId,
-    ) => Stream.Stream<AppEmbedContext, AppsFailure>;
+    ) => Stream.Stream<AppEmbedContext, AppsError>;
   }
 >()("lecturn/apps/services/AppRegistryService") {}
 
@@ -167,8 +144,8 @@ export class AppLeaseService extends Context.Service<
     readonly set: (
       appId: AppId,
       input: AppLiveLeaseInput,
-    ) => Effect.Effect<{ readonly expiresAt: IsoDateTime }, AppsFailure>;
-    readonly clear: (appId: AppId) => Effect.Effect<void, AppsFailure>;
+    ) => Effect.Effect<{ readonly expiresAt: IsoDateTime }, AppsError>;
+    readonly clear: (appId: AppId) => Effect.Effect<void, AppsError>;
     readonly current: (appId: AppId) => Effect.Effect<Option.Option<AppLease>>;
     readonly stream: Stream.Stream<AppLeaseChange>;
   }
@@ -180,35 +157,35 @@ export class AppProjectService extends Context.Service<
     readonly ensureWorkspace: (
       appId: AppId,
       input: AppsEnsureWorkspaceInput,
-    ) => Effect.Effect<{ readonly projectId: ProjectId }, AppsFailure>;
+    ) => Effect.Effect<{ readonly projectId: ProjectId }, AppsError>;
     readonly resolveAppForProject: (
       projectId: ProjectId,
-    ) => Effect.Effect<Option.Option<AppBinding>, AppsFailure>;
+    ) => Effect.Effect<Option.Option<AppBinding>, AppsError>;
     readonly listThreads: (
       projectId: ProjectId,
-    ) => Effect.Effect<ReadonlyArray<ConnectedAppThreadSummary>, AppsFailure>;
+    ) => Effect.Effect<ReadonlyArray<ConnectedAppThreadSummary>, AppsError>;
     readonly streamThreads: (
       projectId: ProjectId,
-    ) => Stream.Stream<ConnectedAppThreadsStreamEvent, AppsFailure>;
+    ) => Stream.Stream<ConnectedAppThreadsStreamEvent, AppsError>;
     readonly setThreadAppData: (
       appId: AppId,
       input: AppsSetThreadAppDataInput,
-    ) => Effect.Effect<void, AppsFailure>;
-    /** The subject decides who may set `appData` (D32), so it is passed, not inferred. */
+    ) => Effect.Effect<void, AppsError>;
+    /** The subject decides who may set `appData`, so it is passed, not inferred. */
     readonly createEmbedThread: (
       subject: AppSubject,
       input: AppsCreateEmbedThreadInput,
-    ) => Effect.Effect<{ readonly threadId: ThreadId }, AppsFailure>;
+    ) => Effect.Effect<{ readonly threadId: ThreadId }, AppsError>;
     readonly setEmbedDefaultModel: (
       subject: AppSubject,
       input: AppsSetEmbedDefaultModelInput,
-    ) => Effect.Effect<void, AppsFailure>;
+    ) => Effect.Effect<void, AppsError>;
     readonly markThreadsCopied: (
       appId: AppId,
       input: AppsMarkThreadsCopiedInput,
-    ) => Effect.Effect<void, AppsFailure>;
+    ) => Effect.Effect<void, AppsError>;
     /** Every project bound to the app, with its threads (`apps.delete` with `deleteThreads`). */
-    readonly deleteAppProjects: (appId: AppId) => Effect.Effect<void, AppsFailure>;
+    readonly deleteAppProjects: (appId: AppId) => Effect.Effect<void, AppsError>;
   }
 >()("lecturn/apps/services/AppProjectService") {}
 
@@ -223,7 +200,7 @@ export class AppAuthorization extends Context.Service<
       session: AuthenticatedSession,
       method: string,
       payload: unknown,
-    ) => Effect.Effect<void, EnvironmentAuthorizationError | AppsNotImplemented>;
+    ) => Effect.Effect<void, EnvironmentAuthorizationError>;
     /** `None` drops the item. */
     readonly filterShellItem: (
       session: AuthenticatedSession,
@@ -232,11 +209,11 @@ export class AppAuthorization extends Context.Service<
     readonly authorizeHttp: (
       session: AuthenticatedSession,
       path: string,
-    ) => Effect.Effect<void, EnvironmentAuthorizationError | AppsNotImplemented>;
+    ) => Effect.Effect<void, EnvironmentAuthorizationError>;
     readonly mintEmbedToken: (
       appId: AppId,
       input: AppsMintEmbedTokenInput,
-    ) => Effect.Effect<AppEmbedTarget, AppsFailure>;
+    ) => Effect.Effect<AppEmbedTarget, AppsError>;
   }
 >()("lecturn/apps/services/AppAuthorization") {}
 
@@ -245,25 +222,18 @@ export class AppToolkit extends Context.Service<
   {
     readonly listFor: (
       scope: McpInvocationScope,
-    ) => Effect.Effect<ReadonlyArray<McpSchema.Tool>, AppsFailure>;
+    ) => Effect.Effect<ReadonlyArray<McpSchema.Tool>, AppsError>;
     /** `name` is prefixed, as the agent called it. */
     readonly call: (
       scope: McpInvocationScope,
       name: string,
       args: Readonly<Record<string, unknown>>,
       meta: Readonly<Record<string, unknown>>,
-    ) => Effect.Effect<McpSchema.CallToolResult, AppsFailure>;
-    readonly readResource: (
-      scope: McpInvocationScope,
-      uri: string,
-    ) => Effect.Effect<McpSchema.ReadResourceResult, AppsFailure>;
-    readonly cardToolCall: (
-      input: AppCardToolCall,
-    ) => Effect.Effect<McpSchema.CallToolResult, AppsFailure>;
+    ) => Effect.Effect<McpSchema.CallToolResult, AppsError>;
   }
 >()("lecturn/apps/services/AppToolkit") {}
 
-/** One ref-counted stdio process per (appId, projectId) (D5). */
+/** One ref-counted stdio process per (appId, projectId). */
 export class HeadlessToolHost extends Context.Service<
   HeadlessToolHost,
   {
@@ -271,32 +241,32 @@ export class HeadlessToolHost extends Context.Service<
     readonly acquire: (
       appId: AppId,
       projectId: ProjectId,
-    ) => Effect.Effect<void, AppsFailure, Scope.Scope>;
+    ) => Effect.Effect<void, AppsError, Scope.Scope>;
     readonly listTools: (
       appId: AppId,
       projectId: ProjectId,
-    ) => Effect.Effect<ReadonlyArray<McpSchema.Tool>, AppsFailure>;
+    ) => Effect.Effect<ReadonlyArray<McpSchema.Tool>, AppsError>;
     readonly call: (
       appId: AppId,
       projectId: ProjectId,
       request: AppToolCallRequest,
-    ) => Effect.Effect<McpSchema.CallToolResult, AppsFailure>;
-    /** On the call-path process, for card documents and the resources cards read (A21). */
+    ) => Effect.Effect<McpSchema.CallToolResult, AppsError>;
+    /** On the call-path process, for card documents and the resources cards read. */
     readonly readResource: (
       appId: AppId,
       projectId: ProjectId,
       uri: string,
-    ) => Effect.Effect<McpSchema.ReadResourceResult, AppsFailure>;
+    ) => Effect.Effect<McpSchema.ReadResourceResult, AppsError>;
     /** Runs the registration's `listArgs`; never the call-path command. */
     readonly refreshDefinitions: (
       appId: AppId,
       projectId: ProjectId,
-    ) => Effect.Effect<void, AppsFailure>;
-    /** Acquires the call-path process to fill an empty cache (D5, decision 11). */
+    ) => Effect.Effect<void, AppsError>;
+    /** Acquires the call-path process to fill an empty cache. */
     readonly listForEmptyCache: (
       appId: AppId,
       projectId: ProjectId,
-    ) => Effect.Effect<ReadonlyArray<McpSchema.Tool>, AppsFailure>;
+    ) => Effect.Effect<ReadonlyArray<McpSchema.Tool>, AppsError>;
     readonly stopApp: (appId: AppId) => Effect.Effect<void>;
   }
 >()("lecturn/apps/services/HeadlessToolHost") {}
@@ -306,15 +276,15 @@ export class LiveToolClient extends Context.Service<
   {
     readonly listTools: (
       lease: AppLease,
-    ) => Effect.Effect<ReadonlyArray<McpSchema.Tool>, AppsFailure>;
+    ) => Effect.Effect<ReadonlyArray<McpSchema.Tool>, AppsError>;
     readonly call: (
       lease: AppLease,
       request: AppToolCallRequest,
-    ) => Effect.Effect<McpSchema.CallToolResult, AppsFailure>;
+    ) => Effect.Effect<McpSchema.CallToolResult, AppsError>;
     readonly readResource: (
       lease: AppLease,
       uri: string,
-    ) => Effect.Effect<McpSchema.ReadResourceResult, AppsFailure>;
+    ) => Effect.Effect<McpSchema.ReadResourceResult, AppsError>;
   }
 >()("lecturn/apps/services/LiveToolClient") {}
 
@@ -324,7 +294,7 @@ export class AppToolApprovalService extends Context.Service<
     readonly request: (
       context: AppToolApprovalContext,
       info: ConnectedAppToolApprovalInfo,
-    ) => Effect.Effect<AppToolApprovalAnswer, AppsFailure>;
+    ) => Effect.Effect<AppToolApprovalAnswer, AppsError>;
   }
 >()("lecturn/apps/services/AppToolApprovalService") {}
 
@@ -334,7 +304,7 @@ export class AppHostContextStore extends Context.Service<
     readonly set: (
       target: AppsUpdateHostContextInput["target"],
       text: string,
-    ) => Effect.Effect<void, AppsFailure>;
+    ) => Effect.Effect<void, AppsError>;
     /** The thread entry comes before the project entry. */
     readonly forTurn: (
       threadId: ThreadId,
@@ -349,10 +319,10 @@ export class ThreadCopyService extends Context.Service<
     readonly export: (
       appId: AppId,
       projectIds: ReadonlyArray<ProjectId> | undefined,
-    ) => Effect.Effect<ConnectedAppThreadBundleV1, AppsFailure>;
+    ) => Effect.Effect<ConnectedAppThreadBundleV1, AppsError>;
     readonly import: (
       appId: AppId,
       bundle: ConnectedAppThreadBundleV1,
-    ) => Effect.Effect<AppsImportThreadsResult, AppsFailure>;
+    ) => Effect.Effect<AppsImportThreadsResult, AppsError>;
   }
 >()("lecturn/apps/services/ThreadCopyService") {}

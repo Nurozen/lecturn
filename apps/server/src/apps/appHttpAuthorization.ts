@@ -5,13 +5,18 @@
  * thread route's thread belongs to the subject's project. List routes (shell,
  * projects) are filtered by their handlers instead.
  */
-import { ThreadId } from "@lecturn/contracts";
+import {
+  AuthOrchestrationReadScope,
+  EnvironmentAuthorizationError,
+  ThreadId,
+  authScopeRequiredResponse,
+} from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import type { AuthenticatedSession } from "../auth/EnvironmentAuth.ts";
-import { type AppAuthorization, AppsNotImplemented } from "./services.ts";
+import type { AppAuthorization } from "./services.ts";
 import { type AppSubject, parseAppSubject } from "./subjects.ts";
 
 export type AppHttpRoute =
@@ -89,11 +94,16 @@ export const authorizeAppHttpRequest = (
   apps: Option.Option<AppAuthorization["Service"]>,
   session: AuthenticatedSession,
   url: string,
-) => {
+): Effect.Effect<void, EnvironmentAuthorizationError> => {
   if (parseAppSubject(session.subject) === null) return Effect.void;
   return Option.match(apps, {
     onNone: () =>
-      Effect.fail(new AppsNotImplemented({ service: "AppAuthorization", method: "authorizeHttp" })),
+      Effect.fail(
+        new EnvironmentAuthorizationError({
+          message: "Connected apps are not available on this server.",
+          ...authScopeRequiredResponse(AuthOrchestrationReadScope),
+        }),
+      ),
     onSome: (authorization) => authorization.authorizeHttp(session, requestPath(url)),
   });
 };

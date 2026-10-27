@@ -14,7 +14,7 @@ import type { AuthenticatedSession } from "../auth/EnvironmentAuth.ts";
 import { RPC_REQUIRED_SCOPES } from "../auth/RpcAuthorization.ts";
 import * as AppAuthorizationLayer from "./appAuthorization.ts";
 import * as AppRpcAuthorization from "./appRpcAuthorization.ts";
-import { AppAuthorization, AppsNotImplemented } from "./services.ts";
+import { AppAuthorization } from "./services.ts";
 
 const group = WsRpcGroup.omit(
   ...[...WsRpcGroup.requests.keys()].filter(
@@ -58,18 +58,17 @@ const recordingAuthorization = (calls: Array<string>) =>
     mintEmbedToken: () => Effect.die("unused"),
   });
 
-// A3's project service stub: every lookup is unfinished.
-const unfinished = () =>
-  Effect.fail(new AppsNotImplemented({ service: "AppProjectService", method: "lookup" }));
-const unfinishedAuthorization = Layer.succeed(AppAuthorization)(
+// The method allowlist alone decides server.probe, so no lookup may run.
+const unused = () => Effect.die("unused");
+const allowlistAuthorization = Layer.succeed(AppAuthorization)(
   AppAuthorizationLayer.makeWith({
-    resolveAppForProject: unfinished,
-    projectIdForThread: unfinished,
-    worktreePathForThread: unfinished,
-    canonicalPath: () => Effect.die("unused"),
-    threadIdForAttachment: unfinished,
-    projectIdForNote: unfinished,
-    issueEmbedSession: unfinished,
+    resolveAppForProject: unused,
+    projectIdForThread: unused,
+    worktreePathForThread: unused,
+    canonicalPath: unused,
+    threadIdForAttachment: unused,
+    projectIdForNote: unused,
+    issueEmbedSession: unused,
     environmentId: Effect.die("unused"),
     embedOrigin: "http://127.0.0.1:3773",
   }),
@@ -88,17 +87,17 @@ describe("app RPC authorization", () => {
 
   it.effect("denies an app session a method outside its allowlist", () =>
     Effect.gen(function* () {
-      // server.probe is on the embed list (D31), so only the app credential is outside it here.
+      // server.probe is on the embed list, so only the app credential is outside it here.
       const handled: Array<string> = [];
       const error = yield* probe(
         session("app:dev.example.app"),
-        unfinishedAuthorization,
+        allowlistAuthorization,
         handled,
       ).pipe(Effect.flip);
       expect(error).toMatchObject({ _tag: "EnvironmentAuthorizationError" });
       expect(handled).toEqual([]);
       expect(
-        yield* probe(session("embed:dev.example.app:project-1"), unfinishedAuthorization, handled),
+        yield* probe(session("embed:dev.example.app:project-1"), allowlistAuthorization, handled),
       ).toEqual({});
     }).pipe(Effect.scoped),
   );

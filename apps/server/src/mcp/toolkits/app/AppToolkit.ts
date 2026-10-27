@@ -1,6 +1,6 @@
 /**
  * A connected app's tools on Lecturn's `/mcp`, for threads in that app's
- * projects (R4). The interceptor (AppToolInterceptor.ts) reaches this through
+ * projects. The interceptor (AppToolInterceptor.ts) reaches this through
  * `AppToolSource`.
  *
  * `call` runs in a fixed order, and each later step's policy lives in its own
@@ -41,7 +41,6 @@ import {
   AppProjectService,
   AppRegistryService,
   type AppRecord,
-  AppsNotImplemented,
   type AppToolCallRequest,
   AppToolkit,
   type AppToolTier,
@@ -80,7 +79,7 @@ const visibleToModel = (tool: McpSchema.Tool) => {
 };
 
 /**
- * D6: other `_meta` keys are provider hints Lecturn has not vetted, and an
+ * Other `_meta` keys are provider hints Lecturn has not vetted, and an
  * adapter could change how it treats the tool because of one.
  */
 const presentTool = (prefix: string, tool: McpSchema.Tool): McpSchema.Tool => {
@@ -144,9 +143,6 @@ const sanitizeResult = (result: McpSchema.CallToolResult): McpSchema.CallToolRes
 
 const errorResult = (text: string) =>
   new McpSchema.CallToolResult({ isError: true, content: [{ type: "text", text }] });
-
-const notImplemented = (method: string) =>
-  new AppsNotImplemented({ service: "AppToolkit", method });
 
 export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
   extensions: AppToolkitExtensions,
@@ -442,12 +438,7 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
       });
     });
 
-  return AppToolkit.of({
-    listFor,
-    call,
-    readResource: () => Effect.fail(notImplemented("readResource")),
-    cardToolCall: () => Effect.fail(notImplemented("cardToolCall")),
-  });
+  return AppToolkit.of({ listFor, call });
 });
 
 type AppCachedHeadless = Option.Option<ReadonlyArray<McpSchema.Tool>>;

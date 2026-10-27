@@ -20,19 +20,8 @@ import {
   AppRegistryService,
   HeadlessToolHost,
   ThreadCopyService,
-  type AppsFailure,
-  type AppsNotImplemented,
 } from "./services.ts";
 import { type AppSubject, parseAppSubject } from "./subjects.ts";
-
-const unavailable = (error: AppsNotImplemented) =>
-  new AppsError({ code: "unavailable", message: error.message });
-
-const toRpcError = <A>(effect: Effect.Effect<A, AppsFailure>) =>
-  effect.pipe(Effect.catchTags({ AppsNotImplemented: (error) => Effect.fail(unavailable(error)) }));
-
-const toRpcStreamError = <A>(stream: Stream.Stream<A, AppsFailure>) =>
-  stream.pipe(Stream.catchTags({ AppsNotImplemented: (error) => Stream.fail(unavailable(error)) }));
 
 // Only for typing the handler record; ws.ts serves these through its own group.
 const AppsRpcGroup = RpcGroup.make(...AppsRpcs);
@@ -56,16 +45,16 @@ export const make = Effect.fn("AppsRpcHandlers.make")(function* (session: Authen
   const subject = parseAppSubject(session.subject);
   // `apps:host` is only ever granted to app subjects; this keeps a mis-scoped
   // session from reaching a service without an app id.
-  const asApp = <A>(run: (appId: AppId) => Effect.Effect<A, AppsFailure>) =>
+  const asApp = <A>(run: (appId: AppId) => Effect.Effect<A, AppsError>) =>
     subject?.kind === "app"
-      ? toRpcError(run(subject.appId))
+      ? run(subject.appId)
       : Effect.fail(forbidden("Only a connected app can call this method."));
-  const asEmbed = <A>(run: (embed: AppSubject) => Effect.Effect<A, AppsFailure>) =>
+  const asEmbed = <A>(run: (embed: AppSubject) => Effect.Effect<A, AppsError>) =>
     subject?.kind === "embed"
-      ? toRpcError(run(subject))
+      ? run(subject)
       : Effect.fail(forbidden("Only an embedded Lecturn view can call this method."));
 
-  // D5: definitions refresh through the app's lock-free listArgs, which spawn
+  // Definitions refresh through the app's lock-free listArgs, which spawn
   // nothing without them; never delays the answer.
   const refreshDefinitions = (appId: AppId, projectId: ProjectId) =>
     headless
@@ -88,23 +77,20 @@ export const make = Effect.fn("AppsRpcHandlers.make")(function* (session: Authen
     );
 
   return AppsRpcGroup.of({
-    [M.appsList]: () => toRpcError(registry.list),
-    [M.appsSubscribeStatus]: () => toRpcStreamError(registry.streamStatus),
+    [M.appsList]: () => registry.list,
+    [M.appsSubscribeStatus]: () => registry.streamStatus,
     [M.appsDecidePairing]: (input) =>
-      toRpcError(
-        registry
-          .decidePairing(input)
-          .pipe(
-            Effect.tap((status) =>
-              input.decision === "grant" ? refreshAfterGrant(status) : Effect.void,
-            ),
+      registry
+        .decidePairing(input)
+        .pipe(
+          Effect.tap((status) =>
+            input.decision === "grant" ? refreshAfterGrant(status) : Effect.void,
           ),
-      ),
-    [M.appsRevoke]: ({ appId }) => toRpcError(registry.revoke(appId)),
-    [M.appsSetRuntimeCeiling]: (input) => toRpcError(registry.setRuntimeCeiling(input)),
-    [M.appsDelete]: (input) => toRpcError(registry.delete(input).pipe(Effect.as({}))),
-    [M.appsSubscribeEmbedContext]: ({ projectId }) =>
-      toRpcStreamError(registry.streamEmbedContext(projectId)),
+        ),
+    [M.appsRevoke]: ({ appId }) => registry.revoke(appId),
+    [M.appsSetRuntimeCeiling]: (input) => registry.setRuntimeCeiling(input),
+    [M.appsDelete]: (input) => registry.delete(input).pipe(Effect.as({})),
+    [M.appsSubscribeEmbedContext]: ({ projectId }) => registry.streamEmbedContext(projectId),
     [M.appsCreateEmbedThread]: (input) =>
       asEmbed((embed) => projects.createEmbedThread(embed, input)),
     [M.appsSetEmbedDefaultModel]: (input) =>
@@ -126,7 +112,7 @@ export const make = Effect.fn("AppsRpcHandlers.make")(function* (session: Authen
     [M.appsListThreads]: ({ projectId }) => asApp(() => projects.listThreads(projectId)),
     [M.appsSubscribeThreads]: ({ projectId }) =>
       subject?.kind === "app"
-        ? toRpcStreamError(projects.streamThreads(projectId))
+        ? projects.streamThreads(projectId)
         : Stream.fail(forbidden("Only a connected app can call this method.")),
     [M.appsSetThreadAppData]: (input) =>
       asApp((appId) => projects.setThreadAppData(appId, input).pipe(Effect.as({}))),

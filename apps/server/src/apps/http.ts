@@ -1,5 +1,5 @@
 /**
- * Raw routes for connected-app pairing (I3). The caller is an unauthenticated
+ * Raw routes for connected-app pairing. The caller is an unauthenticated
  * local app, so every request first passes the loopback guard
  * (pairingGuard.ts); the poll secret then stands in for a session.
  */
@@ -18,7 +18,7 @@ import * as Schema from "effect/Schema";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import { type PairingRefusal, pairingPeerOf, pairingRefusal } from "./pairingGuard.ts";
-import { AppRegistryService, type AppsFailure } from "./services.ts";
+import { AppRegistryService } from "./services.ts";
 
 const POLL_SECRET_HEADER = APPS_POLL_SECRET_HEADER.toLowerCase();
 
@@ -38,10 +38,7 @@ const REFUSAL_MESSAGES: Record<PairingRefusal, string> = {
   "remote-address": "Pairing requests must come from this machine.",
 };
 
-const failureResponse = (failure: AppsFailure) => {
-  if (failure._tag === "AppsNotImplemented") {
-    return errorResponse("unavailable", failure.message, 503);
-  }
+const failureResponse = (failure: AppsError) => {
   switch (failure.code) {
     case "invalid":
       return errorResponse("invalid", failure.message, 400);
@@ -60,7 +57,7 @@ const failureResponse = (failure: AppsFailure) => {
 const guarded = <R>(
   handle: (
     request: HttpServerRequest.HttpServerRequest,
-  ) => Effect.Effect<HttpServerResponse.HttpServerResponse, AppsFailure, R>,
+  ) => Effect.Effect<HttpServerResponse.HttpServerResponse, AppsError, R>,
 ) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
@@ -70,10 +67,7 @@ const guarded = <R>(
       return errorResponse("forbidden", REFUSAL_MESSAGES[refusal], 403);
     }
     return yield* handle(request).pipe(
-      Effect.catchTags({
-        AppsError: (failure) => Effect.succeed(failureResponse(failure)),
-        AppsNotImplemented: (failure) => Effect.succeed(failureResponse(failure)),
-      }),
+      Effect.catchTags({ AppsError: (failure) => Effect.succeed(failureResponse(failure)) }),
     );
   });
 
