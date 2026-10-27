@@ -1,59 +1,27 @@
 import {
-  appGrantFingerprintSource,
-  type AppHeadlessTools,
-  type AppRuntimeCeiling,
-  type AppStatus,
-} from "@lecturn/contracts";
+  APP_STATUS_LABEL,
+  appStatusPhase,
+  type AppStatusPhase,
+} from "@lecturn/client-runtime/state/app-status";
+import type { AppHeadlessTools, AppRuntimeCeiling, AppStatus } from "@lecturn/contracts";
 
 export type ConnectedAppStatusTone = "success" | "warning" | "error" | "muted";
+
+const STATUS_TONE = {
+  running: "success",
+  closed: "muted",
+  "pairing-requested": "warning",
+  denied: "error",
+  revoked: "error",
+} as const satisfies Record<AppStatusPhase, ConnectedAppStatusTone>;
 
 export function connectedAppStatus(app: Pick<AppStatus, "state" | "live">): {
   readonly label: string;
   readonly tone: ConnectedAppStatusTone;
 } {
-  switch (app.state) {
-    case "pairing-requested":
-      return { label: "Pairing requested", tone: "warning" };
-    case "denied":
-      return { label: "Denied", tone: "error" };
-    case "revoked":
-      return { label: "Revoked", tone: "error" };
-    case "granted":
-      // The server drops an unrenewed lease at its expiry and streams the change.
-      return app.live !== null
-        ? { label: "Running", tone: "success" }
-        : { label: "Closed", tone: "muted" };
-  }
+  const phase = appStatusPhase(app);
+  return { label: APP_STATUS_LABEL[phase], tone: STATUS_TONE[phase] };
 }
-
-/**
- * Why a pending request is waiting. `renew` is a granted app asking for a new
- * credential with the command already approved; `changed` asks to run a
- * different command or frame from different origins than the user approved.
- */
-export type AppPairingKind = "new" | "changed" | "renew" | "repair";
-
-export function appPairingKind(
-  app: Pick<AppStatus, "state" | "headlessTools" | "embedOrigins" | "pendingRequest">,
-): AppPairingKind | null {
-  const request = app.pendingRequest;
-  if (request === null) return null;
-  if (app.state === "revoked" || app.state === "denied") return "repair";
-  const approved = appGrantFingerprintSource({
-    ...(app.headlessTools === null ? {} : { headlessTools: app.headlessTools }),
-    embedOrigins: app.embedOrigins,
-  });
-  const requested = appGrantFingerprintSource(request.registration);
-  if (approved !== requested) return "changed";
-  return app.state === "granted" ? "renew" : "new";
-}
-
-export const APP_PAIRING_APPROVE_LABEL: Readonly<Record<AppPairingKind, string>> = {
-  new: "Approve",
-  changed: "Approve changes",
-  renew: "Approve",
-  repair: "Re-pair",
-};
 
 export const RUNTIME_CEILING_NONE = "none";
 export type RuntimeCeilingKey = typeof RUNTIME_CEILING_NONE | NonNullable<AppRuntimeCeiling>;

@@ -1,3 +1,7 @@
+import {
+  appPairingKind,
+  type AppEnvironmentStatus,
+} from "@lecturn/client-runtime/state/app-status";
 import { ScrollView, View } from "react-native";
 
 import * as Dialog from "../../components/ui/Dialog";
@@ -7,12 +11,7 @@ import { ListSection } from "../../components/ui/ListSection";
 import { Sheet } from "../../components/ui/Sheet";
 import { AppText } from "../../components/ui/AppText";
 import { relativeTime } from "../../lib/time";
-import {
-  appPairingKind,
-  appStatusPresentation,
-  type AppCard,
-  type AppEnvironmentStatus,
-} from "./apps-tab-state";
+import { appStatusPresentation, type AppCard } from "./apps-tab-state";
 import { useConnectedAppCommands } from "./useConnectedAppCommands";
 
 function AppEnvironmentSection(props: {

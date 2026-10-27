@@ -19,7 +19,6 @@ import {
   appCardFrames,
   appCardTargetWorkspace,
   appClosedBannerState,
-  appPairingKind,
   appScreenTitle,
   appSettledShelfKey,
   appStatusPresentation,
@@ -175,40 +174,14 @@ function build(input: {
 }
 
 describe("app status", () => {
-  it("is Running only with a live lease", () => {
+  it("gives each status its card tone", () => {
     expect(appStatusPresentation(makeStatus())).toEqual({ label: "Running", tone: "running" });
-    expect(appStatusPresentation(makeStatus({ live: null }))).toEqual({
-      label: "Closed",
-      tone: "closed",
-    });
-    expect(appStatusPresentation(makeStatus({ state: "revoked", live: null })).label).toBe(
-      "Revoked",
-    );
+    expect(appStatusPresentation(makeStatus({ live: null })).tone).toBe("closed");
     expect(appStatusPresentation(makeStatus({ state: "pairing-requested" })).tone).toBe(
       "attention",
     );
-  });
-
-  it("names why a pairing request waits", () => {
-    expect(appPairingKind(makeStatus())).toBeNull();
-    expect(
-      appPairingKind(makeStatus({ state: "pairing-requested", pendingRequest: pendingRequest() })),
-    ).toBe("new");
-    expect(appPairingKind(makeStatus({ state: "revoked", pendingRequest: pendingRequest() }))).toBe(
-      "repair",
-    );
-    expect(appPairingKind(makeStatus({ pendingRequest: pendingRequest() }))).toBe("renew");
-    const changed = pendingRequest();
-    expect(
-      appPairingKind(
-        makeStatus({
-          pendingRequest: {
-            ...changed,
-            registration: { ...changed.registration, embedOrigins: ["http://localhost:5173"] },
-          },
-        }),
-      ),
-    ).toBe("changed");
+    expect(appStatusPresentation(makeStatus({ state: "denied", live: null })).tone).toBe("off");
+    expect(appStatusPresentation(makeStatus({ state: "revoked", live: null })).tone).toBe("off");
   });
 });
 

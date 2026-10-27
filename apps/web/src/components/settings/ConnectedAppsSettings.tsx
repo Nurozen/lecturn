@@ -1,3 +1,7 @@
+import {
+  APP_PAIRING_APPROVE_LABEL,
+  appPairingKind,
+} from "@lecturn/client-runtime/state/app-status";
 import { AuthAccessReadScope, type AppStatus } from "@lecturn/contracts";
 import { BlocksIcon, EllipsisIcon } from "lucide-react";
 
@@ -21,8 +25,6 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "..
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
 import {
-  APP_PAIRING_APPROVE_LABEL,
-  appPairingKind,
   connectedAppAccess,
   connectedAppStatus,
   deleteConnectedAppConfirmMessage,

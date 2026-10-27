@@ -323,6 +323,10 @@
       "types": "./src/state/apps.ts",
       "default": "./src/state/apps.ts"
     },
+    "./state/app-status": {
+      "types": "./src/state/appStatus.ts",
+      "default": "./src/state/appStatus.ts"
+    },
     "./state/source-control": {
       "types": "./src/state/sourceControl.ts",
       "default": "./src/state/sourceControl.ts"

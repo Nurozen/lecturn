@@ -1,4 +1,5 @@
-import { APP_PAIRING_APPROVE_LABEL } from "../settings/ConnectedAppsSettings.logic";
+import { APP_PAIRING_APPROVE_LABEL } from "@lecturn/client-runtime/state/app-status";
+
 import { Button } from "../ui/button";
 import type { AppsSidebarPairing } from "./AppsSidebar.logic";
 import { useConnectedAppCommands } from "./useConnectedAppCommands";

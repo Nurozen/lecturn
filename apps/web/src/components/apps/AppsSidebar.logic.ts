@@ -1,5 +1,11 @@
 import { scopedThreadKey, scopeThreadRef } from "@lecturn/client-runtime/environment";
 import { appGroups } from "@lecturn/client-runtime/state/app-projects";
+import {
+  appPairingKind,
+  primaryAppStatus,
+  type AppEnvironmentStatus,
+  type AppPairingKind,
+} from "@lecturn/client-runtime/state/app-status";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -20,9 +26,7 @@ import {
   type ThreadStatusPill,
 } from "../Sidebar.logic";
 import {
-  appPairingKind,
   connectedAppStatus,
-  type AppPairingKind,
   type ConnectedAppStatusTone,
 } from "../settings/ConnectedAppsSettings.logic";
 
@@ -50,11 +54,6 @@ export function appStatusChip(app: Pick<AppStatus, "state" | "live">): {
     description: status.label,
     variant: CHIP_VARIANT[status.tone],
   };
-}
-
-interface AppEnvironmentStatus {
-  readonly environmentId: EnvironmentId;
-  readonly app: AppStatus;
 }
 
 export interface AppsSidebarSections {
@@ -92,14 +91,6 @@ export interface AppsSidebarApp {
   /** Threads running or waiting on the user. */
   readonly workingCount: number;
   readonly workspaces: ReadonlyArray<AppsSidebarWorkspace>;
-}
-
-// An app on several machines shows the status that can do the most.
-function statusRank(app: AppStatus): number {
-  if (app.state === "granted" && app.live !== null) return 0;
-  if (app.pendingRequest !== null) return 1;
-  if (app.state === "granted") return 2;
-  return app.state === "revoked" ? 3 : 4;
 }
 
 const BUSY_STATUSES = new Set(["working", "approval", "input"]);
@@ -179,12 +170,7 @@ export function buildAppsSidebarApps(input: {
   return [...new Set<AppId>([...statusesByApp.keys(), ...groupsByApp.keys()])]
     .map((appId): AppsSidebarApp => {
       const statuses = statusesByApp.get(appId) ?? [];
-      const primary =
-        statuses.length === 0
-          ? null
-          : statuses.reduce((best, next) =>
-              statusRank(next.app) < statusRank(best.app) ? next : best,
-            );
+      const primary = primaryAppStatus(statuses);
       const spansEnvironments =
         (groupsByApp.get(appId)?.spansEnvironments ?? false) ||
         new Set(statuses.map((status) => status.environmentId)).size > 1;

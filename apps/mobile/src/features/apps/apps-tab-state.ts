@@ -1,15 +1,23 @@
 import { appGroups, type AppWorkspaceGroup } from "@lecturn/client-runtime/state/app-projects";
+import {
+  APP_STATUS_LABEL,
+  appPairingKind,
+  appStatusPhase,
+  primaryAppStatus,
+  type AppEnvironmentStatus,
+  type AppPairingKind,
+  type AppStatusPhase,
+} from "@lecturn/client-runtime/state/app-status";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@lecturn/client-runtime/state/shell";
-import {
-  appGrantFingerprintSource,
-  type AppBinding,
-  type AppEmbedContext,
-  type AppId,
-  type AppStatus,
-  type EnvironmentId,
+import type {
+  AppBinding,
+  AppEmbedContext,
+  AppId,
+  AppStatus,
+  EnvironmentId,
 } from "@lecturn/contracts";
 
 import type { HomeAppWorkspaceHeaderListItem, HomeGroupDisplayState } from "../home/homeListItems";
@@ -26,78 +34,28 @@ export interface AppStatusPresentation {
   readonly tone: AppStatusTone;
 }
 
-/** Running means a live lease: the server drops an unrenewed one and streams the change. */
+const STATUS_TONE = {
+  running: "running",
+  closed: "closed",
+  "pairing-requested": "attention",
+  denied: "off",
+  revoked: "off",
+} as const satisfies Record<AppStatusPhase, AppStatusTone>;
+
 export function appStatusPresentation(
   app: Pick<AppStatus, "state" | "live">,
 ): AppStatusPresentation {
-  switch (app.state) {
-    case "pairing-requested":
-      return { label: "Pairing requested", tone: "attention" };
-    case "denied":
-      return { label: "Denied", tone: "off" };
-    case "revoked":
-      return { label: "Revoked", tone: "off" };
-    case "granted":
-      return app.live !== null
-        ? { label: "Running", tone: "running" }
-        : { label: "Closed", tone: "closed" };
-  }
+  const phase = appStatusPhase(app);
+  return { label: APP_STATUS_LABEL[phase], tone: STATUS_TONE[phase] };
 }
 
-/**
- * Why a pending request waits, as Settings > Connected apps words it on web: `changed` asks to
- * run a different command or frame from other origins than approved, `repair` comes back after
- * a revoke or denial, and `renew` is a granted app asking for a new credential.
- */
-export type AppPairingKind = "new" | "changed" | "renew" | "repair";
-
-export function appPairingKind(
-  app: Pick<AppStatus, "state" | "headlessTools" | "embedOrigins" | "pendingRequest">,
-): AppPairingKind | null {
-  const request = app.pendingRequest;
-  if (request === null) return null;
-  if (app.state === "revoked" || app.state === "denied") return "repair";
-  const approved = appGrantFingerprintSource({
-    ...(app.headlessTools === null ? {} : { headlessTools: app.headlessTools }),
-    embedOrigins: app.embedOrigins,
-  });
-  if (approved !== appGrantFingerprintSource(request.registration)) return "changed";
-  return app.state === "granted" ? "renew" : "new";
-}
-
-export const APP_PAIRING_APPROVE_LABEL: Readonly<Record<AppPairingKind, string>> = {
-  new: "Approve",
-  changed: "Approve changes",
-  renew: "Approve",
-  repair: "Re-pair",
-};
-
+/** The pairing row's line under the app name, as Settings > Connected apps words it on web. */
 export const APP_PAIRING_DESCRIPTION: Readonly<Record<AppPairingKind, string>> = {
   new: "Wants to connect",
   changed: "Asks to run a different command",
   renew: "Asks for a new credential",
   repair: "Asks to pair again",
 };
-
-export interface AppEnvironmentStatus {
-  readonly environmentId: EnvironmentId;
-  readonly app: AppStatus;
-}
-
-// The header shows one status for an app that spans machines: the one that can do the most.
-function statusRank(app: AppStatus): number {
-  if (app.state === "granted" && app.live !== null) return 0;
-  if (app.pendingRequest !== null) return 1;
-  if (app.state === "granted") return 2;
-  return app.state === "revoked" ? 3 : 4;
-}
-
-function primaryStatus(statuses: ReadonlyArray<AppEnvironmentStatus>): AppEnvironmentStatus | null {
-  if (statuses.length === 0) return null;
-  return statuses.reduce((best, next) =>
-    statusRank(next.app) < statusRank(best.app) ? next : best,
-  );
-}
 
 /**
  * The pushed app screen's title: the name its card shows. Null until an environment reports the
@@ -112,7 +70,7 @@ export function appScreenTitle(
     const app = apps.find((candidate) => candidate.appId === appId);
     if (app !== undefined) reported.push({ environmentId, app });
   }
-  return primaryStatus(reported)?.app.name ?? null;
+  return primaryAppStatus(reported)?.app.name ?? null;
 }
 
 const BUSY_STATUSES: ReadonlySet<ThreadListV2Status> = new Set(["working", "approval", "input"]);
@@ -164,7 +122,7 @@ export function buildAppCards(input: {
   return [...appIds]
     .map((appId): AppCard => {
       const statuses = statusesByApp.get(appId) ?? [];
-      const primary = primaryStatus(statuses);
+      const primary = primaryAppStatus(statuses);
       const group = groupsByApp.get(appId);
       const workspaces = group?.workspaces ?? [];
       return {
