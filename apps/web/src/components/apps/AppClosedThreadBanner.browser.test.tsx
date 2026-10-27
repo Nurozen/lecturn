@@ -106,6 +106,21 @@ async function renderEmptyAppThread() {
 }
 
 const banner = () => container.querySelector<HTMLElement>('[data-testid="app-closed-banner"]');
+const placeholder = () =>
+  [...container.querySelectorAll<HTMLElement>("p")].find((node) =>
+    node.textContent?.includes("Send a message to start the conversation."),
+  ) ?? null;
+
+/** Names what keeps `element` from the user; it can be laid out while a transparent ancestor hides it. */
+function concealer(element: HTMLElement | null) {
+  if (element === null) return "missing";
+  for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (Number(style.opacity) === 0 || style.visibility === "hidden" || node.inert)
+      return `${node.tagName.toLowerCase()}.${node.className}`;
+  }
+  return null;
+}
 
 describe("AppClosedThreadBanner on an empty app thread", () => {
   it("heads a thread with no messages yet when its app is closed", async () => {
@@ -113,6 +128,7 @@ describe("AppClosedThreadBanner on an empty app thread", () => {
     await renderEmptyAppThread();
 
     await vi.waitFor(() => expect(banner()?.textContent).toContain("Rocket closed"));
+    await vi.waitFor(() => expect(concealer(banner())).toBeNull());
     expect(container.textContent).not.toContain("Send a message to start the conversation.");
   });
 
@@ -121,13 +137,14 @@ describe("AppClosedThreadBanner on an empty app thread", () => {
     await renderEmptyAppThread();
 
     await vi.waitFor(() => expect(banner()?.textContent).toContain("Rocket access revoked"));
+    await vi.waitFor(() => expect(concealer(banner())).toBeNull());
   });
 
   it("keeps the start placeholder while the app is running", async () => {
     embedContext = context({ live: { expiresAt: "2026-10-26T12:00:00.000Z" } });
     await renderEmptyAppThread();
 
-    expect(container.textContent).toContain("Send a message to start the conversation.");
+    await vi.waitFor(() => expect(concealer(placeholder())).toBeNull());
     expect(banner()).toBeNull();
   });
 });
