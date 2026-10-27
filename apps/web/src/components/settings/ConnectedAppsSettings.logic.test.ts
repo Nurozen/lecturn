@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   appEnvEntries,
+  connectedAppAccess,
   connectedAppActionError,
   connectedAppStatus,
   formatAppCommandLine,
@@ -24,6 +25,27 @@ describe("connectedAppStatus", () => {
     expect(tone({ state: "pairing-requested", live: null })).toBe("warning");
     expect(tone({ state: "denied", live: null })).toBe("error");
     expect(tone({ state: "revoked", live: LEASE })).toBe("error");
+  });
+});
+
+describe("connectedAppAccess", () => {
+  const app = {
+    name: "Embed Host",
+    toolPrefix: "ex",
+    headlessTools: null,
+    embedOrigins: [],
+  } satisfies Omit<Parameters<typeof connectedAppAccess>[0], "gatedTools">;
+  const gated = (gatedTools: ReadonlyArray<string>) =>
+    connectedAppAccess({ ...app, gatedTools }).find((line) => line.title === "Gated tools");
+
+  it("names gated tools as agents call them, with the verb agreeing", () => {
+    expect(gated(["window_flash"])?.detail).toBe(
+      "ex_window_flash follows the runtime ceiling below.",
+    );
+    expect(gated(["window_flash", "counter_reset"])?.detail).toBe(
+      "ex_window_flash, ex_counter_reset follow the runtime ceiling below.",
+    );
+    expect(gated([])).toBeUndefined();
   });
 });
 

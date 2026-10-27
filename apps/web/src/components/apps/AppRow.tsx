@@ -11,6 +11,7 @@ import { AppIcon } from "./AppIcon";
 import {
   appStatusChip,
   appTargetWorkspace,
+  appWorkingBadge,
   appWorkspaceOpenUrl,
   type AppsSidebarApp,
 } from "./AppsSidebar.logic";
@@ -38,7 +39,7 @@ export function AppRowAction({
             data-lecturn-hover
             aria-label={label}
             data-testid={testId}
-            className="inline-flex items-center rounded px-1 py-0.5 text-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&_svg]:size-3.5"
+            className="rounded px-1 text-xs text-muted-foreground outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&_svg]:size-3.5"
             onClick={onClick}
           />
         }
@@ -51,9 +52,8 @@ export function AppRowAction({
 }
 
 /**
- * The state chip, then a slot that shows the working count at rest and trades it for the
- * row's actions on hover or keyboard focus, so the name keeps the row's room. A touch-only
- * pointer cannot hover, so it always gets the actions. `group/app-row` must be on the row.
+ * The state chip, the working count, then the row's actions, all shown at rest as a project
+ * header's are.
  */
 export function AppRowTrailing({
   chip,
@@ -80,20 +80,31 @@ export function AppRowTrailing({
           <TooltipPopup>{chip.description}</TooltipPopup>
         </Tooltip>
       )}
-      <span className="group/app-row-slot relative flex shrink-0 items-center gap-1">
-        {working ? (
-          <span className="flex items-center group-any-hover/app-row:hidden group-has-[:focus-visible]/app-row-slot:hidden">
-            {working}
-          </span>
-        ) : null}
-        <span
-          data-testid="app-row-actions"
-          className="pointer-events-none absolute inset-y-0 right-0 flex items-center opacity-0 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-any-hover/app-row:pointer-events-auto group-any-hover/app-row:static group-any-hover/app-row:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:static pointer-coarse:opacity-100"
-        >
-          {children}
-        </span>
+      {working}
+      <span data-testid="app-row-actions" className="flex shrink-0 items-center">
+        {children}
       </span>
     </>
+  );
+}
+
+/** A count, not "N working", so the row's actions fit beside the name at the default width. */
+export function AppWorkingBadge({
+  app,
+  state,
+  testId,
+}: {
+  readonly app: AppsSidebarApp;
+  readonly state: Parameters<typeof appWorkingBadge>[1];
+  readonly testId: string;
+}) {
+  const badge = appWorkingBadge(app, state);
+  if (badge === null) return null;
+  return (
+    <Badge variant={badge.variant} size="sm" data-testid={testId}>
+      {badge.count}
+      <span className="sr-only"> working</span>
+    </Badge>
   );
 }
 
@@ -122,7 +133,7 @@ export function AppRow({
     <div
       data-thread-selection-safe
       data-testid="sidebar-app-row"
-      className="group/app-row lecturn-project-header flex items-center gap-1 pt-2"
+      className="lecturn-project-header flex items-center gap-1 pt-2"
     >
       <button
         type="button"
@@ -138,30 +149,32 @@ export function AppRow({
           className={cn("lecturn-hierarchy-chevron size-3.5", collapsed && "-rotate-90")}
         />
       </button>
-      <button
-        type="button"
-        data-lecturn-hover
-        aria-label={`Show only ${presentation.name}`}
-        className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left text-xs font-medium text-sidebar-foreground"
-        onClick={onSelect}
-      >
-        <span data-testid="sidebar-app-icon" className="contents">
-          <AppIcon iconDataUrl={presentation.iconDataUrl} />
-        </span>
-        <span className="min-w-0 truncate" data-testid="sidebar-app-name">
-          {presentation.name}
-        </span>
-      </button>
+      {/* With its actions shown at rest a long name truncates at the default width, as a
+          project's does, so the tooltip reads it whole. */}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              data-lecturn-hover
+              aria-label={`Show only ${presentation.name}`}
+              className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left text-xs font-medium text-sidebar-foreground"
+              onClick={onSelect}
+            />
+          }
+        >
+          <span data-testid="sidebar-app-icon" className="contents">
+            <AppIcon iconDataUrl={presentation.iconDataUrl} />
+          </span>
+          <span className="min-w-0 truncate" data-testid="sidebar-app-name">
+            {presentation.name}
+          </span>
+        </TooltipTrigger>
+        <TooltipPopup side="right">{presentation.name}</TooltipPopup>
+      </Tooltip>
       <AppRowTrailing
         chip={presentation.chip}
-        working={
-          app.workingCount > 0 ? (
-            <Badge variant="info" size="sm" data-testid="app-row-working">
-              {app.workingCount}
-              <span className="sr-only"> working</span>
-            </Badge>
-          ) : null
-        }
+        working={<AppWorkingBadge app={app} state={presentation.state} testId="app-row-working" />}
       >
         {target ? (
           <AppRowAction

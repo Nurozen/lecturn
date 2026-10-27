@@ -1,4 +1,4 @@
-import type { AppEmbedContext, EnvironmentId } from "@lecturn/contracts";
+import type { AppEmbedContext, AppStatus, EnvironmentId } from "@lecturn/contracts";
 
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { useAppEmbedContext, useAppStatuses } from "../../state/apps";
@@ -48,6 +48,7 @@ interface AppPresentation {
   readonly name: string;
   readonly iconDataUrl: string | null;
   readonly chip: ReturnType<typeof appStatusChip> | null;
+  readonly state: AppStatus["state"] | null;
   readonly openUrlTemplate: string | null;
 }
 
@@ -67,6 +68,7 @@ export function useAppPresentation(app: AppsSidebarApp): AppPresentation {
     name: source?.name ?? app.name,
     iconDataUrl: source?.iconDataUrl ?? null,
     chip: source === null ? null : appStatusChip(source),
+    state: source?.state ?? null,
     openUrlTemplate: source?.openUrlTemplate ?? null,
   };
 }

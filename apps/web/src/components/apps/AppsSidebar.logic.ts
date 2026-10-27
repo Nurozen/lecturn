@@ -240,6 +240,23 @@ export function appTargetWorkspace(
   return best;
 }
 
+/**
+ * The app's working count as its row and header show it. Revoking an app does not stop its
+ * threads' runs, which go on without its tools, so a revoked or denied app shows no count: it
+ * is not the app that is working. Gold while a thread waits on an approval, as Lecturn marks
+ * Pending Approval, and Working's blue otherwise.
+ */
+export function appWorkingBadge(
+  app: Pick<AppsSidebarApp, "workingCount" | "workspaces">,
+  state: AppStatus["state"] | null,
+): { readonly count: number; readonly variant: "warning" | "info" } | null {
+  if (app.workingCount === 0 || state === "revoked" || state === "denied") return null;
+  const approval = app.workspaces.some(
+    (workspace) => workspace.status?.label === "Pending Approval",
+  );
+  return { count: app.workingCount, variant: approval ? "warning" : "info" };
+}
+
 /** Where "Open in <App>" points for a workspace: the app's own scheme, at that folder. */
 export function appWorkspaceOpenUrl(
   template: string | null,

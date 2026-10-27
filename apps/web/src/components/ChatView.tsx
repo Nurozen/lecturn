@@ -180,7 +180,7 @@ import {
 import { flushSync } from "react-dom";
 import { useLocation } from "@tanstack/react-router";
 import { useEmbedPresentation } from "../embed/EmbedPresentationContext";
-import { useEmbedTimelineEntries } from "./embed/embedPendingApprovalRows";
+import { useComposerCardTimelineEntries } from "./embed/embedPendingApprovalRows";
 import { useEmbedAwareNavigate } from "../embed/embedNavigation";
 import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
 import { isMacPlatform } from "../lib/utils";
@@ -2916,7 +2916,10 @@ export default function ChatView(props: ChatViewProps) {
     nextEntries: timelineEntries,
     rememberedForActive: peekRememberedThreadTimeline<typeof timelineEntries>(activeThreadKey),
   });
-  const shownTimelineEntries = useEmbedTimelineEntries(displayedTimeline.entries, pendingApprovals);
+  const shownTimelineEntries = useComposerCardTimelineEntries(
+    displayedTimeline.entries,
+    pendingApprovals,
+  );
   const displayedTimelineKey = displayedTimeline.displayThreadKey ?? routeThreadKey;
   const paintOnlyDisplayedTimeline = isPaintOnlyThreadTimeline(
     displayedTimeline.displayThreadKey,

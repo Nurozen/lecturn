@@ -45,6 +45,9 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
 }: ComposerPendingApprovalActionsProps) {
   const embedded = useEmbedPresentation() !== null;
   const stopTurn = embedded ? onStopTurn : undefined;
+  // A host theme's --input can sit within a few levels of its warning-tinted card, so an outline
+  // drawn from it vanishes there at any width; the warning outline is Lecturn's own color.
+  const outlineVariant = embedded ? "warning-outline" : "outline";
   const primaryOptions = options.filter(
     (option) => option.decision === "decline" || option.decision === "accept",
   );
@@ -60,7 +63,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
             key={option.decision}
             // The embed pane is narrow: compact buttons leave the tool's name room to show whole.
             size={embedded ? "micro" : "xs"}
-            variant={option.decision === "accept" ? "default" : "outline"}
+            variant={option.decision === "accept" ? "default" : outlineVariant}
             disabled={disabled || isResponding || !canRespond}
             aria-description={option.warning}
             onClick={() => {
@@ -89,7 +92,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
             render={
               <Button
                 size={embedded ? "icon-micro" : "icon-xs"}
-                variant="outline"
+                variant={outlineVariant}
                 aria-label="More approval options"
                 data-testid={moreTestId}
               />

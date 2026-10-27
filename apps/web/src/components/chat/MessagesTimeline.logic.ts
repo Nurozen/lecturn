@@ -1423,11 +1423,12 @@ export function deriveMessagesTimelineRows(input: {
   /** The embed pane: see `openLatestTurnRunId`. */
   keepLatestTurnOpen?: boolean;
   /**
-   * The embed pane while its composer card asks the user to answer the turn. The card is the one
-   * place that says so, so no working, thinking or still-live row ticks beside it; calls that are
-   * really running stay live.
+   * While the composer card asks the user to answer the turn, no thinking or still-live row ticks
+   * beside it; calls that are really running stay live.
    */
   waitingOnUser?: boolean;
+  /** The embed pane, where the card is the one place that says the turn waits on the user. */
+  hideWaitingRow?: boolean;
 }): MessagesTimelineRow[] {
   const timelineEntries = timelineRowEntries(input.timelineEntries);
   const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>();
@@ -1584,7 +1585,7 @@ export function deriveMessagesTimelineRows(input: {
     activeWorkRow !== null || latestToolFailed ? activeToolEntries.map((entry) => entry.id) : [],
   );
   const appendWorkingRow = () => {
-    if (waitingOnUser) return;
+    if (waitingOnUser && input.hideWaitingRow === true) return;
     nextRows.push({
       kind: "working",
       id: "working-indicator-row",

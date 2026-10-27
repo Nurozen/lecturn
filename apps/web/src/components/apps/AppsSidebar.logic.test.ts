@@ -20,6 +20,7 @@ import {
   appStatusChip,
   appTargetWorkspace,
   appTreeGroupKey,
+  appWorkingBadge,
   appWorkspaceOpenUrl,
   buildAppsSidebarApps,
   isAppTreeGroupCollapsed,
@@ -263,6 +264,34 @@ describe("buildAppsSidebarApps", () => {
     expect(apps[0]!.workingCount).toBe(2);
     expect(apps[0]!.workspaces[0]!.status?.label).toBe("Pending Approval");
     expect(titles(apps[0]!.workspaces[0]!.sections.active)).not.toContain("archived");
+  });
+});
+
+describe("appWorkingBadge", () => {
+  const hopper = makeProject("hopper");
+  const build1 = (threads: ReadonlyArray<EnvironmentThreadShell>) =>
+    build({
+      statuses: [{ environmentId: MAC, app: makeStatus() }],
+      projects: [hopper],
+      threads,
+    })[0]!;
+
+  it("is gold while a thread waits on an approval and blue while threads only run", () => {
+    const approval = build1([
+      makeThread("working", hopper, { runtime: running }),
+      makeThread("approval", hopper, { hasPendingApprovals: true }),
+    ]);
+    expect(appWorkingBadge(approval, "granted")).toEqual({ count: 2, variant: "warning" });
+    const runs = build1([makeThread("working", hopper, { runtime: running })]);
+    expect(appWorkingBadge(runs, "granted")).toEqual({ count: 1, variant: "info" });
+    expect(appWorkingBadge(build1([makeThread("idle", hopper)]), "granted")).toBeNull();
+  });
+
+  it("is gone once the app is revoked or denied, whose threads run on without its tools", () => {
+    const runs = build1([makeThread("working", hopper, { runtime: running })]);
+    expect(appWorkingBadge(runs, "revoked")).toBeNull();
+    expect(appWorkingBadge(runs, "denied")).toBeNull();
+    expect(appWorkingBadge(runs, "pairing-requested")).not.toBeNull();
   });
 });
 

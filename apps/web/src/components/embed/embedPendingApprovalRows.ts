@@ -32,9 +32,8 @@ function heldAppToolCallIds(
 
 /**
  * Drops the timeline row of each approval still waiting for an answer, and the running row of the
- * app tool call it holds. The composer's approval card already asks it, and the narrow pane has no
- * room to ask twice; once answered the approval comes back as the resolved record and the call's
- * row returns with it.
+ * app tool call it holds, since the composer's approval card already asks it. Once answered the
+ * approval comes back as the resolved record and the call's row returns with it.
  */
 export function withoutPendingApprovalRows(
   entries: ReadonlyArray<TimelineEntry>,
@@ -52,19 +51,20 @@ export function withoutPendingApprovalRows(
   return kept.length === entries.length ? entries : kept;
 }
 
-/** The embed's timeline; full Lecturn keeps the pending row beside its composer card. */
-export function useEmbedTimelineEntries(
+/**
+ * The timeline beside the composer's approval card. A waiting app approval's own row repeats the
+ * card word for word, and the call it holds is not running but waiting on the card, so both stay
+ * out until it is answered, in full Lecturn as in the embed. Full Lecturn keeps a provider's own
+ * waiting approval row, whose card shows the command under a generic title; the embed's narrow
+ * pane has no room for either twice.
+ */
+export function useComposerCardTimelineEntries(
   entries: ReadonlyArray<TimelineEntry>,
   approvals: ReadonlyArray<ShownApproval>,
 ): ReadonlyArray<TimelineEntry> {
   const embedded = useEmbedPresentation() !== null;
-  return embedded ? withoutPendingApprovalRows(entries, approvals) : entries;
-}
-
-/**
- * In the embed a turn waiting on the composer card's answer shows no live rows; full Lecturn keeps
- * them and its working row says it is waiting.
- */
-export function useEmbedTimelineWaitingOnUser(awaitingUser: boolean): boolean {
-  return useEmbedPresentation() !== null && awaitingUser;
+  return withoutPendingApprovalRows(
+    entries,
+    embedded ? approvals : approvals.filter((approval) => approval.connectedAppTool !== undefined),
+  );
 }
