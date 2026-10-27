@@ -27,6 +27,11 @@ const STATUS_TEXT_CLASS = {
   off: "text-danger-foreground",
 } as const satisfies Record<AppStatusTone, string>;
 
+// The trailing controls draw narrower than 44pt so the status line keeps "Running" and the
+// working chip on one row at phone widths; the slop restores the 44pt touch targets.
+const ACTION_HIT_SLOP = { top: 6, bottom: 6, left: 4, right: 4 };
+const CHEVRON_HIT_SLOP = { top: 6, bottom: 6, left: 8, right: 8 };
+
 function HeaderAction(props: {
   readonly icon: AppSymbolName;
   readonly label: string;
@@ -40,9 +45,9 @@ function HeaderAction(props: {
       accessibilityLabel={props.label}
       accessibilityState={{ disabled: props.disabled }}
       disabled={props.disabled}
-      hitSlop={6}
+      hitSlop={ACTION_HIT_SLOP}
       onPress={props.onPress}
-      className="h-11 w-11 items-center justify-center"
+      className="h-11 w-9 items-center justify-center"
       style={({ pressed }) => ({ opacity: props.disabled ? 0.35 : pressed ? 0.6 : 1 })}
     >
       <SymbolView name={props.icon} size={22} tintColor={accent} />
@@ -64,7 +69,7 @@ export function AppCardHeader(props: {
 
   return (
     <View
-      className="flex-row items-center gap-3 px-3 py-3"
+      className="flex-row items-center gap-2 py-3 pl-3 pr-1"
       style={{
         backgroundColor: themeColorWithAlpha(accent, dark ? 0.035 : 0.025),
         borderTopLeftRadius: 14,
@@ -82,7 +87,7 @@ export function AppCardHeader(props: {
           .join(", ")}
         accessibilityHint="Shows the app's status and access."
         onPress={props.onOpenDetails}
-        className="min-w-0 flex-1 flex-row items-center gap-3"
+        className="min-w-0 flex-1 flex-row items-center gap-2.5"
         style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
       >
         <View
@@ -105,7 +110,7 @@ export function AppCardHeader(props: {
             {card.name}
           </AppText>
           {status !== null || card.workingCount > 0 ? (
-            <View className="flex-row flex-wrap items-center gap-x-3 gap-y-1">
+            <View className="flex-row flex-wrap items-center gap-x-2 gap-y-1">
               {status !== null ? (
                 <View className="flex-row items-center gap-1.5">
                   <View className={cn("h-2 w-2 rounded-full", STATUS_DOT_CLASS[status.tone])} />
@@ -135,30 +140,32 @@ export function AppCardHeader(props: {
           ) : null}
         </View>
       </Pressable>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={collapsed ? `Show ${card.name} threads` : `Hide ${card.name} threads`}
-        accessibilityState={{ expanded: !collapsed }}
-        hitSlop={6}
-        onPress={props.onToggle}
-        className="h-11 w-9 items-center justify-center"
-        style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-      >
-        <ThreadHierarchyChevron expanded={!collapsed} size={16} />
-      </Pressable>
-      <View className="h-8 w-px bg-border" />
-      <HeaderAction
-        icon="plus"
-        label={`New ${card.name} thread`}
-        disabled={props.onNewThread === null}
-        onPress={() => props.onNewThread?.()}
-      />
-      <HeaderAction
-        icon="arrow.up.right.square"
-        label={`Open in ${card.name}`}
-        disabled={props.onOpenInApp === null}
-        onPress={() => props.onOpenInApp?.()}
-      />
+      <View className="flex-row items-center gap-1">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={collapsed ? `Show ${card.name} threads` : `Hide ${card.name} threads`}
+          accessibilityState={{ expanded: !collapsed }}
+          hitSlop={CHEVRON_HIT_SLOP}
+          onPress={props.onToggle}
+          className="h-11 w-7 items-center justify-center"
+          style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+        >
+          <ThreadHierarchyChevron expanded={!collapsed} size={16} />
+        </Pressable>
+        <View className="h-8 w-px bg-border" />
+        <HeaderAction
+          icon="plus"
+          label={`New ${card.name} thread`}
+          disabled={props.onNewThread === null}
+          onPress={() => props.onNewThread?.()}
+        />
+        <HeaderAction
+          icon="arrow.up.right.square"
+          label={`Open in ${card.name}`}
+          disabled={props.onOpenInApp === null}
+          onPress={() => props.onOpenInApp?.()}
+        />
+      </View>
     </View>
   );
 }
