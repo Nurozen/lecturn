@@ -273,7 +273,7 @@ never conflict with:
 `apps/server/src/mcpApps/AppMcpAppRoute.ts`,
 `apps/server/src/persistence/AppRegistrations.ts`,
 `apps/server/src/persistence/Migrations/{079_AppRegistrations,080_ProjectionProjectsAppBinding}.ts`,
-`apps/server/src/orchestration-v2/Adapters/{ScriptedAdapterV2,scriptedScript}.ts`,
+`apps/server/src/orchestration-v2/Adapters/{ScriptedAdapterV2,scriptedScript,codexMcpToolResult,connectedAppAdapterHooks}.ts`,
 `apps/server/src/provider/Drivers/ScriptedDriver.ts`,
 `apps/web/src/embed/**`, `apps/web/src/components/{apps,embed}/**`,
 `apps/web/src/components/AppShell.tsx`, `apps/web/src/components/RootDocumentSync.tsx`,
@@ -345,6 +345,32 @@ line or one spread unless noted:
 - `apps/server/src/orchestration-v2/RunExecutionService.ts`:
   `...(yield* appInstructionsTurnInput(input.appThread.projectId))` in the
   turn input.
+- `apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts`, whose logic
+  lives in `connectedAppAdapterHooks.ts` and `codexMcpToolResult.ts`: their
+  imports and `mcpToolResultOutput`'s; `mcpToolResultOutput(codexMcpToolResult(item))`
+  in `codexMcpToolOutput` and `result: codexMcpToolResult(item)` beside a
+  captured card; the `appInstructions` field of `buildCodexTurnStartParams`,
+  its spread at the turn start, and `withConnectedAppInstructions(...)` around
+  the developer instructions; `...codexAppToolApprovals(mcpSession)` in the
+  `lecturn` MCP server entry; `makeCodexMcpActivation(mcpSessions, CODEX_PROVIDER)`
+  in the session, its `onStartupStatus` as the
+  `mcpServer/startupStatus/updated` handler, and `codexMcpActivation.report(...)`
+  after `thread/start` and `thread/resume`. These two are not one line:
+  `ensureThread` carries the `mcpSession` beside the start response so the
+  report gets the built provider thread's id, and `resumeThread` reads
+  `appThreadId` and `mcpSession` into locals first. Without the reports an
+  app thread never gets its "tools unavailable" notice.
+- `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts`: the
+  `connectedAppAdapterHooks.ts` import and its `claudeLecturnMcpStartupFailure`
+  re-export (tests read it there); `withConnectedAppInstructions(...)` around
+  `systemPrompt.append` and around `queryPolicyKey`, so changed app
+  instructions open a new process; the `appInstructions` field of
+  `makeClaudeQueryOptions` and its spread at the query open;
+  `makeClaudeMcpActivation(mcpSessions, CLAUDE_PROVIDER)` in
+  `makeClaudeAdapterV2`; `claudeMcpActivation.onMessage(...)` before
+  `handleSdkMessage` in the query's message loop; and
+  `claudeMcpActivation.report(...)` in `resumeThread` and in `ensureThread`,
+  which names its `makeProviderThread` result to report it.
 - `apps/server/src/mcp/McpHttpServer.ts`: `interceptAppTools(invocation, httpEffect)`
   in `makeMcpAuthMiddleware` and `toolkitRegistration(AppsToolkit, AppsHandlers.layer)`.
 - `apps/server/src/auth/EnvironmentAuth.ts`: `rejectAppAudience` with the
@@ -397,8 +423,9 @@ line or one spread unless noted:
   Apps mode. `SidebarThreadHeader.tsx` is the fork's rewrite of upstream's
   header (search row, mode switch slot, labelled scope row); take upstream's
   search behavior into it rather than taking upstream's file.
-  `AppSidebarLayout.tsx` and `LegacySidebar.tsx` carry the same
-  `sidebarMode` switch and `sidebar.toggleApps` shortcut.
+  `AppSidebarLayout.tsx` handles the `sidebar.toggleApps` shortcut and
+  shows `<StandaloneAppsSidebar />` instead of the legacy sidebar in Apps
+  mode; `LegacySidebar.tsx` has `<AppsModeSwitch />` in its fixed header.
 - `apps/web/src/components/CommandPalette.tsx`: the `useAppsPaletteItems`
   call, `actionItems.push(...appsPalette.actions)`, the `open-app` intent
   and view, and `<AppThreadBadge>` on thread items.
