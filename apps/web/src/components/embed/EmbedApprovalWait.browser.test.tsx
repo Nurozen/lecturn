@@ -365,12 +365,10 @@ describe("an approval that committed before the call it holds", () => {
 
     await render("settled");
     await expandSettledTurn();
-    expect(workRows()).toEqual([
-      "rw_design_check",
-      "rw_motor_search",
-      "rw_engine_simulate",
-      "approval",
-    ]);
+    // The expanded turn's rows mount after the list measures, not in the click's act().
+    await expect
+      .poll(workRows)
+      .toEqual(["rw_design_check", "rw_motor_search", "rw_engine_simulate", "approval"]);
   });
 
   it("still hides the held call's row in the embed", async () => {
