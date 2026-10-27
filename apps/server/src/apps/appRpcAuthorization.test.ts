@@ -65,6 +65,8 @@ const unfinishedAuthorization = Layer.succeed(AppAuthorization)(
   AppAuthorizationLayer.makeWith({
     resolveAppForProject: unfinished,
     projectIdForThread: unfinished,
+    worktreePathForThread: unfinished,
+    canonicalPath: () => Effect.die("unused"),
     threadIdForAttachment: unfinished,
     projectIdForNote: unfinished,
     issueEmbedSession: unfinished,
