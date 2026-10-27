@@ -149,6 +149,18 @@ describe("expandAppOpenUrl", () => {
       null,
     );
   });
+
+  it("opens nothing for a stored template in a script or file scheme", () => {
+    for (const template of [
+      "javascript:alert(document.cookie)//{threadId}",
+      "data:text/html,<script>alert(1)</script>{threadId}",
+      "file:///{workspaceRoot}",
+    ]) {
+      expect(expandAppOpenUrl(template, { workspaceRoot: "/w", threadId: "t" }), template).toBe(
+        null,
+      );
+    }
+  });
 });
 
 describe("promptWithAppReferences", () => {
