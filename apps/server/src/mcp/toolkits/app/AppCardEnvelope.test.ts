@@ -81,6 +81,7 @@ const okResult = new McpSchema.CallToolResult({
 
 const decodeRead = Schema.decodeUnknownSync(McpSchema.ReadResourceResult);
 const encodeResult = Schema.encodeSync(McpSchema.CallToolResult);
+const decodeResult = Schema.decodeUnknownSync(McpSchema.CallToolResult);
 
 type HeadlessRead = HeadlessToolHost["Service"]["readResource"];
 
@@ -174,6 +175,30 @@ it.effect("captures the card at call time and returns the envelope every adapter
 
         // Building the envelope also publishes the card route for McpAppRequests.
         expect(Option.isSome(yield* Ref.get(runtime.mcpAppRoute))).toBe(true);
+      }),
+  ),
+);
+
+it.effect("carries an image's bytes once, in the result's own content", () =>
+  withEnvelope(
+    () => Effect.succeed(document),
+    (wrap) =>
+      Effect.gen(function* () {
+        const data = "iVBORw0KGgoA".repeat(20_000);
+        const caption = { type: "text", text: "Iso view" };
+        const rendered = decodeResult({
+          content: [{ type: "image", data, mimeType: "image/png" }, caption],
+          structuredContent: { path: "renders/window/view.png" },
+        });
+        const wrapped = encodeResult(yield* wrap(input({ result: rendered })));
+        expect(wrapped.content).toEqual(encodeResult(rendered).content);
+        expect(readMcpAppToolOutcome(wrapped.structuredContent)).toEqual({
+          result: {
+            content: [{ type: "image", mimeType: "image/png" }, caption],
+            structuredContent: { path: "renders/window/view.png" },
+          },
+        });
+        expect(JSON.stringify(wrapped).split(data)).toHaveLength(2);
       }),
   ),
 );

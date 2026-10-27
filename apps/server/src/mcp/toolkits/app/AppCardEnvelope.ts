@@ -14,7 +14,7 @@ import {
   MCP_APP_OUTPUT_KEY,
   readMcpAppResourceUri,
 } from "@lecturn/shared/mcpApp";
-import { LECTURN_MCP_APP_SERVER } from "@lecturn/shared/toolOutput";
+import { LECTURN_MCP_APP_SERVER, omitToolOutputImageData } from "@lecturn/shared/toolOutput";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -120,8 +120,11 @@ export const make = Effect.gen(function* () {
         ...(input.result._meta === undefined ? {} : { _meta: input.result._meta }),
         structuredContent: {
           [MCP_APP_OUTPUT_KEY]: reference,
+          // No reader gets this copy's image bytes (storage keeps only the
+          // top-level ones), and carried twice an image can push the result
+          // past Codex's 1 MiB limit, where Codex keeps only its head and tail.
           ...(input.refusal === undefined
-            ? { result }
+            ? { result: omitToolOutputImageData(result) }
             : { [MCP_APP_CANCELLED_KEY]: { reason: input.refusal } }),
         },
       });
