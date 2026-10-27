@@ -248,8 +248,9 @@ describe("app RPC allowlist", () => {
     Effect.gen(function* () {
       const dispatch = (fields: Record<string, unknown>) =>
         allowed(embedSession, O.dispatchCommand, command(fields));
-      expect(yield* dispatch({ type: "message.dispatch", threadId: rocketThread })).toBe(true);
-      expect(yield* dispatch({ type: "message.dispatch", threadId: normalThread })).toBe(false);
+      const message = { type: "message.dispatch", dispatchMode: { type: "start_immediately" } };
+      expect(yield* dispatch({ ...message, threadId: rocketThread })).toBe(true);
+      expect(yield* dispatch({ ...message, threadId: normalThread })).toBe(false);
       expect(yield* dispatch({ type: "runtime-request.respond", threadId: rocketThread })).toBe(
         true,
       );
@@ -274,11 +275,53 @@ describe("app RPC allowlist", () => {
       ).toBe(false);
 
       const launch = (fields: Record<string, unknown>) =>
-        allowed(embedSession, O.launchThread, { projectId: rocketProject, ...fields });
+        allowed(embedSession, O.launchThread, {
+          projectId: rocketProject,
+          workspaceStrategy: { type: "root" },
+          ...fields,
+        });
       expect(yield* launch({ threadId: rocketThread, reuseExistingThread: true })).toBe(true);
       expect(yield* launch({ threadId: missingThread, reuseExistingThread: true })).toBe(false);
       expect(yield* launch({ threadId: rocketThread })).toBe(false);
       expect(yield* launch({})).toBe(false);
+    }),
+  );
+
+  it.effect("keeps an embed's threads on their project's own workspace", () =>
+    Effect.gen(function* () {
+      const elsewhere = { type: "existing_worktree", worktreePath: "/work/other" };
+      const newWorktree = { type: "worktree", baseRef: "main" };
+      const onBranch = { type: "root", branch: "feature" };
+
+      const launch = (workspaceStrategy: Record<string, unknown>) =>
+        allowed(embedSession, O.launchThread, {
+          projectId: rocketProject,
+          threadId: rocketThread,
+          reuseExistingThread: true,
+          workspaceStrategy,
+        });
+      expect(yield* launch({ type: "root" })).toBe(true);
+      expect(yield* launch(elsewhere)).toBe(false);
+      expect(yield* launch(newWorktree)).toBe(false);
+      expect(yield* launch(onBranch)).toBe(false);
+
+      const send = (dispatchMode: Record<string, unknown>) =>
+        allowed(
+          embedSession,
+          O.dispatchCommand,
+          command({
+            type: "message.dispatch",
+            threadId: rocketThread,
+            attachments: [],
+            dispatchMode,
+          }),
+        );
+      expect(yield* send({ type: "start_immediately" })).toBe(true);
+      expect(yield* send({ type: "defer_start" })).toBe(true);
+      expect(yield* send({ type: "defer_start", workspaceStrategy: { type: "root" } })).toBe(true);
+      expect(yield* send({ type: "defer_start", workspaceStrategy: elsewhere })).toBe(false);
+      expect(yield* send({ type: "defer_start", workspaceStrategy: newWorktree })).toBe(false);
+      expect(yield* send({ type: "defer_start", workspaceStrategy: onBranch })).toBe(false);
     }),
   );
 
@@ -436,7 +479,12 @@ describe("app RPC allowlist", () => {
         allowed(
           embedSession,
           O.dispatchCommand,
-          command({ type: "message.dispatch", threadId: rocketThread, ...fields }),
+          command({
+            type: "message.dispatch",
+            threadId: rocketThread,
+            dispatchMode: { type: "start_immediately" },
+            ...fields,
+          }),
         );
       expect(yield* send({ attachments: [attachment(createPendingAttachmentId(".png"))] })).toBe(
         true,

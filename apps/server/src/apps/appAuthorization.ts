@@ -22,6 +22,7 @@ import {
   type ChatAttachment,
   type EnvironmentId,
   type OrchestrationV2Command,
+  type OrchestrationV2ThreadLaunchWorkspaceStrategy,
   type ProjectId,
   ThreadId,
   type ThreadNoteId,
@@ -159,11 +160,26 @@ const commandReferences = (command: OrchestrationV2Command): ReadonlyArray<Acces
   }
 };
 
+/**
+ * Preparation binds the thread to whatever worktree or branch a strategy names, and provider
+ * turns and relative asset paths then run there. Unchecked, an embed could aim its thread at any
+ * directory, so it keeps the project root, as `TITLE_UPDATE_KEYS` already keeps it there.
+ */
+const staysInProjectRoot = (strategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined) =>
+  strategy === undefined || (strategy.type === "root" && strategy.branch === undefined);
+
 const commandTargets = (command: OrchestrationV2Command): ReadonlyArray<AccessTarget> | null => {
   if (!EMBED_COMMAND_TYPES.has(command.type) || !("threadId" in command)) return null;
   if (
     command.type === "thread.metadata.update" &&
     Object.keys(command).some((key) => !TITLE_UPDATE_KEYS.has(key))
+  ) {
+    return null;
+  }
+  if (
+    command.type === "message.dispatch" &&
+    command.dispatchMode.type === "defer_start" &&
+    !staysInProjectRoot(command.dispatchMode.workspaceStrategy)
   ) {
     return null;
   }
@@ -233,8 +249,12 @@ export const APP_RPC_RULES: AppRpcTable = {
   [O.searchThread]: { resolve: "threadId", ...embed },
   // Only an existing thread: any create from an embed goes through apps.createEmbedThread.
   [O.launchThread]: {
-    resolve: ({ projectId, threadId, reuseExistingThread }) =>
-      threadId === undefined || reuseExistingThread !== true ? null : [{ projectId }, { threadId }],
+    resolve: ({ projectId, threadId, reuseExistingThread, workspaceStrategy }) =>
+      threadId === undefined ||
+      reuseExistingThread !== true ||
+      !staysInProjectRoot(workspaceStrategy)
+        ? null
+        : [{ projectId }, { threadId }],
     ...embed,
   },
   [O.dispatchCommand]: { resolve: commandTargets, ...embed },
