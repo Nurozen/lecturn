@@ -367,6 +367,10 @@
       "types": "./src/state/threadRequests.ts",
       "default": "./src/state/threadRequests.ts"
     },
+    "./state/app-tool-approval-placement": {
+      "types": "./src/state/appToolApprovalPlacement.ts",
+      "default": "./src/state/appToolApprovalPlacement.ts"
+    },
     "./state/thread-workflows": {
       "types": "./src/state/threadWorkflows.ts",
       "default": "./src/state/threadWorkflows.ts"
