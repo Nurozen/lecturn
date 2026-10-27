@@ -10,8 +10,7 @@ vi.mock(import("~/assets/assetUrls"), async (original) => ({
   useAssetUrlRefresh: () => refresh,
 }));
 // The real source view highlights through a worker pool; the text it receives is what matters here.
-vi.mock(import("./ReadOnlySourcePreview"), async (original) => ({
-  ...(await original()),
+vi.mock(import("./ReadOnlySourcePreview"), () => ({
   default: ({ text }: { text: string }) => <pre>{text}</pre>,
 }));
 

@@ -831,10 +831,12 @@ describe("ChatMarkdown thread find", () => {
         ),
       );
       await frame();
-      const ranges = [...CSS.highlights.values()].flatMap((value) => [...value]);
-      expect(ranges.map((range) => (range as Range).toString())).toEqual(
-        Array.from({ length: count }, () => query),
-      );
+      await vi.waitFor(() => {
+        const ranges = [...CSS.highlights.values()].flatMap((value) => [...value]);
+        expect(ranges.map((range) => (range as Range).toString())).toEqual(
+          Array.from({ length: count }, () => query),
+        );
+      });
       const segments =
         searchableMessageSegments(
           { role: user ? "user" : "assistant", text, streaming: false },

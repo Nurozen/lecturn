@@ -31,9 +31,10 @@ const config: DecisionUsageConfig = {
 };
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
+    // Start the pool after setting the clock so its idle timers do not replay decades.
     yield* TestClock.setTime(baseTime);
-    return yield* effect;
-  }).pipe(Effect.provide(database));
+    return yield* effect.pipe(Effect.provide(database));
+  });
 const fixture = Effect.fn("usageTest.fixture")(function* (
   overrides: Partial<DecisionUsageConfig> = {},
 ) {

@@ -341,13 +341,15 @@ export function makeBillingService(
       sub.trial_start !== null && card !== null
         ? yield* provider(() => stripe.hasSuccessfulCardSetup(a.customer_id!, card.id))
         : false;
+    const cancelAt =
+      sub.cancel_at ?? (sub.cancel_at_period_end ? sub.items.data[0]!.current_period_end : null);
     const access = computeConnectEntitlement(
       {
         status: sub.status,
         paidThrough,
         trialEnd: sub.trial_end,
         trialCardConfirmed,
-        cancelAt: sub.cancel_at,
+        cancelAt,
         endedAt: sub.ended_at,
         suspended: suspended || !!refundedCurrentTerm,
       },
@@ -360,7 +362,7 @@ export function makeBillingService(
     a.state.currentPeriodEnd = sub.items.data[0]!.current_period_end;
     a.state.trialEnd = sub.trial_end;
     a.state.cancelAtPeriodEnd = sub.cancel_at_period_end;
-    a.state.cancelAt = sub.cancel_at;
+    a.state.cancelAt = cancelAt;
     const windowStart = connectedAccessWindowStart(
       settled,
       trialCardConfirmed && sub.trial_start !== null && sub.trial_end !== null

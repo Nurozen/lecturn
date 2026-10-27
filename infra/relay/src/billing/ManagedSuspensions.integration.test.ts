@@ -1,10 +1,12 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer, Redacted, Schema } from "effect";
+import { TestClock } from "effect/testing";
 import * as PgClient from "@effect/sql-pg/PgClient";
 import { RelayDb } from "../db.ts";
 import { BillingError, operationId } from "./BillingStore.ts";
 import { makeManagedSuspensions } from "./ManagedSuspensions.ts";
 import { make as makeReservations } from "./ManagedReservations.ts";
+import { computeConnectEntitlement } from "./ConnectEntitlements.ts";
 const databaseUrl = process.env.BILLING_TEST_DATABASE_URL;
 const database = Layer.effect(
   RelayDb,
@@ -28,6 +30,69 @@ const fixture = Effect.gen(function* () {
 });
 const run = <A, E>(effect: Effect.Effect<A, E, RelayDb>) => effect.pipe(Effect.provide(database));
 describe.skipIf(!databaseUrl)("ManagedSuspensions PostgreSQL", () => {
+  it.effect("does not retire a pre-renewal projection until its fixed grace deadline", () =>
+    run(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(999_000);
+        const { sql, id } = yield* fixture;
+        const access = computeConnectEntitlement(
+          {
+            status: "active",
+            paidThrough: 1000,
+            trialEnd: null,
+            trialCardConfirmed: false,
+            cancelAt: null,
+            endedAt: null,
+            suspended: false,
+          },
+          999,
+          60,
+        );
+        yield* sql`UPDATE relay_billing_accounts SET state=${encodeJson({ status: "active", accessUntil: access.validUntil })}::jsonb,updated_at=999 WHERE user_id=${id}`;
+        const calls: string[] = [];
+        const worker = yield* makeManagedSuspensions({
+          enabled: () => Effect.succeed(true),
+          enforcementUsers: [id],
+          provider: {
+            rotate: () =>
+              Effect.sync(() => {
+                calls.push("rotate");
+              }),
+            disconnect: () =>
+              Effect.sync(() => {
+                calls.push("disconnect");
+              }),
+            remove: () =>
+              Effect.sync(() => {
+                calls.push("delete");
+              }),
+          },
+        });
+        yield* TestClock.setTime(1_001_000);
+        yield* worker.drain();
+        expect(calls).toEqual([]);
+        expect(
+          yield* sql`SELECT tunnel_id FROM relay_managed_suspensions WHERE tunnel_id=${id}`,
+        ).toHaveLength(0);
+        expect(
+          (yield* sql<{
+            tunnel_id: string | null;
+          }>`SELECT tunnel_id FROM relay_managed_endpoint_allocations WHERE user_id=${id}`)[0]!
+            .tunnel_id,
+        ).toBe(id);
+
+        yield* TestClock.setTime(1_060_000);
+        yield* worker.drain();
+        expect(calls).toEqual(["rotate", "disconnect", "delete"]);
+        expect(
+          (yield* sql<{
+            tunnel_id: string | null;
+          }>`SELECT tunnel_id FROM relay_managed_endpoint_allocations WHERE user_id=${id}`)[0]!
+            .tunnel_id,
+        ).toBeNull();
+      }),
+    ),
+  );
   it.effect(
     "finishing old teardown cannot clear a replacement tunnel or its newer quota generation",
     () =>

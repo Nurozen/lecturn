@@ -4,7 +4,7 @@ import { Effect, Layer, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import { RelayDb } from "../db.ts";
 import { makeBillingStore, operationId } from "./BillingStore.ts";
-import { billingOperationsMigration, makeBillingOperations } from "./BillingOperations.ts";
+import { makeBillingOperations } from "./BillingOperations.ts";
 
 const url = process.env.BILLING_TEST_DATABASE_URL;
 const database = Layer.effect(
@@ -21,7 +21,6 @@ describe.skipIf(!url)("billing operations PostgreSQL", () => {
     Effect.gen(function* () {
       yield* TestClock.setTime(100_000);
       const { $client: sql } = yield* RelayDb;
-      yield* sql.unsafe(billingOperationsMigration);
       const store = yield* makeBillingStore;
       const user = `identity-${yield* operationId}`;
       const kept = `${user}-kept`;
@@ -59,7 +58,6 @@ describe.skipIf(!url)("billing operations PostgreSQL", () => {
         const now = 100 * 86400;
         yield* TestClock.setTime(now * 1000);
         const { $client: sql } = yield* RelayDb;
-        yield* sql.unsafe(billingOperationsMigration);
         const store = yield* makeBillingStore;
         const id = `retention-${yield* operationId}`;
         const ops = yield* makeBillingOperations({
@@ -102,10 +100,14 @@ describe.skipIf(!url)("billing operations PostgreSQL", () => {
         ).toBe(1);
         const before = (yield* sql<{
           epoch: number;
-        }>`SELECT epoch FROM relay_billing_enforcement_control WHERE id=1`)[0]!;
+        }>`SELECT epoch::float8 AS epoch FROM relay_billing_enforcement_control WHERE id=1`)[0]!;
         const off = yield* ops.suspensionControl(false, "Test emergency rollback");
         expect(off.enabled).toBe(false);
         expect(off.epoch).toBe(before.epoch + 1);
+        expect(JSON.parse(JSON.stringify(off))).toEqual({
+          enabled: false,
+          epoch: before.epoch + 1,
+        });
         expect(
           (yield* sql`SELECT id FROM relay_billing_operator_audit WHERE operation='suspension-control' AND target='off'`)
             .length,

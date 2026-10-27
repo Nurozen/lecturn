@@ -6,6 +6,8 @@ export interface ProviderReplayGate {
   readonly hasReached: (label: string) => boolean;
   readonly release: (label: string) => boolean;
   readonly releaseAll: () => void;
+  readonly recordProcessed: (label: string) => void;
+  readonly waitForProcessed: (label: string) => Promise<void>;
   /**
    * Replay runs on a test clock, so a scenario advances it by exactly that on
    * the receipt.
@@ -50,8 +52,25 @@ export function makeProviderReplayGate(labels: ReadonlyArray<string>): ProviderR
 
   const finishArmed: Array<Duration.Input> = [];
   const finishArmedWaiters: Array<() => void> = [];
+  const processed = new Set<string>();
+  const processedWaiters = new Map<string, Array<() => void>>();
 
   return {
+    recordProcessed: (label) => {
+      processed.add(label);
+      for (const wake of processedWaiters.get(label) ?? []) wake();
+      processedWaiters.delete(label);
+    },
+    waitForProcessed: (label) =>
+      new Promise((resolve) => {
+        if (processed.has(label)) {
+          resolve();
+          return;
+        }
+        const waiters = processedWaiters.get(label) ?? [];
+        waiters.push(resolve);
+        processedWaiters.set(label, waiters);
+      }),
     recordFinishArmed: (debounce) => {
       finishArmed.push(debounce);
       for (const wake of finishArmedWaiters.splice(0)) wake();

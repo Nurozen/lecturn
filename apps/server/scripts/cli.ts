@@ -326,7 +326,12 @@ export const buildPublishManifest = (input: PublishManifestInput): PackageJson =
   const workspaceCatalog = input.workspaceConfig.catalog ?? {};
   const workspaceOverrides = input.workspaceConfig.overrides ?? {};
   const dependencies = resolveCatalogDependencies(
-    serverPackageJson.dependencies,
+    // Workspace modules are bundled into dist; consumers cannot install these private packages.
+    Object.fromEntries(
+      Object.entries(serverPackageJson.dependencies).filter(
+        ([, spec]) => !spec.startsWith("workspace:"),
+      ),
+    ),
     workspaceCatalog,
     "apps/server",
   );

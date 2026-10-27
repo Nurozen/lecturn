@@ -23,6 +23,10 @@ import { ExtensionAllowance, type ContextualJudgment } from "@lecturn/contracts"
 const url = process.env.BILLING_TEST_DATABASE_URL;
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const validAllowance = Schema.is(ExtensionAllowance);
+// PgClient uses the extended protocol, which accepts only one statement per query.
+// Execute each migration as one block so function bodies retain their semicolons.
+const migrate = (sql: RelayDb["Service"]["$client"], source: string) =>
+  sql.unsafe(`DO $migration$ BEGIN EXECUTE '${source.replaceAll("'", "''")}'; END $migration$`);
 const database = Layer.unwrap(
   Effect.sync(() => {
     const schema = "extensions_suite_" + NodeCrypto.randomUUID().replaceAll("-", "");
@@ -41,7 +45,7 @@ const database = Layer.unwrap(
         const entries = yield* fs.readDirectory(migrations);
         for (const entry of entries.toSorted()) {
           if (!/^\d+_/.test(entry)) continue;
-          yield* sql.unsafe(yield* fs.readFileString(`${migrations}${entry}/migration.sql`));
+          yield* migrate(sql, yield* fs.readFileString(`${migrations}${entry}/migration.sql`));
         }
         return { $client: sql } as RelayDb["Service"];
       }),
@@ -866,17 +870,17 @@ describe.skipIf(!url)("Extensions PostgreSQL consent and shared ledger", () => {
               yield* sql.unsafe(`CREATE SCHEMA ${schema}`);
               yield* sql.unsafe(`SET LOCAL search_path TO ${schema}`);
               yield* sql`CREATE TABLE relay_billing_accounts(user_id text PRIMARY KEY)`;
-              yield* sql.unsafe(legacyFundingSql);
-              yield* sql.unsafe(legacyUsageSql);
+              yield* migrate(sql, legacyFundingSql);
+              yield* migrate(sql, legacyUsageSql);
               yield* sql`INSERT INTO relay_decision_funding(environment_id,public_key,generation,payer_id,state) VALUES ('old-host','old-key',7,'old-payer','active')`;
               yield* sql`INSERT INTO relay_decision_usage_windows(payer_id,window_start,window_end,used_input_tokens,reserved_input_tokens) VALUES ('old-payer',100,200,123,456)`;
               yield* sql`INSERT INTO relay_decision_usage_requests(payer_id,request_id,environment_id,public_key,credential_id,funding_generation,run_id,fingerprint,model,template_version,window_start,window_end,created_at,hold_tokens,debited_input_tokens) VALUES ('old-payer','old-request','old-host','old-key','old-credential',7,'old-run','old-fingerprint','extensions-v1','decisions-v1',100,200,100,456,123)`;
-              yield* sql.unsafe(extensionMigrationSql);
+              yield* migrate(sql, extensionMigrationSql);
               expect(
                 (yield* sql<{
                   feature_id: string;
                   generation: number;
-                }>`SELECT feature_id,generation FROM relay_decision_funding`)[0],
+                }>`SELECT feature_id,generation::float8 AS generation FROM relay_decision_funding`)[0],
               ).toEqual({ feature_id: "decisions", generation: 7 });
               expect(
                 (yield* sql<{
