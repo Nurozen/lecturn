@@ -26,13 +26,34 @@ need, and `lecturn-pack.json`, which lists the install settings your package man
 (hoisted `node_modules`, the patched dependencies, allowed build scripts) and notes for packaging
 into `app.asar`. Add both tarballs as dependencies and apply those settings.
 
+### Build
+
+- Main process: leave `@lecturn/embed` and `lecturn` out of your bundle. `mountEmbedView` loads
+  the view's preload, `electron-preload.cjs`, from beside its own module, and the sidecar runs
+  `lecturn/dist/bin.mjs` from disk.
+- Your window's preload: a sandboxed preload cannot load ES modules or resolve package imports, so
+  bundle it, `@lecturn/embed/renderer` included, into one CommonJS file, with `electron` left
+  external.
+- Your page: a sandboxed `file://` page loads one classic script, so bundle it, with
+  `@lecturn/embed/renderer`, into a single IIFE.
+
+[`examples/embed-host/vite.config.ts`](../../examples/embed-host/vite.config.ts) builds all three.
+
 ## Electron in a few lines
 
 ```ts
 // main process
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import { app } from "electron";
 import { connect } from "@lecturn/embed/node";
 import { mountEmbedView } from "@lecturn/embed/electron";
 
+const require = createRequire(import.meta.url);
+// An installed Electron app ships no separate Node, so its tools run on Electron in Node mode.
+const bundledNode = process.execPath;
+
+await app.whenReady();
 const lecturn = await connect({
   registration: {
     appId: "dev.example.embedhost",
@@ -45,23 +66,21 @@ const lecturn = await connect({
       command: bundledNode,
       args: [counterServerPath, "--root", "{workspaceRoot}"],
       listArgs: [counterServerPath, "--list-tools"],
+      env: { ELECTRON_RUN_AS_NODE: "1" },
       cwd: "{workspaceRoot}",
     },
     liveTools: true,
     gatedTools: ["window_flash"],
     instructions: "You can increment a counter and flash the host window.",
   },
-  lecturnHome: process.env.LECTURN_HOME, // tests pass a temp dir
   sidecar: {
     serverEntry: require.resolve("lecturn/dist/bin.mjs"),
     baseDir: join(app.getPath("userData"), "lecturn"),
-    nodePath: bundledNode,
   },
-  signal: quitting.signal,
 });
 const { projectId } = await lecturn.ensureWorkspace(workspaceRoot, "ws-a");
 const live = await startLiveMcp(); // your own HTTP MCP server, serving window_flash
-await lecturn.setLiveTools({ url: live.url, bearer: live.token });
+await lecturn.setLiveTools({ url: live.url, bearer: live.bearer });
 
 const embed = mountEmbedView(win, {
   connection: lecturn,
@@ -70,6 +89,17 @@ const embed = mountEmbedView(win, {
   bounds: paneRect,
 });
 embed.on("lecturn/navigate", ({ ref }) => focus(ref));
+
+// Electron does not wait for promises in before-quit, so quit again once both have closed.
+let closed = false;
+app.on("before-quit", (event) => {
+  if (closed) return;
+  event.preventDefault();
+  void Promise.allSettled([lecturn.close(), live.close()]).finally(() => {
+    closed = true;
+    app.quit();
+  });
+});
 ```
 
 ```ts
@@ -87,23 +117,33 @@ sendBridge({
 ```
 
 `reportPaneRect` keeps the view over an element of your page, so you never compute bounds yourself
-after the first mount. The view runs Lecturn's web app with its own preload, partition and sandbox;
-`webPreferences` can tune the rest but not those.
+after the first mount. A host that lays out the pane in main instead calls `embed.setBounds(rect)`
+on each change. Mount with `threadId` to open the view at a thread. `embed.setVisible(false)` hides
+the view and keeps it loaded; `embed.destroy()` removes it. The view also goes away when its window
+closes; if you veto a window's `close`, add that listener before mounting.
+
+The view runs Lecturn's web app with its own preload, partition and sandbox; `webPreferences` can
+tune the rest but not those.
 
 [`examples/embed-host`](../../examples/embed-host) is a complete host built this way.
 
 ## Registration
 
-- `appId` is reverse-DNS (`dev.example.embedhost`). `toolPrefix` names your tools to agents as
+- `appId` is lowercase reverse-DNS (`dev.example.embedhost`), at most 128 characters. `name` is at
+  most 64 characters, and `iconDataUrl` is a base64 PNG data URL (`data:image/png;base64,…`) of
+  at most 64 KB.
+- `toolPrefix` is 2 to 12 lowercase letters and digits. Agents see your tools as
   `<prefix>_<tool>`, so two apps never collide.
-- `refPrefixes` mark references to your app's objects, such as `ex:item/42`. They show as chips in
-  messages, and clicking one sends `lecturn/navigate` back to you.
-- `openUrlTemplate` is how Lecturn's **Open in** button reopens your app at a thread.
+- `refPrefixes` (1 to 8) mark references to your app's objects, such as `ex:item/42`. Each ends in
+  `:` and is at most 16 characters. They show as chips in messages, and clicking one sends
+  `lecturn/navigate` back to you.
+- `openUrlTemplate` is how Lecturn's **Open in** button reopens your app (see below).
 - `headlessTools` is an MCP server over stdio that Lecturn starts on demand, one process per
-  workspace, with `{workspaceRoot}` substituted in `args`, `listArgs`, `env` and `cwd`. It works
-  while your app is closed.
+  workspace, with `{workspaceRoot}` substituted in `args`, `listArgs`, `env` and `cwd`. `command`
+  is an absolute path and `cwd` is always `{workspaceRoot}`. It works while your app is closed.
 - `liveTools: true` means your running app serves more tools over HTTP (see Live tools).
-- `gatedTools` always need approval, subject to the thread's permission mode.
+- `gatedTools` ask the user before each call in Supervised and Auto-accept edits threads, and run
+  without asking in Auto and Full access. With the per-app Read-only ceiling, they are refused.
 - `embedOrigins` lists the loopback origins allowed to frame Lecturn, with their port
   (`http://127.0.0.1:5173`) or a port wildcard (`http://127.0.0.1:*`). Only iframe hosts need it.
 - `instructions` (at most 8 KB) reach the agent on every thread of your app.
@@ -125,6 +165,16 @@ tool process owns the workspace.
 Without `listArgs`, Lecturn learns your tools by starting the full tool server the first time a
 thread lists tools. Codex gives MCP servers only 10 seconds to start, so a slow start can leave a
 thread without your tools.
+
+### Handle `openUrlTemplate`
+
+Lecturn fills `{workspaceRoot}` and `{threadId}` URL-encoded, and leaves `{threadId}` empty when it
+opens a workspace rather than a thread. Register your scheme with
+`app.setAsDefaultProtocolClient("embedhost")` and take the URL from `open-url` on macOS (listen
+before `ready` to catch the one that launched you), or from the command line (`process.argv` at
+launch, `second-instance` after) on Windows and Linux. Then get the project from
+`ensureWorkspace(workspaceRoot, title)` and call `embed.openThread(threadId)` on a view of that
+project, `embed.retarget(projectId, threadId)` on one showing another, or mount with `threadId`.
 
 ## Tool calls
 
@@ -157,10 +207,13 @@ cannot be raised.
 await lecturn.setLiveTools({ url: "http://127.0.0.1:43123/mcp", bearer });
 ```
 
-Your running app serves these as a Streamable HTTP MCP server on loopback, checking the bearer.
-`setLiveTools` publishes the endpoint and renews a 60-second lease every 20 seconds; Lecturn lists
-the tools again each time a lease starts. If your app stops renewing, or calls `clearLiveTools()`,
-live calls answer that the app is closed, and Lecturn shows that on your threads.
+Your running app serves these from any Streamable HTTP MCP server on a loopback URL with an
+explicit port. Lecturn sends `Authorization: Bearer <bearer>` on every request; refuse anything
+else, and refuse a foreign `Host` header, since a web page can reach loopback through a rebinding
+DNS name. `setLiveTools` publishes the endpoint and renews a 60-second lease every 20 seconds;
+Lecturn lists the tools again each time a lease starts. If your app stops renewing, or calls
+`clearLiveTools()`, live calls answer that the app is closed, and Lecturn shows that on your
+threads.
 
 ## Theming
 
@@ -201,7 +254,8 @@ later. `styles.variables` sets Lecturn's own CSS variables, and unknown names ar
 ```ts
 import { mountEmbed } from "@lecturn/embed/browser";
 
-const { url, token } = await fetchTarget(); // your server calls lecturn.embedTarget(projectId)
+// Your server mints the target with lecturn.embedTarget(projectId, threadId?).
+const { url, token } = await fetchTarget();
 const embed = mountEmbed(container, {
   url,
   token,
@@ -211,7 +265,20 @@ const embed = mountEmbed(container, {
 ```
 
 The page's origin must be in `embedOrigins`; the view answers no other parent. Embed tokens last
-at most 15 minutes, and the view asks `onTokenRefresh` for a new one ahead of expiry.
+at most 15 minutes, and the view asks `onTokenRefresh` for a new one ahead of expiry. The bridge
+sends and receives the same messages as the Electron one, with these differences:
+
+- `embed.retarget({ url, token })` loads a target your server minted in the same frame, where
+  Electron's `retarget(projectId, threadId)` mints its own.
+- The page has no connection, so it does not follow a live switch by itself. Subscribe to
+  `lecturn.status` on your server, and on each `mode` event mint a target for the same workspace
+  root and thread (through `projectIdsByWorkspaceRoot` and `threadIdMap`), send it to the page,
+  and pass it to `retarget`. Point `onTokenRefresh` at the new project id too.
+- `onOpenLink(url)` (a mount option) opens the links the view sends out, such as a card's links
+  and **Open in Lecturn**. Without it, `http(s)` and `lecturn://apps` links open in a new tab;
+  with it, you receive every URL, so check the scheme.
+- `embed.setVisible(false)` hides the iframe, and `embed.destroy()` removes it and stops
+  listening.
 
 ## The sidecar and the live switch
 
@@ -221,11 +288,17 @@ your app works before the user approves it or when Lecturn is not running. `conn
 `"user-server"` or `"sidecar"`.
 
 While on the sidecar, `connect()` checks every 2 seconds for the user's Lecturn and asks it to pair.
-When the user approves, the connection switches over without a restart: it recreates your
-workspaces, copies the sidecar's threads, moves the live lease, and reloads mounted views at the
-copied threads. The sidecar's originals then show read-only as **Continued in Lecturn**. If the
-user's Lecturn goes away, the connection switches back. After the user denies pairing,
-`requestPairingAgain()` asks again.
+Every Lecturn client signed in to it shows the request, and the user can also answer under
+**Settings → Connected apps**. When the user approves, the connection switches over without a
+restart: it recreates your workspaces, copies the sidecar's threads, moves the live lease, and
+reloads mounted views at the copied threads. The sidecar's originals then show read-only as
+**Continued in Lecturn**. If the user's Lecturn goes away, the connection switches back. After the
+user denies pairing, `requestPairingAgain()` asks again.
+
+`connect()` looks for the user's Lecturn in `lecturnHome`, which defaults to `LECTURN_HOME`, then
+`~/.lecturn`. To try pairing without touching your own Lecturn, start a development one with its
+own home (`vp run dev --home-dir /tmp/lecturn-dev` in a Lecturn checkout), run your app with
+`LECTURN_HOME=/tmp/lecturn-dev`, and approve the request in that Lecturn's web client.
 
 `lecturn.status.subscribe(listener)` reports both: `{ type: "status", mode, pairing, app }`, and
 on each switch `{ type: "mode", mode, environmentId, projectIdsByWorkspaceRoot, threadIdMap }`.
@@ -237,23 +310,31 @@ mounted with `target` (an `EmbedTargetSource`, for hosts whose `connect()` runs 
 
 ## Host lifetime
 
-The sidecar never outlives the process that started it:
+The sidecar never outlives the process that started it.
+
+Close the connection before your app exits, as the quit handler above does. `close()` clears your
+live leases, so Lecturn shows the app as closed at once rather than when the lease lapses, and
+stops a sidecar this process started. Calling it more than once is safe.
+
+To quit while `connect()` is still starting:
 
 - Pass your app's lifetime as `signal`. Aborting it while `connect()` is still starting the sidecar
   stops that process, and `connect()` rejects with the signal's reason only once the process has
   exited. Aborting it later closes the connection.
-- The promise `connect()` returns also has `close()`, which works before it settles. Before ready,
-  it stops a starting sidecar and resolves once the process has exited; after ready, it is the
-  connection's `close()`.
-- If your process exits without closing, crashes included, the sidecar notices and shuts itself
-  down: it watches a pipe that only your process holds, and its parent process.
+- Or call `close()` on the promise `connect()` returns, which works before it settles. Before
+  ready, it stops a starting sidecar and resolves once the process has exited; after ready, it is
+  the connection's `close()`.
 
 ```ts
 const quitting = new AbortController();
-app.on("before-quit", () => quitting.abort());
-const connection = await connect({ registration, sidecar, signal: quitting.signal });
+app.once("before-quit", () => quitting.abort());
+const lecturn = await connect({ registration, sidecar, signal: quitting.signal });
 ```
+
+If your process exits without closing, crashes included, the sidecar notices and shuts itself
+down: it watches a pipe that only your process holds, and its parent process.
 
 A sidecar that another process of your app already runs in the same `baseDir` is attached to, not
 started, and is left running when this process closes. `nodePath` defaults to your own binary run
-as Node (`ELECTRON_RUN_AS_NODE=1` under Electron).
+as Node (`ELECTRON_RUN_AS_NODE=1` under Electron); set it only to use a separate Node binary,
+since an explicit `nodePath` does not get that variable.
