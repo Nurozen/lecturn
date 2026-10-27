@@ -209,8 +209,9 @@ describe("the embed's approval card in a 320 px pane", () => {
     await render(320);
     const m = measure();
     expectActionsOnTitleRow(m);
-    // Truncation starts just under the 352 px pane: most of the name still shows.
-    expect(m.title.clientWidth).toBeGreaterThanOrEqual(m.title.scrollWidth * 0.85);
+    // The whole name fits the 352 px pane, so when only the name gives way it loses at most
+    // the 32 px the pane did. The name's width depends on the platform's fallback font.
+    expect(m.title.clientWidth).toBeGreaterThanOrEqual(m.title.scrollWidth - (352 - 320));
   });
 });
 
