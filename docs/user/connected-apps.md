@@ -20,6 +20,10 @@ Only a program on the computer that runs Lecturn can ask to connect.
 If the app later changes that command, its environment or those addresses, its access pauses until
 you approve the change.
 
+A request you do not answer expires after 10 minutes and leaves the app as it was: an app you never
+approved leaves the list, and a paused app resumes with what you approved before. A running app
+asks again.
+
 An app can also run a private copy of Lecturn for itself, for example before you approve it or
 when Lecturn is not running. Once you approve, the chats it held there are copied into your
 Lecturn, and the app shows each original as **Continued in Lecturn**.

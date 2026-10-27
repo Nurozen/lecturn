@@ -109,15 +109,16 @@ export const makeRegistryLayer = (
     Layer.provide(ServerSecretStore.layer),
     Layer.provideMerge(ServerEnvironment.layerIdentity),
   );
-  const layer = AppRegistryServiceLayer.layer.pipe(
+  /** Over the caller's database, so a test can stop the server and start it again on the same data. */
+  const layerOverDatabase = AppRegistryServiceLayer.layer.pipe(
     Layer.provideMerge(AppLeaseServiceLayer.layer),
     Layer.provideMerge(sessions),
     Layer.provide(liveClient),
     Layer.provide(projects),
-    Layer.provide(SqlitePersistence.layerMemory),
     Layer.provide(config),
   );
-  return { layer, liveListCalls, deletedProjectsOf };
+  const layer = layerOverDatabase.pipe(Layer.provide(SqlitePersistence.layerMemory));
+  return { layer, layerOverDatabase, liveListCalls, deletedProjectsOf };
 };
 
 export const sidecar = (overrides: Record<string, unknown> = {}): AppSidecarBootstrap => ({

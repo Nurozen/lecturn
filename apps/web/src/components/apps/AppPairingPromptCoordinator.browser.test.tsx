@@ -239,6 +239,24 @@ describe("AppPairingPromptCoordinator", () => {
     await vi.waitFor(() => expect(prompt()).toBeNull());
   });
 
+  it("goes away when a request lapses unanswered, whatever the app falls back to", async () => {
+    // A denied app keeps its state while it asks again, and after the request lapses.
+    state.apps = [pendingApp({ state: "denied" })];
+    await render();
+    expect(prompt()?.textContent).toContain("Pair Rocket again?");
+    state.apps = [pendingApp({ state: "denied", pendingRequest: null })];
+    await render();
+    await vi.waitFor(() => expect(prompt()).toBeNull());
+
+    // A new app's lapsed request removes the app.
+    state.apps = [pendingApp()];
+    await render();
+    expect(prompt()).not.toBeNull();
+    state.apps = [];
+    await render();
+    await vi.waitFor(() => expect(prompt()).toBeNull());
+  });
+
   it("stays hidden for a client without access:write", async () => {
     state.apps = [pendingApp()];
     state.canManage = false;

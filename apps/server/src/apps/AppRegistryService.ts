@@ -43,6 +43,9 @@ import {
 import { parseAppSubject } from "./subjects.ts";
 
 const PAIRING_REQUEST_TTL = Duration.minutes(10);
+// Timers can fire a few milliseconds early; this far past expiry every clock
+// reading agrees the request has lapsed.
+const LAPSE_GRACE = Duration.seconds(1);
 
 /**
  * First segments of Lecturn's own MCP tool names, plus namespaces Lecturn or
@@ -226,6 +229,28 @@ export const make = Effect.gen(function* () {
       Effect.asVoid,
     );
 
+  /**
+   * A request nobody answered leaves the app as the user last decided it:
+   * `pairing-requested` holds only while a request waits, so no client shows
+   * a prompt it cannot answer.
+   */
+  const settleLapsed = (publish: ReadonlyArray<AppId>) =>
+    Effect.gen(function* () {
+      const settled = yield* storage(repository.settleLapsedPairings(yield* DateTime.now));
+      yield* Effect.forEach(new Set([...publish, ...settled]), publishStatus, { discard: true });
+    });
+
+  // Clients keep no timers: this update takes the lapsed prompt off them.
+  const settleAfterLapse = (appId: AppId, expiresAt: DateTime.Utc) =>
+    DateTime.now.pipe(
+      Effect.flatMap((now) =>
+        Effect.sleep(Duration.sum(DateTime.distance(now, expiresAt), LAPSE_GRACE)),
+      ),
+      Effect.andThen(settleLapsed([appId])),
+      Effect.ignore,
+      Effect.forkIn(layerScope),
+    );
+
   const list = Effect.gen(function* () {
     const records = yield* storage(repository.list);
     const pending = yield* pendingRequests;
@@ -268,6 +293,18 @@ export const make = Effect.gen(function* () {
       const requestId = NodeCrypto.randomUUID();
       const pollSecret = NodeCrypto.randomBytes(32).toString("base64url");
       const existing = Option.getOrUndefined(yield* storage(repository.get(registration.appId)));
+      // Stored before the app's state changes, so a lapse settling in between
+      // sees this request waiting and leaves the app alone.
+      yield* storage(
+        repository.createPairingRequest({
+          requestId,
+          appId: registration.appId,
+          registration,
+          pollSecretHash: sha256Hex(pollSecret),
+          expiresAt,
+          now,
+        }),
+      );
       if (existing === undefined) {
         yield* storage(
           repository.upsert({
@@ -282,42 +319,30 @@ export const make = Effect.gen(function* () {
             now,
           }),
         );
-      } else if (
-        existing.state !== "revoked" &&
-        !(
-          existing.state === "granted" &&
-          existing.grantedFingerprint === registrationFingerprint(registration)
-        )
-      ) {
+      } else {
         // A changed command or frame origin is not what the user approved, so
-        // the grant is suspended until they decide (R1.4). The approved
-        // registration stays on the record; the new one waits on the request.
-        yield* storage(
-          repository.upsert(
-            writeOf(existing, now, {
-              state: "pairing-requested",
-              ...(existing.grantedFingerprint === null ? { registration } : {}),
-            }),
-          ),
-        );
+        // the grant is suspended until they decide (R1.4). Denied and revoked
+        // apps keep their state, which an unanswered request then leaves standing.
+        const suspend =
+          existing.state === "pairing-requested" ||
+          (existing.state === "granted" &&
+            existing.grantedFingerprint !== registrationFingerprint(registration));
+        // An approved registration stays on the record while the new one waits
+        // on the request; with none approved, the record shows what is asked.
+        const unapproved = existing.grantedFingerprint === null;
+        if (suspend || unapproved) {
+          yield* storage(
+            repository.upsert(
+              writeOf(existing, now, {
+                ...(suspend ? { state: "pairing-requested" as const } : {}),
+                ...(unapproved ? { registration } : {}),
+              }),
+            ),
+          );
+        }
       }
-      yield* storage(
-        repository.createPairingRequest({
-          requestId,
-          appId: registration.appId,
-          registration,
-          pollSecretHash: sha256Hex(pollSecret),
-          expiresAt,
-          now,
-        }),
-      );
       yield* publishStatus(registration.appId);
-      // Takes the expired prompt off every client without them keeping timers.
-      yield* Effect.sleep(PAIRING_REQUEST_TTL).pipe(
-        Effect.andThen(publishStatus(registration.appId)),
-        Effect.ignore,
-        Effect.forkIn(layerScope),
-      );
+      yield* settleAfterLapse(registration.appId, expiresAt);
       return { requestId, pollSecret, expiresAt: iso(expiresAt) };
     });
 
@@ -470,7 +495,7 @@ export const make = Effect.gen(function* () {
         );
       } else if (record.state === "pairing-requested") {
         // A granted app asking for a fresh credential with the command the user
-        // already approved keeps its grant, and a revoked one stays revoked.
+        // already approved keeps its grant, and a revoked or denied one stays so.
         yield* storage(repository.upsert(writeOf(record, now, { state: "denied" })));
         yield* revokeAppSessions(record.appId);
       }
@@ -700,6 +725,18 @@ export const make = Effect.gen(function* () {
     ),
     toolTitlesOf,
   ).pipe(Effect.forkScoped({ startImmediately: true }));
+
+  // Lapse timers end with the server: settle what lapsed while it was down,
+  // and time what still waits.
+  yield* Effect.gen(function* () {
+    yield* settleLapsed([]);
+    const waiting = yield* storage(repository.listPendingPairingRequests(yield* DateTime.now));
+    yield* Effect.forEach(
+      waiting,
+      (request) => settleAfterLapse(request.appId, request.expiresAt),
+      { discard: true },
+    );
+  }).pipe(Effect.ignore);
 
   // A sidecar exists only for its app, so a registration it cannot serve
   // stops it instead of running without the app.

@@ -102,6 +102,12 @@ registration with a different fingerprint pauses the grant until the user decide
 registration waits on its pairing request meanwhile. Name, icon, instructions and gated tools are
 the app's own presentation and policy, so changing them does not ask again.
 
+A pairing request is unauthenticated, from any loopback process, so one nobody answers must leave
+no trace: `pairing-requested` holds only while a request waits. When it lapses the registry
+restores a paused grant and drops an app never granted, and a denied or revoked app never leaves
+its state for a request ([AppRegistryService.ts][registry]). A lapse timer does not survive a
+restart, so startup settles what lapsed while the server was down.
+
 Headless processes inherit the server's environment minus `ELECTRON_RUN_AS_NODE`, then the
 registration's `env`. The server itself may run as Electron-as-node, and leaking that flag would
 change what an app's Electron binary does.
@@ -250,6 +256,7 @@ provider thread.
 [embed-preload]: ../../packages/embed/src/electron-preload.ts
 [frame-ancestors]: ../../apps/server/src/apps/frameAncestors.ts
 [contracts-apps]: ../../packages/contracts/src/apps.ts
+[registry]: ../../apps/server/src/apps/AppRegistryService.ts
 [interceptor]: ../../apps/server/src/mcp/toolkits/app/AppToolInterceptor.ts
 [served-results]: ../../packages/shared/src/appToolResults.ts
 [gate]: ../../apps/server/src/apps/AppToolGate.ts
