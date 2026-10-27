@@ -25,7 +25,10 @@ function runningAppToolName(entry: WorkTimelineEntry): string | undefined {
 
 /**
  * The row of the call each app approval is holding. The request names only the tool, so each
- * approval claims the latest unclaimed running call of that tool in its own run before its row.
+ * approval claims an unclaimed running call of that tool in its own run: the latest before its row,
+ * else the first after it. The gate gives the approval the thread's next free ordinal when it
+ * raises it, and a provider numbers its rows ahead of their commit, so a call whose row has not
+ * committed yet can sort after the approval that holds it.
  */
 function heldAppToolCallIds(
   entries: ReadonlyArray<TimelineEntry>,
@@ -43,15 +46,20 @@ function heldAppToolCallIds(
     );
     const approvalEntry = approvalIndex >= 0 ? entries[approvalIndex] : undefined;
     const runId = approvalEntry && isWork(approvalEntry) ? approvalEntry.entry.runId : undefined;
+    const isHeldCall = (entry: TimelineEntry) =>
+      isWork(entry) &&
+      !held.has(entry.id) &&
+      (runId == null || entry.entry.runId === runId) &&
+      runningAppToolName(entry) === toolName;
     const end = approvalIndex >= 0 ? approvalIndex : entries.length;
-    for (let index = end - 1; index >= 0; index -= 1) {
-      const entry = entries[index]!;
-      if (!isWork(entry) || held.has(entry.id)) continue;
-      if (runId != null && entry.entry.runId !== runId) continue;
-      if (runningAppToolName(entry) !== toolName) continue;
-      held.add(entry.id);
-      break;
+    let call: TimelineEntry | undefined;
+    for (let index = end - 1; index >= 0 && call === undefined; index -= 1) {
+      if (isHeldCall(entries[index]!)) call = entries[index];
     }
+    for (let index = end + 1; index < entries.length && call === undefined; index += 1) {
+      if (isHeldCall(entries[index]!)) call = entries[index];
+    }
+    if (call !== undefined) held.add(call.id);
   }
   return held;
 }
