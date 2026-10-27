@@ -132,7 +132,7 @@ export const appInvocationScope = (scope: McpInvocationScope): McpAppInvocationS
 
 /**
  * An app thread's agent works for that app, so its credential reaches only the
- * app's own project (R2.3); every other caller is unaffected.
+ * app's own project; every other caller is unaffected.
  */
 export const assertProjectReach = (
   scope: McpInvocationScope,

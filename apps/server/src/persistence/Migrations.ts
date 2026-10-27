@@ -132,7 +132,7 @@ const ThreadFailureLookupIndexCompatibility = Effect.gen(function* () {
  * Lecturn-only migrations at ids that a later upstream remap may also take.
  * The migrator skips an id once any migration is recorded there, so when a
  * ledger holds another name at one of these ids, the migration runs again on
- * its own. Their SQL is idempotent for that reason (D31).
+ * its own. Their SQL is idempotent for that reason.
  */
 const selfRepairingMigrations = [
   [79, "AppRegistrations", Migration0079],

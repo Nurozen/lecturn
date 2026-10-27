@@ -16,7 +16,7 @@ import {
 } from "./embedAuth";
 import { makeEmbedHttpLayer } from "./embedHttpLayer";
 
-/** What the host answers to `lecturn/token.refresh` (I4). */
+/** What the host answers to `lecturn/token.refresh`. */
 export interface EmbedTokenGrant {
   readonly token: string;
   readonly expiresAt: string;

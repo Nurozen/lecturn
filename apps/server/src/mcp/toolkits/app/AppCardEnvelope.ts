@@ -1,5 +1,5 @@
 /**
- * Wraps an app tool result for MCP Apps cards (D3): the last step of
+ * Wraps an app tool result for MCP Apps cards: the last step of
  * AppToolkit.call, after Lecturn's own `_meta` handling.
  *
  * A tool that declares `_meta.ui.resourceUri` gets its card document captured

@@ -314,7 +314,7 @@ it.layer(NodeServices.layer)("AppRegistryService", (it) => {
         });
       assert.isUndefined(yield* ceilingOf("read-only"));
       assert.strictEqual(yield* ceilingOf("auto"), "auto");
-      // The registry keeps the full ceiling, read-only included (D2).
+      // The registry keeps the full ceiling, read-only included.
       yield* registry.setRuntimeCeiling({ appId: registration.appId, ceiling: "read-only" });
       const record = Option.getOrThrow(yield* registry.get(registration.appId));
       assert.strictEqual(record.status.runtimeCeiling, "read-only");

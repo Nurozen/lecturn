@@ -1,8 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Test harness driving a real Electron app; it runs no Effect runtime.
 /**
- * The gold scenario (spec B2), automated with the scripted provider so every
- * tool call is exact and goes through Lecturn's real app toolkit. Steps are
- * B2's numbers; `vp run --filter embed-host e2e -- --steps 1,2` runs a subset.
+ * The full connected-app scenario, automated with the scripted provider so
+ * every tool call is exact and goes through Lecturn's real app toolkit.
+ * `vp run --filter embed-host e2e -- --steps 1,2` runs a subset of the steps.
  *
  *   1. No user server: the host starts the sidecar, registers, ensures `ws-a`
  *      and mounts the embed view.
@@ -48,7 +48,7 @@ import {
 import type { E2eContext, ScenarioStep } from "./run.ts";
 
 const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
-const SCRIPTS_FILE = NodePath.join(here, "scripts", "b2-steps-1-2.scripted.json");
+const SCRIPTS_FILE = NodePath.join(here, "scripts", "scenario-steps-1-2.scripted.json");
 export const AUTOMATED_STEPS: ReadonlyArray<ScenarioStep> = [1, 2, 3, 4, 5, "ledger", 7, 8];
 // Each later attach step continues from the state the one before it leaves.
 const REQUIRES: ReadonlyArray<readonly [ScenarioStep, ScenarioStep]> = [
@@ -331,7 +331,7 @@ export default async function scenario({
   const unknown = steps.filter((step) => !AUTOMATED_STEPS.includes(step));
   if (unknown.length > 0) {
     throw new Error(
-      `B2 step ${unknown.join(", ")} is not automated; automated steps: ${AUTOMATED_STEPS.join(", ")}`,
+      `Step ${unknown.join(", ")} is not automated; automated steps: ${AUTOMATED_STEPS.join(", ")}`,
     );
   }
   const missing = REQUIRES.filter(

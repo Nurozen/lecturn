@@ -104,8 +104,8 @@ export interface RestingComposerControlsMeasurement {
   overflowWidth: number;
   iconOnlyBlockWidths?: readonly number[];
   /**
-   * The narrow embed footer's controls row ("model | effort | access", as the embed mockup draws
-   * it) has no overflow menu: access drops to its icon, then the model label truncates.
+   * The narrow embed footer's controls row ("model | effort | access") has no overflow menu:
+   * access drops to its icon, then the model label truncates.
    */
   keepsBlocks?: boolean;
 }

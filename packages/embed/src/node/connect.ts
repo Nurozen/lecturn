@@ -156,7 +156,7 @@ export interface ConnectDeps {
   now(): number;
 }
 
-/** D36 asks for 5 s or less: a user server that starts later is found within one beat. */
+/** A user server that starts later is found within one beat; a beat is capped at 5 s. */
 export const USER_SERVER_WATCH_INTERVAL_MS = 2_000;
 // A switch that failed for a reason other than the credential (an import
 // error, a server still starting) is not retried on every beat.
@@ -181,7 +181,7 @@ interface ThreadSubscription {
 }
 
 /**
- * The attach state machine (D33, D36): sidecar while pairing is pending or
+ * The attach state machine: sidecar while pairing is pending or
  * denied, a live switch to the user server on grant, and back to the sidecar
  * when the user server goes away. Exported for the fake-server tests.
  */
@@ -220,7 +220,7 @@ export async function createConnection(
   let pairing: ConnectionPairing = "none";
   let pairingRequest: { readonly server: UserServer; readonly request: PairingRequest } | null =
     null;
-  // After a switch the sidecar stays up, lease included, until no turn runs on it (D33).
+  // After a switch the sidecar stays up, lease included, until no turn runs on it.
   let draining = false;
   let userMisses = 0;
   let attachRetryAt = 0;
@@ -622,7 +622,7 @@ export async function createConnection(
   };
 
   // A granted user server is used at once, copying first when the sidecar may
-  // hold history it lacks (R7.4); otherwise the sidecar serves while pairing
+  // hold history it lacks; otherwise the sidecar serves while pairing
   // waits on the user.
   async function initialAttach() {
     const found = await deps.discover().catch(() => null);

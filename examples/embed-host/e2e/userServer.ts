@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetch:off globalTimers:off globalDate:off -- Test harness for a server the e2e launches; it runs no Effect runtime.
 /**
  * The user's own Lecturn server for the attach steps: `lecturn serve` on the
- * run's temp Lecturn home, the one the host's helper watches (D36). It keeps
+ * run's temp Lecturn home, the one the host's helper watches. It keeps
  * its home across restarts, so it comes back as the same environment.
  */
 import * as NodeChildProcess from "node:child_process";

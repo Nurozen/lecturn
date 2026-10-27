@@ -1,7 +1,7 @@
 /**
- * The R4.7 thread notice: an app thread whose provider thread did not get
- * Lecturn's MCP server (or lost it at startup) cannot reach the app's tools,
- * so the thread says so instead of the agent failing silently.
+ * An app thread whose provider thread did not get Lecturn's MCP server (or
+ * lost it at startup) cannot reach the app's tools, so the thread says so
+ * instead of the agent failing silently.
  *
  * Shown once per thread and provider thread: a provider switch is a new
  * provider thread with its own chance to fail, while a repeated report for

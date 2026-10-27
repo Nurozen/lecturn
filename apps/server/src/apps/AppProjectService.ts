@@ -1,5 +1,5 @@
 /**
- * App projects (spec R3): one project per `(appId, workspaceRoot)`, invisible
+ * App projects: one project per `(appId, workspaceRoot)`, invisible
  * to every workspace-root lookup a normal project uses, plus the thread list an
  * app's rail reads, plus the writes of thread app metadata, which go through
  * orchestration like any other thread change (see threadAppMetadata.ts).
@@ -297,7 +297,7 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Only the app bound to a thread's project writes its app fields (R3.3).
+   * Only the app bound to a thread's project writes its app fields.
    * Subagent children are not the app's threads, so they are refused too.
    */
   const requireOwnedThread = Effect.fn("AppProjectService.requireOwnedThread")(function* (
@@ -359,7 +359,7 @@ const make = Effect.gen(function* () {
 
   /**
    * The embed view holds an embed token, never the app credential, so the
-   * server creates the thread for the app that owns the token's project (D32)
+   * server creates the thread for the app that owns the token's project
    * and is the only writer of the thread's app fields.
    */
   const createEmbedThread: AppProjectService["Service"]["createEmbedThread"] = Effect.fn(

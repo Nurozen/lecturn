@@ -3,7 +3,7 @@
  * Embed Host: the smallest Electron app with Lecturn chat in a pane. The
  * Lecturn integration is everything between `lecturn:begin` and
  * `lecturn:end` here, in preload.ts and in renderer/main.ts; the rest is
- * the host app itself. `scripts/count-integration-lines.ts` measures it.
+ * the host app itself.
  *
  * Environment (all optional; tests set every one to a temp path):
  * - LECTURN_HOME: where a user's own Lecturn server would be found.
@@ -143,7 +143,7 @@ async function main() {
       : null,
   );
 
-  // Project ids differ per server, so the e2e hooks follow the live switch (D36).
+  // Project ids differ per server, so the e2e hooks follow the live switch.
   let currentProjectId = projectId;
   const modeEvents: Array<ConnectionModeEvent> = [];
   lecturn.status.subscribe((event) => {
@@ -182,15 +182,6 @@ async function main() {
       capture: async (file: string) => {
         await NodeFSP.writeFile(file, await captureEmbedView(embed));
       },
-      // scripts/bar/perf.ts times a mount on the already running server (spec B3).
-      mountView: () =>
-        mountEmbedView(win, {
-          connection: lecturn,
-          projectId: currentProjectId,
-          theme: hostTheme,
-          bounds: paneRect(),
-          ...freezeClock,
-        }),
     },
   });
 }

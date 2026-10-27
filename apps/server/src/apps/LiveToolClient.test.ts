@@ -29,7 +29,6 @@ import {
   AppLeaseService,
   AppProjectService,
   AppRegistryService,
-  type AppsFailure,
 } from "./services.ts";
 
 const BEARER = "live-bearer-secret";
@@ -173,7 +172,7 @@ const rpcMethods = (requests: ReadonlyArray<RecordedRequest>) =>
     request.method === "DELETE" ? "DELETE" : (request.body as { method: string }).method,
   );
 
-const failureMessage = <A>(exit: Exit.Exit<A, AppsFailure>) => {
+const failureMessage = <A>(exit: Exit.Exit<A, AppsError>) => {
   assert.isTrue(Exit.isFailure(exit));
   const error = Exit.isFailure(exit)
     ? Option.getOrUndefined(Exit.findErrorOption(exit))

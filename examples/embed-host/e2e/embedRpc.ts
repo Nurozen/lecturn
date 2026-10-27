@@ -39,7 +39,7 @@ export async function ticketedSocketUrl(origin: string, bearer: string): Promise
 }
 
 /**
- * Creates a thread the way the embed view does (D32): with the embed token,
+ * Creates a thread the way the embed view does: with the embed token,
  * so the server sets the thread's app fields. The guest has no new-thread
  * control of its own yet, and the tracer needs a thread to type into.
  */

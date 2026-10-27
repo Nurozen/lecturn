@@ -1,15 +1,7 @@
-#!/usr/bin/env node
-// @effect-diagnostics nodeBuiltinImport:off - A host-side probe that reads capture files and writes a JSON report.
-
-import * as NodeFSP from "node:fs/promises";
-import * as NodeProcess from "node:process";
-import * as NodeUtil from "node:util";
-
-import { PNG } from "pngjs";
-
 /**
- * The embed theme allowlist from the embed bridge contract (I4). Kept here
- * because this tool must also load in trees that predate that contract.
+ * The allowlisted variables the probe checks: those rocketwright-theme.json
+ * sends. The contract's other variables are optional, and the probe fails any
+ * variable the host did not send.
  */
 export const EMBED_THEME_VARS = [
   "--background",
@@ -99,7 +91,14 @@ export function parseCssColor(value: string): Rgb | null {
   return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
 }
 
-export function samplePixel(image: PNG, x: number, y: number): Rgb {
+/** A decoded RGBA capture, as pngjs returns it. */
+export interface RgbaImage {
+  readonly width: number;
+  readonly height: number;
+  readonly data: Uint8Array;
+}
+
+export function samplePixel(image: RgbaImage, x: number, y: number): Rgb {
   if (x < 0 || y < 0 || x >= image.width || y >= image.height) {
     throw new Error(`Sample point ${x},${y} is outside a ${image.width}x${image.height} capture.`);
   }
@@ -220,63 +219,4 @@ function readGuestTheme(variables: ReadonlyArray<string>) {
 
 export function collectGuestTheme(guest: GuestEvaluator): Promise<ObservedGuestTheme> {
   return guest.evaluate(readGuestTheme, [...EMBED_THEME_VARS]);
-}
-
-export async function probeGuestTheme(input: {
-  readonly guest: GuestEvaluator;
-  readonly sent: SentEmbedTheme;
-  /** A DPR-1 capture of the guest and a point inside the pane's bare background. */
-  readonly capture: PNG;
-  readonly backgroundPoint: { readonly x: number; readonly y: number };
-}): Promise<ThemeProbeReport & { readonly observed: ObservedGuestTheme }> {
-  const observed = await collectGuestTheme(input.guest);
-  const report = evaluateThemeProbe({
-    sent: input.sent,
-    observed,
-    backgroundPixel: samplePixel(input.capture, input.backgroundPoint.x, input.backgroundPoint.y),
-  });
-  return { ...report, observed };
-}
-
-async function main(): Promise<void> {
-  const { values } = NodeUtil.parseArgs({
-    args: NodeProcess.argv.slice(2),
-    options: {
-      sent: { type: "string" },
-      observed: { type: "string" },
-      capture: { type: "string" },
-      point: { type: "string" },
-      out: { type: "string" },
-    },
-  });
-  if (!values.sent || !values.observed || !values.capture || !values.point) {
-    throw new Error(
-      "Usage: node scripts/bar/theme-probe.ts --sent sent.json --observed observed.json --capture pane.png --point x,y [--out theme-probe.json]",
-    );
-  }
-  const [x, y] = values.point.split(",").map(Number);
-  if (x === undefined || y === undefined || !Number.isInteger(x) || !Number.isInteger(y)) {
-    throw new Error(`--point expects x,y integers, got '${values.point}'.`);
-  }
-  const sent = JSON.parse(await NodeFSP.readFile(values.sent, "utf8")) as SentEmbedTheme;
-  const observed = JSON.parse(
-    await NodeFSP.readFile(values.observed, "utf8"),
-  ) as ObservedGuestTheme;
-  const capture = PNG.sync.read(await NodeFSP.readFile(values.capture));
-  const report = evaluateThemeProbe({
-    sent,
-    observed,
-    backgroundPixel: samplePixel(capture, x, y),
-  });
-  const text = `${JSON.stringify(report, null, 2)}\n`;
-  if (values.out) await NodeFSP.writeFile(values.out, text);
-  NodeProcess.stdout.write(text);
-  if (!report.passed) process.exitCode = 1;
-}
-
-if (import.meta.main) {
-  void main().catch((error: unknown) => {
-    NodeProcess.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    NodeProcess.exit(2);
-  });
 }

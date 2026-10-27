@@ -24,7 +24,7 @@ import { EmbedViewError } from "./errors.ts";
 
 export type EmbedThemeMode = EmbedHostContext["theme"];
 
-/** A bare mode, or a mode with the host's theme variables and fonts (D17). */
+/** A bare mode, or a mode with the host's theme variables and fonts. */
 export type EmbedThemeInput =
   | EmbedThemeMode
   | { readonly theme: EmbedThemeMode; readonly styles?: EmbedHostStyles };
@@ -135,7 +135,7 @@ export interface EmbedHostSessionDeps {
 }
 
 /**
- * The host side of the embed bridge (I4) for one guest view, independent of
+ * The host side of the embed bridge for one guest view, independent of
  * the transport. The host sends nothing before the guest's `initialized`;
  * notifications queue until then. A new document starts the handshake again.
  */

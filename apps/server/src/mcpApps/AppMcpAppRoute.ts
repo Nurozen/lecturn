@@ -1,5 +1,5 @@
 /**
- * Requests from connected-app cards (D3): `McpAppRequests` hands every card
+ * Requests from connected-app cards: `McpAppRequests` hands every card
  * whose server is Lecturn's own here. The app serves them, headless first and
  * then live, so cards keep working in stopped, non-Codex and copied threads,
  * none of which has a provider session that could.
@@ -14,6 +14,7 @@ import {
   APP_TOOL_CONTEXT_META_KEY,
   type AppId,
   type AppRegistration,
+  type AppsError,
   type AppToolApprovalMeta,
   type AppToolContextMeta,
   type McpAppCallToolResult,
@@ -44,7 +45,6 @@ import {
   AppLeaseService,
   AppProjectService,
   AppRegistryService,
-  type AppsFailure,
   AppToolApprovalService,
   type AppToolCallRequest,
   type AppToolTier,
@@ -135,7 +135,7 @@ export const makeAppResourceReader = Effect.gen(function* () {
     registration: AppRegistration,
     projectId: ProjectId,
     uri: string,
-  ): Effect.Effect<Option.Option<McpSchema.ReadResourceResult>, AppsFailure> =>
+  ): Effect.Effect<Option.Option<McpSchema.ReadResourceResult>, AppsError> =>
     Effect.gen(function* () {
       const fromLive = Effect.gen(function* () {
         const lease = yield* leases.current(registration.appId);

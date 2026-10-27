@@ -392,7 +392,7 @@ it.layer(TestLayer)("thread app metadata through orchestration", (it) => {
         ([subject, target]) =>
           service.createEmbedThread(subject, { projectId: target, appData: "x" }).pipe(
             Effect.flip,
-            Effect.map((error) => ("code" in error ? error.code : error._tag)),
+            Effect.map((error) => error.code),
           ),
       );
       assert.deepEqual(codes, ["forbidden", "forbidden", "not-found", "forbidden"]);
@@ -447,7 +447,7 @@ it.layer(TestLayer)("thread app metadata through orchestration", (it) => {
         ([subject, target]) =>
           service.setEmbedDefaultModel(subject, { projectId: target, modelSelection: chosen }).pipe(
             Effect.flip,
-            Effect.map((error) => ("code" in error ? error.code : error._tag)),
+            Effect.map((error) => error.code),
           ),
       );
       assert.deepEqual(codes, ["forbidden", "forbidden", "forbidden"]);
@@ -548,7 +548,7 @@ it.layer(TestLayer)("thread app metadata through orchestration", (it) => {
         (attempt) =>
           attempt.pipe(
             Effect.flip,
-            Effect.map((error) => ("code" in error ? error.code : error._tag)),
+            Effect.map((error) => error.code),
           ),
       );
       assert.deepEqual(refusals, ["forbidden", "forbidden", "not-found", "forbidden"]);
@@ -643,7 +643,7 @@ it.layer(TestLayer)("thread app metadata through orchestration", (it) => {
       yield* service.setThreadAppData(app, { threadId, appData: "live", subtitle: "Max-Q" });
       yield* service.markThreadsCopied(app, { entries: [{ threadId, continuedIn }] });
 
-      // A23's import writes a copy as one thread.created carrying copiedFrom.
+      // Thread copy imports a copy as one thread.created carrying copiedFrom.
       const template = (yield* orchestrator.getThreadProjection(threadId)).thread;
       const copyId = ThreadId.make("copy:environment:sidecar:thread:source");
       const copiedFrom = {

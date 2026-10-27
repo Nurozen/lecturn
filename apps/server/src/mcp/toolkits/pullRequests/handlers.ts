@@ -301,7 +301,7 @@ const make = Effect.gen(function* () {
             Effect.orElseSucceed(() => null),
             Effect.map((shell) => shell ?? undefined),
           );
-    // An app thread reads pull requests only through its own project (R2.3).
+    // An app thread reads pull requests only through its own project.
     const known = yield* projects
       .listShells(scope.app === undefined ? undefined : { projectIds: [scope.app.projectId] })
       .pipe(Effect.mapError((cause) => new PullRequestListFailedError({ cause })));

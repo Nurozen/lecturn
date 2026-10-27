@@ -50,7 +50,7 @@ describe("composer approval state", () => {
     expect(approvalSendBlockReason(approval)).toBe(APP_TOOL_APPROVAL_SEND_BLOCK_REASON);
   });
 
-  it("marks the app approval card parts for the bar probes", () => {
+  it("gives test ids to the app approval card's parts only", () => {
     const approval = appApproval(null, "static");
     expect(appApprovalTestId(approval, "card")).toBe("app-approval-card");
     expect(appApprovalTestId(approval, "icon")).toBe("app-approval-icon");

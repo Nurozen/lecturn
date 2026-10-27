@@ -538,7 +538,7 @@ const LECTURN_THREAD_GOLD = { light: "#bc7642", dark: "#dca64e" } as const;
 
 /**
  * In full Lecturn, connected-app cards draw their accent in the thread gold
- * the sidebar uses, rather than the theme's focus ring (D25). Embedded views
+ * the sidebar uses, rather than the theme's focus ring. Embedded views
  * keep the host's `--ring`, and other MCP apps keep the theme's.
  */
 export function connectedAppCardTheme<

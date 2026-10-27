@@ -88,7 +88,7 @@ export class ServerConfig extends Context.Service<
      * `StaveBinary` consults it after settings and `LECTURN_STAVE_PATH`.
      */
     readonly stavePath?: string | undefined;
-    /** Set only on a connected app's own sidecar server (D9). */
+    /** Set only on a connected app's own sidecar server. */
     readonly appSidecar?: AppSidecarBootstrap | undefined;
     readonly extensions?: {
       readonly bundledRoot: string;

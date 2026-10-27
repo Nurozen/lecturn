@@ -1,6 +1,6 @@
 /**
- * Runs each granted app's headless tool command, one process per app project
- * (D5). A process starts on the first call or empty-cache listing and stays
+ * Runs each granted app's headless tool command, one process per app project.
+ * A process starts on the first call or empty-cache listing and stays
  * up between calls; the idle reaper (headlessReaper.ts, run from the
  * onRunTerminal hook) closes it later. The process table is the shared
  * AppRuntimeState one, so that hook sees what this host runs.
@@ -36,12 +36,7 @@ import {
   resolveHeadlessSpec,
   runListCommand,
 } from "./headlessMcpProcess.ts";
-import {
-  AppProjectService,
-  AppRegistryService,
-  type AppsFailure,
-  HeadlessToolHost,
-} from "./services.ts";
+import { AppProjectService, AppRegistryService, HeadlessToolHost } from "./services.ts";
 
 export const headlessProcessKey = (appId: AppId, projectId: ProjectId): HeadlessProcessKey =>
   `${appId} ${projectId}`;
@@ -216,7 +211,7 @@ const make = Effect.gen(function* () {
     appId: AppId,
     projectId: ProjectId,
     use: (connection: HeadlessMcpConnection) => Effect.Effect<A, E>,
-  ): Effect.Effect<A, E | AppsFailure> =>
+  ): Effect.Effect<A, E | AppsError> =>
     Effect.acquireUseRelease(
       hold(appId, projectId),
       (slot) => use(slot.connection),

@@ -1,5 +1,5 @@
 /**
- * The stdio MCP client for an app's headless tool command (D5). One
+ * The stdio MCP client for an app's headless tool command. One
  * connection is one spawned process speaking newline-delimited JSON-RPC.
  * `@modelcontextprotocol/sdk` is a devDependency only, so this is our own
  * small client rather than the SDK's.

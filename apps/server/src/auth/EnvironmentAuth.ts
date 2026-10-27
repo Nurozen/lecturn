@@ -623,7 +623,7 @@ const rejectMcpClientAudience = <S extends { readonly subject: string }>(session
       ).pipe(Effect.tap(() => Effect.logWarning("Rejected an MCP client session outside /mcp.")))
     : Effect.succeed(session);
 
-/** Connected-app sessions reach only the routes `apps/appHttpAuthorization.ts` lists (R2.3). */
+/** Connected-app sessions reach only the routes `apps/appHttpAuthorization.ts` lists. */
 const rejectAppAudience =
   (path: () => string) =>
   <S extends { readonly subject: string }>(session: S) => {
@@ -801,7 +801,7 @@ export const make = Effect.gen(function* () {
 
   /**
    * The embed page shares the user's origin, so its requests can carry the
-   * user's cookie as well (D14). A bearer that verifies to an embed session
+   * user's cookie as well. A bearer that verifies to an embed session
    * wins over the cookie, so the embed never acts as the user; any other
    * bearer keeps today's cookie-first order.
    */
@@ -839,7 +839,7 @@ export const make = Effect.gen(function* () {
   };
 
   // Which subject a request acted as, and whether the browser also sent a
-  // cookie: the embed's cookie-isolation check (D14) reads these from the trace.
+  // cookie: the embed's cookie-isolation check reads these from the trace.
   const annotateAuthenticated =
     (request: HttpServerRequest.HttpServerRequest) => (session: AuthenticatedSession) =>
       Effect.annotateCurrentSpan({
@@ -1191,7 +1191,7 @@ export const make = Effect.gen(function* () {
 
   const listSessions: EnvironmentAuth["Service"]["listSessions"] = () =>
     sessions.listActive().pipe(
-      // Connected apps are managed under Settings > Apps, not as clients (D11).
+      // Connected apps are managed under Settings > Apps, not as clients.
       Effect.map((activeSessions) =>
         activeSessions
           .filter((session) => parseAppSubject(session.subject) === null)

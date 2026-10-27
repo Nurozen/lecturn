@@ -1,14 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  type ChecklistName,
-  evaluateProbe,
-  loadChecklist,
-  type ProbeLocator,
-  type ProbeRoot,
-  playwrightProbeRoot,
-} from "../../../scripts/bar/probe-dom.ts";
 import { counterCardResource } from "./counterCard.ts";
 
 interface CardDom {
@@ -66,96 +58,27 @@ function renderCard(initialWidth: number) {
   };
 }
 
-function domLocator(elements: () => Array<Element>, frame: Document): ProbeLocator {
-  return {
-    locator: (selector) =>
-      domLocator(
-        () => elements().flatMap((element) => Array.from(element.querySelectorAll(selector))),
-        frame,
-      ),
-    count: async () => elements().length,
-    allInnerTexts: async () => elements().map((element) => element.textContent ?? ""),
-    all: async () => elements().map((element) => domLocator(() => [element], frame)),
-    first: () => domLocator(() => elements().slice(0, 1), frame),
-    contentFrame: () => documentHost(frame, frame),
-    evaluateAll: async (fn) => fn(elements()),
-  };
-}
-
-function documentHost(document: Document, frame: Document) {
-  return {
-    locator: (selector: string) =>
-      domLocator(() => Array.from(document.querySelectorAll(selector)), frame),
-  };
-}
-
-/** The card as Lecturn's timeline mounts it: an iframe inside an `mcp-app-card` row. */
-function hostPageRoot(card: Document): ProbeRoot {
-  const page = card.implementation.createHTMLDocument("host");
-  page.body.innerHTML = `<div data-testid="mcp-app-card"><iframe></iframe></div>`;
-  return playwrightProbeRoot(documentHost(page, card));
-}
-
-async function rowProbe(name: ChecklistName, id: string) {
-  const probe = (await loadChecklist(name)).rows.find((row) => row.id === id)?.probe;
-  if (!probe) throw new Error(`${name} checklist has no probe for ${id}`);
-  return probe;
-}
-
-const wide = {
-  width: 760,
-  layout: "wide",
-  checklist: "desktop",
-  row: "desktop.main.card-wide",
-} as const;
-const narrow = {
-  width: 380,
-  layout: "narrow",
-  checklist: "embed",
-  row: "embed.timeline.card-narrow",
-} as const;
 const forms = [
-  { ...wide, other: narrow },
-  { ...narrow, other: wide },
-];
+  { width: 760, layout: "wide" },
+  { width: 380, layout: "narrow" },
+] as const;
 
 describe("counter card structure hooks", () => {
-  it.each(forms)("passes the $row probe at $width px and not the other form's", async (form) => {
+  it.each(forms)("draws the $layout form's icon, saved state and curve at $width px", (form) => {
     const card = renderCard(form.width);
     card.sendToolResult({ count: 5, by: 2, history: [1, 3, 5] });
-    const root = hostPageRoot(card.document);
+    const doc = card.document;
+    const points = (doc.querySelector("[data-card-chart] polyline")?.getAttribute("points") ?? "")
+      .trim()
+      .split(/\s+/u);
 
-    expect(await evaluateProbe(await rowProbe(form.checklist, form.row), root)).toEqual({
-      passed: true,
-    });
-    expect(
-      await evaluateProbe(await rowProbe(form.other.checklist, form.other.row), root),
-    ).toMatchObject({
-      passed: false,
-      reason: expect.stringContaining(`[data-card-layout="${form.other.layout}"]`),
-    });
-  });
-
-  it.each(forms)("exposes the icon, saved state and curve at $width px", async (form) => {
-    const card = renderCard(form.width);
-    card.sendToolResult({ count: 5, by: 2, history: [1, 3, 5] });
-    const root = playwrightProbeRoot(documentHost(card.document, card.document));
-
-    expect(
-      await evaluateProbe(
-        {
-          kind: "all",
-          probes: [
-            { kind: "count", selector: "[data-card-title] [data-card-icon]", min: 1, max: 1 },
-            { kind: "text", selector: "[data-card-chip]", equals: "Saved" },
-            { kind: "text", selector: "[data-card-subtitle]", equals: "Saved result" },
-            // The icon is itself an svg path, so the curve is checked on its own.
-            { kind: "chart-points", selector: "[data-card-chart] polyline", min: 3 },
-          ],
-        },
-        root,
-      ),
-    ).toEqual({ passed: true });
+    expect(doc.querySelector("[data-card-layout]")?.getAttribute("data-card-layout")).toBe(
+      form.layout,
+    );
+    expect(doc.querySelectorAll("[data-card-title] [data-card-icon]")).toHaveLength(1);
+    expect(doc.querySelector("[data-card-chip]")?.textContent).toBe("Saved");
+    expect(doc.querySelector("[data-card-subtitle]")?.textContent).toBe("Saved result");
+    expect(points.length).toBeGreaterThanOrEqual(3);
   });
 
   it.each(forms)("pairs each stat's label with its value at $width px", (form) => {

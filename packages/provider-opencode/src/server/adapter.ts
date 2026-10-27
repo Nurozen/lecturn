@@ -98,7 +98,7 @@ export { openCodeToolProjectionKind } from "./toolItems.ts";
 export const OPENCODE_PROVIDER = ProviderDriverKind.make("opencode");
 
 // Above Lecturn's hour-long wait tools, as Claude and Codex are; it also
-// covers a connected app's 10-minute approval wait (D28).
+// covers a connected app's 10-minute approval wait.
 const LECTURN_MCP_TOOL_TIMEOUT_MS = 65 * 60 * 1_000;
 export const OPENCODE_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(OPENCODE_PROVIDER);
 export const OPENCODE_SDK_PROTOCOL = "opencode-sdk.sse" as const;

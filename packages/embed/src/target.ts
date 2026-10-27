@@ -1,6 +1,6 @@
 import type { AppStatus } from "@lecturn/contracts/apps";
 
-// Mirrors AppEmbedTarget (I1). The token travels in the url hash or over the
+// Mirrors AppEmbedTarget in @lecturn/contracts. The token travels in the url hash or over the
 // bridge, never in what the server sees.
 export interface EmbedTarget {
   readonly url: string;
@@ -24,7 +24,7 @@ export interface ConnectionStatusEvent {
 }
 
 /**
- * The connection moved to another server (D36). Project and thread ids differ
+ * The connection moved to another server. Project and thread ids differ
  * per server: hosts look their workspaces up by root, and their open threads
  * through `threadIdMap` (old server's id to the new one's).
  */

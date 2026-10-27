@@ -9,7 +9,7 @@ import * as McpToolAccess from "../../McpToolAccess.ts";
 import { unavailable } from "../../threadAccess.ts";
 import { AppsToolkit, type McpConnectedApp } from "./tools.ts";
 
-/** An app thread is shown its own app and project only, as it reaches no other (R2.3). */
+/** An app thread is shown its own app and project only, as it reaches no other. */
 export const connectedApps = (
   scope: McpInvocationContext.McpInvocationScope,
   statuses: ReadonlyArray<AppStatus>,

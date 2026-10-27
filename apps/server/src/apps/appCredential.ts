@@ -1,5 +1,5 @@
 /**
- * The long-lived bearer a paired app keeps (D11). It has the MCP client
+ * The long-lived bearer a paired app keeps. It has the MCP client
  * credential's shape: no refresh grant exists, so it lasts 30 days and the app
  * pairs again when it runs out.
  */
@@ -21,7 +21,7 @@ export const issueAppCredential = (
     scopes: [AuthAppHostScope],
     ttl: APP_CREDENTIAL_TTL,
     // The claim only holds runtime modes; a read-only ceiling is enforced from
-    // the registry by the tool gate (D2).
+    // the registry by the tool gate.
     ...(input.ceiling === null || input.ceiling === "read-only"
       ? {}
       : { runtimeModeCeiling: input.ceiling }),

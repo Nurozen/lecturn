@@ -1138,7 +1138,7 @@ export function buildImportChip(importedFrom: ThreadImportOrigin): {
   };
 }
 
-/** The origin chip of a connected app's thread copied from the app's own Lecturn (D33). */
+/** The origin chip of a connected app's thread copied from the app's own Lecturn. */
 export function buildCopyChip(
   copiedFrom: ConnectedAppThreadCopyOrigin,
   appName: string | null,

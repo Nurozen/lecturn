@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off globalFetch:off -- Test harness driving a real Electron app; it runs no Effect runtime.
 /**
- * Embed cookie isolation (A17a, decision 19). The guest's session first gets
+ * Embed cookie isolation. The guest's session first gets
  * a real Lecturn session cookie for the sidecar origin through a normal
  * pairing in a second window of the same partition; then the embed loads.
  * The guest's CDP network events give each request's kind and the Cookie
@@ -9,7 +9,7 @@
  * - every protected fetch/XHR carries no Cookie and is the embed subject;
  * - every WebSocket upgrade authenticates by ticket as the embed subject;
  * - a probe fetch with the embed bearer and `credentials: "include"` (so the
- *   cookie is sent) still authenticates as the embed subject (D14).
+ *   cookie is sent) still authenticates as the embed subject.
  * The public document and static assets are logged but not asserted.
  */
 import * as NodeAssert from "node:assert/strict";

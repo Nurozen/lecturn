@@ -5,9 +5,9 @@ interface TimelineRowHead {
 }
 
 /**
- * The row an app thread's title sits beside, as the app mockups set the title level with the
- * opening message. Only the thread's own opening message qualifies: with earlier history still
- * to load (or cut by an import), the first loaded row is mid-thread and the title stays above it.
+ * The row an app thread's title sits level with. Only the thread's own opening message
+ * qualifies: with earlier history still to load (or cut by an import), the first loaded row is
+ * mid-thread and the title stays above it.
  */
 export function appThreadTitleRowId(input: {
   readonly rows: ReadonlyArray<TimelineRowHead>;

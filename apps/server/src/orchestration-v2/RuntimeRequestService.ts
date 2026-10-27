@@ -100,7 +100,7 @@ export const layer: Layer.Layer<
             });
           }
           // Lecturn: a connected-app approval is answered to the waiting MCP
-          // tool call, never to the provider, which did not raise it (D1).
+          // tool call, never to the provider, which did not raise it.
           if (
             request.connectedAppTool !== undefined ||
             (yield* appApprovals.claims(input.requestId))

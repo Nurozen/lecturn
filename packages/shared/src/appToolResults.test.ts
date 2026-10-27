@@ -123,6 +123,35 @@ describe("served app tool results", () => {
     expect(claim("t1", "ex_a")).toBe("a");
   });
 
+  it("keeps a result's text and metadata but not its media", () => {
+    recordServedAppToolResult(
+      {
+        threadId: "t1",
+        tool: "rw_render",
+        args: {},
+        result: {
+          content: [
+            { type: "text", text: "Rendered." },
+            { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
+            { type: "audio", data: "UklGRg==", mimeType: "audio/wav" },
+          ],
+          _meta: { "lecturn/summary": "Rendered" },
+        },
+      },
+      T0 + 10,
+    );
+
+    expect(
+      claimServedAppToolResult(
+        { threadId: "t1", tool: "rw_render", args: {}, callId: "c", startedAt: T0 },
+        T0 + 20,
+      ),
+    ).toEqual({
+      content: [{ type: "text", text: "Rendered." }],
+      _meta: { "lecturn/summary": "Rendered" },
+    });
+  });
+
   it("forgets results after a few minutes", () => {
     recordServedAppToolResult({ threadId: "t1", tool: "ex_a", args: {}, result: "a" }, T0);
 

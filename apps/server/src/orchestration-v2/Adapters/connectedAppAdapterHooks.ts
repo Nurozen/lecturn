@@ -19,7 +19,7 @@ interface McpActivationTarget {
   readonly providerThreadId: ProviderThreadId;
 }
 
-/** `text` followed by a connected app's registered instructions, when it has any (D7). */
+/** `text` followed by a connected app's registered instructions, when it has any. */
 export function withConnectedAppInstructions<T extends string | undefined>(
   text: T,
   appInstructions: string | undefined,
@@ -31,7 +31,7 @@ export function withConnectedAppInstructions<T extends string | undefined>(
 /**
  * Lecturn's MCP server gates a connected app's tools by runtime mode, so
  * Codex's own MCP approval is turned off for those tools alone, on app threads
- * alone (D28). A server-wide `default_tools_approval_mode` would also stop
+ * alone. A server-wide `default_tools_approval_mode` would also stop
  * Codex asking about Lecturn's own tools.
  */
 export function codexAppToolApprovals(mcpSession: McpSessionConfig): {
@@ -46,7 +46,7 @@ export function codexAppToolApprovals(mcpSession: McpSessionConfig): {
 /**
  * One per Codex session. Codex starts a thread's MCP servers after
  * `thread/start` or resume answers, and reports a failure by native thread id,
- * possibly before this session knows which app thread that is (R4.7).
+ * possibly before this session knows which app thread that is.
  */
 export function makeCodexMcpActivation(mcpSessions: McpSessions, driver: ProviderDriverKind) {
   const threadsByNativeId = new Map<string, McpActivationTarget>();

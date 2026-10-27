@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Test harness driving a real Electron app; it runs no Effect runtime.
 /**
- * The CP1 tracer: the sidecar starts, the workspace is ensured, the embed is
+ * The tracer: the sidecar starts, the workspace is ensured, the embed is
  * mounted with RocketWright's theme under the host's own pane header, and
  * one scripted turn calls `ex_counter_increment` through Lecturn's app
  * toolkit. It asserts the header, the user's plain message, the app tool's
@@ -62,7 +62,7 @@ async function assertPaneHeader(run: Awaited<ReturnType<typeof launchEmbedHost>>
   return { headerBottom: layout.headerBottom, view };
 }
 
-/** Both mockups draw an app tool's row, ending on a success check, with its card under it. */
+/** An app tool's row ends on a success check, with its card under it. */
 async function assertAppToolRow(guest: Page) {
   const row = guest.locator('[data-timeline-row-kind="work"]:has([data-app-tool-outcome])');
   const workRows = await guest.locator('[data-timeline-row-kind="work"]').allTextContents();
@@ -133,7 +133,7 @@ export default async function tracer({ log, artifactsDir, keep }: E2eContext): P
       threadId,
     );
 
-    // A9's method: the guest WebContentsView is a page of the app's context.
+    // Playwright reaches the guest WebContentsView as a page of the app's context.
     const guest = await run.guestPage(`/${threadId}`);
     log(`guest ${new URL(guest.url()).pathname}`);
     const header = await assertPaneHeader(run, THREAD_TITLE);

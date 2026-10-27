@@ -731,7 +731,7 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
         : undefined;
     if (mcpApp !== undefined) {
       const workEntry = projectedWorkEntry(row);
-      // App cards sit under their tool's row, as the app mockups draw them; other MCP Apps replace it.
+      // App cards sit under their tool's row; other MCP Apps replace it.
       const headsAppCard = isAppToolSource(workEntry.toolSource);
       if (headsAppCard) {
         entries.push({

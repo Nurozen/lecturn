@@ -139,11 +139,13 @@ Adapters store a result's `lecturn/*` `_meta` keys with the tool item, and drop 
 keys. Claude and Codex always get them. Pi's bridge passes them in `details`, which the model never
 sees. ACP reads the MCP result from `rawOutput`, but some agents (Grok) end the call with text or
 nothing. The interceptor keeps each result it served, briefly and process-wide in
-[appToolResults.ts][served-results], and the ACP adapter fills such a row from it. It matches by
-thread, tool and arguments, oldest first, and only to a result served after the agent announced the
-call. Matching by name and order is fragile across adapters, so it stays limited to ACP rows that
-came without a result. Cursor's SDK reports no result `_meta` and OpenCode reports results as text,
-so their app rows show the title with no summary.
+[appToolResults.ts][served-results], and the ACP adapter fills such a row from it. The interceptor
+cannot tell an ACP caller from any other, so the store drops image and audio blocks to stay small; a
+filled row has its card, summary and text but not the media. It matches by thread, tool and
+arguments, oldest first, and only to a result served after the agent announced the call. Matching by
+name and order is fragile across adapters, so it stays limited to ACP rows that came without a
+result. Cursor's SDK reports no result `_meta` and OpenCode reports results as text, so their app
+rows show the title with no summary.
 
 Headless definitions are cached. The registration's `listArgs`, the preferred path, runs a command
 that prints the definitions and exits. It must not take an app-side lock. A throwaway lister could
@@ -239,10 +241,11 @@ it to exit.
 ## Per-adapter decisions
 
 Each adapter makes three decisions. It delivers the app's `instructions`. It keeps the provider's
-own approval prompt off app tools, which Lecturn already gates. And it reports whether the
-provider thread got Lecturn's MCP server, through `McpProviderSessions.reportActivation`. On a
-missing or failed activation, the apps hook writes one "tools unavailable" notice per thread and
-provider thread.
+own approval prompt off app tools, which Lecturn already gates. And it reports whether the provider
+thread got Lecturn's MCP server: `reportThreadMcpActivation` in
+[McpProviderSessions.ts][mcp-sessions] after it loads the thread, or an `mcp-activation-failed`
+signal when the server fails to start. On a missing or failed activation, the apps hook writes one
+"tools unavailable" notice per thread and provider thread.
 
 | Adapter                                          | Instructions                                  | Native prompt for app tools                                                                                                           | Notes                                                                                                       |
 | ------------------------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -267,6 +270,7 @@ provider thread.
 [registry]: ../../apps/server/src/apps/AppRegistryService.ts
 [interceptor]: ../../apps/server/src/mcp/toolkits/app/AppToolInterceptor.ts
 [served-results]: ../../packages/shared/src/appToolResults.ts
+[mcp-sessions]: ../../packages/provider-core/src/server/McpProviderSessions.ts
 [gate]: ../../apps/server/src/apps/AppToolGate.ts
 [approval-service]: ../../apps/server/src/apps/AppToolApprovalService.ts
 [runtime-layer]: ../../apps/server/src/orchestration-v2/runtimeLayer.ts

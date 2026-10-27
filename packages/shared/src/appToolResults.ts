@@ -7,6 +7,10 @@
  * A served result is matched to a call by thread, tool and arguments, and only
  * if it was served after the agent announced the call, so a result from an
  * earlier call (or an earlier provider on the thread) never fills a later one.
+ *
+ * `/mcp` cannot tell which calls come from such an agent, so it records every
+ * app tool result; media blocks are dropped first, since they would pin
+ * megabytes per entry for a fill that needs the card and summary.
  */
 
 export interface ServedAppToolCall {
@@ -43,6 +47,19 @@ function stableKey(value: unknown): string {
   return JSON.stringify(value) ?? "undefined";
 }
 
+const MEDIA_BLOCK_TYPES = new Set(["image", "audio"]);
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+function withoutMedia(result: unknown): unknown {
+  if (!isRecord(result) || !Array.isArray(result.content)) return result;
+  const content = result.content.filter(
+    (block) => !(isRecord(block) && MEDIA_BLOCK_TYPES.has(String(block.type))),
+  );
+  return content.length === result.content.length ? result : { ...result, content };
+}
+
 function prune(now: number): void {
   served = served.filter((entry) => now - entry.servedAt <= SERVED_TTL_MS).slice(-MAX_SERVED);
 }
@@ -51,7 +68,13 @@ export function recordServedAppToolResult(
   call: ServedAppToolCall & { readonly result: unknown },
   now: number,
 ): void {
-  served.push({ ...call, argsKey: stableKey(call.args), servedAt: now, claimedBy: undefined });
+  served.push({
+    ...call,
+    result: withoutMedia(call.result),
+    argsKey: stableKey(call.args),
+    servedAt: now,
+    claimedBy: undefined,
+  });
   prune(now);
 }
 

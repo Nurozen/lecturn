@@ -36,7 +36,7 @@ const assertAppSchema = Effect.gen(function* () {
 
 // Upstream ids are remapped above Lecturn's latest id, so another build can
 // record its own migrations at 79 and 80. The migrator would skip those ids,
-// so the app schema has to arrive anyway (D31).
+// so the app schema has to arrive anyway.
 describe("connected-app migrations on a divergent ledger", () => {
   it.effect(
     "adds the app schema when another build recorded different migrations at 79 and 80",

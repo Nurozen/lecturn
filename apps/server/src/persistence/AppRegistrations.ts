@@ -1,7 +1,7 @@
 /**
  * Connected-app registrations and pairing requests. A plain store, not
  * event-sourced: grants and cached tool definitions are environment state,
- * and lease heartbeats would churn an event log (spec R1.2).
+ * and lease heartbeats would churn an event log.
  */
 import {
   AppGrantState,

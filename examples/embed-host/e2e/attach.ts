@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off -- Test harness driving a real Electron app and servers; it runs no Effect runtime of its own.
 /**
- * Spec B2 steps 3-5 and the copy ledger (D33, D36), from a host that step 1
- * left on its sidecar:
+ * Scenario steps 3-5 and the copy ledger, from a host that step 1 left on its
+ * sidecar:
  *
  *   3. A user server starts (temp home) with the host running; approving the
  *      pairing from an admin client switches the host live. The `mode` event
@@ -341,7 +341,7 @@ export function attachFlow(input: {
   readonly log: E2eContext["log"];
   /** Launches the host again on the same directories. */
   readonly reopen: () => Promise<EmbedHostRun>;
-  /** Where the CP4 captures go; none are taken without it. */
+  /** Where the flow's screenshots go; none are taken without it. */
   readonly artifactsDir?: string | undefined;
 }): AttachFlow {
   const { log, artifactsDir } = input;
@@ -422,7 +422,7 @@ export function attachFlow(input: {
     await guestAt(host, sidecar.origin, source.threadId);
     const before = await viewState(host);
 
-    // D36: no host restart; the helper finds the new server on its own.
+    // No host restart; the helper finds the new server on its own.
     const user = await server.start();
     const token = await userSettings();
     const request = await until("the host's pairing request", SWITCH_TIMEOUT_MS, async () => {
@@ -700,7 +700,7 @@ export function attachFlow(input: {
       `lecturn://apps/${HOST_APP_ID}/threads/${copy.userEnvironmentId}/${copy.copyThreadId}`,
       "the notice links to the copy",
     );
-    // The composer stays mounted under the notice; embed.css hides it (D33).
+    // The composer stays mounted under the notice; embed.css hides it.
     NodeAssert.equal(
       await guest.locator('[data-testid="composer-editor"]').filter({ visible: true }).count(),
       0,
@@ -776,7 +776,7 @@ export function attachFlow(input: {
       ),
       "the copy was taken before the held turn finished",
     );
-    // D33: the sidecar, lease included, stays up while its turn runs.
+    // The sidecar, lease included, stays up while its turn runs.
     NodeAssert.ok(isAlive(sidecarPid), "the sidecar keeps running the held turn");
     NodeAssert.notEqual(
       (await appStatus(fallback2.origin, await sidecarSettings(), HOST_APP_ID)).live,

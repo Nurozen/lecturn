@@ -134,7 +134,7 @@ const T0 = Date.parse("2026-10-25T10:00:00.000Z");
 
 /**
  * One Lecturn server's app-visible state, with the copy rules of
- * ThreadCopyService (A23): an up-to-date copy is skipped, a newer source
+ * ThreadCopyService: an up-to-date copy is skipped, a newer source
  * replaces a history-only copy in place, and metadata never moves history.
  */
 class FakeServer {
@@ -546,7 +546,7 @@ describe("connect", () => {
     expect(connection.status.current.pairing).toBe("none");
     expect(connection.workspaceRootOf(sidecarProject)).toBe("/ws/a");
     expect(connection.workspaceRootOf(userProject)).toBe("/ws/a");
-    // Both copies point back at the sidecar for the D33 read-only rule.
+    // Both sidecar threads record where they continue, which makes them read-only there.
     expect(w.sidecar.thread("s-idle").continuedIn).toMatchObject({
       environmentId: "env-user",
       threadId: "copy:env-sidecar:s-idle",

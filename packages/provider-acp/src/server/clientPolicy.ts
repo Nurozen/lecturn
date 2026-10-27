@@ -304,7 +304,7 @@ function acpLecturnToolNames(toolCall: EffectAcpSchema.RequestPermissionRequest[
 /**
  * Lecturn's MCP server gates connected-app tools itself (static gates and
  * app-decided ones, by runtime mode), so a native ACP prompt for one would
- * ask the user twice (D28). File mutations never qualify: an app tool is not
+ * ask the user twice. File mutations never qualify: an app tool is not
  * one, whatever it is called.
  */
 export function acpLecturnAppToolDisposition(

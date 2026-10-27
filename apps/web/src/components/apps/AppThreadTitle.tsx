@@ -49,8 +49,8 @@ export function AppThreadTitle({
 }
 
 /**
- * Sets the title level with the opening message, title on the left and the message on the right,
- * as the app mockups draw it. A phone's lane is too narrow for both, so there they stack. Every
+ * Sets the title level with the opening message, title on the left and the message on the right.
+ * A phone's lane is too narrow for both, so there they stack. Every
  * other row, and every row of a thread that is not an app's, renders as it would without this.
  */
 export function AppThreadTitleBeside({

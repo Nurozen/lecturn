@@ -935,8 +935,8 @@ function latestResponseRunId(timelineEntries: ReadonlyArray<TimelineEntry>): Run
 }
 
 /**
- * The embed pane draws its latest finished turn as the app mockups do: every tool row on its own
- * line instead of behind the turn fold or a "Used N tools" group. Earlier turns keep both.
+ * The embed pane shows its latest finished turn's work in full: every tool row on its own line
+ * instead of behind the turn fold or a "Used N tools" group. Earlier turns keep both.
  */
 function openLatestTurnRunId(
   timelineEntries: ReadonlyArray<TimelineEntry>,
@@ -1140,7 +1140,7 @@ function deriveTurnFolds(input: {
         timelineEntryIsPersistentResourceCard(entry) ||
         timelineEntryHeadsAppCard(entry) ||
         // An app thread reads as the calls the agent made into the app, so its tool rows stay
-        // out of the fold, as the app mockups draw a finished turn.
+        // out of the fold.
         (entry.kind === "work" && isAppToolSource(entry.entry.toolSource)) ||
         input.liveSubagentEntryIds.has(entry.id) ||
         input.completeSupersededReplyEntryIds.has(entry.id)

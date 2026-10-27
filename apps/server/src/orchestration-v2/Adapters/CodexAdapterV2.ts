@@ -748,7 +748,7 @@ export function buildCodexTurnStartParams(input: {
         ? undefined
         : getCodexServiceTierOptionValue(input.modelSelection);
     // Lecturn: a connected app's registered instructions are the app's own
-    // guidance for its tools, unlike its context, so they are developer text (D7).
+    // guidance for its tools, unlike its context, so they are developer text.
     const developerInstructions = withConnectedAppInstructions(
       input.hasLecturnMcp !== true
         ? undefined

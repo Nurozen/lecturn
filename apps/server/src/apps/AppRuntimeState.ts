@@ -36,7 +36,7 @@ export interface AppCredentialTools {
 /** `None` for an app that is not granted. */
 export type AppToolsLookup = (appId: AppId) => Effect.Effect<Option.Option<AppCredentialTools>>;
 
-/** Processes are keyed by app project, never by credential (D5). */
+/** Processes are keyed by app project, never by credential. */
 export type HeadlessProcessKey = `${AppId} ${ProjectId}`;
 
 /** One live call-path process, as the idle reaper needs to see it. */
@@ -46,7 +46,7 @@ export interface HeadlessProcessEntry {
   /** The reaper never closes a process that is still finishing a call. */
   readonly inFlightCalls: number;
   readonly lastCallEndedAt: DateTime.Utc | null;
-  /** Closes stdin and waits; the app's own owner may keep serving (D5). */
+  /** Closes stdin and waits; the app's own owner may keep serving. */
   readonly close: Effect.Effect<void>;
   /** Revoke and shutdown only. */
   readonly kill: Effect.Effect<void>;

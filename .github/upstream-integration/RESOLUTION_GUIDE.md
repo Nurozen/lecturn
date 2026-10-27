@@ -283,8 +283,8 @@ never conflict with:
 `apps/web/src/routes/{embed.*,_chat.apps.$appId,settings.apps}.tsx`,
 `apps/web/src/{state/apps,lib/openAppUrl}.ts`, `apps/desktop/src/ipc/methods/apps.ts`,
 `apps/mobile/src/features/apps/**`, `apps/mobile/src/state/apps.ts`,
-`scripts/bar/**`, `scripts/lib/lecturn-pack.ts`,
-`scripts/{check-embed-chunks,seed-bar-fixture,smoke-pack-install,smoke-pack-probe}.ts`,
+`scripts/lib/lecturn-pack.ts`,
+`scripts/{check-embed-chunks,smoke-pack-install,smoke-pack-probe}.ts`,
 `packages/tsconfig.embed-dts.json`, `docs/internals/app-trust-boundary.md`,
 `docs/user/connected-apps.md`, and their tests.
 
@@ -296,7 +296,8 @@ coordinator, goes into `AppShell.tsx`; take upstream's `__root.tsx` and keep
 the lazy `AppShell` import with its `void loadAppShell()` preload in
 `beforeLoad`, the `/embed` bypass beside `/account/billing` in `beforeLoad`,
 and `isEmbedLocation({ pathname })` in `RootRouteView`'s standalone check.
-`scripts/check-embed-chunks.ts` fails if the sidebar reaches the embed chunk.
+`scripts/check-embed-chunks.ts` fails if the sidebar reaches the embed chunk;
+CI's build job runs it after the desktop build, so keep that step in `ci.yml`.
 
 Call sites in upstream hot files, which must survive a merge. Each is one
 line or one spread unless noted:

@@ -1,5 +1,5 @@
 /**
- * `frame-ancestors` for the static web app (D20). Only the static HTML
+ * `frame-ancestors` for the static web app. Only the static HTML
  * handler sets it: asset and attachment routes serve the MCP App and document
  * frames Lecturn's own clients embed, so a policy there would break them.
  * Electron hosts load `/embed` top-level, where `frame-ancestors` never

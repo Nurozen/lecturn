@@ -244,10 +244,10 @@ async function renderAt(paneWidth: number, labels: Labels) {
   await act(async () => document.fonts.ready);
 }
 
-// The embed mockup's row, and the longest labels RocketWright's pane showed (CP-W1), where the
-// footer used to wrap to three rows.
-const MOCKUP = { model: "Opus 5", effort: "High", access: "Supervised" };
-const CP_W1 = { model: "GPT-6-Astra", effort: "Medium", access: "Full access" };
+// Typical labels, and the longest RocketWright's pane showed: neither may wrap the footer
+// past two rows.
+const TYPICAL = { model: "Opus 5", effort: "High", access: "Supervised" };
+const LONGEST = { model: "GPT-6-Astra", effort: "Medium", access: "Full access" };
 
 const visibleText = (row: Element) =>
   Array.from(row.querySelectorAll<HTMLElement>("button")).map((button) =>
@@ -261,10 +261,10 @@ const visibleText = (row: Element) =>
 
 describe("EmbedComposerFooter in a narrow pane", () => {
   it.each([
-    [352, MOCKUP],
-    [352, CP_W1],
-    [320, MOCKUP],
-    [320, CP_W1],
+    [352, TYPICAL],
+    [352, LONGEST],
+    [320, TYPICAL],
+    [320, LONGEST],
   ])("keeps the footer to two single-line rows at %i px (%o)", async (width, labels) => {
     await renderAt(width, labels);
 
@@ -293,14 +293,14 @@ describe("EmbedComposerFooter in a narrow pane", () => {
     const [model, effort, access] = visibleText(controlsRow);
     expect(model).toBe(labels.model);
     expect(effort).toBe(labels.effort);
-    // Access gives way to its icon first; the mockup's labels all fit at RocketWright's width.
-    expect(access).toBe(width === 352 && labels === MOCKUP ? labels.access : "");
+    // Access gives way to its icon first; typical labels all fit at RocketWright's width.
+    expect(access).toBe(width === 352 && labels === TYPICAL ? labels.access : "");
     expect(visibleText(contextualRow)).toEqual(["Contextual · Off"]);
   });
 
   // RocketWright's frozen composer region is 187 px tall with one chip in the strip.
-  it("matches the mockup's composer height with one chip at 352 px", async () => {
-    await renderAt(352, MOCKUP);
+  it("matches RocketWright's composer height with one chip at 352 px", async () => {
+    await renderAt(352, TYPICAL);
 
     expect(container.querySelectorAll('[data-testid="app-ref-chip"]')).toHaveLength(1);
     const height = container

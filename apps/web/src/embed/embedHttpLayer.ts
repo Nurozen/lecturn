@@ -39,7 +39,10 @@ export function layerWithoutCookies<E, R>(layer: Layer.Layer<HttpClient.HttpClie
   ).pipe(Layer.provide(layer));
 }
 
-/** Every primary HTTP request the embed page makes: the embed bearer, never cookies (D14). */
+/**
+ * Every primary HTTP request the embed page makes: the embed bearer, never cookies, so no request
+ * can authenticate as the user's own session.
+ */
 export function makeEmbedHttpLayer() {
   return Layer.merge(
     Layer.effect(

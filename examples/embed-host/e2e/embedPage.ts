@@ -18,7 +18,7 @@ export interface CounterCard {
 }
 
 export function embedPage(guest: Page) {
-  // Approval cards name an app tool by its declared MCP title (FIXI), not its id.
+  // Approval cards name an app tool by its declared MCP title, not its id.
   const approvalGroup = (toolTitle: string) =>
     guest.locator(`[data-app-tool-approval="true"][aria-label="Approve ${toolTitle}"]`);
   const cardRows = guest.locator('[data-timeline-row-kind="mcp-app"]');

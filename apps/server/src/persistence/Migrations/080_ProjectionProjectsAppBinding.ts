@@ -3,7 +3,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 // Lecturn connected apps. Every statement is guarded because Migrations.ts
 // re-runs it whenever another build's ledger holds a different migration at
-// this id (D31), so it must be safe to run twice.
+// this id, so it must be safe to run twice.
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const columns = yield* sql<{ readonly name: string }>`

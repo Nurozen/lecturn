@@ -1,5 +1,5 @@
-/* The composer's approval card and Contextual control as the embed mockup draws them. Kept apart
-   from embed.css, which themes the whole pane. */
+/* The composer's approval card and Contextual control in the embed pane. Kept apart from
+   embed.css, which themes the whole pane. */
 
 /* The card (ChatComposer's top drawer) is as wide as the composer and sits on it instead of
    tucking its bottom under it, so all of its ~60 px shows. */

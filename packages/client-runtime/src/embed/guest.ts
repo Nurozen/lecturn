@@ -101,7 +101,7 @@ interface PendingRequest {
 }
 
 /**
- * The guest side of the embed bridge (I4): Lecturn's embed view talking to the app that hosts it,
+ * The guest side of the embed bridge: Lecturn's embed view talking to the app that hosts it,
  * the mirror of `makeMcpAppHost`. The host may send nothing before `ui/notifications/initialized`,
  * so until the guest has sent it, host requests are refused with -32002 and host notifications are
  * dropped. Outgoing traffic other than the handshake waits for it in order.

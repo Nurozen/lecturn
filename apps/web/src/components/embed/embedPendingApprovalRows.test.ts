@@ -267,7 +267,7 @@ describe("withoutPendingApprovalRows when the held call's row commits after its 
   });
 });
 
-describe("withoutPendingApprovalRows with RocketWright's CP9 page 01 rows", () => {
+describe("withoutPendingApprovalRows with a recorded RocketWright approval turn", () => {
   // Scripted turn 1 numbers its rows 1001, 1002, ...; the reply and the engine call were still in
   // flight when Lecturn's gate read the highest committed ordinal (1003) and raised the approval.
   const providerTurnId = "provider-turn:provider:scripted:native-turn:cp9-01";

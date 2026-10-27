@@ -1,5 +1,5 @@
 /**
- * The pure half of thread copy (A23): copy ids, the attachments a thread's
+ * The pure half of thread copy: copy ids, the attachments a thread's
  * history references, and the rewrite of that history into a copy. Kept apart
  * from ThreadCopyService so the id and remap rules are testable without a
  * server.
@@ -23,7 +23,7 @@ import {
 } from "../attachmentStore.ts";
 
 /**
- * The id every later import of the same source thread finds again (R8.2). The
+ * The id every later import of the same source thread finds again. The
  * source tuple is the importer's to choose, so the app leads: an app id holds
  * no `:`, and two apps naming one source never derive one thread.
  */
@@ -38,7 +38,7 @@ export const legacyCopyThreadId = (sourceEnvironmentId: EnvironmentId, sourceThr
   ThreadId.make(`copy:${sourceEnvironmentId}:${sourceThreadId}`);
 
 /**
- * A copy that gained Lecturn-side turns is never replaced (D33); newer source
+ * A copy that gained Lecturn-side turns is never replaced; newer source
  * history goes to this thread instead, keyed by the revision so a rerun finds it.
  */
 export const recopyThreadId = (
@@ -133,7 +133,7 @@ const copiedItemId = (threadId: ThreadId, sourceId: string) =>
   TurnItemId.make(`${threadId}:${sourceId}`);
 
 /**
- * A copy is run-less history (R8.2): every run, node and provider reference
+ * A copy is run-less history: every run, node and provider reference
  * is dropped, ids are re-derived from the copy's id so a re-copy upserts the
  * same rows, and items are renumbered in the order the source showed them.
  */
