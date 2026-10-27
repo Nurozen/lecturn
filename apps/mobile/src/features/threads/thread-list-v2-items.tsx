@@ -24,7 +24,7 @@ import { Pressable, useWindowDimensions, View } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 
 import type { ThreadListProvider } from "../../state/thread-list-environments";
-import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
+import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { Menu } from "../../components/ui/Menu";
 import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
@@ -47,67 +47,37 @@ import {
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
   resolveThreadListV2SnoozeGateExpiryMs,
   resolveThreadListV2SnoozeMenuSelection,
-  threadHasUnseenCompletion,
   resolveThreadListV2Status,
   resolveThreadListV2ProviderDrivers,
   resolveThreadListV2SwipeActions,
-  type ThreadListV2Status,
 } from "./threadListV2";
 import { QueuedMessageIcon } from "./queued-message-icon";
 import { shouldRecedeThreadRow } from "./thread-row-emphasis";
 import { ThreadSearchMatchExcerpt } from "./thread-search-match";
 import { ThreadHierarchyChevron } from "./thread-list-items";
+import {
+  resolveThreadStatusBadge,
+  resolveThreadStatusLabel,
+  type ThreadStatusLabel,
+} from "./thread-status-badge";
 
-interface StatusLabel {
-  readonly label: string;
-  readonly icon: AppSymbolName;
-  readonly className: string;
-  readonly iconTintClassName: string;
+/** The status a row shows in place of its age, shared by the thread list and the Apps tab. */
+export function ThreadStatusBadge(props: { readonly label: ThreadStatusLabel }) {
+  return (
+    <View className="flex-row items-center gap-1">
+      <SymbolView
+        name={props.label.icon}
+        size={13}
+        tintColorClassName={props.label.iconTintClassName}
+        type="monochrome"
+        weight="semibold"
+      />
+      <Text className={cn("text-xs font-lecturn-bold", props.label.className)}>
+        {props.label.label}
+      </Text>
+    </View>
+  );
 }
-const STATUS_LABEL_BY_STATUS: Partial<Record<ThreadListV2Status, StatusLabel>> = {
-  approval: {
-    label: "Approval",
-    icon: "exclamationmark.shield",
-    className: "text-warning-foreground",
-    iconTintClassName: "accent-warning-foreground",
-  },
-  input: {
-    label: "Input",
-    icon: "questionmark.bubble",
-    className: "text-adaptive-indigo-600-300",
-    iconTintClassName: "accent-adaptive-indigo-600-300",
-  },
-  working: {
-    label: "Working",
-    icon: "circle.dashed",
-    className: "text-adaptive-sky-600-400",
-    iconTintClassName: "accent-adaptive-sky-600-400",
-  },
-  waiting: {
-    label: "Waiting",
-    icon: "circle.dashed.inset.filled",
-    className: "text-foreground-muted",
-    iconTintClassName: "accent-foreground-muted",
-  },
-  failed: {
-    label: "Failed",
-    icon: "exclamationmark.circle",
-    className: "text-danger-foreground",
-    iconTintClassName: "accent-danger-foreground",
-  },
-  limited: {
-    label: "Limited",
-    icon: "exclamationmark.circle",
-    className: "text-warning-foreground",
-    iconTintClassName: "accent-warning-foreground",
-  },
-};
-const DONE_STATUS_LABEL: StatusLabel = {
-  label: "Done",
-  icon: "checkmark.circle",
-  className: "text-adaptive-emerald-700-300",
-  iconTintClassName: "accent-adaptive-emerald-700-300",
-};
 
 const CARD_MENU_ACTIONS: MenuAction[] = [
   { id: "settle", title: "Settle", image: "checkmark" },
@@ -522,13 +492,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const providerIconSurfaceColor = selectedBackgroundColor;
 
   const status = resolveThreadListV2Status(thread);
-  const isUnread = status === "ready" && threadHasUnseenCompletion(thread);
-  const workingLabel = STATUS_LABEL_BY_STATUS[status];
-  const statusLabel =
-    (status === "working" && workingLabel !== undefined && thread.goal?.status === "active"
-      ? { ...workingLabel, label: "Goal" }
-      : workingLabel) ?? (isUnread ? DONE_STATUS_LABEL : undefined);
-  const visibleStatusLabel = status === "working" ? undefined : statusLabel;
+  const statusLabel = resolveThreadStatusLabel(thread);
+  const visibleStatusLabel = resolveThreadStatusBadge(thread);
   const recede = shouldRecedeThreadRow({ status, selected });
   // The item blanks the time for status-labelled cards; Lecturn hides the "Working"
   // label behind the active border, so working cards draw their activity time.
@@ -904,18 +869,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           />
         ) : null}
         {visibleStatusLabel ? (
-          <View className="flex-row items-center gap-1">
-            <SymbolView
-              name={visibleStatusLabel.icon}
-              size={13}
-              tintColorClassName={visibleStatusLabel.iconTintClassName}
-              type="monochrome"
-              weight="semibold"
-            />
-            <Text className={cn("text-xs font-lecturn-bold", visibleStatusLabel.className)}>
-              {visibleStatusLabel.label}
-            </Text>
-          </View>
+          <ThreadStatusBadge label={visibleStatusLabel} />
         ) : (
           <Text className="text-xs tabular-nums text-foreground-tertiary">{timeLabel}</Text>
         )}
