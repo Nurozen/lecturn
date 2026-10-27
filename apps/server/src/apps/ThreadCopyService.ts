@@ -78,6 +78,7 @@ import {
   copiedAttachmentId,
   copyThreadHistory,
   copyThreadId,
+  legacyCopyThreadId,
   recopyThreadId,
 } from "./threadCopyHistory.ts";
 import { threadAppMetadataOf, withoutThreadAppMetadata } from "./threadAppMetadata.ts";
@@ -467,6 +468,11 @@ const make = Effect.gen(function* () {
     return bySource;
   });
 
+  const threadExists = (threadId: ThreadId) =>
+    sql<{ readonly found: number }>`
+      SELECT 1 AS "found" FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId} LIMIT 1
+    `.pipe(Effect.map((rows) => rows.length > 0));
+
   const hasRuns = (threadId: ThreadId) =>
     sql<{ readonly found: number }>`
       SELECT 1 AS "found" FROM orchestration_v2_projection_runs WHERE thread_id = ${threadId} LIMIT 1
@@ -483,32 +489,42 @@ const make = Effect.gen(function* () {
    * generation, the user) after its first copy.
    */
   const planThread = Effect.fn("ThreadCopyService.planThread")(function* (input: {
+    readonly appId: AppId;
     readonly appName: Effect.Effect<string, AppsError>;
     readonly bundle: ConnectedAppThreadBundleV1;
     readonly thread: ConnectedAppThreadBundleThread;
     readonly copies: ReadonlyArray<CopyRow>;
   }) {
-    const { bundle, thread } = input;
+    const { appId, bundle, thread } = input;
     const sourceTitle = thread.title.trim();
-    const firstCopyId = copyThreadId(bundle.sourceEnvironmentId, thread.sourceThreadId);
+    const firstCopyId = copyThreadId(appId, bundle.sourceEnvironmentId, thread.sourceThreadId);
+    const firstCopyIds = new Set([
+      firstCopyId,
+      legacyCopyThreadId(bundle.sourceEnvironmentId, thread.sourceThreadId),
+    ]);
     // A re-copy's suffix tells it apart from the continued copy beside it.
     const titleOf = (threadId: ThreadId) => {
       const title = sourceTitle === "" ? UNTITLED : sourceTitle;
-      return threadId === firstCopyId
+      return firstCopyIds.has(threadId)
         ? Effect.succeed(title)
         : Effect.map(input.appName, (name) => `${title} (from ${name})`);
     };
+    // This app's copies are found above by `copiedFrom`, so an id already in
+    // use is someone else's thread, and `thread.created` would hand it over.
+    const create = Effect.fn("ThreadCopyService.planCreate")(function* (threadId: ThreadId) {
+      if (yield* threadExists(threadId)) {
+        return yield* new AppsError({
+          code: "conflict",
+          message: `Thread ${threadId} already exists and is not a copy of this app's.`,
+        });
+      }
+      return { type: "create", threadId, title: yield* titleOf(threadId) } satisfies ThreadPlan;
+    });
     const latest = input.copies.reduce<CopyRow | undefined>(
       (best, copy) => (best === undefined || copy.revision > best.revision ? copy : best),
       undefined,
     );
-    if (latest === undefined) {
-      return {
-        type: "create",
-        threadId: firstCopyId,
-        title: yield* titleOf(firstCopyId),
-      } satisfies ThreadPlan;
-    }
+    if (latest === undefined) return yield* create(firstCopyId);
     if (latest.revision >= thread.historyRevision) {
       if (sourceTitle === "" || latest.deleted) return { type: "skip" } satisfies ThreadPlan;
       const title = yield* titleOf(latest.threadId);
@@ -529,12 +545,14 @@ const make = Effect.gen(function* () {
         title: sourceTitle === "" ? current.title : yield* titleOf(latest.threadId),
       } satisfies ThreadPlan;
     }
-    const threadId = recopyThreadId(
-      bundle.sourceEnvironmentId,
-      thread.sourceThreadId,
-      thread.historyRevision,
+    return yield* create(
+      recopyThreadId(
+        appId,
+        bundle.sourceEnvironmentId,
+        thread.sourceThreadId,
+        thread.historyRevision,
+      ),
     );
-    return { type: "create", threadId, title: yield* titleOf(threadId) } satisfies ThreadPlan;
   });
 
   const availableInstance = (instanceId: ProviderInstanceId) =>
@@ -829,6 +847,7 @@ const make = Effect.gen(function* () {
       });
       for (const thread of project.threads) {
         const plan = yield* planThread({
+          appId,
           appName: appNameOnce,
           bundle,
           thread,

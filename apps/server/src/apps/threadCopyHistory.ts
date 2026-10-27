@@ -5,6 +5,7 @@
  * server.
  */
 import {
+  type AppId,
   type ChatAttachment,
   type EnvironmentId,
   MessageId,
@@ -21,8 +22,19 @@ import {
   parseAttachmentFileExtension,
 } from "../attachmentStore.ts";
 
-/** The id every later import of the same source thread finds again (R8.2). */
-export const copyThreadId = (sourceEnvironmentId: EnvironmentId, sourceThreadId: ThreadId) =>
+/**
+ * The id every later import of the same source thread finds again (R8.2). The
+ * source tuple is the importer's to choose, so the app leads: an app id holds
+ * no `:`, and two apps naming one source never derive one thread.
+ */
+export const copyThreadId = (
+  appId: AppId,
+  sourceEnvironmentId: EnvironmentId,
+  sourceThreadId: ThreadId,
+) => ThreadId.make(`copy:${appId}:${sourceEnvironmentId}:${sourceThreadId}`);
+
+/** Copies taken before ids named the app. They are found by `copiedFrom`, never derived again. */
+export const legacyCopyThreadId = (sourceEnvironmentId: EnvironmentId, sourceThreadId: ThreadId) =>
   ThreadId.make(`copy:${sourceEnvironmentId}:${sourceThreadId}`);
 
 /**
@@ -30,10 +42,12 @@ export const copyThreadId = (sourceEnvironmentId: EnvironmentId, sourceThreadId:
  * history goes to this thread instead, keyed by the revision so a rerun finds it.
  */
 export const recopyThreadId = (
+  appId: AppId,
   sourceEnvironmentId: EnvironmentId,
   sourceThreadId: ThreadId,
   historyRevision: number,
-) => ThreadId.make(`copy:${sourceEnvironmentId}:${sourceThreadId}:r${historyRevision}`);
+) =>
+  ThreadId.make(`${copyThreadId(appId, sourceEnvironmentId, sourceThreadId)}:r${historyRevision}`);
 
 /**
  * `chat` is an uploaded image or file: its stored name depends on the
