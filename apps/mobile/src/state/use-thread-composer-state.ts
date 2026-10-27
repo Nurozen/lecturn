@@ -104,6 +104,7 @@ import {
 import { setPendingConnectionError } from "../state/use-remote-environment-registry";
 import { clearThreadComposerError, setThreadComposerError } from "./thread-composer-error";
 import {
+  useSelectedThreadPendingRequests,
   useSelectedThreadProjection,
   useSelectedThreadVisibleTurnItems,
 } from "../state/use-thread-detail";
@@ -184,6 +185,7 @@ export function useThreadComposerState() {
   } = useThreadSelection();
   const selectedThreadProjection = useSelectedThreadProjection();
   const selectedThreadVisibleTurnItems = useSelectedThreadVisibleTurnItems();
+  const selectedThreadPendingApprovals = useSelectedThreadPendingRequests()?.approvals;
   const composerDrafts = useAtomValue(composerDraftsAtom);
   const acknowledgedMessages = useAtomValue(acknowledgedThreadMessagesAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
@@ -266,6 +268,7 @@ export function useThreadComposerState() {
       anchoredMessages: pendingCreation,
       attempts: selectedThreadAttempts,
       nodes: selectedThreadNodes,
+      cardApprovals: selectedThreadPendingApprovals ?? [],
     });
     const pendingAcknowledgments = acknowledgedMessages.filter(
       (message) =>
@@ -281,6 +284,7 @@ export function useThreadComposerState() {
     selectedThreadAttempts,
     selectedThreadNodes,
     selectedThreadVisibleTurnItems,
+    selectedThreadPendingApprovals,
     pendingCreationMessage,
     selectedThreadKey,
     selectedThreadQueuedMessages,
