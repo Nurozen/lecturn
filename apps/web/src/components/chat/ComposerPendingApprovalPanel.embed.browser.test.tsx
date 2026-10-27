@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { page } from "vite-plus/test/browser";
 
 import { EmbedPresentationContext } from "../../embed/EmbedPresentationContext";
+import { applyEmbedThemeToRoot } from "../../embed/embedTheme";
 import type { PendingApproval } from "../../session-logic";
 import { ComposerBanner } from "./ComposerBanner";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
@@ -35,6 +36,9 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   delete document.documentElement.dataset.lecturnEmbed;
+  applyEmbedThemeToRoot(document.documentElement, { appearance: "light", variables: {} });
+  delete document.documentElement.dataset.lecturnEmbed;
+  document.documentElement.style.removeProperty("color-scheme");
   vi.unstubAllGlobals();
 });
 
@@ -287,5 +291,72 @@ describe("the approval card outside the embed", () => {
     expect(card.left).toBeGreaterThan(composer.left + 10);
     expect(card.bottom).toBeGreaterThan(composer.top + 10);
     expect(buttonBoxes[0]!.top).toBeGreaterThanOrEqual(titleBox.bottom);
+  });
+});
+
+// RocketWright's dark palette, as its pane sends it: --input is one step off --card, which the
+// warning card's tint lifts above it.
+const HOST_THEME = {
+  "--background": "#1b1e20",
+  "--foreground": "#e6e9ea",
+  "--card": "#25292c",
+  "--card-foreground": "#e6e9ea",
+  "--popover": "#25292c",
+  "--popover-foreground": "#e6e9ea",
+  "--muted": "#25292c",
+  "--muted-foreground": "#8e989c",
+  "--secondary": "#25292c",
+  "--secondary-foreground": "#e6e9ea",
+  "--border": "#2a3034",
+  "--input": "#2a3034",
+  "--primary": "#61b5ad",
+  "--primary-foreground": "#1b1e20",
+  "--accent": "#253c3f",
+  "--accent-foreground": "#e6e9ea",
+  "--ring": "#61b5ad",
+};
+
+/** The painted color at a viewport point, read from a screenshot of the page. */
+async function paintedAt(points: ReadonlyArray<{ x: number; y: number }>) {
+  const shot: unknown = await page.screenshot({ save: false, base64: true });
+  const image = new Image();
+  image.src = `data:image/png;base64,${typeof shot === "string" ? shot : (shot as { base64: string }).base64}`;
+  await image.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const context = canvas.getContext("2d")!;
+  context.drawImage(image, 0, 0);
+  const scale = image.width / innerWidth;
+  return points.map(({ x, y }) =>
+    Array.from(context.getImageData(Math.floor(x * scale), Math.floor(y * scale), 1, 1).data).slice(
+      0,
+      3,
+    ),
+  );
+}
+
+describe.each([352, 1280])("the embed approval card's Decline in a %i px pane", (width) => {
+  it("stands out from the card as an outlined button under a host's dark theme", async () => {
+    applyEmbedThemeToRoot(document.documentElement, { appearance: "dark", variables: HOST_THEME });
+    await render(width);
+    const actions = container.querySelector('[data-slot="composer-banner-actions"]')!;
+    const decline = [...actions.querySelectorAll<HTMLElement>("button")].find(
+      (button) => button.textContent === "Decline",
+    )!;
+    const more = actions.querySelector<HTMLElement>('[aria-label="More approval options"]')!;
+    for (const button of [decline, more]) {
+      const box = button.getBoundingClientRect();
+      const y = box.top + box.height / 2;
+      const [card, edge] = await paintedAt([
+        { x: box.left - 2, y },
+        { x: box.left + 0.5, y },
+      ]);
+      // An outline that blends into the card differs from it by a few levels at most.
+      expect(
+        Math.max(...edge!.map((channel, index) => Math.abs(channel - card![index]!))),
+      ).toBeGreaterThanOrEqual(24);
+      expect(getComputedStyle(button).borderTopWidth).toBe("1px");
+    }
   });
 });
