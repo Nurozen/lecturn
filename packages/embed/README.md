@@ -137,7 +137,9 @@ tune the rest but not those.
 - `refPrefixes` (1 to 8) mark references to your app's objects, such as `ex:item/42`. Each ends in
   `:` and is at most 16 characters. They show as chips in messages, and clicking one sends
   `lecturn/navigate` back to you.
-- `openUrlTemplate` is how Lecturn's **Open in** button reopens your app (see below).
+- `openUrlTemplate` is how Lecturn's **Open in** button reopens your app (see below). It uses your
+  app's own URL scheme or http(s); script, file and browser schemes such as `javascript:`,
+  `data:` and `file:` are refused.
 - `headlessTools` is an MCP server over stdio that Lecturn starts on demand, one process per
   workspace, with `{workspaceRoot}` substituted in `args`, `listArgs`, `env` and `cwd`. `command`
   is an absolute path and `cwd` is always `{workspaceRoot}`. It works while your app is closed.
@@ -169,7 +171,8 @@ thread without your tools.
 ### Handle `openUrlTemplate`
 
 Lecturn fills `{workspaceRoot}` and `{threadId}` URL-encoded, and leaves `{threadId}` empty when it
-opens a workspace rather than a thread. Register your scheme with
+opens a workspace rather than a thread. When the user clicks one of your references in Lecturn
+itself, in a message or a card, `{ref}` holds it. Register your scheme with
 `app.setAsDefaultProtocolClient("embedhost")` and take the URL from `open-url` on macOS (listen
 before `ready` to catch the one that launched you), or from the command line (`process.argv` at
 launch, `second-instance` after) on Windows and Linux. Then get the project from
