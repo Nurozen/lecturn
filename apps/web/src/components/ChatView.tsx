@@ -478,6 +478,7 @@ import {
   shouldShowThreadErrorBanner,
   ThreadErrorBanner,
 } from "./chat/ThreadErrorBanner";
+import { ChatBannerLane } from "./chat/ChatBannerLane";
 import { QueuedRunsControl, type QueuedRunsControlHandle } from "./chat/QueuedRunsControl";
 import { useThreadLinkedPullRequest } from "./pullRequest/useThreadLinkedPullRequest";
 import { useProactivePanels } from "../hooks/useProactivePanels";
@@ -8439,7 +8440,7 @@ export default function ChatView(props: ChatViewProps) {
                   </div>
                 </div>
               ) : null}
-              <div className="chat-banner-lane pointer-events-none absolute top-0 z-20 flex flex-col">
+              <ChatBannerLane threadRef={displayedThreadRef}>
                 <ProviderStatusBanner
                   status={visibleProviderStatus}
                   onDismiss={() => setDismissedProviderStatusBannerKey(providerStatusBannerKey)}
@@ -8460,7 +8461,7 @@ export default function ChatView(props: ChatViewProps) {
                     setThreadErrorBannerDismissTick((tick) => tick + 1);
                   }}
                 />
-              </div>
+              </ChatBannerLane>
               <div
                 className="relative flex min-h-0 flex-1 flex-col"
                 data-timeline-loading={threadDetailLoading || undefined}

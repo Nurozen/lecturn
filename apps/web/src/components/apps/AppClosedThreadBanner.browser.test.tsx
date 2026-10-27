@@ -1,5 +1,6 @@
 import "../../index.css";
 
+import { scopeThreadRef } from "@lecturn/client-runtime/environment";
 import {
   AppId,
   type AppEmbedContext,
@@ -39,7 +40,9 @@ vi.mock(import("../../state/apps"), async (original) => ({
   useAppEmbedContext: ((ref: unknown) => (ref === null ? null : embedContext)) as never,
 }));
 
+import { ChatBannerLane } from "../chat/ChatBannerLane";
 import { MessagesTimeline } from "../chat/MessagesTimeline";
+import { ThreadErrorBanner } from "../chat/ThreadErrorBanner";
 
 const context = (overrides: Partial<AppEmbedContext> = {}): AppEmbedContext => ({
   appId: APP_ID,
@@ -70,8 +73,9 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function renderEmptyAppThread() {
+async function renderEmptyAppThread(threadError: string | null = null) {
   threadCount += 1;
+  const threadRef = scopeThreadRef(MAC, ThreadId.make(`t-empty-${threadCount}`));
   const props: ComponentProps<typeof MessagesTimeline> = {
     timelineEntries: [],
     isWorking: false,
@@ -80,7 +84,7 @@ async function renderEmptyAppThread() {
     latestRun: null,
     turnDiffSummaries: [],
     runs: [],
-    routeThreadKey: `${MAC}:${ThreadId.make(`t-empty-${threadCount}`)}`,
+    routeThreadKey: `${MAC}:${threadRef.threadId}`,
     onOpenTurnDiff: () => {},
     onOpenThread: () => {},
     onForkFromRun: async () => {},
@@ -102,10 +106,23 @@ async function renderEmptyAppThread() {
     onIsAtEndChange: () => {},
     onManualNavigation: () => {},
   };
-  await act(async () => root.render(<MessagesTimeline {...props} />));
+  // The chat canvas as ChatView lays it out: the banner lane over the timeline.
+  await act(async () =>
+    root.render(
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+        <ChatBannerLane threadRef={threadRef}>
+          <ThreadErrorBanner error={threadError} onDismiss={() => {}} />
+        </ChatBannerLane>
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <MessagesTimeline {...props} />
+        </div>
+      </div>,
+    ),
+  );
 }
 
 const banner = () => container.querySelector<HTMLElement>('[data-testid="app-closed-banner"]');
+const threadErrorAlert = () => container.querySelector<HTMLElement>('[data-slot="alert"]');
 const placeholder = () =>
   [...container.querySelectorAll<HTMLElement>("p")].find((node) =>
     node.textContent?.includes("Send a message to start the conversation."),
@@ -138,6 +155,19 @@ describe("AppClosedThreadBanner on an empty app thread", () => {
 
     await vi.waitFor(() => expect(banner()?.textContent).toContain("Rocket access revoked"));
     await vi.waitFor(() => expect(concealer(banner())).toBeNull());
+  });
+
+  it("keeps a thread error from covering the revoked notice", async () => {
+    embedContext = context({ state: "revoked" });
+    await renderEmptyAppThread("Turn failed: Rocket was revoked (approval cancelled).");
+
+    await vi.waitFor(() => expect(concealer(banner())).toBeNull());
+    expect(concealer(threadErrorAlert())).toBeNull();
+    const notice = banner()!.getBoundingClientRect();
+    const error = threadErrorAlert()!.getBoundingClientRect();
+    expect(notice.height).toBeGreaterThan(0);
+    expect(error.height).toBeGreaterThan(0);
+    expect(error.bottom).toBeLessThanOrEqual(notice.top);
   });
 
   it("keeps the start placeholder while the app is running", async () => {
