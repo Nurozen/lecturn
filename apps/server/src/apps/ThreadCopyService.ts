@@ -57,8 +57,11 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { resolveAttachmentRelativePath } from "../attachmentPaths.ts";
 import {
   parseAttachmentFileExtension,
+  parseThreadSegmentFromAttachmentId,
+  PENDING_ATTACHMENT_THREAD_SEGMENT,
   resolveAttachmentPath,
   resolveAttachmentPathById,
+  toSafeThreadAttachmentSegment,
 } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -78,6 +81,7 @@ import {
   copiedAttachmentId,
   copyThreadHistory,
   copyThreadId,
+  legacyCopyThreadId,
   recopyThreadId,
 } from "./threadCopyHistory.ts";
 import { threadAppMetadataOf, withoutThreadAppMetadata } from "./threadAppMetadata.ts";
@@ -243,14 +247,61 @@ const make = Effect.gen(function* () {
           ),
         );
 
+  /**
+   * Bytes leave only for files the app's own threads minted. A history
+   * reference proves nothing, since an app writes its own history (imports,
+   * tool output). An id names its minting thread only by a lossy segment, so
+   * every thread with that segment must be the app's, as in AppAuthorization's
+   * attachment lookup.
+   */
+  const makeOwnsAttachment = Effect.fn("ThreadCopyService.makeOwnsAttachment")(function* (
+    appProjectIds: ReadonlySet<string>,
+  ) {
+    interface Row {
+      readonly threadId: string;
+      readonly projectId: string;
+    }
+    // Every id a segment reshapes, read once per export: copies are all of this kind.
+    const reshaped = yield* Effect.cached(sql<Row>`
+      SELECT thread_id AS "threadId", project_id AS "projectId"
+      FROM orchestration_v2_projection_threads
+      WHERE thread_id GLOB '*[^a-z0-9_-]*' OR length(thread_id) > 80
+    `);
+    return Effect.fn("ThreadCopyService.ownsAttachment")(function* (attachmentId: string) {
+      const segment = parseThreadSegmentFromAttachmentId(attachmentId);
+      if (segment === null || segment === PENDING_ATTACHMENT_THREAD_SEGMENT) return false;
+      const exact = yield* sql<Row>`
+        SELECT thread_id AS "threadId", project_id AS "projectId"
+        FROM orchestration_v2_projection_threads
+        WHERE thread_id = ${segment}
+      `;
+      const owners = [
+        ...exact,
+        ...(yield* reshaped).filter(
+          (row) => toSafeThreadAttachmentSegment(row.threadId) === segment,
+        ),
+      ];
+      return owners.length > 0 && owners.every((row) => appProjectIds.has(row.projectId));
+    });
+  });
+
   const exportThread = Effect.fn("ThreadCopyService.exportThread")(function* (
     shell: OrchestrationV2ThreadShell,
     historyRevision: number,
     assets: Map<string, ConnectedAppThreadBundleAsset>,
+    ownsAttachment: Effect.Success<ReturnType<typeof makeOwnsAttachment>>,
   ) {
     const { messages, items } = yield* readHistory(shell.id);
     for (const [sourceAttachmentId, ref] of collectThreadAssetRefs(messages, items)) {
       if (assets.has(sourceAttachmentId)) continue;
+      // The reference is still copied, as for a file the source lost.
+      if (!(yield* ownsAttachment(sourceAttachmentId))) {
+        yield* Effect.logWarning("Thread copy left out an attachment of another owner", {
+          threadId: shell.id,
+          sourceAttachmentId,
+        });
+        continue;
+      }
       const filePath =
         ref.kind === "chat"
           ? resolveAttachmentPath({
@@ -308,6 +359,14 @@ const make = Effect.gen(function* () {
       }
     }
     const sourceEnvironmentId = yield* environment.getEnvironmentId;
+    const appProjectIds = new Set(
+      (yield* projects
+        .list({ includeDeleted: true })
+        .pipe(Effect.mapError(unavailable("Could not read projects"))))
+        .filter((candidate) => candidate.appBinding?.appId === appId)
+        .map((candidate) => candidate.projectId as string),
+    );
+    const ownsAttachment = yield* makeOwnsAttachment(appProjectIds);
     const assets = new Map<string, ConnectedAppThreadBundleAsset>();
     const bundleProjects: Array<ConnectedAppThreadBundleProject> = [];
     for (const row of rows) {
@@ -327,7 +386,7 @@ const make = Effect.gen(function* () {
         Effect.mapError(unavailable("Could not read thread history")),
       );
       const threads = yield* Effect.forEach(shells, (shell) =>
-        exportThread(shell, revisions.get(shell.id) ?? 0, assets).pipe(
+        exportThread(shell, revisions.get(shell.id) ?? 0, assets, ownsAttachment).pipe(
           Effect.mapError(unavailable(`Could not read thread ${shell.id}`)),
         ),
       );
@@ -467,6 +526,11 @@ const make = Effect.gen(function* () {
     return bySource;
   });
 
+  const threadExists = (threadId: ThreadId) =>
+    sql<{ readonly found: number }>`
+      SELECT 1 AS "found" FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId} LIMIT 1
+    `.pipe(Effect.map((rows) => rows.length > 0));
+
   const hasRuns = (threadId: ThreadId) =>
     sql<{ readonly found: number }>`
       SELECT 1 AS "found" FROM orchestration_v2_projection_runs WHERE thread_id = ${threadId} LIMIT 1
@@ -483,32 +547,42 @@ const make = Effect.gen(function* () {
    * generation, the user) after its first copy.
    */
   const planThread = Effect.fn("ThreadCopyService.planThread")(function* (input: {
+    readonly appId: AppId;
     readonly appName: Effect.Effect<string, AppsError>;
     readonly bundle: ConnectedAppThreadBundleV1;
     readonly thread: ConnectedAppThreadBundleThread;
     readonly copies: ReadonlyArray<CopyRow>;
   }) {
-    const { bundle, thread } = input;
+    const { appId, bundle, thread } = input;
     const sourceTitle = thread.title.trim();
-    const firstCopyId = copyThreadId(bundle.sourceEnvironmentId, thread.sourceThreadId);
+    const firstCopyId = copyThreadId(appId, bundle.sourceEnvironmentId, thread.sourceThreadId);
+    const firstCopyIds = new Set([
+      firstCopyId,
+      legacyCopyThreadId(bundle.sourceEnvironmentId, thread.sourceThreadId),
+    ]);
     // A re-copy's suffix tells it apart from the continued copy beside it.
     const titleOf = (threadId: ThreadId) => {
       const title = sourceTitle === "" ? UNTITLED : sourceTitle;
-      return threadId === firstCopyId
+      return firstCopyIds.has(threadId)
         ? Effect.succeed(title)
         : Effect.map(input.appName, (name) => `${title} (from ${name})`);
     };
+    // This app's copies are found above by `copiedFrom`, so an id already in
+    // use is someone else's thread, and `thread.created` would hand it over.
+    const create = Effect.fn("ThreadCopyService.planCreate")(function* (threadId: ThreadId) {
+      if (yield* threadExists(threadId)) {
+        return yield* new AppsError({
+          code: "conflict",
+          message: `Thread ${threadId} already exists and is not a copy of this app's.`,
+        });
+      }
+      return { type: "create", threadId, title: yield* titleOf(threadId) } satisfies ThreadPlan;
+    });
     const latest = input.copies.reduce<CopyRow | undefined>(
       (best, copy) => (best === undefined || copy.revision > best.revision ? copy : best),
       undefined,
     );
-    if (latest === undefined) {
-      return {
-        type: "create",
-        threadId: firstCopyId,
-        title: yield* titleOf(firstCopyId),
-      } satisfies ThreadPlan;
-    }
+    if (latest === undefined) return yield* create(firstCopyId);
     if (latest.revision >= thread.historyRevision) {
       if (sourceTitle === "" || latest.deleted) return { type: "skip" } satisfies ThreadPlan;
       const title = yield* titleOf(latest.threadId);
@@ -529,12 +603,14 @@ const make = Effect.gen(function* () {
         title: sourceTitle === "" ? current.title : yield* titleOf(latest.threadId),
       } satisfies ThreadPlan;
     }
-    const threadId = recopyThreadId(
-      bundle.sourceEnvironmentId,
-      thread.sourceThreadId,
-      thread.historyRevision,
+    return yield* create(
+      recopyThreadId(
+        appId,
+        bundle.sourceEnvironmentId,
+        thread.sourceThreadId,
+        thread.historyRevision,
+      ),
     );
-    return { type: "create", threadId, title: yield* titleOf(threadId) } satisfies ThreadPlan;
   });
 
   const availableInstance = (instanceId: ProviderInstanceId) =>
@@ -611,12 +687,16 @@ const make = Effect.gen(function* () {
       thread.messages,
       thread.turnItems,
     )) {
-      const asset = input.assets.get(sourceAttachmentId);
+      // Every reference moves to the copy's own ids, bytes or not: one left
+      // as it was would name whatever file this server holds under that id.
       const attachmentId = copiedAttachmentId(threadId, sourceAttachmentId);
-      if (asset === undefined || attachmentId === null) continue;
-      const relativePath = copiedAssetRelativePath(attachmentId, ref);
-      if (relativePath === null) continue;
+      if (attachmentId === null) {
+        return yield* invalid(`Attachment ${sourceAttachmentId} cannot be copied.`);
+      }
       attachmentIds.set(sourceAttachmentId, attachmentId);
+      const asset = input.assets.get(sourceAttachmentId);
+      const relativePath = asset === undefined ? null : copiedAssetRelativePath(attachmentId, ref);
+      if (asset === undefined || relativePath === null) continue;
       files.push({ blob: blobPath(input.stagingDir, asset), relativePath });
     }
 
@@ -829,6 +909,7 @@ const make = Effect.gen(function* () {
       });
       for (const thread of project.threads) {
         const plan = yield* planThread({
+          appId,
           appName: appNameOnce,
           bundle,
           thread,

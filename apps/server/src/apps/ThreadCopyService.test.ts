@@ -58,6 +58,7 @@ import {
   resolveAttachmentPath,
   resolveAttachmentPathById,
   createAttachmentId,
+  toSafeThreadAttachmentSegment,
 } from "../attachmentStore.ts";
 import type { AuthenticatedSession } from "../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -92,7 +93,7 @@ import {
   ThreadCopyService,
 } from "./services.ts";
 import { formatEmbedSubject } from "./subjects.ts";
-import { copyThreadId, recopyThreadId } from "./threadCopyHistory.ts";
+import { copyThreadId, legacyCopyThreadId, recopyThreadId } from "./threadCopyHistory.ts";
 import * as ThreadCopyServiceLayer from "./ThreadCopyService.ts";
 
 const driver = ProviderDriverKind.make("codex");
@@ -266,13 +267,16 @@ const writeTurn = (
     readonly card?: boolean;
     readonly userText?: string;
     readonly context?: OrchestrationMessageContext;
+    /** Another thread's upload and card, referenced as a forged history would. */
+    readonly borrowed?: { readonly image: ChatAttachment; readonly cardId: string };
   } = {},
 ) =>
   Effect.gen(function* () {
     const sink = yield* EventSink.EventSinkV2;
     const runId = RunId.make(`${threadId}:run:${turn}`);
     const time = at(turn * 10);
-    const attachments: Array<ChatAttachment> = [];
+    const attachments: Array<ChatAttachment> =
+      options.borrowed === undefined ? [] : [options.borrowed.image];
     if (options.image === true) {
       const attachment: ChatAttachment = {
         type: "image",
@@ -288,8 +292,10 @@ const writeTurn = (
       );
       attachments.push(attachment);
     }
-    const cardId = options.card === true ? createAttachmentId(threadId, "html")! : null;
-    if (cardId !== null) yield* writeFile(`${cardId}.html`, CARD_HTML);
+    const cardId =
+      options.borrowed?.cardId ??
+      (options.card === true ? createAttachmentId(threadId, "html")! : null);
+    if (options.card === true && cardId !== null) yield* writeFile(`${cardId}.html`, CARD_HTML);
     const base = (suffix: string, ordinal: number) => ({
       id: TurnItemId.make(`${threadId}:t${turn}:${suffix}`),
       threadId,
@@ -568,7 +574,7 @@ describe("ThreadCopyService", () => {
           Effect.gen(function* () {
             const projectId = yield* appProjectFor("/work/rocket");
             const [summary] = yield* listCopies(projectId);
-            const threadId = copyThreadId(sidecar.environmentId, source.threadId);
+            const threadId = copyThreadId(app, sidecar.environmentId, source.threadId);
             assert.strictEqual(summary?.threadId, threadId);
             assert.strictEqual(summary?.title, "Max-Q study");
             assert.strictEqual(summary?.subtitle, "Apogee 1.2 km");
@@ -653,7 +659,7 @@ describe("ThreadCopyService", () => {
       yield* user.run(
         Effect.gen(function* () {
           const projection = yield* projectionOf(
-            copyThreadId(sidecar.environmentId, source.threadId),
+            copyThreadId(app, sidecar.environmentId, source.threadId),
           );
           const message = projection.messages.find((entry) => entry.role === "user");
           const item = projection.visibleTurnItems.find(
@@ -715,7 +721,10 @@ describe("ThreadCopyService", () => {
         Effect.gen(function* () {
           const [only, ...rest] = yield* listCopies(yield* appProjectFor("/work/rocket"));
           assert.lengthOf(rest, 0);
-          assert.strictEqual(only?.threadId, copyThreadId(sidecar.environmentId, source.threadId));
+          assert.strictEqual(
+            only?.threadId,
+            copyThreadId(app, sidecar.environmentId, source.threadId),
+          );
           assert.strictEqual(
             only?.copiedFrom?.sourceHistoryRevision,
             newer.projects[0]!.threads[0]!.historyRevision,
@@ -783,7 +792,7 @@ describe("ThreadCopyService", () => {
                   threadId: source.threadId,
                   continuedIn: {
                     environmentId: user.environmentId,
-                    threadId: copyThreadId(sidecar.environmentId, source.threadId),
+                    threadId: copyThreadId(app, sidecar.environmentId, source.threadId),
                     copiedAt: DateTime.formatIso(yield* DateTime.now),
                   },
                 },
@@ -809,7 +818,7 @@ describe("ThreadCopyService", () => {
       yield* sidecar.run(writeTurn(source.threadId, 1, { card: true }));
       const first = yield* sidecar.run(exportAll);
       yield* user.run(importBundle(first));
-      const copyId = copyThreadId(sidecar.environmentId, source.threadId);
+      const copyId = copyThreadId(app, sidecar.environmentId, source.threadId);
       const before = yield* user.run(Effect.all([projectionOf(copyId), attachmentFiles]));
       assert.strictEqual(before[0].thread.title, RAW_TITLE);
 
@@ -853,7 +862,7 @@ describe("ThreadCopyService", () => {
         skipped: 0,
       });
       const copy = yield* user.run(
-        projectionOf(copyThreadId(sidecar.environmentId, source.threadId)),
+        projectionOf(copyThreadId(app, sidecar.environmentId, source.threadId)),
       );
       assert.strictEqual(copy.thread.title, "Counter study");
       assert.lengthOf(transcript(copy), 4);
@@ -869,7 +878,7 @@ describe("ThreadCopyService", () => {
         const source = yield* sidecar.run(createSourceThread("/work/rocket", "Max-Q study"));
         yield* sidecar.run(writeTurn(source.threadId, 1));
         yield* user.run(importBundle(yield* sidecar.run(exportAll)));
-        const copyId = copyThreadId(sidecar.environmentId, source.threadId);
+        const copyId = copyThreadId(app, sidecar.environmentId, source.threadId);
         yield* user.run(sendMessage(copyId, "continue here"));
         const continued = yield* user.run(projectionOf(copyId));
 
@@ -886,7 +895,7 @@ describe("ThreadCopyService", () => {
             assert.deepEqual(transcript(untouched), transcript(continued));
             assert.deepEqual(untouched.thread.copiedFrom, continued.thread.copiedFrom);
 
-            const recopyId = recopyThreadId(sidecar.environmentId, source.threadId, revision);
+            const recopyId = recopyThreadId(app, sidecar.environmentId, source.threadId, revision);
             const recopy = yield* projectionOf(recopyId);
             assert.strictEqual(recopy.thread.title, `Max-Q study (from ${APP_NAME})`);
             assert.strictEqual(recopy.thread.copiedFrom?.sourceHistoryRevision, revision);
@@ -913,7 +922,7 @@ describe("ThreadCopyService", () => {
         const [kept, recopy] = yield* user.run(
           Effect.all([
             projectionOf(copyId),
-            projectionOf(recopyThreadId(sidecar.environmentId, source.threadId, revision)),
+            projectionOf(recopyThreadId(app, sidecar.environmentId, source.threadId, revision)),
           ]),
         );
         assert.strictEqual(kept.thread.title, continued.thread.title);
@@ -928,7 +937,7 @@ describe("ThreadCopyService", () => {
       const source = yield* sidecar.run(createSourceThread("/work/rocket", "Thread"));
       yield* sidecar.run(writeTurn(source.threadId, 1));
       yield* user.run(importBundle(yield* sidecar.run(exportAll)));
-      const copyId = copyThreadId(sidecar.environmentId, source.threadId);
+      const copyId = copyThreadId(app, sidecar.environmentId, source.threadId);
 
       yield* user.run(sendMessage(copyId, "go on"));
       const projection = yield* user.run(projectionOf(copyId));
@@ -946,7 +955,7 @@ describe("ThreadCopyService", () => {
       const source = yield* sidecar.run(createSourceThread("/work/rocket", "Thread"));
       yield* sidecar.run(writeTurn(source.threadId, 1));
       yield* user.run(importBundle(yield* sidecar.run(exportAll)));
-      const copyId = copyThreadId(sidecar.environmentId, source.threadId);
+      const copyId = copyThreadId(app, sidecar.environmentId, source.threadId);
 
       yield* user.run(
         Effect.gen(function* () {
@@ -982,11 +991,8 @@ describe("ThreadCopyService", () => {
 
       // The bundle lists threads newest first; whichever comes last dies after its files land.
       const lastSource = bundle.projects[0]!.threads.at(-1)!.sourceThreadId;
-      const lastCopy = copyThreadId(sidecar.environmentId, lastSource);
-      gate.segment = lastCopy
-        .replace(/[^a-z0-9_-]+/gi, "-")
-        .toLowerCase()
-        .slice(0, 40);
+      const lastCopy = copyThreadId(app, sidecar.environmentId, lastSource);
+      gate.segment = toSafeThreadAttachmentSegment(lastCopy);
       const fiber = yield* user.run(importBundle(bundle)).pipe(Effect.forkChild);
       yield* Deferred.await(gate.reached);
       yield* Fiber.interrupt(fiber);
@@ -1026,7 +1032,7 @@ describe("ThreadCopyService", () => {
       const source = yield* sidecar.run(createSourceThread("/work/rocket", "Thread"));
       yield* sidecar.run(writeTurn(source.threadId, 1, { card: true }));
       const bundle = yield* sidecar.run(exportAll);
-      gate.segment = "copy-environment-sidecar";
+      gate.segment = "copy-dev-embed-host-environment-sidecar";
       const fiber = yield* user.run(importBundle(bundle)).pipe(Effect.forkChild);
       yield* Deferred.await(gate.reached);
       yield* Fiber.interrupt(fiber);
@@ -1074,7 +1080,7 @@ describe("ThreadCopyService", () => {
         yield* user.run(importBundle(bundle));
 
         const copy = yield* user.run(
-          projectionOf(copyThreadId(sidecar.environmentId, source.threadId)),
+          projectionOf(copyThreadId(app, sidecar.environmentId, source.threadId)),
         );
         assert.strictEqual(DEFAULT_RUNTIME_MODE, "full-access");
         assert.strictEqual(copy.thread.runtimeMode, runtimeMode);
@@ -1111,7 +1117,7 @@ describe("ThreadCopyService", () => {
       yield* user.run(importBundle(bundle));
 
       const copy = yield* user.run(
-        projectionOf(copyThreadId(sidecar.environmentId, source.threadId)),
+        projectionOf(copyThreadId(app, sidecar.environmentId, source.threadId)),
       );
       assert.deepEqual(copy.thread.modelSelection, { instanceId, model: DEFAULT_MODEL });
       assert.strictEqual(copy.thread.providerInstanceId, instanceId);
@@ -1140,7 +1146,7 @@ describe("ThreadCopyService", () => {
         }),
       );
       const recopied = yield* user.run(
-        projectionOf(copyThreadId(sidecar.environmentId, source.threadId)),
+        projectionOf(copyThreadId(app, sidecar.environmentId, source.threadId)),
       );
       assert.deepEqual(transcript(recopied), ["question 1", "answer 1", "question 2", "answer 2"]);
       assert.lengthOf(
@@ -1171,6 +1177,266 @@ describe("ThreadCopyService", () => {
       const refused = yield* user.run(Effect.flip(copy.import(app, corrupt)));
       assert.strictEqual(refused._tag === "AppsError" ? refused.code : null, "invalid");
       assert.deepEqual(yield* user.run(attachmentFiles), []);
+    }),
+  );
+});
+
+/** A thread in a project no app owns. */
+const createPersonalThread = (threadId: ThreadId) =>
+  Effect.gen(function* () {
+    const projectId = `personal:${threadId}` as ProjectId;
+    yield* Effect.flatMap(ProjectService.ProjectService, (projects) =>
+      projects.create({
+        commandId: CommandId.make(`${projectId}:create`),
+        projectId,
+        title: "Personal",
+        workspaceRoot: `/work/personal/${threadId}`,
+      }),
+    );
+    yield* Effect.flatMap(Orchestrator.OrchestratorV2, (orchestrator) =>
+      orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make(`${threadId}:create`),
+        threadId,
+        projectId,
+        title: "Personal thread",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      }),
+    );
+    return projectId;
+  });
+
+/** The upload and the card a thread's latest turn references. */
+const referencesOf = (threadId: ThreadId) =>
+  Effect.map(projectionOf(threadId), (projection) => ({
+    image: projection.messages.findLast((message) => message.role === "user")!.attachments[0]!,
+    cardId: projection.visibleTurnItems
+      .map((row) => mcpAppFromToolItem(row.item as never))
+      .findLast((card) => card !== undefined)!.attachmentId,
+  }));
+
+const otherApp = AppId.make("dev.other-app");
+
+describe("thread copy ownership", () => {
+  it.effect("an import never takes over another app's copy of the same source thread", () =>
+    Effect.gen(function* () {
+      const sidecar = yield* startEnvironment("sidecar");
+      const user = yield* startEnvironment("user");
+      const source = yield* sidecar.run(createSourceThread("/work/rocket", "Max-Q study"));
+      yield* sidecar.run(writeTurn(source.threadId, 1));
+      const bundle = yield* sidecar.run(exportAll);
+      yield* user.run(importBundle(bundle));
+      const victimId = copyThreadId(app, sidecar.environmentId, source.threadId);
+      const victim = yield* user.run(projectionOf(victimId));
+
+      // Another app names the same source, at a revision the victim's copy never had.
+      const [thread] = bundle.projects[0]!.threads;
+      const forged = {
+        ...bundle,
+        appId: otherApp,
+        projects: [
+          {
+            workspaceRoot: "/work/other",
+            title: "Other",
+            threads: [
+              {
+                ...thread!,
+                historyRevision: thread!.historyRevision + 7,
+                messages: [],
+                turnItems: [],
+              },
+            ],
+          },
+        ],
+        assets: [],
+      };
+      yield* user.run(Effect.flatMap(ThreadCopyService, (copy) => copy.import(otherApp, forged)));
+
+      yield* user.run(
+        Effect.gen(function* () {
+          const after = yield* projectionOf(victimId);
+          assert.strictEqual(after.thread.projectId, victim.thread.projectId);
+          assert.deepEqual(after.thread.copiedFrom, victim.thread.copiedFrom);
+          assert.deepEqual(transcript(after), transcript(victim));
+          const otherProject = Option.getOrThrow(
+            yield* Effect.flatMap(ProjectStore.ProjectStoreV2, (projects) =>
+              projects.findActiveByAppWorkspace(otherApp, "/work/other"),
+            ),
+          ).projectId;
+          const [own, ...rest] = yield* listCopies(otherProject);
+          assert.lengthOf(rest, 0);
+          assert.notStrictEqual(own?.threadId, victimId);
+          assert.deepEqual(transcript(yield* projectionOf(own!.threadId)), []);
+        }),
+      );
+    }),
+  );
+
+  it.effect("a copy taken before ids named the app is still found and keeps its title", () =>
+    Effect.gen(function* () {
+      const sidecar = yield* startEnvironment("sidecar");
+      const user = yield* startEnvironment("user");
+      const source = yield* sidecar.run(createSourceThread("/work/rocket", "Max-Q study"));
+      yield* sidecar.run(writeTurn(source.threadId, 1));
+      const bundle = yield* sidecar.run(exportAll);
+      const legacyId = legacyCopyThreadId(sidecar.environmentId, source.threadId);
+      const projectId = yield* user.run(
+        Effect.gen(function* () {
+          const apps = yield* AppProjectService;
+          const { projectId } = yield* apps.ensureWorkspace(app, {
+            workspaceRoot: "/work/rocket",
+            title: "/work/rocket",
+          });
+          yield* Effect.flatMap(Orchestrator.OrchestratorV2, (orchestrator) =>
+            orchestrator.dispatch({
+              type: "thread.create",
+              createdBy: "user",
+              creationSource: "web",
+              commandId: CommandId.make("legacy-copy:create"),
+              threadId: legacyId,
+              projectId,
+              title: "Earlier title",
+              modelSelection,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: null,
+            }),
+          );
+          const current = yield* Effect.flatMap(ProjectionStore.ProjectionStoreV2, (store) =>
+            store.getThread(legacyId),
+          );
+          yield* Effect.flatMap(EventSink.EventSinkV2, (sink) =>
+            sink.write({
+              events: [
+                {
+                  id: EventId.make("legacy-copy:copied-from"),
+                  type: "thread.metadata-updated",
+                  threadId: legacyId,
+                  occurredAt: at(0),
+                  payload: {
+                    ...current,
+                    copiedFrom: {
+                      appId: app,
+                      sourceEnvironmentId: sidecar.environmentId,
+                      sourceThreadId: source.threadId,
+                      copiedAt: DateTime.formatIso(at(0)),
+                      sourceHistoryRevision: bundle.projects[0]!.threads[0]!.historyRevision,
+                    },
+                  },
+                },
+              ],
+            }),
+          );
+          return projectId;
+        }),
+      );
+
+      assert.deepEqual(yield* user.run(importBundle(bundle)), { imported: 0, skipped: 1 });
+      const [only, ...rest] = yield* user.run(listCopies(projectId));
+      assert.lengthOf(rest, 0);
+      assert.strictEqual(only?.threadId, legacyId);
+      assert.strictEqual(only?.title, "Max-Q study");
+    }),
+  );
+
+  it.effect("refuses an import whose copy id is already a thread outside the app", () =>
+    Effect.gen(function* () {
+      const user = yield* startEnvironment("user");
+      const sourceEnvironmentId = EnvironmentId.make("environment:sidecar");
+      const sourceThreadId = "source-thread" as ThreadId;
+      const takenId = copyThreadId(app, sourceEnvironmentId, sourceThreadId);
+      const projectId = yield* user.run(createPersonalThread(takenId));
+      yield* user.run(writeTurn(takenId, 1));
+      const bundle: ConnectedAppThreadBundleV1 = {
+        version: 1,
+        appId: app,
+        sourceEnvironmentId,
+        exportedAt: DateTime.formatIso(at(0)),
+        projects: [
+          {
+            workspaceRoot: "/work/rocket",
+            title: "Rocket",
+            threads: [
+              {
+                sourceThreadId,
+                title: "Forged",
+                createdAt: DateTime.formatIso(at(0)),
+                updatedAt: DateTime.formatIso(at(0)),
+                historyRevision: 1,
+                appData: null,
+                subtitle: null,
+                pinned: false,
+                messages: [],
+                turnItems: [],
+              },
+            ],
+          },
+        ],
+        assets: [],
+      };
+
+      const refused = yield* user.run(Effect.flip(importBundle(bundle)));
+      assert.strictEqual(refused._tag === "AppsError" ? refused.code : null, "conflict");
+      const after = yield* user.run(projectionOf(takenId));
+      assert.strictEqual(after.thread.projectId, projectId);
+      assert.isUndefined(after.thread.copiedFrom);
+      assert.deepEqual(transcript(after), ["question 1", "answer 1"]);
+    }),
+  );
+
+  it.effect(
+    "a copied reference whose bytes the bundle lacks never reaches another thread's file",
+    () =>
+      Effect.gen(function* () {
+        const sidecar = yield* startEnvironment("sidecar");
+        const user = yield* startEnvironment("user");
+        const personal = "personal-thread" as ThreadId;
+        yield* user.run(createPersonalThread(personal));
+        yield* user.run(writeTurn(personal, 1, { image: true, card: true }));
+        const borrowed = yield* user.run(referencesOf(personal));
+
+        // The sidecar has no such files, so its bundle carries the references without bytes.
+        const source = yield* sidecar.run(createSourceThread("/work/rocket", "Thread"));
+        yield* sidecar.run(writeTurn(source.threadId, 1, { borrowed }));
+        const bundle = yield* sidecar.run(exportAll);
+        assert.deepEqual(bundle.assets, []);
+        yield* user.run(importBundle(bundle));
+
+        const copied = yield* user.run(
+          referencesOf(copyThreadId(app, sidecar.environmentId, source.threadId)),
+        );
+        assert.notStrictEqual(copied.image.id, borrowed.image.id);
+        assert.notStrictEqual(copied.cardId, borrowed.cardId);
+        assert.deepEqual((yield* user.run(exportAll)).assets, []);
+      }),
+  );
+
+  it.effect("exports only the files the app's own threads hold", () =>
+    Effect.gen(function* () {
+      const user = yield* startEnvironment("user");
+      const personal = "personal-thread" as ThreadId;
+      yield* user.run(createPersonalThread(personal));
+      yield* user.run(writeTurn(personal, 1, { image: true, card: true }));
+      const borrowed = yield* user.run(referencesOf(personal));
+
+      // The app's own card, then a tool result and upload naming the other thread's files.
+      const own = yield* user.run(createSourceThread("/work/rocket", "Thread"));
+      yield* user.run(writeTurn(own.threadId, 1, { card: true }));
+      const ownCard = (yield* user.run(referencesOf(own.threadId))).cardId;
+      yield* user.run(writeTurn(own.threadId, 2, { borrowed }));
+
+      const bundle = yield* user.run(exportAll);
+      assert.deepEqual(
+        bundle.assets.map((asset) => asset.sourceAttachmentId),
+        [ownCard],
+      );
     }),
   );
 });
@@ -1298,6 +1564,7 @@ describe("copied card assets", () => {
             }),
           );
           const normalThread = copyThreadId(
+            app,
             EnvironmentId.make("environment:elsewhere"),
             "normal-thread" as ThreadId,
           );
