@@ -1,67 +1,33 @@
-import { isAppToolSource } from "@lecturn/shared/appToolPresentation";
-import { lecturnMcpToolName } from "@lecturn/shared/lecturnMcpToolName";
+import { claimHeldAppToolCalls } from "@lecturn/client-runtime/state/app-tool-approval-placement";
 
 import { useEmbedPresentation } from "../../embed/EmbedPresentationContext";
 import type { PendingApproval, TimelineEntry } from "../../session-logic";
 
 type ShownApproval = Pick<PendingApproval, "requestId" | "connectedAppTool">;
-type WorkTimelineEntry = Extract<TimelineEntry, { kind: "work" }>;
 
-const isWork = (entry: TimelineEntry): entry is WorkTimelineEntry => entry.kind === "work";
+const turnItemOf = (entry: TimelineEntry) =>
+  entry.kind === "work" ? entry.entry.structuredPayload : undefined;
 
-/** The app tool a running row is calling, as the approval names it (`rw_simulate`). */
-function runningAppToolName(entry: WorkTimelineEntry): string | undefined {
-  const item = entry.entry.structuredPayload;
-  if (
-    entry.entry.toolLifecycleStatus !== "inProgress" ||
-    item?.type !== "dynamic_tool" ||
-    !isAppToolSource(item.toolSource) ||
-    item.toolName === null
-  ) {
-    return undefined;
-  }
-  return lecturnMcpToolName(item.toolName) ?? item.toolName;
-}
-
-/**
- * The row of the call each app approval is holding. The request names only the tool, so each
- * approval claims an unclaimed running call of that tool in its own run: the latest before its row,
- * else the first after it. The gate gives the approval the thread's next free ordinal when it
- * raises it, and a provider numbers its rows ahead of their commit, so a call whose row has not
- * committed yet can sort after the approval that holds it.
- */
 function heldAppToolCallIds(
   entries: ReadonlyArray<TimelineEntry>,
   approvals: ReadonlyArray<ShownApproval>,
 ): ReadonlySet<string> {
-  const held = new Set<string>();
-  for (const approval of approvals) {
-    const toolName = approval.connectedAppTool?.toolName;
-    if (toolName === undefined) continue;
-    const approvalIndex = entries.findIndex(
-      (entry) =>
-        isWork(entry) &&
-        entry.entry.structuredPayload?.type === "approval_request" &&
-        entry.entry.structuredPayload.requestId === approval.requestId,
-    );
-    const approvalEntry = approvalIndex >= 0 ? entries[approvalIndex] : undefined;
-    const runId = approvalEntry && isWork(approvalEntry) ? approvalEntry.entry.runId : undefined;
-    const isHeldCall = (entry: TimelineEntry) =>
-      isWork(entry) &&
-      !held.has(entry.id) &&
-      (runId == null || entry.entry.runId === runId) &&
-      runningAppToolName(entry) === toolName;
-    const end = approvalIndex >= 0 ? approvalIndex : entries.length;
-    let call: TimelineEntry | undefined;
-    for (let index = end - 1; index >= 0 && call === undefined; index -= 1) {
-      if (isHeldCall(entries[index]!)) call = entries[index];
-    }
-    for (let index = end + 1; index < entries.length && call === undefined; index += 1) {
-      if (isHeldCall(entries[index]!)) call = entries[index];
-    }
-    if (call !== undefined) held.add(call.id);
-  }
-  return held;
+  const appApprovals = approvals.flatMap((approval) =>
+    approval.connectedAppTool === undefined
+      ? []
+      : [
+          {
+            requestId: approval.requestId,
+            toolName: approval.connectedAppTool.toolName,
+            pending: true,
+          },
+        ],
+  );
+  return new Set(
+    claimHeldAppToolCalls(entries, appApprovals, turnItemOf).map(
+      (held) => entries[held.callIndex]!.id,
+    ),
+  );
 }
 
 /**

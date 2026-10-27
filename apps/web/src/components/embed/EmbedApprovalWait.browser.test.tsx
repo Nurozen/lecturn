@@ -2,16 +2,23 @@ import "~/index.css";
 import "../../embed/embed.css";
 
 import { RegistryProvider } from "@effect/atom-react";
+import {
+  appToolApprovalsOf,
+  placeAppToolApprovals,
+} from "@lecturn/client-runtime/state/app-tool-approval-placement";
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import {
   AppId,
   EnvironmentId,
   MessageId,
+  NodeId,
   ProjectId,
+  ProviderSessionId,
   RunId,
   RuntimeRequestId,
   ThreadId,
   TurnItemId,
+  type OrchestrationV2RuntimeRequest,
   type OrchestrationV2TurnItem,
 } from "@lecturn/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
@@ -38,18 +45,20 @@ const presentation = { projectRef: scopeProjectRef(ENVIRONMENT_ID, ProjectId.mak
 const PANE_WIDTH = 352;
 const APP_SOURCE = { key: "app:rocketwright", name: "RocketWright", kind: "integration" } as const;
 
+const ENGINE_TOOL = {
+  appId: AppId.make("io.rocketwright"),
+  appName: "RocketWright",
+  toolName: "rw_engine_simulate",
+  reason: "engine_simulate duration not set",
+  source: "app",
+} as const;
+
 const approval: PendingApproval = {
   requestId: REQUEST_ID,
   requestKind: "permission",
   createdAt: at(12),
   responseCapability: "live",
-  connectedAppTool: {
-    appId: AppId.make("io.rocketwright"),
-    appName: "RocketWright",
-    toolName: "rw_engine_simulate",
-    reason: "engine_simulate duration not set",
-    source: "app",
-  },
+  connectedAppTool: ENGINE_TOOL,
 };
 
 function at(seconds: number) {
@@ -86,7 +95,8 @@ function appCall(id: string, tool: string, second: number, status: "running" | "
   } satisfies OrchestrationV2TurnItem;
 }
 
-type Stage = "pending" | "approved" | "finished";
+/** `settled` is `finished` once the run has ended and the timeline no longer folds it live. */
+type Stage = "pending" | "approved" | "finished" | "settled";
 
 /** The capture's turn: a request, a finished check, then the call the approval card holds. */
 function turnItems(stage: Stage, parallel: boolean): OrchestrationV2TurnItem[] {
@@ -106,7 +116,7 @@ function turnItems(stage: Stage, parallel: boolean): OrchestrationV2TurnItem[] {
       "engine-simulate",
       "rw_engine_simulate",
       10,
-      stage === "finished" ? "completed" : "running",
+      stage === "finished" || stage === "settled" ? "completed" : "running",
     ),
     {
       ...base("engine-approval", 12, stage === "pending" ? "waiting" : "completed"),
@@ -122,41 +132,79 @@ function turnItems(stage: Stage, parallel: boolean): OrchestrationV2TurnItem[] {
     items.splice(
       2,
       0,
-      appCall("motor-search", "rw_motor_search", 8, stage === "finished" ? "completed" : "running"),
+      appCall(
+        "motor-search",
+        "rw_motor_search",
+        8,
+        stage === "finished" || stage === "settled" ? "completed" : "running",
+      ),
     );
   }
   return items;
 }
 
-function entriesFor(stage: Stage, parallel: boolean) {
+/**
+ * The rows as the thread detail atom hands them to ChatView. `raced` commits the approval before
+ * the row of the call it holds, as the gate does when the provider's row is still in flight.
+ */
+function entriesFor(stage: Stage, parallel: boolean, raced: boolean) {
+  const items = turnItems(stage, parallel).map((item): OrchestrationV2TurnItem => {
+    if (!raced) return item;
+    if (item.id === "engine-approval") {
+      return { ...item, ordinal: 9, startedAt: DateTime.makeUnsafe(at(9)) };
+    }
+    return item.id === "engine-simulate" && item.completedAt !== null
+      ? { ...item, completedAt: DateTime.makeUnsafe(at(14)) }
+      : item;
+  });
+  items.sort((left, right) => left.ordinal - right.ordinal);
+  const request: OrchestrationV2RuntimeRequest = {
+    id: REQUEST_ID,
+    nodeId: NodeId.make("engine-approval-node"),
+    providerTurnId: null,
+    nativeRequestRef: null,
+    kind: "permission",
+    status: stage === "pending" ? "pending" : "resolved",
+    responseCapability: { type: "live", providerSessionId: ProviderSessionId.make("session") },
+    createdAt: DateTime.makeUnsafe(at(raced ? 9 : 12)),
+    resolvedAt: stage === "pending" ? null : DateTime.makeUnsafe(at(12)),
+    connectedAppTool: ENGINE_TOOL,
+  };
+  const rows = items.map((item, position) => ({
+    position,
+    visibility: "local" as const,
+    sourceThreadId: THREAD_ID,
+    sourceItemId: item.id,
+    item,
+  }));
   return deriveTimelineEntriesFromVisibleTurnItems({
-    visibleTurnItems: turnItems(stage, parallel).map((item, position) => ({
-      position,
-      visibility: "local",
-      sourceThreadId: THREAD_ID,
-      sourceItemId: item.id,
-      item,
-    })),
+    visibleTurnItems: placeAppToolApprovals(rows, appToolApprovalsOf([request])),
     optimisticMessages: [],
   });
 }
 
 /** ChatView's wiring: the composer card's approvals filter the entries and mark the turn as waiting. */
-function Timeline(props: { stage: Stage; parallel: boolean; threadKey: string }) {
+function Timeline(props: { stage: Stage; parallel: boolean; raced: boolean; threadKey: string }) {
   const approvals = props.stage === "pending" ? [approval] : [];
   const timelineEntries = useEmbedTimelineEntries(
-    entriesFor(props.stage, props.parallel),
+    entriesFor(props.stage, props.parallel, props.raced),
     approvals,
   );
+  const live = props.stage !== "settled";
   return (
     <MessagesTimeline
-      isWorking
-      activeTurnInProgress
+      isWorking={live}
+      activeTurnInProgress={live}
       awaitingUser={approvals.length > 0}
       activeTurnStartedAt={at(0)}
       listRef={createRef<LegendListRef | null>()}
-      latestRun={{ runId: RUN_ID, status: "running", startedAt: at(0), completedAt: null }}
-      runningRunId={RUN_ID}
+      latestRun={{
+        runId: RUN_ID,
+        status: live ? "running" : "completed",
+        startedAt: at(0),
+        completedAt: live ? null : at(20),
+      }}
+      runningRunId={live ? RUN_ID : null}
       turnDiffSummaries={[]}
       runs={[]}
       routeThreadKey={props.threadKey}
@@ -205,14 +253,16 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function mount(embedded: boolean, parallel = true) {
+async function mount(embedded: boolean, parallel = true, raced = false) {
   await page.viewport(PANE_WIDTH, 900);
   if (embedded) document.documentElement.dataset.lecturnEmbed = "";
   container.style.cssText = `height: 900px; width: ${PANE_WIDTH}px; display: flex; flex-direction: column;`;
   threadCount += 1;
   const threadKey = `environment-local:approval-wait-${threadCount}`;
   return async (stage: Stage) => {
-    const timeline = <Timeline stage={stage} parallel={parallel} threadKey={threadKey} />;
+    const timeline = (
+      <Timeline stage={stage} parallel={parallel} raced={raced} threadKey={threadKey} />
+    );
     await act(async () =>
       root.render(
         <RegistryProvider>
@@ -232,6 +282,13 @@ const rowKinds = () =>
     (row) => row.dataset.timelineRowKind,
   );
 const text = () => container.textContent ?? "";
+/** The app tool rows top to bottom, the approval named by its kind. */
+const workRows = () =>
+  Array.from(container.querySelectorAll<HTMLElement>("[data-v2-item-type]")).map((row) =>
+    row.dataset.v2ItemType === "approval_request"
+      ? "approval"
+      : (row.textContent?.match(/rw_[a-z_]+/)?.[0] ?? row.dataset.v2ItemType),
+  );
 // A live row's label shines and a working or thinking row shimmers.
 const liveMarks = () => container.querySelectorAll(".live-tool-shine, .live-activity-focus").length;
 
@@ -280,5 +337,47 @@ describe("the same turn in full Lecturn", () => {
     await render("approved");
     expect(text()).toContain("Working for");
     expect(text()).not.toContain("Waiting for you");
+  });
+});
+
+/** Opens a settled turn's fold and then its work log. */
+async function expandSettledTurn() {
+  for (const kind of ["turn-fold", "work-toggle"]) {
+    const toggle = container.querySelector<HTMLElement>(
+      `[data-timeline-row-kind="${kind}"] button, [data-timeline-row-kind="${kind}"] [role="button"]`,
+    );
+    expect(toggle, kind).not.toBeNull();
+    await act(async () => toggle?.click());
+  }
+}
+
+describe("an approval that committed before the call it holds", () => {
+  it("is the live row in full Lecturn while it waits, as when the call landed first", async () => {
+    const render = await mount(false, true, true);
+
+    await render("pending");
+    const liveRow = container.querySelector('[data-timeline-row-kind="work-live"]');
+    expect(liveRow?.textContent).toContain("Approve rw_engine_simulate");
+  });
+
+  it("sits just below that call in full Lecturn once answered and settled", async () => {
+    const render = await mount(false, true, true);
+
+    await render("settled");
+    await expandSettledTurn();
+    expect(workRows()).toEqual([
+      "rw_design_check",
+      "rw_motor_search",
+      "rw_engine_simulate",
+      "approval",
+    ]);
+  });
+
+  it("still hides the held call's row in the embed", async () => {
+    const render = await mount(true, true, true);
+
+    await render("pending");
+    expect(text()).not.toContain("rw_engine_simulate");
+    expect(text()).toContain("rw_motor_search");
   });
 });
