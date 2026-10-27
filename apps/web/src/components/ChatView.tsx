@@ -8440,7 +8440,7 @@ export default function ChatView(props: ChatViewProps) {
                   </div>
                 </div>
               ) : null}
-              <ChatBannerLane threadRef={displayedThreadRef}>
+              <ChatBannerLane>
                 <ProviderStatusBanner
                   status={visibleProviderStatus}
                   onDismiss={() => setDismissedProviderStatusBannerKey(providerStatusBannerKey)}
