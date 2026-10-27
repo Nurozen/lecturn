@@ -1,3 +1,8 @@
+import {
+  APP_PAIRING_APPROVE_LABEL,
+  appPairingKind,
+  type AppPairingKind,
+} from "@lecturn/client-runtime/state/app-status";
 import { AuthAccessReadScope, type AppRuntimeCeiling, type AppStatus } from "@lecturn/contracts";
 import { useState } from "react";
 
@@ -5,11 +10,6 @@ import { appsEnvironment } from "~/state/apps";
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { useEnvironmentQuery } from "~/state/query";
 import { useEnvironmentScope } from "~/state/session";
-import {
-  APP_PAIRING_APPROVE_LABEL,
-  appPairingKind,
-  type AppPairingKind,
-} from "../settings/ConnectedAppsSettings.logic";
 import { Button } from "../ui/button";
 import {
   Dialog,

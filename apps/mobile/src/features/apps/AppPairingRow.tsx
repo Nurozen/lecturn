@@ -1,12 +1,9 @@
+import { APP_PAIRING_APPROVE_LABEL } from "@lecturn/client-runtime/state/app-status";
 import { View } from "react-native";
 
 import { AppText } from "../../components/ui/AppText";
 import { RequestActionButton } from "../threads/RequestActionButton";
-import {
-  APP_PAIRING_APPROVE_LABEL,
-  APP_PAIRING_DESCRIPTION,
-  type AppPairingItem,
-} from "./apps-tab-state";
+import { APP_PAIRING_DESCRIPTION, type AppPairingItem } from "./apps-tab-state";
 import { useConnectedAppCommands } from "./useConnectedAppCommands";
 
 /** A pairing request inside the app's box, answered here or in Settings on another client. */

@@ -1,4 +1,5 @@
 import {
+  AppId,
   ContextHandoffId,
   MessageId,
   CheckpointId,
@@ -8,6 +9,7 @@ import {
   PlanId,
   ProviderInstanceId,
   ProviderDriverKind,
+  ProviderSessionId,
   ProviderThreadId,
   ProviderTurnId,
   RunId,
@@ -15,11 +17,13 @@ import {
   ScheduledTaskId,
   ThreadId,
   TurnItemId,
+  type OrchestrationV2RuntimeRequest,
   type OrchestrationV2RunAttempt,
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2TurnItem,
   type ThreadImportOrigin,
 } from "@lecturn/contracts";
+import { createAppToolApprovalPlacer } from "@lecturn/client-runtime/state/app-tool-approval-placement";
 import { resolveUserMessagePresentation } from "@lecturn/client-runtime/user-message";
 import { appToolRawName, appToolSource } from "@lecturn/shared/appToolPresentation";
 import {
@@ -3149,5 +3153,80 @@ describe("connected-app tool rows", () => {
     const activity = activityOf(appCall("rw_motor_search"));
     expect(activity && workEntryAppToolSummary(activity.workEntry)).toBeUndefined();
     expect(rawName(activity)).toBeUndefined();
+  });
+});
+
+describe("an app approval that committed before the call it holds", () => {
+  const source = appToolSource({
+    appId: "dev.rocketwright.app",
+    name: "RocketWright",
+    toolPrefix: "rw",
+  });
+  const requestId = RuntimeRequestId.make("request-engine");
+  const engineCall = (completedAt: string | null): OrchestrationV2TurnItem => ({
+    ...base("item-engine", "2026-06-20T00:00:02.000Z", 3),
+    status: completedAt === null ? "running" : "completed",
+    completedAt: completedAt === null ? null : DateTime.makeUnsafe(completedAt),
+    type: "dynamic_tool",
+    title: "Simulate engine",
+    toolName: "mcp__lecturn__rw_engine_simulate",
+    toolSource: source,
+    input: {},
+  });
+  const engineApproval = (answered: boolean): OrchestrationV2TurnItem => ({
+    ...base("item-approval", "2026-06-20T00:00:03.000Z", 2),
+    status: answered ? "completed" : "waiting",
+    completedAt: answered ? DateTime.makeUnsafe("2026-06-20T00:00:05.000Z") : null,
+    type: "approval_request",
+    requestId,
+    requestKind: "permission",
+    appName: "RocketWright",
+    prompt: "Approve Simulate engine · Burn duration not set",
+  });
+  const request = (answered: boolean): OrchestrationV2RuntimeRequest => ({
+    id: requestId,
+    nodeId: NodeId.make("node-approval"),
+    providerTurnId: null,
+    nativeRequestRef: null,
+    kind: "permission",
+    status: answered ? "resolved" : "pending",
+    responseCapability: { type: "live", providerSessionId: ProviderSessionId.make("session") },
+    createdAt: DateTime.makeUnsafe("2026-06-20T00:00:03.000Z"),
+    resolvedAt: answered ? DateTime.makeUnsafe("2026-06-20T00:00:05.000Z") : null,
+    connectedAppTool: {
+      appId: AppId.make("dev.rocketwright.app"),
+      appName: "RocketWright",
+      toolName: "rw_engine_simulate",
+      reason: "Burn duration not set",
+      source: "app",
+    },
+  });
+  const feedItemIds = (feed: ReadonlyArray<ThreadFeedEntry>) =>
+    feed.flatMap((entry) =>
+      entry.type === "activity-group"
+        ? entry.activities.map((activity) => activity.projectedItem.item.id)
+        : entry.type === "message"
+          ? [entry.id]
+          : [],
+    );
+
+  it("lists the approval under its call, while it waits and once answered", () => {
+    // The shared thread-detail atom places the rows before the feed is built.
+    const place = createAppToolApprovalPlacer();
+    const stages = [
+      { answered: false, callDone: null },
+      { answered: true, callDone: null },
+      { answered: true, callDone: "2026-06-20T00:00:06.000Z" },
+    ];
+    for (const { answered, callDone } of stages) {
+      const rows = [userMessage(), engineApproval(answered), engineCall(callDone)].map(
+        (item, position) => projected(item, position),
+      );
+      expect(feedItemIds(buildThreadFeed(place(rows, [request(answered)])))).toEqual([
+        "message-user",
+        "item-engine",
+        "item-approval",
+      ]);
+    }
   });
 });
