@@ -12,6 +12,7 @@ export function HierarchyRow({
   frame,
   guides,
   connector = true,
+  connectorTop = "50%",
   children,
 }: {
   readonly depth: number;
@@ -20,6 +21,8 @@ export function HierarchyRow({
   readonly guides: readonly SidebarHierarchyLine[] | undefined;
   /** False for rows that sit beside the branch line, such as threads under a section label. */
   readonly connector?: boolean;
+  /** Where the connector meets a row whose label sits above its content. */
+  readonly connectorTop?: number | `${number}%`;
   readonly children: ReactNode;
 }) {
   const { accent, light, dark, opaque } = useGlassPalette();
@@ -88,7 +91,7 @@ export function HierarchyRow({
             style={{
               position: "absolute",
               left: (depth - 1) * 18 + 14,
-              top: "50%",
+              top: connectorTop,
               width: 12,
               height: 1,
               backgroundColor: settled ? red : rail,

@@ -21,7 +21,7 @@ export function AppPairingRow(props: { readonly item: AppPairingItem }) {
       ? [tools.command, ...tools.args].join(" ")
       : null;
   return (
-    <View className="gap-2.5 py-2 pr-1">
+    <View className="gap-2.5 px-[14px] py-2">
       <View className="gap-0.5">
         <AppText className="text-sm font-lecturn-medium text-foreground">
           {APP_PAIRING_DESCRIPTION[item.kind]}

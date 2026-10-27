@@ -126,7 +126,7 @@ const labels = new Map([
 ]);
 
 function summarize(items: ReadonlyArray<AppsTabItem>): string[] {
-  return items.map((item) => {
+  return items.flatMap((item) => {
     const indent = "  ".repeat(item.depth);
     switch (item.type) {
       case "app-card-header":
@@ -135,10 +135,11 @@ function summarize(items: ReadonlyArray<AppsTabItem>): string[] {
         return `${indent}pairing ${item.kind}${item.machineLabel ? ` on ${item.machineLabel}` : ""}`;
       case "app-workspace-header":
         return `${indent}workspace ${item.project.title}${item.collapsed ? " (collapsed)" : ""}`;
-      case "app-section-label":
-        return `${indent}${item.label}`;
       case "app-thread":
-        return `${indent}- ${item.thread.title}`;
+        return [
+          ...(item.sectionLabel === null ? [] : [`${indent}${item.sectionLabel}`]),
+          `${indent}- ${item.thread.title}`,
+        ];
       case "app-settled-shelf":
         return `${indent}Settled (${item.count})${item.expanded ? " open" : ""}`;
       case "app-empty":
@@ -291,6 +292,41 @@ describe("apps tab items", () => {
       "    - Feed system review",
       "    Settled (1)",
     ]);
+    expect(
+      items.filter((item) => item.type === "app-thread").map((item) => item.sectionLabel),
+    ).toEqual(["Pinned", "Active", "Active"]);
+  });
+
+  it("labels only each section's first thread, as one row with it", () => {
+    const { items } = build({
+      projects: [hopper],
+      threads: [
+        makeThread("Fin clearance", hopper, { runtime: running }),
+        makeThread("Nose cone", hopper, { runtime: running }),
+      ],
+    });
+    expect(
+      items.flatMap((item) =>
+        item.type === "app-thread" ? [[item.thread.title, item.sectionLabel]] : [],
+      ),
+    ).toEqual([
+      ["Fin clearance", "Active"],
+      ["Nose cone", null],
+    ]);
+  });
+
+  it("gives each workspace header the thread list's count and spacing", () => {
+    const { items } = build({ projects: [hopper, liquid], threads });
+    expect(
+      items.flatMap((item) =>
+        item.type === "app-workspace-header"
+          ? [[item.project.title, item.threadCount, item.isFirst]]
+          : [],
+      ),
+    ).toEqual([
+      ["hopper-38mm", 4, true],
+      ["liquid-demo", 2, false],
+    ]);
   });
 
   it("opens a Settled shelf and collapses workspaces and apps on request", () => {
@@ -386,7 +422,6 @@ describe("apps tab items", () => {
     const frames = appCardFrames(items);
     expect(items.map((item) => frames.get(item.key))).toEqual([
       { first: true, last: false },
-      { first: false, last: false },
       { first: false, last: false },
       { first: false, last: true },
       { first: true, last: false },

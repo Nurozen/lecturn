@@ -32,10 +32,10 @@ export const AppThreadRow = memo(function AppThreadRow(props: {
       accessibilityLabel={[thread.title, badge?.label, subtitle, age].filter(Boolean).join(", ")}
       accessibilityState={{ selected: props.selected === true }}
       onPress={() => props.onSelectThread(thread)}
-      className="py-1"
+      className="mx-[14px] mb-2"
       style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
     >
-      <GlassCard radius={18} className="min-h-[60px] flex-row items-center gap-3 px-4 py-2.5">
+      <GlassCard className="min-h-[60px] flex-row items-center gap-3 px-4 py-2.5">
         <View className="h-8 w-8 items-center justify-center" accessible={false}>
           {busy ? (
             <View

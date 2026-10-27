@@ -272,17 +272,18 @@ export interface AppPairingItem {
   readonly depth: number;
 }
 
-export interface AppSectionLabelItem {
-  readonly type: "app-section-label";
-  readonly key: string;
-  readonly label: "Pinned" | "Active";
-  readonly depth: number;
-}
+export type AppSectionLabel = "Pinned" | "Active";
 
 export interface AppThreadItem {
   readonly type: "app-thread";
   readonly key: string;
   readonly thread: EnvironmentThreadShell;
+  /**
+   * Set on a section's first thread, which draws the label above itself. As with the thread
+   * list's dividers, a label rides on a row rather than being one: each extra row boundary in
+   * the virtualized list can render as a hairline seam across the box.
+   */
+  readonly sectionLabel: AppSectionLabel | null;
   readonly depth: number;
 }
 
@@ -305,7 +306,6 @@ export type AppsTabItem =
   | AppCardHeaderItem
   | AppPairingItem
   | (HomeAppWorkspaceHeaderListItem & { readonly depth: number })
-  | AppSectionLabelItem
   | AppThreadItem
   | AppSettledShelfItem
   | AppEmptyItem;
@@ -385,7 +385,7 @@ export function buildAppsTabItems(input: {
       continue;
     }
 
-    for (const { workspace, layout } of matchingWorkspaces) {
+    for (const [index, { workspace, layout }] of matchingWorkspaces.entries()) {
       const workspaceCollapsed = collapsed(workspace.key);
       items.push({
         type: "app-workspace-header",
@@ -393,7 +393,9 @@ export function buildAppsTabItems(input: {
         groupKey: workspace.key,
         project: workspace.project,
         machineLabel: workspace.machineLabel,
+        threadCount: layout.items.length,
         collapsed: workspaceCollapsed,
+        isFirst: index === 0,
         depth: 1,
       });
       if (workspaceCollapsed) continue;
@@ -411,22 +413,13 @@ export function buildAppsTabItems(input: {
       // A snoozed thread is not settled; it waits at the end of Active.
       active.push(...snoozed);
 
-      const pushSection = (
-        label: AppSectionLabelItem["label"],
-        threads: EnvironmentThreadShell[],
-      ) => {
-        if (threads.length === 0) return;
-        items.push({
-          type: "app-section-label",
-          key: `${label.toLowerCase()}:${workspace.key}`,
-          label,
-          depth: 2,
-        });
-        for (const thread of threads) {
+      const pushSection = (label: AppSectionLabel, threads: EnvironmentThreadShell[]) => {
+        for (const [threadIndex, thread] of threads.entries()) {
           items.push({
             type: "app-thread",
             key: `thread:${thread.environmentId}:${thread.id}`,
             thread,
+            sectionLabel: threadIndex === 0 ? label : null,
             depth: 2,
           });
         }
@@ -449,6 +442,7 @@ export function buildAppsTabItems(input: {
               type: "app-thread",
               key: `thread:${thread.environmentId}:${thread.id}`,
               thread,
+              sectionLabel: null,
               depth: 2,
             });
           }
