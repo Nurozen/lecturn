@@ -93,6 +93,29 @@ function statusRank(app: AppStatus): number {
   return app.state === "revoked" ? 3 : 4;
 }
 
+function primaryStatus(statuses: ReadonlyArray<AppEnvironmentStatus>): AppEnvironmentStatus | null {
+  if (statuses.length === 0) return null;
+  return statuses.reduce((best, next) =>
+    statusRank(next.app) < statusRank(best.app) ? next : best,
+  );
+}
+
+/**
+ * The pushed app screen's title: the name its card shows. Null until an environment reports the
+ * app, so the header stays blank rather than flashing a placeholder or the raw app id.
+ */
+export function appScreenTitle(
+  statuses: ReadonlyMap<EnvironmentId, ReadonlyArray<AppStatus>>,
+  appId: AppId,
+): string | null {
+  const reported: AppEnvironmentStatus[] = [];
+  for (const [environmentId, apps] of statuses) {
+    const app = apps.find((candidate) => candidate.appId === appId);
+    if (app !== undefined) reported.push({ environmentId, app });
+  }
+  return primaryStatus(reported)?.app.name ?? null;
+}
+
 const BUSY_STATUSES: ReadonlySet<ThreadListV2Status> = new Set(["working", "approval", "input"]);
 
 /** Running, or waiting on the user: what the card's "N working" chip counts. */
@@ -142,12 +165,7 @@ export function buildAppCards(input: {
   return [...appIds]
     .map((appId): AppCard => {
       const statuses = statusesByApp.get(appId) ?? [];
-      const primary =
-        statuses.length === 0
-          ? null
-          : statuses.reduce((best, next) =>
-              statusRank(next.app) < statusRank(best.app) ? next : best,
-            );
+      const primary = primaryStatus(statuses);
       const group = groupsByApp.get(appId);
       const workspaces = group?.workspaces ?? [];
       return {

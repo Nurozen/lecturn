@@ -818,7 +818,8 @@ const RootStackConfig = createWorkspaceStackNavigator({
     AppThreads: createNativeStackScreen({
       screen: AppThreadsRouteScreen,
       linking: APP_LINKING_PATH,
-      options: { ...SOLID_HEADER_OPTIONS, title: "App" },
+      // Blank, not a placeholder: the screen sets the app's name once an environment reports it.
+      options: { ...SOLID_HEADER_OPTIONS, title: "" },
     }),
     ThreadTerminal: createNativeStackScreen({
       screen: ThreadTerminalRouteScreen,

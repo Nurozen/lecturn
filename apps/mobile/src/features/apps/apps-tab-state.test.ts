@@ -20,6 +20,7 @@ import {
   appCardTargetWorkspace,
   appClosedBannerState,
   appPairingKind,
+  appScreenTitle,
   appSettledShelfKey,
   appStatusPresentation,
   appThreadSubtitle,
@@ -442,6 +443,29 @@ describe("app thread rows", () => {
       "Needs approval",
     );
     expect(appThreadSubtitle(makeThread("d", project, { appSubtitle: "  " }))).toBeNull();
+  });
+});
+
+describe("app screen title", () => {
+  it("uses the name the card shows, preferring the environment where the app runs", () => {
+    const statuses = new Map([
+      [MAC, [makeStatus({ name: "RocketWright (old)", live: null })]],
+      [SERVER, [makeStatus()]],
+    ]);
+    expect(appScreenTitle(statuses, ROCKET)).toBe("RocketWright");
+    expect(
+      buildAppCards({ statuses, projects: [], threads: [], environmentLabels: labels })[0]?.name,
+    ).toBe("RocketWright");
+  });
+
+  it("stays blank until an environment reports the app", () => {
+    expect(appScreenTitle(new Map(), ROCKET)).toBeNull();
+    expect(
+      appScreenTitle(
+        new Map([[MAC, [makeStatus({ appId: AppId.make("com.example.other"), name: "Other" })]]]),
+        ROCKET,
+      ),
+    ).toBeNull();
   });
 });
 

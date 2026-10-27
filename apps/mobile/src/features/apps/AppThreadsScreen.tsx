@@ -5,8 +5,10 @@ import { useNavigation } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { View, type ScrollViewProps } from "react-native";
 
+import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { AppText } from "../../components/ui/AppText";
 import { EmptyState } from "../../components/ui/EmptyState";
+import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useAppStatusesByEnvironment } from "../../state/apps";
 import { useAppProjects, useAppThreadShells } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
@@ -33,6 +35,7 @@ import {
   appCardFrames,
   appCardTargetWorkspace,
   appOpenUrl,
+  appScreenTitle,
   buildAppCards,
   buildAppsTabItems,
   type AppCard,
@@ -297,8 +300,13 @@ export function AppsTree(props: {
 
 /** One app's workspaces and threads, the target of `lecturn://apps/<appId>`. */
 export function AppThreadsScreen(props: { readonly appId: AppId }) {
+  const { environments } = useEnvironments();
+  const statuses = useAppStatusesByEnvironment(environments);
+  const title = appScreenTitle(statuses, props.appId) ?? "";
   return (
     <View className="flex-1 bg-screen">
+      <NativeStackScreenOptions options={{ title }} />
+      <ArcaneBackdrop />
       <AppsTree appId={props.appId} searchQuery="" contentBottomInset={24} />
     </View>
   );
