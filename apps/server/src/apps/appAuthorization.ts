@@ -249,12 +249,12 @@ export const APP_RPC_RULES: AppRpcTable = {
   [O.searchThread]: { resolve: "threadId", ...embed },
   // Only an existing thread: any create from an embed goes through apps.createEmbedThread.
   [O.launchThread]: {
-    resolve: ({ projectId, threadId, reuseExistingThread, workspaceStrategy }) =>
+    resolve: ({ projectId, threadId, reuseExistingThread, workspaceStrategy, initialMessage }) =>
       threadId === undefined ||
       reuseExistingThread !== true ||
       !staysInProjectRoot(workspaceStrategy)
         ? null
-        : [{ projectId }, { threadId }],
+        : [{ projectId }, { threadId }, ...storedAttachmentTargets(initialMessage?.attachments)],
     ...embed,
   },
   [O.dispatchCommand]: { resolve: commandTargets, ...embed },

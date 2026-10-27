@@ -325,6 +325,32 @@ describe("app RPC allowlist", () => {
     }),
   );
 
+  it.effect("checks a launch's initial attachments as it checks a dispatch's", () =>
+    Effect.gen(function* () {
+      const attachment = (id: string) => ({
+        type: "file",
+        id,
+        name: "notes.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 10,
+      });
+      const launch = (id: string) =>
+        allowed(embedSession, O.launchThread, {
+          projectId: rocketProject,
+          threadId: rocketThread,
+          reuseExistingThread: true,
+          workspaceStrategy: { type: "root" },
+          initialMessage: { text: "Read this", attachments: [attachment(id)] },
+        });
+      const stored = (threadId: ThreadId) => createAttachmentId(threadId, "pdf") ?? "unparseable";
+      expect(yield* launch(createPendingAttachmentId(".pdf"))).toBe(true);
+      expect(yield* launch(stored(rocketThread))).toBe(true);
+      expect(yield* launch(stored(rocketSecondThread))).toBe(false);
+      expect(yield* launch(stored(otherAppThread))).toBe(false);
+      expect(yield* launch(stored(normalThread))).toBe(false);
+    }),
+  );
+
   it.effect("serves an embed asset URLs for its own threads and project files only", () =>
     Effect.gen(function* () {
       const asset = (resource: Record<string, unknown>) =>
