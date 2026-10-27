@@ -13,7 +13,6 @@ import { FetchHttpClient } from "effect/http";
 import {
   type DiscoveredServer,
   discoverServer,
-  isProcessAlive,
   probeEnvironment,
   readServerRuntimeState,
   serverRuntimeStatePath,
@@ -195,7 +194,6 @@ export async function startSidecar(input: StartSidecarInput): Promise<SidecarHan
   const appSeedToken = NodeCrypto.randomBytes(32).toString("base64url");
   const envelope = makeSidecarEnvelope(input.registration, appSeedToken);
   const executable = input.sidecar.nodePath ?? process.execPath;
-  const spawnedAt = Date.now();
   let child: NodeChildProcess.ChildProcess;
   try {
     child = NodeChildProcess.spawn(executable, sidecarArgs(serverEntry, baseDir), {
@@ -280,12 +278,10 @@ export async function startSidecar(input: StartSidecarInput): Promise<SidecarHan
         if (winner !== null) return attached(winner);
       } else {
         const state = await unlessAborted(readServerRuntimeState(statePath));
-        // A crashed earlier sidecar can leave its record behind.
-        const fresh =
-          state !== null &&
-          (state.pid === child.pid ||
-            (Date.parse(state.startedAt) >= spawnedAt - 1_000 && isProcessAlive(state.pid)));
-        if (fresh) {
+        // Only the child's own record means it is serving. Any other pid is a
+        // crashed earlier sidecar's leftover or the live winner of a start
+        // race, whose record can land before this child exits 78.
+        if (state !== null && state.pid === child.pid) {
           await unlessAborted(
             waitUntilHttpReady(state.origin, Math.max(1, deadline - Date.now()), signal),
           );

@@ -85,9 +85,12 @@ const writeRecord = (pid, origin) => {
 
 const mode = process.env.FAKE_SIDECAR_MODE;
 if (mode === "owned") {
-  // Another process won the lock and serves at FAKE_WINNER_ORIGIN.
+  // Another process won the lock and serves at FAKE_WINNER_ORIGIN. The exit
+  // comes a few polls after its record appears, as a server that loses the
+  // lock race exits only after the winner has published, so the host reads
+  // the winner's record while this child still runs.
   writeRecord(process.ppid, process.env.FAKE_WINNER_ORIGIN);
-  process.exit(78);
+  setTimeout(() => process.exit(78), 500);
 } else if (mode === "starting") {
   // Never becomes ready: the host gives up while it is still starting.
   setInterval(() => {}, 1_000);
