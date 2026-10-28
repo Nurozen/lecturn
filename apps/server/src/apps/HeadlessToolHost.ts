@@ -1,9 +1,10 @@
 /**
  * Runs each granted app's headless tool command, one process per app project.
  * A process starts on the first call or empty-cache listing and stays
- * up between calls; the idle reaper (headlessReaper.ts, run from the
- * onRunTerminal hook) closes it later. The process table is the shared
- * AppRuntimeState one, so that hook sees what this host runs.
+ * up between calls; the idle reaper (headlessReaper.ts) closes it later,
+ * armed by the onRunTerminal hook and by every release that leaves the
+ * process idle. The process table is the shared AppRuntimeState one, so that
+ * hook sees what this host runs.
  *
  * `inFlightCalls` counts every holder: calls, listings and `acquire` scopes.
  * The reaper only needs to know that someone is still using the process.
@@ -50,7 +51,7 @@ const decodeCallResult = Schema.decodeUnknownEffect(McpSchema.CallToolResult);
 const decodeReadResult = Schema.decodeUnknownEffect(McpSchema.ReadResourceResult);
 
 const make = Effect.gen(function* () {
-  const { headlessProcesses } = yield* AppRuntimeState;
+  const { headlessProcesses, headlessIdleWatch } = yield* AppRuntimeState;
   const registry = yield* AppRegistryService;
   const projects = yield* AppProjectService;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -175,6 +176,10 @@ const make = Effect.gen(function* () {
           kill: kill(key, slot),
         }),
       );
+      // stopApp found no entry for a revoke that landed during the handshake.
+      // The registry commits before it publishes, so a revoke this check
+      // misses is one whose stopApp will find the entry above.
+      yield* requireHeadless(appId).pipe(Effect.onError(() => kill(key, slot)));
       // A process that exits on its own is replaced on the next call.
       yield* connection.exited.pipe(
         Effect.andThen(forget(key, slot)),
@@ -197,15 +202,19 @@ const make = Effect.gen(function* () {
   };
 
   const release = (appId: AppId, projectId: ProjectId) =>
-    DateTime.now.pipe(
-      Effect.flatMap((now) =>
-        updateEntry(headlessProcessKey(appId, projectId), (entry) => ({
-          ...entry,
-          inFlightCalls: Math.max(0, entry.inFlightCalls - 1),
-          lastCallEndedAt: now,
-        })),
-      ),
-    );
+    Effect.gen(function* () {
+      const key = headlessProcessKey(appId, projectId);
+      const now = yield* DateTime.now;
+      yield* updateEntry(key, (entry) => ({
+        ...entry,
+        inFlightCalls: Math.max(0, entry.inFlightCalls - 1),
+        lastCallEndedAt: now,
+      }));
+      // A card's call outside any run has no run end to arm the reaper.
+      if ((yield* Ref.get(headlessProcesses)).get(key)?.inFlightCalls !== 0) return;
+      const watchIdle = yield* Ref.get(headlessIdleWatch);
+      if (Option.isSome(watchIdle)) yield* watchIdle.value(key);
+    });
 
   const withProcess = <A, E>(
     appId: AppId,

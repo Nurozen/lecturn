@@ -52,6 +52,9 @@ export interface HeadlessProcessEntry {
   readonly kill: Effect.Effect<void>;
 }
 
+/** Starts the idle reaper's watch on one process unless it already has one. */
+export type HeadlessIdleWatch = (key: HeadlessProcessKey) => Effect.Effect<void>;
+
 export class AppRuntimeState extends Context.Service<
   AppRuntimeState,
   {
@@ -59,6 +62,12 @@ export class AppRuntimeState extends Context.Service<
     readonly hostContext: Ref.Ref<ReadonlyMap<AppHostContextKey, string>>;
     /** Written by HeadlessToolHost, read by the onRunTerminal reaper contribution. */
     readonly headlessProcesses: Ref.Ref<ReadonlyMap<HeadlessProcessKey, HeadlessProcessEntry>>;
+    /**
+     * Set while the reaper is up (headlessReaper.ts). HeadlessToolHost arms it
+     * when a call leaves a process idle: a card's call outside any run has no
+     * run end to do so.
+     */
+    readonly headlessIdleWatch: Ref.Ref<Option.Option<HeadlessIdleWatch>>;
     /**
      * Set while an AppsLayer is built over this state. A second build would
      * split lease, registry and process state between transports, so it dies.
@@ -89,6 +98,7 @@ export const layer = Layer.effect(
   Effect.all({
     hostContext: Ref.make<ReadonlyMap<AppHostContextKey, string>>(new Map()),
     headlessProcesses: Ref.make<ReadonlyMap<HeadlessProcessKey, HeadlessProcessEntry>>(new Map()),
+    headlessIdleWatch: Ref.make(Option.none<HeadlessIdleWatch>()),
     appsLayerBuilt: Ref.make(false),
     mcpAppRoute: Ref.make(Option.none<AppMcpAppRoute>()),
     appInstructions: Ref.make(Option.none<AppInstructionsLookup>()),

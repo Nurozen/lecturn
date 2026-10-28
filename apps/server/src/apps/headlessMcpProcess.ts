@@ -219,6 +219,13 @@ export const connect = Effect.fn("headlessMcpProcess.connect")(function* (
     ),
     Effect.forkScoped,
   );
+  // A kill closes the scope, which interrupts the reader before it settles;
+  // this finalizer runs first, so waiting and later requests fail, not hang.
+  yield* Effect.addFinalizer(() =>
+    Effect.suspend(() =>
+      gone === undefined ? settleAll(failure(`${spec.command} was stopped.`)) : Effect.void,
+    ),
+  );
 
   const request = (method: string, params: unknown) =>
     Effect.suspend(() => {

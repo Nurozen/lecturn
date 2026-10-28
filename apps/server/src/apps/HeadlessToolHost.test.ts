@@ -6,11 +6,14 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as Ref from "effect/Ref";
 import type * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as AppRuntimeState from "./AppRuntimeState.ts";
@@ -28,9 +31,28 @@ import {
 type Workspace = ReturnType<typeof makeWorkspace>;
 type FakeApps = Effect.Success<ReturnType<typeof makeFakeApps>>;
 
+/** Holds back every spawned process's output, its initialize answer first, until `gate` ends. */
+const gatedSpawner = (gate: Effect.Effect<void>) =>
+  Layer.effect(
+    ChildProcessSpawner.ChildProcessSpawner,
+    Effect.gen(function* () {
+      const real = yield* ChildProcessSpawner.ChildProcessSpawner;
+      return ChildProcessSpawner.make((command) =>
+        real.spawn(command).pipe(
+          Effect.map((handle) =>
+            ChildProcessSpawner.makeHandle({
+              ...handle,
+              stdout: Stream.unwrap(gate.pipe(Effect.as(handle.stdout))),
+            }),
+          ),
+        ),
+      );
+    }),
+  );
+
 /** Builds a real host over the fixture app; the reaper sees no active run. */
 const withHost = <A, E>(
-  options: { readonly listArgs: boolean },
+  options: { readonly listArgs: boolean; readonly beforeOutput?: Effect.Effect<void> },
   body: (context: {
     readonly host: HeadlessToolHost["Service"];
     readonly workspace: Workspace;
@@ -51,6 +73,7 @@ const withHost = <A, E>(
         HeadlessToolHostLayer.layer.pipe(
           Layer.provideMerge(AppRuntimeState.layer),
           Layer.provide(fake.layer),
+          Layer.provide(gatedSpawner(options.beforeOutput ?? Effect.void)),
           Layer.provide(NodeServices.layer),
           // The desktop app's flag must not reach the app's command.
           Layer.provide(
@@ -183,6 +206,68 @@ it.effect("stops an app's processes at once when it is revoked", () =>
       expect(yield* call(host, "echo_meta").pipe(Effect.flip)).toMatchObject({
         code: "forbidden",
       });
+    }),
+  ),
+);
+
+it.effect("fails a call still waiting on a process its revoke stopped", () =>
+  withHost({ listArgs: false }, ({ host, workspace, fake }) =>
+    Effect.gen(function* () {
+      yield* call(host, "echo_meta");
+      const release = NodePath.join(workspace.workspaceRoot, "release");
+      const holding = yield* Effect.forkChild(call(host, "hold", { release }), {
+        startImmediately: true,
+      });
+      yield* fake.publishStatus("revoked");
+      expect(yield* Fiber.join(holding).pipe(Effect.flip)).toMatchObject({ code: "unavailable" });
+    }),
+  ),
+);
+
+it.effect("stops a process revoked while it starts and never sends it the call", () =>
+  Effect.gen(function* () {
+    const spawned = yield* Deferred.make<void>();
+    const answer = yield* Deferred.make<void>();
+    const beforeOutput = Deferred.succeed(spawned, undefined).pipe(
+      Effect.andThen(Deferred.await(answer)),
+    );
+    yield* withHost({ listArgs: false, beforeOutput }, ({ host, workspace, processes, fake }) =>
+      Effect.gen(function* () {
+        const calling = yield* Effect.forkChild(call(host, "echo_meta"), {
+          startImmediately: true,
+        });
+        yield* Deferred.await(spawned);
+        yield* fake.publishStatus("revoked");
+        yield* Deferred.succeed(answer, undefined);
+
+        expect(yield* Fiber.join(calling).pipe(Effect.flip)).toMatchObject({ code: "forbidden" });
+        expect(yield* processes).toBe(0);
+        const events = workspace.events().map((event) => event.event);
+        expect(events).not.toContain("call");
+        expect(events).toContain("sigterm");
+      }),
+    );
+  }),
+);
+
+it.effect("reaps a process a card started after the last run's process was reaped", () =>
+  withHost({ listArgs: false }, ({ host, workspace, processes, reaper }) =>
+    Effect.gen(function* () {
+      yield* call(host, "echo_meta");
+      yield* reaper.onProjectRunEnded(projectId);
+      yield* TestClock.adjust("1 minute");
+      yield* reaper.awaitIdle;
+      expect(yield* processes).toBe(0);
+
+      // A saved card in a stopped thread: no run will end to arm the reaper.
+      yield* host.readResource(appId, projectId, "ui://ex/counter-card");
+      expect(starts(workspace, "serve")).toHaveLength(2);
+      yield* TestClock.adjust("59 seconds");
+      expect(yield* processes).toBe(1);
+
+      yield* TestClock.adjust("1 second");
+      yield* reaper.awaitIdle;
+      expect(yield* processes).toBe(0);
     }),
   ),
 );
