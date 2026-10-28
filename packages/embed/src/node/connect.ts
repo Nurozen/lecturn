@@ -215,6 +215,7 @@ export async function createConnection(
     return ledgerWrite;
   };
 
+  // In user-server mode, the sidecar a switch left behind until `drain` stops it.
   let sidecar: SidecarRuntime | null = null;
   let user: { readonly server: UserServer; readonly session: ServerSession } | null = null;
   let active: ServerSession | null = null;
@@ -222,8 +223,6 @@ export async function createConnection(
   let pairing: ConnectionPairing = "none";
   let pairingRequest: { readonly server: UserServer; readonly request: PairingRequest } | null =
     null;
-  // After a switch the sidecar stays up, lease included, until no turn runs on it.
-  let draining = false;
   let userMisses = 0;
   let attachRetryAt = 0;
   // Sidecar thread id to its current user-server copy, from the last attach.
@@ -426,9 +425,10 @@ export async function createConnection(
   };
 
   /**
-   * Changes nothing while a sidecar turn waits on an approval: its copy carries no pending
-   * request and the original turns read-only, so it is answered here first and a later beat
-   * switches. A thread already continued elsewhere is read-only either way.
+   * Changes nothing while a sidecar turn runs: the switch turns the original read-only and the
+   * copy carries no runtime request, so an approval the turn asks for could be answered nowhere.
+   * The sidecar keeps serving it, and a later beat switches. A thread already continued elsewhere
+   * is read-only here anyway, and its turn could wait forever on an approval nobody can answer.
    */
   const attach = async (server: UserServer, token: string) => {
     const side = sidecar?.session;
@@ -436,12 +436,10 @@ export async function createConnection(
     if (side !== undefined) {
       await ensureAll(side);
       sideThreads = await listByRoot(side, Object.keys(ledger.workspaces));
-      const waiting = [...sideThreads.values()].some((threads) =>
-        threads.some(
-          (thread) => thread.state === "awaiting-approval" && thread.continuedIn === undefined,
-        ),
+      const busy = [...sideThreads.values()].some((threads) =>
+        hasRunningTurn(threads.filter((thread) => thread.continuedIn === undefined)),
       );
-      if (waiting) return;
+      if (busy) return;
     }
     const session = await deps.openUserServer(server, token);
     let map: Record<string, string>;
@@ -473,7 +471,6 @@ export async function createConnection(
     pairing = "none";
     pairingRequest = null;
     threadCopies = map;
-    draining = sidecar !== null;
     moveSubscriptions(session);
     await carryHostContext(session, map);
     emitMode(session, map);
@@ -482,7 +479,6 @@ export async function createConnection(
   const enterSidecar = async () => {
     sidecar ??= await openSidecar();
     const session = sidecar.session;
-    draining = false;
     await ensureAll(session);
     if (liveTools !== null) await leaseFor(session).set(liveTools);
     active = session;
@@ -513,7 +509,6 @@ export async function createConnection(
     const stopped = sidecar;
     if (stopped === null || stopped.isRunning()) return;
     sidecar = null;
-    draining = false;
     await dropLease(stopped.session, false);
     void stopped.session.close().catch(() => undefined);
   };
@@ -528,11 +523,15 @@ export async function createConnection(
     await moveTo(session, sameIds);
   };
 
-  /** Stops the sidecar once no turn runs on it; until then a turn in flight finishes there. */
+  /**
+   * Stops the sidecar once no turn runs on it. The switch found it idle, but a turn can start
+   * there before mounted views move, and a continued thread's turn never held the switch; the
+   * marks cannot be undone, so such a turn finishes on the sidecar, lease included.
+   */
   const drain = async () => {
     const side = sidecar;
     const current = user;
-    if (!draining || side === null || current === null) return;
+    if (side === null || current === null) return;
     const roots = Object.keys(ledger.workspaces);
     const sideThreads = await listByRoot(side.session, roots);
     if ([...sideThreads.values()].some(hasRunningTurn)) return;
@@ -551,7 +550,6 @@ export async function createConnection(
     }
     // A turn that ended after the copy leaves history for the next attach to pick up.
     if (settled) await updateLedger((ledgerNow) => ({ ...ledgerNow, pendingCopy: false }));
-    draining = false;
     sidecar = null;
     await dropLease(side.session, true);
     await side.session.close().catch(() => undefined);
@@ -629,7 +627,7 @@ export async function createConnection(
         } catch {
           attachRetryAt = deps.now() + ATTACH_RETRY_MS;
         }
-        // A switch that waits on a sidecar approval, or failed, still holds the grant.
+        // A switch that waits on a sidecar turn, or failed, still holds the grant.
         pairing = "none";
         emitStatus();
         return;
@@ -787,7 +785,7 @@ export async function createConnection(
     setLiveTools: async (tools) => {
       liveTools = tools;
       const session = requireActive();
-      if (draining && sidecar !== null && sidecar.session !== session) {
+      if (sidecar !== null && sidecar.session !== session) {
         leaseFor(sidecar.session)
           .set(tools)
           .catch(() => undefined);

@@ -205,8 +205,10 @@ ownership lock, because probing the lock can make a starting server exit. On gra
 4. publishes the live lease on the new server;
 5. retargets mounted views and emits a `mode` event.
 
-The sidecar and its lease stay up until no turn runs on it. Losing the user server runs the same
-sequence in reverse.
+The switch waits until no turn runs on the sidecar: the copy carries no runtime request and the
+original turns read-only, so an approval a running turn asks for would have nowhere to be
+answered. A turn that starts during the switch finishes on the sidecar, which keeps its lease until
+no turn runs on it. Losing the user server runs the same sequence in reverse.
 
 A thread is copied again only when its `historyRevision` has passed the revision its copy was
 taken at. The revision moves on messages, turn items and terminal provider-turn events, never on
