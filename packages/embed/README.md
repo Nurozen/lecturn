@@ -295,7 +295,8 @@ Every Lecturn client signed in to it shows the request, and the user can also an
 **Settings → Connected apps**. When the user approves, the connection switches over without a
 restart: it recreates your workspaces, copies the sidecar's threads, moves the live lease, and
 reloads mounted views at the copied threads. The sidecar's originals then show read-only as
-**Continued in Lecturn**. If the user's Lecturn goes away, the connection switches back. If the
+**Continued in Lecturn**. A turn on the sidecar that waits for an approval holds the switch until
+the user answers it there. If the user's Lecturn goes away, the connection switches back. If the
 user revokes the app while it is connected, the connection switches back and `pairing` reads
 `"denied"`. After a deny or a revoke, `requestPairingAgain()` asks again.
 
@@ -339,6 +340,7 @@ If your process exits without closing, crashes included, the sidecar notices and
 down: it watches a pipe that only your process holds, and its parent process.
 
 A sidecar that another process of your app already runs in the same `baseDir` is attached to, not
-started, and is left running when this process closes. `nodePath` defaults to your own binary run
-as Node (`ELECTRON_RUN_AS_NODE=1` under Electron); set it only to use a separate Node binary,
-since an explicit `nodePath` does not get that variable.
+started, and is left running when this process closes. If the process that started it closes
+first, the sidecar starts again here and mounted views reload on it. `nodePath` defaults to your
+own binary run as Node (`ELECTRON_RUN_AS_NODE=1` under Electron); set it only to use a separate
+Node binary, since an explicit `nodePath` does not get that variable.

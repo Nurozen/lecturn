@@ -56,7 +56,8 @@ export interface EmbedConnectionSource extends EmbedTargetSource {
 /**
  * Keeps a mount on the same workspace and thread across a server switch. A
  * thread with no counterpart on the new server (made after the last copy)
- * leaves the mount on its project.
+ * leaves the mount on its project. An unchanged project id is the sidecar
+ * started again on another port, which needs the reload all the same.
  */
 export function followConnectionMode(
   source: EmbedConnectionSource,
@@ -70,7 +71,7 @@ export function followConnectionMode(
     const { projectId, threadId } = current();
     const root = workspaceRootOf.call(source, projectId);
     const nextProjectId = root === null ? undefined : event.projectIdsByWorkspaceRoot[root];
-    if (nextProjectId === undefined || nextProjectId === projectId) return;
+    if (nextProjectId === undefined) return;
     retarget(nextProjectId, threadId === undefined ? undefined : event.threadIdMap[threadId]);
   });
 }

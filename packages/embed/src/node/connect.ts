@@ -34,7 +34,7 @@ import {
   loadKeyring,
   makeCredentialStore,
 } from "./credentials.ts";
-import { discoverServer } from "./discovery.ts";
+import { discoverServer, isProcessAlive } from "./discovery.ts";
 import { type LiveLeaseHeartbeat, type LiveTools, makeLiveLeaseHeartbeat } from "./liveLease.ts";
 import {
   createPairingRequest,
@@ -136,6 +136,8 @@ export interface SidecarRuntime {
   readonly session: ServerSession;
   /** Stops the process when this connection started it; an attached sidecar is left running. */
   stop(): Promise<void>;
+  /** An attached sidecar stops when the process that started it closes. */
+  isRunning(): boolean;
 }
 
 /** Everything `connect` touches outside itself; tests stand in fake servers here. */
@@ -382,10 +384,12 @@ export async function createConnection(
    * Copies what the user server lacks: new sidecar threads and threads whose
    * history moved past their copy. Nothing is exported when nothing is due.
    */
-  const copyThreads = async (side: ServerSession, userSession: ServerSession) => {
-    await ensureAll(side);
+  const copyThreads = async (
+    side: ServerSession,
+    sideThreads: ReadonlyMap<string, ReadonlyArray<ConnectedAppThreadSummary>>,
+    userSession: ServerSession,
+  ) => {
     const roots = Object.keys(ledger.workspaces);
-    const sideThreads = await listByRoot(side, roots);
     let userThreads = await listByRoot(userSession, roots);
     const due = new Set<string>();
     for (const [root, threads] of sideThreads) {
@@ -421,13 +425,30 @@ export async function createConnection(
     return map;
   };
 
+  /**
+   * Changes nothing while a sidecar turn waits on an approval: its copy carries no pending
+   * request and the original turns read-only, so it is answered here first and a later beat
+   * switches. A thread already continued elsewhere is read-only either way.
+   */
   const attach = async (server: UserServer, token: string) => {
+    const side = sidecar?.session;
+    let sideThreads: Map<string, ReadonlyArray<ConnectedAppThreadSummary>> | undefined;
+    if (side !== undefined) {
+      await ensureAll(side);
+      sideThreads = await listByRoot(side, Object.keys(ledger.workspaces));
+      const waiting = [...sideThreads.values()].some((threads) =>
+        threads.some(
+          (thread) => thread.state === "awaiting-approval" && thread.continuedIn === undefined,
+        ),
+      );
+      if (waiting) return;
+    }
     const session = await deps.openUserServer(server, token);
     let map: Record<string, string>;
     try {
       await ensureAll(session);
-      if (sidecar !== null) {
-        map = await copyThreads(sidecar.session, session);
+      if (side !== undefined && sideThreads !== undefined) {
+        map = await copyThreads(side, sideThreads, session);
       } else {
         const sidecarEnvironmentId = await deps.knownSidecarEnvironmentId();
         map =
@@ -470,6 +491,12 @@ export async function createConnection(
     return session;
   };
 
+  const moveTo = async (session: ServerSession, threadIdMap: Record<string, string>) => {
+    moveSubscriptions(session);
+    await carryHostContext(session, threadIdMap);
+    emitMode(session, threadIdMap);
+  };
+
   const fallback = async () => {
     const gone = user;
     if (gone !== null) {
@@ -477,12 +504,28 @@ export async function createConnection(
       await dropLease(gone.session, false);
       void gone.session.close().catch(() => undefined);
     }
-    const session = await enterSidecar();
-    moveSubscriptions(session);
     // Copies made on the user server map back to the sidecar threads they came from.
-    const map = invert(threadCopies);
-    await carryHostContext(session, map);
-    emitMode(session, map);
+    await moveTo(await enterSidecar(), invert(threadCopies));
+  };
+
+  /** The next start takes over the same baseDir, or attaches to whichever process did. */
+  const dropStoppedSidecar = async () => {
+    const stopped = sidecar;
+    if (stopped === null || stopped.isRunning()) return;
+    sidecar = null;
+    draining = false;
+    await dropLease(stopped.session, false);
+    void stopped.session.close().catch(() => undefined);
+  };
+
+  // The new process keeps every id but listens on another port, so mounts still reload.
+  const reopenSidecar = async () => {
+    const session = await enterSidecar();
+    const threads = await listByRoot(session, Object.keys(ledger.workspaces));
+    const sameIds = Object.fromEntries(
+      [...threads.values()].flat().map(({ threadId }) => [threadId, threadId]),
+    );
+    await moveTo(session, sameIds);
   };
 
   /** Stops the sidecar once no turn runs on it; until then a turn in flight finishes there. */
@@ -585,9 +628,10 @@ export async function createConnection(
           await attach(pending.server, credential.token);
         } catch {
           attachRetryAt = deps.now() + ATTACH_RETRY_MS;
-          pairing = "none";
-          emitStatus();
         }
+        // A switch that waits on a sidecar approval, or failed, still holds the grant.
+        pairing = "none";
+        emitStatus();
         return;
       }
     }
@@ -606,6 +650,7 @@ export async function createConnection(
   };
 
   const tick = async () => {
+    await dropStoppedSidecar();
     if (mode === "user-server") {
       if (user?.session.credentialRejected === true) return dropRejectedUser(user.server);
       const found = await deps.discover().catch(() => null);
@@ -618,6 +663,7 @@ export async function createConnection(
       userMisses = 0;
       return drain();
     }
+    if (sidecar === null) return reopenSidecar();
     if (pairingRequest !== null) return pollPairing(pairingRequest);
     if (pairing === "denied" || deps.now() < attachRetryAt) return;
     const found = await deps.discover();
@@ -873,6 +919,7 @@ async function openSidecar(input: {
     signal,
   });
   const stop = () => (handle.kind === "spawned" ? handle.stop() : Promise.resolve());
+  const isRunning = () => isProcessAlive(handle.pid);
   try {
     const sessionPath = sidecarSessionPath(input.sidecar.baseDir);
     let accessToken: string;
@@ -906,7 +953,7 @@ async function openSidecar(input: {
       await session.close().catch(() => undefined);
       signal.throwIfAborted();
     }
-    return { session, stop };
+    return { session, stop, isRunning };
   } catch (error) {
     await stop();
     throw signal.aborted ? signal.reason : error;

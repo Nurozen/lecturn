@@ -13,7 +13,7 @@ import type {
 } from "@lecturn/contracts/apps";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import type { ConnectionEvent, ConnectionModeEvent } from "../target.ts";
+import { type ConnectionEvent, type ConnectionModeEvent, followConnectionMode } from "../target.ts";
 import type { AttachLedger } from "./copyLedger.ts";
 import {
   type ConnectDeps,
@@ -524,6 +524,7 @@ function world() {
           state.sidecarStops += 1;
           state.sidecarRunning = false;
         },
+        isRunning: () => state.sidecarRunning,
       };
     },
     hasSidecarState: async () => state.sidecarStateOnDisk,
@@ -555,7 +556,14 @@ function world() {
     wait: clock.wait,
     now: () => state.now,
   };
-  return { sidecar, userServer, state, credentials, clock, deps, grant };
+  /** Another process of the app started the shared sidecar and closed it; its memory goes too. */
+  const stopSidecarElsewhere = () => {
+    state.sidecarRunning = false;
+    for (const session of sidecar.sessions) session.closed = true;
+    sidecar.lease = null;
+    sidecar.hostContext.clear();
+  };
+  return { sidecar, userServer, state, credentials, clock, deps, grant, stopSidecarElsewhere };
 }
 
 const connections: Array<LecturnConnection> = [];
@@ -667,22 +675,124 @@ describe("connect", () => {
     expect(w.state.ledger.pendingCopy).toBe(true);
   });
 
-  it("does not stop the sidecar while a turn there waits on an approval", async () => {
+  it("waits to switch until a sidecar turn's approval is answered", async () => {
     const w = world();
     w.state.userRunning = true;
     const { connection } = await open(w);
     await connection.ensureWorkspace("/ws/a", "A");
     w.sidecar.addThread("/ws/a", "s-1", { state: "awaiting-approval" });
+    // Already read-only after an earlier switch: nothing here can answer it, so it holds nothing up.
+    w.sidecar.addThread("/ws/a", "s-continued", {
+      state: "awaiting-approval",
+      continuedIn: {
+        environmentId: "env-user",
+        threadId: "copy-earlier",
+        copiedAt: new Date(T0).toISOString(),
+      } as never,
+    });
     w.grant();
     await w.clock.beat();
+    expect(connection.mode).toBe("sidecar");
+    expect(connection.status.current.pairing).toBe("none");
+    expect(w.credentials.all.get("env-user")?.token).toBe(USER_TOKEN);
+
+    // Later beats retry with the stored credential, without asking or reconnecting each time.
     await w.clock.beat();
+    expect(connection.mode).toBe("sidecar");
+    expect(w.state.pairingRequests).toBe(1);
+    expect(w.userServer.sessions).toHaveLength(0);
+    expect(w.userServer.imported).toEqual([]);
+    expect(w.sidecar.thread("s-1").continuedIn).toBeUndefined();
+
+    w.sidecar.touch("s-1", { state: "idle", historyRevision: 2 });
     await w.clock.beat();
     expect(connection.mode).toBe("user-server");
-    expect(w.state.sidecarStops).toBe(0);
-    w.sidecar.touch("s-1", { state: "idle" });
+    expect(w.sidecar.thread("s-1").continuedIn?.threadId).toBe("copy:env-sidecar:s-1");
+  });
+
+  it("starts on the sidecar when a turn there waits on an approval, and switches once answered", async () => {
+    const w = world();
+    w.state.userRunning = true;
+    await w.credentials.set("env-user", {
+      token: USER_TOKEN,
+      expiresAt: new Date(T0 + 86_400_000).toISOString(),
+    });
+    w.state.ledger = { version: 1, workspaces: { "/ws/a": "A" }, pendingCopy: true };
+    w.state.sidecarStateOnDisk = true;
+    w.sidecar.addThread("/ws/a", "s-1", { state: "awaiting-approval" });
+
+    const { connection } = await open(w);
+    expect(connection.mode).toBe("sidecar");
+    expect(w.state.sidecarStarts).toBe(1);
+    expect(w.state.pairingRequests).toBe(0);
+    expect(w.userServer.imported).toEqual([]);
+    expect(w.sidecar.thread("s-1").continuedIn).toBeUndefined();
+
+    w.sidecar.touch("s-1", { state: "idle", historyRevision: 2 });
     await w.clock.beat();
-    expect(w.state.sidecarStops).toBe(1);
-    expect(w.state.ledger.pendingCopy).toBe(false);
+    expect(connection.mode).toBe("user-server");
+    expect(w.userServer.imported).toEqual(["s-1"]);
+  });
+
+  it("starts the sidecar again when the process that started it closes", async () => {
+    const w = world();
+    const { connection, modes } = await open(w);
+    const { projectId } = await connection.ensureWorkspace("/ws/a", "A");
+    w.sidecar.addThread("/ws/a", "s-1");
+    await connection.setLiveTools(LIVE);
+    await connection.updateHostContext({ threadId: "s-1" }, "selected: fin-1");
+    const rail: Array<ConnectedAppThreadsStreamEvent> = [];
+    connection.subscribeThreads(projectId, (event) => rail.push(event));
+    const retargets: Array<[string, string | undefined]> = [];
+    followConnectionMode(
+      connection,
+      () => ({ projectId, threadId: "s-1" }),
+      (next, thread) => retargets.push([next, thread]),
+    );
+
+    w.stopSidecarElsewhere();
+    const railBefore = rail.length;
+    await w.clock.beat();
+
+    expect(w.state.sidecarStarts).toBe(2);
+    expect(connection.mode).toBe("sidecar");
+    expect(modes().at(-1)).toEqual({
+      type: "mode",
+      mode: "sidecar",
+      environmentId: "env-sidecar",
+      projectIdsByWorkspaceRoot: { "/ws/a": projectId },
+      threadIdMap: { "s-1": "s-1" },
+    });
+    // The same ids on a new process, which listens elsewhere: a mounted view reloads in place.
+    expect(retargets).toEqual([[projectId, "s-1"]]);
+    expect(w.sidecar.lease).toEqual(LIVE);
+    expect(Object.fromEntries(w.sidecar.hostContext)).toEqual({ "thread:s-1": "selected: fin-1" });
+    expect(rail.length).toBe(railBefore + 1);
+    expect((await connection.listThreads(projectId)).map((thread) => thread.threadId)).toEqual([
+      "s-1",
+    ]);
+  });
+
+  it("forgets a draining sidecar that stopped, so a fallback starts a fresh one", async () => {
+    const w = world();
+    w.state.userRunning = true;
+    const { connection } = await open(w);
+    const { projectId } = await connection.ensureWorkspace("/ws/a", "A");
+    w.sidecar.addThread("/ws/a", "s-running", { state: "running" });
+    w.grant();
+    await w.clock.beat();
+    expect(connection.mode).toBe("user-server");
+
+    w.stopSidecarElsewhere();
+    await w.clock.beat();
+    w.state.userRunning = false;
+    await w.clock.beat();
+    await w.clock.beat();
+    expect(connection.mode).toBe("sidecar");
+    expect(w.state.sidecarStarts).toBe(2);
+    expect((await connection.listThreads(projectId)).map((thread) => thread.threadId)).toEqual([
+      "s-running",
+    ]);
   });
 
   it("re-copies a thread whose turn ended after the copy exactly once; the attach after copies nothing", async () => {
