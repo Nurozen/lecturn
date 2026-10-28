@@ -71,7 +71,8 @@ export function useConnectedAppCommands(environmentId: EnvironmentId | null) {
     busyAppId,
     /** The ceiling is applied before the grant so the app never runs above it. */
     approve: (app: AppStatus, requestedCeiling?: AppRuntimeCeiling) => {
-      const ceiling = requestedCeiling ?? app.runtimeCeiling;
+      // null is a choice ("Thread's mode" clears the cap), so only an omitted ceiling keeps the old one.
+      const ceiling = requestedCeiling === undefined ? app.runtimeCeiling : requestedCeiling;
       const request = app.pendingRequest;
       if (request === null) return Promise.resolve(false);
       return run(app, "approve", async (id) => {

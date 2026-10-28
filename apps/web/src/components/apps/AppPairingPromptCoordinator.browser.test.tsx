@@ -132,6 +132,19 @@ const button = (label: string) => {
   return found;
 };
 const click = (element: HTMLElement) => act(async () => element.click());
+const chooseCeiling = async (label: string) => {
+  const trigger = prompt()?.querySelector<HTMLElement>('[aria-label="Runtime ceiling"]');
+  if (!trigger) throw new Error("No runtime ceiling select");
+  await click(trigger);
+  const option = await vi.waitFor(() => {
+    const found = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((candidate) =>
+      candidate.textContent?.startsWith(label),
+    );
+    if (!found) throw new Error(`${label} option not open yet`);
+    return found;
+  });
+  await click(option);
+};
 
 describe("AppPairingPromptCoordinator", () => {
   it("shows the exact command, env and gated tools the app asked for", async () => {
@@ -166,21 +179,23 @@ describe("AppPairingPromptCoordinator", () => {
   it("applies a chosen ceiling before granting, so the app never runs above it", async () => {
     state.apps = [pendingApp()];
     await render();
-    const trigger = prompt()?.querySelector<HTMLElement>('[aria-label="Runtime ceiling"]');
-    if (!trigger) throw new Error("No runtime ceiling select");
-    await click(trigger);
-    const readOnly = await vi.waitFor(() => {
-      const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
-        (candidate) => candidate.textContent?.startsWith("Read-only"),
-      );
-      if (!option) throw new Error("Read-only option not open yet");
-      return option;
-    });
-    await click(readOnly);
+    await chooseCeiling("Read-only");
     await click(button("Approve"));
 
     expect(state.calls.map((call) => call.value)).toEqual([
       { environmentId, input: { appId: "dev.example.rocket", ceiling: "read-only" } },
+      { environmentId, input: { requestId: "request-1", decision: "grant" } },
+    ]);
+  });
+
+  it("clears an existing ceiling when re-pairing with the thread's mode", async () => {
+    state.apps = [pendingApp({ state: "revoked", runtimeCeiling: "read-only" })];
+    await render();
+    await chooseCeiling("Thread's mode");
+    await click(button("Re-pair"));
+
+    expect(state.calls.map((call) => call.value)).toEqual([
+      { environmentId, input: { appId: "dev.example.rocket", ceiling: null } },
       { environmentId, input: { requestId: "request-1", decision: "grant" } },
     ]);
   });

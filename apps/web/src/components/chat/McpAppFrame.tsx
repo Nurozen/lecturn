@@ -323,9 +323,9 @@ export function McpAppFrame(props: {
         }
         window.open(url, "_blank", "noopener,noreferrer");
       },
-      // In full Lecturn a reference opens the app itself, as a chip in the thread does; the
-      // embed's own navigation is the bridge's (lecturn/navigate).
-      ...(app.server === LECTURN_MCP_APP_SERVER && !isEmbedLocation()
+      // A reference opens as a chip in the thread does: full Lecturn opens the app itself, and
+      // the embed asks its host to navigate (lecturn/navigate).
+      ...(app.server === LECTURN_MCP_APP_SERVER
         ? {
             openAppRef: {
               refPrefixes: () => latest.current.appReferences?.refPrefixes ?? [],
