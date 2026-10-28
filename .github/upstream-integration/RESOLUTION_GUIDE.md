@@ -758,7 +758,10 @@ from upstream's side.
     (#12289).
   - Android (#21071 dropped the rail): the bottom bar has Chats/Apps/Pulls, and
     each split-view sidebar toolbar has "Show <tab>" buttons for the other two
-    lists.
+    lists. Below a 320 dp row the threads sidebar moves them into a "More
+    actions" menu (upstream's `AndroidScreenHeader` overflow), and the
+    `CompactBrandTitle` wordmark is single-line, so "Lecturn" never wraps.
+    `ThreadNavigationSidebar` also takes the sidebar half of 325a7e2ae4.
   - Mobile Apps code follows the compiler rules: promise `.finally` instead of
     try/finally; LegendList rows built in `renderItem` keep `memo`.
   - `ChatComposer` phone viewport is `useComposerPhoneViewport` (the embed keeps

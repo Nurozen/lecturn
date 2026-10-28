@@ -25,6 +25,14 @@ import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSi
 import { useToolbarLayout } from "../../components/ui/useToolbarLayout";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
 
+/**
+ * The narrowest split-view sidebar (280dp, which every window under about 875dp gets) leaves a
+ * 266dp row. Four buttons there leave the brand 46dp, and "Lecturn" needs up to 99dp at the
+ * largest text size, so below this width "Show apps" and "Show pull requests" move into a
+ * More menu, as AndroidScreenHeader does for the other sidebar lists.
+ */
+export const INLINE_LIST_BUTTONS_MIN_ROW_WIDTH = 320;
+
 /** One toolbar height for the compact list and expanded sidebar, including search. */
 export function ThreadListToolbar(props: {
   readonly searchQuery: string;
@@ -53,6 +61,9 @@ export function ThreadListToolbar(props: {
   const showPullRequests = useWorkspaceListNavigation("pullRequests");
   const searchRef = useRef<TextInputInstance>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [rowWidth, setRowWidth] = useState(0);
+  const listButtons = props.sidebar && workspace !== null;
+  const listButtonsInline = rowWidth >= INLINE_LIST_BUTTONS_MIN_ROW_WIDTH;
   const searching = searchOpen || props.searchQuery.length > 0;
   const openSearch = useCallback(() => {
     onRequestVisibility?.();
@@ -109,7 +120,11 @@ export function ThreadListToolbar(props: {
         }
         style={headerPadding}
       >
-        <View className="flex-row items-center gap-1" style={{ minHeight: toolbarHeight }}>
+        <View
+          onLayout={(event) => setRowWidth(event.nativeEvent.layout.width)}
+          className="flex-row items-center gap-1"
+          style={{ minHeight: toolbarHeight }}
+        >
           {searching ? (
             <>
               <AndroidHeaderIconButton
@@ -128,7 +143,7 @@ export function ThreadListToolbar(props: {
                   brand={<CompactBrandTitle allowFontScaling={false} fit />}
                 />
               </View>
-              {props.sidebar && workspace ? (
+              {listButtons && listButtonsInline ? (
                 <>
                   <AndroidHeaderIconButton
                     accessibilityLabel="Show apps"
@@ -152,6 +167,25 @@ export function ThreadListToolbar(props: {
                 icon="gearshape"
                 onPress={props.onOpenSettings}
               />
+              {listButtons && !listButtonsInline ? (
+                <AndroidAnchoredMenu
+                  actions={[
+                    { id: "apps", title: "Show apps" },
+                    { id: "pullRequests", title: "Show pull requests" },
+                  ]}
+                  onPressAction={({ nativeEvent }) =>
+                    nativeEvent.event === "apps" ? showApps() : showPullRequests()
+                  }
+                >
+                  {(open) => (
+                    <AndroidHeaderIconButton
+                      accessibilityLabel="More actions"
+                      icon="ellipsis"
+                      onPress={open}
+                    />
+                  )}
+                </AndroidAnchoredMenu>
+              ) : null}
             </>
           )}
         </View>

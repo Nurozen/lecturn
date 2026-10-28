@@ -20,7 +20,8 @@ export function CompactBrandTitle(
     readonly accessibilityLabel?: string;
     /**
      * Fills the parent row and drops the stage badge when the full title does not fit.
-     * Narrow Android sidebar headers otherwise draw their actions over the badge.
+     * Narrow Android sidebar headers otherwise draw their actions over the badge. The
+     * wordmark itself stays on one line and ellipsizes if even it does not fit.
      */
     readonly fit?: boolean;
   } = {},
@@ -53,7 +54,8 @@ export function CompactBrandTitle(
       <Text
         allowFontScaling={props.allowFontScaling}
         className="font-lecturn-medium text-foreground-muted"
-        style={{ fontSize: 21 * scale, letterSpacing: -0.5 * scale }}
+        numberOfLines={1}
+        style={{ flexShrink: 1, fontSize: 21 * scale, letterSpacing: -0.5 * scale }}
       >
         Lecturn
       </Text>
