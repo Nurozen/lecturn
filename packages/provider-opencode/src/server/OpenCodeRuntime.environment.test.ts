@@ -250,7 +250,7 @@ describe("OpenCode database lock startup", () => {
     ({ mode, keepPipesOpen }) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-opencode-lock-" });
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-opencode-lock-" });
         const platform = yield* HostProcess.Platform;
         const executablePath = yield* HostProcess.ExecutablePath;
         const environment = yield* HostProcess.Environment;

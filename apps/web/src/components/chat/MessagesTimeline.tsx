@@ -1280,6 +1280,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
           runningRunId,
           isWorking,
           runlessWorkActive,
+          keepLatestTurnOpen,
         })
       ).get(entryId),
     onExpandTurn: expandCitedRun,

@@ -110,7 +110,7 @@ it.layer(NodeServices.layer)("writeFileStringAtomically", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-atomic-write-" });
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-atomic-write-" });
       const filePath = path.join(root, "settings.json");
       yield* fs.writeFileString(filePath, "before");
       const firstAttempt = yield* Deferred.make<void>();
@@ -146,7 +146,7 @@ it.layer(NodeServices.layer)("writeFileStringAtomically", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-atomic-write-" });
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-atomic-write-" });
       const filePath = path.join(root, "settings.json");
       yield* fs.writeFileString(filePath, "before");
       const firstAttempt = yield* Deferred.make<void>();
@@ -181,7 +181,7 @@ it.layer(NodeServices.layer)("writeFileStringAtomically", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-atomic-write-" });
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-atomic-write-" });
       const filePath = path.join(root, "settings.json");
       yield* fs.writeFileString(filePath, "before");
       const firstAttempt = yield* Deferred.make<void>();
@@ -219,7 +219,7 @@ it.layer(NodeServices.layer)("writeFileStringAtomically", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-atomic-write-" });
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-atomic-write-" });
       const filePath = path.join(root, "settings.json");
       yield* fs.writeFileString(filePath, "before");
       yield* Effect.acquireRelease(fs.chmod(filePath, 0o444), () =>

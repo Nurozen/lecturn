@@ -49,6 +49,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import {
   storageCleanupActivityAt,
+  storageCleanupNotRepository,
   storageCleanupPullRequestMerged,
   storageCleanupThreadIdle,
 } from "./storageCleanup.ts";
@@ -234,6 +235,29 @@ describe("merged pull request cleanup", () => {
     expect(storageCleanupPullRequestMerged(null, squashed)).toBe(false);
     expect(storageCleanupPullRequestMerged(null, integrated)).toBe(false);
     expect(storageCleanupPullRequestMerged(pullRequest({ state: "open" }), integrated)).toBe(false);
+  });
+});
+
+describe("checkouts Git no longer recognizes", () => {
+  it.each([
+    ["a missing gitdir before Git 2.56", "fatal: not a git repository: /missing-git-directory"],
+    [
+      "a missing gitdir in Git 2.56",
+      "fatal: gitfile does not point to a valid repository: /tmp/worktrees/feature/.git",
+    ],
+    [
+      "a directory outside any repository",
+      "fatal: not a git repository (or any of the parent directories): .git",
+    ],
+  ])("recognizes %s", (_name, stderr) => {
+    expect(storageCleanupNotRepository(stderr)).toBe(true);
+  });
+
+  it("does not treat other Git failures as a changed repository", () => {
+    expect(storageCleanupNotRepository("fatal: invalid gitfile format: .git")).toBe(false);
+    expect(storageCleanupNotRepository("fatal: Unable to create 'index.lock': File exists.")).toBe(
+      false,
+    );
   });
 });
 

@@ -831,7 +831,7 @@ effectIt.layer(NodeServices.layer)("resolveSpawnCommand", (it) => {
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
-          const prefix = yield* fs.makeTempDirectoryScoped({ prefix: "t3-npm-shim-" });
+          const prefix = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-npm-shim-" });
           const shim = path.join(prefix, "opencode.cmd");
           const executable = path.join(
             prefix,

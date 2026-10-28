@@ -46,9 +46,10 @@ export function androidWorkspaceNavigationState(
 
 /**
  * Resets the root stack to a workspace list or detail. Always reads and targets the root
- * navigator: the sidebar and rail render in the root layout, where `useNavigation()` is the
- * container, and a container dispatch runs on the deepest focused navigator. With Settings
- * or New task open, that is their nested stack, which rejects the reset.
+ * navigator: the split view's sidebar renders in the root layout, where `useNavigation()` is
+ * the container, and a container dispatch runs on the deepest focused navigator. With Settings
+ * or New task open, that is their nested stack, which rejects the reset. The bottom bar
+ * renders inside Home, a root stack screen.
  */
 export function resetAndroidWorkspace(
   navigation: WorkspaceNavigation,

@@ -707,6 +707,9 @@ from upstream's side.
   that cache through `refreshModels`, not `invalidateCaches`.
 - **Git status (#20175).** A rename's source path carries the fork's
   staged/unstaged/conflicted flags, mirroring the rename's index side.
+- **Storage cleanup (#17911).** `storageCleanupNotRepository` also accepts Git
+  2.56's "gitfile does not point to a valid repository" wording; upstream
+  matches only "not a git repository", which fails on current CI runners.
 - **Sidebar.** The subagent parent highlight (#15163) lives in the fork Sidebar
   body (`routeRowThreadKey`). Working-row context drag into chat (#19697) and
   the shared working timer (#21195, with its `useNowSecond` hook) are not taken
@@ -720,6 +723,9 @@ from upstream's side.
 - **MessagesTimeline.** `TimelineRowCtx` is per row (#21123); the fork reveal and
   notes viewport wraps upstream's composer-fade div and minimap. Browser tests
   wait for `[data-timeline-ready]` before focusing or finding rows.
+  `useAssistantCitationTarget` keeps the fork's readiness switch (user and
+  assistant citations); upstream's `getTurnFoldRunId` (#18423) feeds its
+  expand-turn case.
 - **DraftHeroHeadline.** Upstream drops the h1 aria-label (#17877); the fork
   keeps `font-display` and the "No project" row.
 - **Identity.** PR detail snapshot key `lecturn.pullRequests.recentDetails`;
@@ -750,7 +756,8 @@ from upstream's side.
     second argument is upstream's `feature.used` callback;
     `exitWithAppSidecarParent(config)` wraps `runServer` and the desktop
     launcher-loss race wraps the result; OpenCode v2 re-adds Lecturn MCP each
-    turn (upstream), reports `mcp-activation-failed` on a failed add and appends
+    turn (upstream), reports `mcp-activation-failed` only when an add fails
+    while Lecturn MCP is not yet up for the session, and appends
     `connectedAppInstructionsSection` (fork).
 
 ## Recurring mechanical conflicts

@@ -3316,6 +3316,76 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("reports a failed Lecturn MCP add only while the server is not up yet", () =>
+    Effect.gen(function* () {
+      const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+      yield* mcpSessions.set({
+        environmentId: EnvironmentId.make("environment:opencode2-adapter"),
+        threadId,
+        providerSessionId: "mcp:opencode2-adapter",
+        providerInstanceId: instanceId,
+        endpoint: "http://127.0.0.1:3773/mcp",
+        authorizationHeader: "Bearer thread-credential",
+        browserToolsAvailable: false,
+      });
+      yield* Effect.addFinalizer(() => mcpSessions.clear(threadId));
+      const activations = yield* mcpSessions.subscribeActivations;
+      const server = "lecturn-thread_opencode2-adapter";
+      const add = out("mcp.add", { server, "location[directory]": WORK });
+      const rejected = reply("mcp.add", { status: 500, body: { message: "MCP unavailable" } });
+      const instructions = [
+        out("session.instructions.entry.put", { sessionID: SESSION, key: "lecturn" }),
+        reply("session.instructions.entry.put", null),
+      ];
+      const turn = [
+        out("session.prompt", { sessionID: SESSION, text: "<any>" }),
+        promptAccepted,
+        event("session.execution.succeeded", { sessionID: SESSION }),
+      ];
+      const { runtime, thread } = yield* resumed([
+        add,
+        rejected,
+        ...turn,
+        add,
+        reply("mcp.add", null),
+        ...instructions,
+        ...turn,
+        add,
+        rejected,
+        ...instructions,
+        ...turn,
+        out("mcp.remove", { server, "location[directory]": WORK }),
+        reply("mcp.remove", null),
+      ]);
+      for (let index = 0; index < 3; index++) {
+        const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
+        yield* runtime.startTurn(turnInput(thread));
+        assert.equal((yield* Fiber.join(terminal))?.status, "completed");
+      }
+
+      const end = "end of test";
+      yield* mcpSessions.reportActivation({
+        type: "mcp-activation-failed",
+        threadId,
+        providerThreadId: thread.id,
+        driver: OPENCODE_PROVIDER,
+        reason: end,
+      });
+      const reported = yield* activations.pipe(
+        Stream.takeUntil(
+          (signal) => signal.type === "mcp-activation-failed" && signal.reason === end,
+        ),
+        Stream.runCollect,
+      );
+      assert.deepEqual(
+        Array.from(reported, (signal) =>
+          signal.type === "mcp-activation-failed" ? signal.reason : signal.type,
+        ),
+        ["mcp-activated", "OpenCode did not accept Lecturn's MCP server.", end],
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("reports no Lecturn MCP on an external server, so an app thread gets the notice", () =>
     Effect.gen(function* () {
       const mcpSessions = yield* McpProviderSessions.McpProviderSessions;

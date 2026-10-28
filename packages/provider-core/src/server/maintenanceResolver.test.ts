@@ -646,7 +646,7 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
     "advertises $case for pnpm-global installs",
     (fixture) =>
       Effect.gen(function* () {
-        const tempDir = yield* makeTempDir("t3-pnpm-latest");
+        const tempDir = yield* makeTempDir("lecturn-pnpm-latest");
         const pnpmBinDir = NodePath.join(tempDir, "pnpm-bin");
         writeExecutable(NodePath.join(pnpmBinDir, "pnpm"));
         const link = linkIntoPackage(tempDir, "package-tool", [

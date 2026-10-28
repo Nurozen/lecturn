@@ -162,6 +162,19 @@ function worktreeOwner(threads: ReadonlyArray<OrchestrationV2ThreadShell>) {
 }
 
 /**
+ * Whether Git says the directory is no longer a checkout. Git 2.56 reports a
+ * `.git` file whose gitdir is gone as "gitfile does not point to a valid
+ * repository"; earlier versions say "not a git repository".
+ */
+export function storageCleanupNotRepository(stderr: string): boolean {
+  const message = stderr.toLowerCase();
+  return (
+    message.includes("not a git repository") ||
+    message.includes("gitfile does not point to a valid repository")
+  );
+}
+
+/**
  * Whether the host's pull request proves this worktree's head was merged. A
  * squash or rebase merge leaves the head outside the default branch, so the
  * merged pull request then has to name this exact commit.
@@ -477,7 +490,7 @@ const make = Effect.gen(function* () {
         );
       if (result === null) return null;
       if (result.exitCode === 0 || result.exitCode === allowedExitCode) return result;
-      if (result.stderr.toLowerCase().includes("not a git repository")) return null;
+      if (storageCleanupNotRepository(result.stderr)) return null;
       return yield* failure(
         result.stderr.trim().split(/\r?\n/)[0]?.slice(0, 1000) || "command failed",
       );

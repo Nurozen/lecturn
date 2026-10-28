@@ -10,7 +10,7 @@ import {
 describe("native device stream document", () => {
   it.each([
     ["android", "ios", "http://192.168.1.10:3773/api/device-hub", "http://192.168.1.10:3773/"],
-    ["android", "ios", "https://env.example/t3/api/device-hub", "https://env.example/"],
+    ["android", "ios", "https://env.example/lecturn/api/device-hub", "https://env.example/"],
     ["android", "android", "http://192.168.1.10:3773/api/device-hub", "https://localhost/"],
     ["ios", "ios", "http://192.168.1.10:3773/api/device-hub", "file:///"],
   ] as const)(

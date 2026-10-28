@@ -507,6 +507,9 @@ jobs:
       - name: Build CLI single-executable
         env:
           VP_NODE_VERSION: "26.8.2"
+          # The executable bundles the server again, so it needs the same stamp
+          # as the server bundle above.
+          LECTURN_TELEMETRY_CHANNEL: ${{ github.repository == 'Nurozen/lecturn' && needs.preflight.outputs.release_channel || 'dev' }}
         run: node apps/server/scripts/cli.ts build-exe --verbose
 
       - name: Build CLI archive
@@ -942,6 +945,9 @@ jobs:
         shell: bash
         env:
           VP_NODE_VERSION: "26.8.2"
+          # The executable bundles the server again, so it needs the same stamp
+          # as the desktop artifact's server bundle.
+          LECTURN_TELEMETRY_CHANNEL: ${{ github.repository == 'Nurozen/lecturn' && needs.preflight.outputs.release_channel || 'dev' }}
         run: node apps/server/scripts/cli.ts build-exe --verbose
 
       # Without signing secrets the archive's executable is signed ad hoc,

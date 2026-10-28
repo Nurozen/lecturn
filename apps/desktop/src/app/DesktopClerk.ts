@@ -101,9 +101,9 @@ export const make = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
   const shell = yield* ElectronShell.ElectronShell;
 
-  // The SDK bridge acquires Electron's profile-scoped single-instance lock
-  // (Windows/Linux), and Clerk's renderer storage lives in that profile, so
-  // userData must point at the real (or isolated LECTURN_HOME) profile first.
+  // Electron's single-instance lock (taken below) is scoped to the profile,
+  // and Clerk's renderer storage lives in it, so userData must point at the
+  // real (or isolated LECTURN_HOME) profile first.
   // Must not yield: the bridge registers a scheme Electron rejects once ready.
   // main.ts provides the synchronous pre-ready FileSystem for this.
   const userDataPath = yield* DesktopAppIdentity.resolveUserDataPath(environment);

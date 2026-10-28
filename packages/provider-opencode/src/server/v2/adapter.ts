@@ -3093,8 +3093,11 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
               ),
             ),
           );
+        // A failed re-add of a server already up (usually still connected) only
+        // drops this turn's instructions: the tools-unavailable notice it would
+        // report is never cleared.
         if (mcpAvailable) state.mcp = wanted;
-        else {
+        else if (state.mcp === undefined) {
           yield* mcpSessions.reportActivation({
             type: "mcp-activation-failed",
             threadId: turnInput.threadId,

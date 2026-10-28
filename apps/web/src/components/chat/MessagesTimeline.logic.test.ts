@@ -2641,6 +2641,54 @@ describe("deriveMessagesTimelineRows", () => {
     ).toBe(true);
   });
 
+  it("gives the embed's open latest turn no fold to expand, matching its rows", () => {
+    const at = (second: number) => `2026-01-01T00:00:${String(second).padStart(2, "0")}Z`;
+    const message = (id: string, role: "user" | "assistant", second: number, runId: string) => ({
+      id,
+      kind: "message" as const,
+      createdAt: at(second),
+      message: {
+        id: id as never,
+        role,
+        text: id,
+        runId: runId as never,
+        createdAt: at(second),
+        updatedAt: at(second),
+        streaming: false,
+      },
+    });
+    const foldInput = {
+      timelineEntries: [
+        message("first-prompt", "user", 0, "run-1"),
+        message("first-update", "assistant", 2, "run-1"),
+        message("first-answer", "assistant", 4, "run-1"),
+        message("latest-prompt", "user", 10, "run-2"),
+        message("latest-update", "assistant", 12, "run-2"),
+        message("latest-answer", "assistant", 14, "run-2"),
+      ],
+      latestRun: {
+        runId: "run-2" as never,
+        status: "completed" as const,
+        startedAt: at(10),
+        completedAt: at(15),
+      },
+      isWorking: false,
+    };
+    expect(timelineEntryTurnFoldRunId(foldInput, "latest-update")).toBe("run-2");
+
+    const embedInput = { ...foldInput, keepLatestTurnOpen: true };
+    expect(timelineEntryTurnFoldRunId(embedInput, "first-update")).toBe("run-1");
+    expect(timelineEntryTurnFoldRunId(embedInput, "latest-update")).toBeNull();
+    const embedRows = deriveMessagesTimelineRows({
+      ...embedInput,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    });
+    expect(
+      embedRows.some((row) => row.kind === "message" && row.message.id === "latest-update"),
+    ).toBe(true);
+  });
+
   it("shows a provider-native subagent's runless tools as live work while it works", () => {
     const entries = (commandStatus: "inProgress" | "completed") => [
       {
