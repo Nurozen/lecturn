@@ -295,8 +295,9 @@ Every Lecturn client signed in to it shows the request, and the user can also an
 **Settings → Connected apps**. When the user approves, the connection switches over without a
 restart: it recreates your workspaces, copies the sidecar's threads, moves the live lease, and
 reloads mounted views at the copied threads. The sidecar's originals then show read-only as
-**Continued in Lecturn**. If the user's Lecturn goes away, the connection switches back. After the
-user denies pairing, `requestPairingAgain()` asks again.
+**Continued in Lecturn**. If the user's Lecturn goes away, the connection switches back. If the
+user revokes the app while it is connected, the connection switches back and `pairing` reads
+`"denied"`. After a deny or a revoke, `requestPairingAgain()` asks again.
 
 `connect()` looks for the user's Lecturn in `lecturnHome`, which defaults to `LECTURN_HOME`, then
 `~/.lecturn`. To try pairing without touching your own Lecturn, start a development one with its

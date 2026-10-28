@@ -1,8 +1,12 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off -- Tests the Promise API against fake servers and real temp dirs.
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
+import * as NodeHttp from "node:http";
+import type * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import type * as NodeStream from "node:stream";
 import type {
   ConnectedAppThreadSummary,
   ConnectedAppThreadsStreamEvent,
@@ -29,7 +33,7 @@ import {
 } from "./credentials.ts";
 import { isProcessAlive } from "./discovery.ts";
 import type { PairingPoll } from "./pairing.ts";
-import { CredentialRejectedError, type ServerSession } from "./serverSession.ts";
+import { CredentialRejectedError, openServerSession, type ServerSession } from "./serverSession.ts";
 
 function recordingFetch(response: Response) {
   const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
@@ -113,6 +117,82 @@ describe("issueWebSocketTicket", () => {
   });
 });
 
+/** A ticket endpoint and a `/ws` that completes the handshake for a ticketed upgrade only. */
+async function ticketedSocketServer() {
+  const state = { refuse: false };
+  const sockets: Array<NodeStream.Duplex> = [];
+  let onConnected = () => {};
+  const connected = new Promise<void>((resolve) => (onConnected = resolve));
+  let onTicketlessUpgrade = () => {};
+  const ticketlessUpgrade = new Promise<void>((resolve) => (onTicketlessUpgrade = resolve));
+  const server = NodeHttp.createServer((_request, response) => {
+    if (state.refuse) {
+      response.writeHead(401).end();
+      return;
+    }
+    response
+      .writeHead(200, { "content-type": "application/json" })
+      .end(JSON.stringify({ ticket: "ticket", expiresAt: new Date(T0 + 60_000).toISOString() }));
+  });
+  server.on("upgrade", (request: NodeHttp.IncomingMessage, socket: NodeStream.Duplex) => {
+    // A closing session resets its socket.
+    socket.on("error", () => undefined);
+    if (!new URL(request.url ?? "/", "http://127.0.0.1").searchParams.has("wsTicket")) {
+      socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+      onTicketlessUpgrade();
+      return;
+    }
+    const accept = NodeCrypto.createHash("sha1")
+      .update(`${request.headers["sec-websocket-key"]}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest("base64");
+    socket.write(
+      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+    );
+    sockets.push(socket);
+    onConnected();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as NodeNet.AddressInfo;
+  return {
+    origin: `http://127.0.0.1:${port}`,
+    state,
+    connected,
+    ticketlessUpgrade,
+    dropSockets: () => {
+      for (const socket of sockets.splice(0)) socket.destroy();
+    },
+    close: () => {
+      server.closeAllConnections();
+      return new Promise((resolve) => server.close(resolve));
+    },
+  };
+}
+
+describe("openServerSession", () => {
+  it("reports a bearer the server refuses when the socket reconnects", async () => {
+    const server = await ticketedSocketServer();
+    const session = await openServerSession({
+      origin: server.origin,
+      environmentId: "env-user",
+      accessToken: "bearer",
+      verify: true,
+    });
+    try {
+      await server.connected;
+      expect(session.credentialRejected).toBe(false);
+
+      // Revoking the app closes its socket, and its bearer gets no ticket from then on.
+      server.state.refuse = true;
+      server.dropSockets();
+      await server.ticketlessUpgrade;
+      expect(session.credentialRejected).toBe(true);
+    } finally {
+      await session.close();
+      await server.close();
+    }
+  });
+});
+
 type Thread = {
   -readonly [K in keyof ConnectedAppThreadSummary]: ConnectedAppThreadSummary[K];
 } & { lecturnTurns: boolean };
@@ -145,7 +225,7 @@ class FakeServer {
   readonly hostContext = new Map<string, string>();
   exports = 0;
   readonly imported: Array<string> = [];
-  readonly sessions: Array<{ closed: boolean }> = [];
+  readonly sessions: Array<{ closed: boolean; rejected: boolean }> = [];
   private readonly subscribers = new Set<{
     readonly projectId: string;
     readonly listener: (event: ConnectedAppThreadsStreamEvent) => void;
@@ -215,7 +295,7 @@ class FakeServer {
   }
 
   open(): ServerSession {
-    const handle = { closed: false };
+    const handle = { closed: false, rejected: false };
     this.sessions.push(handle);
     const live = () => {
       if (handle.closed) throw new Error(`session to ${this.environmentId} is closed`);
@@ -223,6 +303,9 @@ class FakeServer {
     return {
       origin: this.origin,
       environmentId: this.environmentId,
+      get credentialRejected() {
+        return handle.rejected;
+      },
       ensureWorkspace: async (root, title) => {
         live();
         return { projectId: this.ensure(root, title) };
@@ -345,6 +428,11 @@ class FakeServer {
     };
   }
 
+  /** The server refuses the bearer its open sessions hold, as when it reconnects them. */
+  rejectSessions() {
+    for (const session of this.sessions) session.rejected = true;
+  }
+
   emitTo(projectId: string) {
     for (const subscriber of this.subscribers) {
       if (subscriber.projectId === projectId) {
@@ -407,6 +495,7 @@ function world() {
     pairingRequests: 0,
     poll: { state: "pairing-requested" } as PairingPoll,
     ledger: { version: 1, workspaces: {}, pendingCopy: false } as AttachLedger,
+    now: T0,
   };
   const credentials = memoryCredentials();
   const clock = manualClock();
@@ -464,7 +553,7 @@ function world() {
       state.ledger = next;
     },
     wait: clock.wait,
-    now: () => T0,
+    now: () => state.now,
   };
   return { sidecar, userServer, state, credentials, clock, deps, grant };
 }
@@ -766,6 +855,58 @@ describe("connect", () => {
     expect(w.state.pairingRequests).toBe(0);
     const { projectId } = await connection.ensureWorkspace("/ws/a", "A");
     expect(projectId).toBe(w.userServer.projectId("/ws/a"));
+  });
+
+  it("falls back when the user revokes the connected app, and asks again only when the app does", async () => {
+    const w = world();
+    w.state.userRunning = true;
+    await w.credentials.set("env-user", {
+      token: USER_TOKEN,
+      expiresAt: new Date(T0 + 86_400_000).toISOString(),
+    });
+    const { connection, events, modes } = await open(w);
+    expect(connection.mode).toBe("user-server");
+
+    w.userServer.rejectSessions();
+    await w.clock.beat();
+    expect(connection.mode).toBe("sidecar");
+    expect(modes().at(-1)?.environmentId).toBe("env-sidecar");
+    expect(events.at(-1)).toEqual({
+      type: "status",
+      mode: "sidecar",
+      pairing: "denied",
+      app: null,
+    });
+    expect(w.credentials.all.has("env-user")).toBe(false);
+    expect(w.userServer.sessions.every((session) => session.closed)).toBe(true);
+    await w.clock.beat();
+    expect(w.state.pairingRequests).toBe(0);
+
+    const parked = w.clock.nextPark();
+    await connection.requestPairingAgain();
+    await parked;
+    expect(w.state.pairingRequests).toBe(1);
+    expect(connection.status.current.pairing).toBe("pending");
+  });
+
+  it("asks to pair again when the connected app's credential expires", async () => {
+    const w = world();
+    w.state.userRunning = true;
+    await w.credentials.set("env-user", {
+      token: USER_TOKEN,
+      expiresAt: new Date(T0 + 86_400_000).toISOString(),
+    });
+    const { connection } = await open(w);
+    expect(connection.mode).toBe("user-server");
+
+    w.state.now = T0 + 86_400_000;
+    w.userServer.rejectSessions();
+    await w.clock.beat();
+    expect(connection.mode).toBe("sidecar");
+    expect(w.credentials.all.has("env-user")).toBe(false);
+    await w.clock.beat();
+    expect(w.state.pairingRequests).toBe(1);
+    expect(connection.status.current.pairing).toBe("pending");
   });
 
   it("drops a credential the user server refuses and asks to pair again", async () => {

@@ -61,6 +61,11 @@ export type HostContextTarget = { readonly threadId: string } | { readonly proje
 export interface ServerSession {
   readonly origin: string;
   readonly environmentId: string;
+  /**
+   * The server refused the bearer when the socket reconnected, so the session
+   * cannot recover; its owner closes it, which ends the reconnects.
+   */
+  readonly credentialRejected: boolean;
   ensureWorkspace(workspaceRoot: string, title: string): Promise<{ readonly projectId: string }>;
   mintEmbedToken(projectId: string, threadId?: string): Promise<AppEmbedTarget>;
   setLiveLease(input: {
@@ -204,13 +209,16 @@ const socketUrl = (origin: string, ticket: string | null) => {
   return url.toString();
 };
 
-const makeAppsClient = (origin: string, accessToken: string) => {
+const makeAppsClient = (origin: string, accessToken: string, onRejected: () => void) => {
   // Tickets are single-use, so every (re)connect fetches a fresh one. A failed
   // fetch yields a ticketless URL the server rejects, which the socket retries.
   const url = Effect.promise(() =>
     issueWebSocketTicket(origin, accessToken).then(
       (ticket) => socketUrl(origin, ticket),
-      () => socketUrl(origin, null),
+      (error: unknown) => {
+        if (error instanceof CredentialRejectedError) onRejected();
+        return socketUrl(origin, null);
+      },
     ),
   );
   const protocol = Layer.effect(RpcClient.Protocol, RpcClient.makeProtocolSocket()).pipe(
@@ -253,9 +261,14 @@ export async function openServerSession(input: {
   if (input.verify === true) await issueWebSocketTicket(origin, accessToken);
   const scope = Scope.makeUnsafe();
   const closeScope = () => run(Scope.close(scope, Exit.void));
+  let credentialRejected = false;
   let client: Effect.Success<ReturnType<typeof makeAppsClient>>;
   try {
-    client = await run(makeAppsClient(origin, accessToken).pipe(Scope.provide(scope)));
+    client = await run(
+      makeAppsClient(origin, accessToken, () => {
+        credentialRejected = true;
+      }).pipe(Scope.provide(scope)),
+    );
   } catch (error) {
     await closeScope();
     throw error;
@@ -267,6 +280,9 @@ export async function openServerSession(input: {
   return {
     origin,
     environmentId: input.environmentId,
+    get credentialRejected() {
+      return credentialRejected;
+    },
     ensureWorkspace: (workspaceRoot, title) =>
       run(
         decodeEnsureWorkspace({ workspaceRoot, title }).pipe(

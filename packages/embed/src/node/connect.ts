@@ -593,8 +593,21 @@ export async function createConnection(
     }
   };
 
+  /**
+   * A bearer refused while still within its expiry means the user revoked the
+   * app: that reads as a deny, so the user is not asked straight back. An
+   * expired one pairs again through `reach` on a later beat.
+   */
+  const dropRejectedUser = async (server: UserServer) => {
+    const credential = await deps.credentials.get(server.environmentId);
+    if (credential !== null && isCredentialUsable(credential, deps.now())) pairing = "denied";
+    await deps.credentials.delete(server.environmentId);
+    await fallback();
+  };
+
   const tick = async () => {
     if (mode === "user-server") {
+      if (user?.session.credentialRejected === true) return dropRejectedUser(user.server);
       const found = await deps.discover().catch(() => null);
       if (user === null) return fallback();
       if (found?.environmentId !== user.server.environmentId) {
