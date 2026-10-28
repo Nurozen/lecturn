@@ -8,6 +8,8 @@ import * as Path from "effect/Path";
 import type * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 
+import type { AppSidecarBootstrap } from "@lecturn/contracts";
+
 import { sweepStalePendingAttachments } from "./attachmentStore.ts";
 import { DEFAULT_SIGNAL_EXPORT, type SignalExport } from "@lecturn/shared/observability";
 import * as OtelEnvironment from "@lecturn/shared/otelEnvironment";
@@ -86,6 +88,8 @@ export class ServerConfig extends Context.Service<
      * `StaveBinary` consults it after settings and `LECTURN_STAVE_PATH`.
      */
     readonly stavePath?: string | undefined;
+    /** Set only on a connected app's own sidecar server. */
+    readonly appSidecar?: AppSidecarBootstrap | undefined;
     readonly extensions?: {
       readonly bundledRoot: string;
       readonly reviewBinary?: {

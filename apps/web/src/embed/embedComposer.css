@@ -1,0 +1,80 @@
+/* The composer's approval card and Contextual control in the embed pane. Kept apart from
+   embed.css, which themes the whole pane. */
+
+/* The card (ChatComposer's top drawer) is as wide as the composer and sits on it instead of
+   tucking its bottom under it, so all of its ~60 px shows. */
+html[data-lecturn-embed]
+  [data-slot="composer-banner-attachment"]:has(
+    [data-chat-composer-top-drawer] [data-composer-banner-layout="approval"]
+  ) {
+  width: 100%;
+  margin-bottom: 0;
+}
+
+html[data-lecturn-embed]
+  [data-chat-composer-top-drawer]:has([data-composer-banner-layout="approval"]) {
+  --chat-composer-attachment-overlap: 0px;
+}
+
+/* The fade hides the part the composer would cover; nothing is covered now. The composer's top
+   edge is the seam. */
+html[data-lecturn-embed]
+  [data-chat-composer-top-drawer]:has([data-composer-banner-layout="approval"])::before {
+  -webkit-mask-image: none;
+  mask-image: none;
+  border-bottom-width: 0;
+}
+
+/* Square top corners under the card, so card and composer read as one outline. */
+html[data-lecturn-embed]
+  [data-slot="composer-shell"]:has(
+    [data-chat-composer-top-drawer] [data-composer-banner-layout="approval"]
+  )
+  :is([data-slot="composer-host"], [data-chat-composer-main-surface]) {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+/* The tool's name has the priority on the title's row: the shield takes only its own width, the
+   compact Decline, Approve and menu keep that row at any pane width, and the reason gets the full
+   width of a second line, so at 352 px "Approve <tool>" shows whole and only a narrower pane
+   truncates it (ComposerPendingApprovalPanel). */
+html[data-lecturn-embed] [data-chat-composer-top-drawer]:has([data-app-tool-approval]) {
+  padding-inline: 0.375rem;
+}
+
+html[data-lecturn-embed] [data-composer-banner-row]:has([data-app-tool-approval]) {
+  --composer-banner-icon-column: 1rem;
+  display: grid;
+  grid-template-columns: var(--composer-banner-icon-column) minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.25rem;
+  row-gap: 0.125rem;
+}
+
+html[data-lecturn-embed] [data-app-tool-approval] {
+  display: contents;
+}
+
+html[data-lecturn-embed] [data-app-tool-approval] > [data-app-approval-detail] {
+  grid-column: 2 / -1;
+  grid-row: 2;
+}
+
+html[data-lecturn-embed]
+  [data-composer-banner-row]:has([data-app-tool-approval])
+  > [data-slot="composer-banner-actions"] {
+  flex-wrap: nowrap;
+  gap: 0.25rem;
+}
+
+/* Contextual is text only, as drawn, wherever its label shows; an icon-only resting block keeps
+   the icon, since it is all that control has left. */
+html[data-lecturn-embed]
+  :is(
+    [data-embed-composer-contextual-row],
+    [data-resting-block="contextual"][data-composer-block-icon-only="false"]
+  )
+  svg:has(+ [data-composer-control-label]) {
+  display: none;
+}

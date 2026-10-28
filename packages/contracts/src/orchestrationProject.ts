@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 
+import { AppBinding } from "./apps.ts";
 import { IsoDateTime, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
 import { ModelSelection } from "./modelSelection.ts";
@@ -22,6 +23,8 @@ export const OrchestrationProjectShell = Schema.Struct({
   // decode; null means "not a Stave space".
   stave: Schema.optional(Schema.NullOr(StaveProjectInfo)),
   notice: Schema.optional(Schema.NullOr(StaveProjectNotice)),
+  // Lecturn: present only on projects owned by a connected app.
+  appBinding: Schema.optionalKey(AppBinding),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

@@ -1,0 +1,76 @@
+{
+  "name": "@lecturn/embed",
+  "version": "0.0.50",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Nurozen/lecturn",
+    "directory": "packages/embed"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    "./node": {
+      "types": "./src/node.ts",
+      "default": "./dist/node.mjs"
+    },
+    "./electron": {
+      "types": "./src/electron.ts",
+      "default": "./dist/electron.mjs"
+    },
+    "./renderer": {
+      "types": "./src/renderer.ts",
+      "default": "./dist/renderer.mjs"
+    },
+    "./browser": {
+      "types": "./src/browser.ts",
+      "default": "./dist/browser.mjs"
+    },
+    "./electron-preload": "./dist/electron-preload.cjs"
+  },
+  "publishConfig": {
+    "exports": {
+      "./node": {
+        "types": "./dist/node.d.mts",
+        "default": "./dist/node.mjs"
+      },
+      "./electron": {
+        "types": "./dist/electron.d.mts",
+        "default": "./dist/electron.mjs"
+      },
+      "./renderer": {
+        "types": "./dist/renderer.d.mts",
+        "default": "./dist/renderer.mjs"
+      },
+      "./browser": {
+        "types": "./dist/browser.d.mts",
+        "default": "./dist/browser.mjs"
+      },
+      "./electron-preload": "./dist/electron-preload.cjs"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc-rs --noEmit",
+    "test": "vp test run --config ../../vite.config.ts --dir ."
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@lecturn/contracts": "workspace:*",
+    "@lecturn/shared": "workspace:*",
+    "@types/node": "catalog:",
+    "electron": "44.4.5",
+    "vite-plus": "catalog:"
+  },
+  "peerDependencies": {
+    "electron": "^44.4.5"
+  },
+  "peerDependenciesMeta": {
+    "electron": {
+      "optional": true
+    }
+  }
+}

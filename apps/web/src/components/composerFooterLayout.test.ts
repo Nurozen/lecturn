@@ -295,6 +295,54 @@ describe("resolveRestingComposerControlsLayout", () => {
       }),
     ).toEqual({ hiddenCount: 0, visible: false });
   });
+
+  describe("in the narrow embed footer", () => {
+    const embed = { ...base, iconOnlyBlockWidths: [60, 100], keepsBlocks: true };
+
+    it("keeps every label while the row fits", () => {
+      expect(resolveRestingComposerControlsLayout({ ...embed, hostWidth: 357 })).toEqual({
+        hiddenCount: 0,
+        iconOnlyCount: 0,
+        visible: true,
+      });
+    });
+
+    it("drops only the trailing access block to its icon, never into the overflow menu", () => {
+      for (const hostWidth of [356, 200, 0]) {
+        expect(
+          resolveRestingComposerControlsLayout({
+            ...embed,
+            hostWidth,
+            previous: { hiddenCount: 2, iconOnlyCount: 2, visible: false },
+          }),
+        ).toEqual({ hiddenCount: 0, iconOnlyCount: 1, visible: true });
+      }
+    });
+
+    it("needs a pixel of slack to bring the access label back", () => {
+      const previous = { hiddenCount: 0, iconOnlyCount: 1, visible: true };
+      expect(resolveRestingComposerControlsLayout({ ...embed, hostWidth: 357, previous })).toEqual({
+        hiddenCount: 0,
+        iconOnlyCount: 1,
+        visible: true,
+      });
+      expect(resolveRestingComposerControlsLayout({ ...embed, hostWidth: 358, previous })).toEqual({
+        hiddenCount: 0,
+        iconOnlyCount: 0,
+        visible: true,
+      });
+    });
+  });
+
+  it("goes back to overflowing outside the narrow embed footer", () => {
+    expect(
+      resolveRestingComposerControlsLayout({
+        ...base,
+        hostWidth: 240,
+        previous: { hiddenCount: 0, visible: true },
+      }),
+    ).toEqual({ hiddenCount: 2, visible: true });
+  });
 });
 
 describe("context strip labels and resting composer controls", () => {

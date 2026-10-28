@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  WORKSPACE_TABS,
   initialWorkspaceTabsState,
+  isWorkspaceTab,
+  workspaceComposeTabTitle,
   workspaceTabsReducer,
   workspaceToolbarHeight,
 } from "./workspace-tabs-state";
@@ -73,5 +76,44 @@ describe("workspace root navigation", () => {
     expect(state.tabs.threads).toMatchObject({ query: "keyboard", searchMode: "expanded" });
     expect(state.tabs.pullRequests.searchMode).toBe("resting");
     expect(workspaceTabsReducer(state, { type: "select", tab: "pullRequests" })).toBe(state);
+  });
+
+  it("keeps the Apps tab's search and position apart from Threads and Pulls", () => {
+    let state = workspaceTabsReducer(initialWorkspaceTabsState(), {
+      type: "scroll",
+      tab: "threads",
+      offset: 300,
+    });
+    state = workspaceTabsReducer(state, { type: "select", tab: "apps" });
+    expect(state.tabs.apps).toMatchObject({ query: "", scrollOffset: 0, searchMode: "resting" });
+    state = workspaceTabsReducer(state, { type: "scroll", tab: "apps", offset: 120 });
+    state = workspaceTabsReducer(state, { type: "search" });
+    state = workspaceTabsReducer(state, { type: "query", query: "rocket" });
+    state = workspaceTabsReducer(state, { type: "select", tab: "pullRequests" });
+    state = workspaceTabsReducer(state, { type: "select", tab: "apps" });
+    expect(state.tabs.apps).toMatchObject({ query: "rocket", searchMode: "active" });
+    state = workspaceTabsReducer(state, { type: "cancel" });
+    expect(state.tabs.apps).toMatchObject({ query: "", scrollOffset: 120, searchMode: "resting" });
+    expect(state.tabs.threads.scrollOffset).toBe(300);
+    expect(state.tabs.pullRequests.query).toBe("");
+  });
+
+  it("orders the tabs Threads, Apps, Pulls and rejects the native compose key", () => {
+    expect(WORKSPACE_TABS).toEqual(["threads", "apps", "pullRequests"]);
+    expect(Object.keys(initialWorkspaceTabsState().tabs).sort()).toEqual(
+      [...WORKSPACE_TABS].sort(),
+    );
+    expect(WORKSPACE_TABS.every(isWorkspaceTab)).toBe(true);
+    expect(isWorkspaceTab("compose")).toBe(false);
+  });
+});
+
+describe("workspaceComposeTabTitle", () => {
+  it("titles the compose tab only where it is an ordinary tab", () => {
+    expect(workspaceComposeTabTitle("18.5")).toBe("New chat");
+    expect(workspaceComposeTabTitle("26.0")).toBe("New chat");
+    expect(workspaceComposeTabTitle("26.1")).toBeUndefined();
+    expect(workspaceComposeTabTitle("26.4.1")).toBeUndefined();
+    expect(workspaceComposeTabTitle("27")).toBeUndefined();
   });
 });

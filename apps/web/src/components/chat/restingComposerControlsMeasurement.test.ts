@@ -6,13 +6,20 @@ import {
 } from "../composerFooterLayout";
 import { measureRestingComposerControls } from "./restingComposerControlsMeasurement";
 
-function measurePicker(input: { clientWidth: number; flexGrow: string; maxWidth?: string }) {
+function measurePicker(input: {
+  clientWidth: number;
+  flexGrow: string;
+  maxWidth?: string;
+  embedFooterStacked?: boolean;
+}) {
   const label = { clientWidth: input.clientWidth, scrollWidth: 160 };
   const picker = {
     getBoundingClientRect: () => ({ width: 52 }),
     querySelector: () => label,
   };
   const controls = {
+    closest: (selector: string) =>
+      input.embedFooterStacked && selector === "[data-embed-composer-footer-stacked]" ? {} : null,
     querySelector: (selector: string) => {
       if (selector === "[data-chat-provider-model-picker]") return picker;
       if (selector === "[data-resting-controls-overflow]") {
@@ -68,6 +75,16 @@ describe("measureRestingComposerControls", () => {
     expect(measurement.naturalFixedWidth).toBe(212);
     expect(resolveRestingComposerControlsLayout({ ...measurement, hostWidth: 200 })).toEqual({
       hiddenCount: 1,
+      iconOnlyCount: 1,
+      visible: true,
+    });
+  });
+
+  it("keeps every block in the narrow embed footer, which has no overflow menu", () => {
+    const measurement = measurePicker({ clientWidth: 20, flexGrow: "1", embedFooterStacked: true });
+
+    expect(resolveRestingComposerControlsLayout({ ...measurement, hostWidth: 200 })).toEqual({
+      hiddenCount: 0,
       iconOnlyCount: 1,
       visible: true,
     });

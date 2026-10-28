@@ -1,0 +1,24 @@
+{
+  "name": "embed-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.mjs",
+  "scripts": {
+    "start": "node scripts/start.ts",
+    "e2e": "node e2e/run.ts",
+    "typecheck": "tsc-rs --noEmit"
+  },
+  "dependencies": {
+    "@lecturn/embed": "workspace:*",
+    "electron": "44.4.5",
+    "lecturn": "workspace:*"
+  },
+  "devDependencies": {
+    "@lecturn/contracts": "workspace:*",
+    "@types/node": "catalog:",
+    "effect": "catalog:",
+    "playwright-core": "1.60.0",
+    "vite-plus": "catalog:"
+  }
+}

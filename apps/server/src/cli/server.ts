@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema";
 import { Command, GlobalFlag } from "effect/cli";
 import * as CliError from "effect/cli/CliError";
 
+import { exitWithAppSidecarParent } from "../apps/sidecarBootstrap.ts";
 import * as ServerConfig from "../config.ts";
 import { runServer } from "../server.ts";
 import { type CliServerFlags, resolveServerConfig, sharedServerCommandFlags } from "./config.ts";
@@ -23,7 +24,10 @@ const runServerCommand = (
   Effect.gen(function* () {
     const logLevel = yield* GlobalFlag.LogLevel;
     const config = yield* resolveServerConfig(flags, logLevel, options);
-    return yield* runServer.pipe(Effect.provideService(ServerConfig.ServerConfig, config));
+    return yield* runServer.pipe(
+      exitWithAppSidecarParent(config),
+      Effect.provideService(ServerConfig.ServerConfig, config),
+    );
   });
 
 export const runDefaultServerCommand = (flags: CliServerFlags) =>

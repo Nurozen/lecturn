@@ -72,6 +72,7 @@ const layerDesktopClerk = (
     userDataPathOverride,
     shell = {
       openExternal: () => Effect.succeed(true),
+      openAppUrl: () => Effect.succeed(false),
       openSystemSettings: () => Effect.succeed(false),
       copyText: () => Effect.void,
     },
@@ -430,6 +431,7 @@ it.effect.each(["startup", "open-url"] as const)(
             delivered.resolve(response.headers.get("location")!);
             return true;
           }),
+        openAppUrl: () => Effect.succeed(false),
         openSystemSettings: () => Effect.succeed(false),
         copyText: () => Effect.void,
       });
@@ -495,14 +497,19 @@ it.effect("hands web and app links to the renderer and leaves other links alone"
       assert.strictEqual(open("http://localhost:3000/"), 1);
       assert.strictEqual(open("lecturn://new?prompt=hi"), 1);
       assert.strictEqual(open("lecturn://threads/env-1/thread-1"), 1);
+      assert.strictEqual(open("lecturn://apps/com.rocketwright.app"), 1);
+      assert.strictEqual(open("lecturn://apps/com.rocketwright.app/threads/env-1/thread-1"), 1);
       assert.strictEqual(open("mailto:hello@example.com"), 0);
       assert.strictEqual(open("lecturn://somewhere-else"), 0);
+      assert.strictEqual(open("lecturn://apps/Not-An-App"), 0);
       yield* Effect.yieldNow;
       assert.deepStrictEqual(received, [
         "https://example.com/page",
         "http://localhost:3000/",
         "lecturn://new?prompt=hi",
         "lecturn://threads/env-1/thread-1",
+        "lecturn://apps/com.rocketwright.app",
+        "lecturn://apps/com.rocketwright.app/threads/env-1/thread-1",
       ]);
     }).pipe(
       Effect.provide(layerDesktopClerk(true, [], { platform: "darwin" })),

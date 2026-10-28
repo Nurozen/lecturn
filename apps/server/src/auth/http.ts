@@ -32,6 +32,8 @@ import * as HttpEffect from "effect/http/HttpEffect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
+import { authorizeAppHttpRequest } from "../apps/appHttpAuthorization.ts";
+import { AppAuthorization } from "../apps/services.ts";
 import * as EnvironmentAuth from "./EnvironmentAuth.ts";
 import * as SessionStore from "./SessionStore.ts";
 import { traceAuthenticatedRelayRequest, traceRelayRequest } from "../cloud/traceRelayRequest.ts";
@@ -228,6 +230,8 @@ export const layerAuthenticatedAuth = Layer.effect(
   EnvironmentAuthenticatedAuth,
   Effect.gen(function* () {
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+    // Optional so routes built without the apps services still refuse app sessions.
+    const apps = yield* Effect.serviceOption(AppAuthorization);
     return (httpEffect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
@@ -242,6 +246,9 @@ export const layerAuthenticatedAuth = Layer.effect(
           Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
             failEnvironmentInternal("internal_error", error),
           ),
+        );
+        yield* authorizeAppHttpRequest(apps, session, request.url).pipe(
+          Effect.catch(() => failEnvironmentAuthInvalid("invalid_credential")),
         );
         const endTime = yield* Clock.currentTimeNanos;
         const handler = httpEffect.pipe(

@@ -171,6 +171,10 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: node apps/desktop/scripts/verify-preload-bundle.mjs
 
+      - name: Verify the embed page's startup chunks
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: node scripts/check-embed-chunks.ts
+
       # GitHub-hosted runners share their cores between the build and the
       # typecheck, so the typecheck can finish well after the build.
       - name: Typecheck

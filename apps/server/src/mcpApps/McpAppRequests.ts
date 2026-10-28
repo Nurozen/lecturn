@@ -12,14 +12,16 @@ import {
   type TurnItemId,
 } from "@lecturn/contracts";
 import { mcpAppToolCallableByApp, type McpAppReference } from "@lecturn/shared/mcpApp";
-import { mcpAppFromToolItem } from "@lecturn/shared/toolOutput";
+import { LECTURN_MCP_APP_SERVER, mcpAppFromToolItem } from "@lecturn/shared/toolOutput";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
+import { AppRuntimeState } from "../apps/AppRuntimeState.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import type * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
 import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
@@ -64,6 +66,7 @@ const make = Effect.gen(function* () {
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
   const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
   const modelContext = yield* McpAppModelContext.McpAppModelContext;
+  const { mcpAppRoute } = yield* AppRuntimeState;
 
   const fail = (threadId: ThreadId, reason: McpAppRequestError["reason"], cause?: unknown) =>
     new McpAppRequestError({ threadId, reason, ...(cause === undefined ? {} : { cause }) });
@@ -77,17 +80,38 @@ const make = Effect.gen(function* () {
       .pipe(Effect.mapError((cause) => fail(input.threadId, "request-failed", cause)));
     const app: McpAppReference | undefined =
       item?.type === "dynamic_tool" ? mcpAppFromToolItem(item) : undefined;
-    if (item === null || app === undefined || item.providerThreadId === null) {
+    // Connected-app cards are served by Lecturn itself, so they need no
+    // provider thread: copied and imported threads carry them too.
+    if (
+      item === null ||
+      app === undefined ||
+      (item.providerThreadId === null && app.server !== LECTURN_MCP_APP_SERVER)
+    ) {
       return yield* fail(input.threadId, "not-an-app");
     }
     return { app, providerThreadId: item.providerThreadId };
   });
+
+  // Connected-app cards never reach the provider session, which on most
+  // adapters cannot serve them; the app does (AppMcpAppRoute.ts).
+  const connectedAppRoute = (threadId: ThreadId) =>
+    Ref.get(mcpAppRoute).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.fail(fail(threadId, "app-unavailable")),
+          onSome: (route) => Effect.succeed(route),
+        }),
+      ),
+    );
 
   const resolve = Effect.fn("McpAppRequests.resolve")(function* (input: {
     readonly threadId: ThreadId;
     readonly itemId: TurnItemId;
   }) {
     const { app, providerThreadId } = yield* resolveApp(input);
+    if (app.server === LECTURN_MCP_APP_SERVER || providerThreadId === null) {
+      return { app, connected: yield* connectedAppRoute(input.threadId) } as const;
+    }
     const projection = yield* threadManagement
       .getThreadRecords(input.threadId, ["providerThreads"])
       .pipe(Effect.mapError((cause) => fail(input.threadId, "request-failed", cause)));
@@ -105,12 +129,16 @@ const make = Effect.gen(function* () {
     if (runtime === undefined) return yield* fail(input.threadId, "session-stopped");
     const mcpApps: ProviderAdapter.ProviderAdapterV2McpApps | undefined = runtime.mcpApps;
     if (mcpApps === undefined) return yield* fail(input.threadId, "provider-unsupported");
-    return { app, providerThread, mcpApps };
+    return { app, providerThread, mcpApps, connected: undefined };
   });
+  type ProviderResolved = Extract<
+    Effect.Success<ReturnType<typeof resolve>>,
+    { readonly connected: undefined }
+  >;
 
   const findTool = Effect.fn("McpAppRequests.findTool")(function* (
     threadId: ThreadId,
-    resolved: Effect.Success<ReturnType<typeof resolve>>,
+    resolved: ProviderResolved,
     name: string,
   ) {
     const tools = yield* resolved.mcpApps
@@ -121,6 +149,8 @@ const make = Effect.gen(function* () {
 
   const toolInfo = Effect.fn("McpAppRequests.toolInfo")(function* (input: McpAppToolInfoInput) {
     const resolved = yield* resolve(input);
+    if (resolved.connected)
+      return yield* resolved.connected.toolInfo({ ...input, app: resolved.app });
     const tool = yield* findTool(input.threadId, resolved, input.name);
     const title = tool === undefined ? undefined : toolTitle(tool);
     return {
@@ -133,6 +163,8 @@ const make = Effect.gen(function* () {
 
   const callTool = Effect.fn("McpAppRequests.callTool")(function* (input: McpAppCallToolInput) {
     const resolved = yield* resolve(input);
+    if (resolved.connected)
+      return yield* resolved.connected.callTool({ ...input, app: resolved.app });
     // The spec forbids apps calling tools hidden from them; checked here too,
     // since a client's own check is only a courtesy to its user.
     const tool = yield* findTool(input.threadId, resolved, input.name);
@@ -153,6 +185,9 @@ const make = Effect.gen(function* () {
     input: McpAppReadResourceInput,
   ) {
     const resolved = yield* resolve(input);
+    if (resolved.connected) {
+      return yield* resolved.connected.readResource({ ...input, app: resolved.app });
+    }
     return yield* resolved.mcpApps
       .readResource({
         providerThread: resolved.providerThread,

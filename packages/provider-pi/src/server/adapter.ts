@@ -1,6 +1,7 @@
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import { AgentScope } from "@lecturn/shared/AgentScope";
 import { getModelSelectionStringOptionValue } from "@lecturn/shared/model";
+import { lecturnResultMeta } from "@lecturn/shared/appToolPresentation";
 import { readToolOutputImage } from "@lecturn/shared/toolOutput";
 import * as Predicate from "effect/Predicate";
 import {
@@ -22,6 +23,8 @@ import {
   type ProviderApprovalDecision,
   type ProviderInstanceId,
   type OrchestrationV2ProviderTurnTokenUsage,
+  type ProviderThreadId,
+  type ThreadId,
 } from "@lecturn/contracts";
 import { PiSettings } from "../settings.ts";
 import * as Cause from "effect/Cause";
@@ -254,6 +257,10 @@ function piToolOutput(result: unknown, toolName: string): unknown {
     recordString(details, "server") !== undefined &&
     recordString(details, "tool") !== undefined &&
     Array.isArray(recordField(structured, "content"));
+  // The bridge moves Lecturn's `_meta` keys into details; the row reads them from `_meta`.
+  const meta = isMcpResult ? lecturnResultMeta(recordField(details, "_meta")) : undefined;
+  const withMeta = <T extends object>(output: T) =>
+    meta === undefined ? output : { ...output, _meta: meta };
   if (isMcpResult) {
     structured = recordField(structured, "structuredContent");
   }
@@ -282,7 +289,7 @@ function piToolOutput(result: unknown, toolName: string): unknown {
     }
   }
   if (structured !== undefined && !isBoundedStructuredToolValue(structured)) {
-    return {
+    return withMeta({
       content: [
         ...content,
         {
@@ -290,7 +297,7 @@ function piToolOutput(result: unknown, toolName: string): unknown {
           text: "Structured output omitted because it exceeds the stored result limit.",
         },
       ],
-    };
+    });
   }
   if (
     !isMcpResult &&
@@ -300,10 +307,10 @@ function piToolOutput(result: unknown, toolName: string): unknown {
     const text = contentText(content);
     return text.length > 0 ? text : undefined;
   }
-  return {
+  return withMeta({
     content,
     ...(structured === undefined ? {} : { structuredContent: structured }),
-  };
+  });
 }
 
 function providerRef(
@@ -446,6 +453,15 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
       const scope = yield* Effect.scope;
       const cwd = input.runtimePolicy.cwd ?? host.paths.cwd;
       const mcpSession = yield* mcpSessions.read(input.threadId);
+      // One thread per session; Pi's extension bridges the session's server.
+      const reportMcpActivation = (threadId: ThreadId, providerThreadId: ProviderThreadId) =>
+        McpProviderSessions.reportThreadMcpActivation({
+          mcpSessions,
+          threadId,
+          providerThreadId,
+          driver: PI_PROVIDER,
+          mcpActivated: mcpSession !== undefined && threadId === input.threadId,
+        });
       const provideCacheFs = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
         effect.pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -2379,6 +2395,12 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         },
         ensureThread: (threadInput) =>
           registerThread(threadInput).pipe(
+            Effect.tap((thread) =>
+              reportMcpActivation(
+                threadInput.threadId,
+                threadInput.existingProviderThread?.id ?? thread.id,
+              ),
+            ),
             Effect.mapError(
               (cause) =>
                 new ProviderAdapter.ProviderAdapterEnsureThreadError({
@@ -2396,6 +2418,12 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             runtimePolicy: threadInput.runtimePolicy ?? input.runtimePolicy,
             existingProviderThread: threadInput.providerThread,
           }).pipe(
+            Effect.tap((thread) =>
+              reportMcpActivation(
+                threadInput.threadId ?? threadInput.providerThread.appThreadId ?? input.threadId,
+                thread.id,
+              ),
+            ),
             Effect.mapError(
               (cause) =>
                 new ProviderAdapter.ProviderAdapterResumeThreadError({

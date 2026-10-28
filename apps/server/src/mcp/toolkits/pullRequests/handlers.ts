@@ -216,6 +216,7 @@ const make = Effect.gen(function* () {
     if (Option.isNone(thread) || thread.value.deletedAt !== null) {
       return yield* new PullRequestThreadNotFoundError({ threadId });
     }
+    yield* McpInvocationContext.assertProjectReach(scope, thread.value.projectId);
     return thread.value;
   });
 
@@ -300,8 +301,9 @@ const make = Effect.gen(function* () {
             Effect.orElseSucceed(() => null),
             Effect.map((shell) => shell ?? undefined),
           );
+    // An app thread reads pull requests only through its own project.
     const known = yield* projects
-      .listShells()
+      .listShells(scope.app === undefined ? undefined : { projectIds: [scope.app.projectId] })
       .pipe(Effect.mapError((cause) => new PullRequestListFailedError({ cause })));
     const callerProject = known.find((project) => project.id === callerThread?.projectId);
     return yield* Effect.forEach(targets, (input) =>

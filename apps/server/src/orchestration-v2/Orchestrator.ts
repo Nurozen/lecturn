@@ -146,6 +146,8 @@ import {
 } from "./ThreadForkService.ts";
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import * as LecturnOrchestrationHooks from "./fork/LecturnOrchestrationHooks.ts";
+import { expire } from "../apps/appToolApprovalExpiry.ts";
+import { applyThreadAppMetadataCommand, threadAppMetadataOf } from "../apps/threadAppMetadata.ts";
 import { ExternalSessionImporterV2, planThreadImport } from "./fork/ThreadImport.ts";
 import {
   applyForkDeltas,
@@ -497,6 +499,9 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.created.record":
       return command.parentThreadId;
     case "secret_request.record":
+    case "thread.app-data.set":
+    case "thread.continued-in.set":
+    case "runtime-request.app-expire":
       return command.threadId;
     case "thread.fork":
     case "thread.merge_back":
@@ -2262,6 +2267,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       snoozedAt: null,
       lastVisitedAt: null,
       deletedAt: null,
+      ...threadAppMetadataOf(command),
     };
 
     yield* emitEvent({
@@ -2531,7 +2537,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           | "thread.runtime-mode.set"
           | "thread.interaction-mode.set"
           | "thread.model-selection.set"
-          | "provider.switch";
+          | "provider.switch"
+          | "thread.app-data.set"
+          | "thread.continued-in.set";
       }
     >,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -3326,6 +3334,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             modelSelection: command.modelSelection,
             updatedAt: now,
           };
+        case "thread.app-data.set":
+        case "thread.continued-in.set":
+          return applyThreadAppMetadataCommand(thread, command, now);
       }
     })();
     if (
@@ -3377,6 +3388,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return "thread.marked-unread" as const;
         case "thread.metadata.update":
         case "thread.title.regeneration.complete":
+        case "thread.app-data.set":
+        case "thread.continued-in.set":
           return "thread.metadata-updated" as const;
         case "thread.pull-request.link":
         case "thread.pull-request.unlink":
@@ -11090,6 +11103,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.interaction-mode.set":
       case "thread.model-selection.set":
       case "provider.switch":
+      case "thread.app-data.set":
+      case "thread.continued-in.set":
         yield* dispatchThreadMutation(command, events, effects);
         break;
       case "thread.pull-request-watch.sync":
@@ -11271,6 +11286,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "secret_request.record":
         yield* dispatchSecretRequestRecord(command, events);
+        break;
+      case "runtime-request.app-expire":
+        yield* mapDispatchError(command)(expire(command, projectionStore, emit(events, command)));
         break;
       default:
         return yield* dispatchUnsupported(command);

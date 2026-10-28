@@ -1,4 +1,6 @@
 import {
+  AppId,
+  type ConnectedAppToolApprovalInfo,
   NodeId,
   ProviderSessionId,
   RuntimeRequestId,
@@ -183,4 +185,118 @@ it("restores old text answers without mutating history or replacing unchanged ro
   expect(row.item).not.toHaveProperty("questionAnswer");
   expect(project(answered)).toBe(result);
   expect(project({ ...answered, visibleTurnItems: [...rows] })[0]).toBe(result[0]);
+});
+
+describe("pending connected-app tool approvals", () => {
+  const appRequestId = RuntimeRequestId.make("app-approval");
+  const appNodeId = NodeId.make("app-approval-node");
+  const connectedAppTool: ConnectedAppToolApprovalInfo = {
+    appId: AppId.make("dev.rocketwright.app"),
+    appName: "RocketWright",
+    toolName: "rw_engine_simulate",
+    reason: "Simulates 120 s of burn",
+    source: "app",
+  };
+  const appProjection = (
+    options: ReadonlyArray<{
+      decision: "accept" | "acceptForSession" | "decline" | "cancel";
+      label: string;
+    }> | null,
+  ): OrchestrationV2ThreadProjection => ({
+    ...v2Projection,
+    runtimeRequests: [
+      {
+        id: appRequestId,
+        nodeId: appNodeId,
+        providerTurnId: null,
+        nativeRequestRef: null,
+        kind: "permission",
+        status: "pending",
+        responseCapability: {
+          type: "live",
+          providerSessionId: ProviderSessionId.make("calling-session"),
+        },
+        createdAt: v2Now,
+        resolvedAt: null,
+        connectedAppTool,
+      },
+    ],
+    turnItems:
+      options === null
+        ? []
+        : [
+            {
+              id: TurnItemId.make("app-approval-item"),
+              threadId: v2Projection.thread.id,
+              runId: null,
+              nodeId: appNodeId,
+              providerThreadId: null,
+              providerTurnId: null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: 0,
+              status: "waiting",
+              title: null,
+              startedAt: v2Now,
+              completedAt: null,
+              updatedAt: v2Now,
+              type: "approval_request",
+              requestId: appRequestId,
+              requestKind: "permission",
+              appName: "RocketWright",
+              prompt: "Approve rw_engine_simulate · Simulates 120 s of burn",
+              options: [...options],
+            },
+          ],
+  });
+
+  it("is answerable and names the app tool it is for", () => {
+    const [approval] = derivePendingThreadRequests(
+      appProjection([
+        { decision: "accept", label: "Approve" },
+        { decision: "decline", label: "Decline" },
+      ]),
+    ).approvals;
+    expect(approval).toMatchObject({
+      requestId: appRequestId,
+      requestKind: "permission",
+      responseCapability: "live",
+      appName: "RocketWright",
+      connectedAppTool,
+      options: [
+        { decision: "accept", label: "Approve" },
+        { decision: "decline", label: "Decline" },
+      ],
+    });
+  });
+
+  it("never offers to allow an app tool for the whole session", () => {
+    const decisions = (projection: OrchestrationV2ThreadProjection) =>
+      derivePendingThreadRequests(projection).approvals[0]?.options?.map(
+        (option) => option.decision,
+      );
+    expect(
+      decisions(
+        appProjection([
+          { decision: "accept", label: "Approve" },
+          { decision: "acceptForSession", label: "Always allow this session" },
+          { decision: "decline", label: "Decline" },
+        ]),
+      ),
+    ).toEqual(["accept", "decline"]);
+    // The approval item can be outside the loaded turn items; the defaults would offer it.
+    expect(decisions(appProjection(null))).toEqual(["decline", "accept", "cancel"]);
+  });
+
+  it("leaves provider approvals without the field", () => {
+    const provider = appProjection(null);
+    const [approval] = derivePendingThreadRequests({
+      ...provider,
+      runtimeRequests: provider.runtimeRequests.map(
+        ({ connectedAppTool: _connectedAppTool, ...request }) => request,
+      ),
+    }).approvals;
+    expect(approval).not.toHaveProperty("connectedAppTool");
+    expect(approval).not.toHaveProperty("options");
+  });
 });

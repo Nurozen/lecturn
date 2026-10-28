@@ -3,7 +3,7 @@ import type { EnvironmentId } from "@lecturn/contracts";
 /**
  * Bus between the places that launch the Stave wizard (the command palette's
  * add-project sources, a saga's project section) and the dialog host mounted
- * in `__root.tsx`, on the `confirmDialog.ts` pattern: module state, a change
+ * in `AppShell.tsx`, on the `confirmDialog.ts` pattern: module state, a change
  * listener set, and a reset hook for tests.
  */
 

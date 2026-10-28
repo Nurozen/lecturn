@@ -498,7 +498,7 @@ export function makeCatalogBackend(database: DatabaseHandle): CatalogBackend {
   };
 }
 
-interface CatalogStore {
+export interface CatalogStore {
   readonly read: Effect.Effect<ConnectionCatalogDocumentType, ConnectionTransientError>;
   readonly update: (
     transform: (catalog: ConnectionCatalogDocumentType) => ConnectionCatalogDocumentType,
@@ -689,6 +689,115 @@ const yieldToBrowserTask = Effect.callback<void>((resume) => {
   return Effect.sync(() => port1.close());
 });
 
+/** The services kept in the connection catalog document, wherever that document is stored. */
+export function makeCatalogServices(catalog: CatalogStore) {
+  const targetStore = Persistence.ConnectionTargetStore.of({
+    list: catalog.read.pipe(
+      Effect.map((document) => document.targets),
+      Effect.mapError((cause) => persistenceError("list-targets", cause)),
+    ),
+    listDisabled: catalog.read.pipe(
+      Effect.map((document) => document.disabledEnvironmentIds),
+      Effect.mapError((cause) => persistenceError("list-disabled-targets", cause)),
+    ),
+  });
+  const registrationStore = Persistence.ConnectionRegistrationStore.of({
+    register: (registration, routes) =>
+      catalog
+        .update((document) => registerConnectionInCatalog(document, registration, routes))
+        .pipe(Effect.mapError((cause) => persistenceError("register-connection", cause))),
+    setRoutes: (environmentId, routes) =>
+      catalog
+        .update((document) => setRoutesInCatalog(document, environmentId, routes))
+        .pipe(Effect.mapError((cause) => persistenceError("set-connection-routes", cause))),
+    remove: (environmentId) =>
+      catalog
+        .update((document) => removeConnectionFromCatalog(document, environmentId))
+        .pipe(Effect.mapError((cause) => persistenceError("remove-connection", cause))),
+    setEnabled: (environmentId, enabled) =>
+      catalog
+        .update((document) => setConnectionEnabledInCatalog(document, environmentId, enabled))
+        .pipe(Effect.mapError((cause) => persistenceError("set-connection-enabled", cause))),
+  });
+  const profileStore = ProfileStore.make({
+    get: (connectionId) =>
+      catalog.read.pipe(
+        Effect.map((document) =>
+          Option.fromUndefinedOr(
+            document.profiles.find((profile) => profile.connectionId === connectionId),
+          ),
+        ),
+      ),
+    put: (profile) =>
+      catalog.update((document) => ({
+        ...document,
+        profiles: replaceCatalogValue(document.profiles, (value) => value.connectionId, profile),
+      })),
+    remove: (connectionId) =>
+      catalog.update((document) => ({
+        ...document,
+        profiles: removeCatalogValue(
+          document.profiles,
+          (value) => value.connectionId,
+          connectionId,
+        ),
+      })),
+  });
+  const credentialStore = CredentialStore.make({
+    get: (connectionId) =>
+      catalog.read.pipe(
+        Effect.map((document) =>
+          Option.fromUndefinedOr(
+            document.credentials.find((entry) => entry.connectionId === connectionId)?.credential,
+          ),
+        ),
+      ),
+    put: (connectionId, credential) =>
+      catalog.update((document) => ({
+        ...document,
+        credentials: replaceCatalogValue(document.credentials, (value) => value.connectionId, {
+          connectionId,
+          credential,
+        }),
+      })),
+    remove: (connectionId) =>
+      catalog.update((document) => ({
+        ...document,
+        credentials: removeCatalogValue(
+          document.credentials,
+          (value) => value.connectionId,
+          connectionId,
+        ),
+      })),
+  });
+  const remoteTokenStore = TokenStore.make({
+    get: (environmentId) =>
+      catalog.read.pipe(
+        Effect.map((document) =>
+          Option.fromUndefinedOr(
+            document.remoteDpopTokens.find((token) => token.environmentId === environmentId),
+          ),
+        ),
+      ),
+    put: (token) => catalog.update((document) => putRemoteDpopTokenInCatalog(document, token)),
+    remove: (environmentId) =>
+      catalog.update((document) => ({
+        ...document,
+        remoteDpopTokens: removeCatalogValue(
+          document.remoteDpopTokens,
+          (value) => value.environmentId,
+          environmentId,
+        ),
+      })),
+  });
+  return Context.make(Persistence.ConnectionTargetStore, targetStore).pipe(
+    Context.add(Persistence.ConnectionRegistrationStore, registrationStore),
+    Context.add(ProfileStore.ConnectionProfileStore, profileStore),
+    Context.add(CredentialStore.ConnectionCredentialStore, credentialStore),
+    Context.add(TokenStore.RemoteDpopAccessTokenStore, remoteTokenStore),
+  );
+}
+
 export const layer = Layer.effectContext(
   Effect.gen(function* () {
     const { handle: database } = yield* Effect.acquireRelease(
@@ -702,105 +811,6 @@ export const layer = Layer.effectContext(
       yieldToHost: yieldToBrowserTask,
     });
 
-    const targetStore = Persistence.ConnectionTargetStore.of({
-      list: catalog.read.pipe(
-        Effect.map((document) => document.targets),
-        Effect.mapError((cause) => persistenceError("list-targets", cause)),
-      ),
-      listDisabled: catalog.read.pipe(
-        Effect.map((document) => document.disabledEnvironmentIds),
-        Effect.mapError((cause) => persistenceError("list-disabled-targets", cause)),
-      ),
-    });
-    const registrationStore = Persistence.ConnectionRegistrationStore.of({
-      register: (registration, routes) =>
-        catalog
-          .update((document) => registerConnectionInCatalog(document, registration, routes))
-          .pipe(Effect.mapError((cause) => persistenceError("register-connection", cause))),
-      setRoutes: (environmentId, routes) =>
-        catalog
-          .update((document) => setRoutesInCatalog(document, environmentId, routes))
-          .pipe(Effect.mapError((cause) => persistenceError("set-connection-routes", cause))),
-      remove: (environmentId) =>
-        catalog
-          .update((document) => removeConnectionFromCatalog(document, environmentId))
-          .pipe(Effect.mapError((cause) => persistenceError("remove-connection", cause))),
-      setEnabled: (environmentId, enabled) =>
-        catalog
-          .update((document) => setConnectionEnabledInCatalog(document, environmentId, enabled))
-          .pipe(Effect.mapError((cause) => persistenceError("set-connection-enabled", cause))),
-    });
-    const profileStore = ProfileStore.make({
-      get: (connectionId) =>
-        catalog.read.pipe(
-          Effect.map((document) =>
-            Option.fromUndefinedOr(
-              document.profiles.find((profile) => profile.connectionId === connectionId),
-            ),
-          ),
-        ),
-      put: (profile) =>
-        catalog.update((document) => ({
-          ...document,
-          profiles: replaceCatalogValue(document.profiles, (value) => value.connectionId, profile),
-        })),
-      remove: (connectionId) =>
-        catalog.update((document) => ({
-          ...document,
-          profiles: removeCatalogValue(
-            document.profiles,
-            (value) => value.connectionId,
-            connectionId,
-          ),
-        })),
-    });
-    const credentialStore = CredentialStore.make({
-      get: (connectionId) =>
-        catalog.read.pipe(
-          Effect.map((document) =>
-            Option.fromUndefinedOr(
-              document.credentials.find((entry) => entry.connectionId === connectionId)?.credential,
-            ),
-          ),
-        ),
-      put: (connectionId, credential) =>
-        catalog.update((document) => ({
-          ...document,
-          credentials: replaceCatalogValue(document.credentials, (value) => value.connectionId, {
-            connectionId,
-            credential,
-          }),
-        })),
-      remove: (connectionId) =>
-        catalog.update((document) => ({
-          ...document,
-          credentials: removeCatalogValue(
-            document.credentials,
-            (value) => value.connectionId,
-            connectionId,
-          ),
-        })),
-    });
-    const remoteTokenStore = TokenStore.make({
-      get: (environmentId) =>
-        catalog.read.pipe(
-          Effect.map((document) =>
-            Option.fromUndefinedOr(
-              document.remoteDpopTokens.find((token) => token.environmentId === environmentId),
-            ),
-          ),
-        ),
-      put: (token) => catalog.update((document) => putRemoteDpopTokenInCatalog(document, token)),
-      remove: (environmentId) =>
-        catalog.update((document) => ({
-          ...document,
-          remoteDpopTokens: removeCatalogValue(
-            document.remoteDpopTokens,
-            (value) => value.environmentId,
-            environmentId,
-          ),
-        })),
-    });
     const cacheStore = Persistence.EnvironmentCacheStore.of({
       loadShell: (environmentId) =>
         readDatabaseValue(database, SHELL_STORE_NAME, environmentId).pipe(
@@ -1002,12 +1012,8 @@ export const layer = Layer.effectContext(
         ).pipe(Effect.mapError((cause) => persistenceError("clear-environment", cause))),
     });
 
-    return Context.make(Persistence.ConnectionTargetStore, targetStore).pipe(
+    return makeCatalogServices(catalog).pipe(
       Context.add(GitHubRoutingPermissions, githubRoutingPermissions),
-      Context.add(Persistence.ConnectionRegistrationStore, registrationStore),
-      Context.add(ProfileStore.ConnectionProfileStore, profileStore),
-      Context.add(CredentialStore.ConnectionCredentialStore, credentialStore),
-      Context.add(TokenStore.RemoteDpopAccessTokenStore, remoteTokenStore),
       Context.add(Persistence.EnvironmentCacheStore, cacheStore),
     );
   }),

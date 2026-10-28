@@ -20,6 +20,7 @@ import {
   type PendingThreadRequests,
 } from "./threadRequests.ts";
 import { arrayElementsEqual, parseThreadKey, threadKey } from "./entities.ts";
+import { createAppToolApprovalPlacer } from "./appToolApprovalPlacement.ts";
 
 const EMPTY_VISIBLE_TURN_ITEMS: OrchestrationV2ThreadProjection["visibleTurnItems"] = Object.freeze(
   [],
@@ -57,9 +58,12 @@ export function createEnvironmentThreadDetailAtoms<E>(
 
   const visibleTurnItemsAtomFamily = Atom.family((key: string) => {
     const projectQuestionHistory = createQuestionHistoryProjector();
+    const placeAppToolApprovals = createAppToolApprovalPlacer();
     return Atom.make((get): OrchestrationV2ThreadProjection["visibleTurnItems"] => {
       const projection = Option.getOrNull(get(threadStateValueAtomFamily(key)).data);
-      return projection === null ? EMPTY_VISIBLE_TURN_ITEMS : projectQuestionHistory(projection);
+      return projection === null
+        ? EMPTY_VISIBLE_TURN_ITEMS
+        : placeAppToolApprovals(projectQuestionHistory(projection), projection.runtimeRequests);
     }).pipe(Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-visible-turn-items:${key}`));
   });
 

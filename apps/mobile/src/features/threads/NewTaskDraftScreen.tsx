@@ -113,7 +113,7 @@ import {
 } from "../../state/use-composer-drafts";
 import {
   useEnvironmentServerConfig,
-  useListedProjects,
+  useNewThreadTargetProjects,
   useThreadShells,
 } from "../../state/entities";
 import { useProjectClone } from "../../state/projectClones";
@@ -207,7 +207,7 @@ export function NewTaskDraftScreen(props: {
   readonly draftId?: string;
   readonly incomingShareId?: string;
 }) {
-  const projects = useListedProjects();
+  const projects = useNewThreadTargetProjects();
   const flow = useNewTaskFlow();
   const navigation = useNavigation();
   const {

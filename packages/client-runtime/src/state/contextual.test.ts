@@ -24,7 +24,10 @@ import { executeAtomQuery } from "./runtime.ts";
 const environmentId = EnvironmentId.make("host-a"),
   projectId = ProjectId.make("project-a"),
   threadId = ThreadId.make("thread-a");
-const makeHarness = Effect.fn("Contextual.testHarness")(function* (client: WsRpcProtocolClient) {
+const makeHarness = Effect.fn("Contextual.testHarness")(function* (
+  client: WsRpcProtocolClient,
+  config: { readonly followChanges?: boolean } = {},
+) {
   const session: RpcSession = {
     client,
     initialConfig: Effect.never,
@@ -61,6 +64,7 @@ const makeHarness = Effect.fn("Contextual.testHarness")(function* (client: WsRpc
   } as EnvironmentRegistry["Service"]);
   const atoms = createContextualEnvironmentAtoms(
     Atom.runtime(Layer.succeed(EnvironmentRegistry, environmentRegistry)),
+    config,
   );
   const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (value) =>
     Effect.sync(() => value.dispose()),
@@ -166,6 +170,47 @@ describe("Contextual client boundaries", () => {
         expect(
           (yield* AtomRegistry.getResult(registry, query, { suspendOnWaiting: true })).revision,
         ).toBe(3);
+      }),
+    ),
+  );
+  it.effect("never opens the host-wide change stream when told not to follow it", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let subscribed = 0;
+        let revision = 1;
+        const { atoms, registry } = yield* makeHarness(
+          {
+            [WS_METHODS.contextualSubscribe]: () =>
+              Stream.fromEffect(Effect.sync(() => subscribed++)).pipe(
+                Stream.flatMap(() => Stream.never),
+              ),
+            [WS_METHODS.contextualProjectSettings]: () =>
+              Effect.sync(() => ({ projectId, defaultEnabled: false, sourceIds: [], revision })),
+            [WS_METHODS.contextualUpdateProjectSettings]: () =>
+              Effect.sync(() => ({
+                projectId,
+                defaultEnabled: true,
+                sourceIds: [],
+                revision: ++revision,
+              })),
+          } as unknown as WsRpcProtocolClient,
+          { followChanges: false },
+        );
+        const query = atoms.projectSettings({ environmentId, input: { projectId } });
+        const unmount = registry.mount(query);
+        yield* Effect.addFinalizer(() => Effect.sync(unmount));
+        yield* Effect.promise(() => executeAtomQuery(registry, query));
+        yield* Effect.promise(() =>
+          atoms.updateProjectSettings.run(registry, {
+            environmentId,
+            input: { projectId, expectedRevision: 1, defaultEnabled: true, sourceIds: [] },
+          }),
+        );
+        // Its own writes still refresh the query.
+        expect(
+          (yield* AtomRegistry.getResult(registry, query, { suspendOnWaiting: true })).revision,
+        ).toBe(2);
+        expect(subscribed).toBe(0);
       }),
     ),
   );

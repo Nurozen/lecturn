@@ -72,7 +72,8 @@ describe("runMigrations", () => {
       const exit = yield* Effect.exit(runMigrations());
 
       assert.isTrue(Exit.isFailure(exit));
-      for (const [id, name] of v2Migrations) {
+      // 79 and 80 run on their own instead (Migrations.divergentLedger.test.ts).
+      for (const [id, name] of v2Migrations.filter(([id]) => id < 79)) {
         assert.include(String(exit), `${id}_${name} (recorded: nothing)`);
       }
       assert.deepStrictEqual(yield* history, before);
@@ -153,6 +154,8 @@ describe("runMigrations", () => {
       assert.deepStrictEqual(yield* runMigrations(), [
         [77, "ThreadFailureLookupIndex"],
         [78, "DropUnusedV1Projections"],
+        [79, "AppRegistrations"],
+        [80, "ProjectionProjectsAppBinding"],
       ]);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),

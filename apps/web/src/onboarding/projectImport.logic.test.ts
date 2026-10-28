@@ -1,4 +1,9 @@
-import { EnvironmentId, ProjectId, type AgentSessionProjectCandidate } from "@lecturn/contracts";
+import {
+  AppId,
+  EnvironmentId,
+  ProjectId,
+  type AgentSessionProjectCandidate,
+} from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -257,6 +262,26 @@ describe("resolveOnboardingProjectId", () => {
         candidate("/projects/repo"),
       ),
     ).toBe(recreatedProjectId);
+  });
+
+  it("never answers a folder with the app project on the same root", () => {
+    expect(
+      resolveOnboardingProjectId(
+        [
+          {
+            id: ProjectId.make("app-project"),
+            environmentId: localEnvironmentId,
+            workspaceRoot: "/projects/repo",
+            appBinding: {
+              appId: AppId.make("dev.rocketwright.app"),
+              workspaceRoot: "/projects/repo",
+            },
+          },
+        ],
+        localEnvironmentId,
+        candidate("/projects/repo"),
+      ),
+    ).toBeNull();
   });
 
   it("does not reuse a moved project when the scan has no project ID", () => {

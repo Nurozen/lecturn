@@ -72,6 +72,8 @@ import { PullRequestWatchRouteScreen } from "./features/pull-request-watch/PullR
 import { ThreadAgentsSheet } from "./features/threads/ThreadAgentsSheet";
 import { ThreadQueueSheet } from "./features/threads/ThreadQueueControl";
 import { ThreadRouteScreen } from "./features/threads/ThreadRouteScreen";
+import { AppThreadsRouteScreen } from "./features/apps/AppThreadsRouteScreen";
+import { APP_LINKING_PATH, APP_THREAD_LINKING_PATH } from "./lib/appLinking";
 import { McpAppFullscreenScreen } from "./features/threads/McpAppFullscreenScreen";
 import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteScreen";
 import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewRouteScreen";
@@ -810,8 +812,14 @@ const RootStackConfig = createWorkspaceStackNavigator({
     }),
     Thread: createNativeStackScreen({
       screen: ThreadRouteScreen,
-      linking: THREAD_LINKING_PREFIX,
+      linking: { path: THREAD_LINKING_PREFIX, alias: [APP_THREAD_LINKING_PATH] },
       options: GLASS_HEADER_OPTIONS,
+    }),
+    AppThreads: createNativeStackScreen({
+      screen: AppThreadsRouteScreen,
+      linking: APP_LINKING_PATH,
+      // Blank, not a placeholder: the screen sets the app's name once an environment reports it.
+      options: { ...SOLID_HEADER_OPTIONS, title: "" },
     }),
     ThreadTerminal: createNativeStackScreen({
       screen: ThreadTerminalRouteScreen,

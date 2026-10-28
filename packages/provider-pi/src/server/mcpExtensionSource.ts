@@ -136,6 +136,16 @@ function mcpScriptResult(result: JsonValue | undefined) {
   return scriptResult;
 }
 
+// Lecturn's own result keys (an app row's summary) ride in details, which Pi
+// hands its host but never shows the model or scripts.
+function lecturnResultMeta(result: JsonValue | undefined) {
+  if (typeof result !== "object" || result === null || Array.isArray(result)) return undefined;
+  const meta = result._meta;
+  if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return undefined;
+  const kept = Object.entries(meta).filter(([key]) => key.startsWith("lecturn/"));
+  return kept.length === 0 ? undefined : Object.fromEntries(kept);
+}
+
 function mcpOutputSchema(tool: McpTool) {
   return jsonSchemaToTypebox({
     type: "object",
@@ -382,10 +392,11 @@ export default async function lecturnMcpExtension(pi: ExtensionAPI) {
           if (isMcpToolError(result) && !content.some((part) => part.type === "text" && part.text.length > 0)) {
             content.push({ type: "text", text: "MCP tool lecturn/" + name + " returned an error" });
           }
+          const meta = lecturnResultMeta(result);
           return {
             content,
             structuredContent: mcpScriptResult(result),
-            details: { server: "lecturn", tool: name },
+            details: { server: "lecturn", tool: name, ...(meta === undefined ? {} : { _meta: meta }) },
             ...(isMcpToolError(result) ? { isError: true } : {}),
           };
         },

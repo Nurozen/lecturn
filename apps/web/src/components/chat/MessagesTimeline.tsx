@@ -1,4 +1,15 @@
 import { ContextualMessageDisclosure } from "../contextual/ContextualDisclosure";
+import { EmbedAgentName } from "../embed/EmbedAgentName";
+import { EmbedUserAvatar } from "../embed/EmbedUserAvatar";
+import { useEmbedPresentation } from "../../embed/EmbedPresentationContext";
+import {
+  AppClosedThreadBanner,
+  useAppClosedThreadBannerShown,
+} from "../apps/AppClosedThreadBanner";
+import { AppThreadTitle, AppThreadTitleBeside } from "../apps/AppThreadTitle";
+import { appThreadTitleRowId } from "../apps/AppThreadTitle.logic";
+import { AppToolWorkRow } from "../apps/AppToolWorkRow";
+import { appToolRowOutcome } from "../apps/AppToolWorkRow.logic";
 import { fadeOutTimeline, revealTimeline } from "./timelineExit";
 import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shallow } from "zustand/vanilla/shallow";
@@ -47,6 +58,7 @@ import {
   liveThoughtLine,
   resolveWorkEntryToolPresentation,
   resolveViewedImageAsset,
+  workEntryAppToolSummary,
   workEntryViewedImagePath,
 } from "@lecturn/client-runtime/work-log/presentation";
 import { resolveWorkGroupScrollAnchor } from "@lecturn/client-runtime/work-log/scroll-anchor";
@@ -244,7 +256,7 @@ import {
   worktreeSetupAgentStarted,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
-  TIMELINE_MINIMAP_MIN_ITEMS,
+  timelineMinimapShown,
   type TimelineLatestRun,
   type WorkGroupScrollAnchor,
 } from "./MessagesTimeline.logic";
@@ -1014,6 +1026,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
 
   // Find the fold that hides the match: imported turns have no run id but still
   // fold under a synthetic key, so the match's own run id cannot open them.
+  const embedded = useEmbedPresentation() !== null;
+  const keepLatestTurnOpen = embedded;
   const findFoldRunIds = findActive
     ? timelineTurnFoldRunIdsByEntryId({
         timelineEntries,
@@ -1021,6 +1035,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         runningRunId,
         isWorking,
         runlessWorkActive,
+        keepLatestTurnOpen,
       })
     : null;
   const activeFindRunId = activeFindMatch
@@ -1073,6 +1088,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
     turnDiffSummaries,
     supportsConversationRollback,
     worktreeSetup,
+    keepLatestTurnOpen,
+    waitingOnUser: awaitingUser,
+    hideWaitingRow: embedded,
   });
   const rows = useStableRows(rawRows, listIdentityKey);
   // Run status/timestamps churn on every stream event; the shared row context
@@ -1232,13 +1250,16 @@ const ConversationTimeline = memo(function ConversationTimeline({
   // whole timeline once, after that work, instead of flashing measured rows on.
   const [initialLayoutReady, setInitialLayoutReady] = useState(false);
   const [hasRevealed, setHasRevealed] = useState(false);
+  // LegendList never reports load without rows, so a mounted list holding only
+  // its header (a closed app's banner on an empty thread) has nothing to wait for.
+  const layoutReady = initialLayoutReady || (rows.length === 0 && timelineViewportElement !== null);
   useEffect(() => {
-    if (hasRevealed || !initialLayoutReady || citationHistoryLoading) return;
+    if (hasRevealed || !layoutReady || citationHistoryLoading) return;
     // The load callback can precede the container's visibility commit. Give it
     // a frame, and wait for cold-thread details rather than showing shell rows.
     const frame = requestAnimationFrame(() => setHasRevealed(true));
     return () => cancelAnimationFrame(frame);
-  }, [initialLayoutReady, citationHistoryLoading, hasRevealed]);
+  }, [layoutReady, citationHistoryLoading, hasRevealed]);
   useLayoutEffect(() => {
     if (hasRevealed && timelineViewportElement) revealTimeline(timelineViewportElement);
   }, [hasRevealed, timelineViewportElement]);
@@ -1518,6 +1539,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     isPreparingWorktree,
     latestRunId: latestRun?.runId ?? null,
   };
+  const appTitleRowId = appThreadTitleRowId({ rows, historyControls, importHistoryTruncated });
   const listHeaderLeadingContent =
     parentThreadLink === null ? (
       topFadeEnabled ? (
@@ -1541,6 +1563,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const listHeader = (
     <>
       {parentThreadLink === null ? listHeaderLeadingContent : null}
+      <AppClosedThreadBanner threadRef={citationThreadRef} />
+      <AppThreadTitle threadRef={citationThreadRef} beside={appTitleRowId !== null} />
       {historyControls ? (
         <TimelineHistoryControl {...historyControls} />
       ) : importHistoryTruncated ? (
@@ -1568,6 +1592,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
           runningRunId,
           isWorking,
           runlessWorkActive,
+          keepLatestTurnOpen,
         });
       const entryById = new Map(timelineEntries.map((entry) => [entry.id, entry]));
       return readThreadFindPosition(
@@ -1614,6 +1639,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     findFoldRunIds,
     findPositionReaderRef,
     isWorking,
+    keepLatestTurnOpen,
     latestRun,
     rows,
     runlessWorkActive,
@@ -1638,7 +1664,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const renderItem = ({ item }: { item: MessagesTimelineRow }) => (
     <div className="messages-timeline-row-frame">
       <div className="chat-content-lane overflow-x-clip" data-timeline-root="true">
-        <TimelineRowContent row={item} />
+        <AppThreadTitleBeside threadRef={citationThreadRef} shown={item.id === appTitleRowId}>
+          <TimelineRowContent row={item} />
+        </AppThreadTitleBeside>
       </div>
     </div>
   );
@@ -1648,12 +1676,14 @@ const ConversationTimeline = memo(function ConversationTimeline({
     if (scrollNode) forwardWheelToTimeline(event, scrollNode);
   };
 
+  const appClosedBannerShown = useAppClosedThreadBannerShown(citationThreadRef);
   if (
     rows.length === 0 &&
     !isWorking &&
     parentThreadLink === null &&
     historyControls === undefined &&
-    footer === null
+    footer === null &&
+    !appClosedBannerShown
   ) {
     if (hideEmptyPlaceholder) {
       return <div className="h-full min-h-0 bg-background" data-timeline-loading="true" />;
@@ -1874,6 +1904,7 @@ function TimelineMinimap({
   onWheel: (event: WheelEvent) => void;
   onSelect: (item: TimelineMinimapItem) => void;
 }) {
+  const embedded = useEmbedPresentation() !== null;
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const wheelTargetRef = (node: HTMLDivElement | null) => {
     if (!node) return;
@@ -1936,7 +1967,7 @@ function TimelineMinimap({
     });
   };
 
-  if (items.length < TIMELINE_MINIMAP_MIN_ITEMS) {
+  if (!timelineMinimapShown(items.length, embedded)) {
     return null;
   }
 
@@ -2528,6 +2559,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         data-chat-user-message-bubble="true"
         className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground"
       >
+        <EmbedUserAvatar />
         <MessageAuthorHeading>You</MessageAuthorHeading>
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[210px] grid-cols-2 gap-2">
@@ -2933,6 +2965,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
     <>
       <div className="relative min-w-0 px-1 py-0.5">
         <MessageAuthorHeading>Lecturn</MessageAuthorHeading>
+        {row.startsReply ? <EmbedAgentName runId={row.message.runId} timeline={ctx} /> : null}
         <div data-thread-find-text="true">
           <AssistantCitationSource
             messageId={row.message.id}
@@ -3876,13 +3909,15 @@ function toolIconAcceptsTint(
 }
 
 function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
-  const { isCompacting, isPreparingWorktree, backgroundWorktreeSetup } =
+  const { isCompacting, isPreparingWorktree, backgroundWorktreeSetup, awaitingUser } =
     use(TimelineRowActivityCtx);
   const shimmer = isPreparingWorktree || isCompacting;
   const label = isPreparingWorktree ? (
     "Setting up worktree…"
   ) : isCompacting ? (
     <CompactingLabel />
+  ) : awaitingUser ? (
+    "Waiting for you"
   ) : row.createdAt ? (
     <>
       Working for <WorkingTimer createdAt={row.createdAt} />
@@ -5799,10 +5834,14 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       }
     : {};
 
+  const appToolOutcome = appToolRowOutcome(workEntry, showFailedIndicator);
+  const Row = appToolOutcome === undefined ? WorkLogRow : AppToolWorkRow;
   return (
-    <WorkLogRow
+    <Row
       data-v2-item-type={workEntry.projectedItem?.item.type}
       data-v2-item-visibility={workEntry.projectedItem?.visibility}
+      data-app-tool-outcome={appToolOutcome}
+      data-app-tool-summary={workEntryAppToolSummary(workEntry)}
       {...rowToggleProps}
       icon={
         <span
@@ -5966,7 +6005,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           )}
         </WorkLogDetails>
       ) : null}
-    </WorkLogRow>
+    </Row>
   );
 }
 

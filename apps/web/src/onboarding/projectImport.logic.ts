@@ -1,5 +1,11 @@
+import { isAppProject } from "@lecturn/client-runtime/state/app-projects";
 import { findProjectByPath } from "@lecturn/client-runtime/state/projects";
-import type { AgentSessionProjectCandidate, EnvironmentId, ProjectId } from "@lecturn/contracts";
+import type {
+  AgentSessionProjectCandidate,
+  AppBinding,
+  EnvironmentId,
+  ProjectId,
+} from "@lecturn/contracts";
 
 const RECENT_PROJECT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const DEFAULT_SELECTION_MIN_THREADS = 3;
@@ -93,12 +99,16 @@ export function resolveOnboardingProjectId(
     readonly id: ProjectId;
     readonly environmentId: EnvironmentId;
     readonly workspaceRoot: string;
+    readonly appBinding?: AppBinding | undefined;
   }>,
   environmentId: EnvironmentId,
   candidate: Pick<AgentSessionProjectCandidate, "path" | "projectId">,
 ): ProjectId | null {
   if (candidate.projectId !== undefined) return candidate.projectId;
-  const environmentProjects = projects.filter((project) => project.environmentId === environmentId);
+  // An app project on the same folder coexists with a normal one and never answers for it.
+  const environmentProjects = projects.filter(
+    (project) => project.environmentId === environmentId && !isAppProject(project),
+  );
   const currentRootMatch = findProjectByPath(environmentProjects, candidate.path);
   if (currentRootMatch !== undefined) return currentRootMatch.id;
   return null;

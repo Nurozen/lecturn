@@ -193,7 +193,10 @@ export function contextualDisclosurePreview(disclosure: ContextualDisclosure): s
 /** Query identities include the environment and full RPC payload. Mutations are serialized per host. */
 export function createContextualEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
+  /** An embedded chat may not follow the host-wide change stream, so it refreshes on its own writes only. */
+  config: { readonly followChanges?: boolean } = {},
 ) {
+  const followChanges = config.followChanges ?? true;
   const changes = createEnvironmentRpcSubscriptionAtomFamily(runtime, {
     label: "contextual:changes",
     tag: WS_METHODS.contextualSubscribe,
@@ -204,9 +207,11 @@ export function createContextualEnvironmentAtoms<R, E>(
   );
   const refresh = Atom.family((environmentId: EnvironmentId) =>
     Atom.make((get) => {
-      const sequence = Option.getOrNull(
-        AsyncResult.value(get(changes({ environmentId, input: { afterSequence: 0 } }))),
-      );
+      const sequence = followChanges
+        ? Option.getOrNull(
+            AsyncResult.value(get(changes({ environmentId, input: { afterSequence: 0 } }))),
+          )
+        : null;
       return `${get(manual(environmentId))}:${sequence ?? 0}`;
     }),
   );

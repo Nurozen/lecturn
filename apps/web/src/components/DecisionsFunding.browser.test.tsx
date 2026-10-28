@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, AuthRelayWriteScope } from "@lecturn/contracts";
 const mocks = vi.hoisted(() => ({
   scopes: ["relay:write"] as string[],
@@ -98,6 +98,8 @@ async function render(): Promise<View> {
   await act(async () => {
     view.root.render(<DecisionsFunding environmentId={environmentId} onChange={mocks.changed} />);
   });
+  // The lazy view replaces the empty Suspense fallback only after its import settles.
+  await vi.waitFor(() => expect(view.container.firstElementChild).not.toBeNull());
   return view;
 }
 async function unmount(view: View) {
@@ -114,6 +116,8 @@ async function click(view: View, text: string) {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
+// Both funding views are lazy chunks; load them once so a cold transform cannot outlast a render.
+beforeAll(() => Promise.all([import("./ExtensionsFunding"), import("./LegacyDecisionsFunding")]));
 afterEach(async () => {
   for (const view of mounted.toReversed()) await unmount(view);
   vi.unstubAllGlobals();

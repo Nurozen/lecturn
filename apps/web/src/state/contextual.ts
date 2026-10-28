@@ -10,7 +10,12 @@ import { useEnvironmentSessionState } from "./session";
 import { usePrimaryEnvironmentId } from "./environments";
 import { useServerConfigs } from "./entities";
 import { isElectron } from "../env";
-export const contextualEnvironment = createContextualEnvironmentAtoms(connectionAtomRuntime);
+import { isEmbedLocation } from "../embed/embedAuth";
+export const contextualEnvironment = createContextualEnvironmentAtoms(connectionAtomRuntime, {
+  followChanges: !isEmbedLocation(),
+});
+/** An embedded chat shows its thread's Contextual state but cannot change it. */
+const EMBED_CONTEXTUAL_ACCESS = { operate: false, administer: false, funding: false } as const;
 export function useContextualAccess(environmentId: EnvironmentId | null) {
   const primaryId = usePrimaryEnvironmentId();
   const session = useEnvironmentSessionState(environmentId);
@@ -19,6 +24,7 @@ export function useContextualAccess(environmentId: EnvironmentId | null) {
     local ||
     (session.data?.authenticated === true &&
       session.data.scopes?.some((value) => value === scope) === true);
+  if (isEmbedLocation()) return EMBED_CONTEXTUAL_ACCESS;
   return {
     operate: allows(AuthOrchestrationOperateScope),
     administer: allows(AuthAccessWriteScope),

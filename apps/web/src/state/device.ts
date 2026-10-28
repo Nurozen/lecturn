@@ -10,6 +10,7 @@ import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 
 import { connectionAtomRuntime } from "../connection/runtime";
+import { isEmbedLocation } from "../embed/embedAuth";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentSession } from "./session";
 import { useEnvironmentQuery } from "./query";
@@ -32,8 +33,11 @@ export function useDeviceState(environmentId: EnvironmentId | null): {
   readonly state: DeviceServiceState;
   readonly loaded: boolean;
 } {
+  // Devices are host-wide, so an embedded chat is refused their state and shows none.
   const query = useEnvironmentQuery(
-    environmentId === null ? null : deviceEnvironment.state({ environmentId, input: {} }),
+    environmentId === null || isEmbedLocation()
+      ? null
+      : deviceEnvironment.state({ environmentId, input: {} }),
   );
   return { state: query.data ?? EMPTY_DEVICE_STATE, loaded: query.data !== undefined };
 }

@@ -5,17 +5,21 @@ Terms whose meaning matters across Lecturn. Architecture and lifecycle constrain
 
 ## Workspace and conversation
 
-| Term           | Meaning                                                                                           |
-| -------------- | ------------------------------------------------------------------------------------------------- |
-| Environment    | One running server and the machine, credentials, workspace access, and state it owns.             |
-| Client         | A web, desktop, or mobile UI connected to an environment. The desktop app can also host a server. |
-| Project        | An environment-local workspace record rooted at a directory.                                      |
-| Workspace root | The project's base filesystem directory on the environment.                                       |
-| Worktree       | A separate Git checkout a thread can use instead of the project's main checkout.                  |
-| Thread         | The durable conversation and work history for a project. It survives provider process exits.      |
-| Turn           | One user-to-agent cycle, a V2 run. Provider work can end before checkpoint and diff work settles. |
-| Activity       | A non-message timeline item, such as a tool action, approval, or failure.                         |
-| Lecturn home   | The base data directory. Runtime state normally lives under its `userdata` directory.             |
+| Term            | Meaning                                                                                                                                                    |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Environment     | One running server and the machine, credentials, workspace access, and state it owns.                                                                      |
+| Client          | A web, desktop, or mobile UI connected to an environment. The desktop app can also host a server.                                                          |
+| Project         | An environment-local workspace record rooted at a directory.                                                                                               |
+| Workspace root  | The project's base filesystem directory on the environment.                                                                                                |
+| Worktree        | A separate Git checkout a thread can use instead of the project's main checkout.                                                                           |
+| Thread          | The durable conversation and work history for a project. It survives provider process exits.                                                               |
+| Turn            | One user-to-agent cycle, a V2 run. Provider work can end before checkpoint and diff work settles.                                                          |
+| Activity        | A non-message timeline item, such as a tool action, approval, or failure.                                                                                  |
+| Lecturn home    | The base data directory. Runtime state normally lives under its `userdata` directory.                                                                      |
+| Connected app   | A local program the user approved to run agent threads in its own projects and offer its tools to them. See [app trust boundary](./app-trust-boundary.md). |
+| App project     | A project bound to one connected app by `appBinding`. Its threads are listed in Apps mode instead of Projects mode.                                        |
+| Embed view      | Lecturn's web UI at `/embed/...`, shown inside a connected app's window with a short-lived embed token.                                                    |
+| Lecturn sidecar | A private Lecturn server a connected app starts in its own base directory when the user's server is absent or has not granted it.                          |
 
 ## Orchestration
 

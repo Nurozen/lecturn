@@ -1,4 +1,5 @@
 import type { ToolActivityIcon, ToolActivitySource } from "@lecturn/contracts";
+import { lecturnResultMeta, resolveAppToolPresentation } from "@lecturn/shared/appToolPresentation";
 import { resolveLecturnMcpToolDefinition } from "@lecturn/shared/lecturnMcpToolPresentation";
 
 export function normalizeMcpText(value: unknown, maxLength = 160): string | undefined {
@@ -17,6 +18,25 @@ export function normalizeMcpHttpUrl(value: unknown): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * What a tool item keeps of an MCP `CallToolResult`: its structured content,
+ * else its content blocks. A result with `lecturn/*` `_meta` (an app row's
+ * summary) keeps its MCP shape with only those keys, so the row can read them.
+ */
+export function mcpToolResultOutput(result: unknown): unknown {
+  if (typeof result !== "object" || result === null || Array.isArray(result)) return undefined;
+  const record = result as Readonly<Record<string, unknown>>;
+  const structured = record.structuredContent ?? undefined;
+  const content = record.content ?? undefined;
+  const meta = lecturnResultMeta(record._meta);
+  if (meta === undefined) return structured ?? content;
+  return {
+    ...(content === undefined ? {} : { content }),
+    ...(structured === undefined ? {} : { structuredContent: structured }),
+    _meta: meta,
+  };
 }
 
 export function mcpToolPresentation(input: {
@@ -38,6 +58,17 @@ export function mcpToolPresentation(input: {
     typeof input.toolName === "string" ? /^mcp__(.+?)__(.+)$/i.exec(input.toolName) : null;
   const server = normalizeMcpText(input.serverName ?? qualified?.[1] ?? input.serverDisplayName);
   const tool = normalizeMcpText(qualified?.[2] ?? input.toolName);
+  const app =
+    server && tool ? resolveAppToolPresentation({ serverName: server, toolName: tool }) : null;
+  if (app) {
+    // The app's declared title reads best; without one, the prefixed name is
+    // what the agent called and what the app documents.
+    return {
+      title: app.title ?? normalizeMcpText(input.title) ?? app.toolName,
+      ...(app.toolSource.icon ? { toolIcon: app.toolSource.icon } : {}),
+      toolSource: app.toolSource,
+    };
+  }
   if (server && tool && resolveLecturnMcpToolDefinition(`${server}.${tool}`)) return {};
   const title =
     normalizeMcpText(input.title) ??

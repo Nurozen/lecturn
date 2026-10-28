@@ -45,6 +45,10 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
+import {
+  ComposerAppReferencesExtension,
+  useComposerAppReferences,
+} from "./embed/appRefDecorations";
 
 import {
   clampCollapsedComposerCursor,
@@ -798,6 +802,7 @@ function createComposerExtensions(richText: boolean) {
     ComposerSkillExtension,
     ComposerCitationExtension,
     ComposerContextReferenceExtension,
+    ComposerAppReferencesExtension,
     ComposerMarkersExtension,
     ...(richText
       ? [
@@ -1416,6 +1421,7 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
     },
     [],
   );
+  useComposerAppReferences(editor);
 
   useEffect(() => {
     editor?.setEditable(!disabled);
@@ -1764,6 +1770,7 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
             />
             {isEmpty && contextRecords.size === 0 && placeholder ? (
               <div
+                data-composer-placeholder
                 className={cn(
                   "pointer-events-none absolute inset-0 leading-relaxed text-placeholder/75",
                   placeholderClassName,

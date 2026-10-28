@@ -58,7 +58,10 @@ import {
   rewriteCursorSkillMentions,
 } from "./skills.ts";
 import { mergeProviderInstanceEnvironment } from "@lecturn/provider-core/server/instanceEnvironment";
-import { lecturnOrchestrationPromptForFirstRun } from "@lecturn/provider-core/server/orchestrationInstructions";
+import {
+  connectedAppInstructionsSection,
+  lecturnOrchestrationPromptForFirstRun,
+} from "@lecturn/provider-core/server/orchestrationInstructions";
 import { buildRuntimeInstructions } from "@lecturn/provider-core/server/runtimeInstructions";
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
 import { makeProviderFailure } from "@lecturn/provider-core/server/failure";
@@ -213,6 +216,9 @@ export function cursorMcpServers(
   if (session === undefined) {
     return extraServers;
   }
+  // No tool timeout can be set: @cursor/sdk 1.0.35 calls MCP tools without
+  // request options, so the MCP SDK's 60 s default applies and this config type
+  // has no timeout field. A gated app call must be answered within it.
   return {
     ...extraServers,
     lecturn: {
@@ -868,6 +874,22 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
   const runner = yield* CursorAgentSdk.CursorAgentSdkRunner;
   const host = yield* ProviderHost.ProviderHost;
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+  // The SDK sends `cursorMcpServers` of the thread's session on every turn.
+  const reportCursorMcpActivation = (
+    threadId: ThreadId,
+    providerThreadId: OrchestrationV2ProviderThread["id"],
+  ) =>
+    mcpSessions.read(threadId).pipe(
+      Effect.flatMap((session) =>
+        McpProviderSessions.reportThreadMcpActivation({
+          mcpSessions,
+          threadId,
+          providerThreadId,
+          driver: CursorAgentSdk.CURSOR_PROVIDER,
+          mcpActivated: session !== undefined,
+        }),
+      ),
+    );
   const adapterOptions = options;
   const apiKey = adapterOptions.environment.CURSOR_API_KEY?.trim() || undefined;
 
@@ -2202,7 +2224,15 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
               detail: "Cursor turn requires non-empty text or attachments.",
             });
           }
-          const text = `${userText}\n\n${buildRuntimeInstructions({ harness: "Cursor", model: turnInput.modelSelection.model })}`;
+          // Cursor has no system prompt hook, so a connected app's instructions
+          // ride every turn beside the runtime instructions.
+          const text = [
+            userText,
+            buildRuntimeInstructions({ harness: "Cursor", model: turnInput.modelSelection.model }),
+            connectedAppInstructionsSection(turnInput.appInstructions),
+          ]
+            .filter((part) => part !== undefined)
+            .join("\n\n");
           return images.length === 0
             ? text
             : ({
@@ -2413,7 +2443,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                 runtimePolicy: threadInput.runtimePolicy,
               });
               const now = yield* DateTime.now;
-              return makeProviderThread({
+              const providerThread = makeProviderThread({
                 idAllocator,
                 providerInstanceId: adapterOptions.instanceId,
                 appThreadId: threadInput.threadId,
@@ -2421,6 +2451,11 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                 nativeThreadId: opened.nativeThreadId,
                 now,
               });
+              yield* reportCursorMcpActivation(
+                threadInput.threadId,
+                threadInput.existingProviderThread?.id ?? providerThread.id,
+              );
+              return providerThread;
             },
             (effect, threadInput) =>
               effect.pipe(
@@ -2444,6 +2479,10 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                 modelSelection: input.modelSelection,
                 runtimePolicy: input.runtimePolicy,
               });
+              yield* reportCursorMcpActivation(
+                threadInput.providerThread.appThreadId ?? input.threadId,
+                threadInput.providerThread.id,
+              );
               const now = yield* DateTime.now;
               return {
                 ...threadInput.providerThread,

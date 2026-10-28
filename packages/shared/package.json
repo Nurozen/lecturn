@@ -415,6 +415,14 @@
       "types": "./src/orchestrationV2Timeline.ts",
       "import": "./src/orchestrationV2Timeline.ts"
     },
+    "./appToolPresentation": {
+      "types": "./src/appToolPresentation.ts",
+      "import": "./src/appToolPresentation.ts"
+    },
+    "./appToolResults": {
+      "types": "./src/appToolResults.ts",
+      "import": "./src/appToolResults.ts"
+    },
     "./lecturnMcpToolPresentation": {
       "types": "./src/lecturnMcpToolPresentation.ts",
       "import": "./src/lecturnMcpToolPresentation.ts"
@@ -506,6 +514,22 @@
     "./mcpApp": {
       "types": "./src/mcpApp.ts",
       "import": "./src/mcpApp.ts"
+    },
+    "./jsonRpcFrame": {
+      "types": "./src/jsonRpcFrame.ts",
+      "import": "./src/jsonRpcFrame.ts"
+    },
+    "./lecturnMcpToolName": {
+      "types": "./src/lecturnMcpToolName.ts",
+      "import": "./src/lecturnMcpToolName.ts"
+    },
+    "./appReferences": {
+      "types": "./src/appReferences.ts",
+      "import": "./src/appReferences.ts"
+    },
+    "./appLinks": {
+      "types": "./src/appLinks.ts",
+      "import": "./src/appLinks.ts"
     },
     "./atomicWrite": {
       "types": "./src/atomicWrite.ts",

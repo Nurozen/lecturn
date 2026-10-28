@@ -24,6 +24,7 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
+import { useUiStateStore } from "../uiStateStore";
 import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useEnvironmentIdentificationMode, useLegacySidebarEnabled } from "../hooks/useSettings";
@@ -33,6 +34,12 @@ import {
   usePanelNavigationSuppression,
 } from "../panelAnimations";
 import LegacyThreadSidebar from "./LegacySidebar";
+import { StandaloneAppsSidebar } from "./apps/AppsSidebar";
+import {
+  onSidebarRevealRequest,
+  toggleSidebarMode,
+  useSidebarModeSearchLink,
+} from "./apps/sidebarMode";
 import { useThreadVisitedMigration } from "../hooks/useThreadVisitedMigration";
 import ThreadSidebar from "./Sidebar";
 import { SettingsNavigationProvider } from "./settings/SettingsNavigation";
@@ -152,26 +159,33 @@ function SidebarControl() {
         // available everywhere else, including the plain-text composer.
         return;
       }
-      if (
-        resolveShortcutCommand(event, keybindings, { context: { usagePageOpen } }) !==
-        "sidebar.toggle"
-      )
-        return;
+      const command = resolveShortcutCommand(event, keybindings, { context: { usagePageOpen } });
+      if (command !== "sidebar.toggle" && command !== "sidebar.toggleApps") return;
 
       event.preventDefault();
       event.stopPropagation();
-      toggleSidebar();
+      if (command === "sidebar.toggleApps") toggleSidebarMode();
+      else toggleSidebar();
     };
 
     window.addEventListener("keydown", onKeyDown, true);
     const unsubscribe = window.desktopBridge?.onMenuAction((action) => {
       if (action === "sidebar.toggle") toggleSidebar();
+      else if (action === "sidebar.toggleApps") toggleSidebarMode();
     });
     return () => {
       window.removeEventListener("keydown", onKeyDown, true);
       unsubscribe?.();
     };
   }, [keybindings, toggleSidebar, usagePageOpen]);
+  // Mobile keeps the sheet closed: it would cover the thread a link or command just opened.
+  useEffect(
+    () =>
+      onSidebarRevealRequest(() => {
+        if (!isMobile && !isSidebarVisible) toggleSidebar();
+      }),
+    [isMobile, isSidebarVisible, toggleSidebar],
+  );
 
   return (
     <div
@@ -260,9 +274,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const viewportRef = useWorkspaceViewport(useIsMobile());
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
+  const sidebarMode = useUiStateStore((state) => state.sidebarMode);
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   useThreadVisitedMigration();
+  useSidebarModeSearchLink();
   const pathname = useLocation({ select: (location) => location.pathname });
   const panelAnimationsSuppressed = usePanelNavigationSuppression(pathname);
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
@@ -354,7 +370,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
                 <SettingsSidebarNav pathname={pathname} />
               </>
             ) : legacySidebarEnabled ? (
-              <LegacyThreadSidebar />
+              sidebarMode === "apps" ? (
+                <StandaloneAppsSidebar />
+              ) : (
+                <LegacyThreadSidebar />
+              )
             ) : (
               <ThreadSidebar />
             )}

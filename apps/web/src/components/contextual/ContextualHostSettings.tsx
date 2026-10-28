@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import type { ContextualSource, ContextualSourcePolicy, EnvironmentId } from "@lecturn/contracts";
 import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 import {
@@ -17,7 +17,7 @@ import {
 import { useEnvironment } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { ExtensionsFunding } from "../ExtensionsFunding";
+import { LazyExtensionsFunding } from "../DecisionsFunding";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Checkbox } from "../ui/checkbox";
@@ -185,14 +185,16 @@ function HostSettings({ environmentId }: { environmentId: EnvironmentId }) {
           {discover && <SourceSelection environmentId={environmentId} />}
         </section>
       )}
-      <ExtensionsFunding
-        environmentId={environmentId}
-        featureId="contextual"
-        onChange={() => {
-          funding.refresh();
-          capture.refresh();
-        }}
-      />
+      <Suspense fallback={null}>
+        <LazyExtensionsFunding
+          environmentId={environmentId}
+          featureId="contextual"
+          onChange={() => {
+            funding.refresh();
+            capture.refresh();
+          }}
+        />
+      </Suspense>
       {access.administer && (
         <section
           className="space-y-3 border-t border-border/60 pt-4"

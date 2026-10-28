@@ -1,4 +1,5 @@
-export type WorkspaceTab = "threads" | "pullRequests";
+export const WORKSPACE_TABS = ["threads", "apps", "pullRequests"] as const;
+export type WorkspaceTab = (typeof WORKSPACE_TABS)[number];
 export type WorkspaceSearchMode = "resting" | "active" | "expanded";
 
 export interface WorkspaceTabState {
@@ -14,6 +15,28 @@ export interface WorkspaceTabsState {
   readonly tabs: Readonly<Record<WorkspaceTab, WorkspaceTabState>>;
 }
 
+export function isWorkspaceTab(value: string): value is WorkspaceTab {
+  return (WORKSPACE_TABS as ReadonlyArray<string>).includes(value);
+}
+
+export function workspaceTabSearchLabel(tab: WorkspaceTab): string {
+  return tab === "threads"
+    ? "Search threads"
+    : tab === "apps"
+      ? "Search apps"
+      : "Search pull requests";
+}
+
+/**
+ * From iOS 26.1 the compose tab is a UISearchTab that shows only its icon, and a
+ * title written after the tabs are installed makes UIKit fit the other titles to
+ * a four-slot bar. Earlier releases render it as an ordinary labelled tab.
+ */
+export function workspaceComposeTabTitle(iosVersion: string | number): string | undefined {
+  const [major = 0, minor = 0] = String(iosVersion).split(".").map(Number);
+  return major > 26 || (major === 26 && minor >= 1) ? undefined : "New chat";
+}
+
 function emptyTab(): WorkspaceTabState {
   return { query: "", searchMode: "resting", scrollOffset: 0, searchEntryOffset: 0 };
 }
@@ -22,7 +45,7 @@ export function initialWorkspaceTabsState(): WorkspaceTabsState {
   return {
     selectedTab: "threads",
     selectionRevision: 0,
-    tabs: { threads: emptyTab(), pullRequests: emptyTab() },
+    tabs: { threads: emptyTab(), apps: emptyTab(), pullRequests: emptyTab() },
   };
 }
 
@@ -82,7 +105,8 @@ export function workspaceTabsReducer(
 }
 
 export const WORKSPACE_TOOLBAR = { height: 48, expandedGap: 10, edge: 16, gap: 8 };
-export const WORKSPACE_DOCK = { height: 48, tabsWidth: 176, gap: 12, bottomGap: 6 };
+// Three 72pt tabs plus padding; still leaves room for the compose button on a 320pt phone.
+export const WORKSPACE_DOCK = { height: 48, tabsWidth: 224, gap: 12, bottomGap: 6 };
 
 export function workspaceToolbarHeight(mode: WorkspaceSearchMode): number {
   return mode === "expanded"

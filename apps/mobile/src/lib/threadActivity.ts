@@ -3,6 +3,10 @@ import type {
   ThreadPendingUserInput,
   ThreadUserInputQuestion,
 } from "@lecturn/client-runtime/state/thread-requests";
+import {
+  withoutApprovalCardRows,
+  type CardApproval,
+} from "@lecturn/client-runtime/state/app-tool-approval-placement";
 import { turnItemIsWorkspacePreparation } from "@lecturn/client-runtime/state/turn-item-presentation";
 import { formatSubagentDisplayTitle } from "@lecturn/client-runtime/state/subagent-display";
 import { isLiveSubagentTurnItem } from "@lecturn/client-runtime/state/subagentRuntime";
@@ -68,6 +72,7 @@ import {
   formatReadToolLabel,
   formatSearchToolLabel,
 } from "@lecturn/shared/toolActivity";
+import { isAppToolSource } from "@lecturn/shared/appToolPresentation";
 import { formatDuration } from "@lecturn/shared/orchestrationTiming";
 import type { HtmlRenderReference } from "@lecturn/shared/htmlRender";
 import type { McpAppReference } from "@lecturn/shared/mcpApp";
@@ -315,6 +320,8 @@ const projectedEntriesCache = new WeakMap<
   {
     readonly attemptId: RunAttemptId | null;
     readonly entry: RawThreadFeedEntry;
+    /** An app tool's card, which follows its row. */
+    readonly card?: RawThreadFeedEntry;
   }
 >();
 const localMessageEntriesCache = new WeakMap<
@@ -1665,6 +1672,10 @@ function appendActivityGroupRows(
   flushGroupableRun(true);
 }
 
+export function threadWorkGroupDetailsId(groupId: string) {
+  return `work-details:${groupId}`;
+}
+
 function appendToolGroupRows(
   result: ThreadFeedEntry[],
   sourceGroup: Extract<ThreadFeedEntry, { readonly type: "activity-group" }>,
@@ -1764,7 +1775,7 @@ function appendToolGroupRows(
   if (!expanded) return;
   result.push({
     type: "activity-group",
-    id: `work-details:${groupId}`,
+    id: threadWorkGroupDetailsId(groupId),
     createdAt: activities[0]!.createdAt,
     runId: activities[0]!.runId,
     activities: activities.map((activity) => ({
@@ -1898,13 +1909,20 @@ export function buildPendingUserInputAnswers(
 }
 
 export function buildThreadFeed(
-  visibleTurnItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
+  projectedTurnItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
   options?: {
     readonly anchoredMessages?: ReadonlyArray<LocalThreadMessage>;
     readonly attempts?: ReadonlyArray<OrchestrationV2RunAttempt>;
     readonly nodes?: ReadonlyArray<OrchestrationV2ExecutionNode>;
+    /** Those the composer's approval card is asking, so the feed does not ask them again. */
+    readonly cardApprovals?: ReadonlyArray<CardApproval>;
   },
 ): ThreadFeedEntry[] {
+  const visibleTurnItems = withoutApprovalCardRows(
+    projectedTurnItems,
+    options?.cardApprovals ?? [],
+    (row) => row.item,
+  );
   const entries: RawThreadFeedEntry[] = [];
   const attemptByRootNodeId = new Map(
     (options?.attempts ?? []).map((attempt) => [attempt.rootNodeId, attempt] as const),
@@ -1945,6 +1963,7 @@ export function buildThreadFeed(
     const cached = projectedEntriesCache.get(row);
     if (cached?.attemptId === attemptId) {
       entries.push(cached.entry);
+      if (cached.card) entries.push(cached.card);
       continue;
     }
     const createdAt = DateTime.formatIso(item.startedAt ?? item.updatedAt);
@@ -1979,6 +1998,21 @@ export function buildThreadFeed(
         revision: turnItemDetailRevision(item),
         app,
       };
+      const activity = toFeedActivity(row, attemptId);
+      // App cards sit under their tool's row; other MCP Apps replace it. Prominent keeps that row
+      // on its own and out of the run fold, beside its card.
+      if (isAppToolSource(activity.workEntry.toolSource)) {
+        const rowEntry: RawThreadFeedEntry = {
+          type: "activity",
+          id: activity.id,
+          createdAt,
+          runId: item.runId,
+          activity: { ...activity, prominent: true },
+        };
+        projectedEntriesCache.set(row, { attemptId, entry: rowEntry, card: entry });
+        entries.push(rowEntry, entry);
+        continue;
+      }
       projectedEntriesCache.set(row, { attemptId, entry });
       entries.push(entry);
       continue;

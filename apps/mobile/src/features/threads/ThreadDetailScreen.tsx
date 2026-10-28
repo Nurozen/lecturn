@@ -137,6 +137,7 @@ import type {
   ThreadFeedLatestRun,
 } from "../../lib/threadActivity";
 import { PendingApprovalCard } from "./PendingApprovalCard";
+import { AppClosedBanner } from "../apps/AppClosedBanner";
 import { ComposerErrorNotice } from "./ComposerErrorNotice";
 import { ComposerFeedback } from "./ComposerFeedback";
 import { ComposerUsageLimits } from "./ComposerUsageLimits";
@@ -1367,6 +1368,7 @@ const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
                       />
                     </Animated.View>
                   ) : null}
+                  <AppClosedBanner thread={props.selectedThread} />
                   {props.activePendingApproval || props.activePendingUserInput ? (
                     <Animated.View
                       className="shrink-0 gap-3 px-4 pb-3"

@@ -1,3 +1,4 @@
+import { appToolSource } from "@lecturn/shared/appToolPresentation";
 import { shouldPreserveAssistantLineBreaks } from "@lecturn/shared/markdownPipeline";
 import { ThreadId, type WorktreeSetupSnapshot } from "@lecturn/contracts";
 import {
@@ -36,6 +37,7 @@ import {
   resolveAssistantMessageCopyState,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
+  timelineMinimapShown,
   resolveTimelineMinimapHeightStyle,
   resolveTimelineMinimapHitStripWidth,
   resolveTimelineMinimapIndexFromPointer,
@@ -196,6 +198,24 @@ describe("work entry labels", () => {
     expect(threadReadTargetId(threadRead)).toBe("thread-child");
     expect(threadReadLabelPrefix(liveWorkEntryLabel(threadRead, undefined, active))).toBe(prefix);
     expect(threadReadLabelPrefix(workEntryDisplayLabel(threadRead, undefined))).toBe(prefix);
+  });
+
+  it("labels an app tool row with its tool id as written", () => {
+    const appTool = {
+      ...entry,
+      label: "ex_counter_increment",
+      toolTitle: "ex_counter_increment",
+      itemType: "dynamic_tool" as const,
+      toolLifecycleStatus: "completed" as const,
+      toolSource: appToolSource({ appId: "dev.example", name: "Example", toolPrefix: "ex" }),
+    };
+    expect(workEntryDisplayLabel(appTool, undefined)).toBe("ex_counter_increment");
+    expect(
+      liveWorkEntryLabel({ ...appTool, toolLifecycleStatus: "inProgress" }, undefined, true),
+    ).toBe("ex_counter_increment");
+
+    const { toolSource: _appSource, ...otherTool } = appTool;
+    expect(workEntryDisplayLabel(otherTool, undefined)).toBe("Ex_counter_increment");
   });
 
   it("finds no target for other tools or thread reads without one", () => {
@@ -3766,6 +3786,61 @@ describe("v2 run and attempt history", () => {
       expect.objectContaining({ id: "provider-recovered" }),
     ]);
   });
+  it("keeps app tool rows out of a settled turn's fold", () => {
+    const message = (id: string, role: "user" | "assistant", at: string) => ({
+      id: `${id}-entry`,
+      kind: "message" as const,
+      createdAt: at,
+      message: {
+        id: id as never,
+        role,
+        text: id,
+        runId: role === "user" ? null : ("turn-1" as never),
+        createdAt: at,
+        updatedAt: at,
+        streaming: false,
+      },
+    });
+    const work = (id: string, at: string, app: boolean) => ({
+      id: `${id}-entry`,
+      kind: "work" as const,
+      createdAt: at,
+      entry: {
+        id,
+        createdAt: at,
+        runId: "turn-1" as never,
+        label: id,
+        tone: "tool" as const,
+        toolLifecycleStatus: "completed" as const,
+        ...(app
+          ? {
+              toolSource: {
+                key: "app:embed-host",
+                name: "Embed Host",
+                kind: "integration" as const,
+              },
+            }
+          : {}),
+      },
+    });
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        message("user", "user", "2026-01-01T00:00:00Z"),
+        work("ex_counter_read", "2026-01-01T00:00:01Z", true),
+        work("ran-command", "2026-01-01T00:00:02Z", false),
+        message("final", "assistant", "2026-01-01T00:00:03Z"),
+      ],
+      isWorking: false,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    });
+    expect(rows.map((row) => row.id)).toEqual([
+      "user-entry",
+      "turn-fold:turn-1",
+      "ex_counter_read-entry",
+      "final-entry",
+    ]);
+  });
   it("hides subagents in folded turns when they arrive before commentary", () => {
     const timelineEntries = [
       {
@@ -5697,6 +5772,13 @@ describe("timeline end and minimap geometry", () => {
     ).toBe(false);
     expect(resolveTimelineIsAtEnd({ isNearEnd: true, isAtEnd: false })).toBe(false);
     expect(resolveTimelineIsAtEnd({ isAtEnd: false })).toBe(false);
+  });
+
+  it("draws the minimap rail from two turns, never in the embed pane", () => {
+    expect(timelineMinimapShown(1, false)).toBe(false);
+    expect(timelineMinimapShown(2, false)).toBe(true);
+    expect(timelineMinimapShown(2, true)).toBe(false);
+    expect(timelineMinimapShown(40, true)).toBe(false);
   });
 
   it("maps the minimap rail to rows and sizes its hit strip from the free gutter", () => {

@@ -43,6 +43,8 @@ import {
   OrchestrationV2ThreadShell,
   OrchestrationV2TurnItem,
   OrchestrationV2TurnItemJson,
+  OrchestrationV2RuntimeRequestJson,
+  OrchestrationV2ThreadShellJson,
 } from "./orchestrationV2.ts";
 
 const now = DateTime.makeUnsafe("2026-04-20T00:00:00.000Z");
@@ -1552,5 +1554,121 @@ describe("latestProviderTurnForAttempt", () => {
     ];
     expect(latestProviderTurnForAttempt(turns, RunAttemptId.make("goal-attempt"))?.id).toBe("last");
     expect(latestProviderTurnForAttempt(turns, null)).toBeUndefined();
+  });
+});
+
+const decodeThreadShellJson = Schema.decodeUnknownSync(OrchestrationV2ThreadShellJson);
+const encodeThreadShellJson = Schema.encodeSync(OrchestrationV2ThreadShellJson);
+const decodeRuntimeRequestJson = Schema.decodeUnknownSync(OrchestrationV2RuntimeRequestJson);
+
+describe("connected app thread fields", () => {
+  const at = "2026-04-20T00:00:00.000Z";
+  const shell = {
+    createdBy: "user",
+    creationSource: "web",
+    id: "thread-1",
+    projectId: "project-1",
+    title: "Thread",
+    providerInstanceId: "claudeAgent",
+    modelSelection: { instanceId: "claudeAgent", model: "claude-sonnet" },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+    lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: "thread-1" },
+    forkedFrom: null,
+    activeProviderThreadId: null,
+    latestRunId: null,
+    activeRunId: null,
+    status: "idle",
+    pendingRuntimeRequest: null,
+    latestVisibleMessage: null,
+    latestUserMessageAt: null,
+    hasActionableProposedPlan: false,
+    pendingBackgroundTasks: [],
+    providerInstanceHistory: [],
+    itemCount: 0,
+    visibleItemCount: 0,
+    createdAt: at,
+    updatedAt: at,
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    deletedAt: null,
+  };
+  const appFields = {
+    appData: '{"artifact":"fins"}',
+    appSubtitle: "baseline / 305.23 m",
+    appOrigin: "embed",
+    copiedFrom: {
+      appId: "dev.rocketwright.app",
+      sourceEnvironmentId: "env-a",
+      sourceThreadId: "thread-0",
+      copiedAt: at,
+      sourceHistoryRevision: 12,
+    },
+    continuedIn: { environmentId: "env-b", threadId: "copy:env-a:thread-0", copiedAt: at },
+  };
+  const roundTrip = (value: unknown) => encodeThreadShellJson(decodeThreadShellJson(value));
+
+  it("adds no bytes to the shell of a thread outside an app", () => {
+    expect(JSON.stringify(roundTrip(shell))).toBe(JSON.stringify(shell));
+  });
+
+  it("round-trips app metadata on the wire shell", () => {
+    expect(roundTrip({ ...shell, ...appFields })).toEqual({ ...shell, ...appFields });
+    expect(() => roundTrip({ ...shell, appOrigin: "app" })).toThrow();
+    expect(() => roundTrip({ ...shell, appData: "x".repeat(1025) })).toThrow();
+  });
+
+  it("marks an app tool approval without changing the request kind older clients decode", () => {
+    const request = decodeRuntimeRequestJson({
+      id: "request-1",
+      nodeId: "node-1",
+      providerTurnId: null,
+      nativeRequestRef: null,
+      kind: "permission",
+      status: "pending",
+      responseCapability: { type: "live", providerSessionId: "session-1" },
+      createdAt: at,
+      resolvedAt: null,
+      connectedAppTool: {
+        appId: "dev.rocketwright.app",
+        appName: "RocketWright",
+        toolName: "rw_engine_simulate",
+        reason: "Duration over 60 s",
+        source: "app",
+      },
+    });
+    expect(request.kind).toBe("permission");
+    expect(request.connectedAppTool?.source).toBe("app");
+  });
+
+  it("keeps app metadata commands server-only while thread.create may carry the fields", () => {
+    expect(() =>
+      decodeOrchestrationV2Command({
+        type: "thread.app-data.set",
+        commandId: "command-1",
+        threadId: "thread-1",
+        appData: null,
+      }),
+    ).toThrow();
+    const create = decodeOrchestrationV2Command({
+      type: "thread.create",
+      createdBy: "user",
+      creationSource: "web",
+      commandId: "command-2",
+      threadId: "thread-2",
+      projectId: "project-1",
+      title: "Fins",
+      modelSelection: { instanceId: "claudeAgent", model: "claude-sonnet" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      appData: '{"artifact":"fins"}',
+      appOrigin: "embed",
+    });
+    expect(create.type === "thread.create" && create.appOrigin).toBe("embed");
   });
 });

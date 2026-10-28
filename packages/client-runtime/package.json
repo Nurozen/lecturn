@@ -11,6 +11,10 @@
       "types": "./src/imageAttachmentSize.ts",
       "default": "./src/imageAttachmentSize.ts"
     },
+    "./embed/guest": {
+      "types": "./src/embed/guest.ts",
+      "default": "./src/embed/guest.ts"
+    },
     "./handoff": {
       "types": "./src/handoff.ts",
       "default": "./src/handoff.ts"
@@ -311,6 +315,18 @@
       "types": "./src/state/staveSpaceWizard.ts",
       "default": "./src/state/staveSpaceWizard.ts"
     },
+    "./state/app-projects": {
+      "types": "./src/state/appProjects.ts",
+      "default": "./src/state/appProjects.ts"
+    },
+    "./state/apps": {
+      "types": "./src/state/apps.ts",
+      "default": "./src/state/apps.ts"
+    },
+    "./state/app-status": {
+      "types": "./src/state/appStatus.ts",
+      "default": "./src/state/appStatus.ts"
+    },
     "./state/source-control": {
       "types": "./src/state/sourceControl.ts",
       "default": "./src/state/sourceControl.ts"
@@ -354,6 +370,10 @@
     "./state/thread-requests": {
       "types": "./src/state/threadRequests.ts",
       "default": "./src/state/threadRequests.ts"
+    },
+    "./state/app-tool-approval-placement": {
+      "types": "./src/state/appToolApprovalPlacement.ts",
+      "default": "./src/state/appToolApprovalPlacement.ts"
     },
     "./state/thread-workflows": {
       "types": "./src/state/threadWorkflows.ts",

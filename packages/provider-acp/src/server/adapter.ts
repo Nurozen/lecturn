@@ -58,8 +58,13 @@ import type * as EffectAcpSchema from "effect-acp/compat";
 
 import { formatReadToolLabel, formatSearchToolLabel } from "@lecturn/shared/toolActivity";
 import * as ProviderHost from "@lecturn/provider-core/server/ProviderHost";
+import { acpAppInstructions } from "./appInstructions.ts";
+import { acpLecturnMcpToolRawOutput, acpMcpToolCallArgs } from "./appToolOutput.ts";
 import { makeAcpMcpOverAcpBridge, type AcpMcpOverAcpBridge } from "./mcpOverAcpBridge.ts";
-import { mcpToolPresentation } from "@lecturn/provider-core/server/mcpToolPresentation";
+import {
+  mcpToolPresentation,
+  mcpToolResultOutput,
+} from "@lecturn/provider-core/server/mcpToolPresentation";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import * as McpProviderSession from "@lecturn/provider-core/server/mcpSession";
 import {
@@ -78,6 +83,7 @@ import {
 } from "./runtimeModel.ts";
 import {
   acpClientExecuteDisposition,
+  acpLecturnAppToolDisposition,
   acpMcpToolApprovalElicitationDisposition,
   acpPermissionDisposition,
   type AcpPermissionDisposition,
@@ -92,6 +98,7 @@ import {
 import { ACP_EMPTY_OPTION_VALUE, ACP_SESSION_MODE_OPTION_ID } from "./sessionConfig.ts";
 import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
 import {
+  lecturnAcpInstructionState,
   lecturnAcpPromptWithInstructions,
   type LecturnAcpInstructionState,
 } from "@lecturn/provider-core/server/orchestrationInstructions";
@@ -292,6 +299,12 @@ export interface AcpAdapterV2Flavor {
   ) => AcpAdapterV2SubagentUpdate | undefined;
   readonly normalizeToolCall?: (toolCall: AcpToolCallState) => AcpToolCallState;
   readonly extractProposedPlanMarkdown?: (toolCall: AcpToolCallState) => string | undefined;
+  /**
+   * Lecturn: the name the agent's own tool list gives a tool on Lecturn's MCP
+   * server, where it is known. App instructions name the app's tools that way,
+   * because an agent that calls the server's bare name gets "not found".
+   */
+  readonly lecturnMcpToolName?: (tool: string) => string;
   /**
    * Lecturn: in plan interaction, a completed turn that captured no proposed
    * plan proposes its final assistant message instead.
@@ -673,9 +686,7 @@ function acpMcpToolCallOutput(rawOutput: unknown): unknown {
   const record = unknownRecord(rawOutput);
   if (record === undefined) return rawOutput;
   if (!("result" in record) && !("error" in record)) return rawOutput;
-  const result = unknownRecord(record.result);
-  const resultOutput =
-    result === undefined ? undefined : (result.structuredContent ?? result.content ?? undefined);
+  const resultOutput = mcpToolResultOutput(record.result);
   const errorMessage = unknownRecord(record.error)?.message;
   if (typeof errorMessage !== "string") {
     return resultOutput ?? rawOutput;
@@ -1334,6 +1345,23 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           .read(threadId)
           .pipe(Effect.map((session) => acpMcpContext(session, self, extraServers)));
   const driver = flavor.driver;
+  // Every ACP session gets the stdio bridge whenever the thread has a session,
+  // so the session itself is the answer (see acpMcpContext).
+  const reportAcpMcpActivation = (
+    threadId: ThreadId,
+    providerThreadId: OrchestrationV2ProviderThread["id"],
+  ) =>
+    mcpSessions.read(threadId).pipe(
+      Effect.flatMap((session) =>
+        McpProviderSessions.reportThreadMcpActivation({
+          mcpSessions,
+          threadId,
+          providerThreadId,
+          driver,
+          mcpActivated: session !== undefined,
+        }),
+      ),
+    );
   const continuationRequests = options.continuationRequests;
   const postSettleContinuationEnabled =
     flavor.enablePostSettleContinuation === true && continuationRequests !== undefined;
@@ -3123,6 +3151,18 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               });
             }
           } else if (mcpIdentity !== undefined) {
+            const mcpOutput = acpLecturnMcpToolRawOutput({
+              threadId: context.input.threadId,
+              callId: toolCall.toolCallId,
+              server: mcpIdentity.server,
+              tool: mcpIdentity.tool,
+              args: acpMcpToolCallArgs(mcpIdentity.input, rawInputRecord),
+              status,
+              startedAtMillis: DateTime.toEpochMillis(startedAt),
+              nowMillis: DateTime.toEpochMillis(now),
+              rawOutput,
+            });
+            const mcpOutputRecord = unknownRecord(mcpOutput);
             turnItem = {
               ...base,
               title: null,
@@ -3130,7 +3170,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 serverName: mcpIdentity.server,
                 toolName: mcpIdentity.tool,
                 source: unknownRecord(
-                  (unknownRecord(rawOutputRecord?.result) ?? rawOutputRecord)?._meta,
+                  (unknownRecord(mcpOutputRecord?.result) ?? mcpOutputRecord)?._meta,
                 )?.source,
               }),
               type: "dynamic_tool",
@@ -3140,7 +3180,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 unknownRecord(rawInputRecord?.arguments) ??
                 rawInputRecord ??
                 {},
-              ...(rawOutput === undefined ? {} : { output: acpMcpToolCallOutput(rawOutput) }),
+              ...(mcpOutput === undefined ? {} : { output: acpMcpToolCallOutput(mcpOutput) }),
             };
             yield* emitProviderEvent({ type: "turn_item.updated", driver, turnItem });
             yield* rearmDeferredFinalize(context);
@@ -5323,10 +5363,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 handlerGeneration,
                 Effect.gen(function* () {
                   const context = yield* activeContext;
-                  const disposition = (flavor.permissionDisposition ?? acpPermissionDisposition)(
-                    context.input.runtimePolicy,
-                    params,
-                  );
+                  const appTools = (yield* mcpSessions.read(context.input.threadId))?.app;
+                  const disposition =
+                    acpLecturnAppToolDisposition(params, appTools) ??
+                    (flavor.permissionDisposition ?? acpPermissionDisposition)(
+                      context.input.runtimePolicy,
+                      params,
+                    );
                   if (disposition === "allow") {
                     const optionId = selectAutoApprovedPermissionOption(params);
                     return {
@@ -6407,10 +6450,16 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           sessionId: string,
         ) {
           const prompt: Array<EffectAcpSchema.ContentBlock> = [];
-          const instructionState = {
+          const appInstructions = acpAppInstructions({
+            instructions: turnInput.appInstructions,
+            app: (yield* mcpSessions.read(turnInput.threadId))?.app,
+            toolName: flavor.lecturnMcpToolName,
+          });
+          const instructionState = lecturnAcpInstructionState({
             interactionMode: turnInput.runtimePolicy.interactionMode,
             hasLecturnMcp: (yield* readAdapterMcpContext(turnInput.threadId)).servers.length > 0,
-          } satisfies LecturnAcpInstructionState;
+            ...(appInstructions === undefined ? {} : { appInstructions }),
+          });
           const previousInstructionState = (yield* Ref.get(promptInstructionStates)).get(sessionId);
           const messageText = providerMessageTextWithAttachmentPaths({
             text: turnInput.message.text,
@@ -6420,6 +6469,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           const text = lecturnAcpPromptWithInstructions({
             prompt: messageText,
             state: instructionState,
+            ...(appInstructions === undefined ? {} : { appInstructions }),
             ...(previousInstructionState === undefined
               ? {}
               : { previousState: previousInstructionState }),
@@ -6956,6 +7006,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               yield* Ref.update(providerThreadByNativeSessionId, (current) =>
                 new Map(current).set(sessionId, providerThread),
               );
+              yield* reportAcpMcpActivation(
+                threadInput.threadId,
+                threadInput.existingProviderThread?.id ?? providerThread.id,
+              );
               return providerThread;
             },
             (effect, threadInput) =>
@@ -7009,6 +7063,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                     yield* Ref.set(activeInteractionMode, nextRuntimePolicy.interactionMode);
                   }
                   const now = yield* DateTime.now;
+                  const appThreadId = threadInput.providerThread.appThreadId;
+                  if (appThreadId !== null) {
+                    yield* reportAcpMcpActivation(appThreadId, threadInput.providerThread.id);
+                  }
                   return {
                     ...threadInput.providerThread,
                     providerSessionId: input.providerSessionId,

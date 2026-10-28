@@ -8,6 +8,8 @@ import { ScreenContent } from "../../components/ui/ScreenContent";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import { HomeRouteScreen } from "../home/HomeRouteScreen";
 import { PullRequestsScreen } from "../pull-requests/PullRequestsScreen";
+import { AppsScreen } from "../apps/AppsScreen";
+import { AppsToolbar } from "../apps/AppsToolbar.android";
 import { PullRequestToolbar } from "../pull-requests/PullRequestToolbar.android";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import { AndroidWorkspaceNavigation } from "./AndroidWorkspaceNavigation";
@@ -29,6 +31,18 @@ export function WorkspaceRootScreen() {
   if (layout.usesSplitView) {
     return workspace.state.selectedTab === "threads" ? (
       <HomeRouteScreen />
+    ) : workspace.state.selectedTab === "apps" ? (
+      <>
+        <NativeStackScreenOptions options={{ headerShown: false }} />
+        <AndroidScreenHeader title="Apps" />
+        <View className="flex-1 items-center justify-center px-10">
+          <EmptyState
+            title="Select an app"
+            detail="Choose an app from the sidebar to see its threads."
+            variant="plain"
+          />
+        </View>
+      </>
     ) : (
       <>
         <NativeStackScreenOptions options={{ headerShown: false }} />
@@ -52,6 +66,13 @@ export function WorkspaceRootScreen() {
           <View className="flex-1">
             {workspace.state.selectedTab === "threads" ? (
               <HomeRouteScreen />
+            ) : workspace.state.selectedTab === "apps" ? (
+              <>
+                <AppsToolbar />
+                <ScreenContent>
+                  <AppsScreen />
+                </ScreenContent>
+              </>
             ) : (
               <>
                 <PullRequestToolbar />

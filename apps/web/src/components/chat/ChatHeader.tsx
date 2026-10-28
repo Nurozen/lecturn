@@ -3,13 +3,13 @@ import {
   type EnvironmentId,
   type ThreadId,
 } from "@lecturn/contracts";
-import { scopeThreadRef } from "@lecturn/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
 import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
-import { ChevronDownIcon, GitForkIcon, ImportIcon } from "lucide-react";
+import { ChevronDownIcon, CopyIcon, GitForkIcon, ImportIcon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   memo,
@@ -19,17 +19,19 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { buildImportChip } from "../ChatView.logic";
+import { buildCopyChip, buildImportChip } from "../ChatView.logic";
 import { isTrailingDoubleClick } from "../Sidebar.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
 import { readLocalApi } from "~/localApi";
+import { useAppEmbedContext } from "../../state/apps";
 import { useThreadShell } from "../../state/entities";
 import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { AppIcon } from "../apps/AppIcon";
 import {
   WorkspaceBreadcrumb,
   WorkspaceBreadcrumbItem,
@@ -80,7 +82,14 @@ export const ChatHeader = memo(function ChatHeader({
   onNewThreadInProject,
   onOpenProjectSettings,
 }: ChatHeaderProps) {
+  // An app's workspace is named by its app, as the Apps sidebar names it.
+  const breadcrumbApp = useAppEmbedContext(
+    activeProject?.appBinding
+      ? scopeProjectRef(activeProject.environmentId, activeProject.id)
+      : null,
+  );
   const activeProjectName = activeProject?.title;
+  const breadcrumbProjectName = breadcrumbApp?.name ?? activeProjectName;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const interfaceFont = useClientSettings((settings) => settings.fontFamilySans);
   const breadcrumbContainerRef = useRef<HTMLDivElement>(null);
@@ -112,6 +121,15 @@ export const ChatHeader = memo(function ChatHeader({
   // is the nearer origin, and it carries the import chip itself.
   const importedFrom = forkOrigin === null ? (threadShell?.importedFrom ?? null) : null;
   const importChip = importedFrom === null ? null : buildImportChip(importedFrom);
+  // A connected app's thread copied from its sidecar; the app is the project's.
+  const copiedFrom = forkOrigin === null ? (threadShell?.source.copiedFrom ?? null) : null;
+  const copyAppContext = useAppEmbedContext(
+    copiedFrom === null || threadShell === null
+      ? null
+      : scopeProjectRef(activeThreadEnvironmentId, threadShell.projectId),
+  );
+  const copyChip =
+    copiedFrom === null ? null : buildCopyChip(copiedFrom, copyAppContext?.name ?? null);
   const navigate = useNavigate();
   const openParentThread = () => {
     if (parentThreadRef === null) return;
@@ -176,7 +194,7 @@ export const ChatHeader = memo(function ChatHeader({
     };
   }, [
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Title, font and rename changes resize the breadcrumb text without resizing the list, so it re-measures.
-    activeProjectName,
+    breadcrumbProjectName,
     activeThreadTitle,
     parentThreadLink,
     interfaceFont,
@@ -324,9 +342,13 @@ export const ChatHeader = memo(function ChatHeader({
                     />
                   }
                 >
-                  <ProjectFavicon project={activeProject} className="size-3.5" />
+                  {breadcrumbApp ? (
+                    <AppIcon iconDataUrl={breadcrumbApp.iconDataUrl} />
+                  ) : (
+                    <ProjectFavicon project={activeProject} className="size-3.5" />
+                  )}
                   <WorkspaceBreadcrumbText className="max-w-40">
-                    {activeProjectName}
+                    {breadcrumbProjectName}
                   </WorkspaceBreadcrumbText>
                 </TooltipTrigger>
                 <TooltipPopup side="top">New thread in {activeProjectName}</TooltipPopup>
@@ -461,6 +483,22 @@ export const ChatHeader = memo(function ChatHeader({
                 <span className="min-w-0 truncate">{importChip.label}</span>
               </TooltipTrigger>
               <TooltipPopup side="top">{importChip.tooltip}</TooltipPopup>
+            </Tooltip>
+          ) : copyChip !== null ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    tabIndex={0}
+                    aria-label={copyChip.label}
+                    className="ml-2 inline-flex h-5 max-w-48 shrink-0 items-center gap-1 rounded-full border border-border/70 px-1.5 text-2xs text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  />
+                }
+              >
+                <CopyIcon aria-hidden className="size-3 shrink-0" />
+                <span className="min-w-0 truncate">{copyChip.label}</span>
+              </TooltipTrigger>
+              <TooltipPopup side="top">{copyChip.tooltip}</TooltipPopup>
             </Tooltip>
           ) : null}
         </WorkspaceBreadcrumbItem>

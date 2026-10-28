@@ -3,6 +3,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 
+import { isEmbedLocation } from "../../embed/embedAuth";
+import { makeEmbedHttpLayer } from "../../embed/embedHttpLayer";
 import { readDesktopPrimaryBearerToken } from "./desktopAuth";
 import { resolvePrimaryEnvironmentHttpUrl } from "./target";
 
@@ -33,6 +35,7 @@ function withPrimaryBearerToken(client: HttpClient.HttpClient): HttpClient.HttpC
 export function layerForCurrentOrigin() {
   return Layer.unwrap(
     Effect.sync(() => {
+      if (isEmbedLocation()) return makeEmbedHttpLayer();
       const layerBase = layerRemoteHttpClient(globalThis.fetch);
       if (isSameOriginBrowserPrimary()) {
         return Layer.merge(

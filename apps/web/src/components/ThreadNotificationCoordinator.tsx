@@ -16,13 +16,17 @@ import {
 import { useEffect, useRef } from "react";
 
 import { getClientSettings, useClientSettings } from "../hooks/useSettings";
+import { useAppStatuses } from "../state/apps";
 import { useEnvironmentIds } from "../state/environments";
 import { environmentShell } from "../state/shell";
 import {
   hasDesktopNotifications,
   hasNotificationSound,
   playNotificationSound,
+  revealNotifiedAppThread,
   setNotificationBadge,
+  threadNotificationApp,
+  threadNotificationTitle,
   unlockNotificationAudio,
 } from "../threadNotifications";
 import { resolveSidebarThreadStatus } from "./Sidebar.logic";
@@ -107,8 +111,11 @@ function EnvironmentNotifications({
   onNotification: (environmentId: EnvironmentId, notification: Notification) => void;
 }) {
   const shell = useAtomValue(environmentShell.stateValueAtom(environmentId));
-  const threads =
-    shell.status === "live" && Option.isSome(shell.snapshot) ? shell.snapshot.value.threads : null;
+  const snapshot =
+    shell.status === "live" && Option.isSome(shell.snapshot) ? shell.snapshot.value : null;
+  const threads = snapshot?.threads ?? null;
+  const projects = snapshot?.projects ?? null;
+  const appStatuses = useAppStatuses();
   const mode = useClientSettings((settings) => settings.notificationMode);
   const inAppNotificationsEnabled = useClientSettings(
     (settings) => settings.inAppNotificationsEnabled,
@@ -157,7 +164,19 @@ function EnvironmentNotifications({
             ? "completion"
             : null;
       if (!kind) continue;
-      const title =
+      // App threads alert like any other, even while Projects mode hides their project.
+      const app = threadNotificationApp(
+        projects?.find((project) => project.id === thread.projectId),
+        appStatuses.flatMap((entry) => (entry.environmentId === environmentId ? [entry.app] : [])),
+      );
+      const open = () => {
+        revealNotifiedAppThread(app);
+        void navigate({
+          to: "/$environmentId/$threadId",
+          params: { environmentId, threadId: thread.id },
+        });
+      };
+      const title = threadNotificationTitle(
         kind === "completion"
           ? "Thread completed"
           : status === "approval"
@@ -166,7 +185,9 @@ function EnvironmentNotifications({
               ? "Usage limit reached"
               : status === "failed"
                 ? "Thread failed"
-                : "Input needed";
+                : "Input needed",
+        app,
+      );
       if (hasNotificationSound(mode)) {
         void playNotificationSound(kind, () =>
           hasNotificationSound(getClientSettings().notificationMode),
@@ -199,10 +220,7 @@ function EnvironmentNotifications({
             children: "Open thread",
             onClick: () => {
               toastManager.close(toastId);
-              void navigate({
-                to: "/$environmentId/$threadId",
-                params: { environmentId, threadId: thread.id },
-              });
+              open();
             },
           },
         });
@@ -225,10 +243,7 @@ function EnvironmentNotifications({
         notification.addEventListener("click", () => {
           notification.close();
           window.focus();
-          void navigate({
-            to: "/$environmentId/$threadId",
-            params: { environmentId, threadId: thread.id },
-          });
+          open();
         });
       } catch {
         // Some browsers expose Notification but reject desktop presentation.
@@ -238,11 +253,13 @@ function EnvironmentNotifications({
   }, [
     activeEnvironmentId,
     activeThreadId,
+    appStatuses,
     environmentId,
     inAppNotificationsEnabled,
     mode,
     navigate,
     onNotification,
+    projects,
     threads,
   ]);
 

@@ -6,7 +6,7 @@ import { ProviderDriverKind } from "@lecturn/contracts";
 import { AntigravityIcon, ClaudeAI, GithubCopilotIcon, Icon, OpenAI } from "../Icons";
 
 import { cn } from "~/lib/utils";
-import { providerClients } from "../settings/providerDriverMeta";
+import { providerDriverIcon } from "../settings/providerDriverMeta";
 import { ProviderPackageIcon } from "./ProviderPackageIcon";
 import {
   AcpRegistryAgentIcon,
@@ -32,7 +32,7 @@ export function providerTextColor(driverKind: ProviderDriverKind): {
   readonly className?: string;
   readonly style?: CSSProperties;
 } {
-  const icon = providerClients.get(driverKind)?.icon;
+  const icon = providerDriverIcon(driverKind);
   if (icon) {
     return {
       className: "text-(--icon-light) dark:text-(--icon-dark)",
@@ -70,7 +70,7 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   indicatorBackground?: string;
 }) {
   const Icon = PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
-  const packageIcon = providerClients.get(props.driverKind)?.icon;
+  const packageIcon = providerDriverIcon(props.driverKind);
   const indicatorBackground = props.indicatorBackground ?? "var(--card)";
   const accentStyle = props.accentColor
     ? ({ "--provider-accent": props.accentColor } as CSSProperties)

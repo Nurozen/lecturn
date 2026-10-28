@@ -31,6 +31,7 @@ import {
   type ProviderInstanceId,
   type RunId,
   type RuntimeRequestId,
+  type ThreadId,
 } from "@lecturn/contracts";
 import type * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
@@ -58,7 +59,10 @@ import {
   currentStaveMemoryResolver,
   STAVE_MEMORY_MCP_SERVER_NAME,
 } from "@lecturn/provider-core/server/staveMemory";
-import { lecturnOrchestrationSystemPrompt } from "@lecturn/provider-core/server/orchestrationInstructions";
+import {
+  connectedAppInstructionsSection,
+  lecturnOrchestrationSystemPrompt,
+} from "@lecturn/provider-core/server/orchestrationInstructions";
 import { SKILL_MENTION_PATTERN } from "@lecturn/shared/composerInlineTokens";
 import * as KeyedLock from "@lecturn/shared/KeyedLock";
 import { getModelSelectionStringOptionValue, modelSelectionsEqual } from "@lecturn/shared/model";
@@ -540,6 +544,9 @@ const RECONNECT_WAIT = "30 seconds";
 const LOST_BACKGROUND =
   "Lecturn lost its connection to OpenCode while this subagent ran, so its result is not shown.";
 const INVENTORY_TIMEOUT = "5 seconds";
+// Above Lecturn's hour-long wait tools, as Claude and Codex are; it also
+// covers a connected app's 10-minute approval wait.
+const LECTURN_MCP_TOOL_TIMEOUT_MS = 65 * 60 * 1_000;
 const ACTIVE_CHECK_TIMEOUT = "5 seconds";
 /** Answers that mean the server refused a prompt; any other failure may have been accepted. */
 const CLEAR_PROMPT_REJECTIONS: ReadonlySet<string> = new Set([
@@ -2994,6 +3001,24 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       ),
     );
 
+    // An external server is handed the config but never installs it (see
+    // prepareTurn), so the session alone does not answer this.
+    const reportOpenCodeMcpActivation = (
+      threadId: ThreadId,
+      providerThreadId: OrchestrationV2ProviderThread["id"],
+    ) =>
+      mcpSessions.read(threadId).pipe(
+        Effect.flatMap((session) =>
+          McpProviderSessions.reportThreadMcpActivation({
+            mcpSessions,
+            threadId,
+            providerThreadId,
+            driver,
+            mcpActivated: session !== undefined && !connection.external,
+          }),
+        ),
+      );
+
     const prepareTurn = Effect.fnUntraced(function* (
       sessionId: string,
       state: ThreadState,
@@ -3027,6 +3052,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
               url: mcpSession!.endpoint,
               headers: { Authorization: wanted.credential },
               oauth: false,
+              timeout: new Mcp.TimeoutConfig({ execution: LECTURN_MCP_TOOL_TIMEOUT_MS }),
             }),
           })
           .pipe(
@@ -3039,10 +3065,20 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             ),
           );
         if (added) state.mcp = wanted;
+        else {
+          yield* mcpSessions.reportActivation({
+            type: "mcp-activation-failed",
+            threadId: turnInput.threadId,
+            providerThreadId: state.providerThread.id,
+            driver,
+            reason: "OpenCode did not accept Lecturn's MCP server.",
+          });
+        }
       }
       const instructions = [
         buildRuntimeInstructions({ harness: "OpenCode", model: turnInput.modelSelection.model }),
         lecturnOrchestrationSystemPrompt(state.mcp !== undefined),
+        connectedAppInstructionsSection(turnInput.appInstructions),
       ]
         .filter((part) => part !== undefined && part.length > 0)
         .join("\n\n");
@@ -3418,6 +3454,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             directory,
           );
           state.policy = policy;
+          yield* reportOpenCodeMcpActivation(threadInput.threadId, state.providerThread.id);
           return state.providerThread;
         }).pipe(
           Effect.mapError((cause) =>
@@ -3453,6 +3490,10 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
               sessionID: Session.ID.make(sessionId),
               directory: AbsolutePath.make(cwd),
             });
+          }
+          const appThreadId = threadInput.threadId ?? state.providerThread.appThreadId;
+          if (appThreadId !== null) {
+            yield* reportOpenCodeMcpActivation(appThreadId, state.providerThread.id);
           }
           return state.providerThread;
         }).pipe(

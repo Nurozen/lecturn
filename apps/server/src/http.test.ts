@@ -22,9 +22,11 @@ import {
   injectMcpAppThemeBootstrap,
   MCP_APP_MAX_HTML_BYTES,
 } from "@lecturn/shared/mcpApp";
-import { ORCHESTRATION_PROTOCOL_HEADER } from "@lecturn/contracts";
+import { type AppStatus, ORCHESTRATION_PROTOCOL_HEADER } from "@lecturn/contracts";
 
 import * as ServerConfig from "./config.ts";
+import { AppRegistryService } from "./apps/services.ts";
+import { makeAppStatus } from "./apps/testing/appStatusFixture.ts";
 
 import {
   assetResponseHeaders,
@@ -187,13 +189,19 @@ describe("browser API CORS", () => {
 
 const layerFileResponse = Layer.mergeAll(NodeHttpPlatform.layer, NodeServices.layer);
 
-const makeStaticRequest = Effect.fn("HttpTest.makeStaticRequest")(function* (staticDir: string) {
+const makeStaticRequest = Effect.fn("HttpTest.makeStaticRequest")(function* (
+  staticDir: string,
+  apps: ReadonlyArray<AppStatus> = [],
+) {
   const config = yield* ServerConfig.ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
   const layerApp = Layer.merge(
     ServerHttp.layerStaticAndDevRoute,
     ServerHttp.layerHttpCompression,
-  ).pipe(Layer.provideMerge(NodeHttpPlatform.layer));
+  ).pipe(
+    Layer.provideMerge(NodeHttpPlatform.layer),
+    Layer.provide(Layer.mock(AppRegistryService)({ list: Effect.succeed(apps) })),
+  );
   // HttpRouter.serve reuses services from the layers around it before the
   // app's own, and NodeHttpServer.layerTest brings a real FileSystem, so the
   // caller's FileSystem and static directory go between the two.
@@ -293,6 +301,45 @@ it.layer(
       expect(head.status).toBe(200);
       expect(head.headers["content-length"]).toBe(String(Buffer.byteLength(nextHtml)));
       expect(yield* head.text).toBe("");
+    }),
+  );
+
+  it.effect("lets granted app origins frame /embed and keeps every other page same-origin", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const staticDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-static-frame-" });
+      yield* fs.writeFileString(path.join(staticDir, "index.html"), "<html>app</html>");
+      yield* fs.makeDirectory(path.join(staticDir, "assets"));
+      yield* fs.writeFileString(path.join(staticDir, "assets", "index-abcd1234.js"), "boot();");
+      const request = yield* makeStaticRequest(staticDir, [
+        makeAppStatus({
+          appId: "dev.example.granted",
+          state: "granted",
+          embedOrigins: ["http://127.0.0.1:5173", "http://localhost:*"],
+        }),
+        makeAppStatus({
+          appId: "dev.example.revoked",
+          state: "revoked",
+          embedOrigins: ["http://127.0.0.1:9000"],
+        }),
+      ]);
+
+      for (const resource of ["/embed/env-1/project-1", "/embed/env-1/project-1/thread-1"]) {
+        const response = yield* request(resource);
+        expect(yield* response.text).toBe("<html>app</html>");
+        expect(response.headers["content-security-policy"]).toBe(
+          "frame-ancestors 'self' http://127.0.0.1:5173 http://localhost:*",
+        );
+      }
+      for (const resource of ["/", "/threads/example", "/embedded"]) {
+        const response = yield* request(resource);
+        expect(yield* response.text).toBe("<html>app</html>");
+        expect(response.headers["content-security-policy"]).toBe("frame-ancestors 'self'");
+      }
+      const asset = yield* request("/assets/index-abcd1234.js");
+      expect(yield* asset.text).toBe("boot();");
+      expect(asset.headers["content-security-policy"]).toBeUndefined();
     }),
   );
 

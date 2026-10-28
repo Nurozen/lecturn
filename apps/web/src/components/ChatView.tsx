@@ -37,6 +37,8 @@ import * as DateTime from "effect/DateTime";
 import { restorePlanFollowUpComposer } from "./ChatView.logic";
 import { assistantCitationsToPlainText } from "@lecturn/shared/assistantCitations";
 import { useQueuedRunEdit } from "./chat/useQueuedRunEdit";
+import { appRefLabelsForSend } from "./embed/appRefChipStore";
+import { useFollowEndWhenDrawerDocks } from "./chat/dockedDrawerFollow";
 import {
   isPaintOnlyThreadTimeline,
   peekHeldThreadTimeline,
@@ -176,7 +178,10 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useLocation } from "@tanstack/react-router";
+import { useEmbedPresentation } from "../embed/EmbedPresentationContext";
+import { useComposerCardTimelineEntries } from "./embed/embedPendingApprovalRows";
+import { useEmbedAwareNavigate } from "../embed/embedNavigation";
 import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
 import { isMacPlatform } from "../lib/utils";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
@@ -473,6 +478,7 @@ import {
   shouldShowThreadErrorBanner,
   ThreadErrorBanner,
 } from "./chat/ThreadErrorBanner";
+import { ChatBannerLane } from "./chat/ChatBannerLane";
 import { QueuedRunsControl, type QueuedRunsControlHandle } from "./chat/QueuedRunsControl";
 import { useThreadLinkedPullRequest } from "./pullRequest/useThreadLinkedPullRequest";
 import { useProactivePanels } from "../hooks/useProactivePanels";
@@ -480,6 +486,8 @@ import { useIncrementalTimelineEntries } from "../hooks/useIncrementalTimelineEn
 import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
 import { useAgentOpenedPreviews } from "./preview/useAgentOpenedPreviews";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { useAppClosedBanner } from "./apps/useAppClosedBanner";
+import { AppThreadImportSessionLink } from "./apps/AppThreadImportSessionLink";
 import { ThreadStatusLine } from "./chat/ThreadStatusLine";
 import { formatRelativeTimeUntilLabel } from "../timestampFormat";
 import { ComposerSurface } from "./chat/ComposerSurface";
@@ -1241,7 +1249,8 @@ export default function ChatView(props: ChatViewProps) {
     (store) => store.setStickyModelSelection,
   );
   const timestampFormat = settings.timestampFormat;
-  const navigate = useNavigate();
+  const embedPresentation = useEmbedPresentation();
+  const navigate = useEmbedAwareNavigate();
   // Selects primitives: an object here is new on every router store update, which
   // re-renders ChatView on unrelated navigation state changes.
   const citationHref = useLocation({ select: (location) => location.href });
@@ -1696,7 +1705,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const canReuseTerminal = activeThreadKnownSessionsRaw !== null;
   const previewPanelOpen = activeRightPanelKind === "preview" && browserAvailable;
-  const rightPanelOpen = rightPanelState.isOpen;
+  const rightPanelOpen = rightPanelState.isOpen && embedPresentation === null;
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   const activeTerminalDrawerPresence = usePanelPresence(
@@ -1723,10 +1732,12 @@ export default function ChatView(props: ChatViewProps) {
   const rightPanelControlsAtRoot = rightPanelPresent && !shouldUsePlanSidebarSheet;
   const renderedRightPanelSurface = rightPanelPresence.value?.activeSurface ?? null;
   const renderedRightPanelSurfaces = rightPanelPresence.value?.surfaces ?? [];
-  const previewMiniPlayerVisible = shouldRenderPreviewMiniPlayer(
-    activePreviewMiniPlayer?.source ?? null,
-    renderedRightPanelSurface,
-  );
+  const previewMiniPlayerVisible =
+    embedPresentation === null &&
+    shouldRenderPreviewMiniPlayer(
+      activePreviewMiniPlayer?.source ?? null,
+      renderedRightPanelSurface,
+    );
   const canMaximizeRightPanel = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const rightPanelMaximized = canMaximizeRightPanel && rightPanelState.maximized === true;
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUsePlanSidebarSheet;
@@ -1919,6 +1930,10 @@ export default function ChatView(props: ChatViewProps) {
       ),
     };
   })() as ComposerBannerStackItem | null;
+  const appClosedBannerItem = useAppClosedBanner(
+    activeProjectRef,
+    isLocalDraftThread ? null : threadId,
+  );
   const activeProjectDefaultModelSelection = activeProjectSettings.settings.defaultModelSelection;
   const handleNewThreadInActiveProject = () => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
@@ -2901,6 +2916,10 @@ export default function ChatView(props: ChatViewProps) {
     nextEntries: timelineEntries,
     rememberedForActive: peekRememberedThreadTimeline<typeof timelineEntries>(activeThreadKey),
   });
+  const shownTimelineEntries = useComposerCardTimelineEntries(
+    displayedTimeline.entries,
+    pendingApprovals,
+  );
   const displayedTimelineKey = displayedTimeline.displayThreadKey ?? routeThreadKey;
   const paintOnlyDisplayedTimeline = isPaintOnlyThreadTimeline(
     displayedTimeline.displayThreadKey,
@@ -3126,7 +3145,7 @@ export default function ChatView(props: ChatViewProps) {
     remoteOpenMode: remoteOpenState.mode,
   });
   useOpenFavoriteEditorShortcut({
-    enabled: showOpenInPicker,
+    enabled: showOpenInPicker && embedPresentation === null,
     environmentId: activeThread?.environmentId ?? environmentId,
     keybindings,
     availableEditors,
@@ -4450,6 +4469,12 @@ export default function ChatView(props: ChatViewProps) {
     });
   };
   const scrollToEndStable = useStableCallback(scrollToEnd);
+  useFollowEndWhenDrawerDocks({
+    overlay: composerOverlayElement,
+    inset: composerTimelineInset,
+    isFollowingEnd: () => timelineScrollModeRef.current === "following-end",
+    scrollToEnd: scrollToEndStable,
+  });
   useEffect(() => {
     const composer = composerRef;
     let removeListeners: (() => void) | null = null;
@@ -5655,7 +5680,9 @@ export default function ChatView(props: ChatViewProps) {
       backgroundWorkBannerItem,
     ].filter((item) => item !== null);
     const usageLimitsItems = usageLimitsBanner === null ? [] : [usageLimitsBanner];
-    const projectCloneItems = projectCloneBannerItem === null ? [] : [projectCloneBannerItem];
+    const projectCloneItems = [projectCloneBannerItem, appClosedBannerItem].filter(
+      (item) => item !== null,
+    );
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
       return [
         ...feedbackBannerItems,
@@ -6546,6 +6573,7 @@ export default function ChatView(props: ChatViewProps) {
           reviewComments: composerReviewComments,
           previewAnnotations: composerPreviewAnnotations,
           threadContexts: composerThreadContexts,
+          appRefs: appRefLabelsForSend(composerDraftTarget, followUp.text),
         }),
         interactionMode: followUp.interactionMode,
       });
@@ -6674,6 +6702,7 @@ export default function ChatView(props: ChatViewProps) {
         promptForSend,
       )
       .trim();
+    const outgoingAppRefLabels = appRefLabelsForSend(composerDraftTarget, messageTextForSend);
     // Records bind attachments by the id each side knows: the local id for the optimistic
     // row, the upload id (or local id on the data-URL path) on the wire; the server
     // rebinds them to the persisted id.
@@ -6683,6 +6712,7 @@ export default function ChatView(props: ChatViewProps) {
         reviewComments: composerReviewCommentsSnapshot,
         previewAnnotations: composerPreviewAnnotationsSnapshot,
         threadContexts: composerThreadContextsSnapshot,
+        appRefs: outgoingAppRefLabels,
         attachments: composerAttachmentsSnapshot.map((attachment, index) => ({
           attachment,
           attachmentId: attachmentIds[index] ?? attachment.id,
@@ -8331,6 +8361,7 @@ export default function ChatView(props: ChatViewProps) {
           <header
             ref={threadPanelPopoverAnchorRef}
             data-chat-header
+            hidden={embedPresentation !== null}
             className={cn(
               "relative bg-background [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
               isElectron
@@ -8412,7 +8443,7 @@ export default function ChatView(props: ChatViewProps) {
                   </div>
                 </div>
               ) : null}
-              <div className="chat-banner-lane pointer-events-none absolute top-0 z-20 flex flex-col">
+              <ChatBannerLane>
                 <ProviderStatusBanner
                   status={visibleProviderStatus}
                   onDismiss={() => setDismissedProviderStatusBannerKey(providerStatusBannerKey)}
@@ -8433,7 +8464,7 @@ export default function ChatView(props: ChatViewProps) {
                     setThreadErrorBannerDismissTick((tick) => tick + 1);
                   }}
                 />
-              </div>
+              </ChatBannerLane>
               <div
                 className="relative flex min-h-0 flex-1 flex-col"
                 data-timeline-loading={threadDetailLoading || undefined}
@@ -8491,7 +8522,7 @@ export default function ChatView(props: ChatViewProps) {
                     )
                   }
                   listRef={legendListRef}
-                  timelineEntries={displayedTimeline.entries}
+                  timelineEntries={shownTimelineEntries}
                   runs={paintOnlyDisplayedTimeline ? [] : (serverProjection?.runs ?? [])}
                   latestRun={paintOnlyDisplayedTimeline ? null : activeActivityRun}
                   runningRunId={paintOnlyDisplayedTimeline ? null : activeRunningTurnId}
@@ -8929,7 +8960,7 @@ export default function ChatView(props: ChatViewProps) {
                                     ref={branchToolbarRef}
                                     environmentId={activeThread.environmentId}
                                     threadId={activeThread.id}
-                                    showGitControls={isGitRepo}
+                                    showGitControls={isGitRepo && embedPresentation === null}
                                     {...(routeKind === "draft" && draftId ? { draftId } : {})}
                                     onEnvModeChange={onEnvModeChangeStable}
                                     startFromOrigin={startFromOrigin}
@@ -8983,6 +9014,9 @@ export default function ChatView(props: ChatViewProps) {
                         <DraftImportSessionLink projectRef={activeProjectRef} />
                       </div>
                     ) : null}
+                    {isDraftHeroState ? null : (
+                      <AppThreadImportSessionLink projectRef={activeProjectRef} />
+                    )}
                   </div>
                 </div>
               </div>
@@ -9008,7 +9042,9 @@ export default function ChatView(props: ChatViewProps) {
                 onConfirm={handleSwitchCheckoutToThreadStable}
               />
 
-              <ThreadDetailsPanel {...threadDetailsPanelProps} />
+              {embedPresentation === null ? (
+                <ThreadDetailsPanel {...threadDetailsPanelProps} />
+              ) : null}
 
               <PullRequestThreadDialogHost
                 threadKey={activeThreadKey}
@@ -9020,7 +9056,7 @@ export default function ChatView(props: ChatViewProps) {
             </ThreadFindCanvas>
           </div>
 
-          {mountedTerminalThreadRefs.map(
+          {(embedPresentation === null ? mountedTerminalThreadRefs : []).map(
             ({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
               <PersistentThreadTerminalDrawer
                 key={mountedThreadKey}

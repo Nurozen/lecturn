@@ -94,7 +94,6 @@ import {
   FolderIcon,
   GitBranchIcon,
   GitForkIcon,
-  ListFilterIcon,
   MessageCircleQuestionIcon,
   PinIcon,
   PinOffIcon,
@@ -279,7 +278,16 @@ import {
   useComboboxFilter,
 } from "./ui/combobox";
 import { useSagaSidebarTree } from "./stave/useSagaSidebarTree";
+import {
+  partitionThreadsByProjectKeys,
+  withoutArchivedStaveProjectThreads,
+} from "./stave/listedProjects.logic";
 import { useListedProjects } from "./stave/useListedProjects";
+import { AppThreadBadge } from "./apps/AppThreadBadge";
+import { useAppsNewThreadTarget } from "./apps/useAppsSidebarShortcuts";
+import { JumpHintBadge } from "./sidebar/JumpHintBadge";
+import { AppsModeSwitch } from "./apps/AppsModeSwitch";
+import { AppsSidebar } from "./apps/AppsSidebar";
 import { sagaSidebarThreadOrder } from "./stave/staveSaga.logic";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { snapshotsPerAccount, useSidebarSegmentation } from "./sidebar/accountProjectGroups";
@@ -289,7 +297,8 @@ import { useSidebarSegments } from "./sidebar/useSidebarSegments";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHierarchyPanel } from "./sidebar/SidebarHierarchyPanel";
 import { partitionShelfRows } from "./sidebar/sidebarShelfRows";
-import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
+import { SidebarScopeTrigger } from "./sidebar/SidebarScopeRow";
+import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
@@ -423,17 +432,6 @@ function RelativeTimeLabel(props: { timestamp: string | null }) {
 
 function threadTimeTimestamp(thread: SidebarThreadSummary): string {
   return thread.latestUserMessageAt ?? thread.updatedAt;
-}
-
-function JumpHintBadge(props: { label: string }) {
-  return (
-    <span
-      aria-hidden
-      className="pointer-events-none absolute right-1.5 top-1/2 z-10 inline-flex h-5 -translate-y-1/2 items-center rounded-full border border-border/80 bg-background/95 px-1.5 font-mono text-3xs font-medium tracking-tight text-foreground shadow-sm"
-    >
-      {props.label}
-    </span>
-  );
 }
 
 function terminalProcessLabel(count: number): string {
@@ -2310,6 +2308,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
               >
                 {thread.title}
               </span>
+              <AppThreadBadge project={threadProject} />
               <span id={`${props.resultId}-pr`} className="contents">
                 <ThreadSearchPullRequestNumber
                   thread={thread}
@@ -2371,16 +2370,22 @@ function partitionForkSidebarThreads(input: {
   readonly threads: readonly EnvironmentThreadShell[];
   readonly scopedProjectKeys: ReadonlySet<string> | null;
   readonly archivedProjectKeys: ReadonlySet<string>;
+  readonly appProjectKeys: ReadonlySet<string>;
   readonly serverConfigs: ReadonlyMap<EnvironmentId, EnvironmentServerConfig>;
   readonly workingShelfEnabled: boolean;
   readonly clockKey: string;
 }) {
-  const { threads, scopedProjectKeys, archivedProjectKeys, serverConfigs, workingShelfEnabled } =
-    input;
+  const { threads, scopedProjectKeys, archivedProjectKeys, appProjectKeys } = input;
+  const { serverConfigs, workingShelfEnabled } = input;
   const preciseNow = new Date().toISOString();
   // Archived Stave spaces keep their threads out of the live list.
-  const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys).filter(
-    (thread) => !archivedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
+  // App threads leave the Projects-mode list but stay findable through search.
+  const { outside: visible, inside: appSearchThreads } = partitionThreadsByProjectKeys(
+    withoutArchivedStaveProjectThreads(
+      filterSidebarV2VisibleThreads(threads, scopedProjectKeys),
+      archivedProjectKeys,
+    ),
+    appProjectKeys,
   );
   inboxReturns.observe(workingShelfEnabled ? threads : null);
   const pinned: EnvironmentThreadShell[] = [];
@@ -2425,6 +2430,7 @@ function partitionForkSidebarThreads(input: {
         firstValidTimestampMs(right.snoozedUntil ?? null),
     ),
     settledThreads: sortSettledThreads(settled),
+    appSearchThreads: sortThreadsForSidebar(appSearchThreads),
     snoozeNow: preciseNow,
   };
 }
@@ -2433,8 +2439,10 @@ export default function Sidebar() {
   const sidebarAccountStyle = useSidebarAccountStyle();
   // Archived Stave spaces (and their threads) leave the sidebar; they come
   // back through New project → Stave.
-  const { projects, archivedProjectKeys } = useListedProjects();
+  const { projects, archivedProjectKeys, appProjectKeys } = useListedProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const sidebarMode = useUiStateStore((store) => store.sidebarMode);
+  const appsNewThreadTarget = useAppsNewThreadTarget((state) => state.target);
   const threads = useThreadShells();
   const reservedThreadOrderKeys = {
     pinned: new Map(
@@ -2738,7 +2746,6 @@ export default function Sidebar() {
       });
     },
   );
-  const headerSearchRef = useRef<HTMLDivElement | null>(null);
   // Safari can send a click after Ctrl+click opens settings. Ignore that one
   // selection, then clear the guard when the picker opens again.
   const suppressNextScopeChangeRef = useRef(false);
@@ -2766,11 +2773,13 @@ export default function Sidebar() {
     workingThreads,
     snoozedThreads,
     settledThreads,
+    appSearchThreads,
     snoozeNow,
   } = partitionForkSidebarThreads({
     threads,
     scopedProjectKeys,
     archivedProjectKeys,
+    appProjectKeys,
     serverConfigs,
     workingShelfEnabled,
     clockKey: `${nowMinute}:${snoozeWakeTick}`,
@@ -2786,6 +2795,7 @@ export default function Sidebar() {
     ...workingThreads,
     ...snoozedThreads,
     ...settledThreads,
+    ...appSearchThreads,
   ];
   const searchEnvironmentIds = useConnectedEnvironmentIds();
   const threadSearch = useThreadSearch(searchEnvironmentIds, threadSearchQuery);
@@ -4139,6 +4149,7 @@ export default function Sidebar() {
   );
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (sidebarMode === "apps") return; // AppsSidebar walks its own rows.
       if (event.defaultPrevented || event.repeat || isCommandPaletteOpen() || isModelPickerOpen()) {
         return;
       }
@@ -4184,6 +4195,7 @@ export default function Sidebar() {
     orderedThreadKeys,
     routeTerminalOpen,
     routeThreadKey,
+    sidebarMode,
     threadByKey,
   ]);
 
@@ -4208,6 +4220,11 @@ export default function Sidebar() {
   }, [shouldShowJumpHintsNow, updateThreadJumpHintsVisibility]);
 
   const handleNewThreadClick = (event?: ReactMouseEvent) => {
+    if (sidebarMode === "apps") {
+      if (isMobile) setOpenMobile(false);
+      if (appsNewThreadTarget !== null) void newThreadContext.handleNewThread(appsNewThreadTarget);
+      return;
+    }
     if (shouldCreateNewThreadInCurrentProject(event?.shiftKey ?? false, projectGroups.length)) {
       if (isMobile) setOpenMobile(false);
       void startNewThreadFromContext({
@@ -4235,9 +4252,9 @@ export default function Sidebar() {
         fixedHeader={
           <SidebarGroup className="z-[1]">
             <SidebarThreadHeader
-              searchFieldRef={headerSearchRef}
-              hasProjects={projectGroups.length > 0}
-              projectScope={
+              modeSwitch={<AppsModeSwitch />}
+              showScopeRow={sidebarMode === "projects" && projectGroups.length > 0}
+              scopePicker={
                 <Combobox
                   items={projectScopeItems}
                   filteredItems={filteredProjectScopeItems}
@@ -4264,26 +4281,22 @@ export default function Sidebar() {
                 >
                   <ComboboxTrigger
                     render={
-                      <SidebarHeaderIconButton
-                        label={
-                          scopedProjectGroup
-                            ? `Filter threads by project: ${scopedProjectGroup.displayName}`
-                            : "Filter threads by project"
+                      <SidebarScopeTrigger
+                        kind="projects"
+                        selectedLabel={scopedProjectGroup?.displayName ?? null}
+                        icon={
+                          scopedProjectGroup ? (
+                            <ProjectFavicon
+                              project={scopedProjectGroup}
+                              className="size-4 shrink-0"
+                            />
+                          ) : undefined
                         }
                       />
                     }
-                  >
-                    {scopedProjectGroup ? (
-                      <span className="flex shrink-0">
-                        <ProjectFavicon project={scopedProjectGroup} className="size-4" />
-                      </span>
-                    ) : (
-                      <ListFilterIcon className="size-4" />
-                    )}
-                  </ComboboxTrigger>
+                  />
                   <ComboboxPopup
                     align="start"
-                    anchor={headerSearchRef}
                     className="max-w-[min(18rem,var(--available-width))] overflow-hidden"
                   >
                     <ComboboxSearchInput
@@ -4366,12 +4379,14 @@ export default function Sidebar() {
                   </ComboboxPopup>
                 </Combobox>
               }
-              onNewProject={openAddProjectCommandPalette}
+              onScopeAdd={openAddProjectCommandPalette}
               onNewThread={handleNewThreadClick}
-              newThreadDisabled={projects.length === 0}
+              newThreadDisabled={
+                sidebarMode === "apps" ? appsNewThreadTarget === null : projects.length === 0
+              }
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
-              showNewThreadInProjectHint={projectGroups.length > 1}
+              showNewThreadInProjectHint={sidebarMode === "projects" && projectGroups.length > 1}
               searchInputRef={threadSearchInputRef}
               searchQuery={threadSearchQuery}
               onSearchQueryChange={(value) => {
@@ -4456,7 +4471,8 @@ export default function Sidebar() {
               </p>
             )
           ) : null}
-          {!isSearchingThreads ? (
+          {!isSearchingThreads && sidebarMode === "apps" ? <AppsSidebar /> : null}
+          {!isSearchingThreads && sidebarMode === "projects" ? (
             <TooltipProvider
               key="sidebar-thread-tooltips-150"
               delay={150}
@@ -5368,6 +5384,7 @@ export default function Sidebar() {
             </TooltipProvider>
           ) : null}
           {!isSearchingThreads &&
+          sidebarMode === "projects" &&
           visibleDraftSessionCount === 0 &&
           pinnedThreads.length +
             activeThreads.length +

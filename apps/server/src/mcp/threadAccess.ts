@@ -121,21 +121,31 @@ export function assertLiveCaller({ caller, scope }: Caller) {
 }
 
 export const assertFullAccess = (context: Caller, message: string) =>
-  context.limits.runtimeMode === "full-access" && context.limits.interactionMode === "default"
-    ? Effect.void
-    : Effect.fail(new OrchestratorMcpFailure({ code: "capability_denied", message }));
+  McpInvocationContext.refuseAppCaller(
+    context.scope,
+    "A connected app's thread cannot change projects or environment settings.",
+  ).pipe(
+    Effect.andThen(
+      context.limits.runtimeMode === "full-access" && context.limits.interactionMode === "default"
+        ? Effect.void
+        : Effect.fail(new OrchestratorMcpFailure({ code: "capability_denied", message })),
+    ),
+  );
 
-export const resolveProjectId = (context: Caller, projectId: ProjectId | undefined) =>
-  projectId !== undefined
-    ? Effect.succeed(projectId)
-    : context.caller !== undefined
-      ? Effect.succeed(context.caller.projectId)
-      : Effect.fail(
-          new OrchestratorMcpFailure({
-            code: "target_required",
-            message: "Pass projectId: this MCP client is not running inside a Lecturn thread.",
-          }),
-        );
+export const resolveProjectId = Effect.fn("mcp.resolveProjectId")(function* (
+  context: Caller,
+  projectId: ProjectId | undefined,
+) {
+  const resolved = projectId ?? context.caller?.projectId;
+  if (resolved === undefined) {
+    return yield* new OrchestratorMcpFailure({
+      code: "target_required",
+      message: "Pass projectId: this MCP client is not running inside a Lecturn thread.",
+    });
+  }
+  yield* McpInvocationContext.assertProjectReach(context.scope, resolved);
+  return resolved;
+});
 
 const resolveThreadId = (context: Caller, threadId: ThreadId | undefined) =>
   threadId !== undefined
@@ -161,6 +171,7 @@ export const readThread = Effect.fn("mcp.readThread")(function* <
       message: "The thread was not found.",
     });
   }
+  yield* McpInvocationContext.assertProjectReach(context.scope, shell.projectId);
   const projection = yield* context.threads
     .getProjectThreadRecords({ projectId: shell.projectId, threadId: targetId }, fields, {
       turnItemTypes: ["user_input_request"],

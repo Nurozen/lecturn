@@ -1,3 +1,5 @@
+import { resolveAppToolPresentation } from "./appToolPresentation.ts";
+
 export type LecturnMcpToolLogo = "lecturn";
 
 export interface LecturnMcpToolPresentation {
@@ -385,6 +387,8 @@ function normalizeLecturnMcpToolLabel(value: string): string {
  */
 function resolveLecturnMcpToolName(value: string): string | null {
   const label = normalizeLecturnMcpToolLabel(value);
+  // A registered app's `rw_task_status` ends in a Lecturn tool's name but is still the app's.
+  if (resolveAppToolPresentation({ toolName: label }) !== null) return null;
   const mcpMatch = /^mcp__(?<server>.+?)__(?<tool>.+)$/i.exec(label);
   if (mcpMatch?.groups) {
     const { server, tool } = mcpMatch.groups;

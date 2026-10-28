@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    />
+    <title>Embed Host</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --sidebar-width: 320px;
+        /* PANE_HEADER_HEIGHT in main.ts. */
+        --pane-header-height: 48px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        height: 100vh;
+        display: grid;
+        grid-template-columns: var(--sidebar-width) 1fr;
+        background: #1b1e20;
+        color: #e6e9ea;
+        font:
+          13px system-ui,
+          sans-serif;
+      }
+      aside {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 16px;
+        border-right: 1px solid #2a3034;
+        overflow: auto;
+      }
+      h1 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      #status {
+        color: #8e989c;
+      }
+      ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      li {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 8px;
+        border-radius: 6px;
+      }
+      li[data-focused] {
+        background: #253c3f;
+      }
+      button {
+        border: 1px solid #2a3034;
+        border-radius: 6px;
+        background: #25292c;
+        color: inherit;
+        font: inherit;
+        padding: 4px 8px;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: #61b5ad;
+      }
+      .pane-column {
+        display: grid;
+        grid-template-rows: var(--pane-header-height) 1fr;
+        min-width: 0;
+      }
+      .pane-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 8px 0 16px;
+        border-bottom: 1px solid #2a3034;
+      }
+      .pane-header svg {
+        flex: none;
+        width: 18px;
+        height: 18px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .pane-header > svg {
+        color: #61b5ad;
+      }
+      #pane-title {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 15px;
+        font-weight: 500;
+      }
+      .icon-button {
+        display: grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        border-color: transparent;
+        background: transparent;
+        color: #8e989c;
+      }
+      .icon-button:hover:not(:disabled) {
+        border-color: transparent;
+        background: #25292c;
+        color: #e6e9ea;
+      }
+      .icon-button:disabled {
+        cursor: default;
+        opacity: 0.4;
+      }
+    </style>
+  </head>
+  <body>
+    <aside>
+      <h1>Embed Host</h1>
+      <div id="status"></div>
+      <ul id="items"></ul>
+    </aside>
+    <section class="pane-column">
+      <!-- The host's own chrome: the embed draws no header of its own. -->
+      <header class="pane-header">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 5h16v11H9l-5 4z" />
+        </svg>
+        <span id="pane-title">New thread</span>
+        <button
+          id="pane-menu-button"
+          class="icon-button"
+          type="button"
+          aria-label="Thread actions"
+          aria-haspopup="menu"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 12h.01M12 12h.01M18 12h.01" stroke-width="3" />
+          </svg>
+        </button>
+        <button
+          id="pane-open"
+          class="icon-button"
+          type="button"
+          aria-label="Open in Lecturn"
+          title="Open in Lecturn"
+          disabled
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+          </svg>
+        </button>
+      </header>
+      <!-- Lecturn's view is laid over this element; it stays empty. -->
+      <main id="pane"></main>
+    </section>
+    <script src="./renderer.iife.js"></script>
+  </body>
+</html>

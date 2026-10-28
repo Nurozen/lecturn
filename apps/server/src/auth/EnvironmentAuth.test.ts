@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { authScopeResponse, AuthStandardClientScopes } from "@lecturn/contracts";
+import { AppId, authScopeResponse, AuthStandardClientScopes } from "@lecturn/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -7,6 +7,7 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { issueAppCredential } from "../apps/appCredential.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as PersistenceErrors from "../persistence/Errors.ts";
@@ -355,6 +356,127 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
 
       expect(verified.sessionId).toBe(bearer.sessionId);
     }).pipe(Effect.provide(layerEnvironmentAuth({ mode: "web", host: "192.168.1.50" }))),
+  );
+
+  it.effect("authenticates an embed bearer over the user's cookie", () =>
+    Effect.gen(function* () {
+      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+      const sessions = yield* SessionStore.SessionStore;
+      const pairing = yield* serverAuth.issuePairingCredential();
+      const browser = yield* serverAuth.createBrowserSession(pairing.credential, requestMetadata);
+      const embed = yield* sessions.issue({
+        subject: "embed:dev.rocketwright.app:project-1",
+        scopes: ["orchestration:read"],
+      });
+      const other = yield* serverAuth.issueSession();
+      const request = (bearer: string) =>
+        ({
+          url: "/api/orchestration/shell",
+          cookies: { [sessions.cookieName]: browser.sessionToken },
+          headers: { authorization: `Bearer ${bearer}` },
+        }) as never;
+
+      const asEmbed = yield* serverAuth.authenticateHttpRequest(request(embed.token));
+      expect(asEmbed.subject).toBe("embed:dev.rocketwright.app:project-1");
+      expect(asEmbed.sessionId).toBe(embed.sessionId);
+
+      // Any other bearer keeps today's cookie-first result.
+      const asCookie = yield* serverAuth.authenticateHttpRequest(request(other.token));
+      expect(asCookie.method).toBe("browser-session-cookie");
+      expect(asCookie.subject).toBe("one-time-token");
+      const withBadBearer = yield* serverAuth.authenticateHttpRequest(request("not-a-token"));
+      expect(withBadBearer.method).toBe("browser-session-cookie");
+    }).pipe(Effect.provide(layerEnvironmentAuth())),
+  );
+
+  it.effect("accepts connected-app sessions only on their routes", () =>
+    Effect.gen(function* () {
+      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+      const sessions = yield* SessionStore.SessionStore;
+      const app = yield* sessions.issue({ subject: "app:dev.rocketwright.app" });
+      const embed = yield* sessions.issue({ subject: "embed:dev.rocketwright.app:project-1" });
+      const authenticates = (token: string, url: string) =>
+        serverAuth
+          .authenticateHttpRequest({
+            url,
+            cookies: {},
+            headers: { authorization: `Bearer ${token}` },
+          } as never)
+          .pipe(
+            Effect.as(true),
+            Effect.catchTags({ ServerAuthInvalidCredentialError: () => Effect.succeed(false) }),
+          );
+
+      expect(yield* authenticates(app.token, "/api/auth/websocket-ticket")).toBe(true);
+      expect(yield* authenticates(app.token, "/api/orchestration/shell")).toBe(false);
+      expect(yield* authenticates(app.token, "/api/auth/clients")).toBe(false);
+      expect(yield* authenticates(embed.token, "/api/orchestration/shell?x=1")).toBe(true);
+      expect(yield* authenticates(embed.token, "/api/orchestration/threads/thread-1/bounded")).toBe(
+        true,
+      );
+      expect(yield* authenticates(embed.token, "/api/projects/mutate")).toBe(false);
+      expect(yield* authenticates(embed.token, "/api/connect/link-state")).toBe(false);
+
+      const ticket = yield* serverAuth.issueWebSocketTicket({ sessionId: app.sessionId });
+      const upgrade = (path: string) =>
+        serverAuth
+          .authenticateWebSocketUpgrade({
+            url: `${path}?wsTicket=${ticket.ticket}`,
+            originalUrl: `${path}?wsTicket=${ticket.ticket}`,
+            cookies: {},
+            headers: { host: "127.0.0.1:13773" },
+          } as never)
+          .pipe(
+            Effect.map((session) => session.subject),
+            Effect.catchTags({ ServerAuthInvalidCredentialError: () => Effect.succeed(null) }),
+          );
+      expect(yield* upgrade("/ws")).toBe("app:dev.rocketwright.app");
+      expect(yield* upgrade("/api/device-hub/stream")).toBe(null);
+    }).pipe(Effect.provide(layerEnvironmentAuth())),
+  );
+
+  it.effect(
+    "authenticates a paired app's credential with apps:host and runtime-mode ceilings only",
+    () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const sessions = yield* SessionStore.SessionStore;
+        const issue = (ceiling: "read-only" | "auto-accept-edits") =>
+          issueAppCredential(sessions, {
+            appId: AppId.make("dev.rocketwright.app"),
+            name: "RocketWright",
+            ceiling,
+          });
+
+        const readOnly = yield* issue("read-only");
+        const session = yield* serverAuth.authenticateHttpRequest({
+          url: "/api/auth/websocket-ticket",
+          cookies: {},
+          headers: { authorization: `Bearer ${readOnly.token}` },
+        } as never);
+        expect(session.subject).toBe("app:dev.rocketwright.app");
+        expect(session.scopes).toEqual(["apps:host"]);
+        // Read-only lives in the registry; the claim holds runtime modes only.
+        expect((yield* sessions.verify(readOnly.token)).runtimeModeCeiling).toBeUndefined();
+
+        const capped = yield* issue("auto-accept-edits");
+        expect((yield* sessions.verify(capped.token)).runtimeModeCeiling).toBe("auto-accept-edits");
+      }).pipe(Effect.provide(layerEnvironmentAuth())),
+  );
+
+  it.effect("leaves connected apps out of the client session lists", () =>
+    Effect.gen(function* () {
+      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+      const sessions = yield* SessionStore.SessionStore;
+      const owner = yield* serverAuth.issueSession();
+      yield* sessions.issue({ subject: "app:dev.rocketwright.app" });
+      yield* sessions.issue({ subject: "embed:dev.rocketwright.app:project-1" });
+
+      const listed = yield* serverAuth.listSessions();
+      const clients = yield* serverAuth.listClientSessions(owner.sessionId);
+      expect(listed.map((session) => session.subject)).toEqual([owner.subject]);
+      expect(clients.map((session) => session.sessionId)).toEqual([owner.sessionId]);
+    }).pipe(Effect.provide(layerEnvironmentAuth())),
   );
 
   it.effect("preserves pairing grants after rejecting scopes they do not grant", () =>

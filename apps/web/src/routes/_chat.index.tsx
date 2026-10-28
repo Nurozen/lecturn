@@ -1,4 +1,4 @@
-import { withoutArchivedStaveProjects } from "@lecturn/client-runtime/state/stave-archive";
+import { projectsForProjectsMode } from "@lecturn/client-runtime/state/app-projects";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
@@ -50,11 +50,8 @@ function IndexDraftLanding() {
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
 
   const mostRecentProject = bootstrapped
-    ? (sortScopedProjectsForSidebar(
-        withoutArchivedStaveProjects(projects),
-        threads,
-        "updated_at",
-      )[0] ?? null)
+    ? (sortScopedProjectsForSidebar(projectsForProjectsMode(projects), threads, "updated_at")[0] ??
+      null)
     : null;
   const attempt = startState.retryRequest;
 

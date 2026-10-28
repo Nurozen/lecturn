@@ -9,6 +9,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import {
+  AppWindowIcon,
   RadioTowerIcon,
   ArchiveIcon,
   BlocksIcon,
@@ -91,6 +92,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/source-control": GitBranchIcon,
   "/settings/storage": HardDriveIcon,
   "/settings/connections": Link2Icon,
+  "/settings/apps": AppWindowIcon,
   "/settings/relay": RadioTowerIcon,
   "/settings/archived": ArchiveIcon,
 };

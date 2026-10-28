@@ -23,6 +23,7 @@ import {
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
 } from "../state/projects.ts";
+import { isAppProject } from "../state/appProjects.ts";
 import type { EnvironmentProject } from "../state/models.ts";
 import { sourceControlClients } from "../sourceControlClients.ts";
 import type { SourceControlClientDefinition } from "../sourceControlClients.ts";
@@ -328,7 +329,10 @@ export function findExistingAddProject(input: {
 }): EnvironmentProject | null {
   return (
     findProjectByPath(
-      input.projects.filter((project) => project.environmentId === input.environmentId),
+      // An app project on the same folder coexists with a normal one and never answers for it.
+      input.projects.filter(
+        (project) => project.environmentId === input.environmentId && !isAppProject(project),
+      ),
       input.path,
     ) ?? null
   );

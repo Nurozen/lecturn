@@ -30,7 +30,10 @@ function textFromBlocks(value: unknown, depth: number): string | null {
     if (typeof resource.text === "string") return resource.text;
     if (typeof resource.uri === "string") return resource.uri;
   }
-  const keys = Object.keys(value).filter((key) => key !== "isError" && key !== "is_error");
+  // `_meta` is for Lecturn (an app row's summary), not part of what the tool said.
+  const keys = Object.keys(value).filter(
+    (key) => key !== "isError" && key !== "is_error" && key !== "_meta",
+  );
   if (keys.length === 1 && keys[0] === "content") return textFromBlocks(value.content, depth + 1);
   if (keys.length === 2 && keys.includes("content") && keys.includes("structuredContent")) {
     const text = textFromBlocks(value.content, depth + 1);

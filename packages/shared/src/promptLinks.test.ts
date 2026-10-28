@@ -124,4 +124,17 @@ describe("link round trips", () => {
       "lecturn://threads/env-1/thread-1?prompt=hi",
     );
   });
+
+  it("maps app deep links both ways", () => {
+    expect(promptLinkAppPath("lecturn://apps/com.rw")).toBe("/apps/com.rw");
+    expect(promptLinkAppPath("lecturn-preview://apps/com.rw/threads/env-1/thread-1")).toBe(
+      "/env-1/thread-1?sidebar=apps&app=com.rw",
+    );
+    expect(promptLinkAppPath("lecturn://apps/not-an-app-id")).toBeNull();
+    expect(promptLinkAppPath("https://lecturn.cloudgatherer.net/apps/com.rw")).toBeNull();
+    expect(promptLinkDeepLink("/apps/com.rw")).toBe("lecturn://apps/com.rw");
+    expect(promptLinkDeepLink("/env-1/thread-1?sidebar=apps&app=com.rw", "lecturn-dev")).toBe(
+      "lecturn-dev://apps/com.rw/threads/env-1/thread-1",
+    );
+  });
 });

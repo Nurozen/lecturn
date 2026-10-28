@@ -1,0 +1,150 @@
+import "../../index.css";
+
+import { AppId, RuntimeRequestId } from "@lecturn/contracts";
+import { ShieldIcon } from "lucide-react";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+
+import type { PendingApproval } from "../../session-logic";
+import { ComposerBanner } from "./ComposerBanner";
+import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
+import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
+
+let root: Root;
+let container: HTMLDivElement;
+
+beforeEach(() => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+});
+
+afterEach(async () => {
+  await act(async () => root.unmount());
+  container.remove();
+  vi.unstubAllGlobals();
+});
+
+const approval: PendingApproval = {
+  requestId: RuntimeRequestId.make("approval-1"),
+  requestKind: "permission",
+  createdAt: "2026-10-25T00:00:00.000Z",
+  responseCapability: "live",
+  options: [
+    { decision: "decline", label: "Decline" },
+    { decision: "accept", label: "Approve" },
+    { decision: "cancel", label: "Cancel" },
+  ],
+  connectedAppTool: {
+    appId: AppId.make("dev.example"),
+    appName: "Example",
+    toolName: "ex_window_flash",
+    reason: "Flashes the Embed Host window",
+    source: "app",
+  },
+};
+
+// The banner as ChatComposer draws a pending approval.
+async function render(
+  width: number,
+  reason = approval.connectedAppTool!.reason,
+  toolTitle?: string,
+) {
+  container.style.width = `${width}px`;
+  const shown = {
+    ...approval,
+    connectedAppTool: {
+      ...approval.connectedAppTool!,
+      reason,
+      ...(toolTitle === undefined ? {} : { toolTitle }),
+    },
+  };
+  await act(async () =>
+    root.render(
+      <ComposerBanner.Root variant="warning" density="spacious">
+        <ComposerBanner.Row layout="approval">
+          <ComposerBanner.Icon>
+            <ShieldIcon />
+          </ComposerBanner.Icon>
+          <ComposerBanner.Content>
+            <ComposerPendingApprovalPanel approval={shown} pendingCount={1} />
+          </ComposerBanner.Content>
+          <ComposerBanner.Actions>
+            <ComposerPendingApprovalActions
+              requestId={approval.requestId}
+              canRespond
+              isResponding={false}
+              options={approval.options}
+              onRespondToApproval={async () => undefined}
+            />
+          </ComposerBanner.Actions>
+        </ComposerBanner.Row>
+      </ComposerBanner.Root>,
+    ),
+  );
+}
+
+function layout() {
+  const title = container.querySelector<HTMLElement>('[data-testid="app-approval-title"]')!;
+  const reason = container.querySelector<HTMLElement>('[data-testid="app-approval-reason"]')!;
+  const actions = container.querySelector<HTMLElement>('[data-slot="composer-banner-actions"]')!;
+  return {
+    title,
+    titleBox: title.getBoundingClientRect(),
+    reasonBox: reason.getBoundingClientRect(),
+    actionsBox: actions.getBoundingClientRect(),
+  };
+}
+
+const actionsCenter = (box: DOMRect) => box.top + box.height / 2;
+
+describe("ComposerPendingApprovalPanel for a connected app's tool", () => {
+  it("stacks the reason under the tool with the actions beside both while they fit", async () => {
+    await render(560);
+    const { title, titleBox, reasonBox, actionsBox } = layout();
+
+    expect(title.textContent).toBe("Approve ex_window_flash");
+    expect(title.scrollWidth).toBeLessThanOrEqual(title.clientWidth);
+    expect(reasonBox.top).toBeGreaterThanOrEqual(titleBox.bottom);
+    expect(reasonBox.left).toBeCloseTo(titleBox.left, 0);
+    expect(actionsBox.left).toBeGreaterThanOrEqual(Math.max(titleBox.right, reasonBox.right));
+    expect(actionsCenter(actionsBox)).toBeGreaterThan(titleBox.top);
+    expect(actionsCenter(actionsBox)).toBeLessThan(reasonBox.bottom);
+  });
+
+  it("wraps a long reason to two sans lines, then truncates, without moving the actions", async () => {
+    await render(560, "Flashes the Embed Host window ".repeat(8));
+    const { titleBox, reasonBox, actionsBox } = layout();
+    const reason = container.querySelector<HTMLElement>('[data-testid="app-approval-reason"]')!;
+    const style = getComputedStyle(reason);
+
+    expect(style.fontFamily).toBe(getComputedStyle(layout().title).fontFamily);
+    expect(reasonBox.height).toBeCloseTo(2 * Number.parseFloat(style.lineHeight), 0);
+    expect(reason.scrollHeight).toBeGreaterThan(reason.clientHeight);
+    expect(actionsBox.left).toBeGreaterThanOrEqual(reasonBox.right);
+    expect(actionsCenter(actionsBox)).toBeLessThan(reasonBox.bottom);
+    expect(actionsCenter(actionsBox)).toBeGreaterThan(titleBox.top);
+  });
+
+  it("wraps the actions below the reason instead of cutting the tool name short", async () => {
+    await render(300);
+    const { title, titleBox, reasonBox, actionsBox } = layout();
+
+    expect(title.scrollWidth).toBeLessThanOrEqual(title.clientWidth);
+    expect(titleBox.height).toBeLessThan(20);
+    expect(reasonBox.top).toBeGreaterThanOrEqual(titleBox.bottom);
+    expect(actionsBox.top).toBeGreaterThanOrEqual(reasonBox.bottom);
+  });
+
+  it("names the tool by its declared title when it has one", async () => {
+    await render(380, approval.connectedAppTool!.reason, "Flash window");
+    const { title } = layout();
+
+    expect(title.textContent).toBe("Approve Flash window");
+    expect(
+      container.querySelector('[data-app-tool-approval="true"]')?.getAttribute("aria-label"),
+    ).toBe("Approve Flash window");
+  });
+});
