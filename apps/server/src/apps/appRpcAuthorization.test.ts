@@ -63,6 +63,7 @@ const unused = () => Effect.die("unused");
 const allowlistAuthorization = Layer.succeed(AppAuthorization)(
   AppAuthorizationLayer.makeWith({
     resolveAppForProject: unused,
+    workspaceRootForProject: unused,
     projectIdForThread: unused,
     worktreePathForThread: unused,
     canonicalPath: unused,

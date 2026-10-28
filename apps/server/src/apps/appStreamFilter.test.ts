@@ -9,16 +9,20 @@ import {
   type OrchestrationV2ShellStreamItem,
   type OrchestrationV2ThreadShell,
   type ProjectSnapshot,
+  ServerSettings,
 } from "@lecturn/contracts";
+import { resolveProjectSettings } from "@lecturn/shared/projectSettings";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import type { AuthenticatedSession } from "../auth/EnvironmentAuth.ts";
 import {
   filterProjectSnapshotForSubject,
+  filterServerSettingsForSubject,
   filterShellItem,
   filterShellSnapshotForSubject,
   filterShellStream,
@@ -65,6 +69,9 @@ const snapshot: OrchestrationV2ShellSnapshot = {
     thread("rocket-archived", rocketProject),
   ],
 };
+
+const decodeSettings = Schema.decodeUnknownSync(ServerSettings);
+const encodeSettings = Schema.encodeSync(ServerSettings);
 
 const appSubject: AppSubject = { kind: "app", appId: rocketwright };
 const embedSubject: AppSubject = { kind: "embed", appId: rocketwright, projectId: rocketProject };
@@ -185,5 +192,52 @@ describe("app shell filter", () => {
     expect(
       filterProjectSnapshotForSubject(formatAppSubject(rocketwright))(projects).projects,
     ).toEqual([]);
+  });
+});
+
+describe("app server settings filter", () => {
+  const script = (id: string) => ({
+    id,
+    name: id,
+    command: `./${id}.sh`,
+    icon: "play",
+    runOnWorktreeCreate: false,
+  });
+  const hostSettings = decodeSettings({
+    defaultModelSelection: { instanceId: "claudeAgent", model: "claude-opus-4-6" },
+    projectSettingsOverrides: {
+      [rocketProject]: { defaultAutoPull: true, defaultProjectScripts: [script("simulate")] },
+      [normalProject]: { defaultAutoPull: false, defaultProjectScripts: [script("deploy")] },
+    },
+    projectScriptOverrides: {
+      [rocketProject]: [script("simulate")],
+      [normalProject]: [script("deploy")],
+    },
+    projectAutoPullOverrides: { [rocketProject]: true, [normalProject]: false },
+    projectAgentBrowserAccessOverrides: { [normalProject]: true },
+    deviceHosts: [{ id: "lab", label: "Lab Mac", target: "me@lab.example" }],
+  });
+
+  it("shows an embed only its own project's settings and no saved SSH hosts", () => {
+    const forEmbed = filterServerSettingsForSubject(
+      formatEmbedSubject(rocketwright, rocketProject),
+    )(hostSettings);
+    expect(Object.keys(forEmbed.projectSettingsOverrides)).toEqual([rocketProject]);
+    expect(Object.keys(forEmbed.projectScriptOverrides)).toEqual([rocketProject]);
+    expect(Object.keys(forEmbed.projectAutoPullOverrides)).toEqual([rocketProject]);
+    expect(forEmbed.projectAgentBrowserAccessOverrides).toEqual({});
+    expect(forEmbed.deviceHosts).toEqual([]);
+    // The embed's chat view resolves its project exactly as before.
+    expect(resolveProjectSettings(forEmbed, rocketProject).overrides).toEqual(
+      resolveProjectSettings(hostSettings, rocketProject).overrides,
+    );
+    expect(forEmbed.defaultModelSelection).toEqual(hostSettings.defaultModelSelection);
+    // Clients decode the narrowed settings as they decode the full ones.
+    expect(decodeSettings(encodeSettings(forEmbed))).toEqual(forEmbed);
+
+    const forApp = filterServerSettingsForSubject(formatAppSubject(rocketwright))(hostSettings);
+    expect(forApp.projectSettingsOverrides).toEqual({});
+    expect(forApp.deviceHosts).toEqual([]);
+    expect(filterServerSettingsForSubject("owner")(hostSettings)).toBe(hostSettings);
   });
 });

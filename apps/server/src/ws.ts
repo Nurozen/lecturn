@@ -1850,8 +1850,8 @@ const makeWsRpcHandlers = (
         const providers = options.usageLimitsCommand
           ? withUsageLimitsCommands(currentProviders, yield* usageLimitSources.current)
           : currentProviders;
-        const settings = ServerSettings.redactServerSettingsForClient(
-          yield* serverSettings.getSettings,
+        const settings = AppStreamFilter.filterServerSettingsForSubject(currentSession.subject)(
+          ServerSettings.redactServerSettingsForClient(yield* serverSettings.getSettings),
         );
         const environment = yield* serverEnvironment.getDescriptor;
         const auth = yield* serverAuth.getDescriptor();
@@ -3337,6 +3337,7 @@ const makeWsRpcHandlers = (
                 : Stream.empty;
             const settingsUpdates = serverSettings.streamChanges.pipe(
               Stream.map((settings) => ServerSettings.redactServerSettingsForClient(settings)),
+              Stream.map(AppStreamFilter.filterServerSettingsForSubject(currentSession.subject)),
               Stream.map((settings) => ({
                 version: 1 as const,
                 type: "settingsUpdated" as const,

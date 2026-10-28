@@ -102,6 +102,11 @@ const issued: Array<{ subject: string; ttl: Duration.Duration; label: string }> 
 const fakeDeps: AppAuthorizationDeps = {
   resolveAppForProject: (projectId) =>
     Effect.succeed(Option.fromUndefinedOr(bindings.get(projectId))),
+  // These apps sent resolved roots, so each project lives where its binding says.
+  workspaceRootForProject: (projectId) =>
+    Effect.succeed(
+      Option.map(Option.fromUndefinedOr(bindings.get(projectId)), (b) => b.workspaceRoot),
+    ),
   projectIdForThread: (threadId) =>
     Effect.succeed(Option.fromUndefinedOr(threadProjects.get(threadId))),
   threadIdForAttachment: (attachmentId) => {
@@ -613,6 +618,58 @@ describe("app RPC allowlist", () => {
     }),
   );
 
+  it.effect(
+    "checks an embed's paths against its project's resolved root, not the app's spelling",
+    () =>
+      Effect.gen(function* () {
+        // ensureWorkspace keeps `/work/./rocket` as the app's identity; the project lives at `/work/rocket`.
+        const spelled = makeWith({
+          ...fakeDeps,
+          resolveAppForProject: (projectId) =>
+            Effect.succeed(
+              projectId === rocketProject
+                ? Option.some(binding(rocketwright, "/work/./rocket"))
+                : Option.none(),
+            ),
+        });
+        const allowedHere = (method: string, payload: unknown) =>
+          spelled
+            .authorizeRpc(embedSession, method, payload)
+            .pipe(
+              Effect.as(true),
+              Effect.catchTags({ EnvironmentAuthorizationError: () => Effect.succeed(false) }),
+            );
+        const asset = (resource: Record<string, unknown>) =>
+          allowedHere(W.assetsCreateUrl, { resource });
+        expect(
+          yield* allowedHere(W.projectsSearchEntries, {
+            cwd: "/work/rocket",
+            query: "",
+            limit: 10,
+          }),
+        ).toBe(true);
+        expect(yield* allowedHere(W.subscribeVcsStatus, { cwd: "/work/rocket" })).toBe(true);
+        expect(yield* asset({ _tag: "project-favicon", cwd: "/work/rocket" })).toBe(true);
+        expect(
+          yield* asset({ _tag: "draft-workspace-file", cwd: "/work/rocket", path: "plots/a.png" }),
+        ).toBe(true);
+        expect(
+          yield* asset({
+            _tag: "media-file",
+            threadId: rocketThread,
+            path: "/work/rocket/plots/a.png",
+          }),
+        ).toBe(true);
+        expect(
+          yield* allowedHere(W.projectsSearchEntries, {
+            cwd: "/work/rocket-2",
+            query: "",
+            limit: 10,
+          }),
+        ).toBe(false);
+      }),
+  );
+
   it.effect("denies a call whose project lookup fails", () =>
     Effect.gen(function* () {
       const failing = makeWith({
@@ -672,6 +729,8 @@ describe("embed media paths on disk", () => {
             ? Option.some(diskProject)
             : Option.none(),
         ),
+      workspaceRootForProject: (projectId) =>
+        Effect.succeed(projectId === diskProject ? Option.some(root) : Option.none()),
       worktreePathForThread: (threadId) =>
         Effect.succeed(threadId === diskWorktreeThread ? Option.some(worktree) : Option.none()),
       canonicalPath: yield* canonicalPathOnDisk,

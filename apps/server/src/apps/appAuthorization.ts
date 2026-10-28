@@ -49,6 +49,7 @@ import * as SessionStore from "../auth/SessionStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { ProjectionStoreV2 } from "../orchestration-v2/ProjectionStore.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import { formatHostForUrl, isWildcardHost } from "../startupAccess.ts";
 import { appHttpRouteFor } from "./appHttpAuthorization.ts";
 import * as AppStreamFilter from "./appStreamFilter.ts";
@@ -274,7 +275,8 @@ const APP_RPC_RULES: AppRpcTable = {
     ...embed,
   },
   // The web client's connection handshake: it opens on the config stream and probes with
-  // server.probe, so an embed that can read the config needs both.
+  // server.probe, so an embed that can read the config needs both. Its settings carry only
+  // the token's own project (AppStreamFilter.filterServerSettingsForSubject).
   [W.serverGetConfig]: { resolve: "none", ...embed },
   [W.subscribeServerConfig]: { resolve: "none", ...embed },
   [W.serverProbe]: { resolve: "none", ...embed },
@@ -371,6 +373,13 @@ export interface AppAuthorizationDeps {
   readonly resolveAppForProject: (
     projectId: ProjectId,
   ) => Effect.Effect<Option.Option<AppBinding>, AppsError>;
+  /**
+   * Where the project lives, as `ProjectService` resolved it; `None` when it does not exist.
+   * A binding keeps the root as the app spelled it, which names the app's workspace, not a path.
+   */
+  readonly workspaceRootForProject: (
+    projectId: ProjectId,
+  ) => Effect.Effect<Option.Option<string>, AppsError>;
   /** `None` when the thread does not exist. */
   readonly projectIdForThread: (
     threadId: ThreadId,
@@ -421,21 +430,20 @@ export const makeWith = (deps: AppAuthorizationDeps): AppAuthorization["Service"
       ),
     );
 
+  /** Clients send the project's own root, so paths are checked against it. */
+  const embedProjectRoot = Effect.fnUntraced(function* (subject: AppSubject) {
+    if (subject.kind !== "embed" || !(yield* ownsProject(subject, subject.projectId))) {
+      return Option.none<string>();
+    }
+    return yield* deps.workspaceRootForProject(subject.projectId);
+  });
+
   const ownsProjectRoot = (subject: AppSubject, root: string) =>
-    subject.kind !== "embed"
-      ? Effect.succeed(false)
-      : deps
-          .resolveAppForProject(subject.projectId)
-          .pipe(
-            Effect.map((binding) =>
-              Option.exists(
-                binding,
-                (bound) =>
-                  bound.appId === subject.appId &&
-                  withoutTrailingSlashes(bound.workspaceRoot) === withoutTrailingSlashes(root),
-              ),
-            ),
-          );
+    embedProjectRoot(subject).pipe(
+      Effect.map(
+        Option.exists((own) => withoutTrailingSlashes(own) === withoutTrailingSlashes(root)),
+      ),
+    );
 
   /**
    * The asset service signs whatever file a path's links lead to, so the path must stay inside
@@ -446,10 +454,9 @@ export const makeWith = (deps: AppAuthorizationDeps): AppAuthorization["Service"
     subject: AppSubject,
     { projectPath, relativeTo }: Extract<AccessTarget, { readonly projectPath: string }>,
   ) {
-    if (subject.kind !== "embed") return false;
-    const binding = yield* deps.resolveAppForProject(subject.projectId);
-    if (Option.isNone(binding) || binding.value.appId !== subject.appId) return false;
-    const root = binding.value.workspaceRoot;
+    const ownRoot = yield* embedProjectRoot(subject);
+    if (Option.isNone(ownRoot)) return false;
+    const root = ownRoot.value;
     if (!isInsideRoot(root, projectPath)) return false;
     const workspace =
       isAbsolutePath(projectPath) || relativeTo === undefined
@@ -657,6 +664,7 @@ export const layer = Layer.effect(
   AppAuthorization,
   Effect.gen(function* () {
     const projects = yield* AppProjectService;
+    const projectStore = yield* ProjectStore.ProjectStoreV2;
     const projections = yield* ProjectionStoreV2;
     const sessions = yield* SessionStore.SessionStore;
     const environment = yield* ServerEnvironment.ServerEnvironmentIdentity;
@@ -665,6 +673,11 @@ export const layer = Layer.effect(
     const canonicalPath = yield* canonicalPathOnDisk;
     return makeWith({
       resolveAppForProject: projects.resolveAppForProject,
+      workspaceRootForProject: (projectId) =>
+        projectStore.get(projectId).pipe(
+          Effect.map(Option.map((row) => row.workspaceRoot)),
+          Effect.mapError(() => unavailable("Project lookup failed.")),
+        ),
       projectIdForThread: (threadId) =>
         projections.getThreadShell(threadId).pipe(
           Effect.map((shell) => Option.map(Option.fromNullOr(shell), (found) => found.projectId)),

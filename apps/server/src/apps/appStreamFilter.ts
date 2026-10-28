@@ -1,5 +1,5 @@
 /**
- * Server-side filtering of shell data for `app:` and `embed:` sessions, so a
+ * Server-side filtering of shell data and settings for `app:` and `embed:` sessions, so a
  * connected app never learns about projects it does not own. Every entry
  * point returns its input untouched for other sessions: their payloads stay
  * byte-identical and pay no per-item work.
@@ -10,6 +10,7 @@ import type {
   OrchestrationV2ShellStreamItem,
   ProjectId,
   ProjectSnapshot,
+  ServerSettings,
 } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -120,3 +121,24 @@ export const filterProjectSnapshotForSubject =
           : [],
     };
   };
+
+/**
+ * Settings are host-wide, but the embed's chat view reads only its own project's overrides.
+ * Other projects' overrides and scripts, and the saved SSH device hosts, stay on the host.
+ */
+export const filterServerSettingsForSubject = (subject: string) => {
+  const app = parseAppSubject(subject);
+  if (app === null) return (settings: ServerSettings) => settings;
+  const ownEntry = <V>(byProject: Readonly<Record<ProjectId, V>>): Record<ProjectId, V> =>
+    app.kind === "embed" && Object.hasOwn(byProject, app.projectId)
+      ? ({ [app.projectId]: byProject[app.projectId] } as Record<ProjectId, V>)
+      : {};
+  return (settings: ServerSettings): ServerSettings => ({
+    ...settings,
+    projectSettingsOverrides: ownEntry(settings.projectSettingsOverrides),
+    projectScriptOverrides: ownEntry(settings.projectScriptOverrides),
+    projectAutoPullOverrides: ownEntry(settings.projectAutoPullOverrides),
+    projectAgentBrowserAccessOverrides: ownEntry(settings.projectAgentBrowserAccessOverrides),
+    deviceHosts: [],
+  });
+};
