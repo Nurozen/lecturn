@@ -122,10 +122,14 @@ const providerInstance = {
   textGeneration: {} as ProviderInstance["textGeneration"],
 } satisfies ProviderInstance;
 
-/** Holds the import at the first file promoted into a given copy thread, as a kill would. */
+/**
+ * Holds the import at the first file promoted into a given copy thread: for
+ * good, as a kill would, or until `release`.
+ */
 interface PromotionGate {
   segment: string | null;
   readonly reached: Deferred.Deferred<void>;
+  readonly release?: Deferred.Deferred<void>;
 }
 
 const gatedFileSystem = (gate: PromotionGate) =>
@@ -139,7 +143,11 @@ const gatedFileSystem = (gate: PromotionGate) =>
           .pipe(
             Effect.tap(() =>
               gate.segment !== null && NodePath.basename(to).startsWith(gate.segment)
-                ? Deferred.succeed(gate.reached, undefined).pipe(Effect.andThen(Effect.never))
+                ? Deferred.succeed(gate.reached, undefined).pipe(
+                    Effect.andThen(
+                      gate.release === undefined ? Effect.never : Deferred.await(gate.release),
+                    ),
+                  )
                 : Effect.void,
             ),
           ),
@@ -927,6 +935,71 @@ describe("ThreadCopyService", () => {
         );
         assert.strictEqual(kept.thread.title, continued.thread.title);
         assert.strictEqual(recopy.thread.title, `Apogee study (from ${APP_NAME})`);
+      }),
+  );
+
+  it.effect(
+    "a copy the user continues while its replacement is being imported is kept; the history becomes a new thread",
+    () =>
+      Effect.gen(function* () {
+        const gate: PromotionGate = {
+          segment: null,
+          reached: yield* Deferred.make<void>(),
+          release: yield* Deferred.make<void>(),
+        };
+        const sidecar = yield* startEnvironment("sidecar");
+        const user = yield* startEnvironment("user", gate);
+        const source = yield* sidecar.run(createSourceThread("/work/rocket", "Max-Q study"));
+        yield* sidecar.run(writeTurn(source.threadId, 1));
+        yield* user.run(importBundle(yield* sidecar.run(exportAll)));
+        const copyId = copyThreadId(app, sidecar.environmentId, source.threadId);
+
+        yield* sidecar.run(writeTurn(source.threadId, 2, { card: true }));
+        const newer = yield* sidecar.run(exportAll);
+        const revision = newer.projects[0]!.threads[0]!.historyRevision;
+        // Planned as a replace of the history-only copy; held while promoting its card.
+        gate.segment = toSafeThreadAttachmentSegment(copyId);
+        const fiber = yield* user.run(importBundle(newer)).pipe(Effect.forkChild);
+        yield* Deferred.await(gate.reached);
+        gate.segment = null;
+        yield* user.run(sendMessage(copyId, "continue here"));
+        const continued = yield* user.run(projectionOf(copyId));
+        assert.isNotNull(continued.thread.activeProviderThreadId);
+        yield* Deferred.succeed(gate.release!, undefined);
+        assert.deepEqual(yield* Fiber.join(fiber), { imported: 1, skipped: 0 });
+
+        yield* user.run(
+          Effect.gen(function* () {
+            const kept = yield* projectionOf(copyId);
+            assert.deepEqual(transcript(kept), transcript(continued));
+            assert.deepEqual(kept.thread.copiedFrom, continued.thread.copiedFrom);
+            assert.strictEqual(
+              kept.thread.activeProviderThreadId,
+              continued.thread.activeProviderThreadId,
+            );
+            assert.strictEqual(kept.thread.settledOverride, continued.thread.settledOverride);
+
+            const recopyId = recopyThreadId(app, sidecar.environmentId, source.threadId, revision);
+            const recopy = yield* projectionOf(recopyId);
+            assert.strictEqual(recopy.thread.copiedFrom?.sourceHistoryRevision, revision);
+            assert.deepEqual(transcript(recopy), [
+              "question 1",
+              "answer 1",
+              "question 2",
+              "answer 2",
+            ]);
+            // The card promoted for the kept copy is gone; only the new thread's remains.
+            const store = yield* ProjectionStore.ProjectionStoreV2;
+            assert.deepEqual(yield* store.getThreadAttachmentIds(copyId), []);
+            const files = yield* attachmentFiles;
+            assert.lengthOf(files, 1);
+            assert.sameMembers(
+              files.map((file) => file.replace(/\.[^.]*$/, "")),
+              [...(yield* store.getThreadAttachmentIds(recopyId))],
+            );
+            assert.deepEqual(yield* stagingEntries, []);
+          }),
+        );
       }),
   );
 

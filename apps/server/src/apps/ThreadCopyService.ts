@@ -53,6 +53,7 @@ import type * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 
 import { resolveAttachmentRelativePath } from "../attachmentPaths.ts";
 import {
@@ -71,6 +72,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
+import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -142,25 +144,31 @@ interface CopyRow {
   readonly deleted: boolean;
 }
 
+interface CreatePlan {
+  readonly type: "create";
+  readonly threadId: ThreadId;
+  readonly title: string;
+}
+
 type ThreadPlan =
   | { readonly type: "skip" }
-  | { readonly type: "create"; readonly threadId: ThreadId; readonly title: string }
+  | CreatePlan
   | {
       readonly type: "replace";
-      readonly current: OrchestrationV2AppThread;
-      readonly title: string;
+      readonly threadId: ThreadId;
+      /** `undefined` keeps the copy's own title. */
+      readonly title: string | undefined;
+      /** The plan for a copy the user continued, should the commit find they have since. */
+      readonly recopy: Effect.Effect<CreatePlan, AppsError | SqlError>;
     }
-  | {
-      readonly type: "retitle";
-      readonly current: OrchestrationV2AppThread;
-      readonly title: string;
-    };
+  | { readonly type: "retitle"; readonly threadId: ThreadId; readonly title: string };
 
 const make = Effect.gen(function* () {
   const orchestrator = yield* Orchestrator.OrchestratorV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const projects = yield* ProjectStore.ProjectStoreV2;
   const eventSink = yield* EventSink.EventSinkV2;
+  const threadCommands = yield* ThreadCommandExecutor.ThreadCommandExecutor;
   const appProjects = yield* AppProjectService;
   const registry = yield* AppRegistryService;
   const projectService = yield* ProjectService.ProjectService;
@@ -458,6 +466,23 @@ const make = Effect.gen(function* () {
   const manifestPath = (stagingDir: string, threadId: ThreadId) =>
     path.join(stagingDir, STAGING_MANIFESTS, `${sha256(threadId)}.json`);
 
+  /** `files` were promoted for `threadId`; any its committed history does not reference goes. */
+  const removeUnreferencedFiles = Effect.fn("ThreadCopyService.removeUnreferencedFiles")(function* (
+    threadId: ThreadId,
+    files: ReadonlyArray<string>,
+  ) {
+    const referenced = new Set(yield* projections.getThreadAttachmentIds(threadId));
+    for (const file of files) {
+      const attachmentId = path.basename(file).replace(/\.[^.]*$/, "");
+      if (referenced.has(attachmentId)) continue;
+      const target = resolveAttachmentRelativePath({
+        attachmentsDir: config.attachmentsDir,
+        relativePath: file,
+      });
+      if (target !== null) yield* fs.remove(target, { force: true });
+    }
+  });
+
   /** Removes stale staging areas and the promoted files no committed thread references. */
   const sweepStaging = Effect.fn("ThreadCopyService.sweepStaging")(function* () {
     if (!(yield* fs.exists(stagingRoot))) return;
@@ -472,18 +497,7 @@ const make = Effect.gen(function* () {
       for (const name of manifests) {
         const manifest = decodeManifest(yield* fs.readFileString(path.join(manifestDir, name)));
         if (Option.isNone(manifest)) continue;
-        const referenced = new Set(
-          yield* projections.getThreadAttachmentIds(manifest.value.threadId as ThreadId),
-        );
-        for (const file of manifest.value.files) {
-          const attachmentId = path.basename(file).replace(/\.[^.]*$/, "");
-          if (referenced.has(attachmentId)) continue;
-          const target = resolveAttachmentRelativePath({
-            attachmentsDir: config.attachmentsDir,
-            relativePath: file,
-          });
-          if (target !== null) yield* fs.remove(target, { force: true });
-        }
+        yield* removeUnreferencedFiles(manifest.value.threadId as ThreadId, manifest.value.files);
       }
       yield* fs.remove(stagingDir, { recursive: true, force: true });
     }
@@ -537,6 +551,26 @@ const make = Effect.gen(function* () {
     `.pipe(Effect.map((rows) => rows.length > 0));
 
   /**
+   * Writes over a copy only if it is still history only, judged from the row
+   * as it is now rather than when the import planned. Every user command on
+   * a thread runs under this lock, so a turn started or a delete made since
+   * the plan is seen here, and one sent meanwhile waits for the write.
+   */
+  const writeHistoryOnlyCopy = (
+    threadId: ThreadId,
+    events: (current: OrchestrationV2AppThread) => ReadonlyArray<OrchestrationV2DomainEvent>,
+  ) =>
+    threadCommands.withLock(
+      threadId,
+      Effect.gen(function* () {
+        const current = yield* projections.getThread(threadId);
+        if (current.deletedAt !== null || (yield* hasRuns(threadId))) return false;
+        yield* eventSink.write({ events: events(current) });
+        return true;
+      }),
+    );
+
+  /**
    * An up-to-date copy is skipped. A newer source replaces a copy that
    * is still history only; a copy the user has continued is never touched,
    * and the newer history becomes a thread of its own.
@@ -576,8 +610,16 @@ const make = Effect.gen(function* () {
           message: `Thread ${threadId} already exists and is not a copy of this app's.`,
         });
       }
-      return { type: "create", threadId, title: yield* titleOf(threadId) } satisfies ThreadPlan;
+      return { type: "create", threadId, title: yield* titleOf(threadId) } satisfies CreatePlan;
     });
+    const recopy = create(
+      recopyThreadId(
+        appId,
+        bundle.sourceEnvironmentId,
+        thread.sourceThreadId,
+        thread.historyRevision,
+      ),
+    );
     const latest = input.copies.reduce<CopyRow | undefined>(
       (best, copy) => (best === undefined || copy.revision > best.revision ? copy : best),
       undefined,
@@ -589,28 +631,17 @@ const make = Effect.gen(function* () {
       if (latest.title === title || (yield* hasRuns(latest.threadId))) {
         return { type: "skip" } satisfies ThreadPlan;
       }
-      return {
-        type: "retitle",
-        current: yield* projections.getThread(latest.threadId),
-        title,
-      } satisfies ThreadPlan;
+      return { type: "retitle", threadId: latest.threadId, title } satisfies ThreadPlan;
     }
     if (!latest.deleted && !(yield* hasRuns(latest.threadId))) {
-      const current = yield* projections.getThread(latest.threadId);
       return {
         type: "replace",
-        current,
-        title: sourceTitle === "" ? current.title : yield* titleOf(latest.threadId),
+        threadId: latest.threadId,
+        title: sourceTitle === "" ? undefined : yield* titleOf(latest.threadId),
+        recopy,
       } satisfies ThreadPlan;
     }
-    return yield* create(
-      recopyThreadId(
-        appId,
-        bundle.sourceEnvironmentId,
-        thread.sourceThreadId,
-        thread.historyRevision,
-      ),
-    );
+    return yield* recopy;
   });
 
   const availableInstance = (instanceId: ProviderInstanceId) =>
@@ -679,7 +710,7 @@ const make = Effect.gen(function* () {
     readonly assets: ReadonlyMap<string, ConnectedAppThreadBundleAsset>;
   }) {
     const { thread, plan, bundle } = input;
-    const threadId = plan.type === "replace" ? plan.current.id : plan.threadId;
+    const { threadId } = plan;
 
     const attachmentIds = new Map<string, string>();
     const files: Array<{ readonly blob: string; readonly relativePath: string }> = [];
@@ -734,97 +765,108 @@ const make = Effect.gen(function* () {
     const createdAt = DateTime.makeUnsafe(thread.createdAt);
     const updatedAt = DateTime.makeUnsafe(thread.updatedAt);
     const eventPrefix = `${EVENT_PREFIX}:${threadId}:r${thread.historyRevision}`;
+    const historyEvents = [
+      ...history.messages.map((message): OrchestrationV2DomainEvent => ({
+        id: EventId.make(`${eventPrefix}:message:${message.id}`),
+        type: "message.updated",
+        threadId,
+        occurredAt: message.updatedAt,
+        payload: message,
+      })),
+      ...history.items.map((item): OrchestrationV2DomainEvent => ({
+        id: EventId.make(`${eventPrefix}:item:${item.id}`),
+        type: "turn-item.updated",
+        threadId,
+        occurredAt: item.updatedAt,
+        payload: item,
+      })),
+    ];
 
-    let threadEvent: OrchestrationV2DomainEvent;
-    let fallbackNotice: string | undefined;
     if (plan.type === "replace") {
-      const { current } = plan;
-      const metadata = threadAppMetadataOf(current);
-      threadEvent = {
-        id: EventId.make(`${eventPrefix}:thread`),
-        type: "thread.metadata-updated",
-        threadId,
-        occurredAt: now,
-        payload: {
-          ...withoutThreadAppMetadata(current),
-          ...(metadata.appOrigin === undefined ? {} : { appOrigin: metadata.appOrigin }),
-          ...(metadata.continuedIn === undefined ? {} : { continuedIn: metadata.continuedIn }),
-          ...appFields(thread, copiedFrom),
-          title: plan.title,
-          // A source made stricter since the last copy makes the copy stricter;
-          // a looser source never loosens what the copy already has.
-          runtimeMode: stricter(runtimeModeRank, current.runtimeMode, thread.runtimeMode),
-          interactionMode: stricter(
-            interactionModeRank,
-            current.interactionMode,
-            thread.interactionMode,
-          ),
-          updatedAt,
-          ...sectionFields(thread, current.pinnedAt ?? null),
-        },
-      };
-    } else {
-      const defaults = yield* threadDefaults(input.projectId, thread);
-      fallbackNotice = defaults.fallbackNotice;
-      threadEvent = {
-        id: EventId.make(`${eventPrefix}:thread`),
-        type: "thread.created",
-        threadId,
-        providerInstanceId: defaults.modelSelection.instanceId,
-        occurredAt: createdAt,
-        payload: {
-          createdBy: "system",
-          creationSource: "server",
-          ...appFields(thread, copiedFrom),
-          id: threadId,
-          projectId: input.projectId,
-          title: plan.title,
-          providerInstanceId: defaults.modelSelection.instanceId,
-          modelSelection: defaults.modelSelection,
-          runtimeMode: defaults.runtimeMode,
-          interactionMode: defaults.interactionMode,
-          branch: null,
-          worktreePath: null,
-          linkedPullRequest: null,
-          branchPullRequest: null,
-          // No provider thread: the first turn opens a fresh session and
-          // hands it the copied history.
-          activeProviderThreadId: null,
-          historyOrigin: "v1_import",
-          lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
-          forkedFrom: null,
-          createdAt,
-          updatedAt,
-          archivedAt: null,
-          unsettledAt: null,
-          snoozedUntil: null,
-          snoozedAt: null,
-          pinOrderKey: null,
-          activeOrderKey: null,
-          lastVisitedAt: null,
-          deletedAt: null,
-          ...sectionFields(thread, null),
-        },
-      };
+      const written = yield* writeHistoryOnlyCopy(threadId, (current) => {
+        const metadata = threadAppMetadataOf(current);
+        return [
+          {
+            id: EventId.make(`${eventPrefix}:thread`),
+            type: "thread.metadata-updated",
+            threadId,
+            occurredAt: now,
+            payload: {
+              ...withoutThreadAppMetadata(current),
+              ...(metadata.appOrigin === undefined ? {} : { appOrigin: metadata.appOrigin }),
+              ...(metadata.continuedIn === undefined ? {} : { continuedIn: metadata.continuedIn }),
+              ...appFields(thread, copiedFrom),
+              title: plan.title ?? current.title,
+              // A source made stricter since the last copy makes the copy stricter;
+              // a looser source never loosens what the copy already has.
+              runtimeMode: stricter(runtimeModeRank, current.runtimeMode, thread.runtimeMode),
+              interactionMode: stricter(
+                interactionModeRank,
+                current.interactionMode,
+                thread.interactionMode,
+              ),
+              updatedAt,
+              ...sectionFields(thread, current.pinnedAt ?? null),
+            },
+          },
+          ...historyEvents,
+        ];
+      });
+      // The copy stays as the user left it, so files promoted for it alone would be orphans.
+      if (!written) {
+        yield* removeUnreferencedFiles(
+          threadId,
+          files.map((file) => file.relativePath),
+        );
+      }
+      return written;
     }
 
+    const defaults = yield* threadDefaults(input.projectId, thread);
+    const { fallbackNotice } = defaults;
     yield* eventSink.write({
       events: [
-        threadEvent,
-        ...history.messages.map((message): OrchestrationV2DomainEvent => ({
-          id: EventId.make(`${eventPrefix}:message:${message.id}`),
-          type: "message.updated",
+        {
+          id: EventId.make(`${eventPrefix}:thread`),
+          type: "thread.created",
           threadId,
-          occurredAt: message.updatedAt,
-          payload: message,
-        })),
-        ...history.items.map((item): OrchestrationV2DomainEvent => ({
-          id: EventId.make(`${eventPrefix}:item:${item.id}`),
-          type: "turn-item.updated",
-          threadId,
-          occurredAt: item.updatedAt,
-          payload: item,
-        })),
+          providerInstanceId: defaults.modelSelection.instanceId,
+          occurredAt: createdAt,
+          payload: {
+            createdBy: "system",
+            creationSource: "server",
+            ...appFields(thread, copiedFrom),
+            id: threadId,
+            projectId: input.projectId,
+            title: plan.title,
+            providerInstanceId: defaults.modelSelection.instanceId,
+            modelSelection: defaults.modelSelection,
+            runtimeMode: defaults.runtimeMode,
+            interactionMode: defaults.interactionMode,
+            branch: null,
+            worktreePath: null,
+            linkedPullRequest: null,
+            branchPullRequest: null,
+            // No provider thread: the first turn opens a fresh session and
+            // hands it the copied history.
+            activeProviderThreadId: null,
+            historyOrigin: "v1_import",
+            lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+            forkedFrom: null,
+            createdAt,
+            updatedAt,
+            archivedAt: null,
+            unsettledAt: null,
+            snoozedUntil: null,
+            snoozedAt: null,
+            pinOrderKey: null,
+            activeOrderKey: null,
+            lastVisitedAt: null,
+            deletedAt: null,
+            ...sectionFields(thread, null),
+          },
+        },
+        ...historyEvents,
         ...(fallbackNotice === undefined
           ? []
           : [
@@ -855,25 +897,24 @@ const make = Effect.gen(function* () {
             ]),
       ],
     });
+    return true;
   });
 
   const retitleThread = Effect.fn("ThreadCopyService.retitleThread")(function* (
-    current: OrchestrationV2AppThread,
+    threadId: ThreadId,
     title: string,
   ) {
     const now = yield* DateTime.now;
-    yield* eventSink.write({
-      events: [
-        {
-          // A title can come back to an earlier value, so the id cannot be derived from it.
-          id: EventId.make(`${EVENT_PREFIX}:${current.id}:title:${NodeCrypto.randomUUID()}`),
-          type: "thread.metadata-updated",
-          threadId: current.id,
-          occurredAt: now,
-          payload: { ...current, title },
-        },
-      ],
-    });
+    yield* writeHistoryOnlyCopy(threadId, (current) => [
+      {
+        // A title can come back to an earlier value, so the id cannot be derived from it.
+        id: EventId.make(`${EVENT_PREFIX}:${threadId}:title:${NodeCrypto.randomUUID()}`),
+        type: "thread.metadata-updated",
+        threadId,
+        occurredAt: now,
+        payload: { ...current, title },
+      },
+    ]);
   });
 
   const runImport = Effect.fn("ThreadCopyService.runImport")(function* (
@@ -921,11 +962,16 @@ const make = Effect.gen(function* () {
         }
         // No history is copied, so it counts as skipped.
         if (plan.type === "retitle") {
-          yield* retitleThread(plan.current, plan.title);
+          yield* retitleThread(plan.threadId, plan.title);
           skipped += 1;
           continue;
         }
-        yield* importThread({ appId, bundle, projectId, thread, plan, stagingDir, assets });
+        const target = { appId, bundle, projectId, thread, stagingDir, assets };
+        // A copy the user continued after planning is kept, and its newer
+        // history becomes a thread of its own, as planning would have decided.
+        if (!(yield* importThread({ ...target, plan })) && plan.type === "replace") {
+          yield* importThread({ ...target, plan: yield* plan.recopy });
+        }
         imported += 1;
       }
     }
@@ -953,8 +999,8 @@ const make = Effect.gen(function* () {
   return ThreadCopyService.of({ export: exportThreads, import: importThreads });
 });
 
-// The runtime's event sink is not in the apps layer's context; this is the
-// same memoized instance (see AppToolApprovalService).
+// The runtime's event sink and thread command lock are not in the apps layer's
+// context; these are the same memoized instances (see AppToolApprovalService).
 export const layer = Layer.effect(ThreadCopyService, make).pipe(
-  Layer.provide(RuntimeLayer.layerEventSink),
+  Layer.provide(Layer.merge(RuntimeLayer.layerEventSink, ThreadCommandExecutor.layer)),
 );
