@@ -25,13 +25,40 @@ import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSi
 import { useToolbarLayout } from "../../components/ui/useToolbarLayout";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
 
+// The resting row: pl-4 before the brand, then gap-1 before each button. Both are fixed dp, while
+// the buttons and the "Lecturn" wordmark grow with the app text size (`scale`).
+const BRAND_INSET = 14;
+const BUTTON_GAP = 3.5;
+/** The wordmark at the default text size (72dp measured), plus rounding room. */
+const WORDMARK_WIDTH = 76;
+/** Brand room the inline list buttons must leave at the default text size: a 320dp row. */
+const INLINE_BRAND_ROOM = 100;
+
+export type SidebarHeaderButtons = "inline" | "listMenu" | "listAndSettingsMenu";
+
+function rowWidthFor(buttonCount: number, brandRoom: number, buttonSize: number) {
+  return BRAND_INSET + buttonCount * (buttonSize + BUTTON_GAP) + brandRoom;
+}
+
 /**
  * The narrowest split-view sidebar (280dp, which every window under about 875dp gets) leaves a
- * 266dp row. Four buttons there leave the brand 46dp, and "Lecturn" needs up to 99dp at the
- * largest text size, so below this width "Show apps" and "Show pull requests" move into a
- * More menu, as AndroidScreenHeader does for the other sidebar lists.
+ * 266dp row, where four buttons would wrap "Lecturn" onto two lines. Show apps and Show pull
+ * requests then move into a More menu, as AndroidScreenHeader does for the other sidebar lists,
+ * and at large text sizes Settings joins them once three buttons would cut the wordmark.
+ * An unmeasured row starts with the list menu.
  */
-export const INLINE_LIST_BUTTONS_MIN_ROW_WIDTH = 320;
+export function resolveSidebarHeaderButtons(
+  rowWidth: number | null,
+  sizing: { readonly scale: number; readonly buttonSize: number },
+): SidebarHeaderButtons {
+  if (rowWidth === null) return "listMenu";
+  if (rowWidth >= rowWidthFor(4, INLINE_BRAND_ROOM * sizing.scale, sizing.buttonSize)) {
+    return "inline";
+  }
+  return rowWidth >= rowWidthFor(3, WORDMARK_WIDTH * sizing.scale, sizing.buttonSize)
+    ? "listMenu"
+    : "listAndSettingsMenu";
+}
 
 /** One toolbar height for the compact list and expanded sidebar, including search. */
 export function ThreadListToolbar(props: {
@@ -53,7 +80,8 @@ export function ThreadListToolbar(props: {
   const homeFocused = useNavigationState((state) => state.routes[state.index]?.name === "Home");
   const listFocused =
     homeFocused && (workspace === null || workspace.state.selectedTab === "threads");
-  const { fabSize } = useAndroidControlSizing();
+  const controlSizing = useAndroidControlSizing();
+  const { fabSize } = controlSizing;
   const { height: toolbarHeight, ...headerPadding } = useToolbarLayout();
   const { state } = useWorkspaceState();
   const { onRequestVisibility, onSearchQueryChange } = props;
@@ -61,9 +89,11 @@ export function ThreadListToolbar(props: {
   const showPullRequests = useWorkspaceListNavigation("pullRequests");
   const searchRef = useRef<TextInputInstance>(null);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [rowWidth, setRowWidth] = useState(0);
-  const listButtons = props.sidebar && workspace !== null;
-  const listButtonsInline = rowWidth >= INLINE_LIST_BUTTONS_MIN_ROW_WIDTH;
+  const [rowWidth, setRowWidth] = useState<number | null>(null);
+  const headerButtons =
+    props.sidebar && workspace !== null
+      ? resolveSidebarHeaderButtons(rowWidth, controlSizing)
+      : null;
   const searching = searchOpen || props.searchQuery.length > 0;
   const openSearch = useCallback(() => {
     onRequestVisibility?.();
@@ -143,7 +173,7 @@ export function ThreadListToolbar(props: {
                   brand={<CompactBrandTitle allowFontScaling={false} fit />}
                 />
               </View>
-              {listButtons && listButtonsInline ? (
+              {headerButtons === "inline" ? (
                 <>
                   <AndroidHeaderIconButton
                     accessibilityLabel="Show apps"
@@ -162,20 +192,27 @@ export function ThreadListToolbar(props: {
                 icon="magnifyingglass"
                 onPress={openSearch}
               />
-              <AndroidHeaderIconButton
-                accessibilityLabel="Open settings"
-                icon="gearshape"
-                onPress={props.onOpenSettings}
-              />
-              {listButtons && !listButtonsInline ? (
+              {headerButtons !== "listAndSettingsMenu" ? (
+                <AndroidHeaderIconButton
+                  accessibilityLabel="Open settings"
+                  icon="gearshape"
+                  onPress={props.onOpenSettings}
+                />
+              ) : null}
+              {headerButtons === "listMenu" || headerButtons === "listAndSettingsMenu" ? (
                 <AndroidAnchoredMenu
                   actions={[
                     { id: "apps", title: "Show apps" },
                     { id: "pullRequests", title: "Show pull requests" },
+                    ...(headerButtons === "listAndSettingsMenu"
+                      ? [{ id: "settings", title: "Open settings" }]
+                      : []),
                   ]}
-                  onPressAction={({ nativeEvent }) =>
-                    nativeEvent.event === "apps" ? showApps() : showPullRequests()
-                  }
+                  onPressAction={({ nativeEvent }) => {
+                    if (nativeEvent.event === "apps") showApps();
+                    else if (nativeEvent.event === "pullRequests") showPullRequests();
+                    else props.onOpenSettings();
+                  }}
                 >
                   {(open) => (
                     <AndroidHeaderIconButton

@@ -19,6 +19,8 @@ const harness = vi.hoisted(() => ({
   menuActions: null as readonly MenuAction[] | null,
   pressMenuAction: null as ((id: string) => void) | null,
   showList: new Map<string, () => void>(),
+  baseFontSize: 16,
+  openSettings: (() => {}) as () => void,
 }));
 
 vi.mock("react-native", () => ({
@@ -83,9 +85,10 @@ vi.mock("../../components/ui/AppText", () => ({
 vi.mock("../../components/ui/FloatingActionButton", () => ({ FloatingActionButton: () => null }));
 vi.mock("../../components/ui/Menu", () => ({ Menu: () => null }));
 vi.mock("../../components/ui/SearchField", () => ({ SearchField: () => null }));
-vi.mock("../../components/ui/useAndroidControlSizing", () => ({
-  useAndroidControlSizing: () => ({ fabSize: 56, scale: 1 }),
-}));
+vi.mock("../../components/ui/useAndroidControlSizing", async () => {
+  const { resolveAndroidControlSizing } = await import("../../lib/androidControlSizing");
+  return { useAndroidControlSizing: () => resolveAndroidControlSizing(harness.baseFontSize) };
+});
 vi.mock("../../components/ui/useToolbarLayout", () => ({
   useToolbarLayout: () => ({ height: 56, paddingTop: 0, paddingBottom: 7 }),
 }));
@@ -100,7 +103,9 @@ vi.mock("../pull-requests/pullRequestGlyphs", () => ({
   PullRequestGlyph: { pullRequest: "pull-request" },
 }));
 
-import { INLINE_LIST_BUTTONS_MIN_ROW_WIDTH, ThreadListToolbar } from "./ThreadListToolbar";
+import { resolveAndroidControlSizing } from "../../lib/androidControlSizing";
+import { MAX_BASE_FONT_SIZE, MIN_BASE_FONT_SIZE } from "../../lib/appearancePreferences";
+import { resolveSidebarHeaderButtons, ThreadListToolbar } from "./ThreadListToolbar";
 
 let container: HTMLDivElement;
 let root: Root | null = null;
@@ -118,7 +123,7 @@ function render(sidebar: boolean, rowWidth: number) {
         filterActions={[]}
         filterCustomized={false}
         onFilterAction={() => {}}
-        onOpenSettings={() => {}}
+        onOpenSettings={() => harness.openSettings()}
         onOpenEnvironments={() => {}}
       />,
     ),
@@ -136,6 +141,8 @@ function buttons() {
 const NARROW_SIDEBAR_ROW = 266;
 // The 380dp sidebar of a landscape tablet.
 const WIDE_SIDEBAR_ROW = 366;
+// "Lecturn" at the default text size, measured on the Android tablet capture.
+const WORDMARK_WIDTH = 72;
 
 beforeEach(() => {
   harness.workspace = { isTabActive: () => true, state: { selectedTab: "threads" } };
@@ -143,6 +150,8 @@ beforeEach(() => {
   harness.menuActions = null;
   harness.pressMenuAction = null;
   harness.showList.clear();
+  harness.baseFontSize = 16;
+  harness.openSettings = vi.fn();
 });
 
 afterEach(() => {
@@ -183,16 +192,46 @@ describe("ThreadListToolbar sidebar header", () => {
     ]);
   });
 
-  it("switches at the documented width", () => {
-    render(true, INLINE_LIST_BUTTONS_MIN_ROW_WIDTH - 1);
-    expect(buttons()).toContain("More actions");
-    act(() =>
-      harness.rowLayout?.({
-        nativeEvent: { layout: { width: INLINE_LIST_BUTTONS_MIN_ROW_WIDTH } },
-      }),
-    );
+  it("switches to inline buttons at a 320dp row at the default text size", () => {
+    render(true, 319);
+    expect(buttons()).toEqual(["Search threads", "Open settings", "More actions"]);
+    act(() => harness.rowLayout?.({ nativeEvent: { layout: { width: 320 } } }));
     expect(buttons()).not.toContain("More actions");
     expect(buttons()).toContain("Show apps");
+  });
+
+  it("collapses the list buttons when larger text grows the buttons and the wordmark", () => {
+    harness.baseFontSize = MAX_BASE_FONT_SIZE;
+    render(true, WIDE_SIDEBAR_ROW);
+    expect(buttons()).toEqual(["Search threads", "Open settings", "More actions"]);
+  });
+
+  it("moves Settings into the More menu when three buttons would cut the wordmark", () => {
+    harness.baseFontSize = 18;
+    render(true, NARROW_SIDEBAR_ROW);
+    expect(buttons()).toEqual(["Search threads", "More actions"]);
+    expect(harness.menuActions?.map((action) => action.title)).toEqual([
+      "Show apps",
+      "Show pull requests",
+      "Open settings",
+    ]);
+    act(() => harness.pressMenuAction?.("settings"));
+    expect(harness.openSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the full wordmark room at every text size and sidebar width", () => {
+    for (let base = MIN_BASE_FONT_SIZE; base <= MAX_BASE_FONT_SIZE; base += 1) {
+      const sizing = resolveAndroidControlSizing(base);
+      for (let row = NARROW_SIDEBAR_ROW; row <= WIDE_SIDEBAR_ROW; row += 1) {
+        const layout = resolveSidebarHeaderButtons(row, sizing);
+        const buttonCount = layout === "inline" ? 4 : layout === "listMenu" ? 3 : 2;
+        // pl-4 (14dp) before the brand, gap-1 (3.5dp) before each button.
+        const brandRoom = row - 14 - buttonCount * (sizing.buttonSize + 3.5);
+        expect(brandRoom, `base ${base}, row ${row}`).toBeGreaterThanOrEqual(
+          WORDMARK_WIDTH * sizing.scale,
+        );
+      }
+    }
   });
 
   it("shows no list buttons outside the sidebar", () => {
