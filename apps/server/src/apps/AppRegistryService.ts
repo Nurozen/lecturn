@@ -379,6 +379,14 @@ const make = Effect.gen(function* () {
       );
     });
 
+  /**
+   * Undelivered grants are denied before the session sweep: delivery issues
+   * its credential before it claims, so a claim that beat the denial left a
+   * session for the sweep to revoke.
+   */
+  const endAccess = (appId: AppId) =>
+    storage(repository.denyUndeliveredGrants(appId)).pipe(Effect.andThen(revokeAppSessions(appId)));
+
   const deliverCredential = (request: AppPairingRequestRecord) =>
     Effect.gen(function* () {
       const record = Option.getOrUndefined(yield* storage(repository.get(request.appId)));
@@ -497,7 +505,7 @@ const make = Effect.gen(function* () {
         // A granted app asking for a fresh credential with the command the user
         // already approved keeps its grant, and a revoked or denied one stays so.
         yield* storage(repository.upsert(writeOf(record, now, { state: "denied" })));
-        yield* revokeAppSessions(record.appId);
+        yield* endAccess(record.appId);
       }
       yield* publishStatus(request.appId);
       return yield* requireStatus(request.appId);
@@ -508,7 +516,7 @@ const make = Effect.gen(function* () {
       const record = yield* requireRecord(appId);
       const now = yield* DateTime.now;
       yield* storage(repository.upsert(writeOf(record, now, { state: "revoked" })));
-      yield* revokeAppSessions(appId);
+      yield* endAccess(appId);
       yield* leases.clear(appId);
       // Headless processes stop from this status change (HeadlessToolHost).
       yield* publishStatus(appId);
@@ -532,7 +540,7 @@ const make = Effect.gen(function* () {
   const deleteApp: AppRegistryService["Service"]["delete"] = ({ appId, deleteThreads }) =>
     Effect.gen(function* () {
       const record = yield* requireRecord(appId);
-      yield* revokeAppSessions(appId);
+      yield* endAccess(appId);
       yield* leases.clear(appId);
       if (deleteThreads) {
         // Revoked first, so the app is shut out and its headless processes stop

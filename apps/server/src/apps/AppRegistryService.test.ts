@@ -298,6 +298,49 @@ it.layer(NodeServices.layer)("AppRegistryService", (it) => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("delivers no credential for a grant a newer one replaced", () => {
+    const { layer } = makeLayer();
+    return Effect.gen(function* () {
+      const registry = yield* AppRegistryService;
+      const sessions = yield* SessionStore.SessionStore;
+      const older = yield* registry.createPairingRequest(registration);
+      yield* registry.decidePairing({ requestId: older.requestId, decision: "grant" });
+      const token = yield* grant(registry, registration);
+
+      assert.deepEqual(yield* poll(registry, older), { state: "expired" });
+      assert.strictEqual((yield* sessions.verify(token)).subject, "app:dev.example.app");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("delivers no credential for a grant that was revoked or denied before delivery", () => {
+    const { layer } = makeLayer();
+    const changed = makeRegistration({
+      headlessTools: { ...registration.headlessTools, args: ["serve"] },
+    });
+    return Effect.gen(function* () {
+      const registry = yield* AppRegistryService;
+      const sessions = yield* SessionStore.SessionStore;
+      const ended = {
+        revoked: registry.revoke(registration.appId),
+        denied: Effect.gen(function* () {
+          const asking = yield* registry.createPairingRequest(changed);
+          return yield* registry.decidePairing({ requestId: asking.requestId, decision: "deny" });
+        }),
+      };
+      for (const [how, end] of Object.entries(ended)) {
+        const undelivered = yield* registry.createPairingRequest(registration);
+        yield* registry.decidePairing({ requestId: undelivered.requestId, decision: "grant" });
+        assert.strictEqual((yield* end).state, how);
+        assert.deepEqual(yield* poll(registry, undelivered), { state: "denied" }, how);
+
+        // Granting the app again revives nothing the user ended.
+        const token = yield* grant(registry, registration);
+        assert.deepEqual(yield* poll(registry, undelivered), { state: "denied" }, how);
+        assert.strictEqual((yield* sessions.verify(token)).subject, "app:dev.example.app");
+      }
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("puts only runtime-mode ceilings into the credential", () => {
     const { layer } = makeLayer();
     return Effect.gen(function* () {

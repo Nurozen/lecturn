@@ -41,7 +41,11 @@ export const AppRegistrationRecord = Schema.Struct({
 });
 export type AppRegistrationRecord = typeof AppRegistrationRecord.Type;
 
-/** `superseded`: a newer request for the same app replaced it before a decision. */
+/**
+ * `superseded`: a newer request or grant for the same app replaced it before
+ * it took effect. `denied` also covers a grant ended before its credential
+ * was delivered.
+ */
 export const AppPairingRequestState = Schema.Literals([
   "pending",
   "granted",
@@ -130,11 +134,19 @@ export class AppRegistrationRepository extends Context.Service<
     readonly settleLapsedPairings: (
       now: DateTime.Utc,
     ) => Effect.Effect<ReadonlyArray<AppId>, AppRegistrationRepositoryError>;
-    /** Decides a pending request; `false` when it was not pending. */
+    /**
+     * Decides a pending request; `false` when it was not pending. A grant
+     * supersedes the app's undelivered grants in the same transaction, so
+     * only the newest can still hand out a credential.
+     */
     readonly decidePairingRequest: (input: {
       readonly requestId: string;
       readonly state: "granted" | "denied";
     }) => Effect.Effect<boolean, AppRegistrationRepositoryError>;
+    /** Denies the app's granted requests whose credential was not delivered yet. */
+    readonly denyUndeliveredGrants: (
+      appId: AppId,
+    ) => Effect.Effect<void, AppRegistrationRepositoryError>;
     /** `true` exactly once per granted request, so the credential is handed out once. */
     readonly claimCredentialDelivery: (
       requestId: string,
@@ -437,13 +449,37 @@ export const make = Effect.gen(function* () {
     requestId,
     state,
   }) =>
-    sql<{ readonly requestId: string }>`
-      UPDATE app_pairing_requests SET state = ${state}
-      WHERE request_id = ${requestId} AND state = 'pending'
-      RETURNING request_id AS "requestId"
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const decided = yield* sql<{ readonly appId: string }>`
+            UPDATE app_pairing_requests SET state = ${state}
+            WHERE request_id = ${requestId} AND state = 'pending'
+            RETURNING app_id AS "appId"
+          `;
+          const appId = decided[0]?.appId;
+          if (appId === undefined) return false;
+          if (state === "granted") {
+            yield* sql`
+              UPDATE app_pairing_requests SET state = 'superseded'
+              WHERE app_id = ${appId} AND request_id <> ${requestId}
+                AND state = 'granted' AND credential_delivered = 0
+            `;
+          }
+          return true;
+        }),
+      )
+      .pipe(Effect.mapError(toRepositoryError("AppRegistrationRepository.decidePairingRequest")));
+
+  const denyUndeliveredGrants: AppRegistrationRepository["Service"]["denyUndeliveredGrants"] = (
+    appId,
+  ) =>
+    sql`
+      UPDATE app_pairing_requests SET state = 'denied'
+      WHERE app_id = ${appId} AND state = 'granted' AND credential_delivered = 0
     `.pipe(
-      Effect.map((rows) => rows.length > 0),
-      Effect.mapError(toRepositoryError("AppRegistrationRepository.decidePairingRequest")),
+      Effect.asVoid,
+      Effect.mapError(toRepositoryError("AppRegistrationRepository.denyUndeliveredGrants")),
     );
 
   const claimCredentialDelivery: AppRegistrationRepository["Service"]["claimCredentialDelivery"] = (
@@ -470,6 +506,7 @@ export const make = Effect.gen(function* () {
     listPendingPairingRequests,
     settleLapsedPairings,
     decidePairingRequest,
+    denyUndeliveredGrants,
     claimCredentialDelivery,
   });
 });
