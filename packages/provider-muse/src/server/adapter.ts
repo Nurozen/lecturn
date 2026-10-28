@@ -20,6 +20,7 @@ import {
   type OrchestrationV2PlanStep,
   type ProviderApprovalDecision,
   type RuntimeRequestId,
+  type ProviderThreadId,
   type ServerProviderModel,
   type ThreadId,
 } from "@lecturn/contracts";
@@ -269,6 +270,19 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
   const providerHost = yield* ProviderHost.ProviderHost;
   const fileSystem = yield* FileSystem.FileSystem;
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+  // Muse gets the thread's session as an optional session MCP server.
+  const reportMuseMcpActivation = (threadId: ThreadId, providerThreadId: ProviderThreadId) =>
+    mcpSessions.read(threadId).pipe(
+      Effect.flatMap((session) =>
+        McpProviderSessions.reportThreadMcpActivation({
+          mcpSessions,
+          threadId,
+          providerThreadId,
+          driver: MUSE_PROVIDER,
+          mcpActivated: session !== undefined,
+        }),
+      ),
+    );
   const agentScope = yield* AgentScope;
 
   const protocolError = (detail: string, payload?: unknown) =>
@@ -2099,6 +2113,9 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
         ensureThread: (args) =>
           register(args).pipe(
             commands.withPermits(1),
+            Effect.tap((thread) =>
+              reportMuseMcpActivation(args.threadId, args.existingProviderThread?.id ?? thread.id),
+            ),
             Effect.mapError(
               (cause) =>
                 new ProviderAdapter.ProviderAdapterEnsureThreadError({
@@ -2116,6 +2133,12 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
             existingProviderThread: args.providerThread,
           }).pipe(
             commands.withPermits(1),
+            Effect.tap((thread) =>
+              reportMuseMcpActivation(
+                args.threadId ?? args.providerThread.appThreadId ?? input.threadId,
+                thread.id,
+              ),
+            ),
             Effect.mapError(
               (cause) =>
                 new ProviderAdapter.ProviderAdapterResumeThreadError({

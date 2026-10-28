@@ -75,6 +75,8 @@ import {
   GitCommandError,
   CONTEXTUAL_WS_METHODS,
   ContextualRpcs,
+  APPS_WS_METHODS,
+  AppsRpcs,
   ProjectListEntriesError,
   ProjectReadFileError,
   ProjectSearchContentsError,
@@ -228,7 +230,6 @@ import * as DefectReporter from "./observability/DefectReporter.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { requiredScopeForDeviceList, rpcAuthorizationError } from "./auth/RpcAuthorization.ts";
-import * as RpcAuthorization from "./auth/RpcAuthorization.ts";
 import { RpcInstrumentation, rpcInstrumentationLayer } from "./observability/RpcInstrumentation.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
@@ -272,6 +273,10 @@ import { PullRequestWatchService } from "./pullRequest/PullRequestWatchService.t
 import { SagaWorkbenchService } from "./stave/SagaWorkbenchService.ts";
 import { isPathUnder } from "./stave/StaveSpaceLock.ts";
 import { makeStaveRpcHandlers, StaveRpcRuntime } from "./stave/staveRpcHandlers.ts";
+import * as AppsRpcHandlers from "./apps/AppsRpcHandlers.ts";
+import type { AppsServices } from "./apps/AppsLayer.ts";
+import * as AppRpcAuthorization from "./apps/appRpcAuthorization.ts";
+import * as AppStreamFilter from "./apps/appStreamFilter.ts";
 import { StaveBinary } from "./stave/StaveBinary.ts";
 import { StaveCli } from "./stave/StaveCli.ts";
 import { StaveConfigReader } from "./stave/StaveConfigReader.ts";
@@ -1845,8 +1850,8 @@ const makeWsRpcHandlers = (
         const providers = options.usageLimitsCommand
           ? withUsageLimitsCommands(currentProviders, yield* usageLimitSources.current)
           : currentProviders;
-        const settings = ServerSettings.redactServerSettingsForClient(
-          yield* serverSettings.getSettings,
+        const settings = AppStreamFilter.filterServerSettingsForSubject(currentSession.subject)(
+          ServerSettings.redactServerSettingsForClient(yield* serverSettings.getSettings),
         );
         const environment = yield* serverEnvironment.getDescriptor;
         const auth = yield* serverAuth.getDescriptor();
@@ -1925,6 +1930,7 @@ const makeWsRpcHandlers = (
     // Stave reads live in their own module. RpcInstrumentation traces them in the
     // group middleware and RpcScopeAuthorization checks their scopes like any RPC.
     const staveRpcHandlers = yield* makeStaveRpcHandlers();
+    const appsRpcHandlers = yield* AppsRpcHandlers.make(currentSession);
 
     const getOrchestrationV2ArchivedShellSnapshot = Effect.gen(function* () {
       const { threads, projects, snapshotSequence } = yield* loadShellSnapshotParts({
@@ -2018,6 +2024,7 @@ const makeWsRpcHandlers = (
 
     const handlers = ServerWsRpcGroup.of({
       ...staveRpcHandlers,
+      ...appsRpcHandlers,
       [WS_METHODS.contextualStatus]: (input) => contextual.status(input),
       [WS_METHODS.contextualProjectSettings]: (input) => contextual.projectSettings(input),
       [WS_METHODS.contextualUpdateProjectSettings]: (input) =>
@@ -2327,7 +2334,9 @@ const makeWsRpcHandlers = (
       [ORCHESTRATION_V2_WS_METHODS.subscribeArchivedShell]: (_input) =>
         Stream.unwrap(subscribeOrchestrationV2ArchivedShell()),
       [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: (input) =>
-        Stream.unwrap(subscribeOrchestrationV2Shell(input)),
+        Stream.unwrap(subscribeOrchestrationV2Shell(input)).pipe(
+          AppStreamFilter.filterShellStream(currentSession),
+        ),
       [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: (input) =>
         Stream.unwrap(
           Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
@@ -3313,6 +3322,7 @@ const makeWsRpcHandlers = (
                 : Stream.empty;
             const settingsUpdates = serverSettings.streamChanges.pipe(
               Stream.map((settings) => ServerSettings.redactServerSettingsForClient(settings)),
+              Stream.map(AppStreamFilter.filterServerSettingsForSubject(currentSession.subject)),
               Stream.map((settings) => ({
                 version: 1 as const,
                 type: "settingsUpdated" as const,
@@ -3410,6 +3420,7 @@ const makeWsRpcHandlers = (
 // Lecturn's RPCs get their own groups so each `toLayer` stays within it;
 // RpcServer finds handlers by tag, so the layers serve the one WsRpcGroup.
 type ContextualRpcTag = (typeof CONTEXTUAL_WS_METHODS)[keyof typeof CONTEXTUAL_WS_METHODS];
+type AppsRpcTag = (typeof APPS_WS_METHODS)[keyof typeof APPS_WS_METHODS];
 const LECTURN_WS_METHODS = [
   WS_METHODS.staveGetStatus,
   WS_METHODS.staveSpaceStatus,
@@ -3459,9 +3470,11 @@ type WsRpcTag = RpcGroup.Rpcs<typeof ServerWsRpcGroup>["_tag"];
 const lecturnRpcTags: ReadonlySet<string> = new Set(LECTURN_WS_METHODS);
 const WsCoreRpcGroup = ServerWsRpcGroup.omit(
   ...Object.values(CONTEXTUAL_WS_METHODS),
+  ...Object.values(APPS_WS_METHODS),
   ...LECTURN_WS_METHODS,
 );
 const WsContextualRpcGroup = RpcGroup.make(...ContextualRpcs);
+const WsAppsRpcGroup = RpcGroup.make(...AppsRpcs);
 const WsLecturnRpcGroup = ServerWsRpcGroup.omit(
   ...([...ServerWsRpcGroup.requests.keys()].filter((tag) => !lecturnRpcTags.has(tag)) as Array<
     Exclude<WsRpcTag, LecturnRpcTag>
@@ -3472,6 +3485,7 @@ const WsLecturnRpcGroup = ServerWsRpcGroup.omit(
 export const WS_RPC_HANDLER_GROUPS = {
   core: WsCoreRpcGroup,
   contextual: WsContextualRpcGroup,
+  apps: WsAppsRpcGroup,
   lecturn: WsLecturnRpcGroup,
 } as const;
 
@@ -3491,12 +3505,15 @@ const layerWsRpc = (
       serverBrowser,
     ).pipe(
       Effect.map((handlers) => {
-        const coreHandlers: Omit<typeof handlers, ContextualRpcTag | LecturnRpcTag> = handlers;
+        const coreHandlers: Omit<typeof handlers, ContextualRpcTag | AppsRpcTag | LecturnRpcTag> =
+          handlers;
         const contextualHandlers: Pick<typeof handlers, ContextualRpcTag> = handlers;
+        const appsHandlers: Pick<typeof handlers, AppsRpcTag> = handlers;
         const lecturnHandlers: Pick<typeof handlers, LecturnRpcTag> = handlers;
         return Layer.mergeAll(
           WsCoreRpcGroup.toLayer(coreHandlers),
           WsContextualRpcGroup.toLayer(contextualHandlers),
+          WsAppsRpcGroup.toLayer(appsHandlers),
           WsLecturnRpcGroup.toLayer(lecturnHandlers),
         );
       }),
@@ -3536,6 +3553,7 @@ export const layer = Layer.unwrap(
       | StaveRpcRuntime
       | ProjectionStoreV2.ProjectionStoreV2
       | CheckpointStore.CheckpointStore
+      | AppsServices
     >();
     const lecturnServices = Layer.succeedContext(
       Context.merge(lecturnContext, Context.make(PullRequestWatchService, pullRequestWatches)).pipe(
@@ -3588,7 +3606,7 @@ export const layer = Layer.unwrap(
             Effect.provideService(RpcServer.Protocol, withTerminalOutputWindow(protocol)),
             Effect.provide(
               Layer.merge(
-                RpcAuthorization.layer(session.scopes, (method, payload) => {
+                AppRpcAuthorization.layer(session, (method, payload) => {
                   // Anonymous product signal: the feature and its enum variant,
                   // credited to the connecting client's surface only.
                   const usage = featureUsage(method, payload);
@@ -3602,7 +3620,7 @@ export const layer = Layer.unwrap(
                             : { surface: clientAnalyticsProps.surface }),
                         })
                         .pipe(Effect.ignore);
-                }),
+                }).pipe(Layer.provide(lecturnServices)),
                 rpcInstrumentationLayer,
               ),
             ),

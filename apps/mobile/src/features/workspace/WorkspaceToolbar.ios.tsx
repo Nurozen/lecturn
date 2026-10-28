@@ -14,6 +14,7 @@ import { useWorkspaceTabs } from "./WorkspaceTabsContext";
 import { useSidebarWorkspaceTabs } from "./useSystemWorkspaceTabBar";
 import { useSelectWorkspaceTab } from "./useSelectWorkspaceTab";
 import { useMobileNavigationTheme } from "../../lib/useMobileNavigationTheme";
+import { workspaceTabSearchLabel } from "./workspace-tabs-state";
 
 // Tabler's git-pull-request geometry, shared with the UIKit tab bar.
 const PULL_REQUEST_ICON = require("../../../assets/icons/pull-request.png");
@@ -89,8 +90,7 @@ export function WorkspaceToolbar(props: {
                   obscureBackground: false,
                   placement: NATIVE_LIQUID_GLASS_SUPPORTED ? "integratedButton" : "stacked",
                   allowToolbarIntegration: NATIVE_LIQUID_GLASS_SUPPORTED,
-                  placeholder:
-                    selectedTab === "pullRequests" ? "Search pull requests" : "Search threads",
+                  placeholder: workspaceTabSearchLabel(selectedTab),
                   cancelButtonText: "✕",
                   onFocus: () =>
                     tab.searchMode === "resting"
@@ -126,9 +126,7 @@ export function WorkspaceToolbar(props: {
         />
         {NATIVE_LIQUID_GLASS_SUPPORTED ? null : (
           <Toolbar.Button
-            accessibilityLabel={
-              selectedTab === "pullRequests" ? "Search pull requests" : "Search threads"
-            }
+            accessibilityLabel={workspaceTabSearchLabel(selectedTab)}
             icon="magnifyingglass"
             onPress={focusSearch}
           />
@@ -142,6 +140,15 @@ export function WorkspaceToolbar(props: {
             icon={selectedTab === "threads" ? "text.bubble.fill" : "text.bubble"}
             tintColor={selectedTab === "threads" ? selectedTint : undefined}
             onPress={() => selectTab("threads")}
+          />
+        ) : null}
+        {sidebarTabs === "toolbar" ? (
+          <Toolbar.Button
+            identifier="workspace-tab-apps"
+            accessibilityLabel="Apps"
+            icon={selectedTab === "apps" ? "square.grid.2x2.fill" : "square.grid.2x2"}
+            tintColor={selectedTab === "apps" ? selectedTint : undefined}
+            onPress={() => selectTab("apps")}
           />
         ) : null}
         {sidebarTabs === "toolbar" ? (

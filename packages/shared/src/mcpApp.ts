@@ -5,6 +5,11 @@ export const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
 export const MCP_APP_EXTENSION_ID = "io.modelcontextprotocol/ui";
 export const MCP_APP_RESOURCE_SCHEME = "ui://";
 export const MCP_APP_OUTPUT_KEY = "lecturnMcpApp";
+/**
+ * Beside the reference instead of `result` when Lecturn refused the call: the
+ * view is told it was cancelled (`ui/notifications/tool-cancelled`).
+ */
+export const MCP_APP_CANCELLED_KEY = "cancelled";
 
 const MCP_APP_MIN_HEIGHT = 80;
 export const MCP_APP_DEFAULT_HEIGHT = 320;
@@ -122,6 +127,61 @@ export function readMcpAppReference(value: unknown): McpAppReference | undefined
     ...(permissions === undefined ? {} : { permissions }),
     ...(typeof value.prefersBorder === "boolean" ? { prefersBorder: value.prefersBorder } : {}),
   };
+}
+
+const MAX_ENVELOPE_TEXT_LENGTH = 1024 * 1024;
+
+/**
+ * Adapters record a tool's output as they received it: the envelope itself,
+ * the MCP result around it, or only its text. Bounded like the reference
+ * reader in toolOutput.ts, so a large output is never parsed twice over.
+ */
+function findMcpAppEnvelope(
+  value: unknown,
+  depth = 0,
+): Readonly<Record<PropertyKey, unknown>> | undefined {
+  if (depth > 3) return undefined;
+  if (typeof value === "string") {
+    if (value.length > MAX_ENVELOPE_TEXT_LENGTH) return undefined;
+    try {
+      return findMcpAppEnvelope(JSON.parse(value), depth + 1);
+    } catch {
+      return undefined;
+    }
+  }
+  if (Array.isArray(value)) {
+    for (const block of value.slice(0, 32)) {
+      const found = Predicate.isObject(block)
+        ? findMcpAppEnvelope(block.text, depth + 1)
+        : undefined;
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (!Predicate.isObject(value)) return undefined;
+  if (MCP_APP_OUTPUT_KEY in value) return value;
+  return (
+    findMcpAppEnvelope(value.structuredContent, depth + 1) ??
+    findMcpAppEnvelope(value.content, depth + 1)
+  );
+}
+
+export interface McpAppToolOutcome {
+  readonly result?: unknown;
+  readonly cancelled?: { readonly reason?: string };
+}
+
+/** What a card replays to its view: the call's result, or that Lecturn cancelled the call. */
+export function readMcpAppToolOutcome(output: unknown): McpAppToolOutcome {
+  const envelope = findMcpAppEnvelope(output);
+  if (envelope === undefined) return {};
+  const cancelled = envelope[MCP_APP_CANCELLED_KEY];
+  if (Predicate.isObject(cancelled)) {
+    return {
+      cancelled: typeof cancelled.reason === "string" ? { reason: cancelled.reason } : {},
+    };
+  }
+  return envelope.result === undefined ? {} : { result: envelope.result };
 }
 
 export function mcpAppReferencesEqual(left: McpAppReference, right: McpAppReference): boolean {

@@ -1,4 +1,6 @@
 import {
+  AppBinding,
+  type AppId,
   type ApplicationProjectEvent,
   IsoDateTime,
   ModelSelection,
@@ -41,6 +43,8 @@ export const ProjectRow = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
+  /** Lecturn connected apps; absent on every other project. */
+  appBinding: Schema.optionalKey(AppBinding),
 });
 export type ProjectRow = typeof ProjectRow.Type;
 
@@ -50,7 +54,11 @@ const ProjectDbRow = Schema.Struct({
   autoPull: Schema.BooleanFromBit,
   projectIcon: Schema.NullOr(Schema.fromJsonString(StoredProjectIcon)),
   scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
+  appBinding: Schema.NullOr(Schema.fromJsonString(AppBinding)),
 });
+
+const fromDbRow = ({ appBinding, ...row }: typeof ProjectDbRow.Type): ProjectRow =>
+  appBinding === null ? row : { ...row, appBinding };
 
 function toShell(row: ProjectRow): OrchestrationProjectShell {
   return {
@@ -66,6 +74,7 @@ function toShell(row: ProjectRow): OrchestrationProjectShell {
     scripts: row.scripts,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    ...(row.appBinding === undefined ? {} : { appBinding: row.appBinding }),
   };
 }
 
@@ -82,9 +91,18 @@ export class ProjectStoreV2 extends Context.Service<
       readonly projectIds?: ReadonlyArray<ProjectId>;
       readonly includeDeleted?: boolean;
     }) => Effect.Effect<ReadonlyArray<ProjectRow>, ProjectStoreV2Error>;
-    /** Workspace roots match by exact string; callers normalize before asking. */
+    /**
+     * Workspace roots match by exact string; callers normalize before asking.
+     * Never returns an app project: those share roots with normal projects
+     * and are found only by `findActiveByAppWorkspace`.
+     */
     readonly findActiveByWorkspaceRoot: (
       workspaceRoot: string,
+    ) => Effect.Effect<Option.Option<ProjectRow>, ProjectStoreV2Error>;
+    /** Matches the root exactly as the app sent it. */
+    readonly findActiveByAppWorkspace: (
+      appId: AppId,
+      appWorkspaceRoot: string,
     ) => Effect.Effect<Option.Option<ProjectRow>, ProjectStoreV2Error>;
     readonly getShell: (
       projectId: ProjectId,
@@ -105,6 +123,7 @@ export const make = Effect.gen(function* () {
       projectId: Schema.optional(ProjectId),
       projectIds: Schema.optional(Schema.Array(ProjectId)),
       workspaceRoot: Schema.optional(Schema.String),
+      appBinding: Schema.optional(Schema.NullOr(AppBinding)),
       includeDeleted: Schema.Boolean,
     }),
     Result: ProjectDbRow,
@@ -121,7 +140,10 @@ export const make = Effect.gen(function* () {
         scripts_json AS "scripts",
         created_at AS "createdAt",
         updated_at AS "updatedAt",
-        deleted_at AS "deletedAt"
+        deleted_at AS "deletedAt",
+        CASE WHEN app_id IS NULL THEN NULL
+          ELSE json_object('appId', app_id, 'workspaceRoot', app_workspace_root)
+        END AS "appBinding"
       FROM projection_projects
       WHERE ${sql.and([
         ...(request.includeDeleted ? [] : [sql`deleted_at IS NULL`]),
@@ -130,13 +152,23 @@ export const make = Effect.gen(function* () {
         ...(request.workspaceRoot === undefined
           ? []
           : [sql`workspace_root = ${request.workspaceRoot}`]),
+        ...(request.appBinding === undefined
+          ? []
+          : request.appBinding === null
+            ? [sql`app_id IS NULL`]
+            : [
+                sql`app_id = ${request.appBinding.appId}`,
+                sql`app_workspace_root = ${request.appBinding.workspaceRoot}`,
+              ]),
       ])}
       ORDER BY created_at ASC, project_id ASC
     `,
   });
 
+  // Every write rewrites the whole row, so a field read back from `get` that
+  // is missing here is erased by the next update (appBinding included).
   const upsertRow = (row: ProjectRow) =>
-    encodeRow(row).pipe(
+    encodeRow({ ...row, appBinding: row.appBinding ?? null }).pipe(
       Effect.flatMap(
         (encoded) => sql`
           INSERT INTO projection_projects (
@@ -151,7 +183,9 @@ export const make = Effect.gen(function* () {
             scripts_json,
             created_at,
             updated_at,
-            deleted_at
+            deleted_at,
+            app_id,
+            app_workspace_root
           )
           VALUES (
             ${encoded.projectId},
@@ -165,7 +199,9 @@ export const make = Effect.gen(function* () {
             ${encoded.scripts},
             ${encoded.createdAt},
             ${encoded.updatedAt},
-            ${encoded.deletedAt}
+            ${encoded.deletedAt},
+            ${row.appBinding?.appId ?? null},
+            ${row.appBinding?.workspaceRoot ?? null}
           )
           ON CONFLICT (project_id)
           DO UPDATE SET
@@ -179,7 +215,9 @@ export const make = Effect.gen(function* () {
             scripts_json = excluded.scripts_json,
             created_at = excluded.created_at,
             updated_at = excluded.updated_at,
-            deleted_at = excluded.deleted_at
+            deleted_at = excluded.deleted_at,
+            app_id = excluded.app_id,
+            app_workspace_root = excluded.app_workspace_root
         `,
       ),
     );
@@ -191,7 +229,7 @@ export const make = Effect.gen(function* () {
 
   const get: ProjectStoreV2["Service"]["get"] = (projectId, options) =>
     selectRows({ projectId, includeDeleted: options?.includeDeleted === true }).pipe(
-      Effect.map((rows) => Option.fromUndefinedOr(rows[0])),
+      Effect.map((rows) => Option.map(Option.fromUndefinedOr(rows[0]), fromDbRow)),
       mapError("get"),
     );
 
@@ -199,14 +237,29 @@ export const make = Effect.gen(function* () {
     selectRows({
       ...(options?.projectIds === undefined ? {} : { projectIds: options.projectIds }),
       includeDeleted: options?.includeDeleted === true,
-    }).pipe(mapError("list"));
+    }).pipe(
+      Effect.map((rows) => rows.map(fromDbRow)),
+      mapError("list"),
+    );
 
   const findActiveByWorkspaceRoot: ProjectStoreV2["Service"]["findActiveByWorkspaceRoot"] = (
     workspaceRoot,
   ) =>
-    selectRows({ workspaceRoot, includeDeleted: false }).pipe(
-      Effect.map((rows) => Option.fromUndefinedOr(rows[0])),
+    selectRows({ workspaceRoot, appBinding: null, includeDeleted: false }).pipe(
+      Effect.map((rows) => Option.map(Option.fromUndefinedOr(rows[0]), fromDbRow)),
       mapError("findActiveByWorkspaceRoot"),
+    );
+
+  const findActiveByAppWorkspace: ProjectStoreV2["Service"]["findActiveByAppWorkspace"] = (
+    appId,
+    appWorkspaceRoot,
+  ) =>
+    selectRows({
+      appBinding: { appId, workspaceRoot: appWorkspaceRoot },
+      includeDeleted: false,
+    }).pipe(
+      Effect.map((rows) => Option.map(Option.fromUndefinedOr(rows[0]), fromDbRow)),
+      mapError("findActiveByAppWorkspace"),
     );
 
   const apply: ProjectStoreV2["Service"]["apply"] = Effect.fn("ProjectStoreV2.apply")(
@@ -226,6 +279,7 @@ export const make = Effect.gen(function* () {
           createdAt: payload.createdAt,
           updatedAt: payload.updatedAt,
           deletedAt: null,
+          ...(payload.appBinding === undefined ? {} : { appBinding: payload.appBinding }),
         }).pipe(mapError("apply"));
       }
       // Lecturn: a refresh carries no state; shell readers re-read the row.
@@ -265,6 +319,7 @@ export const make = Effect.gen(function* () {
     get,
     list,
     findActiveByWorkspaceRoot,
+    findActiveByAppWorkspace,
     getShell: (projectId) => get(projectId).pipe(Effect.map(Option.map(toShell))),
     listShells: (options) =>
       list(options?.projectIds === undefined ? undefined : { projectIds: options.projectIds }).pipe(

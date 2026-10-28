@@ -237,6 +237,7 @@ export type OrchestratorFixtureInputStep =
       readonly type: "finish_held_run";
       readonly targetRunIndex: number;
       readonly status: OrchestrationV2RunStatus;
+      readonly afterReplayLabel?: string;
     }
   | {
       readonly type: "capture_shell_snapshot";
@@ -684,6 +685,9 @@ export function materializeFixtureInput(input: {
             threadId: ids.threadId,
             runId: runIdFor(step.targetRunIndex),
             status: step.status,
+            ...(step.afterReplayLabel === undefined
+              ? {}
+              : { afterReplayLabel: step.afterReplayLabel }),
           });
           break;
         case "capture_shell_snapshot":

@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
+import * as AppRuntimeState from "../apps/AppRuntimeState.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import type * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
 import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
@@ -34,7 +35,10 @@ const deepParent = (id: ThreadId): ThreadId | null => {
   return depth === 1 ? threadId : deepForkId(depth - 1);
 };
 
-const appItem = (output: unknown): OrchestrationV2TurnItem => ({
+const appItem = (
+  output: unknown,
+  overrides: Partial<{ toolName: string; providerThreadId: ProviderThreadId | null }> = {},
+): OrchestrationV2TurnItem => ({
   id: itemId,
   threadId,
   runId: null,
@@ -53,6 +57,7 @@ const appItem = (output: unknown): OrchestrationV2TurnItem => ({
   toolName: "weather.get_weather",
   input: {},
   output,
+  ...overrides,
 });
 
 const app = {
@@ -72,6 +77,7 @@ function makeLayer(input: {
   return McpAppRequests.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        AppRuntimeState.layer,
         Layer.mock(McpAppModelContext.McpAppModelContext)({
           set: (entry) =>
             Effect.sync(() => {
@@ -272,5 +278,46 @@ describe("McpAppRequests", () => {
         "provider-unsupported",
       );
     }),
+  );
+
+  // AppMcpAppRoute.test.ts covers the route itself; here AppsLayer is not up.
+  it.effect("keeps connected-app cards off the provider session", () =>
+    Effect.gen(function* () {
+      const requests = yield* McpAppRequests.McpAppRequests;
+      const before = calls.length;
+      const input = { threadId, itemId };
+      assert.equal(
+        yield* reason(requests.readResource({ ...input, uri: "ui://ex/card" })),
+        "app-unavailable",
+      );
+      assert.equal(
+        yield* reason(requests.callTool({ ...input, name: "ex_counter", arguments: {} })),
+        "app-unavailable",
+      );
+      assert.equal(calls.length, before);
+      yield* requests.updateModelContext({
+        ...input,
+        conversationThreadId: threadId,
+        content: [{ type: "text", text: "Counter at 3" }],
+      });
+      assert.equal(storedContext.get(`${threadId}/${itemId}`), "Counter at 3");
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          item: appItem(
+            {
+              lecturnMcpApp: {
+                ...app,
+                server: "lecturn",
+                tool: "ex_counter",
+                resourceUri: "ui://ex/card",
+              },
+            },
+            { toolName: "mcp__lecturn__ex_counter", providerThreadId: null },
+          ),
+          mcpApps,
+        }),
+      ),
+    ),
   );
 });

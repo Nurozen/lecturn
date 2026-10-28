@@ -19,6 +19,7 @@ import type {
   ThreadContextRecord,
   ThreadId,
 } from "@lecturn/contracts";
+import { appReferenceContextRecords, type AppReferenceLabel } from "@lecturn/shared/appReferences";
 import { upgradeLegacyContextMessage } from "@lecturn/shared/composerContextLegacy";
 import { encodeComposerContextFragment } from "@lecturn/shared/composerContextClipboard";
 import {
@@ -312,6 +313,7 @@ export function buildMessageContext(input: {
   previewAnnotations: ReadonlyArray<PreviewAnnotationPayload>;
   threadContexts?: ReadonlyArray<ThreadContextRecord>;
   attachments?: ReadonlyArray<BoundComposerAttachment>;
+  appRefs?: ReadonlyArray<AppReferenceLabel>;
 }): OrchestrationMessageContext | undefined {
   const screenshotAttachmentIds = new Set(
     (input.attachments ?? []).flatMap(({ attachment }) =>
@@ -328,6 +330,7 @@ export function buildMessageContext(input: {
       }),
     ),
     ...(input.attachments ?? []).map(attachmentContextRecord),
+    ...appReferenceContextRecords(input.appRefs ?? []),
   ];
   return records.length === 0 ? undefined : { version: 1, records };
 }

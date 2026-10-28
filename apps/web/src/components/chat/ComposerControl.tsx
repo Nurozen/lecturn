@@ -5,17 +5,23 @@ import type { ComponentProps, ComponentType, SVGProps } from "react";
 import { ChevronDownIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";
+import { useEmbedPresentation } from "../../embed/EmbedPresentationContext";
 import { Separator } from "../ui/separator";
 
 export type ComposerControlSize = "sm" | "xs";
 
-function composerControlClassName(size: ComposerControlSize, className?: string) {
+function composerControlClassName(size: ComposerControlSize, fixed: boolean, className?: string) {
   return cn(
     "relative inline-flex shrink-0 cursor-pointer items-center justify-center whitespace-nowrap rounded-(--control-radius) border border-transparent text-base outline-none hover:bg-accent data-pressed:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-64 data-disabled:pointer-events-none data-disabled:opacity-64 pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 pointer-coarse:after:min-w-11 [&:active:not([aria-haspopup])]:scale-[0.97] [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:-mx-0.5 [&_svg[data-composer-control-icon]]:mx-0",
     "[&_:is([data-composer-control-label],[data-chat-provider-model-picker-label])]:[text-box:trim-both_cap_alphabetic] supports-[text-box:trim-both_cap_alphabetic]:[&_:is([data-composer-control-label],[data-chat-provider-model-picker-label])]:py-1.5",
     size === "xs"
       ? "h-7 gap-1 px-1.75 font-normal text-muted-foreground/70 text-sm hover:text-foreground/80 sm:h-6 sm:text-xs [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3.5 [&_svg[data-composer-control-chevron]]:ms-0 [&_svg[data-composer-control-chevron]]:-me-1"
       : "h-7 gap-1.5 px-2.5 font-medium text-secondary-label [&_svg:not([class*='text-'])]:text-muted-foreground hover:text-foreground sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4",
+    // The embed's viewport is its pane, so a narrow pane must not take the phone type scale.
+    fixed &&
+      (size === "xs"
+        ? "h-6 text-xs [&_svg:not([class*='size-'])]:size-3.5"
+        : "text-sm [&_svg:not([class*='size-'])]:size-4"),
     "aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-pressed:hover:bg-accent/80",
     className,
   );
@@ -31,8 +37,9 @@ export function ComposerControl({
   render,
   ...props
 }: ComposerControlProps) {
+  const fixed = useEmbedPresentation() !== null;
   const defaultProps = {
-    className: composerControlClassName(size, className),
+    className: composerControlClassName(size, fixed, className),
     type: render ? undefined : ("button" as const),
   };
   return useRender({
@@ -94,10 +101,16 @@ export function ComposerControlSeparator({
 }: Omit<ComponentProps<typeof Separator>, "orientation"> & {
   size?: ComposerControlSize;
 }) {
+  const fixed = useEmbedPresentation() !== null;
   return (
     <Separator
       orientation="vertical"
-      className={cn("mx-0.5 hidden sm:block", size === "xs" ? "h-3.5!" : "h-4", className)}
+      className={cn(
+        "mx-0.5",
+        !fixed && "hidden sm:block",
+        size === "xs" ? "h-3.5!" : "h-4",
+        className,
+      )}
       {...props}
     />
   );
@@ -112,8 +125,12 @@ export function ComposerSelectControl({
   className?: string | undefined;
   size?: ComposerControlSize;
 }) {
+  const fixed = useEmbedPresentation() !== null;
   return (
-    <SelectPrimitive.Trigger className={composerControlClassName(size, className)} {...props}>
+    <SelectPrimitive.Trigger
+      className={composerControlClassName(size, fixed, className)}
+      {...props}
+    >
       {children}
       <SelectPrimitive.Icon>
         <ComposerControlChevron size={size} />

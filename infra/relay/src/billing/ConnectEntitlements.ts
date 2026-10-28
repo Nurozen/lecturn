@@ -46,8 +46,15 @@ export function computeConnectEntitlement(
     value !== null && Number.isFinite(value) && value > 0 ? value : null;
   const stop = Math.min(finite(facts.cancelAt) ?? Infinity, finite(facts.endedAt) ?? Infinity);
   const paidThrough = finite(facts.paidThrough);
+  const renewing = facts.status === "active" || facts.status === "past_due";
+  const renewalUntil =
+    paidThrough === null
+      ? null
+      : Math.min(paidThrough + (renewing ? renewalGraceSeconds : 0), stop);
+  // Persist the renewal deadline before the paid boundary so a saved projection cannot
+  // retire a tunnel while the next invoice is still settling.
   if (paidThrough !== null && now < Math.min(paidThrough, stop))
-    return result("paid", Math.min(paidThrough, stop));
+    return result("paid", renewalUntil);
   const trialEnd = finite(facts.trialEnd);
   if (
     facts.status === "trialing" &&
@@ -57,13 +64,7 @@ export function computeConnectEntitlement(
   )
     return result("trial", Math.min(trialEnd, stop));
   // Grace is anchored to previously settled service, never to a failure event or an unpaid trial.
-  if (
-    facts.status === "past_due" &&
-    paidThrough !== null &&
-    renewalGraceSeconds > 0 &&
-    now < Math.min(paidThrough + renewalGraceSeconds, stop)
-  )
-    return result("grace", Math.min(paidThrough + renewalGraceSeconds, stop));
+  if (renewing && renewalUntil !== null && now < renewalUntil) return result("grace", renewalUntil);
   return result("expired", null);
 }
 

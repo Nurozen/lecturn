@@ -1,0 +1,9 @@
+/* Apps nest sections under workspaces, one level deeper than the Projects tree, so the
+   inner step is shorter to leave thread titles readable at the default sidebar width.
+   The rail stays under the workspace chevron; only the elbow shortens. */
+.lecturn-apps-tree .lecturn-hierarchy-branch .lecturn-hierarchy-branch {
+  padding-inline-start: 18px;
+}
+.lecturn-apps-tree .lecturn-hierarchy-branch .lecturn-hierarchy-branch::after {
+  width: 7px;
+}

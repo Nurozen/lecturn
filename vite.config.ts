@@ -232,6 +232,12 @@ export default defineConfig({
         rules: { "lecturn/no-raw-mcp-registration": "off" },
       },
       {
+        // App tools are per-thread and dynamic, so they bypass the static McpToolAccess
+        // declarations; AppToolkit gates each call by the app grant and runtime mode instead.
+        files: ["apps/server/src/mcp/toolkits/app/**"],
+        rules: { "lecturn/no-raw-mcp-registration": "off" },
+      },
+      {
         files: ["apps/web/src/**"],
         excludeFiles: ["apps/web/src/components/ui/**"],
         rules: {

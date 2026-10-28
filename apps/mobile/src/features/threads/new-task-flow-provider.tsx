@@ -33,6 +33,7 @@ import {
   useEnvironmentServerConfig,
   useListedProjects,
   useListedThreadShells,
+  useNewThreadTargetProjects,
   useServerConfigs,
 } from "../../state/entities";
 import type { TurnCommandMetadata } from "../../lib/commandMetadata";
@@ -268,6 +269,8 @@ const NewTaskFlowContext = React.createContext<NewTaskFlowContextValue | null>(n
 
 export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   const projects = useListedProjects();
+  // A caller may name an app workspace, which the picker's `projects` leave out.
+  const targetProjects = useNewThreadTargetProjects();
   const threads = useListedThreadShells();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const groupingSettings = useMobileProjectGroupingSettings();
@@ -290,7 +293,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   );
   const selectedEnvironmentId =
     selectedEnvironmentIdOverride !== null &&
-    projects.some((project) => project.environmentId === selectedEnvironmentIdOverride)
+    targetProjects.some((project) => project.environmentId === selectedEnvironmentIdOverride)
       ? selectedEnvironmentIdOverride
       : (projects[0]?.environmentId ?? null);
   const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(null);
@@ -350,9 +353,11 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
 
   const selectedProject =
     activeDraft.project && !editingPendingTask
-      ? resolveNewTaskDraftProject(projects, activeDraft.project)
-      : (projectsForEnvironment.find(
-          (project) => scopedProjectKey(project.environmentId, project.id) === selectedProjectKey,
+      ? resolveNewTaskDraftProject(targetProjects, activeDraft.project)
+      : (targetProjects.find(
+          (project) =>
+            project.environmentId === selectedEnvironmentId &&
+            scopedProjectKey(project.environmentId, project.id) === selectedProjectKey,
         ) ??
         // While editing a queued task whose project shell is absent, keep the task
         // pinned to its own project — falling through to an arbitrary first
@@ -718,7 +723,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       return false;
     }
     // Keep resumption pending until the stamped project arrives.
-    if (resolveNewTaskDraftProject(projects, stamp) === null) {
+    if (resolveNewTaskDraftProject(targetProjects, stamp) === null) {
       return false;
     }
     setActiveDraftKey(draftKey);

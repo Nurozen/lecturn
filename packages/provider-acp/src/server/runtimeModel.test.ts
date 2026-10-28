@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import type * as EffectAcpSchema from "effect-acp/compat";
+import { setRegisteredAppToolPresentations } from "@lecturn/shared/appToolPresentation";
 
 import {
   decideToolCallUpdateEmission,
@@ -1404,6 +1405,49 @@ describe("extractMcpToolCallIdentity", () => {
       server: "lecturn",
       tool: "orchestrator_capabilities",
     });
+  });
+
+  it("recognizes a registered connected app's tools on Lecturn's server, and only those", () => {
+    setRegisteredAppToolPresentations([
+      { appId: "dev.rocketwright", name: "RocketWright", toolPrefix: "rw" },
+    ]);
+    try {
+      const call = (update: Record<string, unknown>) =>
+        extractMcpToolCallIdentity(
+          toolCallFromUpdate({
+            sessionUpdate: "tool_call",
+            toolCallId: "app-call",
+            kind: "other",
+            status: "in_progress",
+            ...update,
+          } as EffectAcpSchema.SessionNotification["update"]),
+        );
+      expect(call({ title: "mcp__lecturn__rw_simulate" })).toEqual({
+        server: "lecturn",
+        tool: "rw_simulate",
+      });
+      expect(call({ title: "rw_simulate (lecturn MCP Server)" })).toEqual({
+        server: "lecturn",
+        tool: "rw_simulate",
+      });
+      expect(call({ title: "x", _meta: { serverId: "lecturn", toolName: "rw_simulate" } })).toEqual(
+        { server: "lecturn", tool: "rw_simulate" },
+      );
+      expect(call({ title: "mcp__lecturn__zz_simulate" })).toBeUndefined();
+    } finally {
+      setRegisteredAppToolPresentations([]);
+    }
+    expect(
+      extractMcpToolCallIdentity(
+        toolCallFromUpdate({
+          sessionUpdate: "tool_call",
+          toolCallId: "app-call",
+          kind: "other",
+          status: "in_progress",
+          title: "mcp__lecturn__rw_simulate",
+        }),
+      ),
+    ).toBeUndefined();
   });
 
   it("recovers Lecturn identity from acp-mcp-call fallback commands", () => {

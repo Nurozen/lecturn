@@ -272,7 +272,9 @@ describe("Lecturn fork ledger upgrade to orchestration V2", () => {
           [76, "PullRequestReviewGuides"],
           [77, "ThreadFailureLookupIndex"],
           [78, "DropUnusedV1Projections"],
-          [79, "CanonicalizeThreadPullRequestLinks"],
+          [79, "AppRegistrations"],
+          [80, "ProjectionProjectsAppBinding"],
+          [81, "CanonicalizeThreadPullRequestLinks"],
         ]);
         for (const table of [
           "orchestration_v2_events",

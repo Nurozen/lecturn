@@ -1,11 +1,13 @@
 import type { ComponentType, Dispatch, ReactElement, SetStateAction } from "react";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import type { EnvironmentId } from "@lecturn/contracts";
+import type { AppId, EnvironmentId, ProjectId } from "@lecturn/contracts";
 import { PROJECT_FAVICON_FALLBACK_MARKER } from "@lecturn/shared/projectFavicon";
 
 const testState = vi.hoisted(() => ({
   faviconUrl: "https://environment.test/api/assets/token-a/v1-20-favicon.svg",
   lastTarget: null as unknown,
+  appIconUrl: null as string | null,
+  lastAppRef: undefined as unknown,
 }));
 
 const hooks = vi.hoisted(() => {
@@ -55,6 +57,14 @@ vi.mock("react", async (importOriginal) => {
 vi.mock("react/compiler-runtime", () => ({ c: hooks.useMemoCache }));
 vi.mock("@effect/atom-react", () => ({
   useAtomValue: () => testState.faviconUrl,
+}));
+vi.mock("../state/apps", () => ({
+  useAppEmbedContext: (ref: unknown) => {
+    testState.lastAppRef = ref;
+    return ref === null || testState.appIconUrl === null
+      ? null
+      : { iconDataUrl: testState.appIconUrl };
+  },
 }));
 vi.mock("../state/assets", () => ({
   projectFaviconUrlAtom: (input: unknown) => {
@@ -116,6 +126,38 @@ describe("ProjectFavicon", () => {
   beforeEach(() => {
     hooks.reset();
     testState.faviconUrl = "https://environment.test/api/assets/token-a/v1-20-favicon.svg";
+    testState.appIconUrl = null;
+    testState.lastAppRef = undefined;
+  });
+
+  it("shows a connected app's icon on its projects, under a user's own icon", () => {
+    testState.appIconUrl = "data:image/png;base64,iVBORw0KGgo=";
+    const appProject = makeProject({
+      id: "project-rocket" as ProjectId,
+      workspaceRoot: "/rockets/falcon",
+      title: "falcon",
+      faviconPath: "brand/icon.svg",
+      appBinding: { appId: "dev.rocketwright.app" as AppId, workspaceRoot: "/rockets/falcon" },
+    });
+
+    const element = ProjectFavicon({ project: appProject }) as ReactElement<{
+      readonly src: string;
+    }>;
+    expect(element.props.src).toBe(testState.appIconUrl);
+    expect(testState.lastAppRef).toEqual({
+      environmentId: "environment-test",
+      projectId: "project-rocket",
+    });
+
+    const custom = ProjectFavicon({
+      project: { ...appProject, projectIcon: { kind: "emoji", emoji: "🚀" } },
+    }) as ReactElement<{ readonly emoji: string }>;
+    expect(custom.props.emoji).toBe("🚀");
+
+    ProjectFavicon({
+      project: makeProject({ workspaceRoot: "/workspace/plain", title: "plain" }),
+    });
+    expect(testState.lastAppRef).toBeNull();
   });
 
   it("shows the project monogram when no favicon exists", () => {

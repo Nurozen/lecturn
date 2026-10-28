@@ -1,0 +1,239 @@
+import { OrchestrationMessageContext } from "@lecturn/contracts";
+import * as Schema from "effect/Schema";
+import { describe, expect, it } from "vite-plus/test";
+
+import {
+  appReferenceContextRecords,
+  appReferenceLabelsFromRecords,
+  expandAppOpenUrl,
+  findAppReferences,
+  formatAppReferenceHref,
+  parseAppReferenceHref,
+  promptWithAppReferences,
+  splitAppReferences,
+  wholeAppReference,
+} from "./appReferences.ts";
+
+const refs = (text: string, prefixes: ReadonlyArray<string> = ["rw:"]) =>
+  findAppReferences(text, prefixes).map((match) => match.ref);
+
+describe("findAppReferences", () => {
+  it("finds references at text start, after whitespace and inside brackets or quotes", () => {
+    expect(refs("rw:c/fins")).toEqual(["rw:c/fins"]);
+    expect(refs("look at rw:c/fins and rw:c/nose\nrw:sim/run-1")).toEqual([
+      "rw:c/fins",
+      "rw:c/nose",
+      "rw:sim/run-1",
+    ]);
+    expect(refs('(rw:c/fins) [rw:c/nose] "rw:c/tube" `rw:c/motor`')).toEqual([
+      "rw:c/fins",
+      "rw:c/nose",
+      "rw:c/tube",
+      "rw:c/motor",
+    ]);
+  });
+
+  it("leaves closing punctuation outside the reference", () => {
+    expect(refs("Updated rw:c/fins.")).toEqual(["rw:c/fins"]);
+    expect(refs("rw:c/fins, rw:c/nose; rw:c/tube?! rw:c/motor:")).toEqual([
+      "rw:c/fins",
+      "rw:c/nose",
+      "rw:c/tube",
+      "rw:c/motor",
+    ]);
+    expect(refs("rw:c/fins:span.3 here")).toEqual(["rw:c/fins:span.3"]);
+  });
+
+  it("ignores prefixes inside words, paths and URLs, and bare prefixes", () => {
+    expect(refs("xrw:c/fins")).toEqual([]);
+    expect(refs("https://example.test/rw:c/fins")).toEqual([]);
+    expect(refs("rw: nothing")).toEqual([]);
+    expect(refs("rw:.")).toEqual([]);
+  });
+
+  it("is case sensitive and only uses the given prefixes", () => {
+    expect(refs("RW:c/fins")).toEqual([]);
+    expect(refs("rw:c/fins", [])).toEqual([]);
+    expect(refs("rw:c/fins", [""])).toEqual([]);
+    expect(refs("ok:a rw:b", ["ok:", "rw:"])).toEqual(["ok:a", "rw:b"]);
+  });
+
+  it("prefers the longest prefix and treats prefixes literally", () => {
+    expect(findAppReferences("rw:c:fins", ["rw:", "rw:c:"])).toEqual([
+      { ref: "rw:c:fins", prefix: "rw:c:", start: 0, end: 9 },
+    ]);
+    expect(refs("a.b:x aXb:y", ["a.b:"])).toEqual(["a.b:x"]);
+  });
+
+  it("reports offsets into the original text", () => {
+    expect(findAppReferences("see rw:c/fins.", ["rw:"])).toEqual([
+      { ref: "rw:c/fins", prefix: "rw:", start: 4, end: 13 },
+    ]);
+  });
+});
+
+describe("splitAppReferences", () => {
+  it("covers the whole text with text and ref segments in order", () => {
+    const text = "Set rw:c/fins to 4, then rw:sim/run.";
+    const segments = splitAppReferences(text, ["rw:"]);
+    expect(
+      segments.map((segment) => (segment.type === "text" ? segment.text : segment.ref)),
+    ).toEqual(["Set ", "rw:c/fins", " to 4, then ", "rw:sim/run", "."]);
+    expect(
+      segments.map((segment) => (segment.type === "text" ? segment.text : segment.ref)).join(""),
+    ).toBe(text);
+  });
+
+  it("returns one text segment without references and none for empty text", () => {
+    expect(splitAppReferences("plain", ["rw:"])).toEqual([{ type: "text", text: "plain" }]);
+    expect(splitAppReferences("", ["rw:"])).toEqual([]);
+  });
+});
+
+describe("wholeAppReference", () => {
+  it("names the reference a code span holds alone, ignoring surrounding space", () => {
+    expect(wholeAppReference("rw:c/fins", ["rw:"])).toBe("rw:c/fins");
+    expect(wholeAppReference("  rw:c/fins ", ["other:", "rw:"])).toBe("rw:c/fins");
+  });
+
+  it("refuses spans with other text, several references, unknown prefixes or no body", () => {
+    expect(wholeAppReference("rw:c/fins and more", ["rw:"])).toBeNull();
+    expect(wholeAppReference("see rw:c/fins", ["rw:"])).toBeNull();
+    expect(wholeAppReference("rw:c/fins rw:c/nose", ["rw:"])).toBeNull();
+    expect(wholeAppReference("rw:c/fins.", ["rw:"])).toBeNull();
+    expect(wholeAppReference("xx:c/fins", ["rw:"])).toBeNull();
+    expect(wholeAppReference("rw:c/fins", [])).toBeNull();
+    expect(wholeAppReference("rw:", ["rw:"])).toBeNull();
+    expect(wholeAppReference("", ["rw:"])).toBeNull();
+  });
+});
+
+describe("app reference hrefs", () => {
+  it("round-trips references with characters that are special in URLs", () => {
+    for (const ref of ["rw:c/fins", "rw:c/a b#c?d", "rw:sim/run%201"]) {
+      expect(parseAppReferenceHref(formatAppReferenceHref(ref))).toBe(ref);
+    }
+  });
+
+  it("rejects other links and malformed encodings", () => {
+    expect(parseAppReferenceHref("https://example.test/rw:c/fins")).toBeNull();
+    expect(parseAppReferenceHref("lecturn-app-ref://v1/")).toBeNull();
+    expect(parseAppReferenceHref("lecturn-app-ref://v1/%E0%A4%A")).toBeNull();
+  });
+});
+
+describe("expandAppOpenUrl", () => {
+  it("fills every placeholder, encoding the values", () => {
+    expect(
+      expandAppOpenUrl(
+        "rocketwright://open?workspace={workspaceRoot}&thread={threadId}&ref={ref}",
+        {
+          workspaceRoot: "/Users/me/My Rockets/a&b",
+          threadId: "thread-1",
+          ref: "rw:c/fins",
+        },
+      ),
+    ).toBe(
+      "rocketwright://open?workspace=%2FUsers%2Fme%2FMy%20Rockets%2Fa%26b&thread=thread-1&ref=rw%3Ac%2Ffins",
+    );
+  });
+
+  it("leaves missing values empty and refuses a template that is not a URL", () => {
+    expect(
+      expandAppOpenUrl("rw://open?thread={threadId}&ref={ref}", {
+        workspaceRoot: "/w",
+        threadId: null,
+      }),
+    ).toBe("rw://open?thread=&ref=");
+    expect(expandAppOpenUrl("not a url {threadId}", { workspaceRoot: "/w", threadId: "t" })).toBe(
+      null,
+    );
+  });
+
+  it("opens nothing for a stored template in a script or file scheme", () => {
+    for (const template of [
+      "javascript:alert(document.cookie)//{threadId}",
+      "data:text/html,<script>alert(1)</script>{threadId}",
+      "file:///{workspaceRoot}",
+    ]) {
+      expect(expandAppOpenUrl(template, { workspaceRoot: "/w", threadId: "t" }), template).toBe(
+        null,
+      );
+    }
+  });
+});
+
+describe("promptWithAppReferences", () => {
+  it("puts attached references on a line ahead of the prompt", () => {
+    expect(promptWithAppReferences("Check the fins.", ["rw:c/fins", "rw:c/nose"])).toBe(
+      "rw:c/fins rw:c/nose\n\nCheck the fins.",
+    );
+  });
+
+  it("sends references alone, and skips ones the prompt already names or repeats", () => {
+    expect(promptWithAppReferences("  ", ["rw:c/fins"])).toBe("rw:c/fins");
+    expect(promptWithAppReferences("Look at rw:c/fins", ["rw:c/fins", "rw:c/fins"])).toBe(
+      "Look at rw:c/fins",
+    );
+    expect(promptWithAppReferences("Hi", [])).toBe("Hi");
+  });
+});
+
+const encodeContextJson = Schema.encodeUnknownSync(Schema.toCodecJson(OrchestrationMessageContext));
+const decodeContextJson = Schema.decodeUnknownSync(Schema.toCodecJson(OrchestrationMessageContext));
+
+describe("app reference labels on a message", () => {
+  it("survive the wire and storage as message context, beside the message's other records", () => {
+    const records = appReferenceContextRecords([
+      { ref: "rw:c/fins", label: "Fins" },
+      { ref: "rw:cfg/baseline", label: "  Baseline config  " },
+    ]);
+    const wire = JSON.parse(
+      JSON.stringify(
+        encodeContextJson({
+          version: 1,
+          records: [
+            ...records,
+            {
+              version: 1,
+              contextId: "skill_1",
+              kind: "skill",
+              label: "Review",
+              name: "review",
+            },
+          ],
+        }),
+      ),
+    );
+    const stored = decodeContextJson(wire);
+    expect(appReferenceLabelsFromRecords(stored.records)).toEqual([
+      { ref: "rw:c/fins", label: "Fins" },
+      { ref: "rw:cfg/baseline", label: "Baseline config" },
+    ]);
+    expect(stored.records.map((record) => record.kind)).toEqual(["app-ref", "app-ref", "skill"]);
+  });
+
+  it("stores only labels that name something other than the reference, once each", () => {
+    expect(
+      appReferenceContextRecords([
+        { ref: "rw:c/fins", label: "rw:c/fins" },
+        { ref: "rw:c/nose", label: "   " },
+        { ref: "rw:c/tail", label: "Tail" },
+        { ref: "rw:c/tail", label: "Tail again" },
+      ]).map((record) => [record.contextId, record.label]),
+    ).toEqual([["app-ref-1", "Tail"]]);
+    expect(appReferenceContextRecords([{ ref: "rw:c/x", label: "x".repeat(300) }])[0]?.label).toBe(
+      "x".repeat(200),
+    );
+  });
+
+  it("ignores other kinds and malformed payloads", () => {
+    expect(
+      appReferenceLabelsFromRecords([
+        { version: 1, contextId: "a", kind: "app-ref", label: "A", payload: { ref: 7 } },
+        { version: 1, contextId: "b", kind: "app-ref", label: "B", payload: null },
+        { version: 1, contextId: "c", kind: "future", label: "C", payload: { ref: "rw:c/c" } },
+      ] as never),
+    ).toEqual([]);
+  });
+});

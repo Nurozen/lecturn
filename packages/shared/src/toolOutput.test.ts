@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { MCP_APP_OUTPUT_KEY, readMcpAppToolOutcome } from "./mcpApp.ts";
 import {
+  appToolSummaryFromToolItem,
   compactDynamicToolOutput,
+  mcpAppFromToolItem,
   MAX_TOOL_OUTPUT_IMAGES,
   omitToolOutputImageData,
   toolOutputImages,
@@ -147,6 +150,49 @@ describe("compactDynamicToolOutput", () => {
   });
 });
 
+describe("connected-app card envelopes", () => {
+  const card = {
+    attachmentId: "thread-1-abc-html",
+    server: "lecturn",
+    tool: "ex_increment",
+    resourceUri: "ui://ex/counter-card",
+  };
+  const result = { content: [{ type: "text", text: "count 3" }], structuredContent: { count: 3 } };
+  const refusal = "The user declined ex_increment (approval declined).";
+
+  // How adapters record the call: the envelope, the MCP result around it, or its text.
+  const recorded = (envelope: object) => [
+    envelope,
+    { structuredContent: envelope, content: result.content },
+    [{ type: "text", text: JSON.stringify(envelope) }],
+  ];
+
+  it("replays a call's result to its card from every recorded form", () => {
+    for (const output of recorded({ [MCP_APP_OUTPUT_KEY]: card, result })) {
+      expect(mcpAppFromToolItem({ toolName: "mcp__lecturn__ex_increment", output })).toEqual(card);
+      expect(readMcpAppToolOutcome(output)).toEqual({ result });
+    }
+  });
+
+  it("keeps a refused call's card, marked failed and cancelled with the refusal", () => {
+    for (const output of recorded({ [MCP_APP_OUTPUT_KEY]: card, cancelled: { reason: refusal } })) {
+      expect(mcpAppFromToolItem({ toolName: "lecturn.ex_increment", output })).toEqual(card);
+      expect(readMcpAppToolOutcome(output)).toEqual({ cancelled: { reason: refusal } });
+    }
+    expect(
+      compactDynamicToolOutput({
+        isError: true,
+        structuredContent: { [MCP_APP_OUTPUT_KEY]: card, cancelled: { reason: refusal } },
+      }),
+    ).toEqual({ isError: true, [MCP_APP_OUTPUT_KEY]: card });
+  });
+
+  it("finds no outcome in output without a card", () => {
+    expect(readMcpAppToolOutcome({ result })).toEqual({});
+    expect(readMcpAppToolOutcome([{ type: "text", text: "count 3" }])).toEqual({});
+  });
+});
+
 describe("toolOutputIndicatesFailure", () => {
   it("preserves the command failure phrases across shells without copying the output", () => {
     for (const text of [
@@ -225,5 +271,42 @@ describe("toolOutputImages", () => {
       { mimeType: "image/jpeg" },
       { mimeType: "image/png" },
     ]);
+  });
+});
+
+describe("appToolSummaryFromToolItem", () => {
+  const toolSource = {
+    key: "app:dev.rocketwright.app",
+    name: "RocketWright",
+    kind: "integration",
+  } as const;
+  const summary = { "lecturn/summary": "3 candidates" };
+
+  it("reads an app's summary from the result each adapter records, and from the wire form", () => {
+    for (const output of [
+      { content: [{ type: "text", text: "{}" }], structuredContent: { ok: true }, _meta: summary },
+      { [MCP_APP_OUTPUT_KEY]: { attachmentId: "a" }, result: { content: [], _meta: summary } },
+    ]) {
+      const wire = compactDynamicToolOutput(output);
+      expect(wire?._meta).toEqual(summary);
+      expect(appToolSummaryFromToolItem({ toolSource, output })).toBe("3 candidates");
+      expect(appToolSummaryFromToolItem({ toolSource, output: wire })).toBe("3 candidates");
+    }
+  });
+
+  it("shows nothing for other tools or a summary that is not one short line", () => {
+    const output = { content: [], _meta: summary };
+    expect(appToolSummaryFromToolItem({ output })).toBeUndefined();
+    expect(
+      appToolSummaryFromToolItem({
+        toolSource: { ...toolSource, key: "mcp:rocketwright" },
+        output,
+      }),
+    ).toBeUndefined();
+    for (const value of ["x".repeat(121), " ", 3]) {
+      expect(
+        appToolSummaryFromToolItem({ toolSource, output: { _meta: { "lecturn/summary": value } } }),
+      ).toBeUndefined();
+    }
   });
 });

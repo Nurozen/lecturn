@@ -47,6 +47,9 @@ import { FetchHttpClient } from "effect/http";
 
 import { APP_VERSION } from "../branding";
 import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";
+import { isEmbedLocation } from "../embed/embedAuth";
+import { embedConnectionWakeups, embedPrimaryAuth } from "../embed/embedPrimaryAuth";
+import * as EmbedConnectionStorage from "../embed/embedConnectionStorage";
 import * as PrimaryEnvironmentHttpLayer from "../environments/primary/httpLayer";
 import {
   readPrimaryEnvironmentTarget,
@@ -212,6 +215,7 @@ const layerWakeups = Wakeups.layer({
       ),
       accountsNeedingSignIn(appAtomRegistry),
       networkPathChanges,
+      ...(isEmbedLocation() ? [embedConnectionWakeups] : []),
     ],
     { concurrency: "unbounded" },
   ),
@@ -350,16 +354,18 @@ const layerCapabilities = Layer.effectContext(
     const identity = ClientCapabilities.RelayDeviceIdentity.of({
       deviceId: Effect.succeedNone,
     });
-    const primaryAuth = ClientCapabilities.PrimaryEnvironmentAuth.of({
-      bearerToken: Effect.tryPromise({
-        try: readDesktopPrimaryBearerToken,
-        catch: (cause) =>
-          new ConnectionTransientError({
-            reason: "remote-unavailable",
-            detail: `Could not load the desktop primary credential: ${String(cause)}`,
-          }),
-      }).pipe(Effect.map(Option.fromNullishOr)),
-    });
+    const primaryAuth = isEmbedLocation()
+      ? embedPrimaryAuth
+      : ClientCapabilities.PrimaryEnvironmentAuth.of({
+          bearerToken: Effect.tryPromise({
+            try: readDesktopPrimaryBearerToken,
+            catch: (cause) =>
+              new ConnectionTransientError({
+                reason: "remote-unavailable",
+                detail: `Could not load the desktop primary credential: ${String(cause)}`,
+              }),
+          }).pipe(Effect.map(Option.fromNullishOr)),
+        });
     const ssh = ClientCapabilities.SshEnvironmentGateway.of({
       provision: Effect.fn("web.connectionPlatform.ssh.provision")(
         function* (target, expectedEnvironmentId) {
@@ -820,6 +826,7 @@ const layerRpcRequestObserver = Layer.succeed(
 
 type ConnectionPlatformLayerSource =
   | typeof ConnectionStorage.layer
+  | typeof EmbedConnectionStorage.layer
   | typeof layerConnectivity
   | typeof layerWakeups
   | typeof layerCapabilities
@@ -832,7 +839,7 @@ export const layer: Layer.Layer<
   Layer.Error<ConnectionPlatformLayerSource>,
   Layer.Services<ConnectionPlatformLayerSource>
 > = Layer.mergeAll(
-  ConnectionStorage.layer,
+  isEmbedLocation() ? EmbedConnectionStorage.layer : ConnectionStorage.layer,
   layerConnectivity,
   layerWakeups,
   layerCapabilities,

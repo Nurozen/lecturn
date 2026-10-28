@@ -47,6 +47,24 @@ export function shouldFollowThreadWorkGroupAppend(input: {
   );
 }
 
+/**
+ * Whether a disclosure sits at the feed's end: nothing follows its anchor
+ * except the details it reveals. Anchoring such a toggle in place pushes the
+ * revealed rows under the composer overlay, so a follower keeps the end pinned.
+ */
+export function isThreadFeedTailDisclosure(
+  feed: ReadonlyArray<{ readonly id: string }>,
+  anchorKey: string,
+  detailsKey?: string,
+): boolean {
+  for (let index = feed.length - 1; index >= 0; index--) {
+    const id = feed[index]!.id;
+    if (id === anchorKey) return true;
+    if (id !== detailsKey) return false;
+  }
+  return false;
+}
+
 export function resolveThreadFeedSubmissionAnchor<AnchorId>(input: {
   readonly currentAnchorMessageId: AnchorId | null;
   readonly submittedMessageId: AnchorId;

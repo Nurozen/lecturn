@@ -9,6 +9,7 @@ import {
 } from "@lecturn/shared/assistantCitations";
 import { shallow } from "zustand/vanilla/shallow";
 import { renderCodexDirectivesForCopy } from "@lecturn/shared/codexMarkdownDirectives";
+import { isAppToolSource } from "@lecturn/shared/appToolPresentation";
 import {
   commandDisplayText,
   commandProgramName,
@@ -32,6 +33,7 @@ import {
   formatDuration,
   isStreamingMessageTextUpdate,
   isStreamingTurnItemTextUpdate,
+  timelineEntryHeadsAppCard,
   timelineEntryIsPersistentResourceCard,
   workEntryDisplayIndicatesToolFailure,
   workEntryIndicatesToolSuccess,
@@ -185,6 +187,8 @@ export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string
     return "Read file";
   }
   const heading = normalizeCompactToolLabel(entry.toolTitle || entry.label);
+  // An app's tool id is the name the agent called and the app documents, so it stays as written.
+  if (isAppToolSource(entry.toolSource)) return heading;
   return `${heading.charAt(0).toUpperCase()}${heading.slice(1)}`;
 }
 
@@ -289,9 +293,14 @@ export function workEntryIsVisibleInGroup(
   );
 }
 const TIMELINE_MINIMAP_ITEM_SPACING = 8;
-export const TIMELINE_MINIMAP_MIN_ITEMS = 2;
+const TIMELINE_MINIMAP_MIN_ITEMS = 2;
 const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "calc(100vh - 18rem)";
 const TIMELINE_MINIMAP_PERSISTENT_GUTTER = 48;
+
+/** The embed pane is the host's narrow chat, drawn without Lecturn's turn rail. */
+export function timelineMinimapShown(itemCount: number, embedded: boolean): boolean {
+  return !embedded && itemCount >= TIMELINE_MINIMAP_MIN_ITEMS;
+}
 
 export interface WorkGroupScrollAnchor {
   readonly entryId: string;
@@ -584,6 +593,8 @@ type MessagesTimelineRowContent =
       revertTurnCount?: number | undefined;
       /** Lecturn: where a user-message fork cuts (the turn before this message). */
       forkPoint?: ThreadForkPoint | undefined;
+      /** The first visible assistant message after a user message, which the embed names. */
+      startsReply?: boolean;
     }
   | {
       kind: "assistant-meta";
@@ -797,6 +808,7 @@ function deriveSupersededAttemptFolds(
       (entry.kind === "message" && entry.message.role === "user") ||
       entry.kind === "html-render" ||
       entry.kind === "mcp-app" ||
+      timelineEntryHeadsAppCard(entry) ||
       timelineEntryIsPersistentResourceCard(entry) ||
       liveSubagentEntryIds.has(entry.id) ||
       (entry.kind === "work" && entry.entry.itemType === "system_notice")
@@ -911,6 +923,31 @@ function responseBoundaryRunId(entry: TimelineEntry): RunId | null {
   if (entry.kind === "message") return entry.message.runId ?? null;
   if (entry.kind === "work") return entry.entry.runId ?? null;
   return null;
+}
+
+/** The run behind the timeline's last response; null when that response has no run (imported). */
+function latestResponseRunId(timelineEntries: ReadonlyArray<TimelineEntry>): RunId | null {
+  for (let index = timelineEntries.length - 1; index >= 0; index -= 1) {
+    const entry = timelineEntries[index]!;
+    if (timelineEntryStartsResponse(entry)) return responseBoundaryRunId(entry);
+    const runId = timelineEntryFoldRunId(entry, null);
+    if (runId !== null) return runId;
+  }
+  return null;
+}
+
+/**
+ * The embed pane shows its latest finished turn's work in full: every tool row on its own line
+ * instead of behind the turn fold or a "Used N tools" group. Earlier turns keep both.
+ */
+function openLatestTurnRunId(
+  timelineEntries: ReadonlyArray<TimelineEntry>,
+  keepLatestTurnOpen: boolean | undefined,
+  activeVisualResponseRunIds: ReadonlySet<RunId>,
+): RunId | null {
+  if (keepLatestTurnOpen !== true) return null;
+  const runId = latestResponseRunId(timelineEntries);
+  return runId === null || activeVisualResponseRunIds.has(runId) ? null : runId;
 }
 
 /**
@@ -1103,6 +1140,10 @@ function deriveTurnFolds(input: {
       }
       if (
         timelineEntryIsPersistentResourceCard(entry) ||
+        timelineEntryHeadsAppCard(entry) ||
+        // An app thread reads as the calls the agent made into the app, so its tool rows stay
+        // out of the fold.
+        (entry.kind === "work" && isAppToolSource(entry.entry.toolSource)) ||
         input.liveSubagentEntryIds.has(entry.id) ||
         input.completeSupersededReplyEntryIds.has(entry.id)
       ) {
@@ -1318,7 +1359,12 @@ function timelineRowEntries(entries: ReadonlyArray<TimelineEntry>) {
 function deriveTimelineTurnFolds(
   input: Pick<
     MessagesTimelineRowsInput,
-    "timelineEntries" | "latestRun" | "isWorking" | "runlessWorkActive" | "runningRunId"
+    | "timelineEntries"
+    | "latestRun"
+    | "isWorking"
+    | "runlessWorkActive"
+    | "runningRunId"
+    | "keepLatestTurnOpen"
   >,
 ) {
   const timelineEntries = timelineRowEntries(input.timelineEntries);
@@ -1329,11 +1375,20 @@ function deriveTimelineTurnFolds(
     unsettledRunId,
     isWorking: input.isWorking,
   });
+  const openRunId = openLatestTurnRunId(
+    timelineEntries,
+    input.keepLatestTurnOpen,
+    activeVisualResponseRunIds,
+  );
   return deriveTurnFolds({
     timelineEntries,
     terminalAssistantMessageIds: deriveTerminalAssistantMessageIds(timelineEntries),
     latestRun: input.latestRun ?? null,
-    unfoldedRunIds: new Set([...activeVisualResponseRunIds, ...failedRunIds]),
+    unfoldedRunIds: new Set([
+      ...activeVisualResponseRunIds,
+      ...failedRunIds,
+      ...(openRunId === null ? [] : [openRunId]),
+    ]),
     runlessWorkActive: input.isWorking && input.runlessWorkActive === true,
     liveSubagentEntryIds: liveSubagentCardEntryIds(timelineEntries),
     completeSupersededReplyEntryIds: completeSupersededReplyEntryIds(timelineEntries),
@@ -1369,6 +1424,15 @@ export function deriveMessagesTimelineRows(input: {
    * the child (or after the last entry while the child has none of its own).
    */
   legacyForkCreatedAt?: string | null;
+  /** The embed pane: see `openLatestTurnRunId`. */
+  keepLatestTurnOpen?: boolean;
+  /**
+   * While the composer card asks the user to answer the turn, no thinking or still-live row ticks
+   * beside it; calls that are really running stay live.
+   */
+  waitingOnUser?: boolean;
+  /** The embed pane, where the card is the one place that says the turn waits on the user. */
+  hideWaitingRow?: boolean;
 }): MessagesTimelineRow[] {
   const timelineEntries = timelineRowEntries(input.timelineEntries);
   const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>();
@@ -1404,11 +1468,21 @@ export function deriveMessagesTimelineRows(input: {
     isWorking: input.isWorking,
   });
   const runlessWorkActive = input.isWorking && input.runlessWorkActive === true;
+  const waitingOnUser = input.isWorking && input.waitingOnUser === true;
+  const openRunId = openLatestTurnRunId(
+    timelineEntries,
+    input.keepLatestTurnOpen,
+    activeVisualResponseRunIds,
+  );
   const foldsByAnchorEntryId = deriveTurnFolds({
     timelineEntries: timelineEntries,
     terminalAssistantMessageIds,
     latestRun: input.latestRun ?? null,
-    unfoldedRunIds: new Set([...activeVisualResponseRunIds, ...failedRunIds]),
+    unfoldedRunIds: new Set([
+      ...activeVisualResponseRunIds,
+      ...failedRunIds,
+      ...(openRunId === null ? [] : [openRunId]),
+    ]),
     runlessWorkActive,
     liveSubagentEntryIds,
     completeSupersededReplyEntryIds: completeSupersededReplyIds,
@@ -1480,7 +1554,8 @@ export function deriveMessagesTimelineRows(input: {
   );
   const latestToolKeepsActivityLive =
     latestRunningToolEntry !== undefined ||
-    (latestVisibleToolEntry !== undefined &&
+    (!waitingOnUser &&
+      latestVisibleToolEntry !== undefined &&
       workEntryIndicatesToolSuccess(latestVisibleToolEntry.entry));
   const latestToolFailed =
     latestRunningToolEntry === undefined &&
@@ -1515,6 +1590,7 @@ export function deriveMessagesTimelineRows(input: {
     activeWorkRow !== null || latestToolFailed ? activeToolEntries.map((entry) => entry.id) : [],
   );
   const appendWorkingRow = () => {
+    if (waitingOnUser && input.hideWaitingRow === true) return;
     nextRows.push({
       kind: "working",
       id: "working-indicator-row",
@@ -1522,6 +1598,7 @@ export function deriveMessagesTimelineRows(input: {
     });
   };
   let hasActivityRow = false;
+  let lastMessageRole: ChatMessage["role"] | null = null;
   let hasActiveCompaction = false;
   const appendActiveWorkRows = () => {
     if (activeWorkRow === null) return;
@@ -1689,11 +1766,13 @@ export function deriveMessagesTimelineRows(input: {
       }
       const groupedEntries = [timelineEntry.entry];
       let cursor = index + 1;
-      while (cursor < timelineEntries.length) {
+      while (cursor < timelineEntries.length && !timelineEntryHeadsAppCard(timelineEntry)) {
         const nextEntry = timelineEntries[cursor];
         if (
           !nextEntry ||
           nextEntry.kind !== "work" ||
+          (openRunId !== null && nextEntry.entry.runId === openRunId) ||
+          timelineEntryHeadsAppCard(nextEntry) ||
           nextEntry.entry.sourceActivityKind === "context-compaction" ||
           nextEntry.entry.tone === "error" ||
           nextEntry.entry.sourceActivityKind === "runtime.error" ||
@@ -1889,11 +1968,14 @@ export function deriveMessagesTimelineRows(input: {
       terminalAssistantMessageIds.has(timelineEntry.message.id) &&
       !assistantResponseStillInProgress;
 
+    const startsReply = timelineEntry.message.role === "assistant" && lastMessageRole === "user";
+    lastMessageRole = timelineEntry.message.role;
     nextRows.push({
       kind: "message",
       id: timelineEntry.id,
       createdAt: timelineEntry.createdAt,
       message: timelineEntry.message,
+      ...(startsReply ? { startsReply } : {}),
       ...(timelineEntry.projectedItem === undefined
         ? {}
         : { projectedItem: timelineEntry.projectedItem }),
@@ -1974,6 +2056,7 @@ export function deriveMessagesTimelineRows(input: {
   if (
     input.isWorking &&
     input.latestRun?.turnEnded !== true &&
+    !waitingOnUser &&
     !setupOwnsWorkingSlot &&
     !hasActiveCompaction &&
     (!hasActivityRow || latestToolFailed)
@@ -2091,7 +2174,12 @@ export interface MessagesTimelineRowsProjection {
 export function timelineEntryTurnFoldRunId(
   input: Pick<
     MessagesTimelineRowsInput,
-    "timelineEntries" | "latestRun" | "isWorking" | "runlessWorkActive" | "runningRunId"
+    | "timelineEntries"
+    | "latestRun"
+    | "isWorking"
+    | "runlessWorkActive"
+    | "runningRunId"
+    | "keepLatestTurnOpen"
   >,
   entryId: string,
 ): RunId | null {
@@ -2101,7 +2189,12 @@ export function timelineEntryTurnFoldRunId(
 export function timelineTurnFoldRunIdsByEntryId(
   input: Pick<
     MessagesTimelineRowsInput,
-    "timelineEntries" | "latestRun" | "isWorking" | "runlessWorkActive" | "runningRunId"
+    | "timelineEntries"
+    | "latestRun"
+    | "isWorking"
+    | "runlessWorkActive"
+    | "runningRunId"
+    | "keepLatestTurnOpen"
   >,
 ): ReadonlyMap<string, RunId> {
   const byEntryId = new Map<string, RunId>();
@@ -2349,6 +2442,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.assistantCopyStreaming === bm.assistantCopyStreaming &&
         a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
         a.revertTurnCount === bm.revertTurnCount &&
+        a.startsReply === bm.startsReply &&
         (a.forkPoint === bm.forkPoint ||
           (a.forkPoint !== undefined &&
             bm.forkPoint !== undefined &&

@@ -107,6 +107,7 @@ import { defaultUrlTransform } from "react-markdown";
 import { parseAssistantCitationHref } from "@lecturn/shared/assistantCitations";
 import { parseComposerContextHref } from "@lecturn/shared/composerContextReferences";
 import { parseThreadLinkHref } from "@lecturn/shared/threadLinks";
+import { parseAppReferenceHref } from "@lecturn/shared/appReferences";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
 import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
 import {
@@ -139,6 +140,9 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { Button } from "./ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
 import { ContextChip } from "./ContextChip";
+import { AppRefChip } from "./embed/AppRefChip";
+import { useAppReferences } from "./embed/AppReferencesContext";
+import { remarkAppReferences } from "./embed/remarkAppReferences";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
 import { ScrollArea } from "./ui/scroll-area";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
@@ -289,6 +293,10 @@ export function shouldUseMarkdownFileBrowserPrimaryAction(input: {
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 const EMPTY_REMARK_PLUGINS: NonNullable<ReactMarkdownOptions["remarkPlugins"]> = [];
+const EMPTY_REF_PREFIXES: ReadonlyArray<string> = [];
+const appReferenceRemarkPlugins = (
+  refPrefixes: ReadonlyArray<string>,
+): NonNullable<ReactMarkdownOptions["remarkPlugins"]> => [[remarkAppReferences, { refPrefixes }]];
 
 const ARTIFACT_TEMPLATE_ICON_BY_KIND = {
   document: FileTextIcon,
@@ -2511,6 +2519,7 @@ function useChatMarkdownState({
     if (parseAssistantCitationHref(href)) return href;
     if (parseComposerContextHref(href)) return href;
     if (parseThreadLinkHref(href)) return href;
+    if (parseAppReferenceHref(href)) return href;
     if (isWindowsDrivePathHref(href)) return href;
     return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
   };
@@ -2900,6 +2909,8 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const text = use(ChatMarkdownTextContext);
     const citation = href ? parseAssistantCitationHref(href) : null;
     if (citation) return <AssistantCitationChip citation={citation} />;
+    const appReference = href ? parseAppReferenceHref(href) : null;
+    if (appReference) return <AppRefChip reference={appReference} />;
     const linkedThreadId = href ? parseThreadLinkHref(href) : null;
     if (linkedThreadId) {
       const label = hastPlainTextDeep(node) || linkedThreadId;
@@ -3382,13 +3393,17 @@ function ChatMarkdown({
     localMediaPreview,
     closeLocalMediaPreview,
   } = useChatMarkdownState({ text, ...props });
+  // Present only in an app's threads, so every other message parses as before.
+  const refPrefixes = useAppReferences()?.refPrefixes ?? EMPTY_REF_PREFIXES;
   const incrementalParsing =
     props.isStreaming === true &&
     extraRemarkPlugins.length === 0 &&
+    refPrefixes.length === 0 &&
     /(?:^|\n) {0,3}(?:`{3}|~{3})/.test(text);
   const remarkPlugins = [
     ...(lineBreaks ? CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS : CHAT_MARKDOWN_REMARK_PLUGINS),
     ...extraRemarkPlugins,
+    ...(refPrefixes.length > 0 ? appReferenceRemarkPlugins(refPrefixes) : EMPTY_REMARK_PLUGINS),
     ...(incrementalParsing ? [createIncrementalMarkdownPlugin()] : []),
   ];
 

@@ -669,6 +669,28 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
     }).pipe(Effect.provide(layerSessionStore())),
   );
 
+  it.effect("keeps connected-app sessions when revoking other clients", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore.SessionStore;
+      const owner = yield* sessions.issue({ subject: "desktop-bootstrap" });
+      const client = yield* sessions.issue({ subject: "one-time-token" });
+      const app = yield* sessions.issue({ subject: "app:dev.rocketwright.app" });
+      const embed = yield* sessions.issue({
+        subject: "embed:dev.rocketwright.app:project-1",
+        ttl: Duration.minutes(15),
+      });
+
+      expect(yield* sessions.revokeAllExcept(owner.sessionId)).toBe(1);
+      expect((yield* Effect.flip(sessions.verify(client.token)))._tag).toBe(
+        "SessionTokenRevokedError",
+      );
+      expect((yield* sessions.verify(app.token)).subject).toBe("app:dev.rocketwright.app");
+      expect((yield* sessions.verify(embed.token)).subject).toBe(
+        "embed:dev.rocketwright.app:project-1",
+      );
+    }).pipe(Effect.provide(layerSessionStore())),
+  );
+
   it.effect("persists lastConnectedAt on first connect and updates it after reconnect", () =>
     Effect.gen(function* () {
       const sessions = yield* SessionStore.SessionStore;

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
 import {
+  AuthAppHostScope,
   AuthEnvironmentScopes,
   AuthEnvironmentScope,
   authScopeRequiredResponse,
@@ -39,7 +40,9 @@ describe("authorization grants", () => {
 
   const decodeOldScopes = Schema.decodeUnknownSync(oldScopes);
 
-  it.each(AuthEnvironmentScope.literals)(
+  // Only app credentials call apps:host methods, and they ship with the new
+  // contracts, so no old client can be denied for lack of it.
+  it.each(AuthEnvironmentScope.literals.filter((scope) => scope !== AuthAppHostScope))(
     "keeps %s permission errors decodable by old clients",
     (scope) => {
       const response = authScopeRequiredResponse(scope);

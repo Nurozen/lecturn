@@ -19,6 +19,7 @@ import {
   ThreadId,
   type ModelSelection,
   type OrchestrationV2AppThread,
+  type OrchestrationV2DomainEvent,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2ProviderTurn,
   type ProviderReplayEntry,
@@ -50,6 +51,7 @@ import {
   lecturnMcpServerName,
 } from "@lecturn/provider-opencode/testing";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { makeAppToolsUnavailableNotices } from "../../apps/appToolsUnavailableNotice.ts";
 import { openCode2ReplayRuntime } from "./OpenCode2AdapterV2.testkit.ts";
 import {
   makeProviderReplayGate,
@@ -3243,6 +3245,7 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
               url: "http://127.0.0.1:3773/mcp",
               headers: { Authorization: "Bearer thread-credential" },
               oauth: false,
+              timeout: { execution: 65 * 60 * 1_000 },
             },
           }),
           reply("mcp.add", null),
@@ -3313,6 +3316,59 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("reports no Lecturn MCP on an external server, so an app thread gets the notice", () =>
+    Effect.gen(function* () {
+      const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+      yield* mcpSessions.set({
+        environmentId: EnvironmentId.make("environment:opencode2-adapter"),
+        threadId,
+        providerSessionId: "mcp:opencode2-adapter",
+        providerInstanceId: instanceId,
+        endpoint: "http://127.0.0.1:3773/mcp",
+        authorizationHeader: "Bearer thread-credential",
+        browserToolsAvailable: false,
+        app: { appId: "dev.rocketwright", toolPrefix: "rw", toolNames: ["rw_simulate"] },
+      });
+      yield* Effect.addFinalizer(() => mcpSessions.clear(threadId));
+      const activations = yield* mcpSessions.subscribeActivations;
+      // The session still supplies the config; the external server never installs it.
+      const { thread } = yield* resumed([], { external: true });
+      const [signal] = yield* activations.pipe(Stream.take(1), Stream.runCollect);
+      assert.deepEqual(signal, {
+        type: "mcp-activated",
+        threadId,
+        providerThreadId: thread.id,
+        driver: OPENCODE_PROVIDER,
+        mcpActivated: false,
+      });
+
+      const written: Array<OrchestrationV2DomainEvent> = [];
+      const notice = makeAppToolsUnavailableNotices({
+        threads: {
+          getThread: () => Effect.succeed({ projectId: "project:rocket" } as never),
+          getTurnItem: () => Effect.succeed(null),
+          getNextTurnItemOrdinal: () => Effect.succeed(7),
+        },
+        eventSink: {
+          write: (input) =>
+            Effect.sync(() => {
+              written.push(...input.events);
+              return [];
+            }),
+        },
+        grantedAppName: () => Effect.succeedSome("RocketWright"),
+      });
+      yield* notice(signal!);
+      yield* notice(signal!);
+      assert.lengthOf(written, 1);
+      const item = written[0]?.type === "turn-item.updated" ? written[0].payload : undefined;
+      assert.equal(
+        item?.type === "system_notice" ? item.message : undefined,
+        "RocketWright tools unavailable with OpenCode",
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("registers a long thread id's MCP server under a name OpenCode accepts", () =>
     Effect.gen(function* () {
       const child = ThreadId.make(
@@ -3352,6 +3408,7 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
             url: "http://127.0.0.1:3773/mcp",
             headers: { Authorization: "Bearer thread-credential" },
             oauth: false,
+            timeout: { execution: 65 * 60 * 1_000 },
           },
         }),
         reply("mcp.add", null),

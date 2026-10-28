@@ -3,8 +3,14 @@ import { Keyboard, Pressable, View } from "react-native";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { GlassSurface } from "../../components/ui/GlassSurface";
 import { useWorkspaceTabs } from "./WorkspaceTabsContext";
-import { WORKSPACE_DOCK } from "./workspace-tabs-state";
+import { WORKSPACE_DOCK, WORKSPACE_TABS } from "./workspace-tabs-state";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
+
+const TAB_ITEMS = {
+  threads: { label: "Threads", icon: "text.bubble" },
+  apps: { label: "Apps", icon: "square.grid.2x2" },
+  pullRequests: { label: "Pull requests", icon: PullRequestGlyph.pullRequest },
+} as const;
 
 export function WorkspaceDock(props: { readonly onNewTask: () => void }) {
   const workspace = useWorkspaceTabs()!;
@@ -21,13 +27,13 @@ export function WorkspaceDock(props: { readonly onNewTask: () => void }) {
         }}
       >
         <View className="flex-1 flex-row p-1" accessibilityRole="tablist">
-          {(["threads", "pullRequests"] as const).map((tab) => {
+          {WORKSPACE_TABS.map((tab) => {
             const selected = workspace.state.selectedTab === tab;
             return (
               <Pressable
                 key={tab}
                 accessibilityRole="tab"
-                accessibilityLabel={tab === "threads" ? "Threads" : "Pull requests"}
+                accessibilityLabel={TAB_ITEMS[tab].label}
                 accessibilityState={{ selected }}
                 onPress={() => {
                   if (selected) return;
@@ -41,7 +47,7 @@ export function WorkspaceDock(props: { readonly onNewTask: () => void }) {
                 }
               >
                 <SymbolView
-                  name={tab === "threads" ? "text.bubble" : PullRequestGlyph.pullRequest}
+                  name={TAB_ITEMS[tab].icon}
                   size={23}
                   tintColorClassName={selected ? "accent-focus" : "accent-icon"}
                 />

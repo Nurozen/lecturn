@@ -375,8 +375,7 @@ function layerProvider(
               checkpointAllocation: (input) =>
                 Effect.gen(function* () {
                   if (!(yield* gatewayService.checkpointAllocation(input))) return false;
-                  // The gateway store writes allocation columns under its own
-                  // enrollment generation, not the allocation generation.
+                  // Match the real store's allocation mutations after its enrollment guard.
                   const current = yield* allocations.get(input);
                   if (current === null) return false;
                   const guard = {
@@ -390,14 +389,14 @@ function layerProvider(
                   else if (input.step === "dns")
                     yield* allocations.recordDns({
                       ...guard,
-                      tunnelId: current.tunnelId,
+                      tunnelId: input.tunnelId,
                       dnsRecordId: input.dnsRecordId,
                     });
                   else
                     yield* allocations.markReady({
                       ...guard,
-                      tunnelId: current.tunnelId,
-                      origin: current.origin ?? { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
+                      tunnelId: input.tunnelId,
+                      origin: input.origin,
                     });
                   return true;
                 }).pipe(
@@ -2175,6 +2174,14 @@ function makeGatewayEnrollment(events: string[] = [], options: { staleReady?: bo
       }),
     checkpointAllocation: (input) =>
       Effect.sync(() => !!mapping && !mapping.deleting && input.generation === mapping.generation),
+    withAllocation: (input, effect) =>
+      Effect.suspend(() =>
+        mapping &&
+        !mapping.deleting &&
+        (input.generation === undefined || input.generation === mapping.generation)
+          ? Effect.asSome(effect)
+          : Effect.succeedNone,
+      ),
     recordOriginDns: (input) =>
       Effect.sync(() => {
         if (!mapping || input.generation !== mapping.generation) return false;
@@ -2621,9 +2628,9 @@ describe("managed gateway enrollment", () => {
       expect(events).toEqual([
         "gateway:pause",
         "gateway:sync",
+        "tunnel:delete",
         "dns:delete:dns-2",
         "dns:delete:dns-1",
-        "tunnel:delete",
       ]);
       expect(gateway.mapping()).not.toBeNull();
     }).pipe(

@@ -9,6 +9,7 @@ import { View } from "react-native";
 import { GlassCard } from "../../components/GlassCard";
 import { AppText as Text } from "../../components/ui/AppText";
 import type { PendingApproval } from "../../lib/threadActivity";
+import { pendingApprovalCardText } from "./pendingApprovalCardText";
 
 export interface PendingApprovalCardProps {
   readonly canOperateThread: boolean;
@@ -32,15 +33,17 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
   const warning = options.find((option) => option.warning)?.warning;
   const canRespond = props.approval.responseCapability === "live";
   const disabled = !canRespond || props.respondingApprovalId === props.approval.requestId;
+  const { eyebrow, title, detail, detailMaxLines } = pendingApprovalCardText(props.approval);
   return (
     <GlassCard tone="accent" radius={24} className="gap-2.5 p-4" opaque>
-      <Text className="font-lecturn-medium text-xs text-primary">Approval needed</Text>
-      <Text className="font-lecturn-bold text-lg text-foreground">
-        {props.approval.appName ?? props.approval.requestKind}
-      </Text>
-      {props.approval.detail ? (
-        <Text className="font-sans text-sm leading-normal text-foreground-secondary">
-          {props.approval.detail}
+      <Text className="font-lecturn-medium text-xs text-primary">{eyebrow}</Text>
+      <Text className="font-lecturn-bold text-lg text-foreground">{title}</Text>
+      {detail ? (
+        <Text
+          className="font-sans text-sm leading-normal text-foreground-secondary"
+          numberOfLines={detailMaxLines}
+        >
+          {detail}
         </Text>
       ) : null}
       {!canRespond ? (

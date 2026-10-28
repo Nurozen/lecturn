@@ -19,11 +19,17 @@ import { GlassSurface } from "../../components/ui/GlassSurface";
 import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
 import { WorkspaceDock } from "./WorkspaceDock";
 import { useWorkspaceTabs } from "./WorkspaceTabsContext";
-import { WORKSPACE_TOOLBAR, type WorkspaceTab } from "./workspace-tabs-state";
+import {
+  WORKSPACE_TOOLBAR,
+  isWorkspaceTab,
+  workspaceTabSearchLabel,
+  type WorkspaceTab,
+} from "./workspace-tabs-state";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
 
 const TABS: ReadonlyArray<{ id: WorkspaceTab; label: string; icon: AppSymbolName }> = [
   { id: "threads", label: "Threads", icon: "text.bubble" },
+  { id: "apps", label: "Apps", icon: "square.grid.2x2" },
   { id: "pullRequests", label: "PRs", icon: PullRequestGlyph.pullRequest },
 ];
 
@@ -65,7 +71,7 @@ export function WorkspaceToolbar(props: {
   const focusSearch = useCallback(() => {
     if (!workspace) return false;
     const tab = workspace.state.selectedTab;
-    if (tab !== "threads" && tab !== "pullRequests") return false;
+    if (!isWorkspaceTab(tab)) return false;
     workspace.dispatch({ type: "scroll", tab, offset: workspace.getScrollOffset(tab) });
     workspace.dispatch({ type: "search" });
     setFocusRequest((request) => request + 1);
@@ -136,7 +142,7 @@ export function WorkspaceToolbar(props: {
                 <TextInput
                   ref={input}
                   accessibilityLabel={`Search ${activeTab.label}`}
-                  placeholder={`Search ${activeTab.label === "PRs" ? "pull requests" : "threads"}`}
+                  placeholder={workspaceTabSearchLabel(state.selectedTab)}
                   placeholderTextColor={placeholderStyle.color}
                   value={tab.query}
                   onChangeText={(query) => dispatch({ type: "query", query })}

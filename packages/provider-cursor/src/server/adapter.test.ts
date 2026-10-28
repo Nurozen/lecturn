@@ -364,6 +364,161 @@ describe("CursorAdapterV2", () => {
     ),
   );
 
+  it.effect(
+    "appends a connected app's instructions to every turn and reports its MCP activation",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "cursor-v2-app-" });
+        const instanceId = ProviderInstanceId.make("cursor");
+        const threadId = ThreadId.make("cursor-app-thread");
+        const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+        yield* mcpSessions.set({
+          environmentId: EnvironmentId.make("cursor-app-environment"),
+          threadId,
+          providerSessionId: "cursor-app-session",
+          providerInstanceId: instanceId,
+          endpoint: "http://127.0.0.1:43123/mcp",
+          authorizationHeader: "Bearer synthetic-cursor-token",
+          browserToolsAvailable: true,
+          app: { appId: "dev.rocketwright", toolPrefix: "rw", toolNames: ["rw_simulate"] },
+        });
+        const activations = yield* mcpSessions.subscribeActivations;
+        const sent: Array<unknown> = [];
+        const modelSelection = { instanceId, model: "composer-2.5" };
+        const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: workspace,
+        });
+        const adapter = yield* makeCursorAdapterV2({
+          instanceId,
+          settings: yield* decodeCursorSettings({}),
+          environment: { HOME: workspace },
+        }).pipe(
+          Effect.provideService(CursorAgentSdk.CursorAgentSdkRunner, {
+            assertComplete: Effect.void,
+            open: () =>
+              Effect.succeed({
+                agentId: "native-cursor-app",
+                listMessages: Effect.succeed([]),
+                close: Effect.void,
+                send: (input) =>
+                  Effect.sync(() => {
+                    sent.push(input.message);
+                    return {
+                      agentId: "native-cursor-app",
+                      runId: `native-cursor-run-${sent.length}`,
+                      wait: Effect.succeed({
+                        id: `native-cursor-run-${sent.length}`,
+                        requestId: "native-request",
+                        status: "finished" as const,
+                        model: { id: "composer-2.5" },
+                        durationMs: 1,
+                      }),
+                      cancel: Effect.void,
+                    };
+                  }),
+              }),
+          }),
+          Effect.provide(TestProviderHost.layer({ cwd: workspace })),
+        );
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("cursor-app-session"),
+          modelSelection,
+          runtimePolicy,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection,
+          runtimePolicy,
+        });
+        const [activation] = yield* activations.pipe(Stream.take(1), Stream.runCollect);
+        assert.deepEqual(activation, {
+          type: "mcp-activated",
+          threadId,
+          providerThreadId: providerThread.id,
+          driver: CursorAgentSdk.CURSOR_PROVIDER,
+          mcpActivated: true,
+        });
+
+        const now = yield* DateTime.now;
+        const turn = (ordinal: number) =>
+          runtime
+            .startTurn({
+              threadId,
+              providerThread,
+              modelSelection,
+              runtimePolicy,
+              runId: RunId.make(`cursor-app-run-${ordinal}`),
+              runOrdinal: ordinal,
+              providerTurnOrdinal: ordinal,
+              attemptId: RunAttemptId.make(`cursor-app-attempt-${ordinal}`),
+              rootNodeId: NodeId.make(`cursor-app-root-${ordinal}`),
+              appInstructions: "Use rw_ tools for rocket edits.",
+              appThread: {
+                id: threadId,
+                projectId: ProjectId.make("cursor-app-project"),
+                createdBy: "user",
+                creationSource: "web",
+                title: "Cursor app",
+                providerInstanceId: instanceId,
+                modelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                branch: null,
+                worktreePath: null,
+                activeProviderThreadId: providerThread.id,
+                lineage: {
+                  parentThreadId: null,
+                  relationshipToParent: null,
+                  rootThreadId: threadId,
+                },
+                forkedFrom: null,
+                createdAt: now,
+                updatedAt: now,
+                archivedAt: null,
+                settledOverride: null,
+                settledAt: null,
+                lastVisitedAt: null,
+                deletedAt: null,
+              },
+              message: {
+                messageId: MessageId.make(`cursor-app-message-${ordinal}`),
+                createdBy: "user",
+                creationSource: "web",
+                text: "Fly it.",
+                attachments: [],
+              },
+            })
+            .pipe(
+              Effect.andThen(
+                runtime.events.pipe(
+                  Stream.takeUntil((event) => event.type === "turn.terminal"),
+                  Stream.runDrain,
+                ),
+              ),
+            );
+        yield* turn(1);
+        yield* turn(2);
+        assert.lengthOf(sent, 2);
+        for (const message of sent) {
+          assert.isString(message);
+          assert.isTrue(
+            (message as string).endsWith(
+              "## Connected app instructions\n\nUse rw_ tools for rocket edits.",
+            ),
+          );
+        }
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(NodeServices.layer, IdAllocator.layer, McpProviderSessions.layer),
+        ),
+      ),
+  );
+
   it.effect("fails standalone SDK transport diagnostics and sends compaction as /compress", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

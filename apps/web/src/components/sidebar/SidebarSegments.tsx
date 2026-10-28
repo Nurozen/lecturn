@@ -162,12 +162,10 @@ function SegmentedLists<Node>(
                 aria-hidden={segment.collapsed || undefined}
                 variant="account-hierarchy"
                 style={(state) =>
-                  ({
-                    // Preserve row focus rings and project glow when the fold is idle.
-                    ...(state.open && state.transitionStatus === "idle"
-                      ? { overflow: "visible" }
-                      : {}),
-                  }) as CSSProperties
+                  // Preserve row focus rings and project glow when the fold is idle.
+                  (state.open && state.transitionStatus === "idle"
+                    ? { overflow: "visible" }
+                    : {}) as CSSProperties
                 }
               >
                 <ul

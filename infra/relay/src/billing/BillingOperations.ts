@@ -159,7 +159,7 @@ export const makeBillingOperations = (config: {
                 enabled: boolean;
                 epoch: number;
               }>`UPDATE relay_billing_enforcement_control
-          SET enabled=${enabled},epoch=epoch+1 WHERE id=1 RETURNING enabled,epoch`;
+          SET enabled=${enabled},epoch=epoch+1 WHERE id=1 RETURNING enabled,epoch::float8 AS epoch`;
               if (!rows[0])
                 return yield* new BillingError({
                   code: "missing",

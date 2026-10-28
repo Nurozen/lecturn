@@ -12,6 +12,7 @@ import { MorphIcon } from "~/components/MorphIcon";
 import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
 import { formatContextWindowTokens } from "~/lib/contextWindow";
 import { cn } from "~/lib/utils";
+import { useEmbedPresentation } from "../../embed/EmbedPresentationContext";
 import { useShortcutModifierState } from "../../shortcutModifierState";
 import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";
 import { Button } from "../ui/button";
@@ -38,6 +39,8 @@ interface ComposerPrimaryActionsProps {
   pendingAction: PendingActionState | null;
   isRunning: boolean;
   canInterrupt: boolean;
+  /** An approval card above the composer is asking; the embed then draws the send arrow. */
+  approvalPending?: boolean;
   followUpBehavior?: "queue" | "steer";
   canSteer?: boolean;
   alternateShortcutLabel?: string | null;
@@ -93,6 +96,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   pendingAction,
   isRunning,
   canInterrupt,
+  approvalPending = false,
   followUpBehavior = "steer",
   canSteer = true,
   alternateShortcutLabel = null,
@@ -131,6 +135,10 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     }) === "queue";
   const alternateAction = alternateComposerDispatchAction(followUpBehavior);
   const isSendDisabled = !canOperateThread || sendDisabledReason !== null;
+  // The embed keeps the idle send arrow while its approval card asks; the card's menu
+  // offers the stop instead (ComposerPendingApprovalActions).
+  const embedded = useEmbedPresentation() !== null;
+  const embedApprovalHoldsSend = approvalPending && embedded;
   const stageBackdropVariant = useSidebarStageBackdropVariant(
     environmentIdentificationMode === "artwork",
   );
@@ -268,7 +276,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     );
   }
 
-  if (canInterrupt && !hasSendableContent && !isEditingQueuedMessage) {
+  if (canInterrupt && !hasSendableContent && !isEditingQueuedMessage && !embedApprovalHoldsSend) {
     return renderStopGenerationButton(false);
   }
 
@@ -342,7 +350,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         <PlayIcon className="size-4 fill-current" aria-hidden="true" />
       ) : isEditingQueuedMessage ? (
         <CheckIcon className="size-4" aria-hidden="true" />
-      ) : isRunning ? (
+      ) : isRunning && !embedApprovalHoldsSend ? (
         <MorphIcon className="size-4" icon={isQueuing ? ListPlus : CornerUpRight} />
       ) : (
         <SendIcon aria-hidden className="size-[19px]" strokeWidth={1.5} />

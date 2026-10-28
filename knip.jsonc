@@ -103,7 +103,8 @@
       // icon exporters stay beside export-lecturn-icons.ts, which icons:export runs instead.
       // Knip loads its preprocessor (knip-schemas.ts) through a CLI option, not a source import.
       // mobile-native-client.ts runs directly for native client verification (AGENTS.md),
-      // and setup-worktree.ts runs directly from the lecturn.json setup action.
+      // setup-worktree.ts runs directly from the lecturn.json setup action, and
+      // smoke-pack-install.ts runs by hand against a built vendoring kit.
       "entry": [
         "export-android-icons.ts",
         "export-brand-icons.ts",
@@ -112,11 +113,29 @@
         "knip-schemas.ts",
         "mobile-native-client.ts",
         "setup-worktree.ts",
+        "smoke-pack-install.ts",
       ],
     },
     "packages/*": {
       // These workspace packages are private to this monorepo.
       "includeEntryExports": true,
+    },
+    "packages/embed": {
+      // The published helper's entries are its public API; their consumers live outside this repo.
+      "entry": ["src/{node,electron,renderer,browser,electron-preload}.ts!"],
+    },
+    "examples/embed-host": {
+      // Each is loaded on its own: Electron mains, the window preload and page, the stdio tool server, scripts.
+      "entry": [
+        "src/{main,staticMain,preload}.ts!",
+        "src/renderer/main.ts!",
+        "tools/counter-mcp.ts!",
+        "scripts/start.ts",
+        "e2e/run.ts",
+        "e2e/*.e2e.ts",
+        // run.ts imports the full scenario by a computed path.
+        "e2e/scenario.ts",
+      ],
     },
     "packages/effect-acp": {
       "includeEntryExports": true,

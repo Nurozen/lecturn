@@ -73,7 +73,8 @@ function controlBlockWidths(block: HTMLElement): { natural: number; iconOnly: nu
 export function measureRestingComposerControls(
   controls: HTMLElement,
 ): RestingComposerControlsMeasurement | null {
-  const gap = Number.parseFloat(getComputedStyle(controls).columnGap) || 0;
+  const controlsStyle = getComputedStyle(controls);
+  const gap = Number.parseFloat(controlsStyle.columnGap) || 0;
   const picker = controls.querySelector<HTMLElement>("[data-chat-provider-model-picker]");
   const leadingControl =
     picker ?? controls.querySelector<HTMLElement>('[data-chat-provider-unavailable="true"]');
@@ -95,5 +96,6 @@ export function measureRestingComposerControls(
     blockWidths: widths.map((width) => width.natural),
     iconOnlyBlockWidths: widths.map((width) => width.iconOnly),
     overflowWidth: overflow ? elementOuterWidth(overflow) : 0,
+    ...(controls.closest("[data-embed-composer-footer-stacked]") ? { keepsBlocks: true } : {}),
   };
 }

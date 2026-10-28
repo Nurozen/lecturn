@@ -19,7 +19,8 @@ import { usePrimaryEnvironment } from "../state/environments";
 import { runtime } from "../lib/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
-import { readPrimaryCloudLinkState, type CloudLinkTarget } from "./linkEnvironment";
+import { isEmbedLocation } from "../embed/embedAuth";
+import type { CloudLinkTarget } from "./linkEnvironment";
 import { hasCloudPublicConfig } from "./publicConfig";
 
 const primaryCloudLinkAtomRuntime = Atom.runtime(
@@ -30,6 +31,13 @@ const primaryCloudLinkAtomRuntime = Atom.runtime(
     ),
   ),
 );
+
+// Loaded on demand so the /embed startup graph never contains cloud linking
+// (scripts/check-embed-chunks.ts).
+const readPrimaryCloudLinkState = (target: CloudLinkTarget) =>
+  Effect.promise(() => import("./linkEnvironment")).pipe(
+    Effect.flatMap((linkEnvironment) => linkEnvironment.readPrimaryCloudLinkState({ target })),
+  );
 
 const primaryCloudLinkStateAtom = Atom.family((key: string) => {
   const target = JSON.parse(key) as CloudLinkTarget;
@@ -42,7 +50,7 @@ const primaryCloudLinkStateAtom = Atom.family((key: string) => {
       ),
     ),
   );
-  return primaryCloudLinkAtomRuntime.atom(readPrimaryCloudLinkState({ target })).pipe(
+  return primaryCloudLinkAtomRuntime.atom(readPrimaryCloudLinkState(target)).pipe(
     Atom.swr({
       staleTime: 5_000,
       revalidateOnMount: true,
@@ -65,6 +73,8 @@ function targetKey(target: CloudLinkTarget): string {
 
 /** The local host's publisher is authoritative even when another account is active. */
 export const primaryCloudPublisherAtom = Atom.make((get) => {
+  // The embed's credential cannot read Connect state, and its host's account is the user's tab's.
+  if (isEmbedLocation()) return null;
   for (const [environmentId, entry] of get(environmentCatalog.catalogValueAtom).entries) {
     if (entry.target._tag !== "PrimaryConnectionTarget") continue;
     const target: CloudLinkTarget = {

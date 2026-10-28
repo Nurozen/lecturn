@@ -11,6 +11,7 @@ import {
   type AssetCreateUrlInput,
   type AssetCreateUrlResult,
   type ChatFileAttachment,
+  type ConnectedAppThreadCopyOrigin,
   type CommandId,
   type EnvironmentId,
   isImportedHistoryMessage,
@@ -1144,6 +1145,15 @@ export function buildImportChip(importedFrom: ThreadImportOrigin): {
     label: title ? `Imported from ${source} · ${title}` : `Imported from ${source}`,
     tooltip: `Imported from ${source} on ${formatCalendarDate(importedFrom.importedAt)} · ${importedFrom.cwd}`,
   };
+}
+
+/** The origin chip of a connected app's thread copied from the app's own Lecturn. */
+export function buildCopyChip(
+  copiedFrom: ConnectedAppThreadCopyOrigin,
+  appName: string | null,
+): { label: string; tooltip: string } {
+  const label = `Copied from ${appName ?? "a connected app"}`;
+  return { label, tooltip: `${label} on ${formatCalendarDate(copiedFrom.copiedAt)}` };
 }
 
 export interface ThreadImportDivider {

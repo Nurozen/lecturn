@@ -1,5 +1,6 @@
 import { assert, it, vi } from "@effect/vitest";
 import {
+  AppId,
   EnvironmentId,
   EventId,
   CommandId,
@@ -8,6 +9,7 @@ import {
   CheckpointScopeId,
   MessageId,
   type ModelSelection,
+  type OrchestrationV2AppThread,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2ThreadShellSnapshot,
   NodeId,
@@ -33,6 +35,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
 import { projectThreadAwarenessV2 } from "@lecturn/shared/agentAwareness";
 
+import { THREAD_APP_METADATA_KEYS } from "../apps/threadAppMetadata.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
@@ -989,6 +992,104 @@ const assertProjectScopedShells = Effect.fn("assertProjectScopedShells")(functio
   return { projectId, activeThreadId, forkThreadId, otherThreadId };
 });
 
+/** Both shell builders (SQL rows and the memory projection) copy app fields through one helper. */
+const assertAppThreadFieldsInShells = Effect.fn("assertAppThreadFieldsInShells")(function* (
+  suffix: string,
+) {
+  const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+  const now = yield* DateTime.now;
+  const projectId = ProjectId.make(`project:${suffix}`);
+  const appThreadId = ThreadId.make(`thread:${suffix}:app`);
+  const plainThreadId = ThreadId.make(`thread:${suffix}:plain`);
+  const thread = (threadId: ThreadId): OrchestrationV2AppThread => ({
+    createdBy: "user",
+    creationSource: "web",
+    id: threadId,
+    projectId,
+    title: threadId,
+    providerInstanceId,
+    modelSelection,
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+    activeProviderThreadId: null,
+    lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+    forkedFrom: null,
+    createdAt: now,
+    updatedAt: now,
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    lastVisitedAt: null,
+    deletedAt: null,
+  });
+  const metadata = {
+    copiedFrom: {
+      appId: AppId.make("dev.rocketwright"),
+      sourceEnvironmentId: EnvironmentId.make("environment:sidecar"),
+      sourceThreadId: ThreadId.make(`thread:${suffix}:source`),
+      copiedAt: "2026-10-25T12:00:00.000Z",
+      sourceHistoryRevision: 7,
+    },
+    appData: '{"designId":"d-1"}',
+    appSubtitle: "Apogee 412 m",
+    appOrigin: "embed" as const,
+    continuedIn: {
+      environmentId: EnvironmentId.make("environment:user"),
+      threadId: ThreadId.make(`thread:${suffix}:continued`),
+      copiedAt: "2026-10-25T12:01:00.000Z",
+    },
+  };
+  const appFieldsOf = (shell: object | null | undefined) =>
+    Object.fromEntries(
+      Object.entries(shell ?? {}).filter(([key]) =>
+        (THREAD_APP_METADATA_KEYS as ReadonlyArray<string>).includes(key),
+      ),
+    );
+
+  yield* projectionStore.apply({
+    id: EventId.make(`event:${suffix}:app-created`),
+    type: "thread.created",
+    threadId: appThreadId,
+    occurredAt: now,
+    payload: { ...thread(appThreadId), ...metadata },
+  });
+  yield* projectionStore.apply({
+    id: EventId.make(`event:${suffix}:plain-created`),
+    type: "thread.created",
+    threadId: plainThreadId,
+    occurredAt: now,
+    payload: thread(plainThreadId),
+  });
+
+  const snapshot = yield* projectionStore.getShellSnapshot({ projectId });
+  const snapshotShell = (threadId: ThreadId) =>
+    snapshot.threads.find((candidate) => candidate.id === threadId);
+  assert.deepEqual(appFieldsOf(snapshotShell(appThreadId)), metadata);
+  assert.deepEqual(appFieldsOf(yield* projectionStore.getThreadShell(appThreadId)), metadata);
+  // A non-app thread gains no keys, so its wire bytes are unchanged.
+  assert.deepEqual(appFieldsOf(snapshotShell(plainThreadId)), {});
+  assert.deepEqual(appFieldsOf(yield* projectionStore.getThreadShell(plainThreadId)), {});
+
+  // A metadata update carries the whole thread; a cleared field leaves the shell.
+  const { appData: _appData, appSubtitle: _appSubtitle, ...kept } = metadata;
+  yield* projectionStore.apply({
+    id: EventId.make(`event:${suffix}:app-cleared`),
+    type: "thread.metadata-updated",
+    threadId: appThreadId,
+    occurredAt: now,
+    payload: { ...thread(appThreadId), ...kept },
+  });
+  assert.deepEqual(appFieldsOf(yield* projectionStore.getThreadShell(appThreadId)), kept);
+});
+
+it.effect("memory shells carry connected-app thread fields and omit them elsewhere", () =>
+  assertAppThreadFieldsInShells("memory-app-fields").pipe(
+    Effect.provide(ProjectionStore.layerMemory),
+  ),
+);
+
 it.effect("memory shell snapshots scope to one project", () =>
   assertProjectScopedShells("memory-project-shell").pipe(
     Effect.asVoid,
@@ -997,6 +1098,9 @@ it.effect("memory shell snapshots scope to one project", () =>
 );
 
 it.layer(layerTest)("ProjectionStoreV2", (it) => {
+  it.effect("SQL shells carry connected-app thread fields and omit them elsewhere", () =>
+    assertAppThreadFieldsInShells("sql-app-fields"),
+  );
   it.effect(
     "SQL recovery selects unfinished runless native subagents",
     () => runlessNativeSubagentNeedsRecovery,

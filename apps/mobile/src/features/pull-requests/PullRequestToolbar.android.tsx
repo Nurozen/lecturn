@@ -24,6 +24,7 @@ export function PullRequestToolbar(props: {
   const listFocused = homeFocused && workspace.state.selectedTab === "pullRequests";
   const { onRequestVisibility } = props;
   const showThreads = useWorkspaceListNavigation("threads");
+  const showApps = useWorkspaceListNavigation("apps");
   const tab = workspace.state.tabs.pullRequests;
   const input = useRef<TextInputInstance>(null);
   const searching = tab.searchMode !== "resting";
@@ -110,6 +111,11 @@ export function PullRequestToolbar(props: {
                       accessibilityLabel: "Show threads",
                       icon: "text.bubble",
                       onPress: showThreads,
+                    } as const,
+                    {
+                      accessibilityLabel: "Show apps",
+                      icon: "square.grid.2x2",
+                      onPress: showApps,
                     } as const,
                   ]
                 : []),

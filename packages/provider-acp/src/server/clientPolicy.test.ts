@@ -9,6 +9,7 @@ import * as NodePath from "node:path";
 
 import {
   acpClientExecuteDisposition,
+  acpLecturnAppToolDisposition,
   acpMcpToolApprovalElicitationDisposition,
   acpPermissionDisposition,
   makeAcpClientPolicyGrants,
@@ -343,5 +344,50 @@ describe("makeAcpClientPolicyGrants", () => {
     grants.recordApproval({ kind: "command", scope: "turn", turnKey: "turn-2" });
     assert.isFalse(grants.allowsExecute("turn-1"));
     assert.isTrue(grants.allowsExecute("turn-2"));
+  });
+});
+
+describe("acpLecturnAppToolDisposition", () => {
+  const app = { toolPrefix: "rw" };
+  const request = (
+    toolCall: Partial<EffectAcpSchema.RequestPermissionRequest["toolCall"]>,
+  ): EffectAcpSchema.RequestPermissionRequest => ({
+    options: [],
+    sessionId: "app-session",
+    toolCall: { toolCallId: "app-tool-call", ...toolCall },
+  });
+
+  it("allows the thread's app tools in every form agents report Lecturn's server", () => {
+    for (const toolCall of [
+      { kind: "execute", rawInput: { server: "lecturn", tool: "rw_simulate" } },
+      { kind: "other", _meta: { serverId: "lecturn", toolName: "rw_simulate" } },
+      { kind: "other", title: "mcp__lecturn__rw_simulate" },
+      { kind: "other", title: "lecturn.rw_simulate" },
+      { kind: "other", title: 'lecturn/rw_simulate: {"duration":120}' },
+      { kind: "other", title: "rw_simulate (lecturn MCP Server)" },
+      { _meta: { claudeCode: { toolName: "mcp__lecturn__rw_simulate" } } },
+    ] as const) {
+      assert.equal(acpLecturnAppToolDisposition(request(toolCall), app), "allow");
+    }
+  });
+
+  it("leaves Lecturn's own tools, other servers, bare names and commands to the runtime policy", () => {
+    for (const toolCall of [
+      { kind: "other", title: "mcp__lecturn__lecturn_thread_list" },
+      { kind: "other", title: "mcp__weather__rw_simulate" },
+      { kind: "other", rawInput: { server: "weather", tool: "rw_simulate" } },
+      { kind: "other", title: "rw_simulate" },
+      { kind: "other", title: "mcp__lecturn__rw_" },
+      { kind: "execute", title: "lecturn: rw_simulate: rm -rf /" },
+      { kind: "edit", title: "mcp__lecturn__rw_simulate" },
+      { kind: "other", title: "mcp__lecturn__rw_simulate", locations: [{ path: "/etc/hosts" }] },
+    ] as const) {
+      assert.equal(acpLecturnAppToolDisposition(request(toolCall), app), undefined);
+    }
+    // Threads outside an app have no app tools at all.
+    assert.equal(
+      acpLecturnAppToolDisposition(request({ title: "mcp__lecturn__rw_simulate" }), undefined),
+      undefined,
+    );
   });
 });

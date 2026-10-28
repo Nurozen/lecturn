@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  isThreadFeedTailDisclosure,
   resolveThreadFeedLiveFollow,
   resolveThreadFeedSubmissionAnchor,
   resolveThreadWorkGroupInitialScroll,
@@ -219,5 +220,36 @@ describe("resolveThreadFeedLiveFollow", () => {
 
   it("re-arms after an explicit reset", () => {
     expect(resolveThreadFeedLiveFollow(false, { type: "reset" })).toBe(true);
+  });
+});
+
+describe("isThreadFeedTailDisclosure", () => {
+  const feed = [{ id: "message:user" }, { id: "work-toggle:a" }, { id: "work-toggle:b" }];
+
+  it("treats the last toggle as the tail, before and after it reveals its details", () => {
+    expect(isThreadFeedTailDisclosure(feed, "work-toggle:b", "work-details:b")).toBe(true);
+    expect(
+      isThreadFeedTailDisclosure(
+        [...feed, { id: "work-details:b" }],
+        "work-toggle:b",
+        "work-details:b",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps anchoring a toggle with other entries below it", () => {
+    expect(isThreadFeedTailDisclosure(feed, "work-toggle:a", "work-details:a")).toBe(false);
+    expect(
+      isThreadFeedTailDisclosure(
+        [...feed, { id: "work-details:b" }],
+        "work-toggle:b",
+        "work-details:other",
+      ),
+    ).toBe(false);
+  });
+
+  it("treats a row toggle in the last entry as the tail", () => {
+    expect(isThreadFeedTailDisclosure(feed, "work-toggle:b")).toBe(true);
+    expect(isThreadFeedTailDisclosure(feed, "missing")).toBe(false);
   });
 });

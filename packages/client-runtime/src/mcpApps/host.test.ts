@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { makeMcpAppHost, McpAppHostRefusal, type McpAppHostContext } from "./host.ts";
+import {
+  connectedAppCardTheme,
+  makeMcpAppHost,
+  McpAppHostRefusal,
+  mcpAppStyleVariables,
+  mcpAppToolCall,
+  type McpAppHostContext,
+} from "./host.ts";
 
 const app = {
   attachmentId: "thread-1-app",
@@ -409,5 +416,111 @@ describe("makeMcpAppHost", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("tells the app a refused call was cancelled instead of replaying a result", () => {
+    const { host, sent } = setup();
+    initialize(host);
+    sent.length = 0;
+    const reason = "The user declined ex_increment (approval declined).";
+    host.setToolCall(
+      mcpAppToolCall(
+        { by: 1 },
+        { lecturnMcpApp: { ...app, server: "lecturn" }, cancelled: { reason } },
+      ),
+    );
+    expect(sent).toEqual([
+      { jsonrpc: "2.0", method: "ui/notifications/tool-input", params: { arguments: { by: 1 } } },
+      { jsonrpc: "2.0", method: "ui/notifications/tool-cancelled", params: { reason } },
+    ]);
+  });
+
+  it("replays a connected-app card's result from the envelope its adapter recorded", () => {
+    const { host, sent } = setup();
+    initialize(host);
+    sent.length = 0;
+    const result = {
+      content: [{ type: "text", text: "count 3" }],
+      structuredContent: { count: 3 },
+    };
+    host.setToolCall(
+      mcpAppToolCall({}, [{ type: "text", text: JSON.stringify({ lecturnMcpApp: app, result }) }]),
+    );
+    expect(sent.at(-1)).toEqual({
+      jsonrpc: "2.0",
+      method: "ui/notifications/tool-result",
+      params: result,
+    });
+  });
+
+  it("opens links under an app's registered prefixes in the app, and nothing else", async () => {
+    const opened: Array<string> = [];
+    const links: Array<string> = [];
+    const { host, sent } = setup({
+      openLink: async (url) => {
+        links.push(url);
+      },
+      openAppRef: {
+        refPrefixes: () => ["rw:"],
+        open: async (ref) => {
+          opened.push(ref);
+        },
+      },
+    });
+    for (const [id, url] of [
+      [1, "rw:run/42"],
+      [2, "rw:step/3"],
+      [3, "https://example.test/docs"],
+      [4, "rx:run/1"],
+    ] as const) {
+      host.receive({ jsonrpc: "2.0", id, method: "ui/open-link", params: { url } });
+    }
+    await flush();
+    expect(opened).toEqual(["rw:run/42", "rw:step/3"]);
+    expect(links).toEqual(["https://example.test/docs"]);
+    expect(sent.filter((message) => message.id === 1 || message.id === 2)).toEqual([
+      { jsonrpc: "2.0", id: 1, result: {} },
+      { jsonrpc: "2.0", id: 2, result: {} },
+    ]);
+    expect(sent.find((message) => message.id === 4)).toMatchObject({ error: { code: -32602 } });
+
+    // Without the option a ref is just an unsupported link.
+    const plain = setup();
+    plain.host.receive({
+      jsonrpc: "2.0",
+      id: 9,
+      method: "ui/open-link",
+      params: { url: "rw:run/42" },
+    });
+    expect(plain.sent).toEqual([
+      {
+        jsonrpc: "2.0",
+        id: 9,
+        error: { code: -32602, message: "Only http(s) links can be opened." },
+      },
+    ]);
+  });
+});
+
+describe("connectedAppCardTheme", () => {
+  const theme = (appearance: "light" | "dark") => ({
+    appearance,
+    variables: { "--background": "#111111", "--ring": "#5b8def" },
+  });
+
+  it("draws app cards' accent in the thread gold for the card's appearance", () => {
+    expect(mcpAppStyleVariables(connectedAppCardTheme(theme("dark")).variables)).toMatchObject({
+      "--color-ring-primary": "#dca64e",
+      "--color-background-primary": "#111111",
+    });
+    expect(
+      mcpAppStyleVariables(connectedAppCardTheme(theme("light")).variables)["--color-ring-primary"],
+    ).toBe("#bc7642");
+  });
+
+  it("leaves the theme other MCP apps receive unchanged", () => {
+    const original = theme("dark");
+    connectedAppCardTheme(original);
+    expect(mcpAppStyleVariables(original.variables)["--color-ring-primary"]).toBe("#5b8def");
   });
 });

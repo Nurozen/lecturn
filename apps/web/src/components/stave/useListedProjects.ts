@@ -1,17 +1,19 @@
-import { withoutArchivedStaveProjects } from "@lecturn/client-runtime/state/stave-archive";
+import { projectsForProjectsMode } from "@lecturn/client-runtime/state/app-projects";
 
 import { useProjects } from "../../state/entities";
-import { archivedStaveProjectKeys } from "./listedProjects.logic";
+import { appProjectKeys, archivedStaveProjectKeys } from "./listedProjects.logic";
 
 /**
- * The projects list surfaces offer: every project except archived Stave
- * spaces, plus the keys of those hidden projects so their threads can be
- * left out too.
+ * The projects Projects-mode surfaces offer: every project except archived
+ * Stave spaces and connected-app projects, plus the keys of each hidden kind.
+ * Archived keys hide threads everywhere; app keys hide them only from
+ * Projects-mode lists, since search and the palette keep app threads.
  */
 export function useListedProjects() {
   const allProjects = useProjects();
   return {
-    projects: withoutArchivedStaveProjects(allProjects),
+    projects: projectsForProjectsMode(allProjects),
     archivedProjectKeys: archivedStaveProjectKeys(allProjects),
+    appProjectKeys: appProjectKeys(allProjects),
   };
 }

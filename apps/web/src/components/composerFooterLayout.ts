@@ -103,6 +103,11 @@ export interface RestingComposerControlsMeasurement {
   blockWidths: readonly number[];
   overflowWidth: number;
   iconOnlyBlockWidths?: readonly number[];
+  /**
+   * The narrow embed footer's controls row ("model | effort | access") has no overflow menu:
+   * access drops to its icon, then the model label truncates.
+   */
+  keepsBlocks?: boolean;
 }
 
 function restingComposerControlsWidth(
@@ -151,6 +156,20 @@ export function resolveRestingComposerControlsLayout(
   },
 ): { hiddenCount: number; iconOnlyCount?: number; visible: boolean } {
   const { blockWidths, hostWidth, previous } = input;
+  if (input.keepsBlocks) {
+    // Only the trailing access block, whose icon is its value, drops to icon only: the effort
+    // control on this row has no icon to fall back to (embed.css).
+    const wasIconOnly = (previous?.iconOnlyCount ?? 0) > 0;
+    const iconOnly =
+      blockWidths.length > 0 &&
+      restingComposerControlsWidth(input, 0) >
+        hostWidth - (wasIconOnly ? RESTING_CONTROLS_SLACK_PX : 0);
+    return {
+      hiddenCount: 0,
+      ...(input.iconOnlyBlockWidths ? { iconOnlyCount: iconOnly ? 1 : 0 } : {}),
+      visible: true,
+    };
+  }
   const iconSteps = input.iconOnlyBlockWidths ? blockWidths.length : 0;
   const previousStep = previous
     ? previous.hiddenCount > 0

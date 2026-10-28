@@ -482,7 +482,11 @@ function paidInvoice(id: string, start: number, end: number, paidAt = start) {
     },
   } as Stripe.Invoice;
 }
-function paidHarness(invoices: Stripe.Invoice[], overrides: Partial<StripeClient> = {}) {
+function paidHarness(
+  invoices: Stripe.Invoice[],
+  overrides: Partial<StripeClient> = {},
+  billingConfig = config,
+) {
   const active = subscription({ status: "active", trial_start: null, trial_end: null });
   return harness(
     { customer_id: "cus_test" },
@@ -512,8 +516,116 @@ function paidHarness(invoices: Stripe.Invoice[], overrides: Partial<StripeClient
         }) as Stripe.Charge,
       ...overrides,
     },
+    billingConfig,
   );
 }
+
+describe("renewal continuity", () => {
+  it.effect("keeps a pre-boundary projection usable until a fixed grace deadline", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(999_000);
+      const h = paidHarness(
+        [paidInvoice("in_previous", 100, 1000)],
+        {},
+        {
+          ...config,
+          renewalGraceSeconds: 60,
+        },
+      );
+      yield* h.service.processPending();
+      expect(h.account().state.accessUntil).toBe(1060);
+      expect(currentPersonalPaidFacts(h.account(), 999, 300)?.paidPeriodEnd).toBe(1000);
+
+      yield* TestClock.setTime(1_001_000);
+      expect((yield* h.service.status("user_test")).hasAccess).toBe(true);
+      expect(currentPersonalPaidFacts(h.account(), 1001, 300)).toBeNull();
+      // No webhook or refresh occurred before the saved projection crossed the paid boundary.
+      expect(h.account().updated_at).toBe(999);
+
+      yield* h.service.processPending();
+      expect(h.account().state.accessUntil).toBe(1060);
+      expect(h.account().paid_facts).toBeNull();
+      yield* TestClock.setTime(1_060_000);
+      expect((yield* h.service.status("user_test")).hasAccess).toBe(false);
+      yield* h.service.processPending();
+      expect(h.account().state.accessUntil).toBeNull();
+    }),
+  );
+
+  it.effect("preserves the access window when renewal settles during grace", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(999_000);
+      const invoices = [paidInvoice("in_previous", 100, 1000)];
+      const h = paidHarness(invoices, {}, { ...config, renewalGraceSeconds: 60 });
+      yield* h.service.processPending();
+      expect(h.account().state.accessWindowStart).toBe(100);
+
+      yield* TestClock.setTime(1_025_000);
+      invoices.push(paidInvoice("in_renewal", 1000, 2000, 1025));
+      yield* h.service.processPending();
+      expect(h.account().state).toMatchObject({ accessUntil: 2060, accessWindowStart: 100 });
+      expect(currentPersonalPaidFacts(h.account(), 1025, 300)).toMatchObject({
+        invoiceId: "in_renewal",
+        paidPeriodStart: 1025,
+        paidPeriodEnd: 2000,
+      });
+    }),
+  );
+
+  it.effect("does not extend a scheduled cancellation when cancel_at is absent", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(999_000);
+      const ending = subscription({
+        status: "active",
+        trial_start: null,
+        trial_end: null,
+        cancel_at_period_end: true,
+        cancel_at: null,
+      });
+      ending.items.data[0]!.current_period_end = 1000;
+      const h = paidHarness(
+        [paidInvoice("in_previous", 100, 1000)],
+        {
+          listSubscriptions: async () => [ending],
+          retrieveSubscription: async () => ending,
+        },
+        { ...config, renewalGraceSeconds: 60 },
+      );
+      yield* h.service.processPending();
+      expect(h.account().state).toMatchObject({ accessUntil: 1000, cancelAt: 1000 });
+      yield* TestClock.setTime(1_001_000);
+      expect((yield* h.service.status("user_test")).hasAccess).toBe(false);
+      yield* h.service.processPending();
+      expect(h.account().state.accessUntil).toBeNull();
+    }),
+  );
+
+  it.effect("revokes grace when its settled invoice is fully refunded", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(1_025_000);
+      const h = paidHarness(
+        [paidInvoice("in_previous", 100, 1000)],
+        {
+          retrieveCharge: async (id) =>
+            ({
+              id,
+              customer: "cus_test",
+              currency: "usd",
+              paid: true,
+              status: "succeeded",
+              amount: 1000,
+              amount_refunded: 1000,
+              refunded: true,
+            }) as Stripe.Charge,
+        },
+        { ...config, renewalGraceSeconds: 60 },
+      );
+      yield* h.service.processPending();
+      expect((yield* h.service.status("user_test")).hasAccess).toBe(false);
+      expect(h.account().paid_facts).toBeNull();
+    }),
+  );
+});
 
 describe("canonical payment lifecycle", () => {
   it.live("grants settled service and retains the paid term origin", () =>

@@ -49,6 +49,7 @@ export function ThreadListToolbar(props: {
   const { height: toolbarHeight, ...headerPadding } = useToolbarLayout();
   const { state } = useWorkspaceState();
   const { onRequestVisibility, onSearchQueryChange } = props;
+  const showApps = useWorkspaceListNavigation("apps");
   const showPullRequests = useWorkspaceListNavigation("pullRequests");
   const searchRef = useRef<TextInputInstance>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -128,11 +129,18 @@ export function ThreadListToolbar(props: {
                 />
               </View>
               {props.sidebar && workspace ? (
-                <AndroidHeaderIconButton
-                  accessibilityLabel="Show pull requests"
-                  icon={PullRequestGlyph.pullRequest}
-                  onPress={showPullRequests}
-                />
+                <>
+                  <AndroidHeaderIconButton
+                    accessibilityLabel="Show apps"
+                    icon="square.grid.2x2"
+                    onPress={showApps}
+                  />
+                  <AndroidHeaderIconButton
+                    accessibilityLabel="Show pull requests"
+                    icon={PullRequestGlyph.pullRequest}
+                    onPress={showPullRequests}
+                  />
+                </>
               ) : null}
               <AndroidHeaderIconButton
                 accessibilityLabel="Search threads"

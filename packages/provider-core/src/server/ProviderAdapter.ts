@@ -435,6 +435,11 @@ export interface ProviderAdapterV2TurnInput {
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   readonly appContext?: ReadonlyArray<{ readonly key: string; readonly text: string }>;
+  /**
+   * Lecturn: a connected app's registered instructions on its own threads.
+   * Each adapter appends them where it has a system-prompt hook.
+   */
+  readonly appInstructions?: string;
 }
 
 export interface ProviderAdapterV2SteerInput {

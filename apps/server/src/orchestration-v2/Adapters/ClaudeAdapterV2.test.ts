@@ -554,6 +554,71 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     browserToolsAvailable: true,
   });
 
+  it("puts a connected app's instructions in the system prompt and leaves its gate to Lecturn", () => {
+    const threadId = ThreadId.make("thread-claude-app");
+    const mcpSession = {
+      ...mcpSessionFor(threadId),
+      capabilities: new Set(["orchestration", "app"]),
+      app: { appId: "dev.rocketwright", toolPrefix: "rw", toolNames: ["rw_simulate"] },
+    };
+    const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
+      mcpSession,
+      readOnlySandbox: false,
+    });
+    // App tools are Lecturn MCP tools: the wildcard forwards gated ones too, and
+    // Lecturn's server decides them. No app-specific allowlist entry exists.
+    assert.deepEqual(overrides, {
+      allowedTools: [ClaudeAdapterV2.CLAUDE_LECTURN_MCP_TOOL_WILDCARD],
+      mcpServers: LECTURN_MCP_SERVERS,
+    });
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "native-claude-app",
+      resume: false,
+      cwd: "/workspace",
+      ...(overrides.allowedTools === undefined ? {} : { allowedTools: overrides.allowedTools }),
+      ...(overrides.mcpServers === undefined ? {} : { mcpServers: overrides.mcpServers }),
+      appInstructions: "Use rw_ tools for rocket edits.",
+    });
+    const append = (options.systemPrompt as { readonly append: string }).append;
+    assert.include(append, "## Lecturn orchestration");
+    assert.isTrue(
+      append.endsWith("\n\n## Connected app instructions\n\nUse rw_ tools for rocket edits."),
+    );
+    assert.deepEqual(options.allowedTools, [ClaudeAdapterV2.CLAUDE_LECTURN_MCP_TOOL_WILDCARD]);
+
+    const withoutApp = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "native-claude-app",
+      resume: false,
+      cwd: "/workspace",
+    });
+    assert.notInclude(
+      (withoutApp.systemPrompt as { readonly append: string }).append,
+      "Connected app instructions",
+    );
+  });
+
+  it("reads a failed Lecturn MCP connection from init, and only that", () => {
+    const init = (mcp_servers: ReadonlyArray<{ name: string; status: string }>) =>
+      ({ type: "system", subtype: "init", mcp_servers }) as unknown as Parameters<
+        typeof ClaudeAdapterV2.claudeLecturnMcpStartupFailure
+      >[0];
+    assert.equal(
+      ClaudeAdapterV2.claudeLecturnMcpStartupFailure(init([{ name: "lecturn", status: "failed" }])),
+      "Claude reported Lecturn's MCP server as failed.",
+    );
+    assert.isUndefined(
+      ClaudeAdapterV2.claudeLecturnMcpStartupFailure(
+        init([
+          { name: "lecturn", status: "connected" },
+          { name: "weather", status: "failed" },
+        ]),
+      ),
+    );
+    assert.isUndefined(ClaudeAdapterV2.claudeLecturnMcpStartupFailure(init([])));
+  });
+
   it("leaves an absent allowlist absent when no MCP session exists", () => {
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
       mcpSession: undefined,

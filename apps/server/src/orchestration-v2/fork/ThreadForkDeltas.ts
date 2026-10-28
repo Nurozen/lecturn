@@ -34,6 +34,7 @@ import {
 } from "@lecturn/shared/git";
 import * as Effect from "effect/Effect";
 
+import { withoutThreadAppMetadata } from "../../apps/threadAppMetadata.ts";
 import type * as GitWorkflow from "../../git/GitWorkflowService.ts";
 
 export type ThreadForkCommand = Extract<OrchestrationV2Command, { readonly type: "thread.fork" }>;
@@ -171,7 +172,7 @@ export function applyForkDeltas(input: {
 }): OrchestrationV2AppThread {
   const { command } = input;
   return {
-    ...input.targetThread,
+    ...withoutThreadAppMetadata(input.targetThread),
     forkOrigin: { threadId: command.sourceThreadId, messageId: command.sourceMessageId ?? null },
     ...(input.worktree === undefined
       ? {}

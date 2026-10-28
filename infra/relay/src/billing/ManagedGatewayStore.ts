@@ -1,5 +1,7 @@
 import { makeTeamStore } from "../teams/TeamStore.ts";
-import { Clock, DateTime, Effect } from "effect";
+import { Clock, DateTime, Effect, Option, Schema } from "effect";
+import * as SqlError from "effect/sql/SqlError";
+import type { GatewayAllocationCheckpoint } from "../environments/ManagedGatewayEnrollment.ts";
 import { RelayDb } from "../db.ts";
 import { BillingError, type BillingAccount } from "./BillingStore.ts";
 import { effectiveAccountAccess } from "./BillingGrants.ts";
@@ -15,15 +17,7 @@ export interface ManagedGatewayMapping {
   deleting: boolean;
   generation: number;
 }
-export type ManagedGatewayAllocationCheckpoint = {
-  userId: string;
-  environmentId: string;
-  generation: number;
-} & (
-  | { step: "tunnel"; tunnelId: string }
-  | { step: "dns"; dnsRecordId: string }
-  | { step: "ready" }
-);
+export type ManagedGatewayAllocationCheckpoint = GatewayAllocationCheckpoint;
 export interface ManagedGatewayStoreConfig {
   teamsEnabled?: boolean;
   enabled: boolean;
@@ -40,6 +34,7 @@ const validId = (id: string) => id.length > 0 && id.length <= 255 && id.trim() =
 const hostname = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
 const inCohort = (config: ManagedGatewayStoreConfig, userId: string) =>
   config.enforcementUsers.includes("*") || config.enforcementUsers.includes(userId);
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 /** Private service methods only. Never enroll an existing direct-tunnel hostname. */
 export const makeManagedGatewayStore = (config: ManagedGatewayStoreConfig) =>
@@ -89,6 +84,28 @@ export const makeManagedGatewayStore = (config: ManagedGatewayStoreConfig) =>
       );
     };
     return {
+      withAllocation: Effect.fn("ManagedGatewayStore.withAllocation")(function* <A, E, R>(
+        input: { userId: string; environmentId: string; generation?: number },
+        effect: Effect.Effect<A, E, R>,
+      ): Effect.fn.Return<Option.Option<A>, E | BillingError, R> {
+        // All gateway provider mutations take account then allocation locks.
+        // Holding both across provider calls prevents a late release from deleting
+        // DNS or a tunnel that a newer enrollment has just adopted.
+        return yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              yield* lock(input.userId);
+              const rows =
+                yield* query(sql`SELECT allocation.user_id FROM relay_managed_endpoint_allocations allocation
+              JOIN relay_managed_gateway_environments mapping ON mapping.user_id=allocation.user_id AND mapping.environment_id=allocation.environment_id AND mapping.public_hostname=allocation.hostname
+              WHERE allocation.user_id=${input.userId} AND allocation.environment_id=${input.environmentId} AND mapping.deleting=false
+              ${input.generation === undefined ? sql`` : sql`AND mapping.generation=${input.generation}`}
+              FOR UPDATE OF allocation`);
+              return rows.length === 0 ? Option.none() : yield* Effect.asSome(effect);
+            }),
+          )
+          .pipe(Effect.mapError((cause) => (SqlError.isSqlError(cause) ? unavailable() : cause)));
+      }),
       registerPending: Effect.fn("ManagedGatewayStore.registerPending")(function* (
         mapping: Omit<ManagedGatewayMapping, "ready" | "generation" | "deleting">,
       ) {
@@ -196,7 +213,7 @@ export const makeManagedGatewayStore = (config: ManagedGatewayStoreConfig) =>
         if (
           !Number.isSafeInteger(input.generation) ||
           input.generation < 1 ||
-          (input.step === "tunnel" && !validId(input.tunnelId)) ||
+          !validId(input.tunnelId) ||
           (input.step === "dns" && !validId(input.dnsRecordId))
         )
           return yield* invalid("Invalid gateway allocation checkpoint");
@@ -211,14 +228,20 @@ export const makeManagedGatewayStore = (config: ManagedGatewayStoreConfig) =>
             const rows =
               input.step === "tunnel"
                 ? yield* query(
-                    sql`UPDATE relay_managed_endpoint_allocations SET tunnel_id=${input.tunnelId},updated_at=${timestamp} WHERE user_id=${input.userId} AND environment_id=${input.environmentId} AND hostname=${mapping.publicHostname} RETURNING user_id`,
+                    sql`UPDATE relay_managed_endpoint_allocations SET
+                      ready_at=CASE WHEN tunnel_id=${input.tunnelId} THEN ready_at ELSE NULL END,
+                      origin=CASE WHEN tunnel_id=${input.tunnelId} THEN origin ELSE NULL END,
+                      recovery_enabled_at=CASE WHEN tunnel_id=${input.tunnelId} THEN recovery_enabled_at ELSE NULL END,
+                      recovery_environment_public_key=CASE WHEN tunnel_id=${input.tunnelId} THEN recovery_environment_public_key ELSE NULL END,
+                      tunnel_id=${input.tunnelId},tunnel_released_at=NULL,generation=generation+1,updated_at=${timestamp}
+                      WHERE user_id=${input.userId} AND environment_id=${input.environmentId} AND hostname=${mapping.publicHostname} RETURNING user_id`,
                   )
                 : input.step === "dns"
                   ? yield* query(
-                      sql`UPDATE relay_managed_endpoint_allocations SET dns_record_id=${input.dnsRecordId},updated_at=${timestamp} WHERE user_id=${input.userId} AND environment_id=${input.environmentId} AND hostname=${mapping.publicHostname} RETURNING user_id`,
+                      sql`UPDATE relay_managed_endpoint_allocations SET dns_record_id=${input.dnsRecordId},generation=generation+1,updated_at=${timestamp} WHERE user_id=${input.userId} AND environment_id=${input.environmentId} AND hostname=${mapping.publicHostname} AND tunnel_id=${input.tunnelId} RETURNING user_id`,
                     )
                   : yield* query(
-                      sql`UPDATE relay_managed_endpoint_allocations SET ready_at=${timestamp},updated_at=${timestamp} WHERE user_id=${input.userId} AND environment_id=${input.environmentId} AND hostname=${mapping.publicHostname} RETURNING user_id`,
+                      sql`UPDATE relay_managed_endpoint_allocations SET ready_at=${timestamp},origin=${encodeJson(input.origin)}::jsonb,generation=generation+1,updated_at=${timestamp} WHERE user_id=${input.userId} AND environment_id=${input.environmentId} AND hostname=${mapping.publicHostname} AND tunnel_id=${input.tunnelId} AND dns_record_id IS NOT NULL RETURNING user_id`,
                     );
             return rows.length === 1;
           }),

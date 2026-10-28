@@ -7,6 +7,7 @@ import { FolderCodeIcon } from "lucide-react";
 import type { ComponentType } from "react";
 import { createElement, lazy, Suspense, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
+import { useAppEmbedContext } from "../state/apps";
 import { projectFaviconUrlAtom } from "../state/assets";
 import { deriveProjectIdentity } from "../projectIdentity";
 import { projectIconColorClassName } from "../projectIconColors";
@@ -33,7 +34,8 @@ function DynamicProjectIconFallback() {
 export type ProjectFaviconProject = Pick<
   EnvironmentProject,
   "environmentId" | "workspaceRoot" | "title" | "faviconPath" | "projectIcon"
->;
+> &
+  Partial<Pick<EnvironmentProject, "id" | "appBinding">>;
 export function ProjectFavicon(input: {
   project: ProjectFaviconProject;
   className?: string | undefined;
@@ -47,6 +49,11 @@ export function ProjectFavicon(input: {
       faviconPath: project.faviconPath,
     }),
   );
+  const appIconUrl = useAppEmbedContext(
+    project.appBinding !== undefined && project.id !== undefined
+      ? { environmentId: project.environmentId, projectId: project.id }
+      : null,
+  )?.iconDataUrl;
   if (project.projectIcon?.kind === "monogram") {
     return (
       <ProjectMonogram
@@ -84,6 +91,20 @@ export function ProjectFavicon(input: {
     );
   }
   const FallbackIcon = input.fallbackIcon ?? FolderCodeIcon;
+
+  // An app's project is the app's document, so it wears the app's icon over
+  // whatever favicon its folder happens to hold; a user's own icon still wins.
+  if (appIconUrl) {
+    return (
+      <ProjectFaviconImage
+        key={project.appBinding?.appId}
+        src={appIconUrl}
+        className={input.className}
+        fallbackIcon={FallbackIcon}
+        fallbackProjectName={project.title}
+      />
+    );
+  }
 
   if (!src || isProjectFaviconFallbackUrl(src)) {
     return (

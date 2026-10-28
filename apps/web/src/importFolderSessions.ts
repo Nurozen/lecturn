@@ -2,7 +2,7 @@ import type { EnvironmentId, ProjectId } from "@lecturn/contracts";
 
 /**
  * Bus between the command palette's "From Claude Code or Codex" add-project
- * source and the multi-select import dialog mounted in `__root.tsx`, on the
+ * source and the multi-select import dialog mounted in `AppShell.tsx`, on the
  * `staveWizard.ts` pattern: module state and a change listener set.
  */
 

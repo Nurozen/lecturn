@@ -1,6 +1,8 @@
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as Layer from "effect/Layer";
+import * as AppRuntimeState from "../apps/AppRuntimeState.ts";
+import * as AppToolApprovalRegistry from "../apps/AppToolApprovalRegistry.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as OrchestrationCommandReceipts from "../persistence/OrchestrationCommandReceipts.ts";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
@@ -372,7 +374,11 @@ export const layer = Layer.mergeAll(
   layerProviderRuntimeRecoveryProvided,
   layerProjectionMaintenanceProvided,
   layerLegacyV1ThreadImporterProvided,
-).pipe(Layer.provideMerge(layerLecturnOrchestrationHooks));
+).pipe(
+  Layer.provideMerge(layerLecturnOrchestrationHooks),
+  // Lecturn: connected-app state shared by orchestration and AppsLayer (see AppsLayer.ts).
+  Layer.provideMerge(Layer.merge(AppRuntimeState.layer, AppToolApprovalRegistry.layer)),
+);
 
 export const layerProduction = Layer.mergeAll(
   layer.pipe(Layer.provide(layerProjectService)),

@@ -1143,6 +1143,11 @@ export type DesktopActivitySnapshot = typeof DesktopActivitySnapshotSchema.Type;
 export const SystemSettingsPaneSchema = Schema.Literals(["full-disk-access"]);
 export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
 
+export interface DesktopOpenAppUrlInput {
+  readonly url: string;
+  readonly openUrlTemplate: string;
+}
+
 export interface DesktopBridge {
   /** macOS activity surface; commands execute through the authenticated main client. */
   activity?: {
@@ -1235,6 +1240,11 @@ export interface DesktopBridge {
   receiveProviderAuthCallback?: (authorizationUrl: string) => Promise<string>;
   cancelProviderAuthCallback?: (authorizationUrl: string) => Promise<void>;
   openExternal: (url: string) => Promise<boolean>;
+  /**
+   * Opens a connected app's URL, which must be in the scheme of the app's `openUrlTemplate`.
+   * Optional while older desktop shells can host a newer web client.
+   */
+  openAppUrl?: (input: DesktopOpenAppUrlInput) => Promise<boolean>;
   openSystemSettings?: (pane: SystemSettingsPane) => Promise<boolean>;
   checkSystemPermission?: (pane: SystemSettingsPane) => Promise<boolean>;
   /**

@@ -1,0 +1,142 @@
+/* The embed pane takes the host's look. embedTheme.ts sets the allowlisted tokens inline on
+   the root; this file points every token Lecturn derives from its own palette at those, and drops
+   what only Lecturn's own chrome wears. `:root` doubles the selector's weight so it outranks the
+   palette's `:root.dark` block whatever order the stylesheets load in. */
+html:root[data-lecturn-embed] {
+  --app-chrome-background: var(--background);
+  --toolbar-background: var(--background);
+  --toolbar-foreground: var(--foreground);
+  --toolbar-border: var(--border);
+  --toolbar-control: var(--card);
+  --toolbar-control-foreground: var(--foreground);
+  --toolbar-control-hover: var(--accent);
+  --surface-raised: var(--card);
+  --placeholder: var(--muted-foreground);
+  --secondary-label: var(--muted-foreground);
+  --icon-muted: var(--muted-foreground);
+  --message-surface: var(--accent);
+  --message-foreground: var(--accent-foreground);
+  --message-action: var(--primary);
+  --message-action-foreground: var(--primary-foreground);
+  --message-action-hover: color-mix(in srgb, var(--primary) 85%, var(--foreground));
+  --code-background: var(--card);
+  --code-foreground: var(--card-foreground);
+  --terminal-background: var(--background);
+  --terminal-foreground: var(--foreground);
+  --terminal-cursor: var(--primary);
+  --terminal-selection-background: color-mix(in srgb, var(--primary) 30%, transparent);
+  --app-scrollbar-thumb: var(--border);
+  --app-scrollbar-thumb-hover: var(--muted-foreground);
+  --update: var(--primary);
+  --update-foreground: var(--primary);
+  --update-surface: var(--accent);
+
+  /* Lecturn's brass thread becomes the host's primary. */
+  --lecturn-thread-gold: var(--primary);
+  --lecturn-thread-highlight: color-mix(in srgb, var(--primary) 70%, var(--foreground));
+  --lecturn-spinner-gold: var(--primary);
+  --lecturn-spinner-highlight: color-mix(in srgb, var(--primary) 70%, var(--foreground));
+  --lecturn-thread-tip: color-mix(in srgb, var(--primary) 50%, var(--foreground));
+  --lecturn-thread-trail: color-mix(in srgb, var(--primary) 40%, transparent);
+  --lecturn-thread-line: color-mix(in srgb, var(--primary) 60%, transparent);
+  --lecturn-thread-glow: color-mix(in srgb, var(--primary) 35%, transparent);
+  --lecturn-thread-name: var(--primary);
+  --lecturn-thread-name-highlight: color-mix(in srgb, var(--primary) 70%, var(--foreground));
+  --lecturn-thread-edge: transparent;
+
+  /* A flat pane: no frosted composer. */
+  --glass-opacity: 100%;
+  --glass-blur: 0px;
+  --glass-saturation: 1;
+}
+
+/* No grain or night sky: the pane is the host's flat background, pixel for pixel. */
+html[data-lecturn-embed]
+  :is(
+    body,
+    .surface-grain,
+    .lecturn-chat-surface,
+    .lecturn-page-surface,
+    .lecturn-settings-surface,
+    .lecturn-celestial-sidebar
+  ) {
+  background-image: none;
+}
+
+html[data-lecturn-embed] [data-slot="composer-shell"] {
+  --chat-composer-glass-surface: var(--card);
+  --chat-composer-highlight: transparent;
+  --chat-composer-outline: var(--border);
+}
+
+html[data-lecturn-embed] [data-slot="composer-shell"]::before {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background-color: var(--card);
+}
+
+html[data-lecturn-embed] [data-slot="composer-host"] {
+  box-shadow: none;
+}
+
+/* The narrow pane's footer (EmbedComposerFooter) keeps "model | effort | access" on one row, with
+   no provider or effort icon. When the row is short, access drops to its icon, then the model
+   label truncates (composerFooterLayout.ts). */
+html[data-lecturn-embed]
+  [data-embed-composer-footer-stacked]
+  [data-chat-provider-model-picker]
+  :has(+ [data-chat-provider-model-picker-label]),
+html[data-lecturn-embed]
+  [data-embed-composer-footer-stacked]
+  [data-resting-block="traits"]
+  [data-composer-control-icon]:first-child {
+  display: none;
+}
+
+/* The pane's vertical rhythm (chip, input line, then the two footer rows): RocketWright's frozen
+   composer region is measured against it. */
+html[data-lecturn-embed]
+  [data-slot="composer-shell"]:has([data-embed-composer-footer-stacked])
+  [data-chat-composer-body] {
+  padding-top: 1.5rem;
+}
+
+html[data-lecturn-embed]
+  [data-slot="composer-shell"]:has([data-embed-composer-footer-stacked])
+  [data-testid="app-ref-chip-strip"] {
+  margin-bottom: 1rem;
+}
+
+html[data-lecturn-embed] [data-embed-composer-footer-stacked] {
+  padding-top: 1.625rem;
+  padding-bottom: 0.625rem;
+}
+
+/* With attach and send at the end of the input line (EmbedComposerFooter), the empty editor is
+   that one line, and its placeholder stays on it. */
+html[data-lecturn-embed]
+  [data-slot="composer-shell"]:has([data-embed-composer-footer-stacked])
+  .composer-tiptap {
+  min-height: 0;
+}
+
+html[data-lecturn-embed]
+  [data-slot="composer-shell"]:has([data-embed-composer-footer-stacked])
+  [data-composer-placeholder] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Row text sets its own desktop size (14 px body), but the rows inherit the page's 16 px root, so
+   a host probing a row container in its narrow pane reads phone-scale type. Here the rows start
+   from the body size, so container and text agree. */
+html[data-lecturn-embed] [data-timeline-row-kind] {
+  font-size: var(--text-sm);
+}
+
+/* A sidecar thread already continued in the user's Lecturn reads back here but takes no new
+   turns; EmbedView marks it and shows where it continues instead of the composer. */
+[data-embed-continued="true"] [data-chat-composer-overlay="true"] {
+  display: none;
+}

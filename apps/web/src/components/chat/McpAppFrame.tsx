@@ -1,10 +1,11 @@
 import type { EnvironmentId, ThreadId, TurnItemId } from "@lecturn/contracts";
 import {
+  connectedAppCardTheme,
   makeMcpAppHost,
   McpAppHostRefusal,
   mcpAppStyleVariables,
+  mcpAppToolCall,
   mcpResourceBytes,
-  type McpAppCallToolResult,
   type McpAppDisplayMode,
   type McpAppHost,
   type McpAppHostContext,
@@ -18,12 +19,15 @@ import {
   mcpAppFileName,
   type McpAppReference,
 } from "@lecturn/shared/mcpApp";
+import { LECTURN_MCP_APP_SERVER } from "@lecturn/shared/toolOutput";
 import { Minimize2Icon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
 import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
 import { APP_VERSION } from "~/branding";
+import { isEmbedLocation } from "~/embed/embedAuth";
+import { useAppReferences } from "~/components/embed/AppReferencesContext";
 import { isConfirmDialogActive, requestConfirmDialog } from "~/confirmDialog";
 import { useHtmlRenderTheme } from "~/hooks/useHtmlRenderTheme";
 import { Button } from "~/components/ui/button";
@@ -74,7 +78,10 @@ export function McpAppFrame(props: {
   readonly onFullscreenChange?: (fullscreen: boolean) => void;
 }) {
   const { app } = props;
-  const theme = useHtmlRenderTheme();
+  const connectedApp = app.server === LECTURN_MCP_APP_SERVER;
+  const htmlTheme = useHtmlRenderTheme();
+  // The embed's host already sets `--ring` to its own accent.
+  const theme = connectedApp && !isEmbedLocation() ? connectedAppCardTheme(htmlTheme) : htmlTheme;
   const frameRef = useRef<HTMLIFrameElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -135,12 +142,7 @@ export function McpAppFrame(props: {
   // The host gets the tool call pushed by an effect keyed on it, so it must stay cached.
   const toolCall =
     storedItem?.type === "dynamic_tool"
-      ? {
-          arguments: storedItem.input,
-          result: (storedItem.output as { readonly result?: unknown } | undefined)?.result as
-            | McpAppCallToolResult
-            | undefined,
-        }
+      ? mcpAppToolCall(storedItem.input, storedItem.output)
       : undefined;
 
   const callTool = useAtomCommand(mcpAppEnvironment.callTool, { reportFailure: false });
@@ -150,6 +152,7 @@ export function McpAppFrame(props: {
     reportFailure: false,
   });
   const [toolDefinition, setToolDefinition] = useState<unknown>(undefined);
+  const appReferences = useAppReferences();
 
   // Read by the host on every message, so it always sees current values
   // without being rebuilt (which would drop the app's session).
@@ -163,6 +166,7 @@ export function McpAppFrame(props: {
     updateModelContext,
     displayMode,
     toolDefinition,
+    appReferences,
   };
   const hostRef = useRef<McpAppHost | null>(null);
   const latest = useRef(live);
@@ -229,9 +233,8 @@ export function McpAppFrame(props: {
         input: { threadId: props.threadId, itemId: props.itemId, name: app.tool },
       })
       .then((info) => {
-        if (!cancelled && info._tag === "Success" && info.value.tool !== undefined) {
-          setToolDefinition(info.value.tool);
-        }
+        if (cancelled || info._tag !== "Success") return;
+        if (info.value.tool !== undefined) setToolDefinition(info.value.tool);
       });
     return () => {
       cancelled = true;
@@ -337,6 +340,28 @@ export function McpAppFrame(props: {
         }
         window.open(url, "_blank", "noopener,noreferrer");
       },
+      // A reference opens as a chip in the thread does: full Lecturn opens the app itself, and
+      // the embed asks its host to navigate (lecturn/navigate).
+      ...(app.server === LECTURN_MCP_APP_SERVER
+        ? {
+            openAppRef: {
+              refPrefixes: () => latest.current.appReferences?.refPrefixes ?? [],
+              open: async (ref) => {
+                if (
+                  document.activeElement !== frameRef.current ||
+                  !navigator.userActivation?.isActive
+                ) {
+                  throw new McpAppHostRefusal("Links open only from a click in the app.");
+                }
+                const activate = latest.current.appReferences?.activate;
+                if (activate == null) {
+                  throw new McpAppHostRefusal("This app has no link Lecturn can open.");
+                }
+                activate(ref);
+              },
+            },
+          }
+        : {}),
       sendMessage: async (text) => {
         const send = latest.current.props.onSendMessage;
         if (send === undefined) throw new McpAppHostRefusal("Messages are not available here.");
@@ -461,7 +486,7 @@ export function McpAppFrame(props: {
   return (
     // The row keeps its inline height while the app is full screen, so the
     // timeline does not jump; the box itself is what goes full screen.
-    <div style={{ height }}>
+    <div style={{ height }} data-testid="mcp-app-card">
       <div
         ref={boxRef}
         // Full screen is the same box shown in the browser's top layer: moving

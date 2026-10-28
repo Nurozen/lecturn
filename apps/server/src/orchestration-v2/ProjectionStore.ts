@@ -81,6 +81,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type * as Statement from "effect/sql/Statement";
 
 import { MCP_APP_OUTPUT_KEY } from "@lecturn/shared/mcpApp";
+import { threadAppMetadataOf } from "../apps/threadAppMetadata.ts";
 import { threadHtmlRenderAttachmentIds } from "../attachmentStore.ts";
 import {
   isThreadHistoryUserTurn,
@@ -1554,6 +1555,7 @@ export function threadShellFromProjection(
     ...(projection.thread.importedFrom === undefined
       ? {}
       : { importedFrom: projection.thread.importedFrom }),
+    ...threadAppMetadataOf(projection.thread),
     latestRunId: latestRun?.id ?? null,
     latestRunRequestedAt: latestRun?.requestedAt ?? null,
     latestRunStartedAt: latestRun?.startedAt ?? null,
@@ -1818,6 +1820,7 @@ function shellFromState(input: {
     ...(input.state.thread.importedFrom === undefined
       ? {}
       : { importedFrom: input.state.thread.importedFrom }),
+    ...threadAppMetadataOf(input.state.thread),
     latestRunId: input.state.latestRunId,
     latestRunRequestedAt: input.state.latestRunRequestedAt,
     latestRunStartedAt: input.state.latestRunStartedAt,

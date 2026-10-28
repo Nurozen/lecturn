@@ -1,4 +1,9 @@
-import { ORCHESTRATION_V2_WS_METHODS, WS_METHODS, type WsRpcGroup } from "@lecturn/contracts";
+import {
+  APPS_WS_METHODS,
+  ORCHESTRATION_V2_WS_METHODS,
+  WS_METHODS,
+  type WsRpcGroup,
+} from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as References from "effect/References";
@@ -277,6 +282,9 @@ const RPC_AGGREGATES = {
   [WS_METHODS.pullRequestWatchTrack]: "pullRequestWatch",
   [WS_METHODS.pullRequestWatchCommand]: "pullRequestWatch",
   [WS_METHODS.pullRequestWatchConfigure]: "pullRequestWatch",
+  ...(Object.fromEntries(Object.values(APPS_WS_METHODS).map((method) => [method, "apps"])) as {
+    readonly [Method in (typeof APPS_WS_METHODS)[keyof typeof APPS_WS_METHODS]]: "apps";
+  }),
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

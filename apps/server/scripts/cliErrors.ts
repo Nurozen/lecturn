@@ -80,3 +80,26 @@ export class ServerCliExecutableImportError extends Schema.TaggedError<ServerCli
     return `${this.bundlePath} imports file-backed packages that a single-executable cannot resolve: ${this.specifiers.join(", ")}. Load them through createRequire instead.`;
   }
 }
+
+export class ServerCliEmbedBuildMissingError extends Schema.TaggedError<ServerCliEmbedBuildMissingError>()(
+  "ServerCliEmbedBuildMissingError",
+  {
+    assetPath: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Missing @lecturn/embed build output: ${this.assetPath}. Run \`vp run --filter @lecturn/embed build\` first.`;
+  }
+}
+
+export class ServerCliEmbedWorkspaceImportError extends Schema.TaggedError<ServerCliEmbedWorkspaceImportError>()(
+  "ServerCliEmbedWorkspaceImportError",
+  {
+    filePath: Schema.String,
+    specifiers: Schema.Array(Schema.String),
+  },
+) {
+  override get message(): string {
+    return `${this.filePath} still imports workspace packages that are not on npm: ${this.specifiers.join(", ")}. Bundle them into @lecturn/embed.`;
+  }
+}

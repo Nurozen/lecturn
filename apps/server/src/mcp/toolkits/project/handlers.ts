@@ -9,6 +9,7 @@ import * as Project from "../../../project/ProjectService.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as Repositories from "../../../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
+import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { newCommandId, readCaller, resolveProjectId, unavailable } from "../../threadAccess.ts";
 import { ProjectToolkit } from "./tools.ts";
@@ -47,8 +48,8 @@ const assertProjectWorktree = Effect.fn("mcp.assertProjectWorktree")(function* (
 });
 
 const access = Effect.gen(function* () {
-  yield* readCaller();
-  return yield* Project.ProjectService;
+  const { scope } = yield* readCaller();
+  return { scope, projects: yield* Project.ProjectService };
 });
 export const layer = McpToolAccess.toLayer(ProjectToolkit, {
   lecturn_thread_launch: McpToolAccess.startsThreads(
@@ -66,6 +67,11 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
             code: "invalid_request",
             message: "A new thread accepts only pending attachment uploads.",
           });
+        if (input.scratch === true)
+          yield* McpInvocationContext.refuseAppCaller(
+            context.scope,
+            "A connected app's thread launches threads only in the app's own project; omit scratch.",
+          );
         if (
           input.scratch === true &&
           (input.projectId !== undefined || input.workspaceStrategy !== undefined)
@@ -184,9 +190,14 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
   ),
   lecturn_project_list: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
-      const projects = yield* access;
+      const { scope, projects } = yield* access;
       const snapshot = yield* projects.snapshot.pipe(Effect.mapError(unavailable));
-      const rows = snapshot.projects.filter((project) => project.deletedAt === null);
+      // An app thread reaches only its app's project, so it is shown no other.
+      const rows = snapshot.projects.filter(
+        (project) =>
+          project.deletedAt === null &&
+          (scope.app === undefined || project.id === scope.app.projectId),
+      );
       const start = input.cursor ?? 0,
         end = start + (input.limit ?? 20);
       return { projects: rows.slice(start, end), nextCursor: end < rows.length ? end : null };
@@ -194,7 +205,8 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
   ),
   lecturn_project_read: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
-      const projects = yield* access;
+      const { scope, projects } = yield* access;
+      yield* McpInvocationContext.assertProjectReach(scope, input.projectId);
       const result = yield* projects.getById(input.projectId).pipe(Effect.mapError(unavailable));
       if (Option.isNone(result))
         return yield* new OrchestratorMcpFailure({

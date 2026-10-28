@@ -24,6 +24,7 @@ interface RegisteredTool {
       readonly mimeType?: string;
     }>;
     readonly structuredContent?: unknown;
+    readonly details?: unknown;
     readonly isError?: boolean;
   }>;
 }

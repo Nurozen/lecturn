@@ -46,6 +46,7 @@ import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderS
 import { makeAgentDeviceEnvironmentResolver } from "../device/AgentDeviceEnvironment.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
+import { appCredentialFields, refreshedAppTools } from "../apps/appMcpCredential.ts";
 import * as EventSink from "./EventSink.ts";
 import * as CommandOutputHub from "./CommandOutputHub.ts";
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
@@ -486,18 +487,21 @@ export const layerWithOptions = (
                     resolved.capabilities.has("preview") === browserToolsAvailable &&
                     resolved.capabilities.has("device") === deviceToolsAvailable
                   ) {
-                    if (deviceToolsAvailable && existing.agentDeviceEnvironment === undefined) {
-                      const agentDeviceEnvironment = yield* resolveAgentDeviceEnvironment();
-                      // A racing release may have cleared the slot meanwhile.
-                      if (
-                        agentDeviceEnvironment !== undefined &&
-                        (yield* mcpSessions.read(threadId)) === existing
-                      ) {
-                        yield* mcpSessions.set({
-                          ...existing,
-                          agentDeviceEnvironment,
-                        });
-                      }
+                    const agentDeviceEnvironment =
+                      deviceToolsAvailable && existing.agentDeviceEnvironment === undefined
+                        ? yield* resolveAgentDeviceEnvironment()
+                        : undefined;
+                    const app = yield* refreshedAppTools(existing);
+                    // A racing release may have cleared the slot meanwhile.
+                    if (
+                      (agentDeviceEnvironment !== undefined || app !== undefined) &&
+                      (yield* mcpSessions.read(threadId)) === existing
+                    ) {
+                      yield* mcpSessions.set({
+                        ...existing,
+                        ...(agentDeviceEnvironment === undefined ? {} : { agentDeviceEnvironment }),
+                        ...(app === undefined ? {} : { app }),
+                      });
                     }
                     return { mcpCredentialId: existing.providerSessionId, issued: false };
                   }
@@ -512,6 +516,7 @@ export const layerWithOptions = (
                   providerInstanceId,
                   browserToolsAvailable,
                   capabilities,
+                  ...(yield* appCredentialFields(projectionStore, projectService, threadId)),
                 });
                 yield* mcpSessions.set({
                   ...credential.config,

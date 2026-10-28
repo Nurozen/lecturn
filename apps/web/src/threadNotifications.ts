@@ -1,8 +1,10 @@
-import type { EnvironmentId, ThreadId } from "@lecturn/contracts";
+import type { AppBinding, AppId, EnvironmentId, ThreadId } from "@lecturn/contracts";
 import type { ClientSettings } from "@lecturn/contracts/settings";
 
 import completionUrl from "./assets/notification-completion.mp3";
 import inputUrl from "./assets/notification-input.mp3";
+import { useThreadSelectionStore } from "./threadSelectionStore";
+import { useUiStateStore } from "./uiStateStore";
 
 type NotificationMode = ClientSettings["notificationMode"];
 export const NOTIFICATION_MODE_LABELS = {
@@ -33,6 +35,39 @@ export function threadNotificationTag(environmentId: EnvironmentId, threadId: Th
     hash = (hash * TAG_HASH_PRIME) & TAG_HASH_MASK;
   }
   return hash.toString(16).padStart(16, "0");
+}
+
+export interface ThreadNotificationApp {
+  readonly appId: AppId;
+  readonly name: string;
+}
+
+/** The app that owns a thread's project; the name falls back to the id when no status is readable. */
+export function threadNotificationApp(
+  project: { readonly appBinding?: AppBinding | undefined } | undefined,
+  apps: ReadonlyArray<{ readonly appId: AppId; readonly name: string }>,
+): ThreadNotificationApp | null {
+  const appId = project?.appBinding?.appId;
+  if (appId === undefined) return null;
+  return { appId, name: apps.find((app) => app.appId === appId)?.name ?? appId };
+}
+
+export function threadNotificationTitle(title: string, app: ThreadNotificationApp | null): string {
+  return app === null ? title : `${app.name}: ${title}`;
+}
+
+/**
+ * Projects mode hides app threads, so opening one from an alert also brings its app up in
+ * the sidebar; otherwise the open thread would have no row there.
+ */
+export function revealNotifiedAppThread(app: ThreadNotificationApp | null) {
+  if (app === null) return;
+  const ui = useUiStateStore.getState();
+  if (ui.sidebarMode === "apps" && ui.sidebarAppScopeKey === app.appId) return;
+  // A selection made in one mode holds rows the other mode does not show.
+  useThreadSelectionStore.getState().clearSelection();
+  ui.setSidebarMode("apps");
+  ui.setSidebarAppScopeKey(app.appId);
 }
 
 let originalFavicon: HTMLLinkElement | undefined;

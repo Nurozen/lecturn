@@ -1,5 +1,6 @@
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -223,30 +224,49 @@ export const make = Effect.gen(function* () {
     );
   };
 
+  // The secret is written and synced under a temporary name, then hard-linked
+  // into place: link fails if the name exists, and a reader in another process
+  // never sees the file before its bytes are complete.
   const create: ServerSecretStore["Service"]["create"] = (name, value) => {
     const secretPath = resolveSecretPath(name);
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const file = yield* fileSystem.open(secretPath, {
-          flag: "wx",
-          mode: 0o600,
-        });
-        yield* file.writeAll(value);
-        yield* file.sync;
-        yield* fileSystem.chmod(secretPath, 0o600);
-      }),
-    ).pipe(
+    return crypto.randomUUIDv4().pipe(
       Effect.mapError(
         (cause) =>
-          new SecretStorePersistError({
+          new SecretStoreTemporaryPathError({
             resource: `secret ${name}`,
             cause,
           }),
       ),
+      Effect.flatMap((uuid) => {
+        const tempPath = `${secretPath}.${uuid}.tmp`;
+        return Effect.gen(function* () {
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const file = yield* fileSystem.open(tempPath, {
+                flag: "wx",
+                mode: 0o600,
+              });
+              yield* file.writeAll(value);
+              yield* file.sync;
+            }),
+          );
+          yield* fileSystem.chmod(tempPath, 0o600);
+          yield* fileSystem.link(tempPath, secretPath);
+        }).pipe(
+          Effect.ensuring(fileSystem.remove(tempPath).pipe(Effect.ignore)),
+          Effect.mapError(
+            (cause) =>
+              new SecretStorePersistError({
+                resource: `secret ${name}`,
+                cause,
+              }),
+          ),
+        );
+      }),
     );
   };
 
-  const getOrCreateRandom: ServerSecretStore["Service"]["getOrCreateRandom"] = (name, bytes) =>
+  const loadOrCreateRandom = (name: string, bytes: number) =>
     get(name).pipe(
       Effect.flatMap(
         Option.match({
@@ -285,6 +305,31 @@ export const make = Effect.gen(function* () {
             ),
         }),
       ),
+    );
+
+  // Concurrent callers in this process share one load-or-create, so one mint
+  // never races another over the same secret. The work runs detached so a
+  // caller that is interrupted does not fail the others waiting on it.
+  const randomSecretFlights = new Map<string, Deferred.Deferred<Uint8Array, SecretStoreError>>();
+  const getOrCreateRandom: ServerSecretStore["Service"]["getOrCreateRandom"] = (name, bytes) =>
+    Effect.suspend(() => {
+      const pending = randomSecretFlights.get(name);
+      if (pending !== undefined) return Deferred.await(pending);
+      const flight = Deferred.makeUnsafe<Uint8Array, SecretStoreError>();
+      randomSecretFlights.set(name, flight);
+      return loadOrCreateRandom(name, bytes).pipe(
+        Effect.exit,
+        Effect.flatMap((exit) =>
+          Effect.sync(() => {
+            randomSecretFlights.delete(name);
+            Deferred.doneUnsafe(flight, exit);
+          }),
+        ),
+        Effect.forkDetach,
+        Effect.andThen(Deferred.await(flight)),
+      );
+    }).pipe(
+      Effect.map((secret) => Uint8Array.from(secret)),
       Effect.withSpan("ServerSecretStore.getOrCreateRandom"),
     );
 

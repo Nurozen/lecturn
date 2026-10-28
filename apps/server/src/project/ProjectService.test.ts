@@ -1,12 +1,13 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { CommandId, type Project, ProjectId, ProviderInstanceId } from "@lecturn/contracts";
+import { AppId, CommandId, type Project, ProjectId, ProviderInstanceId } from "@lecturn/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -18,6 +19,7 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
+import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
@@ -825,3 +827,120 @@ it.effect("rejects an update that waited on the lock while its project was delet
     );
   }).pipe(Effect.provide(layerProjectServiceDependencies)),
 );
+
+const layerWithStores = Layer.mergeAll(
+  RuntimeLayer.layerProjectService,
+  ProjectStore.layer,
+  RuntimeLayer.layerEventInfrastructure,
+).pipe(
+  Layer.provideMerge(ProjectEnrichmentService.layer),
+  Layer.provideMerge(layerWorkspacePaths),
+  Layer.provideMerge(layerMetadata),
+  Layer.provideMerge(SqlitePersistence.layerMemory),
+  Layer.provideMerge(ServerSettings.layerTest()),
+  Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "project-service-app-" })),
+  Layer.provide(NodeServices.layer),
+);
+
+it.layer(layerWithStores)("ProjectService app projects", (it) => {
+  const app = AppId.make("dev.rocketwright");
+
+  it.effect("keeps app projects out of workspace-root resolution, deleted ones included", () =>
+    Effect.gen(function* () {
+      const service = yield* ProjectService.ProjectService;
+      const appProject = yield* service.create({
+        commandId: CommandId.make("command:app:create"),
+        projectId: ProjectId.make("project:app"),
+        title: "App",
+        workspaceRoot: "/work/shared/",
+        appBinding: { appId: app, workspaceRoot: "/work/shared/" },
+      });
+      assert.equal(appProject.workspaceRoot, "/work/shared");
+      assert.isTrue(Option.isNone(yield* service.getByWorkspaceRoot("/work/shared")));
+
+      yield* service.delete({
+        commandId: CommandId.make("command:app:delete"),
+        projectId: appProject.id,
+      });
+      assert.isTrue(
+        Option.isNone(yield* service.getByWorkspaceRoot("/work/shared", { includeDeleted: true })),
+      );
+
+      // A normal project on the app's folder is neither blocked nor shadowed.
+      const normal = yield* service.create({
+        commandId: CommandId.make("command:normal:create"),
+        projectId: ProjectId.make("project:normal"),
+        title: "Normal",
+        workspaceRoot: "/work/shared",
+      });
+      const second = yield* service.create({
+        commandId: CommandId.make("command:app:create-again"),
+        projectId: ProjectId.make("project:app-again"),
+        title: "App again",
+        workspaceRoot: "/work/shared",
+        appBinding: { appId: app, workspaceRoot: "/work/shared/" },
+      });
+      assert.equal(
+        Option.getOrThrow(yield* service.getByWorkspaceRoot("/work/shared")).id,
+        normal.id,
+      );
+
+      const duplicate = yield* service
+        .create({
+          commandId: CommandId.make("command:app:duplicate"),
+          projectId: ProjectId.make("project:app-duplicate"),
+          title: "Duplicate",
+          workspaceRoot: "/work/shared",
+          appBinding: { appId: app, workspaceRoot: "/work/shared/" },
+        })
+        .pipe(Effect.flip);
+      assert.equal(duplicate._tag, "ProjectConflictError");
+      assert.equal(
+        duplicate._tag === "ProjectConflictError" ? duplicate.conflictingProjectId : null,
+        second.id,
+      );
+    }),
+  );
+
+  it.effect("keeps appBinding through an update and a rebuild from the event log", () =>
+    Effect.gen(function* () {
+      const service = yield* ProjectService.ProjectService;
+      const store = yield* ProjectStore.ProjectStoreV2;
+      const events = yield* OrchestrationEventStore.OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const projectId = ProjectId.make("project:app-rebuild");
+      const binding = { appId: app, workspaceRoot: "/work/rebuild/" };
+      yield* service.create({
+        commandId: CommandId.make("command:app-rebuild:create"),
+        projectId,
+        title: "App",
+        workspaceRoot: "/work/rebuild",
+        appBinding: binding,
+      });
+      yield* service.update({
+        commandId: CommandId.make("command:app-rebuild:update"),
+        projectId,
+        title: "Renamed",
+        autoPull: true,
+      });
+      assert.deepEqual(Option.getOrThrow(yield* store.get(projectId)).appBinding, binding);
+      assert.deepEqual(Option.getOrThrow(yield* service.getShell(projectId)).appBinding, binding);
+
+      yield* sql`DELETE FROM projection_projects`;
+      const stored = yield* events
+        .readApplicationEvents({
+          afterSequence: 0,
+          throughSequence: yield* events.latestApplicationSequence,
+        })
+        .pipe(Stream.runCollect);
+      yield* Effect.forEach(stored, (event) =>
+        "aggregateKind" in event && event.aggregateKind === "project"
+          ? store.apply(event)
+          : Effect.void,
+      );
+      const rebuilt = Option.getOrThrow(yield* store.get(projectId));
+      assert.equal(rebuilt.title, "Renamed");
+      assert.deepEqual(rebuilt.appBinding, binding);
+    }),
+  );
+});

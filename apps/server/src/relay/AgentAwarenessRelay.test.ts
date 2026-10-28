@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import {
+  AppId,
   EnvironmentId,
   EventId,
   MessageId,
@@ -11,6 +12,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   RunId,
+  RuntimeRequestId,
   ThreadId,
   TurnItemId,
 } from "@lecturn/contracts";
@@ -38,6 +40,11 @@ import {
 } from "../cloud/config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import {
+  type AppRegistrationRecord,
+  AppRegistrationRepository,
+} from "../persistence/AppRegistrations.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as AgentAwarenessRelay from "./AgentAwarenessRelay.ts";
@@ -45,6 +52,7 @@ import * as AgentAwarenessRelay from "./AgentAwarenessRelay.ts";
 const THREAD_ID = ThreadId.make("relay-thread");
 const SECOND_THREAD_ID = ThreadId.make("relay-thread-2");
 const PROJECT_ID = ProjectId.make("relay-project");
+const RELAY_APP_ID = AppId.make("dev.rocketwright");
 const NOW = "2026-09-04T12:00:00.000Z";
 
 function shell(overrides: Partial<OrchestrationV2ThreadShell> = {}): OrchestrationV2ThreadShell {
@@ -151,6 +159,8 @@ const makeTestRelay = Effect.fnUntraced(function* (
     readonly canPublishActivity?: boolean;
     /** Lecturn: whether a client reports the user present (default away). */
     readonly userPresent?: () => boolean;
+    /** Lecturn: binds the project to a connected app with this name. */
+    readonly app?: { readonly name: string; readonly projectTitle?: string };
   } = {},
 ) {
   const values = new Map<string, Uint8Array>(
@@ -289,7 +299,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
         Effect.succeed(
           Option.some({
             id: PROJECT_ID,
-            title: "Project",
+            title: options.app?.projectTitle ?? "Project",
             workspaceRoot: "/workspace",
             defaultModelSelection: null,
             scripts: [],
@@ -299,6 +309,27 @@ const makeTestRelay = Effect.fnUntraced(function* (
           }),
         ),
     }),
+    Effect.provideService(ProjectStore.ProjectStoreV2, {
+      get: () =>
+        Effect.succeed(
+          Option.some(
+            options.app === undefined
+              ? {}
+              : { appBinding: { appId: RELAY_APP_ID, workspaceRoot: "/workspace" } },
+          ),
+        ),
+    } as unknown as ProjectStore.ProjectStoreV2["Service"]),
+    Effect.provideService(AppRegistrationRepository, {
+      get: (appId: AppId) =>
+        Effect.succeed(
+          options.app !== undefined && appId === RELAY_APP_ID
+            ? Option.some({
+                appId,
+                registration: { name: options.app.name },
+              } as unknown as AppRegistrationRecord)
+            : Option.none(),
+        ),
+    } as unknown as AppRegistrationRepository["Service"]),
     Effect.provideService(FetchHttpClient.Fetch, fetch),
     Effect.provide(NodeCrypto.layer),
   );
@@ -383,6 +414,61 @@ describe("AgentAwarenessRelay", () => {
         assert.equal(shellReads.length, 0);
         assert.equal(publications.length, 0);
       }),
+  );
+
+  // Mobile's alerts come from these publishes; Projects-mode filters must not reach them.
+  it.effect("publishes approval and completion for a connected app's thread", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay();
+      const app = { appOrigin: "app-credential", appData: "rocket:1" } as const;
+      yield* Ref.set(
+        currentShell,
+        shell({
+          ...app,
+          pendingRuntimeRequest: {
+            id: RuntimeRequestId.make("approval-1"),
+            kind: "command",
+            createdAt: DateTime.makeUnsafe(NOW),
+          },
+        }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      yield* Ref.set(
+        currentShell,
+        shell({
+          ...app,
+          status: "completed",
+          latestRunCompletedAt: DateTime.add(yield* DateTime.now, { seconds: 1 }),
+        }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.deepEqual(
+        publications.map((publication) => [publication.state?.phase, publication.state?.deepLink]),
+        [
+          ["waiting_for_approval", "/threads/relay-environment/relay-thread"],
+          ["completed", "/threads/relay-environment/relay-thread"],
+        ],
+      );
+    }),
+  );
+
+  it.effect("titles an app thread's push with the app name and leaves others alone", () =>
+    Effect.gen(function* () {
+      const plain = yield* makeTestRelay();
+      yield* plain.relay.publishThread(THREAD_ID);
+      const app = yield* makeTestRelay({ app: { name: "RocketWright" } });
+      yield* app.relay.publishThread(THREAD_ID);
+      const sameName = yield* makeTestRelay({
+        app: { name: "RocketWright", projectTitle: "RocketWright" },
+      });
+      yield* sameName.relay.publishThread(THREAD_ID);
+      assert.deepEqual(
+        [plain, app, sameName].map(({ publications }) => publications[0]?.state?.projectTitle),
+        ["Project", "RocketWright: Project", "RocketWright"],
+      );
+    }),
   );
 
   it.effect("tells the relay whether the user is present at publish time", () =>

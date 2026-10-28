@@ -1,4 +1,5 @@
 import { EnvironmentId, ThreadId, TurnItemId } from "@lecturn/contracts";
+import { LECTURN_MCP_APP_SERVER } from "@lecturn/shared/toolOutput";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
@@ -119,7 +120,7 @@ afterEach(async () => {
 
 const isFullscreen = () => document.querySelector("[data-mcp-app-fullscreen]") !== null;
 
-const renderApp = async () => {
+const renderApp = async (server = "srv") => {
   const container = document.body.appendChild(document.createElement("div"));
   root = createRoot(container);
   await act(async () =>
@@ -130,7 +131,7 @@ const renderApp = async () => {
         conversationThreadId={ThreadId.make("thread")}
         itemId={TurnItemId.make("item")}
         revision="1"
-        app={{ attachmentId: "app", server: "srv", tool: "show", resourceUri: "ui://srv/app" }}
+        app={{ attachmentId: "app", server, tool: "show", resourceUri: `ui://${server}/app` }}
         onSendMessage={undefined}
       />,
     ),
@@ -193,4 +194,22 @@ it("opens full screen only from a tap in the app, never from activation the page
   (await exit.element()).focus();
   expect(await nextAnswer(() => userEvent.keyboard("{Escape}"))).toBe("exit:inline");
   expect(isFullscreen()).toBe(false);
+});
+
+it("holds a connected app's card to the same tap-only full screen", async () => {
+  const elsewhere = document.body.appendChild(document.createElement("button"));
+  elsewhere.textContent = "Elsewhere";
+  const load = nextAnswer(async () => {
+    await userEvent.click(elsewhere);
+    await renderApp(LECTURN_MCP_APP_SERVER);
+  });
+  expect(await load).toBe("load:inline");
+  expect(isFullscreen()).toBe(false);
+
+  skew += 5_000;
+  const appButton = page
+    .frameLocator(page.getByTitle(`${LECTURN_MCP_APP_SERVER} app`))
+    .getByRole("button", { name: "Open full screen" });
+  expect(await nextAnswer(() => userEvent.click(appButton))).toBe("tap:fullscreen");
+  expect(isFullscreen()).toBe(true);
 });

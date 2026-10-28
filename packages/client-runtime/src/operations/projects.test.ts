@@ -1,6 +1,7 @@
 import { SourceControlProviderKind } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  AppId,
   EnvironmentId,
   ProjectId,
   CommandId,
@@ -266,6 +267,33 @@ describe("add project shared logic", () => {
     expect(findExistingAddProject({ projects, environmentId: env, path: "/repo" })?.id).toBe(
       "project",
     );
+  });
+
+  it("never resolves an added folder to an app project on the same path", () => {
+    const env = EnvironmentId.make("env");
+    const base = {
+      environmentId: env,
+      workspaceRoot: "/repo",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      repositoryIdentity: null,
+      defaultModelSelection: null,
+      scripts: [],
+    };
+    const app: EnvironmentProject = {
+      ...base,
+      id: ProjectId.make("app-project"),
+      title: "Rocket",
+      appBinding: { appId: AppId.make("dev.example.rocket"), workspaceRoot: "/repo" },
+    };
+    const normal: EnvironmentProject = { ...base, id: ProjectId.make("project"), title: "Repo" };
+
+    expect(findExistingAddProject({ projects: [app], environmentId: env, path: "/repo" })).toBe(
+      null,
+    );
+    expect(
+      findExistingAddProject({ projects: [app, normal], environmentId: env, path: "/repo" })?.id,
+    ).toBe("project");
   });
 
   it("builds the V2 project.create mutation", () => {

@@ -6,7 +6,7 @@ import {
 } from "@lecturn/shared/observability";
 import * as OtelEnvironment from "@lecturn/shared/otelEnvironment";
 import { parsePersistedServerObservabilitySettings } from "@lecturn/shared/serverSettings";
-import { DesktopBackendBootstrap, PortSchema } from "@lecturn/contracts";
+import { PortSchema, ServerBootstrapEnvelope } from "@lecturn/contracts";
 import * as Config from "effect/Config";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -21,6 +21,7 @@ import * as SchemaTransformation from "effect/SchemaTransformation";
 import { Argument, Flag } from "effect/cli";
 import * as CliError from "effect/cli/CliError";
 
+import { splitServerBootstrap } from "../apps/sidecarBootstrap.ts";
 import { readBootstrapEnvelope } from "../bootstrap.ts";
 import * as ServerConfig from "../config.ts";
 import { expandHomePath, resolveBaseDir } from "../os-jank.ts";
@@ -284,9 +285,9 @@ export const resolveServerConfig = (
     const bootstrapFd = Option.getOrUndefined(normalizedFlags.bootstrapFd) ?? env.bootstrapFd;
     const bootstrapEnvelope =
       bootstrapFd !== undefined
-        ? yield* readBootstrapEnvelope(DesktopBackendBootstrap, bootstrapFd)
+        ? yield* readBootstrapEnvelope(ServerBootstrapEnvelope, bootstrapFd)
         : Option.none();
-    const bootstrap = Option.getOrUndefined(bootstrapEnvelope);
+    const { desktop: bootstrap, appSidecar } = splitServerBootstrap(bootstrapEnvelope);
 
     const mode: ServerConfig.RuntimeMode = Option.getOrElse(
       resolveOptionPrecedence(
@@ -485,6 +486,7 @@ export const resolveServerConfig = (
       resourceMonitorPath,
       stavePath,
       ...(bootstrap?.extensions ? { extensions: bootstrap.extensions } : {}),
+      ...(appSidecar === undefined ? {} : { appSidecar }),
       autoBootstrapProjectFromCwd,
       logWebSocketEvents,
       tailscaleServeEnabled,

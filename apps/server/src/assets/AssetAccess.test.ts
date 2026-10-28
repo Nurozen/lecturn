@@ -13,6 +13,7 @@ import { MCP_APP_MAX_HTML_BYTES } from "@lecturn/shared/mcpApp";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -259,6 +260,51 @@ describe("AssetAccess", () => {
         resource: { ...resource, itemId: oversizedScreenshotItem.id },
       }).pipe(Effect.flip);
       expect(oversized._tag).toBe("AssetWorkspaceAssetNotFoundError");
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.live("resolves every concurrent first mint, whichever process signed it", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const realDelay = (ms: number) => Effect.sleep(Duration.millis(ms));
+      // Slow secret writes keep a just-created key file around long enough for
+      // other mints to read it; each `make` stands in for a separate process.
+      const slowSecretWrites: FileSystem.FileSystem = {
+        ...fileSystem,
+        open: (path, options) =>
+          fileSystem.open(path, options).pipe(Effect.tap(() => realDelay(15))),
+      };
+      const stores = yield* Effect.forEach([0, 1], () =>
+        ServerSecretStore.make.pipe(Effect.provideService(FileSystem.FileSystem, slowSecretWrites)),
+      );
+      const resource = {
+        _tag: "tool-output-image" as const,
+        threadId: screenshotItem.threadId,
+        itemId: screenshotItem.id,
+        index: 0,
+      };
+
+      const urls = yield* Effect.forEach(
+        Array.from({ length: 12 }, (_, index) => index),
+        (index) =>
+          realDelay(index % 6).pipe(
+            Effect.andThen(issueAssetUrl({ resource })),
+            Effect.provideService(ServerSecretStore.ServerSecretStore, stores[index % 2]!),
+          ),
+        { concurrency: "unbounded" },
+      );
+
+      for (const [index, { relativeUrl }] of urls.entries()) {
+        const suffix = relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+        const separator = suffix.indexOf("/");
+        const resolved = yield* resolveAsset(
+          suffix.slice(0, separator),
+          suffix.slice(separator + 1),
+        ).pipe(
+          Effect.provideService(ServerSecretStore.ServerSecretStore, stores[(index + 1) % 2]!),
+        );
+        expect(resolved).toMatchObject({ kind: "bytes", mimeType: "image/png" });
+      }
     }).pipe(Effect.provide(layerTest)),
   );
 

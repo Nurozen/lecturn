@@ -19,7 +19,7 @@ import { parseChangeRequestUrl } from "@lecturn/shared/changeRequestUrl";
 import { isWorkspaceImagePreviewPath } from "@lecturn/shared/filePreview";
 import { formatTokens } from "@lecturn/shared/usageFormat";
 import { classifyToolActivity } from "@lecturn/shared/toolActivity";
-import { toolOutputIndicatesFailure } from "@lecturn/shared/toolOutput";
+import { appToolSummaryFromToolItem, toolOutputIndicatesFailure } from "@lecturn/shared/toolOutput";
 
 import {
   summarizeLecturnToolCalls,
@@ -124,6 +124,14 @@ export type ToolGroupSummaryKind =
   | "agent-tool"
   | "tone-tool"
   | "mixed";
+
+/** A connected app's own words for one call of its tool, read after the row's label. */
+export function workEntryAppToolSummary(
+  entry: Pick<WorkLogPresentationEntry, "structuredPayload">,
+): string | undefined {
+  const item = entry.structuredPayload;
+  return item?.type === "dynamic_tool" ? appToolSummaryFromToolItem(item) : undefined;
+}
 
 export function normalizeCompactToolLabel(value: string): string {
   return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();

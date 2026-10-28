@@ -13,7 +13,10 @@ import {
 import { buildPhysicalSagaProjectGroups } from "@lecturn/client-runtime/state/sagaWorkbench";
 import type { ThreadListV2ListItem } from "../threads/threadListV2";
 import type { StaveSagaMemberStatus } from "@lecturn/contracts";
-import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
+import type {
+  EnvironmentProject,
+  EnvironmentThreadShell,
+} from "@lecturn/client-runtime/state/shell";
 
 import type { HomeThreadGroup } from "./homeThreadList";
 
@@ -51,8 +54,27 @@ export interface HomeAccountHeaderListItem {
   readonly collapsed: boolean;
   readonly depth?: number;
 }
-/** Hierarchy chrome rows the home list and iPad sidebar build over the v2 thread rows. */
-export type HomeListItem = HomeAccountHeaderListItem | HomeHeaderListItem;
+/** A connected app's workspace in the Apps tab: a boxed folder row over its threads. */
+export interface HomeAppWorkspaceHeaderListItem {
+  readonly type: "app-workspace-header";
+  readonly key: string;
+  /** Its collapse state key: the scoped project key. */
+  readonly groupKey: string;
+  readonly project: EnvironmentProject;
+  /** Set only when the app's workspaces span more than one environment. */
+  readonly machineLabel: string | null;
+  readonly threadCount: number;
+  readonly collapsed: boolean;
+  /** First workspace in its app's box. */
+  readonly isFirst: boolean;
+  readonly depth?: number;
+}
+
+/** Hierarchy chrome rows the home list, iPad sidebar and Apps tab build over thread rows. */
+export type HomeListItem =
+  | HomeAccountHeaderListItem
+  | HomeHeaderListItem
+  | HomeAppWorkspaceHeaderListItem;
 
 export type HomeGroupDisplayAction = "toggle-collapsed" | "show-more" | "show-less";
 
@@ -98,6 +120,17 @@ export function homeListItemsAreEqual(previous: HomeListItem, item: HomeListItem
         previous.isFirst === item.isFirst &&
         previous.depth === item.depth &&
         previous.memberStatus === item.memberStatus
+      );
+    case "app-workspace-header":
+      return (
+        previous.type === "app-workspace-header" &&
+        previous.key === item.key &&
+        previous.groupKey === item.groupKey &&
+        previous.project === item.project &&
+        previous.machineLabel === item.machineLabel &&
+        previous.threadCount === item.threadCount &&
+        previous.collapsed === item.collapsed &&
+        previous.isFirst === item.isFirst
       );
   }
 }

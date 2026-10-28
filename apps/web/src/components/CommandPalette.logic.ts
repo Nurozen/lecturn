@@ -61,7 +61,7 @@ export function browseInputEndPaddingClass(input: {
 export type SearchOverlayMode = "command" | "files" | "content";
 
 export type CommandPaletteOpenIntent =
-  | { readonly kind: "add-project" | "new-thread-in" | "change-theme" }
+  | { readonly kind: "add-project" | "new-thread-in" | "change-theme" | "open-app" }
   | { readonly kind: "import-session"; readonly projectRef: ScopedProjectRef }
   | {
       readonly kind: "search";
@@ -87,6 +87,7 @@ export type CommandPaletteUiAction =
     }
   | { readonly _tag: "OpenAddProject" }
   | { readonly _tag: "OpenNewThreadIn" }
+  | { readonly _tag: "OpenApp" }
   | { readonly _tag: "OpenImportSession"; readonly projectRef: ScopedProjectRef }
   | { readonly _tag: "OpenChangeTheme" }
   | { readonly _tag: "ClearOpenIntent" }
@@ -135,6 +136,8 @@ export function reduceCommandPaletteUiState(
       return { open: true, mode: "command", openIntent: { kind: "add-project" } };
     case "OpenNewThreadIn":
       return { open: true, mode: "command", openIntent: { kind: "new-thread-in" } };
+    case "OpenApp":
+      return { open: true, mode: "command", openIntent: { kind: "open-app" } };
     case "OpenImportSession":
       return {
         open: true,
@@ -146,6 +149,75 @@ export function reduceCommandPaletteUiState(
     case "ClearOpenIntent":
       return state.openIntent ? { ...state, openIntent: null } : state;
   }
+}
+
+export interface CommandPaletteApp {
+  readonly appId: string;
+  readonly name: string;
+  readonly icon: ReactNode;
+  /** The app's status, e.g. Running or Closed. */
+  readonly status: string | null;
+}
+
+export interface AppsPaletteItems {
+  /** The mode switch for the mode not showing, and "Open app…" once there is an app. */
+  readonly actions: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
+  readonly openAppItems: ReadonlyArray<CommandPaletteActionItem>;
+}
+
+export function buildAppsPaletteItems(input: {
+  readonly sidebarMode: "projects" | "apps";
+  readonly apps: ReadonlyArray<CommandPaletteApp>;
+  readonly icons: {
+    readonly projects: ReactNode;
+    readonly apps: ReactNode;
+    readonly appsAddon: ReactNode;
+  };
+  readonly showSidebarMode: (target: {
+    readonly mode: "projects" | "apps";
+    readonly appId?: string;
+  }) => void;
+}): AppsPaletteItems {
+  const target = input.sidebarMode === "apps" ? "projects" : "apps";
+  const openAppItems = input.apps.map((app): CommandPaletteActionItem => ({
+    kind: "action",
+    value: `open-app:${app.appId}`,
+    searchTerms: [app.name, app.appId],
+    title: app.name,
+    ...(app.status === null ? {} : { description: app.status }),
+    icon: app.icon,
+    run: async () => input.showSidebarMode({ mode: "apps", appId: app.appId }),
+  }));
+  const switchMode: CommandPaletteActionItem = {
+    kind: "action",
+    value: `action:sidebar-${target}`,
+    searchTerms: [
+      target === "apps" ? "Switch sidebar to Apps" : "Switch sidebar to Projects",
+      "sidebar",
+      "mode",
+      target === "apps" ? "connected apps" : "projects",
+    ],
+    title: target === "apps" ? "Switch sidebar to Apps" : "Switch sidebar to Projects",
+    icon: target === "apps" ? input.icons.apps : input.icons.projects,
+    shortcutCommand: "sidebar.toggleApps",
+    run: async () => input.showSidebarMode({ mode: target }),
+  };
+  if (openAppItems.length === 0) return { actions: [switchMode], openAppItems };
+  return {
+    actions: [
+      switchMode,
+      {
+        kind: "submenu",
+        value: "action:open-app",
+        searchTerms: ["Open app", "apps", "connected apps", ...input.apps.map((app) => app.name)],
+        title: "Open app…",
+        icon: input.icons.apps,
+        addonIcon: input.icons.appsAddon,
+        groups: [{ value: "apps", label: "Apps", items: openAppItems }],
+      },
+    ],
+    openAppItems,
+  };
 }
 
 export interface CommandPaletteThreadContentMatch {

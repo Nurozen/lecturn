@@ -1,4 +1,5 @@
 import {
+  type AppBinding,
   CommandId,
   type OrchestrationProjectShell,
   ProjectId,
@@ -40,6 +41,8 @@ import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 export interface ProjectCreateInput extends ProjectCreatePayload {
   readonly commandId: CommandId;
   readonly projectId: ProjectId;
+  /** Lecturn connected apps (AppProjectService); not part of the client payload. */
+  readonly appBinding?: AppBinding;
 }
 
 export interface ProjectUpdateInput extends ProjectUpdatePayload {
@@ -247,13 +250,24 @@ export const make = Effect.gen(function* () {
                 .findActiveByWorkspaceRoot(workspaceRoot)
                 .pipe(Effect.mapError(dispatchError)),
             );
+      // Read under the same workspace lock, so two ensures of one app root
+      // cannot both create.
+      const appBinding = command.type === "project.create" ? command.appBinding : undefined;
+      const appWorkspaceOwner =
+        appBinding === undefined
+          ? undefined
+          : Option.getOrUndefined(
+              yield* projects
+                .findActiveByAppWorkspace(appBinding.appId, appBinding.workspaceRoot)
+                .pipe(Effect.mapError(dispatchError)),
+            );
       const now = yield* DateTime.now;
       const eventId = yield* idAllocator.allocate
         .event({ commandId: command.commandId })
         .pipe(Effect.mapError(dispatchError));
       const planned = planProjectCommand({
         command,
-        state: { project, workspaceOwner },
+        state: { project, workspaceOwner, appWorkspaceOwner },
         eventId,
         now,
       });
@@ -336,7 +350,11 @@ export const make = Effect.gen(function* () {
             .list({ includeDeleted: true })
             .pipe(
               Effect.map((rows) =>
-                Option.fromUndefinedOr(rows.find((row) => row.workspaceRoot === normalized)),
+                Option.fromUndefinedOr(
+                  rows.find(
+                    (row) => row.workspaceRoot === normalized && row.appBinding === undefined,
+                  ),
+                ),
               ),
             )
         : projects.findActiveByWorkspaceRoot(normalized)
@@ -360,6 +378,7 @@ export const make = Effect.gen(function* () {
         title: input.title,
         workspaceRoot,
         ...(input.scripts === undefined ? {} : { scripts: input.scripts }),
+        ...(input.appBinding === undefined ? {} : { appBinding: input.appBinding }),
       });
       yield* projectEnrichment.invalidate([workspaceRoot]);
       return yield* readCommitted(input.projectId);

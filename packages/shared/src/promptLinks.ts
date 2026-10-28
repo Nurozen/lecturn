@@ -1,3 +1,4 @@
+import { appLinkFromPath, appLinkPathFromUrl } from "./appLinks.ts";
 import { DEFAULT_HOSTED_APP_URL } from "./connectAuth.ts";
 
 export const PROMPT_LINK_MAX_PROMPT_LENGTH = 8_000;
@@ -198,6 +199,7 @@ export function promptLinkAppPath(
     if (url.host === "new" && (url.pathname === "" || url.pathname === "/")) {
       return `/new${url.search}`;
     }
+    if (url.host === "apps") return appLinkPathFromUrl(url);
     const thread = url.host === "threads" ? THREAD_PATH.exec(url.pathname) : null;
     return thread ? `/${thread[1]}/${thread[2]}${url.search}` : null;
   }
@@ -208,6 +210,8 @@ export function promptLinkAppPath(
 }
 
 export function promptLinkDeepLink(appPath: string, scheme = "lecturn"): string {
+  const appLink = appLinkFromPath(appPath, scheme);
+  if (appLink !== null) return appLink;
   const url = new URL(appPath, "https://app.invalid");
   const host = url.pathname === "/new" ? "new" : `threads${url.pathname}`;
   return `${scheme}://${host}${url.search}`;

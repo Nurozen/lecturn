@@ -146,6 +146,11 @@ import {
 import type { ManagedServerProvider } from "@lecturn/provider-core/server/snapshot";
 import { mergeProviderInstanceEnvironment } from "@lecturn/provider-core/server/instanceEnvironment";
 import { LECTURN_ORCHESTRATION_INSTRUCTIONS } from "@lecturn/provider-core/server/orchestrationInstructions";
+import {
+  makeClaudeMcpActivation,
+  withConnectedAppInstructions,
+} from "./connectedAppAdapterHooks.ts";
+export { claudeLecturnMcpStartupFailure } from "./connectedAppAdapterHooks.ts";
 import { buildRuntimeInstructions } from "@lecturn/provider-core/server/runtimeInstructions";
 import {
   mcpToolPresentation,
@@ -1114,6 +1119,8 @@ export function makeClaudeQueryOptions(input: {
   readonly onUserDialog?: ClaudeQueryOptions["onUserDialog"];
   readonly supportedDialogKinds?: ClaudeQueryOptions["supportedDialogKinds"];
   readonly allowDangerouslySkipPermissions?: boolean;
+  /** Lecturn: a connected app's registered instructions. */
+  readonly appInstructions?: string;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
   const {
@@ -1196,9 +1203,11 @@ export function makeClaudeQueryOptions(input: {
     systemPrompt: {
       type: "preset" as const,
       preset: "claude_code" as const,
-      append:
+      append: withConnectedAppInstructions(
         buildRuntimeInstructions({ harness: "Claude Code" }) +
-        (input.mcpServers === undefined ? "" : LECTURN_ORCHESTRATION_INSTRUCTIONS),
+          (input.mcpServers === undefined ? "" : LECTURN_ORCHESTRATION_INSTRUCTIONS),
+        input.appInstructions,
+      ),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
   };
@@ -3456,6 +3465,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
   adapterOptions: ClaudeAdapterV2Options,
 ) {
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+  const claudeMcpActivation = makeClaudeMcpActivation(mcpSessions, CLAUDE_PROVIDER);
   const { attachmentsDir, fileSystem, path, crypto, idAllocator, queryRunner } = adapterOptions;
   const subagentModelCatalog = scopeClaudeModelCatalog(
     BUNDLED_CLAUDE_MODEL_CATALOG,
@@ -8537,7 +8547,12 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               ? {}
               : { allowedTools: queryPolicy.allowedTools }),
           });
-          const queryPolicyKey = claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides);
+          // The system prompt is fixed for a process's life, so changed app
+          // instructions need a new one, as a changed policy does.
+          const queryPolicyKey = withConnectedAppInstructions(
+            claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides),
+            turnInput.appInstructions,
+          );
           const compiledSelection = compileClaudeModelSelection(turnInput.modelSelection);
           const resumeSessionAt = yield* getNativeConversationHeadId(turnInput.providerThread);
           const existing = yield* Ref.get(queryContext);
@@ -8649,6 +8664,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             canUseTool,
             onUserDialog,
             supportedDialogKinds: ["resume_return"],
+            ...(turnInput.appInstructions === undefined
+              ? {}
+              : { appInstructions: turnInput.appInstructions }),
           });
           const querySession = yield* queryRunner
             .open({
@@ -8722,7 +8740,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   ) {
                     context.permissionMode = message.permissionMode;
                   }
-                  return handleSdkMessage({ query: querySession, message });
+                  return claudeMcpActivation
+                    .onMessage(turnInput, mcpSession, message)
+                    .pipe(Effect.andThen(handleSdkMessage({ query: querySession, message })));
                 }),
               ),
             ),
@@ -9340,7 +9360,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             function* (threadInput: ProviderAdapter.ProviderAdapterV2EnsureThreadInput) {
               const createdAt = yield* DateTime.now;
               const nativeThreadId = yield* queryRunner.allocateSessionId;
-              return makeProviderThread({
+              const providerThread = makeProviderThread({
                 idAllocator,
                 providerInstanceId: adapterOptions.instanceId,
                 appThreadId: threadInput.threadId,
@@ -9348,6 +9368,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 nativeThreadId,
                 now: createdAt,
               });
+              yield* claudeMcpActivation.report(
+                threadInput.threadId,
+                threadInput.existingProviderThread?.id ?? providerThread.id,
+              );
+              return providerThread;
             },
             (effect, threadInput) =>
               effect.pipe(
@@ -9380,6 +9405,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 });
               }
               const updatedAt = yield* DateTime.now;
+              const appThreadId = threadInput.providerThread.appThreadId;
+              if (appThreadId !== null) {
+                yield* claudeMcpActivation.report(appThreadId, threadInput.providerThread.id);
+              }
               return {
                 ...threadInput.providerThread,
                 providerSessionId: input.providerSessionId,

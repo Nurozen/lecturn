@@ -91,3 +91,8 @@ export * from "./connectAccount.ts";
 export * from "./worktreeSetup.ts";
 export * from "./secretRequest.ts";
 export * from "./clientRpcPermissions.ts";
+export * from "./apps.ts";
+export * from "./appsBundle.ts";
+export * from "./appsRpc.ts";
+export * from "./appsHttp.ts";
+export * from "./embedBridge.ts";

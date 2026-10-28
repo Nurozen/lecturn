@@ -37,6 +37,16 @@ export function withoutArchivedStaveProjects<Project extends StaveStateLike>(
   return projects.filter((project) => !isArchivedStaveProject(project));
 }
 
+/**
+ * Projects offered by lists and pickers. Returns the input unchanged when
+ * nothing is archived, so memoized consumers keep identity.
+ */
+export function listedProjects<Project extends StaveStateLike>(
+  projects: ReadonlyArray<Project>,
+): ReadonlyArray<Project> {
+  return projects.some(isArchivedStaveProject) ? withoutArchivedStaveProjects(projects) : projects;
+}
+
 /** Stamps from `.stave.yaml` and `space list` differ only in trailing fraction digits. */
 function sameStaveIncarnation(left: string, right: string): boolean {
   const key = (value: string) => {

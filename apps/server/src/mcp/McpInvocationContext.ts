@@ -1,9 +1,11 @@
 import {
+  type AppId,
   type AuthMcpClientAccess,
   type EnvironmentId,
   McpCapabilityUnavailableError,
   OrchestratorMcpFailure,
   PreviewAutomationUnavailableError,
+  type ProjectId,
   type ProviderInstanceId,
   type RuntimeMode,
   type ThreadId,
@@ -17,6 +19,7 @@ const ALL_MCP_CAPABILITIES = [
   "worktree",
   "device",
   "pull-requests",
+  "app",
 ] as const;
 export type McpCapability = (typeof ALL_MCP_CAPABILITIES)[number];
 
@@ -24,6 +27,12 @@ export interface McpThreadCaller {
   readonly threadId: ThreadId;
   readonly providerSessionId: string;
   readonly providerInstanceId: ProviderInstanceId;
+}
+
+/** Identity of the connected app whose project the calling thread belongs to. */
+export interface McpAppCaller {
+  readonly appId: AppId;
+  readonly projectId: ProjectId;
 }
 
 export interface McpClientCaller {
@@ -51,6 +60,8 @@ export interface McpInvocationScope {
   readonly requestNamespace: string;
   readonly thread: McpThreadCaller | undefined;
   readonly client: McpClientCaller | undefined;
+  /** Set exactly when `capabilities` has "app"; a capability alone cannot say which app. */
+  readonly app?: McpAppCaller | undefined;
 }
 
 export class McpInvocationContext extends Context.Service<
@@ -111,6 +122,40 @@ const threadCallerRequired = (operation: string) =>
   });
 
 export type McpThreadInvocationScope = McpInvocationScope & { readonly thread: McpThreadCaller };
+
+export type McpAppInvocationScope = McpThreadInvocationScope & { readonly app: McpAppCaller };
+
+export const appInvocationScope = (scope: McpInvocationScope): McpAppInvocationScope | undefined =>
+  scope.capabilities.has("app") && scope.app !== undefined && scope.thread !== undefined
+    ? (scope as McpAppInvocationScope)
+    : undefined;
+
+/**
+ * An app thread's agent works for that app, so its credential reaches only the
+ * app's own project; every other caller is unaffected.
+ */
+export const assertProjectReach = (
+  scope: McpInvocationScope,
+  projectId: ProjectId,
+): Effect.Effect<void, OrchestratorMcpFailure> =>
+  scope.app === undefined || scope.app.projectId === projectId
+    ? Effect.void
+    : Effect.fail(
+        new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message:
+            "This thread belongs to a connected app, so it can reach only the app's own project.",
+        }),
+      );
+
+/** For operations that reach beyond every single project, such as creating one. */
+export const refuseAppCaller = (
+  scope: McpInvocationScope,
+  message: string,
+): Effect.Effect<void, OrchestratorMcpFailure> =>
+  scope.app === undefined
+    ? Effect.void
+    : Effect.fail(new OrchestratorMcpFailure({ code: "capability_denied", message }));
 
 export const requireThreadScope = (scope: McpInvocationScope, operation: string) =>
   scope.thread === undefined

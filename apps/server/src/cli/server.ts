@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema";
 import { Command, GlobalFlag } from "effect/cli";
 import * as CliError from "effect/cli/CliError";
 
+import { exitWithAppSidecarParent } from "../apps/sidecarBootstrap.ts";
 import * as ServerConfig from "../config.ts";
 import { awaitLauncherLoss } from "../launcherWatch.ts";
 import { runServer } from "../server.ts";
@@ -24,7 +25,10 @@ const runServerCommand = (
   Effect.gen(function* () {
     const logLevel = yield* GlobalFlag.LogLevel;
     const config = yield* resolveServerConfig(flags, logLevel, options);
-    const run = runServer.pipe(Effect.provideService(ServerConfig.ServerConfig, config));
+    const run = runServer.pipe(
+      exitWithAppSidecarParent(config),
+      Effect.provideService(ServerConfig.ServerConfig, config),
+    );
     if (config.mode !== "desktop" || config.desktopBootstrapToken === undefined) return yield* run;
     return yield* Effect.raceFirst(
       run,

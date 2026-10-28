@@ -19,3 +19,19 @@ export const CLAUDE_EMBLEM = {
     "M85.06 41.25 L102.99 25.20 Q105.62 26.53 106.66 29.28 L88.82 45.43Z",
   ],
 } as const;
+
+/**
+ * The scripted test driver's mark (a play button). Shaped like a provider package icon so web and
+ * mobile draw it through the same path renderer.
+ */
+export const SCRIPTED_PROVIDER_EMBLEM = {
+  viewBox: "0 0 24 24",
+  fill: { light: "#171717", dark: "#e5e5e5" },
+  paths: [
+    {
+      d: "M7 3h10a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4Zm0 2a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Z",
+      fillRule: "evenodd",
+    },
+    { d: "M9.5 8.2v7.6a.6.6 0 0 0 .9.52l6.3-3.8a.6.6 0 0 0 0-1.04l-6.3-3.8a.6.6 0 0 0-.9.52Z" },
+  ],
+} as const;

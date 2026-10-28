@@ -10,9 +10,11 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 
 import * as Settings from "../serverSettings.ts";
 import { BUILT_IN_DRIVERS, type BuiltInDriversEnv } from "./builtInDrivers.ts";
+import { withTestProviderDrivers } from "./Drivers/ScriptedDriver.ts";
 import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import * as ProviderInstanceRegistryMutator from "./ProviderInstanceRegistryMutator.ts";
 import * as ProviderOrchestrationAdapterInfrastructure from "./ProviderOrchestrationAdapterInfrastructure.ts";
@@ -105,7 +107,7 @@ export const layer: Layer.Layer<
         : deriveProviderInstanceConfigMap(initialSettings);
 
     const layerMutable = ProviderInstanceRegistry.layer({
-      drivers: BUILT_IN_DRIVERS,
+      drivers: withTestProviderDrivers(BUILT_IN_DRIVERS, yield* HostProcess.Environment),
       configMap: initialConfigMap,
     }).pipe(
       Layer.provide(ProviderOrchestrationAdapterInfrastructure.layer),

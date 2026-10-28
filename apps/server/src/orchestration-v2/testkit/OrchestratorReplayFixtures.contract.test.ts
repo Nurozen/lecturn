@@ -11,6 +11,13 @@ import { materializeFixtureInput } from "./fixtures/shared.ts";
 import { readProviderReplayTranscript } from "@lecturn/provider-testing/replayTranscript";
 
 const decodeCommand = Schema.decodeUnknownEffect(OrchestrationV2Command);
+const isSessionUpdateReceiptFrame = Schema.is(
+  Schema.Struct({
+    kind: Schema.Literal("notification"),
+    method: Schema.Literal("session/update"),
+    params: Schema.Struct({ _meta: Schema.Struct({ eventId: Schema.String }) }),
+  }),
+);
 const readTranscript = Effect.fn("readOrchestratorReplayContractTranscript")(function* (file: URL) {
   return yield* readProviderReplayTranscript(file);
 }, Effect.provide(NodeServices.layer));
@@ -94,6 +101,42 @@ describe("orchestrator replay fixture contract", () => {
                   (entry) => entry.type === "emit_inbound" && entry.label === label,
                 ),
                 `${fixture.name}/${provider.driver} replay gate ${label} must label an inbound frame`,
+              );
+            }
+            for (const step of fixture.buildInput().steps) {
+              if (step.type !== "finish_held_run" || step.afterReplayLabel === undefined) continue;
+              const frames = transcript.entries.filter(
+                (entry) => entry.type === "emit_inbound" && entry.label === step.afterReplayLabel,
+              );
+              assert.lengthOf(
+                frames,
+                1,
+                `${fixture.name}/${provider.driver} finish barrier must name one inbound frame`,
+              );
+              const frame = frames[0];
+              assert.isTrue(
+                frame?.type === "emit_inbound" && isSessionUpdateReceiptFrame(frame.frame),
+                `${fixture.name}/${provider.driver} finish barrier requires a session update event ID`,
+              );
+              if (frame?.type === "emit_inbound" && isSessionUpdateReceiptFrame(frame.frame)) {
+                const eventId = frame.frame.params._meta.eventId;
+                assert.lengthOf(
+                  transcript.entries.filter(
+                    (entry) =>
+                      entry.type === "emit_inbound" &&
+                      isSessionUpdateReceiptFrame(entry.frame) &&
+                      entry.frame.params._meta.eventId === eventId,
+                  ),
+                  1,
+                  `${fixture.name}/${provider.driver} finish barrier event ID must be unique`,
+                );
+              }
+              assert.isTrue(
+                materialized.steps.some(
+                  (candidate) =>
+                    candidate.type === "finish_held_run" &&
+                    candidate.afterReplayLabel === step.afterReplayLabel,
+                ),
               );
             }
             if (provider.transcriptEntriesThroughLabel !== undefined) {

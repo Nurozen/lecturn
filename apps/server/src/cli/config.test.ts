@@ -716,6 +716,65 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     }),
   );
 
+  it.effect("keeps an app sidecar in web mode and hands its envelope to the registry", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-cli-config-sidecar-" });
+      const filePath = yield* fs.makeTempFileScoped({
+        prefix: "lecturn-bootstrap-",
+        suffix: ".ndjson",
+      });
+      const appSidecar = {
+        mode: "app-sidecar",
+        registration: {
+          appId: "dev.example.app",
+          name: "Example",
+          iconDataUrl:
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+          toolPrefix: "ex",
+          refPrefixes: ["ex:"],
+          liveTools: false,
+          gatedTools: [],
+        },
+        appSeedToken: "sidecar-seed-token",
+      };
+      yield* fs.writeFileString(filePath, `${yield* encodeUnknownJson(appSidecar)}\n`);
+      const fd = yield* Effect.acquireRelease(
+        Effect.sync(() => NodeFS.openSync(filePath, "r")),
+        (fd) =>
+          Effect.sync(() => {
+            try {
+              NodeFS.closeSync(fd);
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "EBADF") throw error;
+            }
+          }),
+      );
+
+      const resolved = yield* resolveServerConfig(
+        {
+          ...minimalDesktopFlags(baseDir),
+          mode: Option.none(),
+          port: Option.some(4889),
+          bootstrapFd: Option.some(fd),
+        },
+        Option.none(),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+            NetService.layer,
+          ),
+        ),
+      );
+
+      assert.equal(resolved.mode, "web");
+      assert.equal(resolved.desktopBootstrapToken, undefined);
+      assert.equal(resolved.appSidecar?.registration.appId, "dev.example.app");
+      assert.equal(resolved.appSidecar?.appSeedToken, "sidecar-seed-token");
+    }),
+  );
+
   it.effect("creates derived runtime directories during config resolution", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

@@ -69,6 +69,14 @@ import {
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
 import {
+  AppOrigin,
+  ConnectedAppThreadContinuedIn,
+  ConnectedAppThreadCopyOrigin,
+  ConnectedAppThreadData,
+  ConnectedAppThreadSubtitle,
+  ConnectedAppToolApprovalInfo,
+} from "./apps.ts";
+import {
   TurnTokenUsage,
   ToolActivitySurface,
   ToolActivityIcon,
@@ -423,8 +431,22 @@ export const OrchestrationV2ThreadForkPrepareWorktree = Schema.Struct({
 export type OrchestrationV2ThreadForkPrepareWorktree =
   typeof OrchestrationV2ThreadForkPrepareWorktree.Type;
 
+/**
+ * Lecturn: connected-app thread metadata. Omitted on every other thread, so
+ * non-app payloads are unchanged. The owning app comes from the project's
+ * `appBinding`, never from the thread.
+ */
+const ConnectedAppThreadFields = {
+  copiedFrom: Schema.optionalKey(ConnectedAppThreadCopyOrigin),
+  appData: Schema.optionalKey(ConnectedAppThreadData),
+  appSubtitle: Schema.optionalKey(ConnectedAppThreadSubtitle),
+  appOrigin: Schema.optionalKey(AppOrigin),
+  continuedIn: Schema.optionalKey(ConnectedAppThreadContinuedIn),
+};
+
 export const OrchestrationV2AppThread = Schema.Struct({
   ...OrchestrationV2CreationFields,
+  ...ConnectedAppThreadFields,
   id: ThreadId,
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -1096,6 +1118,8 @@ export const OrchestrationV2RuntimeRequest = Schema.Struct({
   resolvedAt: Schema.NullOr(Schema.DateTimeUtc),
   decision: Schema.optional(ProviderApprovalDecision),
   answers: Schema.optional(ProviderUserInputAnswers),
+  /** Lecturn: set when Lecturn itself raised the request to gate an app tool call. */
+  connectedAppTool: Schema.optionalKey(ConnectedAppToolApprovalInfo),
 });
 export type OrchestrationV2RuntimeRequest = typeof OrchestrationV2RuntimeRequest.Type;
 
@@ -1873,6 +1897,7 @@ export type OrchestrationV2LatestVisibleMessageSummary =
 
 export const OrchestrationV2ThreadShell = Schema.Struct({
   ...OrchestrationV2CreationFields,
+  ...ConnectedAppThreadFields,
   id: ThreadId,
   projectId: ProjectId,
   title: Schema.String,
@@ -2657,6 +2682,11 @@ export const OrchestrationV2Command = Schema.Union([
     ),
     /** Lecturn: initial contextual setting for the new thread. */
     contextual: Schema.optionalKey(OrchestrationV2ThreadContextualOption),
+    /**
+     * Lecturn: set atomically at creation by the server on behalf of the
+     * owning app. The server refuses them from any other subject.
+     */
+    ...ConnectedAppThreadFields,
   }),
   /**
    * Lecturn: import a provider session created outside Lecturn (listed by
@@ -3146,6 +3176,28 @@ const OrchestrationV2InternalCommand = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     reason: Schema.optional(Schema.String),
+  }),
+  /** Lecturn: only the owning app may set its thread data, through the apps service. */
+  Schema.Struct({
+    type: Schema.Literal("thread.app-data.set"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    appData: Schema.NullOr(ConnectedAppThreadData),
+    /** Absent leaves the subtitle unchanged; null clears it. */
+    subtitle: Schema.optionalKey(Schema.NullOr(ConnectedAppThreadSubtitle)),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.continued-in.set"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    continuedIn: ConnectedAppThreadContinuedIn,
+  }),
+  /** Lecturn: an unanswered app tool approval times out; the call returns "approval expired". */
+  Schema.Struct({
+    type: Schema.Literal("runtime-request.app-expire"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    requestId: RuntimeRequestId,
   }),
   /**
    * Internal so no client can mark a request saved without the value being

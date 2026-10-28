@@ -44,7 +44,11 @@ export function WorkspaceTabsProvider(props: { readonly children: ReactNode }) {
     activeTab.current = state.selectedTab;
   }, [state.selectedTab]);
   const isTabActive = useCallback((tab: WorkspaceTab) => activeTab.current === tab, []);
-  const scrollOffsets = useRef({ threads: 0, pullRequests: 0 });
+  const scrollOffsets = useRef<Record<WorkspaceTab, number>>({
+    threads: 0,
+    apps: 0,
+    pullRequests: 0,
+  });
   const scrollAnchors = useRef<Partial<Record<WorkspaceTab, WorkspaceScrollAnchor>>>({});
   const getScrollOffset = useCallback((tab: WorkspaceTab) => scrollOffsets.current[tab], []);
   const recordScrollOffset = useCallback((tab: WorkspaceTab, offset: number) => {

@@ -47,6 +47,7 @@ export const SETTINGS_DEVICE_ONLY_PATHS: ReadonlySet<string> = new Set([
   "/settings/appearance",
   "/settings/snap-shot",
   "/settings/connections",
+  "/settings/apps",
   // Relay health and publishing follow this device's primary environment.
   "/settings/relay",
 ]);

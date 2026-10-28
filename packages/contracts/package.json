@@ -18,6 +18,30 @@
     "./relay": {
       "types": "./src/relay.ts",
       "import": "./src/relay.ts"
+    },
+    "./apps": {
+      "types": "./src/apps.ts",
+      "import": "./src/apps.ts"
+    },
+    "./embedBridge": {
+      "types": "./src/embedBridge.ts",
+      "import": "./src/embedBridge.ts"
+    },
+    "./appsRpcCore": {
+      "types": "./src/appsRpcCore.ts",
+      "import": "./src/appsRpcCore.ts"
+    },
+    "./appsHttp": {
+      "types": "./src/appsHttp.ts",
+      "import": "./src/appsHttp.ts"
+    },
+    "./auth": {
+      "types": "./src/auth.ts",
+      "import": "./src/auth.ts"
+    },
+    "./environment": {
+      "types": "./src/environment.ts",
+      "import": "./src/environment.ts"
     }
   },
   "scripts": {

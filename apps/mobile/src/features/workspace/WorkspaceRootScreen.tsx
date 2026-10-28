@@ -18,18 +18,24 @@ import { dispatchHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCom
 import { WorkspaceConnectionTitle } from "../home/WorkspaceConnectionTitle";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import { PullRequestsScreen } from "../pull-requests/PullRequestsScreen";
+import { AppsScreen } from "../apps/AppsScreen";
 import {
   WorkspaceTabsContext,
   WorkspaceTabsProvider,
   useWorkspaceTabs,
 } from "./WorkspaceTabsContext";
 import { WorkspaceToolbar } from "./WorkspaceToolbar";
-import { WORKSPACE_DOCK, workspaceToolbarHeight } from "./workspace-tabs-state";
+import {
+  WORKSPACE_DOCK,
+  workspaceTabSearchLabel,
+  workspaceToolbarHeight,
+} from "./workspace-tabs-state";
 import { WorkspaceSidebarTabs } from "./WorkspaceSidebarTabs";
 import { useSidebarWorkspaceTabs, useSystemWorkspaceTabBar } from "./useSystemWorkspaceTabBar";
 
 const TAB_TITLES = {
   threads: "Threads",
+  apps: "Apps",
   pullRequests: "Pull requests",
 };
 
@@ -120,8 +126,7 @@ function WorkspaceRootContent() {
             titleContent={renderHeaderTitle()}
             actions={[
               {
-                accessibilityLabel:
-                  state.selectedTab === "threads" ? "Search threads" : "Search pull requests",
+                accessibilityLabel: workspaceTabSearchLabel(state.selectedTab),
                 icon: "magnifyingglass",
                 onPress: () => {
                   dispatchHardwareKeyboardCommand("focusSearch");
@@ -141,7 +146,13 @@ function WorkspaceRootContent() {
         )}
         {sidebarPicker ? <WorkspaceSidebarTabs /> : null}
         <SafeAreaInsetsContext value={sidebarPicker ? { ...insets, top: 0 } : insets}>
-          {state.selectedTab === "threads" ? <HomeRouteScreen /> : <PullRequestsScreen />}
+          {state.selectedTab === "threads" ? (
+            <HomeRouteScreen />
+          ) : state.selectedTab === "apps" ? (
+            <AppsScreen />
+          ) : (
+            <PullRequestsScreen />
+          )}
         </SafeAreaInsetsContext>
         <WorkspaceToolbar
           sidebar={sidebarNavigation}

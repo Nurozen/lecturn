@@ -40,6 +40,7 @@ import {
 } from "@lecturn/contracts";
 import { renderAssistantCitationsAsText } from "@lecturn/shared/assistantCitations";
 import { encodeComposerContextFragment } from "@lecturn/shared/composerContextClipboard";
+import { parseAppReferenceHref } from "@lecturn/shared/appReferences";
 import { parseThreadLinkHref } from "@lecturn/shared/threadLinks";
 import { PROMPT_LINK_MAX_PROMPT_LENGTH } from "@lecturn/shared/promptLinks";
 import {
@@ -182,6 +183,13 @@ import {
 } from "../../lib/appearancePreferences";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { markdownFileIconSource } from "../../lib/markdownFileIcons";
+import { markdownWithAppReferences } from "../../lib/markdownDocument";
+import {
+  AppRefPrefixesContext,
+  useAppReferenceLabels,
+  useAppRefPrefixes,
+  useThreadAppRefPrefixes,
+} from "../apps/useThreadAppReferences";
 import { PierreEntryIcon } from "../../components/PierreEntryIcon";
 import { markdownLinkIconSource } from "../../lib/markdownLinkIcons";
 import {
@@ -199,11 +207,13 @@ import {
   isContextCompactionActivityGroup,
   isContextHandoffActivityGroup,
   isSecretRequestActivityGroup,
+  threadWorkGroupDetailsId,
   type ThreadFeedEntry,
   type ThreadFeedLatestRun,
 } from "../../lib/threadActivity";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import {
+  isThreadFeedTailDisclosure,
   resolveThreadFeedLiveFollow,
   type ThreadFeedLiveFollowEvent,
   type ThreadWorkGroupScrollPosition,
@@ -277,6 +287,8 @@ function formatMessageTime(input: string): string {
   }
   return MESSAGE_TIME_FORMATTER.format(timestamp);
 }
+
+const COPY_APP_REFERENCE = "copy-app-reference";
 
 const TURN_FOLD_HEIGHT = 42;
 const USER_BUBBLE_HORIZONTAL_PADDING = 4 * 3.5;
@@ -848,6 +860,7 @@ const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
 }) {
   const liveMarkdown = useLiveThreadLinkLabels(props.markdown, props.environmentId);
   const segments = useMemo(() => splitCodexArtifactTemplateMarkdown(liveMarkdown), [liveMarkdown]);
+  const refPrefixes = useAppRefPrefixes();
 
   return segments.map((segment) => {
     if (segment.kind === "artifact-template") {
@@ -861,7 +874,10 @@ const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
     }
     if (segment.markdown.trim().length === 0) return null;
 
-    const markdown = renderCodexInlineDirectivesAsMarkdown(segment.markdown);
+    const markdown = markdownWithAppReferences(
+      renderCodexInlineDirectivesAsMarkdown(segment.markdown),
+      refPrefixes,
+    );
     return (
       <SelectableMarkdownText
         key={`markdown:${segment.sourceOffset}`}
@@ -1661,6 +1677,7 @@ function UserMessageContent(props: UserMessageContentProps) {
 
 function UserMessageMarkdownContent(props: UserMessageContentProps) {
   const text = props.text;
+  const refPrefixes = useAppRefPrefixes();
   const segments = parseReviewCommentMessageSegments(text);
   const hasReviewComment = segments.some((segment) => segment.kind === "review-comment");
   const contextClipboardFragment = props.context
@@ -1673,7 +1690,7 @@ function UserMessageMarkdownContent(props: UserMessageContentProps) {
   if (!hasReviewComment) {
     return (
       <SelectableMarkdownText
-        markdown={text}
+        markdown={markdownWithAppReferences(text, refPrefixes)}
         contextClipboardFragment={contextClipboardFragment}
         skills={props.skills}
         textStyle={props.markdownStyles.nativeTextStyle}
@@ -1705,7 +1722,7 @@ function UserMessageMarkdownContent(props: UserMessageContentProps) {
         return (
           <SelectableMarkdownText
             key={segment.id}
-            markdown={text}
+            markdown={markdownWithAppReferences(text, refPrefixes)}
             contextClipboardFragment={contextClipboardFragment}
             skills={props.skills}
             textStyle={props.markdownStyles.nativeTextStyle}
@@ -1749,6 +1766,15 @@ function ThreadFeedPlaceholder(props: {
 }
 
 export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
+  const appRefPrefixes = useThreadAppRefPrefixes(props.environmentId, props.threadId);
+  return (
+    <AppRefPrefixesContext value={appRefPrefixes}>
+      <ThreadFeedView {...props} />
+    </AppRefPrefixesContext>
+  );
+});
+
+function ThreadFeedView(props: ThreadFeedProps) {
   const { listRef, onEndFollowEnabledChange, onHeaderMaterialVisibilityChange } = props;
   const workflowOpening = useWorkflowOpening(props.environmentId, props.threadId);
   const deviceType = useDeviceType();
@@ -1868,6 +1894,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     ? theme["--color-user-bubble"]
     : themeColorWithAlpha(theme["--color-user-bubble"], 0.9);
   const onMarkdownLinkPress = (href: string, imageEmbed = false) => {
+    // The app runs on the server's machine, never on the phone, so its references open nothing.
+    if (parseAppReferenceHref(href) !== null) return;
     const linkedThreadId = parseThreadLinkHref(href);
     if (linkedThreadId) {
       navigation.navigate("Thread", {
@@ -1933,15 +1961,27 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     threadId: props.threadId,
     workspaceRoot: props.workspaceRoot ?? null,
   });
+  const appRefLabels = useAppReferenceLabels(props.feed);
+  const appRefColor = theme["--color-primary"];
   const markdownLinkHandlers: MarkdownLinkHandlers = {
     onLinkPress: onMarkdownLinkPress,
     onImagePress: (href) => onMarkdownLinkPress(href, true),
     resolveImageSource,
     fileContextMenu: (href) => {
+      // Otherwise the long-press menu offers to open and share the chip's internal link.
+      const appRef = parseAppReferenceHref(href);
+      if (appRef !== null) {
+        return { title: appRef, actions: [{ id: COPY_APP_REFERENCE, title: "Copy reference" }] };
+      }
       const target = resolveFileChipTarget(href, props.workspaceRoot);
       return target ? fileChipMenu(target) : undefined;
     },
     onFileContextMenuAction: (href, actionId) => {
+      const appRef = parseAppReferenceHref(href);
+      if (appRef !== null) {
+        if (actionId === COPY_APP_REFERENCE) copyTextWithHaptic(appRef);
+        return;
+      }
       const target = resolveFileChipTarget(href, props.workspaceRoot);
       if (!target) return;
       switch (actionId as FileChipAction) {
@@ -1958,6 +1998,16 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
           shareFileChip(target);
           return;
       }
+    },
+    linkCustomization: (href) => {
+      const appRef = parseAppReferenceHref(href);
+      return appRef === null
+        ? undefined
+        : {
+            color: appRefColor,
+            label: appRefLabels.get(appRef) ?? appRef,
+            icon: markdownFileIconSource("mcp"),
+          };
     },
   };
   const renderMarkdownImage: MarkdownImageRenderer = (image) => {
@@ -2184,6 +2234,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     props.feed,
     props.queuedMessages,
   );
+  const presentedFeedRef = useRef(presentedFeed);
+  useLayoutEffect(() => {
+    presentedFeedRef.current = presentedFeed;
+  }, [presentedFeed]);
   const setupAnchorIndex = presentedFeed.findIndex(
     (entry) => entry.type === "message" && entry.message.role === "user",
   );
@@ -2329,7 +2383,19 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     });
   };
 
-  const suspendEndScrollMaintenanceForDisclosure = (anchorKey: string | null) => {
+  const suspendEndScrollMaintenanceForDisclosure = (
+    anchorKey: string | null,
+    detailsKey?: string,
+  ) => {
+    // At the tail the revealed rows have nowhere to go but under the composer
+    // overlays, so a follower stays pinned to the end like streamed growth.
+    if (
+      anchorKey !== null &&
+      endFollowEnabledRef.current &&
+      isThreadFeedTailDisclosure(presentedFeedRef.current, anchorKey, detailsKey)
+    ) {
+      return;
+    }
     disclosureAnchorKeyRef.current = anchorKey;
     setDisclosureToggleSettling(true);
   };
@@ -2378,7 +2444,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   };
 
   const onToggleWorkGroup = (groupId: string, anchorKey?: string) => {
-    suspendEndScrollMaintenanceForDisclosure(anchorKey ?? `work-toggle:${groupId}`);
+    suspendEndScrollMaintenanceForDisclosure(
+      anchorKey ?? `work-toggle:${groupId}`,
+      threadWorkGroupDetailsId(groupId),
+    );
     setInteractionState((current) => ({
       ...current,
       expandedWorkGroups: {
@@ -2726,7 +2795,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       </View>
     </PresentationSource>
   );
-});
+}
 
 function ThreadFeedLoadEarlierControl(props: ThreadFeedHistoryControls) {
   const theme = useUniwindTheme();

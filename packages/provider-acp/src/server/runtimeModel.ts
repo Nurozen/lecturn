@@ -10,6 +10,7 @@ import {
   deriveToolActivityPresentation,
   mergeToolActivityData,
 } from "@lecturn/shared/toolActivity";
+import { resolveAppToolPresentation } from "@lecturn/shared/appToolPresentation";
 import { LECTURN_MCP_TOOL_NAMES } from "@lecturn/shared/lecturnMcpToolPresentation";
 import type {
   OrchestrationV2ProviderThreadNativeMetadata,
@@ -1072,6 +1073,14 @@ const LECTURN_MCP_TITLE_SUFFIX_CALL =
  */
 const LECTURN_MCP_BARE_TITLE_CALL = /^(?<tool>[A-Za-z0-9_]+)(?::\s*\{|$)/;
 
+/**
+ * Lecturn's own tools, plus a registered connected app's `<prefix>_<tool>`:
+ * those reach the agent through the same server, so the same gate applies.
+ */
+const isLecturnServedTool = (tool: string) =>
+  LECTURN_MCP_TOOL_NAMES.has(tool) ||
+  resolveAppToolPresentation({ toolName: tool, serverName: "lecturn" }) !== null;
+
 const LECTURN_MCP_TITLE_PATTERNS = [
   LECTURN_MCP_TITLE_CALL,
   LECTURN_MCP_TITLE_SUFFIX_CALL,
@@ -1108,6 +1117,9 @@ export function extractMcpToolCallIdentity(
   const metaServerId = typeof meta?.serverId === "string" ? meta.serverId.trim() : "";
   const metaToolName = typeof meta?.toolName === "string" ? meta.toolName.trim() : "";
   if (/^lecturn$/i.test(metaServerId) && metaToolName.length > 0) {
+    if (isLecturnServedTool(metaToolName) && !LECTURN_MCP_TOOL_NAMES.has(metaToolName)) {
+      return { server: "lecturn", tool: metaToolName };
+    }
     for (const knownTool of LECTURN_MCP_TOOL_NAMES) {
       const boundary = metaToolName.length - knownTool.length - 1;
       if (
@@ -1152,7 +1164,7 @@ export function extractMcpToolCallIdentity(
     // unknown tool; take the first pattern whose capture is a known tool.
     const candidateTool = LECTURN_MCP_TITLE_PATTERNS.map(
       (pattern) => pattern.exec(trimmed)?.groups?.tool,
-    ).find((tool) => tool !== undefined && LECTURN_MCP_TOOL_NAMES.has(tool));
+    ).find((tool) => tool !== undefined && isLecturnServedTool(tool));
     if (candidateTool !== undefined) {
       return { server: "lecturn", tool: candidateTool };
     }

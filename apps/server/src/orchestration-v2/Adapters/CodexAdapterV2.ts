@@ -1,5 +1,6 @@
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
 import { historyResponseItems } from "@lecturn/provider-core/server/handoffBudget";
+import { mcpToolResultOutput } from "@lecturn/provider-core/server/mcpToolPresentation";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
 import {
   mcpToolPresentation,
@@ -124,6 +125,12 @@ import {
   MCP_APP_RESOURCE_SCHEME,
 } from "@lecturn/shared/mcpApp";
 import { snapshotMcpApp } from "../../mcpApps/McpAppSnapshot.ts";
+import { codexMcpToolResult } from "./codexMcpToolResult.ts";
+import {
+  codexAppToolApprovals,
+  makeCodexMcpActivation,
+  withConnectedAppInstructions,
+} from "./connectedAppAdapterHooks.ts";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
@@ -453,12 +460,7 @@ export interface CodexDynamicToolProjection extends McpToolPresentation {
 function codexMcpToolOutput(
   item: Extract<CodexDynamicToolItem, { readonly type: "mcpToolCall" }>,
 ): unknown | undefined {
-  const resultOutput =
-    item.result === null || item.result === undefined
-      ? undefined
-      : item.result.structuredContent !== null && item.result.structuredContent !== undefined
-        ? item.result.structuredContent
-        : item.result.content;
+  const resultOutput = mcpToolResultOutput(codexMcpToolResult(item));
 
   if (item.error === null || item.error === undefined) {
     return resultOutput;
@@ -723,6 +725,7 @@ export function buildCodexTurnStartParams(input: {
   /** ChatGPT token sharing does not accept service tiers. */
   readonly omitServiceTier?: boolean;
   readonly appContext?: ProviderAdapter.ProviderAdapterV2TurnInput["appContext"];
+  readonly appInstructions?: string;
 }) {
   return Effect.gen(function* () {
     const runtimeModeDefaults = codexRuntimeModeTurnDefaults(input.runtimePolicy.runtimeMode);
@@ -744,10 +747,14 @@ export function buildCodexTurnStartParams(input: {
       input.omitServiceTier === true
         ? undefined
         : getCodexServiceTierOptionValue(input.modelSelection);
-    const developerInstructions =
+    // Lecturn: a connected app's registered instructions are the app's own
+    // guidance for its tools, unlike its context, so they are developer text.
+    const developerInstructions = withConnectedAppInstructions(
       input.hasLecturnMcp !== true
         ? undefined
-        : buildCodexDeveloperInstructions(input.runtimePolicy.interactionMode);
+        : buildCodexDeveloperInstructions(input.runtimePolicy.interactionMode),
+      input.appInstructions,
+    );
     // An app's context is text an MCP server wrote, so it goes in as untrusted
     // context: Codex renders it as quoted user-side input, never as developer
     // instructions.
@@ -1326,6 +1333,7 @@ export function codexThreadRuntimeParams(input: {
                 http_headers: {
                   Authorization: mcpSession.authorizationHeader,
                 },
+                ...codexAppToolApprovals(mcpSession),
               },
             },
           }),
@@ -1756,6 +1764,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   ),
                 );
         const sessionMcpParams = extraMcpServers === undefined ? {} : { extraMcpServers };
+        const codexMcpActivation = makeCodexMcpActivation(mcpSessions, CODEX_PROVIDER);
         const additionalContextByThread = yield* Ref.make(
           new Map<
             string,
@@ -3847,7 +3856,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   ? artifacts.turnItem
                   : {
                       ...artifacts.turnItem,
-                      output: { [MCP_APP_OUTPUT_KEY]: reference, result: item.result },
+                      output: {
+                        [MCP_APP_OUTPUT_KEY]: reference,
+                        result: codexMcpToolResult(item),
+                      },
                     };
               yield* emitProviderEvent({
                 type: "node.updated",
@@ -4353,6 +4365,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               turnItem: artifacts.turnItem,
             });
           }).pipe(Effect.orDie),
+        );
+
+        yield* client.handleServerNotification(
+          "mcpServer/startupStatus/updated",
+          codexMcpActivation.onStartupStatus,
         );
 
         yield* client.handleServerNotification("account/rateLimits/updated", (payload) =>
@@ -6251,6 +6268,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               deviceToolsAvailable: mcpSession?.capabilities?.has("device") ?? false,
               omitServiceTier: adapterOptions.resolveRuntime !== undefined,
               ...(turnInput.appContext === undefined ? {} : { appContext: turnInput.appContext }),
+              ...(turnInput.appInstructions === undefined
+                ? {}
+                : { appInstructions: turnInput.appInstructions }),
             });
             yield* Ref.update(pendingRootTurns, (current) => {
               const updated = new Map(current);
@@ -6513,26 +6533,38 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             ensureInitialized.pipe(
               Effect.andThen(mcpSessions.read(threadInput.threadId)),
               Effect.flatMap((mcpSession) =>
-                client.request(
-                  "thread/start",
-                  codexThreadRuntimeParams({
-                    ...sessionMcpParams,
+                client
+                  .request(
+                    "thread/start",
+                    codexThreadRuntimeParams({
+                      ...sessionMcpParams,
+                      mcpSession,
+                      modelSelection: threadInput.modelSelection,
+                      runtimePolicy: threadInput.runtimePolicy,
+                    }),
+                  )
+                  .pipe(Effect.map((response) => ({ response, mcpSession }))),
+              ),
+              Effect.flatMap(({ response, mcpSession }) => {
+                const providerThread: OrchestrationV2ProviderThread = providerThreadFromCodexThread(
+                  {
+                    appThreadId: threadInput.threadId,
+                    idAllocator,
+                    ownerNodeId: null,
+                    providerSessionId: input.providerSessionId,
+                    providerInstanceId: adapterOptions.instanceId,
+                    thread: response.thread,
+                  },
+                );
+                return codexMcpActivation
+                  .report({
+                    nativeThreadId: response.thread.id,
+                    threadId: threadInput.threadId,
+                    providerThreadId: threadInput.existingProviderThread?.id ?? providerThread.id,
                     mcpSession,
-                    modelSelection: threadInput.modelSelection,
-                    runtimePolicy: threadInput.runtimePolicy,
-                  }),
-                ),
-              ),
-              Effect.map((response): OrchestrationV2ProviderThread =>
-                providerThreadFromCodexThread({
-                  appThreadId: threadInput.threadId,
-                  idAllocator,
-                  ownerNodeId: null,
-                  providerSessionId: input.providerSessionId,
-                  providerInstanceId: adapterOptions.instanceId,
-                  thread: response.thread,
-                }),
-              ),
+                  })
+                  .pipe(Effect.as(providerThread));
+              }),
               Effect.mapError(
                 (cause) =>
                   new ProviderAdapter.ProviderAdapterEnsureThreadError({
@@ -6545,15 +6577,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           resumeThread: (threadInput) =>
             Effect.gen(function* () {
               const nativeThreadId = yield* getNativeThreadId(threadInput.providerThread);
+              const appThreadId = threadInput.threadId ?? threadInput.providerThread.appThreadId;
+              const mcpSession = yield* readMcpSession(appThreadId);
               // excludeTurns is not in the generated request schema yet.
               const resume = client.raw.request("thread/resume", {
                 threadId: nativeThreadId,
                 excludeTurns: true,
                 ...codexThreadRuntimeParams({
                   ...sessionMcpParams,
-                  mcpSession: yield* readMcpSession(
-                    threadInput.threadId ?? threadInput.providerThread.appThreadId,
-                  ),
+                  mcpSession,
                   ...(threadInput.modelSelection === undefined
                     ? {}
                     : { modelSelection: threadInput.modelSelection }),
@@ -6583,6 +6615,14 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 ),
                 Effect.flatMap(decodeCodexResumeMetadata),
               );
+              if (appThreadId !== null) {
+                yield* codexMcpActivation.report({
+                  nativeThreadId: response.thread.id,
+                  threadId: appThreadId,
+                  providerThreadId: threadInput.providerThread.id,
+                  mcpSession,
+                });
+              }
               return {
                 ...threadInput.providerThread,
                 providerSessionId: input.providerSessionId,

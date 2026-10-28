@@ -1,0 +1,701 @@
+{
+  "version": 1,
+  "appId": "dev.embed-host",
+  "sourceEnvironmentId": "environment:sidecar",
+  "exportedAt": "2026-10-25T11:06:31.890Z",
+  "projects": [
+    {
+      "workspaceRoot": "/tmp/lecturn-embed-host/ws-a",
+      "title": "ws-a",
+      "threads": [
+        {
+          "sourceThreadId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3",
+          "title": "Pinned: launch checklist",
+          "createdAt": "2026-10-25T11:06:31.855Z",
+          "updatedAt": "2026-10-25T11:06:31.867Z",
+          "historyRevision": 7,
+          "appData": "{\"section\":\"pinned\"}",
+          "subtitle": "Counter 1",
+          "pinned": true,
+          "messages": [
+            {
+              "createdBy": "user",
+              "creationSource": "web",
+              "id": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3:t1:user",
+              "threadId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3",
+              "runId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3:run:1",
+              "nodeId": null,
+              "role": "user",
+              "text": "question 1",
+              "attachments": [],
+              "streaming": false,
+              "createdAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z"
+            },
+            {
+              "createdBy": "agent",
+              "creationSource": "web",
+              "id": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3:t1:assistant",
+              "threadId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3",
+              "runId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3:run:1",
+              "nodeId": null,
+              "role": "assistant",
+              "text": "answer 1",
+              "attachments": [],
+              "streaming": false,
+              "createdAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z"
+            }
+          ],
+          "turnItems": [
+            {
+              "id": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3:t1:user",
+              "threadId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3",
+              "runId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3:run:1",
+              "nodeId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3:node:1",
+              "providerThreadId": null,
+              "providerTurnId": null,
+              "nativeItemRef": null,
+              "parentItemId": null,
+              "ordinal": 1,
+              "status": "completed",
+              "title": null,
+              "startedAt": "2026-10-25T12:00:10.000Z",
+              "completedAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z",
+              "createdBy": "user",
+              "creationSource": "web",
+              "type": "user_message",
+              "messageId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3:t1:user",
+              "inputIntent": "turn_start",
+              "text": "question 1",
+              "attachments": []
+            },
+            {
+              "id": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3:t1:card",
+              "threadId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3",
+              "runId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3:run:1",
+              "nodeId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3:node:1",
+              "providerThreadId": null,
+              "providerTurnId": null,
+              "nativeItemRef": null,
+              "parentItemId": null,
+              "ordinal": 2,
+              "status": "completed",
+              "title": null,
+              "startedAt": "2026-10-25T12:00:10.000Z",
+              "completedAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z",
+              "type": "dynamic_tool",
+              "toolName": "mcp__lecturn__ex_counter_increment",
+              "input": {},
+              "output": {
+                "lecturnMcpApp": {
+                  "attachmentId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3-550a56ae-0bff-42da-83fe-d86ed0c5f55b-html",
+                  "server": "lecturn",
+                  "tool": "ex_counter_increment",
+                  "resourceUri": "ui://embed-host/counter"
+                },
+                "result": {
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "3"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3:t1:assistant",
+              "threadId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3",
+              "runId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3:run:1",
+              "nodeId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3:node:1",
+              "providerThreadId": null,
+              "providerTurnId": null,
+              "nativeItemRef": null,
+              "parentItemId": null,
+              "ordinal": 3,
+              "status": "completed",
+              "title": null,
+              "startedAt": "2026-10-25T12:00:10.000Z",
+              "completedAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z",
+              "type": "assistant_message",
+              "messageId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3:t1:assistant",
+              "text": "answer 1",
+              "streaming": false
+            }
+          ]
+        },
+        {
+          "sourceThreadId": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce",
+          "title": "Active: counter tuning",
+          "createdAt": "2026-10-25T11:06:31.868Z",
+          "updatedAt": "2026-10-25T11:06:31.870Z",
+          "historyRevision": 14,
+          "appData": "{\"section\":\"active\"}",
+          "subtitle": "Counter 2",
+          "pinned": false,
+          "messages": [
+            {
+              "createdBy": "user",
+              "creationSource": "web",
+              "id": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce:t1:user",
+              "threadId": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce",
+              "runId": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce:run:1",
+              "nodeId": null,
+              "role": "user",
+              "text": "question 1",
+              "attachments": [],
+              "streaming": false,
+              "createdAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z"
+            },
+            {
+              "createdBy": "agent",
+              "creationSource": "web",
+              "id": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce:t1:assistant",
+              "threadId": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce",
+              "runId": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce:run:1",
+              "nodeId": null,
+              "role": "assistant",
+              "text": "answer 1",
+              "attachments": [],
+              "streaming": false,
+              "createdAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z"
+            }
+          ],
+          "turnItems": [
+            {
+              "id": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce:t1:user",
+              "threadId": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce",
+              "runId": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce:run:1",
+              "nodeId": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce:node:1",
+              "providerThreadId": null,
+              "providerTurnId": null,
+              "nativeItemRef": null,
+              "parentItemId": null,
+              "ordinal": 1,
+              "status": "completed",
+              "title": null,
+              "startedAt": "2026-10-25T12:00:10.000Z",
+              "completedAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z",
+              "createdBy": "user",
+              "creationSource": "web",
+              "type": "user_message",
+              "messageId": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce:t1:user",
+              "inputIntent": "turn_start",
+              "text": "question 1",
+              "attachments": []
+            },
+            {
+              "id": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce:t1:assistant",
+              "threadId": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce",
+              "runId": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce:run:1",
+              "nodeId": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce:node:1",
+              "providerThreadId": null,
+              "providerTurnId": null,
+              "nativeItemRef": null,
+              "parentItemId": null,
+              "ordinal": 2,
+              "status": "completed",
+              "title": null,
+              "startedAt": "2026-10-25T12:00:10.000Z",
+              "completedAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z",
+              "type": "assistant_message",
+              "messageId": "f0dbcfa0-8145-4eb4-9a8d-8fef8349abce:t1:assistant",
+              "text": "answer 1",
+              "streaming": false
+            }
+          ]
+        },
+        {
+          "sourceThreadId": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa",
+          "title": "Working: long counter run",
+          "createdAt": "2026-10-25T11:06:31.871Z",
+          "updatedAt": "2026-10-25T11:06:31.873Z",
+          "historyRevision": 20,
+          "appData": "{\"section\":\"working\"}",
+          "subtitle": "Counter 3",
+          "pinned": false,
+          "messages": [
+            {
+              "createdBy": "user",
+              "creationSource": "web",
+              "id": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa:t1:user",
+              "threadId": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa",
+              "runId": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa:run:1",
+              "nodeId": null,
+              "role": "user",
+              "text": "question 1",
+              "attachments": [],
+              "streaming": false,
+              "createdAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z"
+            },
+            {
+              "createdBy": "agent",
+              "creationSource": "web",
+              "id": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa:t1:assistant",
+              "threadId": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa",
+              "runId": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa:run:1",
+              "nodeId": null,
+              "role": "assistant",
+              "text": "answer 1",
+              "attachments": [],
+              "streaming": false,
+              "createdAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z"
+            }
+          ],
+          "turnItems": [
+            {
+              "id": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa:t1:user",
+              "threadId": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa",
+              "runId": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa:run:1",
+              "nodeId": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa:node:1",
+              "providerThreadId": null,
+              "providerTurnId": null,
+              "nativeItemRef": null,
+              "parentItemId": null,
+              "ordinal": 1,
+              "status": "completed",
+              "title": null,
+              "startedAt": "2026-10-25T12:00:10.000Z",
+              "completedAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z",
+              "createdBy": "user",
+              "creationSource": "web",
+              "type": "user_message",
+              "messageId": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa:t1:user",
+              "inputIntent": "turn_start",
+              "text": "question 1",
+              "attachments": []
+            },
+            {
+              "id": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa:t1:assistant",
+              "threadId": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa",
+              "runId": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa:run:1",
+              "nodeId": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa:node:1",
+              "providerThreadId": null,
+              "providerTurnId": null,
+              "nativeItemRef": null,
+              "parentItemId": null,
+              "ordinal": 2,
+              "status": "completed",
+              "title": null,
+              "startedAt": "2026-10-25T12:00:10.000Z",
+              "completedAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z",
+              "type": "assistant_message",
+              "messageId": "99a80fa0-8ee3-474c-8bca-ce2feb2a39aa:t1:assistant",
+              "text": "answer 1",
+              "streaming": false
+            }
+          ]
+        },
+        {
+          "sourceThreadId": "9d76003a-42ce-483e-b3f0-b8250ba860fc",
+          "title": "Settled: first flash",
+          "createdAt": "2026-10-25T11:06:31.873Z",
+          "updatedAt": "2026-10-25T11:06:31.875Z",
+          "historyRevision": 26,
+          "appData": "{\"section\":\"settled\"}",
+          "subtitle": "Counter 4",
+          "pinned": false,
+          "messages": [
+            {
+              "createdBy": "user",
+              "creationSource": "web",
+              "id": "9d76003a-42ce-483e-b3f0-b8250ba860fc:t1:user",
+              "threadId": "9d76003a-42ce-483e-b3f0-b8250ba860fc",
+              "runId": "9d76003a-42ce-483e-b3f0-b8250ba860fc:run:1",
+              "nodeId": null,
+              "role": "user",
+              "text": "question 1",
+              "attachments": [],
+              "streaming": false,
+              "createdAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z"
+            },
+            {
+              "createdBy": "agent",
+              "creationSource": "web",
+              "id": "9d76003a-42ce-483e-b3f0-b8250ba860fc:t1:assistant",
+              "threadId": "9d76003a-42ce-483e-b3f0-b8250ba860fc",
+              "runId": "9d76003a-42ce-483e-b3f0-b8250ba860fc:run:1",
+              "nodeId": null,
+              "role": "assistant",
+              "text": "answer 1",
+              "attachments": [],
+              "streaming": false,
+              "createdAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z"
+            }
+          ],
+          "turnItems": [
+            {
+              "id": "9d76003a-42ce-483e-b3f0-b8250ba860fc:t1:user",
+              "threadId": "9d76003a-42ce-483e-b3f0-b8250ba860fc",
+              "runId": "9d76003a-42ce-483e-b3f0-b8250ba860fc:run:1",
+              "nodeId": "9d76003a-42ce-483e-b3f0-b8250ba860fc:node:1",
+              "providerThreadId": null,
+              "providerTurnId": null,
+              "nativeItemRef": null,
+              "parentItemId": null,
+              "ordinal": 1,
+              "status": "completed",
+              "title": null,
+              "startedAt": "2026-10-25T12:00:10.000Z",
+              "completedAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z",
+              "createdBy": "user",
+              "creationSource": "web",
+              "type": "user_message",
+              "messageId": "9d76003a-42ce-483e-b3f0-b8250ba860fc:t1:user",
+              "inputIntent": "turn_start",
+              "text": "question 1",
+              "attachments": []
+            },
+            {
+              "id": "9d76003a-42ce-483e-b3f0-b8250ba860fc:t1:assistant",
+              "threadId": "9d76003a-42ce-483e-b3f0-b8250ba860fc",
+              "runId": "9d76003a-42ce-483e-b3f0-b8250ba860fc:run:1",
+              "nodeId": "9d76003a-42ce-483e-b3f0-b8250ba860fc:node:1",
+              "providerThreadId": null,
+              "providerTurnId": null,
+              "nativeItemRef": null,
+              "parentItemId": null,
+              "ordinal": 2,
+              "status": "completed",
+              "title": null,
+              "startedAt": "2026-10-25T12:00:10.000Z",
+              "completedAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z",
+              "type": "assistant_message",
+              "messageId": "9d76003a-42ce-483e-b3f0-b8250ba860fc:t1:assistant",
+              "text": "answer 1",
+              "streaming": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "workspaceRoot": "/tmp/lecturn-embed-host/ws-b",
+      "title": "ws-b",
+      "threads": [
+        {
+          "sourceThreadId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b",
+          "title": "Pinned: window notes",
+          "createdAt": "2026-10-25T11:06:31.876Z",
+          "updatedAt": "2026-10-25T11:06:31.878Z",
+          "historyRevision": 34,
+          "appData": "{\"section\":\"pinned\"}",
+          "subtitle": "Counter 5",
+          "pinned": true,
+          "messages": [
+            {
+              "createdBy": "user",
+              "creationSource": "web",
+              "id": "eff74899-f5d0-4156-93d7-f8fedf1fa69b:t1:user",
+              "threadId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b",
+              "runId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b:run:1",
+              "nodeId": null,
+              "role": "user",
+              "text": "question 1",
+              "attachments": [],
+              "streaming": false,
+              "createdAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z"
+            },
+            {
+              "createdBy": "agent",
+              "creationSource": "web",
+              "id": "eff74899-f5d0-4156-93d7-f8fedf1fa69b:t1:assistant",
+              "threadId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b",
+              "runId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b:run:1",
+              "nodeId": null,
+              "role": "assistant",
+              "text": "answer 1",
+              "attachments": [],
+              "streaming": false,
+              "createdAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z"
+            }
+          ],
+          "turnItems": [
+            {
+              "id": "eff74899-f5d0-4156-93d7-f8fedf1fa69b:t1:user",
+              "threadId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b",
+              "runId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b:run:1",
+              "nodeId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b:node:1",
+              "providerThreadId": null,
+              "providerTurnId": null,
+              "nativeItemRef": null,
+              "parentItemId": null,
+              "ordinal": 1,
+              "status": "completed",
+              "title": null,
+              "startedAt": "2026-10-25T12:00:10.000Z",
+              "completedAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z",
+              "createdBy": "user",
+              "creationSource": "web",
+              "type": "user_message",
+              "messageId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b:t1:user",
+              "inputIntent": "turn_start",
+              "text": "question 1",
+              "attachments": []
+            },
+            {
+              "id": "eff74899-f5d0-4156-93d7-f8fedf1fa69b:t1:card",
+              "threadId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b",
+              "runId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b:run:1",
+              "nodeId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b:node:1",
+              "providerThreadId": null,
+              "providerTurnId": null,
+              "nativeItemRef": null,
+              "parentItemId": null,
+              "ordinal": 2,
+              "status": "completed",
+              "title": null,
+              "startedAt": "2026-10-25T12:00:10.000Z",
+              "completedAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z",
+              "type": "dynamic_tool",
+              "toolName": "mcp__lecturn__ex_counter_increment",
+              "input": {},
+              "output": {
+                "lecturnMcpApp": {
+                  "attachmentId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b-26bdb5eb-76b4-4985-bd20-efd20d54e054-html",
+                  "server": "lecturn",
+                  "tool": "ex_counter_increment",
+                  "resourceUri": "ui://embed-host/counter"
+                },
+                "result": {
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "3"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": "eff74899-f5d0-4156-93d7-f8fedf1fa69b:t1:assistant",
+              "threadId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b",
+              "runId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b:run:1",
+              "nodeId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b:node:1",
+              "providerThreadId": null,
+              "providerTurnId": null,
+              "nativeItemRef": null,
+              "parentItemId": null,
+              "ordinal": 3,
+              "status": "completed",
+              "title": null,
+              "startedAt": "2026-10-25T12:00:10.000Z",
+              "completedAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z",
+              "type": "assistant_message",
+              "messageId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b:t1:assistant",
+              "text": "answer 1",
+              "streaming": false
+            }
+          ]
+        },
+        {
+          "sourceThreadId": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1",
+          "title": "Snoozed: follow up on flash",
+          "createdAt": "2026-10-25T11:06:31.879Z",
+          "updatedAt": "2026-10-25T11:06:31.880Z",
+          "historyRevision": 41,
+          "appData": "{\"section\":\"snoozed\"}",
+          "subtitle": "Counter 6",
+          "pinned": false,
+          "messages": [
+            {
+              "createdBy": "user",
+              "creationSource": "web",
+              "id": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1:t1:user",
+              "threadId": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1",
+              "runId": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1:run:1",
+              "nodeId": null,
+              "role": "user",
+              "text": "question 1",
+              "attachments": [],
+              "streaming": false,
+              "createdAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z"
+            },
+            {
+              "createdBy": "agent",
+              "creationSource": "web",
+              "id": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1:t1:assistant",
+              "threadId": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1",
+              "runId": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1:run:1",
+              "nodeId": null,
+              "role": "assistant",
+              "text": "answer 1",
+              "attachments": [],
+              "streaming": false,
+              "createdAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z"
+            }
+          ],
+          "turnItems": [
+            {
+              "id": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1:t1:user",
+              "threadId": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1",
+              "runId": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1:run:1",
+              "nodeId": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1:node:1",
+              "providerThreadId": null,
+              "providerTurnId": null,
+              "nativeItemRef": null,
+              "parentItemId": null,
+              "ordinal": 1,
+              "status": "completed",
+              "title": null,
+              "startedAt": "2026-10-25T12:00:10.000Z",
+              "completedAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z",
+              "createdBy": "user",
+              "creationSource": "web",
+              "type": "user_message",
+              "messageId": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1:t1:user",
+              "inputIntent": "turn_start",
+              "text": "question 1",
+              "attachments": []
+            },
+            {
+              "id": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1:t1:assistant",
+              "threadId": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1",
+              "runId": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1:run:1",
+              "nodeId": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1:node:1",
+              "providerThreadId": null,
+              "providerTurnId": null,
+              "nativeItemRef": null,
+              "parentItemId": null,
+              "ordinal": 2,
+              "status": "completed",
+              "title": null,
+              "startedAt": "2026-10-25T12:00:10.000Z",
+              "completedAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z",
+              "type": "assistant_message",
+              "messageId": "68d4b4b9-ffd7-4db8-a9d7-5c1a66698cf1:t1:assistant",
+              "text": "answer 1",
+              "streaming": false
+            }
+          ]
+        },
+        {
+          "sourceThreadId": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec",
+          "title": "Settled: old experiment",
+          "createdAt": "2026-10-25T11:06:31.881Z",
+          "updatedAt": "2026-10-25T11:06:31.882Z",
+          "historyRevision": 47,
+          "appData": "{\"section\":\"settled\"}",
+          "subtitle": "Counter 7",
+          "pinned": false,
+          "messages": [
+            {
+              "createdBy": "user",
+              "creationSource": "web",
+              "id": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec:t1:user",
+              "threadId": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec",
+              "runId": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec:run:1",
+              "nodeId": null,
+              "role": "user",
+              "text": "question 1",
+              "attachments": [],
+              "streaming": false,
+              "createdAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z"
+            },
+            {
+              "createdBy": "agent",
+              "creationSource": "web",
+              "id": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec:t1:assistant",
+              "threadId": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec",
+              "runId": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec:run:1",
+              "nodeId": null,
+              "role": "assistant",
+              "text": "answer 1",
+              "attachments": [],
+              "streaming": false,
+              "createdAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z"
+            }
+          ],
+          "turnItems": [
+            {
+              "id": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec:t1:user",
+              "threadId": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec",
+              "runId": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec:run:1",
+              "nodeId": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec:node:1",
+              "providerThreadId": null,
+              "providerTurnId": null,
+              "nativeItemRef": null,
+              "parentItemId": null,
+              "ordinal": 1,
+              "status": "completed",
+              "title": null,
+              "startedAt": "2026-10-25T12:00:10.000Z",
+              "completedAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z",
+              "createdBy": "user",
+              "creationSource": "web",
+              "type": "user_message",
+              "messageId": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec:t1:user",
+              "inputIntent": "turn_start",
+              "text": "question 1",
+              "attachments": []
+            },
+            {
+              "id": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec:t1:assistant",
+              "threadId": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec",
+              "runId": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec:run:1",
+              "nodeId": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec:node:1",
+              "providerThreadId": null,
+              "providerTurnId": null,
+              "nativeItemRef": null,
+              "parentItemId": null,
+              "ordinal": 2,
+              "status": "completed",
+              "title": null,
+              "startedAt": "2026-10-25T12:00:10.000Z",
+              "completedAt": "2026-10-25T12:00:10.000Z",
+              "updatedAt": "2026-10-25T12:00:10.000Z",
+              "type": "assistant_message",
+              "messageId": "bd8ad478-6f6c-47ee-9ad2-7b6287066aec:t1:assistant",
+              "text": "answer 1",
+              "streaming": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "sourceAttachmentId": "a5f77be9-f040-44ef-b6ed-77abb3c7ccc3-550a56ae-0bff-42da-83fe-d86ed0c5f55b-html",
+      "mimeType": "text/html",
+      "byteLength": 90,
+      "sha256": "72f481c0215e62a9a72342631e43666ffe38d7cf3aa5468952ce3f2489d2933d",
+      "dataBase64": "PCFkb2N0eXBlIGh0bWw+PGh0bWw+PGhlYWQ+PHRpdGxlPkNvdW50ZXI8L3RpdGxlPjwvaGVhZD48Ym9keT48bWFpbj4zPC9tYWluPjwvYm9keT48L2h0bWw+"
+    },
+    {
+      "sourceAttachmentId": "eff74899-f5d0-4156-93d7-f8fedf1fa69b-26bdb5eb-76b4-4985-bd20-efd20d54e054-html",
+      "mimeType": "text/html",
+      "byteLength": 90,
+      "sha256": "72f481c0215e62a9a72342631e43666ffe38d7cf3aa5468952ce3f2489d2933d",
+      "dataBase64": "PCFkb2N0eXBlIGh0bWw+PGh0bWw+PGhlYWQ+PHRpdGxlPkNvdW50ZXI8L3RpdGxlPjwvaGVhZD48Ym9keT48bWFpbj4zPC9tYWluPjwvYm9keT48L2h0bWw+"
+    }
+  ]
+}

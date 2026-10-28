@@ -1,4 +1,5 @@
 import {
+  type AppBinding,
   type CommandId,
   type EventId,
   MAX_SCRIPT_ID_LENGTH,
@@ -24,6 +25,8 @@ export interface ProjectCreateCommand {
   readonly title: string;
   readonly workspaceRoot: string;
   readonly scripts?: ReadonlyArray<ProjectScript>;
+  /** Lecturn connected apps: server-set only, never from a client payload. */
+  readonly appBinding?: AppBinding;
 }
 
 export interface ProjectMetaUpdateCommand {
@@ -126,7 +129,14 @@ export const decodeProjectCommandRejection = Schema.decodeUnknownOption(
 
 export interface ProjectCommandState {
   readonly project: ProjectRow | undefined;
+  /** The active normal project on the root; app projects never own one. */
   readonly workspaceOwner: ProjectRow | undefined;
+  /**
+   * Lecturn connected apps: the active project already bound to the create's
+   * `(appId, workspaceRoot)`. Read only for a create that carries an
+   * `appBinding`, which conflicts with it instead of with `workspaceOwner`.
+   */
+  readonly appWorkspaceOwner?: ProjectRow | undefined;
 }
 
 const monogramSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -179,7 +189,15 @@ export function planProjectCommand(input: {
           `Project '${command.projectId}' already exists and cannot be created twice.`,
         );
       }
-      const conflict = requireWorkspaceAvailable(command.workspaceRoot);
+      const conflict =
+        command.appBinding === undefined
+          ? requireWorkspaceAvailable(command.workspaceRoot)
+          : state.appWorkspaceOwner === undefined
+            ? undefined
+            : new ProjectWorkspaceConflictError({
+                workspaceRoot: command.appBinding.workspaceRoot,
+                conflictingProjectId: state.appWorkspaceOwner.projectId,
+              });
       if (conflict !== undefined) return Result.fail(conflict);
       return Result.succeed({
         ...base,
@@ -194,6 +212,7 @@ export function planProjectCommand(input: {
           scripts: command.scripts ?? [],
           createdAt: occurredAt,
           updatedAt: occurredAt,
+          ...(command.appBinding === undefined ? {} : { appBinding: command.appBinding }),
         },
       });
     }

@@ -23,6 +23,7 @@ import { getSyntaxHighlighterPromise } from "../../lib/syntaxHighlighting";
 import { useTurnItemDetail } from "../../state/queries";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
+import { AppToolRawName } from "../apps/AppToolRawName";
 import { Button } from "../ui/button";
 import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
 import { RenderErrorBoundary } from "../RenderErrorBoundary";
@@ -374,6 +375,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
         </ul>
       ) : null}
 
+      <AppToolRawName item={item} />
       {item.type === "dynamic_tool" ? (
         <ToolCallBody
           toolName={item.toolName}

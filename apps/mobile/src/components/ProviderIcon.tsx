@@ -7,7 +7,7 @@ import { providerInstanceInitials } from "@lecturn/client-runtime/state/provider
 import { useId, useState } from "react";
 import { resolveOfficialAcpRegistryIconUrl } from "@lecturn/contracts";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
-import { getProviderClient } from "../lib/providerClients";
+import { getProviderIcon } from "../lib/providerClients";
 
 type ProviderIconProps = {
   readonly provider: string | null | undefined;
@@ -105,7 +105,7 @@ export function ProviderIcon(props: ProviderIconProps) {
     );
   }
 
-  const packageIcon = getProviderClient(props.provider)?.icon;
+  const packageIcon = getProviderIcon(props.provider);
   if (packageIcon) {
     const themeFill = (fill: { readonly light: string; readonly dark: string }) =>
       isDarkMode ? fill.dark : fill.light;

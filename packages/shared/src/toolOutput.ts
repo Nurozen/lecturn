@@ -9,6 +9,12 @@ import {
   readHtmlRenderReference,
   type HtmlRenderReference,
 } from "./htmlRender.ts";
+import {
+  APP_TOOL_SUMMARY_META_KEY,
+  appToolSummaryFromMeta,
+  isAppToolSource,
+} from "./appToolPresentation.ts";
+import { lecturnMcpToolName } from "./lecturnMcpToolName.ts";
 import { resolveLecturnMcpToolId } from "./lecturnMcpToolPresentation.ts";
 import { MCP_APP_OUTPUT_KEY, readMcpAppReference, type McpAppReference } from "./mcpApp.ts";
 
@@ -43,6 +49,20 @@ interface CompactToolOutput {
   [MCP_APP_OUTPUT_KEY]?: McpAppReference;
   thread?: { threadId: string };
   threads?: Array<{ threadId?: string; status?: "rolled_back" }>;
+  /** The result's own `_meta` shape, so compacting a compacted output finds it again. */
+  _meta?: { [APP_TOOL_SUMMARY_META_KEY]: string };
+}
+
+/**
+ * Adapters record the MCP result itself, or (Codex, for a card it captured)
+ * the result beside the card reference.
+ */
+function resultSummary(value: unknown): string | undefined {
+  if (!Predicate.isObject(value)) return undefined;
+  return (
+    appToolSummaryFromMeta(value._meta) ??
+    (Predicate.isObject(value.result) ? appToolSummaryFromMeta(value.result._meta) : undefined)
+  );
 }
 
 function readResult(value: unknown, budget: ResultReadBudget, depth = 0): ResultEnvelope {
@@ -116,17 +136,21 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
   };
   const result = readResult(value, budget);
   const output: CompactToolOutput = result.failed ? { isError: true } : {};
-  const data = budget.exceeded ? undefined : result.data;
+  const { data } = result;
+  // A card reference stands on its own, so bulk past the budget (an image, a
+  // long body) must not cost the row its card. IDs and counts could be partial.
   if (data !== undefined) {
+    const htmlRender = readHtmlRenderReference(data.htmlRender);
+    if (htmlRender !== undefined) output.htmlRender = htmlRender;
+    const mcpApp = readMcpAppReference(data[MCP_APP_OUTPUT_KEY]);
+    if (mcpApp !== undefined) output[MCP_APP_OUTPUT_KEY] = mcpApp;
+  }
+  if (data !== undefined && !budget.exceeded) {
     for (const key of ["threadId", "messageId", "taskId", "scheduledTaskId"] as const) {
       const id = boundedId(data[key]);
       if (id !== undefined) output[key] = id;
     }
     if (data.status === "rolled_back") output.status = "rolled_back";
-    const htmlRender = readHtmlRenderReference(data.htmlRender);
-    if (htmlRender !== undefined) output.htmlRender = htmlRender;
-    const mcpApp = readMcpAppReference(data[MCP_APP_OUTPUT_KEY]);
-    if (mcpApp !== undefined) output[MCP_APP_OUTPUT_KEY] = mcpApp;
     const nestedThreadId = Predicate.isObject(data.thread)
       ? boundedId(data.thread.threadId)
       : undefined;
@@ -162,6 +186,9 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
       }
     }
   }
+  // Kept over everything below: it is at most 120 characters.
+  const summary = resultSummary(value);
+  if (summary !== undefined) output._meta = { [APP_TOOL_SUMMARY_META_KEY]: summary };
   const oversized = () => encoder.encode(JSON.stringify(output)).byteLength > MAX_METADATA_BYTES;
   if (oversized()) {
     delete output.threads;
@@ -177,6 +204,15 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
   return Object.keys(output).length === 0 ? undefined : output;
 }
 
+/** The summary a connected app gave this call of its tool, for the row's secondary text. */
+export function appToolSummaryFromToolItem(item: {
+  readonly toolSource?: Parameters<typeof isAppToolSource>[0];
+  readonly output?: unknown;
+}): string | undefined {
+  if (!isAppToolSource(item.toolSource)) return undefined;
+  return resultSummary(compactDynamicToolOutput(item.output));
+}
+
 export function htmlRenderFromToolItem(item: {
   readonly toolName: string | null | undefined;
   readonly output?: unknown;
@@ -184,6 +220,22 @@ export function htmlRenderFromToolItem(item: {
   if (resolveLecturnMcpToolId(item.toolName) !== HTML_RENDER_TOOL_NAME) return undefined;
   const output = compactDynamicToolOutput(item.output);
   return output?.isError ? undefined : output?.htmlRender;
+}
+
+/** The server name connected-app cards carry: their tools are served by Lecturn's own MCP server. */
+export const LECTURN_MCP_APP_SERVER = "lecturn";
+
+/**
+ * Whether a recorded tool name is the call of `server`'s `tool`. Lecturn's own
+ * server is recorded under a different name by each adapter, so its tools are
+ * matched through the normalized name rather than Codex's `server.tool` form.
+ */
+function recordsMcpAppTool(
+  toolName: string | null | undefined,
+  app: Pick<McpAppReference, "server" | "tool">,
+): boolean {
+  if (toolName === `${app.server}.${app.tool}`) return true;
+  return app.server === LECTURN_MCP_APP_SERVER && lecturnMcpToolName(toolName) === app.tool;
 }
 
 /**
@@ -198,7 +250,7 @@ export function mcpAppFromToolItem(item: {
   readonly output?: unknown;
 }): McpAppReference | undefined {
   const app = compactDynamicToolOutput(item.output)?.[MCP_APP_OUTPUT_KEY];
-  return app !== undefined && item.toolName === `${app.server}.${app.tool}` ? app : undefined;
+  return app !== undefined && recordsMcpAppTool(item.toolName, app) ? app : undefined;
 }
 
 /** Some providers report completion even when command output describes a failure. */

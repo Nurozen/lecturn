@@ -700,6 +700,7 @@ describe("orchestrator MCP toolkit", () => {
             Layer.provide(Layer.mock(ThreadSearch.ThreadSearch)({})),
             Layer.provide(
               Layer.mock(ProjectService.ProjectService)({
+                getShell: () => Effect.succeed(Option.none()),
                 getById: (id) =>
                   Effect.succeed(
                     id === projectId
@@ -4058,7 +4059,11 @@ describe("orchestrator MCP toolkit", () => {
           Layer.provide(layerProviderRegistry),
           Layer.provide(ServerSettings.layerTest()),
           Layer.provide(layerUnusedScheduledTaskStub),
-          Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+          Layer.provide(
+            Layer.mock(ProjectService.ProjectService)({
+              getShell: () => Effect.succeed(Option.none()),
+            }),
+          ),
           Layer.provideMerge(
             SecretRequests.layer.pipe(
               Layer.provide(layerMemorySecretStore),

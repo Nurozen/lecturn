@@ -5,6 +5,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useState } from "react";
 
 import ChatView from "./ChatView";
+import { AppReferencesProvider } from "./embed/AppReferencesProvider";
 import { resolveDraftPromotionNavigationTarget, threadHasStarted } from "./ChatView.logic";
 import { waitForDraftHeroTransition } from "./chat/draftHeroTransition";
 import { SidebarInset } from "./ui/sidebar";
@@ -180,25 +181,36 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
   let view: React.ReactNode = null;
   if (target.kind === "draft") {
     if (draftSession) {
+      // Wrapped like the server view below, so promotion keeps the ChatView mounted.
       view = (
-        <ChatView
-          key={target.draftId}
-          draftId={target.draftId}
+        <AppReferencesProvider
           environmentId={draftSession.environmentId}
           threadId={draftSession.threadId}
-          routeKind="draft"
-          forceExpandedMobileComposer
-        />
+        >
+          <ChatView
+            key={target.draftId}
+            draftId={target.draftId}
+            environmentId={draftSession.environmentId}
+            threadId={draftSession.threadId}
+            routeKind="draft"
+            forceExpandedMobileComposer
+          />
+        </AppReferencesProvider>
       );
     }
   } else if (renderState === "ready" || (renderState === "loading" && serverThreadShell !== null)) {
     view = (
-      <ChatView
-        key={nextChatViewKey?.key}
+      <AppReferencesProvider
         environmentId={target.threadRef.environmentId}
         threadId={target.threadRef.threadId}
-        routeKind="server"
-      />
+      >
+        <ChatView
+          key={nextChatViewKey?.key}
+          environmentId={target.threadRef.environmentId}
+          threadId={target.threadRef.threadId}
+          routeKind="server"
+        />
+      </AppReferencesProvider>
     );
   }
 
