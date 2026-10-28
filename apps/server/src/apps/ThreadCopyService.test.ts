@@ -470,6 +470,42 @@ const writeProviderTurn = (threadId: ThreadId, status: "running" | "completed") 
     });
   });
 
+/** A rollback as CheckpointRollbackService records it: the run is marked, its rows stay. */
+const rollBackTurn = (threadId: ThreadId, turn: number) =>
+  Effect.gen(function* () {
+    const sink = yield* EventSink.EventSinkV2;
+    const runId = RunId.make(`${threadId}:run:${turn}`);
+    const time = at(turn * 10 + 5);
+    yield* sink.write({
+      events: [
+        {
+          id: EventId.make(`${runId}:rolled-back`),
+          type: "run.updated",
+          threadId,
+          runId,
+          occurredAt: time,
+          payload: {
+            id: runId,
+            threadId,
+            ordinal: turn,
+            providerInstanceId: instanceId,
+            modelSelection,
+            providerThreadId: null,
+            userMessageId: MessageId.make(`${threadId}:t${turn}:user`),
+            rootNodeId: null,
+            activeAttemptId: null,
+            status: "rolled_back",
+            requestedAt: at(turn * 10),
+            startedAt: at(turn * 10),
+            completedAt: time,
+            checkpointId: null,
+            contextHandoffId: null,
+          },
+        },
+      ],
+    });
+  });
+
 const decodeBundleJson = Schema.decodeUnknownEffect(
   Schema.fromJsonString(ConnectedAppThreadBundleV1),
 );
@@ -935,6 +971,82 @@ describe("ThreadCopyService", () => {
         );
         assert.strictEqual(kept.thread.title, continued.thread.title);
         assert.strictEqual(recopy.thread.title, `Apogee study (from ${APP_NAME})`);
+      }),
+  );
+
+  it.effect(
+    "a source that rolled back a turn and went on is copied anew, never mixed with the dropped turn",
+    () =>
+      Effect.gen(function* () {
+        const sidecar = yield* startEnvironment("sidecar");
+        const user = yield* startEnvironment("user");
+        const source = yield* sidecar.run(createSourceThread("/work/rocket", "Max-Q study"));
+        yield* sidecar.run(writeTurn(source.threadId, 1));
+        yield* sidecar.run(writeTurn(source.threadId, 2, { card: true }));
+        yield* user.run(importBundle(yield* sidecar.run(exportAll)));
+        const copyId = copyThreadId(app, sidecar.environmentId, source.threadId);
+        const taken = yield* user.run(projectionOf(copyId));
+
+        yield* sidecar.run(rollBackTurn(source.threadId, 2));
+        yield* sidecar.run(writeTurn(source.threadId, 3));
+        const newer = yield* sidecar.run(exportAll);
+        const exported = newer.projects[0]!.threads[0]!;
+        assert.deepEqual(
+          exported.turnItems.map((item) => item.id),
+          [1, 3].flatMap((turn) =>
+            ["user", "assistant"].map((role) => `${source.threadId}:t${turn}:${role}`),
+          ),
+        );
+        assert.deepEqual(yield* user.run(importBundle(newer)), { imported: 1, skipped: 0 });
+        assert.deepEqual(yield* user.run(importBundle(newer)), { imported: 0, skipped: 1 });
+
+        const recopyId = recopyThreadId(
+          app,
+          sidecar.environmentId,
+          source.threadId,
+          exported.historyRevision,
+        );
+        yield* user.run(
+          Effect.gen(function* () {
+            const kept = yield* projectionOf(copyId);
+            assert.deepEqual(transcript(kept), transcript(taken));
+            assert.deepEqual(kept.thread.copiedFrom, taken.thread.copiedFrom);
+
+            const recopy = yield* projectionOf(recopyId);
+            assert.deepEqual(transcript(recopy), [
+              "question 1",
+              "answer 1",
+              "question 3",
+              "answer 3",
+            ]);
+            assert.lengthOf(recopy.visibleTurnItems, 4);
+            assert.lengthOf(recopy.messages, 4);
+          }),
+        );
+
+        // History that only grows from there replaces the new copy in place.
+        yield* sidecar.run(writeTurn(source.threadId, 4));
+        assert.deepEqual(yield* user.run(importBundle(yield* sidecar.run(exportAll))), {
+          imported: 1,
+          skipped: 0,
+        });
+        yield* user.run(
+          Effect.gen(function* () {
+            const rail = yield* listCopies(yield* appProjectFor("/work/rocket"));
+            assert.sameMembers(
+              rail.map((summary) => summary.threadId),
+              [copyId, recopyId],
+            );
+            assert.deepEqual(transcript(yield* projectionOf(recopyId)), [
+              "question 1",
+              "answer 1",
+              "question 3",
+              "answer 3",
+              "question 4",
+              "answer 4",
+            ]);
+          }),
+        );
       }),
   );
 

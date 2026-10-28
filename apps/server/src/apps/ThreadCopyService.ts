@@ -81,6 +81,7 @@ import {
   collectThreadAssetRefs,
   copiedAssetRelativePath,
   copiedAttachmentId,
+  copyHoldsDroppedHistory,
   copyThreadHistory,
   copyThreadId,
   legacyCopyThreadId,
@@ -550,6 +551,29 @@ const make = Effect.gen(function* () {
       SELECT 1 AS "found" FROM orchestration_v2_projection_runs WHERE thread_id = ${threadId} LIMIT 1
     `.pipe(Effect.map((rows) => rows.length > 0));
 
+  // Only imports write a copy's copied rows, and the import lock serializes
+  // them, so the answer read while planning still holds at the write.
+  const holdsDroppedHistory = Effect.fn("ThreadCopyService.holdsDroppedHistory")(function* (
+    threadId: ThreadId,
+    thread: ConnectedAppThreadBundleThread,
+  ) {
+    const [messages, items] = yield* Effect.all([
+      sql<{ readonly id: string }>`
+        SELECT message_id AS "id" FROM orchestration_v2_projection_messages WHERE thread_id = ${threadId}
+      `,
+      sql<{ readonly id: string }>`
+        SELECT turn_item_id AS "id" FROM orchestration_v2_projection_turn_items WHERE thread_id = ${threadId}
+      `,
+    ]);
+    return copyHoldsDroppedHistory({
+      threadId,
+      copiedMessageIds: messages.map((row) => row.id),
+      copiedItemIds: items.map((row) => row.id),
+      messages: thread.messages,
+      items: thread.turnItems,
+    });
+  });
+
   /**
    * Writes over a copy only if it is still history only, judged from the row
    * as it is now rather than when the import planned. Every user command on
@@ -573,7 +597,9 @@ const make = Effect.gen(function* () {
   /**
    * An up-to-date copy is skipped. A newer source replaces a copy that
    * is still history only; a copy the user has continued is never touched,
-   * and the newer history becomes a thread of its own.
+   * and the newer history becomes a thread of its own. So does history that
+   * dropped rows the copy holds (a rollback at the source): a replace cannot
+   * remove them, and they would mix with the newer turns.
    *
    * The title is metadata: a rename alone never re-copies history. An
    * up-to-date copy that is still history only takes the source's current
@@ -594,7 +620,7 @@ const make = Effect.gen(function* () {
       firstCopyId,
       legacyCopyThreadId(bundle.sourceEnvironmentId, thread.sourceThreadId),
     ]);
-    // A re-copy's suffix tells it apart from the continued copy beside it.
+    // A re-copy's suffix tells it apart from the earlier copy beside it.
     const titleOf = (threadId: ThreadId) => {
       const title = sourceTitle === "" ? UNTITLED : sourceTitle;
       return firstCopyIds.has(threadId)
@@ -633,7 +659,11 @@ const make = Effect.gen(function* () {
       }
       return { type: "retitle", threadId: latest.threadId, title } satisfies ThreadPlan;
     }
-    if (!latest.deleted && !(yield* hasRuns(latest.threadId))) {
+    if (
+      !latest.deleted &&
+      !(yield* hasRuns(latest.threadId)) &&
+      !(yield* holdsDroppedHistory(latest.threadId, thread))
+    ) {
       return {
         type: "replace",
         threadId: latest.threadId,

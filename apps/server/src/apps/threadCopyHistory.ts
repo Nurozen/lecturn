@@ -38,8 +38,9 @@ export const legacyCopyThreadId = (sourceEnvironmentId: EnvironmentId, sourceThr
   ThreadId.make(`copy:${sourceEnvironmentId}:${sourceThreadId}`);
 
 /**
- * A copy that gained Lecturn-side turns is never replaced; newer source
- * history goes to this thread instead, keyed by the revision so a rerun finds it.
+ * A copy that gained Lecturn-side turns, or holds history its source has
+ * since dropped, is never replaced; newer source history goes to this thread
+ * instead, keyed by the revision so a rerun finds it.
  */
 export const recopyThreadId = (
   appId: AppId,
@@ -131,6 +132,35 @@ const copiedMessageId = (threadId: ThreadId, sourceId: string) =>
   MessageId.make(`${threadId}:${sourceId}`);
 const copiedItemId = (threadId: ThreadId, sourceId: string) =>
   TurnItemId.make(`${threadId}:${sourceId}`);
+
+/**
+ * Whether the copy holds a row taken from its source that the source's
+ * history no longer has, as after a rollback there. A replace only upserts,
+ * and a copied row has no run for the rollback to hide, so that row would
+ * stay among the newer history. Rows this server added carry no copied id.
+ */
+export function copyHoldsDroppedHistory(input: {
+  readonly threadId: ThreadId;
+  readonly copiedMessageIds: ReadonlyArray<string>;
+  readonly copiedItemIds: ReadonlyArray<string>;
+  readonly messages: ReadonlyArray<OrchestrationV2ConversationMessage>;
+  readonly items: ReadonlyArray<OrchestrationV2TurnItem>;
+}): boolean {
+  const { threadId } = input;
+  const prefix = `${threadId}:`;
+  const holdsDropped = (copied: ReadonlyArray<string>, kept: ReadonlySet<string>) =>
+    copied.some((id) => id.startsWith(prefix) && !kept.has(id));
+  return (
+    holdsDropped(
+      input.copiedMessageIds,
+      new Set(input.messages.map((message) => copiedMessageId(threadId, message.id))),
+    ) ||
+    holdsDropped(
+      input.copiedItemIds,
+      new Set(input.items.map((item) => copiedItemId(threadId, item.id))),
+    )
+  );
+}
 
 /**
  * A copy is run-less history: every run, node and provider reference
