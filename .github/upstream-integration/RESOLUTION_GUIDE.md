@@ -672,6 +672,11 @@ from upstream's side.
   `useEffectEvent` so effects never re-run on closure identity. The Home
   group-display handler reads a handler-written ref plus registry prefs
   (LegendList keeps stale row closures); no render-time ref writes.
+  A `useEffectEvent` result never reaches a dependency (a `useFocusEffect`
+  callback, a memoized gesture or value): React returns a new function every
+  render. `AdaptiveWorkspaceLayout` keeps ref-based inspector registration and
+  upstream's memoized pane derivations (325a7e2ae4, #21867); without both,
+  every screen with an inspector pane loops on "Maximum update depth".
 - **Mobile Git sheets.** Fork sections (Space repositories, Selected
   repository, project PRs with Watch, read-only) use upstream
   `ListSection`/`ListRow`; `SheetListRow`/`MetaCard`/`SheetGroupCard` are retired.

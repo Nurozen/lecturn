@@ -12,15 +12,7 @@ import {
   StackActions,
   useNavigation,
 } from "@react-navigation/native";
-import {
-  createContext,
-  use,
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, use, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Platform, useWindowDimensions, View } from "react-native";
 import Animated, {
   runOnJS,
@@ -154,41 +146,58 @@ export function useRegisterWorkspaceInspector(render: (() => ReactNode) | undefi
     );
   })();
 
-  const focusedRef = useRef(false);
-  const deactivateRef = useRef<(() => void) | null>(null);
-
-  // An effect event reads this render's pane without making the focus
-  // subscription re-run (and deactivate) every time the pane closure changes.
-  const syncRegistration = useEffectEvent(() => {
-    if (!focusedRef.current || wrappedRender === undefined) {
-      deactivateRef.current?.();
-      return;
-    }
-    deactivateRef.current = registerWorkspaceInspector(wrappedRender);
-  });
-
-  useFocusEffect(() => {
-    focusedRef.current = true;
-    syncRegistration();
-    return () => {
-      focusedRef.current = false;
-      syncRegistration();
-    };
+  // The focus subscription reads the current pane from this ref, so it never re-runs (and
+  // deactivates) when the pane closure changes. An effect event can't do this: React returns a
+  // new one every render, so a focus callback closing over it re-subscribed on every render.
+  const registrationRef = useRef<WorkspaceInspectorRegistration>({
+    focused: false,
+    deactivate: null,
+    register: registerWorkspaceInspector,
+    render: wrappedRender,
   });
 
   useEffect(() => {
-    if (focusedRef.current) {
-      syncRegistration();
+    const registration = registrationRef.current;
+    registration.register = registerWorkspaceInspector;
+    registration.render = wrappedRender;
+    if (registration.focused) {
+      syncWorkspaceInspectorRegistration(registration);
     }
-  }, [wrappedRender]);
+  }, [registerWorkspaceInspector, wrappedRender]);
+
+  useFocusEffect(() => {
+    const registration = registrationRef.current;
+    registration.focused = true;
+    syncWorkspaceInspectorRegistration(registration);
+    return () => {
+      registration.focused = false;
+      syncWorkspaceInspectorRegistration(registration);
+    };
+  });
 
   useEffect(
     () => () => {
-      deactivateRef.current?.();
-      deactivateRef.current = null;
+      const registration = registrationRef.current;
+      registration.deactivate?.();
+      registration.deactivate = null;
     },
     [],
   );
+}
+
+interface WorkspaceInspectorRegistration {
+  focused: boolean;
+  deactivate: (() => void) | null;
+  register: (render: () => ReactNode) => () => void;
+  render: (() => ReactNode) | undefined;
+}
+
+function syncWorkspaceInspectorRegistration(registration: WorkspaceInspectorRegistration) {
+  if (!registration.focused || registration.render === undefined) {
+    registration.deactivate?.();
+    return;
+  }
+  registration.deactivate = registration.register(registration.render);
 }
 
 export function AdaptiveWorkspaceLayout(props: {
@@ -247,7 +256,14 @@ function AdaptiveWorkspaceLayoutContent(
   const [primarySidebarSearchQuery, setPrimarySidebarSearchQuery] = useState("");
   const [focusedAuxiliaryPaneRole, setFocusedAuxiliaryPaneRole] =
     useState<WorkspaceAuxiliaryPaneRole | null>(null);
-  const baseLayout = deriveLayout({ width: viewportWidth, height, nativeMetrics });
+  // The compiler can't memoize these derivations: they stay live across later hook calls. Fresh
+  // objects here change the workspace context on every render, so every workspace screen
+  // re-renders on any layout state change, and the inspector registration then loops: each
+  // re-register re-renders its screen, which hands over a new inspector renderer.
+  const baseLayout = useMemo(
+    () => deriveLayout({ width: viewportWidth, height, nativeMetrics }),
+    [height, viewportWidth, nativeMetrics],
+  );
   const primarySidebarPinned = isPrimarySidebarPinned({
     pathname,
     nativeWorkspace,
@@ -260,17 +276,30 @@ function AdaptiveWorkspaceLayoutContent(
     setHinge(next);
     setWindowHinge(nextWindow);
   };
-  const layout = alignListPaneToHinge({ layout: baseLayout, hinge, viewportWidth });
+  const layout = useMemo(
+    () => alignListPaneToHinge({ layout: baseLayout, hinge, viewportWidth }),
+    [baseLayout, hinge, viewportWidth],
+  );
   const shouldRenderPrimarySidebar = layout.usesSplitView;
-  const fileInspector = deriveFileInspectorPaneLayout({
-    layout,
-    viewportWidth,
-    preferredWidth: fileInspectorPreferredWidth ?? undefined,
-    reservedLeadingWidth:
-      shouldRenderPrimarySidebar && showPrimarySidebar
-        ? (layout.listPaneWidth ?? 0) + (layout.listPaneGap ?? 0)
-        : 0,
-  });
+  const fileInspector = useMemo(
+    () =>
+      deriveFileInspectorPaneLayout({
+        layout,
+        viewportWidth,
+        preferredWidth: fileInspectorPreferredWidth ?? undefined,
+        reservedLeadingWidth:
+          shouldRenderPrimarySidebar && showPrimarySidebar
+            ? (layout.listPaneWidth ?? 0) + (layout.listPaneGap ?? 0)
+            : 0,
+      }),
+    [
+      fileInspectorPreferredWidth,
+      layout,
+      showPrimarySidebar,
+      shouldRenderPrimarySidebar,
+      viewportWidth,
+    ],
+  );
   const auxiliaryPaneRole: WorkspaceAuxiliaryPaneRole =
     focusedAuxiliaryPaneRole ?? (/\/files(?:\/|$)/.test(pathname) ? "inspector" : "supplementary");
   const auxiliaryPanePreferredVisible =
@@ -281,14 +310,25 @@ function AdaptiveWorkspaceLayoutContent(
     auxiliaryPaneRole === "inspector"
       ? fileInspectorPreferredWidth
       : supplementaryPanePreferredWidth;
-  const panes = deriveWorkspacePaneLayout({
-    layout,
-    viewportWidth,
-    primarySidebarPreferredVisible: showPrimarySidebar,
-    auxiliaryPanePreferredVisible,
-    auxiliaryPaneRole,
-    auxiliaryPanePreferredWidth: auxiliaryPanePreferredWidth ?? undefined,
-  });
+  const panes = useMemo(
+    () =>
+      deriveWorkspacePaneLayout({
+        layout,
+        viewportWidth,
+        primarySidebarPreferredVisible: showPrimarySidebar,
+        auxiliaryPanePreferredVisible,
+        auxiliaryPaneRole,
+        auxiliaryPanePreferredWidth: auxiliaryPanePreferredWidth ?? undefined,
+      }),
+    [
+      auxiliaryPanePreferredVisible,
+      auxiliaryPaneRole,
+      auxiliaryPanePreferredWidth,
+      layout,
+      showPrimarySidebar,
+      viewportWidth,
+    ],
+  );
   const activeThread = parseActiveThreadPath(pathname);
   const environmentId = activeThread?.environmentId ?? null;
   const threadId = activeThread?.threadId ?? null;
