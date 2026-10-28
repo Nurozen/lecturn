@@ -248,9 +248,9 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
       expect(identity).not.toBeNull();
       expect(identity?.canonicalKey).toBe("github.com/nurozen/lecturn");
       expect(normalizeResolvedPath(resolvedIdentityRoot)).toBe(normalizeResolvedPath(resolvedCwd));
-      expect(identity?.displayName).toBe("nurozen/lecturn");
+      expect(identity?.displayName).toBe("Nurozen/lecturn");
       expect(identity?.provider).toBe("github");
-      expect(identity?.owner).toBe("nurozen");
+      expect(identity?.owner).toBe("Nurozen");
       expect(identity?.name).toBe("lecturn");
     }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
   );
@@ -303,6 +303,33 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
   );
 
+  it.effect("ignores local-path remotes such as GitButler's gb-local", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const localOnlyDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "lecturn-repository-identity-local-remote-",
+      });
+      const mixedDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "lecturn-repository-identity-mixed-remote-",
+      });
+
+      yield* git(localOnlyDir, ["init"]);
+      yield* git(localOnlyDir, ["remote", "add", "gb-local", "."]);
+      yield* git(localOnlyDir, ["remote", "add", "backup", "/srv/git/repo.git"]);
+      yield* git(localOnlyDir, ["remote", "add", "archive", "file:///srv/git/repo.git"]);
+      yield* git(mixedDir, ["init"]);
+      yield* git(mixedDir, ["remote", "add", "gb-local", "."]);
+      yield* git(mixedDir, ["remote", "add", "mirror", "git@github.com:Nurozen/lecturn.git"]);
+
+      const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+      expect(yield* resolver.resolve(localOnlyDir)).toBeNull();
+
+      const mixedIdentity = yield* resolver.resolve(mixedDir);
+      expect(mixedIdentity?.locator.remoteName).toBe("mirror");
+      expect(mixedIdentity?.canonicalKey).toBe("github.com/nurozen/lecturn");
+    }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
+  );
+
   it.effect.each(["add", "replace"] as const)(
     "refreshes the primary upstream after %s before cache expiry",
     (change) =>
@@ -336,7 +363,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
         expect(identity).not.toBeNull();
         expect(identity?.locator.remoteName).toBe("upstream");
         expect(identity?.canonicalKey).toBe("github.com/nurozen/lecturn");
-        expect(identity?.displayName).toBe("nurozen/lecturn");
+        expect(identity?.displayName).toBe("Nurozen/lecturn");
         expect(yield* resolver.resolve(cwd)).toEqual(identity);
       }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
   );
@@ -356,7 +383,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
       const identity = yield* resolver.resolve(cwd);
 
       expect(identity?.canonicalKey).toBe("github.com/nurozen/lecturn");
-      expect(identity?.displayName).toBe("nurozen/lecturn");
+      expect(identity?.displayName).toBe("Nurozen/lecturn");
       expect(identity?.origin).toEqual({
         canonicalKey: "github.com/julius/lecturn-fork",
         displayName: "julius/lecturn-fork",
@@ -379,8 +406,8 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
 
       expect(identity).not.toBeNull();
       expect(identity?.canonicalKey).toBe("gitlab.com/nurozen/platform/lecturn");
-      expect(identity?.displayName).toBe("nurozen/platform/lecturn");
-      expect(identity?.owner).toBe("nurozen");
+      expect(identity?.displayName).toBe("Nurozen/platform/lecturn");
+      expect(identity?.owner).toBe("Nurozen");
       expect(identity?.name).toBe("lecturn");
     }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
   );
@@ -452,7 +479,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
       const refreshedIdentity = yield* resolver.resolve(cwd);
       expect(refreshedIdentity).not.toBeNull();
       expect(refreshedIdentity?.canonicalKey).toBe("github.com/nurozen/lecturn-next");
-      expect(refreshedIdentity?.displayName).toBe("nurozen/lecturn-next");
+      expect(refreshedIdentity?.displayName).toBe("Nurozen/lecturn-next");
       expect(refreshedIdentity?.name).toBe("lecturn-next");
     }).pipe(
       Effect.provide(

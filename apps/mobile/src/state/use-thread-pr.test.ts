@@ -6,6 +6,7 @@ import {
   presentThreadGitStatusPr,
   presentThreadLinkedPullRequests,
   presentThreadPr,
+  resolveThreadPrBadgeAction,
   resolveThreadPrSource,
   resolveThreadPullRequestRef,
 } from "./thread-pr-presentation";
@@ -233,6 +234,36 @@ describe("presentThreadLinkedPullRequests", () => {
         { ...link, snapshot: { ...link.snapshot!, state: "merged" } },
       ]),
     ).toMatchObject({ state: "merged", textClassName: "text-adaptive-violet-600-400" });
+  });
+});
+
+describe("resolveThreadPrBadgeAction", () => {
+  it("opens a single linked or branch pull request directly", () => {
+    expect(resolveThreadPrBadgeAction(presentThreadLinkedPullRequests([linkedPr(1)])!)).toEqual({
+      kind: "open",
+      accessibilityLabel: "Open #1 pull request open",
+    });
+    expect(resolveThreadPrBadgeAction(presentThreadPr(pullRequest, null))).toMatchObject({
+      kind: "open",
+    });
+  });
+
+  it("lists unrelated linked pull requests", () => {
+    expect(
+      resolveThreadPrBadgeAction(presentThreadLinkedPullRequests([linkedPr(1), linkedPr(2)])!),
+    ).toEqual({
+      kind: "list",
+      accessibilityLabel: "Show 2 linked pull requests, overall open",
+    });
+  });
+
+  it("lists a stack even though the badge shows its top pull request", () => {
+    const top = linkedPr(2);
+    const stack = presentThreadLinkedPullRequests([
+      linkedPr(1),
+      { ...top, snapshot: { ...top.snapshot!, baseBranch: "change-1" } },
+    ])!;
+    expect(resolveThreadPrBadgeAction(stack)).toMatchObject({ kind: "list" });
   });
 });
 

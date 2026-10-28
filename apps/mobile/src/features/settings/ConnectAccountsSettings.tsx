@@ -26,14 +26,19 @@ export function ConnectAccountsSettings({
   const [busy, setBusy] = useState<string | null>(null);
   const openProfile = async (accountId: string) => {
     setBusy(accountId);
-    try {
+    await (async () => {
       await selectMobileProfileAccount(clerk, accountId);
       navigation.navigate("SettingsSheet", { screen: "SettingsAuth", params: { accountId } });
-    } catch (error) {
-      Dialog.alert("Could not open account", error instanceof Error ? error.message : "Try again.");
-    } finally {
-      setBusy(null);
-    }
+    })()
+      .catch((error: unknown) => {
+        Dialog.alert(
+          "Could not open account",
+          error instanceof Error ? error.message : "Try again.",
+        );
+      })
+      .finally(() => {
+        setBusy(null);
+      });
   };
   const signOut = (accountId: string, label: string) =>
     Dialog.alert(

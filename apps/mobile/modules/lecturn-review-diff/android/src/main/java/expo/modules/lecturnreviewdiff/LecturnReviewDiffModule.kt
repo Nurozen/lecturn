@@ -43,9 +43,8 @@ class LecturnReviewDiffModule : Module() {
       Prop("rowHeight") { view: LecturnReviewDiffView, rowHeight: Double ->
         view.setRowHeight(rowHeight.toFloat())
       }
-      Prop("contentWidth") { view: LecturnReviewDiffView, contentWidth: Double ->
-        view.setContentWidth(contentWidth.toFloat())
-      }
+      // Accept the shared prop while deriving Android's scroll range from the drawn text.
+      Prop("contentWidth") { _: LecturnReviewDiffView, _: Double -> }
       Prop("contentInsetBottom") { view: LecturnReviewDiffView, value: Double ->
         view.setContentInsetBottom(value.toFloat())
       }

@@ -36,7 +36,7 @@ export function WatchPullRequestButton(props: {
     if (!canOperate || busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
-    try {
+    await (async () => {
       const result = await track({
         environmentId: props.environmentId,
         input: {
@@ -57,10 +57,10 @@ export function WatchPullRequestButton(props: {
           failure instanceof Error ? failure.message : "The request failed.",
         );
       }
-    } finally {
+    })().finally(() => {
       busyRef.current = false;
       setBusy(false);
-    }
+    });
   };
   return (
     <Pressable

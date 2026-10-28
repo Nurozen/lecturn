@@ -7,7 +7,7 @@ import { AppState } from "react-native";
 import { resolveCloudPublicConfig } from "../../cloud/publicConfig";
 
 import { useConnectAccounts } from "../../cloud/knownAccounts";
-import { useSessionRelayToken } from "../../cloud/useSessionRelayToken";
+import { sessionRelayTokenReader } from "../../cloud/sessionRelayTokenReader";
 
 export function useConnectBillingStatus(accountId?: string | null) {
   const auth = useAuth();
@@ -18,7 +18,7 @@ export function useConnectBillingStatus(accountId?: string | null) {
     accountId === undefined
       ? auth.isSignedIn
       : accounts.some((account) => account.accountId === userId && account.signedIn);
-  const getRelayToken = useSessionRelayToken({ userId, sessionId, isSignedIn });
+  const getRelayToken = sessionRelayTokenReader({ userId, sessionId, isSignedIn });
   const [refreshKey, setRefreshKey] = useState(0);
   const [result, setResult] = useState<{
     accountId: string;
@@ -29,17 +29,19 @@ export function useConnectBillingStatus(accountId?: string | null) {
   useFocusEffect(
     useCallback(() => {
       if (!isSignedIn || !userId) return;
-      let generation = 0;
+      // Bumped on every request and on backgrounding; a stale response is dropped.
+      const request = { generation: 0 };
       let disposed = false;
       const refresh = () => {
-        const requestGeneration = ++generation;
+        request.generation += 1;
+        const requestGeneration = request.generation;
         setResult({ accountId: userId, status: null, loading: true, refreshKey });
         const client = createBillingClient({
           relayUrl: resolveCloudPublicConfig().relay.url ?? "",
           getToken: getRelayToken,
         });
         const settle = (status: RelayBillingStatus | null) => {
-          if (!disposed && requestGeneration === generation)
+          if (!disposed && requestGeneration === request.generation)
             setResult({ accountId: userId, status, loading: false, refreshKey });
         };
         void client.getStatus().then(settle, () => settle(null));
@@ -48,7 +50,7 @@ export function useConnectBillingStatus(accountId?: string | null) {
       if (appState !== "background" && appState !== "inactive") refresh();
       const subscription = AppState.addEventListener("change", (nextState) => {
         if (nextState === "active" && appState !== "active") refresh();
-        else if (nextState !== "active") ++generation;
+        else if (nextState !== "active") request.generation += 1;
         appState = nextState;
       });
       return () => {

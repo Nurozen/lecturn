@@ -1,5 +1,7 @@
 {
   "id": "/",
+  "name": "Lecturn",
+  "short_name": "Lecturn",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

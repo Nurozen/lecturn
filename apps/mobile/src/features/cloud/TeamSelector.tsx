@@ -13,7 +13,7 @@ import { AppText as Text } from "../../components/ui/AppText";
 import { resolveCloudPublicConfig } from "./publicConfig";
 
 import { useConnectAccounts } from "./knownAccounts";
-import { useSessionRelayToken } from "./useSessionRelayToken";
+import { sessionRelayTokenReader } from "./sessionRelayTokenReader";
 
 /** Native companion: account selection and access status, without purchase links. */
 export function TeamSelector(props: { readonly accountId?: string | null } = {}) {
@@ -25,7 +25,7 @@ export function TeamSelector(props: { readonly accountId?: string | null } = {})
     props.accountId === undefined
       ? auth.isSignedIn
       : accounts.some((account) => account.accountId === userId && account.signedIn);
-  const tokenProvider = useSessionRelayToken({ userId, sessionId, isSignedIn });
+  const tokenProvider = sessionRelayTokenReader({ userId, sessionId, isSignedIn });
   const selected = useSyncExternalStore(
     subscribeTeamSelection,
     () => selectedTeam(userId),

@@ -5,6 +5,7 @@ import {
   type ServerProviderSlashCommand,
   type ServerProviderResetCredits,
 } from "@lecturn/contracts";
+import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -432,10 +433,13 @@ const probeClaudeCapabilities = (
       ),
     );
   }).pipe(
-    Effect.result,
-    Effect.map((result) => (Result.isSuccess(result) ? result.success : undefined)),
+    Effect.tapError((error) =>
+      Effect.logWarning("Claude capability probe failed.", { errorTag: error._tag }),
+    ),
   );
 };
+
+type ClaudeCapabilitiesProbeError = Effect.Error<ReturnType<typeof probeClaudeCapabilities>>;
 
 const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
   claudeSettings: ClaudeSettings,
@@ -514,7 +518,10 @@ export const probeClaudeWorkspaceSnapshot = Effect.fn("probeClaudeWorkspaceSnaps
 ): Effect.fn.Return<ProviderWorkspaceSnapshot, never, FileSystem.FileSystem | Path.Path> {
   if (!claudeSettings.enabled) return machineSnapshot;
   const skills = yield* discoverClaudeSkills(claudeSettings, cwd, environment);
-  const capabilities = yield* probeClaudeCapabilities(claudeSettings, environment, cwd, false);
+  const probeResult = yield* probeClaudeCapabilities(claudeSettings, environment, cwd, false).pipe(
+    Effect.result,
+  );
+  const capabilities = Result.isSuccess(probeResult) ? probeResult.success : undefined;
   return {
     ...machineSnapshot,
     skills,
@@ -531,7 +538,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   resolveCapabilities?: (
     claudeSettings: ClaudeSettings,
     version?: string,
-  ) => Effect.Effect<ClaudeCapabilitiesProbe | undefined>,
+  ) => Effect.Effect<ClaudeCapabilitiesProbe | undefined, ClaudeCapabilitiesProbeError>,
   environment?: NodeJS.ProcessEnv,
   cwd?: string,
   modelCatalog: ClaudeModelCatalog = BUNDLED_CLAUDE_MODEL_CATALOG,
@@ -645,12 +652,14 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   // Resolve sign-in before optional SDK initialization, which can stall on a
   // logged-out CLI and consume the entire discovery budget.
   const loggedIn = yield* probeClaudeLoggedIn(claudeSettings, resolvedEnvironment, cwd);
-  const capabilities =
+  const probeResult =
     resolveCapabilities && loggedIn !== false
-      ? yield* resolveCapabilities(claudeSettings, parsedVersion ?? undefined).pipe(
-          Effect.orElseSucceed(() => undefined),
-        )
+      ? yield* resolveCapabilities(claudeSettings, parsedVersion ?? undefined).pipe(Effect.result)
       : undefined;
+  const capabilities =
+    probeResult && Result.isSuccess(probeResult) ? probeResult.success : undefined;
+  const probeFailure =
+    probeResult && Result.isFailure(probeResult) ? probeResult.failure : undefined;
   const discoveredCatalog = mergeClaudeRuntimeModelCatalog(
     modelCatalog,
     capabilities?.models?.length ? capabilities.models : lastRuntimeModels?.(),
@@ -701,8 +710,11 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         version: parsedVersion,
         status: "warning",
         auth: { status: "unknown" },
-        message:
-          loggedIn === undefined
+        message: probeFailure
+          ? Cause.isTimeoutError(probeFailure)
+            ? `Timed out after ${CAPABILITIES_PROBE_TIMEOUT_MS / 1_000}s while checking Claude account status.`
+            : "Claude Agent CLI failed while checking account status."
+          : loggedIn === undefined
             ? "Could not verify Claude authentication status."
             : "Could not verify Claude authentication status from initialization result.",
       },

@@ -82,10 +82,13 @@ describe("LecturnProjectFileFromJson", () => {
 });
 
 describe("parseLecturnProjectFile", () => {
-  it("returns the decoded file for valid contents", () => {
-    expect(parseLecturnProjectFile('{ "defaultThreadEnvMode": "worktree" }')).toEqual({
-      defaultThreadEnvMode: "worktree",
-    });
+  it("reads project defaults from JSONC with a URL in a block comment", () => {
+    expect(
+      parseLecturnProjectFile(`{
+        /* See https://lecturn.cloudgatherer.net/schema/lecturn.json */
+        "defaultThreadEnvMode": "worktree"
+      }`),
+    ).toEqual({ defaultThreadEnvMode: "worktree" });
   });
 
   it("returns null for malformed or invalid contents", () => {

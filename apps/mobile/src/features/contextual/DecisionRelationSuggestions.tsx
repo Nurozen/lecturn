@@ -57,7 +57,7 @@ function SuggestionCard({
     if (!actionable) return;
     setBusy(true);
     setError(null);
-    try {
+    await (async () => {
       const result =
         action === "merge" && other.data
           ? await merge({
@@ -96,9 +96,9 @@ function SuggestionCard({
         other.refresh();
       } else
         setError("These decisions changed or the request failed. Refresh before choosing again.");
-    } finally {
+    })().finally(() => {
       setBusy(false);
-    }
+    });
   }
   return (
     <View className="gap-2 rounded-lg border border-border p-3">

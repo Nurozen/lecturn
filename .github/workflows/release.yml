@@ -70,6 +70,7 @@ jobs:
   # run. Scheduled runs also decide here whether a nightly is due.
   resolve_commit:
     name: Resolve release commit
+    if: github.repository == 'Nurozen/lecturn'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -346,7 +347,11 @@ jobs:
 
       # The lecturn build task depends on @lecturn/web#build, so apps/server/dist
       # holds the server bundle plus the web client the archive serves.
+      # Release builds report their channel (stable or nightly) in telemetry;
+      # builds in other repositories report "dev".
       - name: Build server bundle and web client
+        env:
+          LECTURN_TELEMETRY_CHANNEL: ${{ github.repository == 'Nurozen/lecturn' && needs.preflight.outputs.release_channel || 'dev' }}
         run: vp run --filter lecturn build
 
       - name: Setup Rust
@@ -678,6 +683,7 @@ jobs:
       - name: Build desktop artifact
         shell: bash
         env:
+          LECTURN_TELEMETRY_CHANNEL: ${{ github.repository == 'Nurozen/lecturn' && needs.preflight.outputs.release_channel || 'dev' }}
           pnpm_config_cache_dir: ${{ runner.temp }}/pnpm-metadata
           LECTURN_DESKTOP_REUSE_RESOURCE_MONITOR: ${{ steps.resource_monitor_cache.outputs.cache-hit == 'true' }}
           LECTURN_DESKTOP_REUSE_LINUX_CAPTURE_HELPERS: ${{ steps.capture_helper_cache.outputs.cache-hit == 'true' }}
@@ -1019,6 +1025,8 @@ jobs:
       # The lecturn build task depends on @lecturn/web#build, so the web client is
       # built (once) as part of this step.
       - name: Build CLI package
+        env:
+          LECTURN_TELEMETRY_CHANNEL: ${{ github.repository == 'Nurozen/lecturn' && needs.preflight.outputs.release_channel || 'dev' }}
         run: vp run --filter lecturn build
 
       - name: Download resource monitors

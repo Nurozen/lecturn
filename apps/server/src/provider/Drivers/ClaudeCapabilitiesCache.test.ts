@@ -88,4 +88,47 @@ describe("Claude capabilities cache", () => {
       expect(personal.currentModels?.[0]?.value).toBe("personal-model");
     }),
   );
+
+  it.effect("reuses the last account once without usage after a probe failure, then retries", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      let failing = false;
+      const cache = yield* makeClaudeCapabilitiesCache(
+        Effect.suspend(() => {
+          calls++;
+          return failing
+            ? Effect.fail("probe timed out")
+            : Effect.succeed({
+                ...capabilities("known-model"),
+                usage: { rate_limits_available: true, rate_limits: [] },
+              } as ClaudeCapabilitiesProbe);
+        }),
+      );
+      expect((yield* cache.get("2.0.0"))?.usage).toBeDefined();
+      failing = true;
+      yield* cache.invalidate;
+      const fallback = yield* cache.get("2.0.0");
+      expect(fallback?.email).toBe("known-model@example.test");
+      expect(fallback?.usage).toBeUndefined();
+      // A fallback earns no TTL, and the last account is reused only once.
+      expect(yield* Effect.flip(cache.get("2.0.0"))).toBe("probe timed out");
+      expect(calls).toBe(3);
+    }),
+  );
+
+  it.effect("does not reuse the last account after a sign-in to another account", () =>
+    Effect.gen(function* () {
+      let failing = false;
+      const cache = yield* makeClaudeCapabilitiesCache(
+        Effect.suspend(() =>
+          failing ? Effect.fail("probe failed") : Effect.succeed(capabilities("known-model")),
+        ),
+        { isSameAccount: () => Effect.succeed(false) },
+      );
+      yield* cache.get("2.0.0");
+      failing = true;
+      yield* cache.invalidate;
+      expect(yield* Effect.flip(cache.get("2.0.0"))).toBe("probe failed");
+    }),
+  );
 });

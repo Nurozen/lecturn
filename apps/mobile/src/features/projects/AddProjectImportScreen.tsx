@@ -126,7 +126,7 @@ function useExternalSessionListing(environmentId: EnvironmentId | null, cwd: str
     let cancelled = false;
     void Promise.all(
       instanceIds.map(async (providerInstanceId): Promise<ExternalSessionsInstanceResult> => {
-        try {
+        return (async (): Promise<ExternalSessionsInstanceResult> => {
           const result = await listSessions({
             environmentId,
             input: {
@@ -138,9 +138,7 @@ function useExternalSessionListing(environmentId: EnvironmentId | null, cwd: str
           return result._tag === "Success"
             ? { providerInstanceId, ok: true, ...result.value }
             : { providerInstanceId, ok: false };
-        } catch {
-          return { providerInstanceId, ok: false };
-        }
+        })().catch((): ExternalSessionsInstanceResult => ({ providerInstanceId, ok: false }));
       }),
     ).then((results) => {
       if (!cancelled) {
@@ -352,7 +350,7 @@ export function AddProjectImportFoldersScreen(props: {
       }
       addingRef.current = true;
       setAddingCwd(folder.cwd);
-      try {
+      await (async () => {
         const { projectId, result } = await dispatchProjectCreate({
           environmentId,
           workspaceRoot: folder.cwd,
@@ -363,10 +361,10 @@ export function AddProjectImportFoldersScreen(props: {
           return;
         }
         openSessions(projectId);
-      } finally {
+      })().finally(() => {
         addingRef.current = false;
         setAddingCwd(null);
-      }
+      });
     },
     [dispatchProjectCreate, environmentId, navigation],
   );
@@ -624,7 +622,7 @@ export function AddProjectImportSessionsScreen(props: {
     // Pin the selection: sessions drop out of the default as the run imports them.
     setChosenKeys(selectedKeys);
     setProgress({ position: 1, total: selectedSessions.length });
-    try {
+    await (async () => {
       const result = await importSessionsSequentially({
         sessions: selectedSessions,
         importSession: async (session) => {
@@ -684,10 +682,10 @@ export function AddProjectImportSessionsScreen(props: {
           }),
         });
       }
-    } finally {
+    })().finally(() => {
       importingRef.current = false;
       setProgress(null);
-    }
+    });
   }, [importThread, project, selectedKeys, selectedSessions]);
 
   const renderRow = useCallback(

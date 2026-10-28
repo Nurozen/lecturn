@@ -1,6 +1,6 @@
 import type { UserProfileCustomPage } from "@clerk/expo/native-components";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { useLayoutEffect, useMemo } from "react";
+import { useLayoutEffect } from "react";
 
 import { MobileAccountProfile } from "./MobileAccountProfile";
 import { SettingsAddAccountAuthContent } from "./SettingsAddAccountRouteScreen";
@@ -23,10 +23,7 @@ export function SettingsAuthRouteScreen(
 ) {
   const navigation = useNavigation();
   const accountId = props.route.params?.accountId;
-  const customPages = useMemo(
-    () => (accountId ? userProfileCustomPages(accountId) : undefined),
-    [accountId],
-  );
+  const customPages = accountId ? userProfileCustomPages(accountId) : undefined;
 
   useLayoutEffect(() => {
     if (!hasCloudPublicConfig()) {

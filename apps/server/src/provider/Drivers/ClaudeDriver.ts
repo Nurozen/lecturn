@@ -156,6 +156,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
         ),
+        {
+          isSameAccount: (last) =>
+            ClaudeResetCredits.readClaudeOrganizationId(accountConfigPath).pipe(
+              Effect.map((workspaceId) => workspaceId === last.workspaceId),
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, path),
+            ),
+        },
       );
       // Snapshots and dispatch resolve the same per-instance runtime metadata.
       const modelCatalog = manifestCatalog.pipe(

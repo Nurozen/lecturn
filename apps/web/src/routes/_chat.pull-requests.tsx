@@ -65,6 +65,7 @@ import {
 
 import {
   filterPullRequestsByInvolvement,
+  findProjectForRepository,
   findScopedProject,
   collectPullRequestListFacets,
   groupPullRequestsByInvolvement,
@@ -1842,29 +1843,6 @@ function usePullRequestScope(search: PullRequestsSearch) {
   const scopedProjects = pullRequestFilterProjects(projects, environmentLabels, scopedProject);
 
   const selectedHost = search.selectedHost ?? search.host;
-  const projectIdForRepository = (() => {
-    const repository = search.repository?.toLowerCase();
-    if (repository === undefined) return undefined;
-    const matches = projects.filter((project) =>
-      projectPullRequestRepository(project, {
-        repository,
-        ...(selectedHost ? { host: selectedHost } : {}),
-      }),
-    );
-    const identities = new Set(
-      matches.map(
-        (project) =>
-          projectPullRequestRepository(project, {
-            repository,
-            ...(selectedHost ? { host: selectedHost } : {}),
-          })?.identity?.canonicalKey,
-      ),
-    );
-    return identities.size === 1 ? matches[0]?.id : undefined;
-  })();
-
-  const linkedProjectId = resolveProjectScope(search.selectedProjectId, projects, projectsKnown);
-  const selectedProjectId = linkedProjectId ?? projectIdForRepository ?? scopedProjectId;
   // A named server still connecting is kept named rather than falling back: falling back while it
   // is merely not ready yet would resolve the project against whatever other server has answered,
   // which can be the wrong one where two servers share a project id.
@@ -1873,7 +1851,30 @@ function usePullRequestScope(search: PullRequestsSearch) {
     knownEnvironmentIds,
     scopedEnvironmentId,
   );
-  const selectedProject = findScopedProject(projects, selectedEnvironmentId, selectedProjectId);
+  const projectForRepository = (() => {
+    if (search.repository === undefined) return undefined;
+    const reference = { repository: search.repository, host: selectedHost };
+    const match = findProjectForRepository(projects, {
+      ...reference,
+      selectedEnvironmentId,
+      scopedProjectId,
+      scopedEnvironmentId,
+    });
+    if (match) return match;
+    // A Stave space root is not a repository; it matches through its editable checkouts.
+    const staveMatches = projects.filter(
+      (project) =>
+        project.stave != null &&
+        (selectedEnvironmentId == null || project.environmentId === selectedEnvironmentId) &&
+        projectPullRequestRepository(project, reference) !== undefined,
+    );
+    return findScopedProject(staveMatches, scopedEnvironmentId, scopedProjectId) ?? staveMatches[0];
+  })();
+  const linkedProjectId = resolveProjectScope(search.selectedProjectId, projects, projectsKnown);
+  const selectedProject =
+    linkedProjectId === undefined && search.repository !== undefined
+      ? projectForRepository
+      : findScopedProject(projects, selectedEnvironmentId, linkedProjectId ?? scopedProjectId);
   const queryEnvironmentIds = resolveQueryEnvironmentIds(
     environmentIds,
     projects,

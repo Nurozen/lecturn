@@ -1,6 +1,6 @@
 /**
  * A dedicated bold face (DMSans-Bold on Android) is already bold, so Enriched must not embolden it
- * again. Lecturn's iOS text uses the System family for every weight (`useFontFamily`), so there the
+ * again. Lecturn's iOS text uses the System family for every weight (`FONT_FAMILIES`), so there the
  * weight has to carry the bold.
  */
 export function enrichedStrongFontWeight(style: {

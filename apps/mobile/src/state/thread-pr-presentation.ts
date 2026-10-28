@@ -136,3 +136,9 @@ export function resolveThreadPrSource(
         );
   return { linkedPresentation, pullRequestRef };
 }
+
+export function resolveThreadPrBadgeAction(pr: ThreadPrPresentation) {
+  return pr.kind === "stack" || pr.others > 0
+    ? { kind: "list" as const, accessibilityLabel: `Show ${pr.accessibilityLabel}` }
+    : { kind: "open" as const, accessibilityLabel: `Open ${pr.accessibilityLabel}` };
+}

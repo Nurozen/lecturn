@@ -70,7 +70,6 @@ vi.mock("../../components/ui/Toolbar", () => ({
   Toolbar: Object.assign(native.noop, { Button: native.noop }),
 }));
 vi.mock("../../lib/useUniwindTheme", () => ({ useUniwindTheme: () => ({}) }));
-vi.mock("../../lib/useFontFamily", () => ({ useFontFamily: () => "Lecturn" }));
 vi.mock("../settings/appearance/useScaledTextRole", () => ({ useScaledTextRole: () => ({}) }));
 vi.mock("./use-thread-settings-sheet-presentation", () => ({
   useThreadSettingsSheetPresentation: () => ({

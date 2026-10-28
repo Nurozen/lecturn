@@ -329,6 +329,7 @@ const config: ExpoConfig = {
           ] as NonNullable<ExpoConfig["plugins"]>[number],
         ]
       : []),
+    "react-native-pdf-jsi",
     [
       "expo-font",
       {
@@ -460,6 +461,7 @@ const config: ExpoConfig = {
     ...(!isIosPersonalTeamBuild ? ["./plugins/withWidgetLogoAsset.cjs", widgetsPlugin] : []),
     "./plugins/withAndroidCleartextTraffic.cjs",
     "./plugins/withAndroidGradleHeap.cjs",
+    "./plugins/withAndroidFbjniVersion.cjs",
     "./plugins/withAndroidInputBackground.cjs",
     "./plugins/withAndroidModernPopupMenu.cjs",
     "./plugins/withAndroidModernAlertDialog.cjs",
@@ -496,6 +498,10 @@ const config: ExpoConfig = {
     },
   },
   owner: "nurozen",
+  experiments: {
+    // Metro only runs babel-plugin-react-compiler when this is set; see src/reactCompilerCoverage.test.ts.
+    reactCompiler: true,
+  },
 };
 
 export default config;

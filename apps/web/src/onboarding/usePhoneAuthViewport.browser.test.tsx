@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
-import { usePhoneAuthViewport } from "./usePhoneAuthViewport";
+import { phoneAuthViewportRef } from "./usePhoneAuthViewport";
 
 let root: Root;
 let container: HTMLDivElement;
@@ -41,7 +41,7 @@ it("attaches after a portal delay and cleans up when only the viewport unmounts"
   const unsubscribe = vi.spyOn(viewport, "removeEventListener");
   const scrollIntoView = vi.spyOn(HTMLInputElement.prototype, "scrollIntoView");
   function Fixture({ show }: { show: boolean }) {
-    const ref = usePhoneAuthViewport(true);
+    const ref = phoneAuthViewportRef(true);
     return show ? (
       <div ref={ref}>
         <input />
@@ -86,7 +86,7 @@ it("reflows on keyboard resize, keeps the focused input visible and restores nor
   const scrollIntoView = vi.spyOn(HTMLInputElement.prototype, "scrollIntoView");
   function Fixture({ enabled }: { enabled: boolean }) {
     return (
-      <div ref={usePhoneAuthViewport(enabled)}>
+      <div ref={phoneAuthViewportRef(enabled)}>
         <input />
       </div>
     );

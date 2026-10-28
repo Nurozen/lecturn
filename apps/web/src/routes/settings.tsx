@@ -12,7 +12,7 @@ import { useNavigateToMainApp } from "../components/sidebar/mainAppLocation";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isElectron } from "../env";
 import { useBackToChat } from "../components/settings/SettingsNavigation";
-import { usePhoneAuthViewport } from "../onboarding/usePhoneAuthViewport";
+import { phoneAuthViewportRef } from "../onboarding/usePhoneAuthViewport";
 import {
   SettingsScopeProvider,
   useSettingsScope,
@@ -126,7 +126,7 @@ function SettingsContentLayout() {
     if (isMobile) backToChat();
     else void navigateToMainApp();
   };
-  const viewportRef = usePhoneAuthViewport(!isElectron);
+  const viewportRef = phoneAuthViewportRef(!isElectron);
   const [restoreSignal, setRestoreSignal] = useState(0);
   const showRestoreDefaults = location.pathname === "/settings/general";
   const handleRestored = () => setRestoreSignal((value) => value + 1);

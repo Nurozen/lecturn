@@ -27,9 +27,9 @@ function skipPhoneAuthViewport() {}
 
 /**
  * Android's keyboard can shrink the visual viewport without changing dvh.
- * Module-level refs keep one identity per `enabled`: the compiler leaves a hook
- * that calls no hooks unmemoized, and a new ref each render would reattach.
+ * Module-level ref callbacks keep one identity per `enabled`, so a re-render
+ * never detaches and reattaches the viewport listeners.
  */
-export function usePhoneAuthViewport(enabled: boolean) {
+export function phoneAuthViewportRef(enabled: boolean) {
   return enabled ? attachPhoneAuthViewport : skipPhoneAuthViewport;
 }

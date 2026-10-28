@@ -201,7 +201,7 @@ const v2Layer = (dbPath: string) => {
 
 describe("Lecturn fork ledger upgrade to orchestration V2", () => {
   it.effect.each(["fork names", "upstream names at 48-54"] as const)(
-    "migrates a %s ledger at 069 to 078 and imports fork lineage",
+    "migrates a %s ledger at 069 to 079 and imports fork lineage",
     (variant) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
@@ -272,6 +272,7 @@ describe("Lecturn fork ledger upgrade to orchestration V2", () => {
           [76, "PullRequestReviewGuides"],
           [77, "ThreadFailureLookupIndex"],
           [78, "DropUnusedV1Projections"],
+          [79, "CanonicalizeThreadPullRequestLinks"],
         ]);
         for (const table of [
           "orchestration_v2_events",

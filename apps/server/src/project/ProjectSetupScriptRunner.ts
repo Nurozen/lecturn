@@ -2,6 +2,7 @@ import { ProjectId, type ProjectScript } from "@lecturn/contracts";
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import {
   projectScriptRuntimeEnv,
+  projectScriptTerminalInput,
   resolveProjectScripts,
   settleProjectScript,
   setupProjectScript,
@@ -410,7 +411,7 @@ export const make = Effect.gen(function* () {
       .write({
         threadId: input.threadId,
         terminalId,
-        data: `${commandLine}\r`,
+        data: projectScriptTerminalInput(commandLine),
       })
       .pipe(
         Effect.mapError(

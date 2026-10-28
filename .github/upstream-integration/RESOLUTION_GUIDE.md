@@ -446,8 +446,9 @@ from upstream's side.
   `lecturn/no-manual-memo` (no `useMemo`/`useCallback`/`"use memo"`), uses
   `useStableCallback` for handlers leaving large components, and
   `attempt()...catch().finally()` instead of `try/finally`. Infer mode skips a
-  `use*` function that calls no hooks, so `usePhoneAuthViewport` returns
-  module-level ref callbacks instead of a memoized closure.
+  `use*` function that calls no hooks, and `lecturn/no-hookless-use-function`
+  (#21260) rejects one, so such helpers are plain functions
+  (`phoneAuthViewportRef`, mobile `sessionRelayTokenReader`).
 - **Browser tests.** Fork React tests live in the vitest `browser` project
   (`*.browser.test.tsx`); `react-test-renderer` and jsdom React tests are gone.
   Mock modules partially with `vi.mock(import(...), original)` and never
@@ -488,6 +489,75 @@ from upstream's side.
 - **Identity.** The Connect route kind is `"lecturn-connect"`, webhook
   redaction covers `x-lecturn-relay-*`, and the desktop CLI launcher env is
   `LECTURN_DESKTOP_CLI_LAUNCHER`.
+
+**Upstream changes taken in a Lecturn shape (sync to upstream cd8c2c59).**
+
+- **Mobile React Compiler (#20967 series).** Metro compiles every mobile file;
+  `reactCompilerCoverage.test.ts` `KNOWN_BAILOUTS` only shrinks and uses fork
+  paths (`LecturnComposerEditor.{ios,native}.tsx`). Mobile runs
+  `lecturn/no-manual-memo` with `allowMemoHooks`. Fork mobile files follow the
+  upstream conversions. `NewTaskDraftScreen` calls flow actions through
+  `useEffectEvent` so effects never re-run on closure identity. The Home
+  group-display handler reads a handler-written ref plus registry prefs
+  (LegendList keeps stale row closures); no render-time ref writes.
+- **Mobile Git sheets.** Fork sections (Space repositories, Selected
+  repository, project PRs with Watch, read-only) use upstream
+  `ListSection`/`ListRow`; `SheetListRow`/`MetaCard`/`SheetGroupCard` are retired.
+- **Mobile fonts.** Upstream removed `useFontFamily`; `lib/fontFamilies`
+  `FONT_FAMILIES` keeps the fork's iOS "System" rule.
+- **Live Activity tokens (#21134).** Locks and listeners live in the fork's
+  per-account registration factory; an identity change removes listeners and
+  clears locks.
+- **Migrations.** Upstream migration 64 (`CanonicalizeThreadPullRequestLinks`)
+  runs as fork id 79; it is idempotent, so a database that ran it under
+  upstream's id is safe.
+- **Telemetry.** The build channel env is `LECTURN_TELEMETRY_CHANNEL`
+  (`__LECTURN_TELEMETRY_CHANNEL__`), set by fork workflows on server-bundle
+  builds. Upstream's `ingest.t3.codes` endpoint is not taken; the fork posts to
+  its PostHog host. MCP tool analytics (#15913) match `lecturn_` tool names in
+  `McpHttpServer` and `ProviderDimensions`; rename them together with the tools.
+- **Workflows.** Upstream repository guards on deploy/release/EAS/AUR/APK
+  workflows are `github.repository == 'Nurozen/lecturn'`.
+- **Desktop update repository (#21210).** Web build env
+  `LECTURN_DESKTOP_UPDATE_REPOSITORY` (fallback `GITHUB_REPOSITORY`), default
+  `Nurozen/lecturn`.
+- **Connect session pending (#11013).** With no owning account the fork reports
+  pending only when the platform says `accountsSynced=false`; otherwise "Sign in
+  to Lecturn Connect".
+- **Orchestration instructions (#18415).** `LECTURN_ORCHESTRATION_SECTIONS`
+  mirrors upstream's sections (each under 4000 bytes); Codex developer
+  instructions use `lecturn_orchestration_NN` keys.
+- **OpenCode abort timeout.** Text-generation abort stays 5 s (upstream 10 s) so
+  a hung abort releases the shared summary queue sooner.
+- **Claude probe recovery (#21042).** Lives in fork-owned
+  `provider/Drivers/ClaudeCapabilitiesCache.ts`; the fork Claude driver drops
+  that cache through `refreshModels`, not `invalidateCaches`.
+- **Git status (#20175).** A rename's source path carries the fork's
+  staged/unstaged/conflicted flags, mirroring the rename's index side.
+- **Sidebar.** The subagent parent highlight (#15163) lives in the fork Sidebar
+  body (`routeRowThreadKey`). Working-row context drag into chat (#19697) and
+  the shared working timer (#21195) are not taken while the fork drag/row shape
+  stays.
+- **PR route repository match.** `/pull-requests` uses upstream
+  `findProjectForRepository` (scoped project, else first match; #10987 Azure)
+  and falls back to the fork's Stave-checkout match. The fork's "ambiguous
+  identities -> no project" rule is retired.
+- **ChatView title seed.** Upstream `deriveThreadTitleSeed` (#19822;
+  attachments carry `type`) feeds the fork's `resolveTurnTitleSeed`.
+- **MessagesTimeline.** `TimelineRowCtx` is per row (#21123); the fork reveal and
+  notes viewport wraps upstream's composer-fade div and minimap. Browser tests
+  wait for `[data-timeline-ready]` before focusing or finding rows.
+- **DraftHeroHeadline.** Upstream drops the h1 aria-label (#17877); the fork
+  keeps `font-display` and the "No project" row.
+- **Identity.** PR detail snapshot key `lecturn.pullRequests.recentDetails`;
+  preview partitions in tests `persist:lecturn-preview-*`; the mobile render
+  counter env is `EXPO_PUBLIC_LECTURN_RENDER_COUNTER`; Linux theme icons install
+  once (the fork app id is lowercase).
+- **Fixtures.** `GitManager.test.ts` keeps the inherited
+  `pingdotgg/codething-mvp` fixture inside existing fork tests; wholly new
+  upstream tests use `nurozen/codething-mvp`.
+- **Lockfile.** Regenerate from the fork lock as seed; a union seed triggers
+  broad re-resolution.
 
 ## Recurring mechanical conflicts
 

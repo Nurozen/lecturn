@@ -18,7 +18,7 @@ import {
 } from "@lecturn/contracts";
 import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 import * as Schema from "effect/Schema";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppState, View } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
@@ -120,24 +120,27 @@ function HostSettings({ environmentId }: { environmentId: EnvironmentId }) {
             }
             onPress={() => {
               void (async () => {
-                if (!capture.data || busy) return;
+                const current = capture.data;
+                if (!current || busy) return;
                 setBusy(true);
                 setError(null);
-                try {
+                await (async () => {
                   const result = await setCapture({
                     environmentId,
                     input: {
-                      state: capture.data.state === "running" ? "paused" : "running",
-                      expectedGeneration: capture.data.generation,
+                      state: current.state === "running" ? "paused" : "running",
+                      expectedGeneration: current.generation,
                     },
                   });
                   if (result._tag === "Failure") throw squashAtomCommandFailure(result);
                   capture.refresh();
-                } catch (cause) {
-                  setError(errorMessage(cause));
-                } finally {
-                  setBusy(false);
-                }
+                })()
+                  .catch((cause: unknown) => {
+                    setError(errorMessage(cause));
+                  })
+                  .finally(() => {
+                    setBusy(false);
+                  });
               })();
             }}
           />
@@ -279,7 +282,7 @@ function SourceSelection({ environmentId }: { environmentId: EnvironmentId }) {
             setBusy(true);
             setError(null);
             setMessage(null);
-            try {
+            await (async () => {
               const result = await configure({
                 environmentId,
                 input: {
@@ -291,11 +294,13 @@ function SourceSelection({ environmentId }: { environmentId: EnvironmentId }) {
               setDraft(null);
               setMessage("Sources saved. Start collection separately when ready.");
               sources.refresh();
-            } catch (cause) {
-              setError(errorMessage(cause));
-            } finally {
-              setBusy(false);
-            }
+            })()
+              .catch((cause: unknown) => {
+                setError(errorMessage(cause));
+              })
+              .finally(() => {
+                setBusy(false);
+              });
           })();
         }}
       />
@@ -337,16 +342,17 @@ function Archive({ environmentId }: { environmentId: EnvironmentId }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function manage(operation: "export" | "forget", selection: ContextualDataSelection) {
-    if (!capture.data || busy) return;
+    const current = capture.data;
+    if (!current || busy) return;
     setBusy(true);
     setError(null);
     setReceipt(null);
-    try {
+    await (async () => {
       const input = {
         actionId: randomUUID(),
         selection,
-        expectedSourceGeneration: inspect.data?.sourceGeneration ?? capture.data.sourceGeneration,
-        expectedPurgeGeneration: inspect.data?.purgeGeneration ?? capture.data.purgeGeneration,
+        expectedSourceGeneration: inspect.data?.sourceGeneration ?? current.sourceGeneration,
+        expectedPurgeGeneration: inspect.data?.purgeGeneration ?? current.purgeGeneration,
       };
       const result =
         operation === "export"
@@ -357,11 +363,13 @@ function Archive({ environmentId }: { environmentId: EnvironmentId }) {
       if (operation === "forget") setSearch(null);
       capture.refresh();
       sources.refresh();
-    } catch (cause) {
-      setError(errorMessage(cause));
-    } finally {
-      setBusy(false);
-    }
+    })()
+      .catch((cause: unknown) => {
+        setError(errorMessage(cause));
+      })
+      .finally(() => {
+        setBusy(false);
+      });
   }
   function confirmForget(selection: ContextualDataSelection, label: string) {
     Dialog.alert(
@@ -383,29 +391,30 @@ function Archive({ environmentId }: { environmentId: EnvironmentId }) {
     if (busy) return;
     setBusy(true);
     setError(null);
-    let file: File | null = null;
-    try {
+    const file = new File(Paths.cache, `lecturn-contextual-${randomUUID()}.ndjson`);
+    await (async () => {
       if (!(await Sharing.isAvailableAsync()))
         throw new Error("File sharing is not available on this device.");
       const result = await download({ environmentId, input: { artifactId } });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-      file = new File(Paths.cache, `lecturn-contextual-${randomUUID()}.ndjson`);
       file.write(new Uint8Array(result.value));
       await Sharing.shareAsync(file.uri, {
         mimeType: "application/x-ndjson",
         UTI: "public.plain-text",
         dialogTitle: "Save Contextual export",
       });
-    } catch (cause) {
-      setError(errorMessage(cause));
-    } finally {
-      try {
-        if (file?.exists) file.delete();
-      } catch (cause) {
+    })()
+      .catch((cause: unknown) => {
         setError(errorMessage(cause));
-      }
-      setBusy(false);
-    }
+      })
+      .finally(() => {
+        try {
+          if (file.exists) file.delete();
+        } catch (cause) {
+          setError(errorMessage(cause));
+        }
+        setBusy(false);
+      });
   }
   return (
     <View className="gap-3 rounded-xl border border-border p-4">
@@ -597,7 +606,10 @@ function Funding({
   const [error, setError] = useState<string | null>(null);
   const active = useRef(true);
   const pendingId = useRef(pending?.challengeId);
-  pendingId.current = pending?.challengeId;
+  const pendingChallengeId = pending?.challengeId;
+  useEffect(() => {
+    pendingId.current = pendingChallengeId;
+  }, [pendingChallengeId]);
   const locked = useRef(false);
   const allowed = useRef(canFund);
   useEffect(() => {
@@ -606,7 +618,7 @@ function Funding({
   useEffect(() => {
     active.current = true;
     void (async () => {
-      try {
+      await (async () => {
         const value = await SecureStore.getItemAsync(storageKey);
         if (!active.current || !value) return;
         const challenge = decodeChallenge(JSON.parse(value));
@@ -616,11 +628,13 @@ function Funding({
         setPendingState(
           Date.parse(challenge.expiresAt) <= Date.now() ? "expired" : "awaiting-approval",
         );
-      } catch (cause) {
-        if (active.current) setError(errorMessage(cause));
-      } finally {
-        if (active.current) setReady(true);
-      }
+      })()
+        .catch((cause: unknown) => {
+          if (active.current) setError(errorMessage(cause));
+        })
+        .finally(() => {
+          if (active.current) setReady(true);
+        });
     })();
     return () => {
       active.current = false;
@@ -639,7 +653,7 @@ function Funding({
     });
   }, [pending, funding.data, funding.error, storageKey]);
   const waiting = pendingState === "awaiting-approval" || pendingState === "approved-awaiting-host";
-  const check = useCallback(async () => {
+  const check = async () => {
     if (!pending || !waiting || !allowed.current || locked.current || !active.current) return;
     if (Date.parse(pending.expiresAt) <= Date.now()) {
       setPendingState("expired");
@@ -648,7 +662,7 @@ function Funding({
     locked.current = true;
     setBusy(true);
     setError(null);
-    try {
+    return await (async () => {
       const input = {
         featureId,
         challengeId: pending.challengeId,
@@ -686,17 +700,19 @@ function Funding({
         await SecureStore.deleteItemAsync(storageKey);
       refresh();
       return observed.value.state === "awaiting-approval";
-    } catch (cause) {
-      if (active.current && pendingId.current === pending.challengeId) {
-        refresh();
-        setError(errorMessage(cause));
-      }
-    } finally {
-      locked.current = false;
-      if (active.current) setBusy(false);
-    }
-    return false;
-  }, [pending, waiting, command, environmentId, featureId, storageKey, refresh]);
+    })()
+      .catch((cause: unknown) => {
+        if (active.current && pendingId.current === pending.challengeId) {
+          refresh();
+          setError(errorMessage(cause));
+        }
+        return false;
+      })
+      .finally(() => {
+        locked.current = false;
+        if (active.current) setBusy(false);
+      });
+  };
   useEffect(() => {
     let canceled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -735,11 +751,12 @@ function Funding({
     }
   }
   async function act(operation: "create" | "cancel" | "revoke") {
-    if (!funding.data || !allowed.current || locked.current || !ready) return;
+    const fundingData = funding.data;
+    if (!fundingData || !allowed.current || locked.current || !ready) return;
     locked.current = true;
     setBusy(true);
     setError(null);
-    try {
+    await (async () => {
       let input: ExtensionHostFundingRequest;
       if (operation === "cancel") {
         if (!pending) return;
@@ -749,7 +766,7 @@ function Funding({
           challengeId: pending.challengeId,
           expectedGeneration: pending.generation,
         };
-      } else input = { featureId, operation, expectedGeneration: funding.data.generation };
+      } else input = { featureId, operation, expectedGeneration: fundingData.generation };
       const result = await command({ environmentId, input });
       if (!active.current || !allowed.current) return;
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
@@ -758,8 +775,8 @@ function Funding({
           !("approvalUrl" in result.value) ||
           result.value.environmentId !== environmentId ||
           result.value.featureId !== featureId ||
-          (result.value.generation !== funding.data.generation &&
-            result.value.generation !== funding.data.generation + 1)
+          (result.value.generation !== fundingData.generation &&
+            result.value.generation !== fundingData.generation + 1)
         )
           throw new Error("The funding request changed. Refresh and try again.");
         let persisted = true;
@@ -784,12 +801,14 @@ function Funding({
         setPayer(null);
       }
       refresh();
-    } catch (cause) {
-      if (active.current) setError(errorMessage(cause));
-    } finally {
-      locked.current = false;
-      if (active.current) setBusy(false);
-    }
+    })()
+      .catch((cause: unknown) => {
+        if (active.current) setError(errorMessage(cause));
+      })
+      .finally(() => {
+        locked.current = false;
+        if (active.current) setBusy(false);
+      });
   }
   return (
     <View className="gap-3 rounded-xl border border-border p-4">

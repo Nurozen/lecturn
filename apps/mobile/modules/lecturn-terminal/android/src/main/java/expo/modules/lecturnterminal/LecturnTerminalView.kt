@@ -7,6 +7,7 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.KeyEvent
+import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -23,7 +24,12 @@ class LecturnTerminalView(context: Context, appContext: AppContext) : ExpoView(
 ) {
   private val container = FrameLayout(context)
   private val terminalCanvas = TerminalCanvasView(context)
-  private val inputView = EditText(context)
+
+  // Newer Android can request autofill even with importantForAutofill=no.
+  // Reporting no autofill type keeps terminal input out of credential autofill.
+  private val inputView = object : EditText(context) {
+    override fun getAutofillType(): Int = View.AUTOFILL_TYPE_NONE
+  }
   private val onInput by EventDispatcher()
   private val onResize by EventDispatcher()
   private val onCapture by EventDispatcher()

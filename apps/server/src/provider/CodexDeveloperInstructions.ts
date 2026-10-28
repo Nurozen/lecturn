@@ -4,8 +4,15 @@ import { buildRuntimeInstructions } from "@lecturn/provider-core/server/runtimeI
 
 import {
   LECTURN_BROWSER_TOOL_INSTRUCTIONS,
-  LECTURN_ORCHESTRATION_INSTRUCTIONS,
+  LECTURN_ORCHESTRATION_SECTIONS,
 } from "@lecturn/provider-core/server/orchestrationInstructions";
+
+/**
+ * Codex cuts the middle out of any `additionalContext` value over 1,000 tokens,
+ * which it counts as UTF-8 bytes divided by four. It does this silently, so
+ * every value built here has to fit.
+ */
+export const CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES = 4_000;
 
 const LECTURN_DEVICE_TOOL_INSTRUCTIONS = `## Lecturn devices
 
@@ -202,9 +209,15 @@ export function buildCodexAdditionalContext(
   toolsAvailable: boolean | LecturnToolAvailability = true,
 ): Record<string, V2TurnStartParams__AdditionalContextEntry> {
   const tools = toolInstructions(toolsAvailable);
-  // Separate keys keep each value under Codex's per-entry token cap.
+  // Separate keys keep each value under Codex's per-entry cap. Codex emits
+  // entries in key order, so the numbering preserves the authored order.
   return {
-    lecturn_orchestration: { kind: "application", value: LECTURN_ORCHESTRATION_INSTRUCTIONS },
+    ...Object.fromEntries(
+      LECTURN_ORCHESTRATION_SECTIONS.map((section, index) => [
+        `lecturn_orchestration_${String(index + 1).padStart(2, "0")}`,
+        { kind: "application" as const, value: section },
+      ]),
+    ),
     lecturn_runtime: {
       kind: "application",
       value: buildRuntimeInstructions({ harness: "Codex", ...runtime }),

@@ -13,7 +13,7 @@ import * as OpenCodeRuntime from "./OpenCodeRuntime.ts";
 import * as OpenCodeServerOwner from "./OpenCodeServerOwner.ts";
 
 const WORKFLOW_INFERENCE_TIMEOUT_MS = 180_000;
-const WORKFLOW_ABORT_TIMEOUT_MS = 5_000;
+const SESSION_ABORT_TIMEOUT_MS = 5_000;
 
 const OpenCodeTextGenerationOperation = Schema.Literals([
   "generateCommitMessage",
@@ -215,7 +215,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
                 title: `Lecturn ${input.operation}`,
                 permission: [{ permission: "*", pattern: "*", action: "deny" }],
               },
-              inference ? { signal } : undefined,
+              { signal },
             ),
           catch: (cause) =>
             new OpenCodeTextGenerationSessionRequestError({
@@ -252,7 +252,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
                 ...(selectedVariant ? { variant: selectedVariant } : {}),
                 parts: [{ type: "text", text: input.prompt }, ...fileParts],
               },
-              inference ? { signal } : undefined,
+              { signal },
             ),
           catch: (cause) =>
             new OpenCodeTextGenerationPromptRequestError({
@@ -260,24 +260,22 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
               cause,
             }),
         }).pipe(
+          // Disconnecting the HTTP request does not stop work in a shared or external server.
           Effect.onInterrupt(() =>
-            inference
-              ? Effect.tryPromise({
-                  try: (signal) => client.session.abort({ sessionID: session.data.id }, { signal }),
-                  catch: (cause) =>
-                    new TextGenerationError({
-                      operation: input.operation,
-                      detail: "Could not cancel OpenCode workflow inference.",
-                      cause,
-                    }),
-                }).pipe(
-                  // Cancellation is best effort; an unresponsive abort endpoint
-                  // must not retain the shared summary queue either.
-                  Effect.interruptible,
-                  Effect.timeoutOption(WORKFLOW_ABORT_TIMEOUT_MS),
-                  Effect.ignore,
-                )
-              : Effect.void,
+            OpenCodeRuntime.runOpenCodeSdk("session.abort", (signal) =>
+              client.session.abort({ sessionID: session.data.id }, { signal }),
+            ).pipe(
+              // An unresponsive abort endpoint must not hold the shared summary queue.
+              Effect.interruptible,
+              Effect.timeout(SESSION_ABORT_TIMEOUT_MS),
+              Effect.catch(() =>
+                Effect.logWarning(
+                  "Failed to stop cancelled OpenCode text generation.",
+                  promptContext,
+                ),
+              ),
+              Effect.asVoid,
+            ),
           ),
         );
         const promptFailure = getOpenCodePromptFailure(result.data?.info?.error);
