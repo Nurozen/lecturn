@@ -676,7 +676,10 @@ from upstream's side.
   callback, a memoized gesture or value): React returns a new function every
   render. `AdaptiveWorkspaceLayout` keeps ref-based inspector registration and
   upstream's memoized pane derivations (325a7e2ae4, #21867); without both,
-  every screen with an inspector pane loops on "Maximum update depth".
+  every screen with an inspector pane loops on "Maximum update depth". The
+  fork keeps queue reordering (upstream later deletes `QueueDragHandle`); its
+  gesture comes from a builder held in `useState` (upstream's
+  `SettingsDragHandle` pattern), rebuilt only when `disabled` changes.
 - **Mobile Git sheets.** Fork sections (Space repositories, Selected
   repository, project PRs with Watch, read-only) use upstream
   `ListSection`/`ListRow`; `SheetListRow`/`MetaCard`/`SheetGroupCard` are retired.
@@ -718,7 +721,10 @@ from upstream's side.
 - **Sidebar.** The subagent parent highlight (#15163) lives in the fork Sidebar
   body (`routeRowThreadKey`). Working-row context drag into chat (#19697) and
   the shared working timer (#21195, with its `useNowSecond` hook) are not taken
-  while the fork drag/row shape stays.
+  while the fork drag/row shape stays. The pinned-marker fix (#11122) reserves
+  no hover-action width at rest, because fork card rows put the title on that
+  line; on pinned or Woke rows the actions open left of the markers
+  (`sidebar/SidebarRowStatusLine.tsx`).
 - **PR route repository match.** `/pull-requests` uses upstream
   `findProjectForRepository` (scoped project, else first match; #10987 Azure)
   and falls back to the fork's Stave-checkout match. The fork's "ambiguous

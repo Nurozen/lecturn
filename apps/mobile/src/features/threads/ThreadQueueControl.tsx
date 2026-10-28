@@ -587,19 +587,24 @@ function QueueDragHandle(props: {
   onMove: (y: number) => void;
   onEnd: (y: number, success: boolean) => void;
 }) {
-  // Gesture callbacks fire outside render, so effect events read the latest
-  // props without rebuilding the gesture.
+  // Gesture callbacks fire outside render, so effect events hand them the latest props. React
+  // returns new effect events each render, so the builder keeps the first ones (they still call
+  // the latest props) and the compiler rebuilds the gesture only when `disabled` changes.
   const onStart = useEffectEvent(() => props.onStart());
   const onMove = useEffectEvent((y: number) => props.onMove(y));
   const onEnd = useEffectEvent((y: number, success: boolean) => props.onEnd(y, success));
-  const gesture = Gesture.Pan()
-    .enabled(!props.disabled)
-    .minDistance(0)
-    .shouldCancelWhenOutside(false)
-    .runOnJS(true)
-    .onStart(() => onStart())
-    .onUpdate((event) => onMove(event.translationY))
-    .onFinalize((event, success) => onEnd(event.translationY, success));
+  const [buildGesture] = useState(
+    () => (enabled: boolean) =>
+      Gesture.Pan()
+        .enabled(enabled)
+        .minDistance(0)
+        .shouldCancelWhenOutside(false)
+        .runOnJS(true)
+        .onStart(() => onStart())
+        .onUpdate((event) => onMove(event.translationY))
+        .onFinalize((event, success) => onEnd(event.translationY, success)),
+  );
+  const gesture = buildGesture(!props.disabled);
   return (
     <GestureDetector gesture={gesture}>
       <View

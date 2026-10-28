@@ -1,7 +1,3 @@
-// @effect-diagnostics nodeBuiltinImport:off - compiles the real layout source on disk.
-import * as NodeModule from "node:module";
-import * as NodePath from "node:path";
-import * as NodeVM from "node:vm";
 import * as React from "react";
 import * as ReactCompilerRuntime from "react/compiler-runtime";
 import * as ReactJsxRuntime from "react/jsx-runtime";
@@ -9,54 +5,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import * as Layout from "../../lib/layout";
+import { loadCompiledMobileModule } from "../../lib/reactCompilerModule.test-support";
 import type * as AdaptiveWorkspaceLayoutModule from "./AdaptiveWorkspaceLayout";
 
 // The inspector loop only exists in compiled code: the React Compiler decides which closures and
 // derived objects keep their identity between renders. So this suite runs the layout module
-// exactly as Metro ships it to Android (babel.config.js with the compiler on) and stubs only
-// the native and navigation edges around it.
-const mobileRoot = NodePath.resolve(__dirname, "../../..");
-const requireFromMobile = NodeModule.createRequire(NodePath.join(mobileRoot, "package.json"));
-const layoutSource = NodePath.join(__dirname, "AdaptiveWorkspaceLayout.tsx");
-
-function compileForAndroid(file: string): { readonly code: string; readonly events: string[] } {
-  const babel: {
-    transformFileSync: (file: string, options: Record<string, unknown>) => { code: string };
-  } = requireFromMobile("@babel/core");
-  const events: string[] = [];
-  const babelConfig = requireFromMobile("./babel.config.js")({ cache: () => {} });
-  const presets = babelConfig.presets.map(([name, options]: [string, object]) =>
-    name === "babel-preset-expo"
-      ? [
-          requireFromMobile.resolve(name),
-          {
-            ...options,
-            "react-compiler": {
-              logger: { logEvent: (_: string, event: { kind: string }) => events.push(event.kind) },
-            },
-          },
-        ]
-      : [name, options],
-  );
-  const { code } = babel.transformFileSync(file, {
-    babelrc: false,
-    configFile: false,
-    cwd: mobileRoot,
-    presets,
-    caller: {
-      name: "metro",
-      bundler: "metro",
-      platform: "android",
-      isDev: false,
-      isServer: false,
-      isNodeModule: false,
-      supportsStaticESM: false,
-      supportsReactCompiler: true,
-    },
-  });
-  return { code, events };
-}
-
+// exactly as Metro ships it to Android and stubs only the native and navigation edges around it.
 let layoutRenders = 0;
 let screenRenders = 0;
 let readerRenders = 0;
@@ -172,21 +126,15 @@ const stubModules: Record<string, unknown> = {
 };
 
 let layout: typeof AdaptiveWorkspaceLayoutModule;
-let compilerEvents: string[] = [];
+let compilerEvents: readonly string[] = [];
 
 beforeAll(() => {
-  const { code, events } = compileForAndroid(layoutSource);
-  compilerEvents = events;
-  const module = { exports: {} as Record<string, unknown> };
-  const requireStub = (specifier: string) => {
-    if (specifier in stubModules) return stubModules[specifier];
-    if (specifier.startsWith("@babel/runtime/")) return requireFromMobile(specifier);
-    throw new Error(`AdaptiveWorkspaceLayout imports an unstubbed module: ${specifier}`);
-  };
-  NodeVM.runInThisContext(`(function (require, module, exports) {${code}\n})`, {
-    filename: layoutSource,
-  })(requireStub, module, module.exports);
-  layout = module.exports as unknown as typeof AdaptiveWorkspaceLayoutModule;
+  const compiled = loadCompiledMobileModule({
+    file: "src/features/layout/AdaptiveWorkspaceLayout.tsx",
+    modules: stubModules,
+  });
+  compilerEvents = compiled.compilerEvents;
+  layout = compiled.exports as unknown as typeof AdaptiveWorkspaceLayoutModule;
 });
 
 const paneA = () => <PaneContent name="pane A" />;

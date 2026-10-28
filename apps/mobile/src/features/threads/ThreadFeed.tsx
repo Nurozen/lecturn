@@ -2266,7 +2266,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
   }, [hasRevealed, listMountKey, loadedListKey, props.contentPresentation.kind, revealOpacity]);
   useEffect(() => () => cancelAnimation(revealOpacity), [revealOpacity]);
   useLayoutEffect(() => {
-    const bottom = props.contentInsetEndAdjustment.value;
+    const bottom = props.contentInsetEndAdjustment.get();
     if (bottom > 0) {
       listRef.current?.reportContentInset({ bottom });
     }
