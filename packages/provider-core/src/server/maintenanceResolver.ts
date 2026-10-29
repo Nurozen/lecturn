@@ -501,11 +501,14 @@ export const resolvePackageManagedProviderMaintenance = Effect.fn(
     });
   }
   if (commandPaths.some(isPnpmGlobalCommandPath)) {
+    // Lecturn: probe the pnpm the update runs. The runner uses the server's
+    // environment, so the instance's PATH could name another pnpm major.
+    const pnpmPath = yield* resolveCommandPath("pnpm");
+    const pnpmVersion = pnpmPath ? yield* runProbe(pnpmPath, ["--version"], {}) : null;
     // pnpm 10 skips unapproved install scripts and still exits 0, leaving a
     // package whose postinstall finishes the install broken. Global installs
     // can only approve on the command line, and pnpm before 10.4 rejects the
     // flag as an unknown option.
-    const pnpmVersion = yield* runProbe("pnpm", ["--version"], context.env);
     const allowBuild =
       pnpmVersion !== null && satisfiesSemverRange(pnpmVersion, ">=10.4.0")
         ? [`--allow-build=${packageName}`]

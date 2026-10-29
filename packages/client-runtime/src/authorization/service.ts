@@ -462,11 +462,8 @@ export const make = Effect.gen(function* () {
           yield* removeRejectedToken(input.expectedEnvironmentId, input.rejectedAccessToken);
         }
         if (identity === undefined) {
-          if (owner.accountId !== undefined) {
-            return yield* sessionPending();
-          }
-          // Without an owner only a platform that reports its sign-in sync can
-          // tell a loading session from a signed-out one.
+          // Owned or not, only a platform that reports its sign-in sync can tell
+          // a loading session from a signed-out or expired one.
           const synced =
             cloudSession.accountsSynced === undefined ? true : yield* cloudSession.accountsSynced;
           return yield* synced ? relayAccountUnresolvedError(0) : sessionPending();

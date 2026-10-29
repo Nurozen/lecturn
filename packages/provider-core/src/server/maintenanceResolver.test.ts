@@ -583,7 +583,8 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
     }),
   );
 
-  it.effect.skipIf(!symlinksSupported)(
+  // The probe looks pnpm up on PATH, which these `#!/bin/sh` stubs only satisfy off Windows.
+  it.effect.skipIf(!symlinksSupported || windowsHost)(
     "switches to pnpm updates when the real path lives in pnpm's global store",
     () =>
       Effect.gen(function* () {
@@ -599,12 +600,19 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
           "package-tool",
         ]);
 
-        const updateCommand = (spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]) =>
+        // The update runs pnpm from the server's PATH, so that pnpm is probed.
+        const serverPnpmDir = NodePath.join(tempDir, "server-pnpm");
+        writeExecutable(NodePath.join(serverPnpmDir, "pnpm"));
+        const updateCommand = (
+          spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+          env: NodeJS.ProcessEnv = { PATH: "" },
+        ) =>
           resolveProviderMaintenanceCapabilitiesEffect(packageToolUpdate, {
             binaryPath: link,
-            env: { PATH: "" },
+            env,
           }).pipe(
             Effect.map((capabilities) => capabilities.update),
+            Effect.provideService(HostProcess.Environment, { PATH: serverPnpmDir }),
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           );
         const pnpmVersion = (version: string) =>
@@ -623,6 +631,24 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
           "pnpm add -g @example/package-tool@latest",
         );
         expect((yield* updateCommand(noSpawn))?.command).toBe(
+          "pnpm add -g @example/package-tool@latest",
+        );
+
+        // An instance PATH naming pnpm 11 must not add the flag for the server's pnpm 9.
+        const instancePnpmDir = NodePath.join(tempDir, "instance-pnpm");
+        writeExecutable(NodePath.join(instancePnpmDir, "pnpm"));
+        const pnpmByPath = ChildProcessSpawner.make((command) => {
+          const spawned = command as unknown as {
+            readonly command: string;
+            readonly options: { readonly env?: NodeJS.ProcessEnv };
+          };
+          const directory = NodePath.isAbsolute(spawned.command)
+            ? NodePath.dirname(spawned.command)
+            : spawned.options.env?.PATH;
+          const version = directory === instancePnpmDir ? "11.1.3" : "9.15.0";
+          return stdoutSpawner(() => `${version}\n`).spawn(command);
+        });
+        expect((yield* updateCommand(pnpmByPath, { PATH: instancePnpmDir }))?.command).toBe(
           "pnpm add -g @example/package-tool@latest",
         );
       }),

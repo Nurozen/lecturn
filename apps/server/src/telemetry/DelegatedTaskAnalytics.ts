@@ -27,6 +27,9 @@ const FINAL_STATUSES: ReadonlySet<string> = new Set([
   "cancelled",
   "interrupted",
 ]);
+// Lecturn: re-reports follow a task's final update, so the newest ids suffice
+// and a long-running server does not keep every finished task's id.
+const REPORTED_TASK_LIMIT = 1_000;
 
 export class DelegatedTaskAnalytics extends Context.Service<
   DelegatedTaskAnalytics,
@@ -79,6 +82,9 @@ const make = Effect.gen(function* () {
       });
       // Only after recording: a failed lookup leaves the next final update to report it.
       reported.add(task.id);
+      if (reported.size > REPORTED_TASK_LIMIT) {
+        reported.delete(reported.values().next().value!);
+      }
     }).pipe(Effect.ignoreCause);
 
   yield* forkParked(

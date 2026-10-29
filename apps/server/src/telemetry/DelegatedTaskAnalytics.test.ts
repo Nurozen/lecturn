@@ -12,11 +12,11 @@ import * as DelegatedTaskAnalytics from "./DelegatedTaskAnalytics.ts";
 
 const parentThreadId = ThreadId.make("parent-private");
 
-const subagentEvent = (status: string, origin = "app_owned") =>
+const subagentEvent = (status: string, origin = "app_owned", id = "task-private") =>
   ({
     type: "subagent.updated",
     payload: {
-      id: "task-private",
+      id,
       threadId: parentThreadId,
       origin,
       status,
@@ -57,46 +57,66 @@ it.effect("records each delegated task's final outcome once, without ids or prom
     ]);
   }).pipe(
     Effect.provide(
-      DelegatedTaskAnalytics.layer.pipe(
-        Layer.provide(
-          Layer.mergeAll(
-            Layer.mock(Orchestrator.OrchestratorV2)({
-              streamDomainEvents: Stream.empty,
-              getThreadShell: () =>
-                ++shellLookups === 1
-                  ? Effect.die("thread store unavailable")
-                  : Effect.succeed({
-                      modelSelection: {
-                        instanceId: ProviderInstanceId.make("codex"),
-                        model: "gpt-5.5",
-                      },
-                    } as never),
-            }),
-            Layer.mock(ProviderRegistry.ProviderRegistry)({
-              getProviders: Effect.succeed([
-                {
-                  instanceId: ProviderInstanceId.make("codex"),
-                  driver: "codex",
-                  models: [{ slug: "gpt-5.5", isCustom: false }],
-                } as never,
-                {
-                  instanceId: ProviderInstanceId.make("claudeAgent"),
-                  driver: "claudeAgent",
-                  models: [{ slug: "claude-opus-5-5", isCustom: false }],
-                } as never,
-              ]),
-            }),
-            Layer.succeed(
-              AnalyticsService.AnalyticsService,
-              AnalyticsService.AnalyticsService.of({
-                record: (event, properties) =>
-                  Effect.sync(() => void recorded.push({ event, properties })),
-                flush: Effect.void,
-              }),
-            ),
-          ),
-        ),
+      analyticsLayer(recorded, () =>
+        ++shellLookups === 1 ? Effect.die("thread store unavailable") : parentShell,
       ),
     ),
   );
 });
+
+it.effect("forgets the oldest reported tasks instead of keeping every id", () => {
+  const recorded: Array<{ event: string; properties: unknown }> = [];
+  return Effect.gen(function* () {
+    const analytics = yield* DelegatedTaskAnalytics.DelegatedTaskAnalytics;
+    // One more finished task than the analytics remember.
+    for (let index = 0; index <= 1_000; index++) {
+      yield* analytics.onSubagent(subagentEvent("completed", "app_owned", `task-${index}`));
+    }
+    yield* analytics.onSubagent(subagentEvent("completed", "app_owned", "task-1000"));
+    expect(recorded).toHaveLength(1_001);
+    yield* analytics.onSubagent(subagentEvent("completed", "app_owned", "task-0"));
+    expect(recorded).toHaveLength(1_002);
+  }).pipe(Effect.provide(analyticsLayer(recorded, () => parentShell)));
+});
+
+const parentShell = Effect.succeed({
+  modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.5" },
+} as never);
+
+function analyticsLayer(
+  recorded: Array<{ event: string; properties: unknown }>,
+  getThreadShell: () => Effect.Effect<never>,
+) {
+  return DelegatedTaskAnalytics.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(Orchestrator.OrchestratorV2)({
+          streamDomainEvents: Stream.empty,
+          getThreadShell,
+        }),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({
+          getProviders: Effect.succeed([
+            {
+              instanceId: ProviderInstanceId.make("codex"),
+              driver: "codex",
+              models: [{ slug: "gpt-5.5", isCustom: false }],
+            } as never,
+            {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              driver: "claudeAgent",
+              models: [{ slug: "claude-opus-5-5", isCustom: false }],
+            } as never,
+          ]),
+        }),
+        Layer.succeed(
+          AnalyticsService.AnalyticsService,
+          AnalyticsService.AnalyticsService.of({
+            record: (event, properties) =>
+              Effect.sync(() => void recorded.push({ event, properties })),
+            flush: Effect.void,
+          }),
+        ),
+      ),
+    ),
+  );
+}

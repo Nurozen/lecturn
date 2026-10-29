@@ -6,14 +6,17 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 const decodeLegacyLink = Schema.decodeEffect(Schema.fromJsonString(ThreadLinkedPullRequest));
 const encodeLinks = Schema.encodeSync(Schema.fromJsonString(Schema.Array(ThreadPullRequestLink)));
-const linksJson = Effect.fnUntraced(function* (linkedPullRequestJson: string, linkedAt: string) {
+// Lecturn: legacy links never recorded when they were made. The epoch is the unknown date
+// `threadPullRequestsOf` already served; a later edit time would hide a merge from settlement.
+const UNKNOWN_LINKED_AT = "1970-01-01T00:00:00.000Z";
+const linksJson = Effect.fnUntraced(function* (linkedPullRequestJson: string) {
   const linked = yield* decodeLegacyLink(linkedPullRequestJson);
   return encodeLinks([
     {
       ...legacyThreadPullRequestKey(linked),
       url: linked.url,
       source: "manual",
-      linkedAt,
+      linkedAt: UNKNOWN_LINKED_AT,
       snapshot: null,
       stack: null,
     },
@@ -28,10 +31,8 @@ export default Effect.gen(function* () {
     const rows = yield* sql<{
       readonly thread_id: string;
       readonly linked_pull_request_json: string;
-      readonly updated_at: string;
     }>`
-      SELECT thread_id, json_extract(payload_json, '$.linkedPullRequest') AS linked_pull_request_json,
-        updated_at
+      SELECT thread_id, json_extract(payload_json, '$.linkedPullRequest') AS linked_pull_request_json
       FROM orchestration_v2_projection_threads
       WHERE thread_id > ${afterThreadId}
         AND json_type(payload_json, '$.pullRequests') IS NULL
@@ -40,7 +41,7 @@ export default Effect.gen(function* () {
       LIMIT ${pageSize}
     `;
     for (const row of rows) {
-      const pullRequests = yield* linksJson(row.linked_pull_request_json, row.updated_at);
+      const pullRequests = yield* linksJson(row.linked_pull_request_json);
       yield* sql`
         UPDATE orchestration_v2_projection_threads
         SET payload_json = json_set(payload_json, '$.pullRequests', json(${pullRequests}))
@@ -57,10 +58,8 @@ export default Effect.gen(function* () {
     const rows = yield* sql<{
       readonly sequence: number;
       readonly linked_pull_request_json: string;
-      readonly updated_at: string;
     }>`
-      SELECT sequence, json_extract(payload_json, '$.linkedPullRequest') AS linked_pull_request_json,
-        json_extract(payload_json, '$.updatedAt') AS updated_at
+      SELECT sequence, json_extract(payload_json, '$.linkedPullRequest') AS linked_pull_request_json
       FROM orchestration_events
       WHERE sequence > ${afterSequence}
         AND application_event_version = 2 AND aggregate_kind = 'thread'
@@ -71,7 +70,7 @@ export default Effect.gen(function* () {
       LIMIT ${pageSize}
     `;
     for (const row of rows) {
-      const pullRequests = yield* linksJson(row.linked_pull_request_json, row.updated_at);
+      const pullRequests = yield* linksJson(row.linked_pull_request_json);
       yield* sql`
         UPDATE orchestration_events
         SET payload_json = json_set(payload_json, '$.pullRequests', json(${pullRequests}))

@@ -692,19 +692,27 @@ from upstream's side.
   runs as fork id 81, after Lecturn Apps 79 (`AppRegistrations`) and 80
   (`ProjectionProjectsAppBinding`). It is idempotent, so a database that ran it
   under upstream's id, or as 79 on the unreleased integration build, is safe.
+  Both of its passes write migrated links' `linkedAt` as `1970-01-01` (unknown
+  date), not the thread's `updated_at`, so the #18232 settlement filter keeps
+  links whose PR merged before the thread's last edit.
 - **Telemetry.** The build channel env is `LECTURN_TELEMETRY_CHANNEL`
   (`__LECTURN_TELEMETRY_CHANNEL__`), set by fork workflows on server-bundle
   builds. Upstream's `ingest.t3.codes` endpoint is not taken; the fork posts to
   its PostHog host. MCP tool analytics (#15913) match `lecturn_` tool names in
   `McpHttpServer` and `ProviderDimensions`; rename them together with the tools.
+  The delegated-task analytics dedupe set keeps only the newest 1,000 task ids.
+- **pnpm-global updates (#20796).** The `pnpm --version` probe that decides
+  `--allow-build` resolves pnpm from the server environment, the same pnpm the
+  update runner runs, not the provider instance's environment.
 - **Workflows.** Upstream repository guards on deploy/release/EAS/AUR/APK
   workflows are `github.repository == 'Nurozen/lecturn'`.
 - **Desktop update repository (#21210).** Web build env
   `LECTURN_DESKTOP_UPDATE_REPOSITORY` (fallback `GITHUB_REPOSITORY`), default
   `Nurozen/lecturn`.
-- **Connect session pending (#11013).** With no owning account the fork reports
-  pending only when the platform says `accountsSynced=false`; otherwise "Sign in
-  to Lecturn Connect".
+- **Connect session pending (#11013).** With or without an owning account the
+  fork reports pending only when the platform says `accountsSynced=false`;
+  otherwise "Sign in to Lecturn Connect". Mobile reports no sync state, so an
+  expired mobile account gets the sign-in failure instead of retrying forever.
 - **Orchestration instructions (#18415).** `LECTURN_ORCHESTRATION_SECTIONS`
   mirrors upstream's sections (each under 4000 bytes); Codex developer
   instructions use `lecturn_orchestration_NN` keys.

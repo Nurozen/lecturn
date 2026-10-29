@@ -1449,6 +1449,39 @@ describe("RemoteEnvironmentAuthorization", () => {
     }),
   );
 
+  it.effect("asks an expired owner to sign in where the platform reports no sync", () =>
+    Effect.gen(function* () {
+      // Mobile keeps an expired account in its known list and reports no sync.
+      const authorized = yield* authorizeRelayAs({
+        accountIds: [],
+        knownAccountIds: ["account-a"],
+      });
+
+      expect(authorized.result).toMatchObject({
+        _tag: "Failure",
+        failure: { _tag: "ConnectionBlockedError", reason: "authentication" },
+      });
+      expect(authorized.clerkTokens).toEqual([]);
+    }),
+  );
+
+  it.effect("retries an owned target while its sign-in has not synced", () =>
+    Effect.gen(function* () {
+      const authorized = yield* authorizeRelayAs({
+        accountIds: [],
+        knownAccountIds: ["account-a"],
+        accountsSynced: false,
+        targetAccountId: "account-a",
+      });
+
+      expect(authorized.result).toMatchObject({
+        _tag: "Failure",
+        failure: { _tag: "ConnectionTransientError", reason: "session-pending" },
+      });
+      expect(authorized.clerkTokens).toEqual([]);
+    }),
+  );
+
   it.effect("connects a signed-out owner's target from cache until accounts are synced", () =>
     Effect.gen(function* () {
       const authorized = yield* authorizeRelayAs({

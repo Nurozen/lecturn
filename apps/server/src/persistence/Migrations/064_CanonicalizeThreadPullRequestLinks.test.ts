@@ -10,11 +10,13 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as EventStore from "../../orchestration-v2/EventStore.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as ProjectionMaintenance from "../../orchestration-v2/ProjectionMaintenance.ts";
+import { resolveAutoSettlementAt } from "../../orchestration-v2/ThreadSettlementService.ts";
 import { listLinkedPullRequestThreads } from "../../pullRequest/linkedThreads.ts";
 import { runMigrations } from "../Migrations.ts";
 
 const decodeThread = Schema.decodeSync(Schema.fromJsonString(OrchestrationV2AppThreadJson));
 const updatedAt = "2026-09-01T00:00:00.000Z";
+const unknownLinkedAt = "1970-01-01T00:00:00.000Z";
 const linked = {
   projectId: "project-1",
   repository: "Acme/Web",
@@ -84,6 +86,12 @@ layer("064_CanonicalizeThreadPullRequestLinks", (it) => {
         { ...thread("empty"), linkedPullRequest: linked, pullRequests: [] },
         { ...thread("current"), linkedPullRequest: linked, pullRequests: [currentLink] },
         { ...thread("unlinked"), linkedPullRequest: null },
+        {
+          // Linked while its pull request was open, then edited after the merge.
+          ...thread("renamed"),
+          createdAt: "2026-08-01T00:00:00.000Z",
+          linkedPullRequest: { ...linked, number: 77, url: "https://github.com/acme/web/pull/77" },
+        },
         ...Array.from({ length: 501 }, (_, index) => ({
           ...thread(`page-${String(index).padStart(3, "0")}`),
           linkedPullRequest: {
@@ -130,7 +138,13 @@ layer("064_CanonicalizeThreadPullRequestLinks", (it) => {
       `;
       const migrated = new Map(rows.map((row) => [row.thread_id, decodeThread(row.payload_json)]));
       assert.deepEqual(migrated.get("github")?.pullRequests, [
-        { ...currentLink, number: 42, url: linked.url, source: "manual" },
+        {
+          ...currentLink,
+          number: 42,
+          url: linked.url,
+          source: "manual",
+          linkedAt: unknownLinkedAt,
+        },
       ]);
       assert.equal(migrated.get("forgejo")?.pullRequests?.[0]?.host, "forge.example:3000");
       assert.equal(migrated.get("azure")?.pullRequests?.[0]?.host, "dev.azure.com");
@@ -168,6 +182,36 @@ layer("064_CanonicalizeThreadPullRequestLinks", (it) => {
           [ThreadId.make(id)],
         );
       }
+
+      // The merge still settles the thread once the sync reactor records it.
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const [renamed] = yield* projections.getSettlementCandidates(ThreadId.make("renamed"));
+      assert.isDefined(renamed);
+      const mergedAt = "2026-08-15T00:00:00.000Z";
+      assert.isNotNull(
+        resolveAutoSettlementAt({
+          thread: {
+            ...renamed!,
+            pullRequests: (renamed!.pullRequests ?? []).map((link) => ({
+              ...link,
+              snapshot: {
+                state: "merged" as const,
+                title: "Pull request",
+                headBranch: "feature",
+                baseBranch: "main",
+                isDraft: false,
+                updatedAt: mergedAt,
+                syncedAt: updatedAt,
+                mergedAt,
+              },
+            })),
+          },
+          pullRequest: null,
+          nowMs: Date.parse(updatedAt),
+          autoSettleAfterDays: null,
+          autoSettleOnMerge: true,
+        }),
+      );
     }),
   );
 });
