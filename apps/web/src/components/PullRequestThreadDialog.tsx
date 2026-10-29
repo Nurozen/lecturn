@@ -20,7 +20,7 @@ import {
 } from "~/lib/sourceControlActions";
 import { cn } from "~/lib/utils";
 import { useComposerDraftStore } from "~/composerDraftStore";
-import { parsePullRequestReference } from "~/pullRequestReference";
+import { parsePullRequestReference } from "@lecturn/client-runtime/pull-request-link-input";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
 import { useProject, useThreadShell } from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";

@@ -268,6 +268,15 @@ export const make = Effect.gen(function* () {
       detail: "Your cloud sign-in changed. Sign in again to authorize the environment.",
     });
 
+  // A missing identity before the attempt captures one means the cloud session
+  // is still loading, not a sign-out. Only a captured identity that goes away
+  // or changes is evidence of one.
+  const sessionPending = () =>
+    new ConnectionTransientError({
+      reason: "session-pending",
+      detail: "Waiting for the Lecturn Connect sign-in to load.",
+    });
+
   const assertSession = Effect.fnUntraced(function* (
     identity: ClientCapabilities.CloudSessionIdentity,
   ) {
@@ -453,7 +462,11 @@ export const make = Effect.gen(function* () {
           yield* removeRejectedToken(input.expectedEnvironmentId, input.rejectedAccessToken);
         }
         if (identity === undefined) {
-          return yield* relayAccountUnresolvedError(0);
+          // Owned or not, only a platform that reports its sign-in sync can tell
+          // a loading session from a signed-out or expired one.
+          const synced =
+            cloudSession.accountsSynced === undefined ? true : yield* cloudSession.accountsSynced;
+          return yield* synced ? relayAccountUnresolvedError(0) : sessionPending();
         }
         const pending = pendingTokens.get(input.expectedEnvironmentId);
         if (pending?.identity === identity && pending.thumbprint === thumbprint) {
@@ -575,6 +588,9 @@ export const make = Effect.gen(function* () {
       // it for the Lecturn Connect route rather than forcing a relay round trip.
       if (endpoint !== undefined && cachedSocket.failure._tag !== "EnvironmentAuthInvalidError") {
         return yield* mapDpopSocketError(cachedSocket.failure);
+      }
+      if (selected.identity !== undefined) {
+        yield* assertSession(selected.identity);
       }
       selected = yield* getDpopToken({
         ...input,

@@ -16,7 +16,7 @@ import {
   type RuntimeMode,
   type ScopedThreadRef,
 } from "@lecturn/contracts";
-import { useCallback, useMemo, useRef } from "react";
+import { useRef } from "react";
 import * as Dialog from "../../components/ui/Dialog";
 
 import { buildModelOptions, resolveDefaultableModelSelection } from "../../lib/modelOptions";
@@ -51,15 +51,11 @@ export function useThreadImportAvailability(
     (environment) =>
       environment.environmentId === environmentId && environment.connectionState === "connected",
   );
-  return useMemo(
-    () =>
-      resolveThreadImportAvailability({
-        connected,
-        serverSupportsForking: serverConfig?.environment.capabilities.threadForking === true,
-        providers: serverConfig?.providers ?? [],
-      }),
-    [connected, serverConfig],
-  );
+  return resolveThreadImportAvailability({
+    connected,
+    serverSupportsForking: serverConfig?.environment.capabilities.threadForking === true,
+    providers: serverConfig?.providers ?? [],
+  });
 }
 
 type ImportThreadInput = {
@@ -95,78 +91,73 @@ export function useImportThreadAttempt(): (
   const importMutation = useAtomCommand(threadEnvironment.import, { reportFailure: false });
   const inFlightSessionKeys = useRef(new Set<string>());
 
-  return useCallback(
-    async ({ branch, interactionMode, project, runtimeMode, session, worktreePath }) => {
-      const key = `${project.environmentId}:${session.providerInstanceId}:${session.sessionId}`;
-      if (inFlightSessionKeys.current.has(key)) {
-        return { ok: false, message: null };
-      }
-      const serverConfig = appAtomRegistry.get(
-        serverEnvironment.configValueAtom(project.environmentId),
-      );
-      const modelSelection = resolveImportModelSelection({
-        instanceId: session.providerInstanceId,
-        modelOptions: buildModelOptions(serverConfig, null, undefined, project.id),
-        projectDefault: resolveDefaultableModelSelection(
-          serverConfig,
-          project.defaultModelSelection,
-          project.id,
-        ),
-        stickySelection: resolveDefaultableModelSelection(
-          serverConfig,
-          appAtomRegistry.get(stickyComposerModelSelectionAtom),
-          project.id,
-        ),
-      });
-      if (modelSelection === null) {
-        return { ok: false, message: threadImportFailureMessage("provider-unavailable") };
-      }
+  return async ({ branch, interactionMode, project, runtimeMode, session, worktreePath }) => {
+    const key = `${project.environmentId}:${session.providerInstanceId}:${session.sessionId}`;
+    if (inFlightSessionKeys.current.has(key)) {
+      return { ok: false, message: null };
+    }
+    const serverConfig = appAtomRegistry.get(
+      serverEnvironment.configValueAtom(project.environmentId),
+    );
+    const modelSelection = resolveImportModelSelection({
+      instanceId: session.providerInstanceId,
+      modelOptions: buildModelOptions(serverConfig, null, undefined, project.id),
+      projectDefault: resolveDefaultableModelSelection(
+        serverConfig,
+        project.defaultModelSelection,
+        project.id,
+      ),
+      stickySelection: resolveDefaultableModelSelection(
+        serverConfig,
+        appAtomRegistry.get(stickyComposerModelSelectionAtom),
+        project.id,
+      ),
+    });
+    if (modelSelection === null) {
+      return { ok: false, message: threadImportFailureMessage("provider-unavailable") };
+    }
 
-      inFlightSessionKeys.current.add(key);
-      try {
-        const threadId = ThreadId.make(uuidv4());
-        const result = await importMutation({
-          environmentId: project.environmentId,
-          input: {
-            threadId,
-            projectId: project.id,
-            providerInstanceId: session.providerInstanceId,
-            sessionId: session.sessionId,
-            modelSelection,
-            runtimeMode,
-            interactionMode: resolveProviderInteractionMode(
-              serverConfig?.providers.find(
-                (candidate) => candidate.instanceId === session.providerInstanceId,
-              ),
-              interactionMode,
-            ),
-            branch,
-            worktreePath,
-            createdAt: new Date().toISOString(),
-          },
-        });
-        if (result._tag === "Failure") {
-          if (isAtomCommandInterrupted(result)) return { ok: false, message: null };
-          const error = squashAtomCommandFailure(result);
-          const reason = threadImportFailureReason(error);
-          return {
-            ok: false,
-            message:
-              reason !== null
-                ? threadImportFailureMessage(reason)
-                : (staveAdmissionErrorMessage(error) ??
-                  (error instanceof Error && error.message.trim().length > 0
-                    ? error.message
-                    : "The session could not be imported.")),
-          };
-        }
-        return { ok: true, value: scopeThreadRef(project.environmentId, threadId) };
-      } finally {
-        inFlightSessionKeys.current.delete(key);
-      }
-    },
-    [importMutation],
-  );
+    inFlightSessionKeys.current.add(key);
+    const threadId = ThreadId.make(uuidv4());
+    // Atom commands resolve failures as values, so the key always clears here.
+    const result = await importMutation({
+      environmentId: project.environmentId,
+      input: {
+        threadId,
+        projectId: project.id,
+        providerInstanceId: session.providerInstanceId,
+        sessionId: session.sessionId,
+        modelSelection,
+        runtimeMode,
+        interactionMode: resolveProviderInteractionMode(
+          serverConfig?.providers.find(
+            (candidate) => candidate.instanceId === session.providerInstanceId,
+          ),
+          interactionMode,
+        ),
+        branch,
+        worktreePath,
+        createdAt: new Date().toISOString(),
+      },
+    });
+    inFlightSessionKeys.current.delete(key);
+    if (result._tag === "Failure") {
+      if (isAtomCommandInterrupted(result)) return { ok: false, message: null };
+      const error = squashAtomCommandFailure(result);
+      const reason = threadImportFailureReason(error);
+      return {
+        ok: false,
+        message:
+          reason !== null
+            ? threadImportFailureMessage(reason)
+            : (staveAdmissionErrorMessage(error) ??
+              (error instanceof Error && error.message.trim().length > 0
+                ? error.message
+                : "The session could not be imported.")),
+      };
+    }
+    return { ok: true, value: scopeThreadRef(project.environmentId, threadId) };
+  };
 }
 
 /**
@@ -175,13 +166,10 @@ export function useImportThreadAttempt(): (
  */
 export function useImportThread(): (input: ImportThreadInput) => Promise<ScopedThreadRef | null> {
   const importThread = useImportThreadAttempt();
-  return useCallback(
-    async (input) => {
-      const attempt = await importThread(input);
-      if (attempt.ok) return attempt.value;
-      if (attempt.message !== null) Dialog.alert(ALERT_TITLE, attempt.message);
-      return null;
-    },
-    [importThread],
-  );
+  return async (input) => {
+    const attempt = await importThread(input);
+    if (attempt.ok) return attempt.value;
+    if (attempt.message !== null) Dialog.alert(ALERT_TITLE, attempt.message);
+    return null;
+  };
 }

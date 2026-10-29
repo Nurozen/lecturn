@@ -130,7 +130,7 @@ export function DecisionGroupPanel({
           onPress={async () => {
             setBusy(true);
             setError(null);
-            try {
+            await (async () => {
               const result = await undo({
                 environmentId,
                 input: {
@@ -144,9 +144,9 @@ export function DecisionGroupPanel({
               if (result._tag === "Success") onChanged();
               if (result._tag !== "Success")
                 setError("The consolidation changed. Refresh Decisions and try again.");
-            } finally {
+            })().finally(() => {
               setBusy(false);
-            }
+            });
           }}
         />
       ) : null}

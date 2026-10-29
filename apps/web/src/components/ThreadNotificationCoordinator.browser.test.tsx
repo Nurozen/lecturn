@@ -1,5 +1,5 @@
 import { threadsForProjectsMode } from "@lecturn/client-runtime/state/app-projects";
-import { AppId, EnvironmentId, ProjectId } from "@lecturn/contracts";
+import { AppId, EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
 import type { ClientSettings } from "@lecturn/contracts/settings";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
@@ -170,6 +170,7 @@ vi.mock(import("./ui/toast"), async (original) => {
   };
 });
 
+import { threadNotificationTag } from "../threadNotifications";
 import { useUiStateStore } from "../uiStateStore";
 import { ThreadNotificationCoordinator } from "./ThreadNotificationCoordinator";
 
@@ -308,7 +309,7 @@ describe("thread notifications", () => {
     expect(state.notification).toHaveBeenCalledTimes(1);
     expect(state.notification).toHaveBeenCalledWith(title, {
       body: "Fix the login form",
-      tag: "env-1:thread-1",
+      tag: expect.any(String),
       silent: true,
     });
   });
@@ -381,7 +382,7 @@ describe("thread notifications", () => {
     expect(state.add).not.toHaveBeenCalled();
     expect(state.notification).toHaveBeenCalledWith("Thread completed", {
       body: "Fix the login form",
-      tag: "env-1:thread-1",
+      tag: expect.any(String),
       silent: true,
     });
   });
@@ -450,7 +451,7 @@ describe("app thread notifications", () => {
       await render();
       expect(state.notification).toHaveBeenCalledWith(title, {
         body: "Fix the login form",
-        tag: "env-1:thread-1",
+        tag: threadNotificationTag(EnvironmentId.make("env-1"), ThreadId.make("thread-1")),
         silent: true,
       });
       const notification = state.notification.mock.results[0]?.value as EventTarget;

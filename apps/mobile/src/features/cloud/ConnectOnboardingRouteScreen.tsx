@@ -4,7 +4,7 @@ import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScroll
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { useAuth } from "@clerk/expo";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Platform, Pressable, RefreshControl, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -59,24 +59,18 @@ function ConfiguredConnectOnboardingRouteScreen(props: { readonly accountId?: st
   });
 
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const handleRefresh = useCallback(() => {
-    void (async () => {
-      setIsRefreshing(true);
-      try {
-        await refreshRelayEnvironments();
-      } finally {
-        setIsRefreshing(false);
-      }
-    })();
-  }, [refreshRelayEnvironments]);
+  const handleRefresh = () => {
+    setIsRefreshing(true);
+    void refreshRelayEnvironments().finally(() => setIsRefreshing(false));
+  };
 
-  const handleClose = useCallback(() => {
+  const handleClose = () => {
     navigation.goBack();
-  }, [navigation]);
+  };
 
   // Persist before dismissing so a quick sign-out/sign-in cannot race ahead
   // of the preference write; the write is a local secure-store update.
-  const handleDontShowAgain = useCallback(() => {
+  const handleDontShowAgain = () => {
     void (async () => {
       if (userId) {
         const result = await settlePromise(() => optOutOfConnectOnboarding(userId));
@@ -84,7 +78,7 @@ function ConfiguredConnectOnboardingRouteScreen(props: { readonly accountId?: st
       }
       navigation.goBack();
     })();
-  }, [navigation, userId]);
+  };
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">

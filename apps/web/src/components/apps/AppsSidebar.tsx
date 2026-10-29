@@ -1,4 +1,3 @@
-import { scopedThreadKey } from "@lecturn/client-runtime/environment";
 import type { EnvironmentId, ScopedProjectRef } from "@lecturn/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { LayoutGridIcon } from "lucide-react";
@@ -7,7 +6,7 @@ import { useComposerDraftStore } from "../../composerDraftStore";
 import { isElectron } from "../../env";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useThreadRouteTarget } from "../../hooks/useThreadRouteTarget";
-import { useServerConfigs } from "../../state/entities";
+import { useServerConfigs, useThreadShells } from "../../state/entities";
 import { resolveActiveThreadRouteRef } from "../../threadRoutes";
 import { useThreadSelectionStore } from "../../threadSelectionStore";
 import { useUiStateStore } from "../../uiStateStore";
@@ -23,6 +22,7 @@ import { AppsGroup } from "./AppsGroup";
 import { AppsModeSwitch } from "./AppsModeSwitch";
 import {
   appsNewThreadWorkspace,
+  appsSidebarActiveThreadKey,
   appsSidebarVisibleThreads,
   appTreeGroupKey,
   isAppTreeGroupCollapsed,
@@ -118,12 +118,14 @@ export function AppsSidebar() {
     routeTarget?.kind === "draft" ? store.getDraftSession(routeTarget.draftId) : null,
   );
   const routeThreadRef = resolveActiveThreadRouteRef(routeTarget, routeDraftThread);
+  const threads = useThreadShells();
 
   const selected = resolveAppsSidebarScope(apps, scopeKey);
-  const activeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
+  const activeThreadKey = appsSidebarActiveThreadKey(routeThreadRef, threads);
   const jumpLabelByKey = useAppsSidebarThreadJumps({
     threads: appsSidebarVisibleThreads({ apps, selected, collapsedByKey }),
     routeThreadRef,
+    routeRowThreadKey: activeThreadKey,
     open: actions.open,
   });
   usePublishAppsNewThreadTarget(appsNewThreadWorkspace({ apps, selected, activeThreadKey }));

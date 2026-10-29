@@ -40,7 +40,7 @@ import { type TerminalOutputState } from "@lecturn/client-runtime/state/terminal
 import { isPhoneLocalOnboarding } from "../../onboarding/phoneAuth.logic";
 import { PhoneAuthControls } from "./PhoneAuthControls";
 import { PhoneAuthTerminal } from "./PhoneAuthTerminal";
-import { usePhoneAuthViewport } from "../../onboarding/usePhoneAuthViewport";
+import { phoneAuthViewportRef } from "../../onboarding/usePhoneAuthViewport";
 import { reconcileOnboardingComputers } from "../../onboarding/computerSelection.logic";
 
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../../appearanceFonts";
@@ -48,7 +48,7 @@ import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
 import { useLecturnConnectAuthPrompt } from "../clerk/useLecturnConnectAuthPrompt";
-import { useCompleteOnboarding } from "../../onboarding/firstRun";
+import { completeOnboarding } from "../../onboarding/firstRun";
 import {
   groupOnboardingProjects,
   partitionOnboardingProjects,
@@ -127,7 +127,6 @@ export function WelcomeWizard({
   readonly resumeEnvironmentId?: EnvironmentId | undefined;
   readonly onDone: (projectRef?: ScopedProjectRef) => void | Promise<void>;
 }) {
-  const completeOnboarding = useCompleteOnboarding();
   const [step, setStep] = useState<WizardStep>(resumeEnvironmentId ? "agents" : "connection");
   const { environments } = useEnvironments();
   const [selection, setSelection] = useState<ReadonlySet<EnvironmentId> | null>(null);
@@ -141,7 +140,7 @@ export function WelcomeWizard({
   const [isImporting, setIsImporting] = useState(false);
   const finishingPromiseRef = useRef<Promise<boolean> | null>(null);
   const completionErrorToastIdRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
-  const phoneAuthViewportRef = usePhoneAuthViewport(!isElectron);
+  const viewportRef = phoneAuthViewportRef(!isElectron);
   useEffect(() => {
     const catalogIds = new Set(environments.map((environment) => environment.environmentId));
     const previous = previousCatalogIds.current;
@@ -226,7 +225,7 @@ export function WelcomeWizard({
   return (
     <Dialog open disablePointerDismissal onOpenChange={(_, event) => event.cancel()}>
       <DialogPopup
-        viewportRef={phoneAuthViewportRef}
+        viewportRef={viewportRef}
         layout="phone-setup"
         className="max-w-3xl overflow-x-hidden overflow-y-auto"
         bottomStickOnMobile={false}

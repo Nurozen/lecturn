@@ -162,6 +162,19 @@ function worktreeOwner(threads: ReadonlyArray<OrchestrationV2ThreadShell>) {
 }
 
 /**
+ * Whether Git says the directory is no longer a checkout. Git 2.56 reports a
+ * `.git` file whose gitdir is gone as "gitfile does not point to a valid
+ * repository"; earlier versions say "not a git repository".
+ */
+export function storageCleanupNotRepository(stderr: string): boolean {
+  const message = stderr.toLowerCase();
+  return (
+    message.includes("not a git repository") ||
+    message.includes("gitfile does not point to a valid repository")
+  );
+}
+
+/**
  * Whether the host's pull request proves this worktree's head was merged. A
  * squash or rebase merge leaves the head outside the default branch, so the
  * merged pull request then has to name this exact commit.
@@ -270,8 +283,14 @@ const make = Effect.gen(function* () {
         if (isLink) continue;
         if ((yield* fs.realPath(target)) !== target) return null;
         const stat = yield* fs.stat(target);
-        if (stat.type === "File") bytes += Number(stat.size);
-        else if (stat.type === "Directory") {
+        if (stat.type === "File") {
+          // Removing a shared hardlink leaves its blocks allocated.
+          if (Option.getOrElse(stat.nlink, () => 1n) !== 1n) continue;
+          bytes += Option.match(stat.blocks, {
+            onNone: () => Number(stat.size),
+            onSome: (blocks) => Number(blocks * 512n),
+          });
+        } else if (stat.type === "Directory") {
           const names = yield* fs.readDirectory(target);
           entries += names.length;
           if (entries > 2_000_000) return null;
@@ -291,11 +310,9 @@ const make = Effect.gen(function* () {
   // The snapshot takes seconds on large databases, so it runs on the reader
   // worker instead of the event loop.
   const readThreads = Effect.fn("StorageCleanup.readThreads")(function* () {
-    const { threads } = yield* projections
-      .getShellSnapshot({ location: "active" })
-      .pipe(NodeSqliteClient.readOnly);
+    const snapshot = yield* projections.getShellSnapshot().pipe(NodeSqliteClient.readOnly);
     const projects = yield* projectStore.listShells();
-    return { projects, threads };
+    return { projects, threads: [...snapshot.threads, ...snapshot.archivedThreads] };
   });
 
   const containsProjectRoot = Effect.fn("StorageCleanup.containsProjectRoot")(function* (
@@ -473,7 +490,7 @@ const make = Effect.gen(function* () {
         );
       if (result === null) return null;
       if (result.exitCode === 0 || result.exitCode === allowedExitCode) return result;
-      if (result.stderr.toLowerCase().includes("not a git repository")) return null;
+      if (storageCleanupNotRepository(result.stderr)) return null;
       return yield* failure(
         result.stderr.trim().split(/\r?\n/)[0]?.slice(0, 1000) || "command failed",
       );
@@ -740,9 +757,9 @@ const make = Effect.gen(function* () {
           const latestProjects = yield* projectStore.listShells();
           if (yield* containsProjectRoot(worktreePath, [project, ...latestProjects]))
             return "contains a project checkout";
-          const latest = (yield* projections.getThreadWorktreePaths()).filter(
-            (entry) => path.resolve(entry.worktreePath) === worktreePath,
-          );
+          const latest = (yield* projections.getThreadWorktreePaths({
+            includeArchived: true,
+          })).filter((entry) => path.resolve(entry.worktreePath) === worktreePath);
           if (hasTerminal(worktreePath)) return "open terminal";
           if (deleted) {
             if (

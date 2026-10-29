@@ -12,8 +12,8 @@ import { staveOperations } from "../../state/staveOperations";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { StaveOperationProgress } from "../stave/StaveOperationProgress";
 import {
+  updateClientSettings,
   useClientSettings,
-  useUpdateClientSettings,
   usePrimarySettings,
   useUpdatePrimarySettings,
 } from "../../hooks/useSettings";
@@ -259,7 +259,6 @@ function StaveConfigPathSetting() {
 
 function StaveSagaNestingSetting() {
   const enabled = useClientSettings((settings) => settings.sidebarNestSagas);
-  const update = useUpdateClientSettings();
   return (
     <SettingsRow
       {...searchableSetting("stave-nest-sagas")}
@@ -268,7 +267,7 @@ function StaveSagaNestingSetting() {
         <Switch
           data-lecturn-hover
           checked={enabled}
-          onCheckedChange={(checked) => update({ sidebarNestSagas: checked })}
+          onCheckedChange={(checked) => updateClientSettings({ sidebarNestSagas: checked })}
           aria-label="Nest saga members"
         />
       }

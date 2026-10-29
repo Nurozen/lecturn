@@ -8,6 +8,7 @@ import { cardIsVisible } from "./watch-visuals";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
+import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
 import {
   mergeHandoffMessage,
   selectMergeHandoffThread,
@@ -263,7 +264,7 @@ function PullRequestWatchControls({
     busyRef.current = true;
     setBusy(true);
     setError(null);
-    try {
+    await (async () => {
       const result = await runCommand({
         environmentId,
         input: { ...input, watchId, requestId: uuidv4() },
@@ -274,17 +275,17 @@ function PullRequestWatchControls({
           failure instanceof Error ? failure.message : "Could not update the pull request watch.",
         );
       }
-    } finally {
+    })().finally(() => {
       busyRef.current = false;
       setBusy(false);
-    }
+    });
   };
   const sendMergeHandoff = async () => {
     if (!canOperate || !watch || !recipient || legacyAuthorization || busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     setError(null);
-    try {
+    await (async () => {
       // This explicit handoff assigns the sole associated recipient before
       // delivery, so subsequent monitoring identifies who owns the work.
       if (watch.managerThreadId === null) {
@@ -316,12 +317,16 @@ function PullRequestWatchControls({
         createdAt: metadata.createdAt,
       });
       setMergeQueuedTo(recipient.title);
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "Could not queue merge instructions.");
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
+    })()
+      .catch((failure: unknown) => {
+        setError(
+          failure instanceof Error ? failure.message : "Could not queue merge instructions.",
+        );
+      })
+      .finally(() => {
+        busyRef.current = false;
+        setBusy(false);
+      });
   };
   const sendSteer = async () => {
     const text = steer.trim();
@@ -329,7 +334,7 @@ function PullRequestWatchControls({
     busyRef.current = true;
     setBusy(true);
     setError(null);
-    try {
+    await (async () => {
       const metadata = makeQueuedMessageMetadata();
       await enqueueThreadOutboxMessage({
         environmentId,
@@ -342,16 +347,18 @@ function PullRequestWatchControls({
       });
       setSteer((value) => (value.trim() === text ? "" : value));
       setQueued(true);
-    } catch (failure) {
-      setError(
-        failure instanceof Error
-          ? failure.message
-          : "Could not save the message. Your text is still here.",
-      );
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
+    })()
+      .catch((failure: unknown) => {
+        setError(
+          failure instanceof Error
+            ? failure.message
+            : "Could not save the message. Your text is still here.",
+        );
+      })
+      .finally(() => {
+        busyRef.current = false;
+        setBusy(false);
+      });
   };
 
   const managerProject = manager
@@ -441,7 +448,7 @@ function PullRequestWatchControls({
             </Text>
             <View className="flex-row flex-wrap items-center gap-2">
               <StatusCue
-                icon="arrow.triangle.pull"
+                icon={PullRequestGlyph.pullRequest}
                 label="Pull request"
                 value={observation?.state ?? "Unknown"}
               />

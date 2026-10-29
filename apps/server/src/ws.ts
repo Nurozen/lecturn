@@ -87,8 +87,6 @@ import {
   ProviderSetupError,
   RelayClientInstallFailedError,
   type RelayClientInstallProgressEvent,
-  type ServerSelfUpdateError,
-  type ServerSelfUpdateProgressEvent,
   type ServerConfig as ClientServerConfig,
   type ServerConfigStreamEvent,
   type ServerLifecycleStreamEvent,
@@ -180,6 +178,7 @@ import * as AcpRegistrySupport from "@lecturn/provider-acp-registry/server/AcpRe
 import * as AcpRegistryRuntimeCoordinator from "@lecturn/provider-acp-registry/server/AcpRegistryRuntimeCoordinator";
 import * as ModelManifest from "./provider/ModelManifest.ts";
 import * as ProviderLatestVersions from "@lecturn/provider-core/server/ProviderLatestVersions";
+import { latestProviderVersionCacheKeys } from "@lecturn/provider-core/server/maintenanceResolver";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ProviderAuthService from "./provider/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
@@ -237,6 +236,7 @@ import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
+import { featureUsage } from "./telemetry/FeatureUsage.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
@@ -2497,10 +2497,16 @@ const makeWsRpcHandlers = (
                 Effect.gen(function* () {
                   yield* instance.invalidateCaches ?? Effect.void;
                   const maintenance = yield* instance.snapshot.resolveMaintenance({
-                    fresh: true,
+                    fresh:
+                      input.instanceId !== undefined &&
+                      input.cwd !== undefined &&
+                      input.fresh !== true,
                   });
-                  if (maintenance.packageName)
-                    yield* providerLatestVersions.invalidate(maintenance.packageName);
+                  yield* Effect.forEach(
+                    latestProviderVersionCacheKeys(maintenance),
+                    providerLatestVersions.invalidate,
+                    { discard: true },
+                  );
                 }),
               { concurrency: "unbounded", discard: true },
             );
@@ -2654,28 +2660,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.providerInstallRemove]: (input) => providerInstallation.remove(input),
       [WS_METHODS.serverUpdateServer]: (input) => serverSelfUpdate.update(input),
       [WS_METHODS.serverUpdateServerWithProgress]: (input) =>
-        Stream.callback<ServerSelfUpdateProgressEvent, ServerSelfUpdateError>((queue) =>
-          serverSelfUpdate
-            .update(input, (stage) =>
-              Queue.offer(queue, {
-                type: "progress",
-                stage,
-              }).pipe(Effect.asVoid),
-            )
-            .pipe(
-              Effect.flatMap((result) =>
-                Queue.offer(queue, {
-                  type: "complete",
-                  result,
-                }),
-              ),
-              Effect.catchTags({
-                ServerSelfUpdateError: (error) => Queue.fail(queue, error),
-              }),
-              Effect.andThen(Queue.end(queue)),
-              Effect.forkScoped,
-            ),
-        ),
+        ServerSelfUpdate.updateProgressStream(serverSelfUpdate, input),
       [WS_METHODS.serverCommitDesktopUpdate]: (input) =>
         serverSelfUpdate.commitDesktopUpdate(input.requestId),
       [WS_METHODS.serverUpsertKeybinding]: (rule) =>
@@ -3621,7 +3606,21 @@ export const layer = Layer.unwrap(
             Effect.provideService(RpcServer.Protocol, withTerminalOutputWindow(protocol)),
             Effect.provide(
               Layer.merge(
-                AppRpcAuthorization.layer(session).pipe(Layer.provide(lecturnServices)),
+                AppRpcAuthorization.layer(session, (method, payload) => {
+                  // Anonymous product signal: the feature and its enum variant,
+                  // credited to the connecting client's surface only.
+                  const usage = featureUsage(method, payload);
+                  return usage === undefined
+                    ? Effect.void
+                    : analytics
+                        .record("feature.used", {
+                          ...usage,
+                          ...(clientAnalyticsProps.surface === undefined
+                            ? {}
+                            : { surface: clientAnalyticsProps.surface }),
+                        })
+                        .pipe(Effect.ignore);
+                }).pipe(Layer.provide(lecturnServices)),
                 rpcInstrumentationLayer,
               ),
             ),

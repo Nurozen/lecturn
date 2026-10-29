@@ -60,7 +60,7 @@ vi.mock(import("./SettingsNavigation"), async (original) => ({
 }));
 vi.mock(import("../../onboarding/usePhoneAuthViewport"), async (original) => ({
   ...(await original()),
-  usePhoneAuthViewport: (() => undefined) as never,
+  phoneAuthViewportRef: (() => undefined) as never,
 }));
 vi.mock(import("../WorkspacePageHeader"), async (original) => ({
   ...(await original()),

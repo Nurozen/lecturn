@@ -73,7 +73,7 @@ export function ContextualThreadControl({
           if (!state || busy) return;
           setBusy(true);
           setError(null);
-          try {
+          await (async () => {
             const result = await update({
               environmentId,
               input: {
@@ -87,9 +87,9 @@ export function ContextualThreadControl({
               setError("Could not change Contextual. Refresh and try again.");
               status.refresh();
             }
-          } finally {
+          })().finally(() => {
             setBusy(false);
-          }
+          });
         }}
       />
       <Pressable

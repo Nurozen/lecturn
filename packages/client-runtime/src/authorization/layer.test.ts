@@ -1036,6 +1036,30 @@ describe("RemoteEnvironmentAuthorization", () => {
     }),
   );
 
+  it.effect("retries instead of blocking while the cloud session has not loaded", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        accountsSynced: false,
+        responses: [Response.json(DESCRIPTOR), accessToken("loaded-token")],
+      });
+      yield* Ref.set(harness.session, Option.none());
+      yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        const pending = yield* remote
+          .authorizeDpopHttp({ expectedEnvironmentId: ENVIRONMENT_ID })
+          .pipe(Effect.flip);
+        expect(pending).toMatchObject({
+          _tag: "ConnectionTransientError",
+          reason: "session-pending",
+        });
+        yield* Ref.set(harness.session, Option.some({ accountId: "account-1" }));
+        const loaded = yield* remote.authorizeDpopHttp({ expectedEnvironmentId: ENVIRONMENT_ID });
+        expect(loaded.httpAuthorization.accessToken).toBe("loaded-token");
+      }).pipe(Effect.provide(harness.layer));
+      expect(yield* Ref.get(harness.bootstrapCalls)).toBe(1);
+    }),
+  );
+
   it.effect("does not return or persist credentials after logout during renewal", () =>
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>();
@@ -1126,13 +1150,6 @@ describe("RemoteEnvironmentAuthorization", () => {
         const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
         yield* remote.authorizeDpopHttp({ expectedEnvironmentId: ENVIRONMENT_ID });
         yield* Ref.set(harness.session, Option.none());
-        const signedOut = yield* remote
-          .authorizeDpopHttp({ expectedEnvironmentId: ENVIRONMENT_ID })
-          .pipe(Effect.flip);
-        expect(signedOut).toMatchObject({
-          _tag: "ConnectionBlockedError",
-          reason: "authentication",
-        });
         yield* Ref.set(harness.session, Option.some({ accountId: "account-1" }));
         const signedIn = yield* remote.authorizeDpopHttp({ expectedEnvironmentId: ENVIRONMENT_ID });
         expect(signedIn.httpAuthorization.accessToken).toBe("new-session-token");
@@ -1429,6 +1446,39 @@ describe("RemoteEnvironmentAuthorization", () => {
         _tag: "Failure",
         failure: { _tag: "ConnectionBlockedError", reason: "authentication" },
       });
+    }),
+  );
+
+  it.effect("asks an expired owner to sign in where the platform reports no sync", () =>
+    Effect.gen(function* () {
+      // Mobile keeps an expired account in its known list and reports no sync.
+      const authorized = yield* authorizeRelayAs({
+        accountIds: [],
+        knownAccountIds: ["account-a"],
+      });
+
+      expect(authorized.result).toMatchObject({
+        _tag: "Failure",
+        failure: { _tag: "ConnectionBlockedError", reason: "authentication" },
+      });
+      expect(authorized.clerkTokens).toEqual([]);
+    }),
+  );
+
+  it.effect("retries an owned target while its sign-in has not synced", () =>
+    Effect.gen(function* () {
+      const authorized = yield* authorizeRelayAs({
+        accountIds: [],
+        knownAccountIds: ["account-a"],
+        accountsSynced: false,
+        targetAccountId: "account-a",
+      });
+
+      expect(authorized.result).toMatchObject({
+        _tag: "Failure",
+        failure: { _tag: "ConnectionTransientError", reason: "session-pending" },
+      });
+      expect(authorized.clerkTokens).toEqual([]);
     }),
   );
 

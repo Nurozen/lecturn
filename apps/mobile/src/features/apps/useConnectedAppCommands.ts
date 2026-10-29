@@ -48,16 +48,13 @@ export function useConnectedAppCommands(environmentId: EnvironmentId) {
   ): Promise<boolean> => {
     if (!canManage) return false;
     setBusy(true);
-    try {
-      const result = await execute();
-      if (result._tag === "Success") return true;
-      if (!isAtomCommandInterrupted(result)) {
-        Dialog.alert(FAILURE_TITLES[action], failureMessage(squashAtomCommandFailure(result)));
-      }
-      return false;
-    } finally {
-      setBusy(false);
+    // `.finally`, not try/finally: the React Compiler cannot lower a try without a catch.
+    const result = await execute().finally(() => setBusy(false));
+    if (result._tag === "Success") return true;
+    if (!isAtomCommandInterrupted(result)) {
+      Dialog.alert(FAILURE_TITLES[action], failureMessage(squashAtomCommandFailure(result)));
     }
+    return false;
   };
 
   const decide = (app: AppStatus, decision: "grant" | "deny") => {

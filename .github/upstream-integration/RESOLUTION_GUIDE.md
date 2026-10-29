@@ -618,8 +618,9 @@ from upstream's side.
   `lecturn/no-manual-memo` (no `useMemo`/`useCallback`/`"use memo"`), uses
   `useStableCallback` for handlers leaving large components, and
   `attempt()...catch().finally()` instead of `try/finally`. Infer mode skips a
-  `use*` function that calls no hooks, so `usePhoneAuthViewport` returns
-  module-level ref callbacks instead of a memoized closure.
+  `use*` function that calls no hooks, and `lecturn/no-hookless-use-function`
+  (#21260) rejects one, so such helpers are plain functions
+  (`phoneAuthViewportRef`, mobile `sessionRelayTokenReader`).
 - **Browser tests.** Fork React tests live in the vitest `browser` project
   (`*.browser.test.tsx`); `react-test-renderer` and jsdom React tests are gone.
   Mock modules partially with `vi.mock(import(...), original)` and never
@@ -660,6 +661,128 @@ from upstream's side.
 - **Identity.** The Connect route kind is `"lecturn-connect"`, webhook
   redaction covers `x-lecturn-relay-*`, and the desktop CLI launcher env is
   `LECTURN_DESKTOP_CLI_LAUNCHER`.
+
+**Upstream changes taken in a Lecturn shape (sync to upstream cd8c2c59).**
+
+- **Mobile React Compiler (#20967 series).** Metro compiles every mobile file;
+  `reactCompilerCoverage.test.ts` `KNOWN_BAILOUTS` only shrinks and uses fork
+  paths (`LecturnComposerEditor.{ios,native}.tsx`). Mobile runs
+  `lecturn/no-manual-memo` with `allowMemoHooks`. Fork mobile files follow the
+  upstream conversions. `NewTaskDraftScreen` calls flow actions through
+  `useEffectEvent` so effects never re-run on closure identity. The Home
+  group-display handler reads a handler-written ref plus registry prefs
+  (LegendList keeps stale row closures); no render-time ref writes.
+  A `useEffectEvent` result never reaches a dependency (a `useFocusEffect`
+  callback, a memoized gesture or value): React returns a new function every
+  render. `AdaptiveWorkspaceLayout` keeps ref-based inspector registration and
+  upstream's memoized pane derivations (325a7e2ae4, #21867); without both,
+  every screen with an inspector pane loops on "Maximum update depth". The
+  fork keeps queue reordering (upstream later deletes `QueueDragHandle`); its
+  gesture comes from a builder held in `useState` (upstream's
+  `SettingsDragHandle` pattern), rebuilt only when `disabled` changes.
+- **Mobile Git sheets.** Fork sections (Space repositories, Selected
+  repository, project PRs with Watch, read-only) use upstream
+  `ListSection`/`ListRow`; `SheetListRow`/`MetaCard`/`SheetGroupCard` are retired.
+- **Mobile fonts.** Upstream removed `useFontFamily`; `lib/fontFamilies`
+  `FONT_FAMILIES` keeps the fork's iOS "System" rule.
+- **Live Activity tokens (#21134).** Locks and listeners live in the fork's
+  per-account registration factory; an identity change removes listeners and
+  clears locks.
+- **Migrations.** Upstream migration 64 (`CanonicalizeThreadPullRequestLinks`)
+  runs as fork id 81, after Lecturn Apps 79 (`AppRegistrations`) and 80
+  (`ProjectionProjectsAppBinding`). It is idempotent, so a database that ran it
+  under upstream's id, or as 79 on the unreleased integration build, is safe.
+  Both of its passes write migrated links' `linkedAt` as `1970-01-01` (unknown
+  date), not the thread's `updated_at`, so the #18232 settlement filter keeps
+  links whose PR merged before the thread's last edit.
+- **Telemetry.** The build channel env is `LECTURN_TELEMETRY_CHANNEL`
+  (`__LECTURN_TELEMETRY_CHANNEL__`), set by fork workflows on server-bundle
+  builds. Upstream's `ingest.t3.codes` endpoint is not taken; the fork posts to
+  its PostHog host. MCP tool analytics (#15913) match `lecturn_` tool names in
+  `McpHttpServer` and `ProviderDimensions`; rename them together with the tools.
+  The delegated-task analytics dedupe set keeps only the newest 1,000 task ids.
+- **pnpm-global updates (#20796).** The `pnpm --version` probe that decides
+  `--allow-build` resolves pnpm from the server environment, the same pnpm the
+  update runner runs, not the provider instance's environment.
+- **Workflows.** Upstream repository guards on deploy/release/EAS/AUR/APK
+  workflows are `github.repository == 'Nurozen/lecturn'`.
+- **Desktop update repository (#21210).** Web build env
+  `LECTURN_DESKTOP_UPDATE_REPOSITORY` (fallback `GITHUB_REPOSITORY`), default
+  `Nurozen/lecturn`.
+- **Connect session pending (#11013).** With or without an owning account the
+  fork reports pending only when the platform says `accountsSynced=false`;
+  otherwise "Sign in to Lecturn Connect". Mobile reports no sync state, so an
+  expired mobile account gets the sign-in failure instead of retrying forever.
+- **Orchestration instructions (#18415).** `LECTURN_ORCHESTRATION_SECTIONS`
+  mirrors upstream's sections (each under 4000 bytes); Codex developer
+  instructions use `lecturn_orchestration_NN` keys.
+- **OpenCode abort timeout.** Text-generation abort stays 5 s (upstream 10 s) so
+  a hung abort releases the shared summary queue sooner.
+- **Claude probe recovery (#21042).** Lives in fork-owned
+  `provider/Drivers/ClaudeCapabilitiesCache.ts`; the fork Claude driver drops
+  that cache through `refreshModels`, not `invalidateCaches`.
+- **Git status (#20175).** A rename's source path carries the fork's
+  staged/unstaged/conflicted flags, mirroring the rename's index side.
+- **Storage cleanup (#17911).** `storageCleanupNotRepository` also accepts Git
+  2.56's "gitfile does not point to a valid repository" wording; upstream
+  matches only "not a git repository", which fails on current CI runners.
+- **Sidebar.** The subagent parent highlight (#15163) lives in the fork Sidebar
+  body (`routeRowThreadKey`). Working-row context drag into chat (#19697) and
+  the shared working timer (#21195, with its `useNowSecond` hook) are not taken
+  while the fork drag/row shape stays. The pinned-marker fix (#11122) reserves
+  no hover-action width at rest, because fork card rows put the title on that
+  line; on pinned or Woke rows the actions open left of the markers
+  (`sidebar/SidebarRowStatusLine.tsx`).
+- **PR route repository match.** `/pull-requests` uses upstream
+  `findProjectForRepository` (scoped project, else first match; #10987 Azure)
+  and falls back to the fork's Stave-checkout match. The fork's "ambiguous
+  identities -> no project" rule is retired.
+- **ChatView title seed.** Upstream `deriveThreadTitleSeed` (#19822;
+  attachments carry `type`) feeds the fork's `resolveTurnTitleSeed`.
+- **MessagesTimeline.** `TimelineRowCtx` is per row (#21123); the fork reveal and
+  notes viewport wraps upstream's composer-fade div and minimap. Browser tests
+  wait for `[data-timeline-ready]` before focusing or finding rows.
+  `useAssistantCitationTarget` keeps the fork's readiness switch (user and
+  assistant citations); upstream's `getTurnFoldRunId` (#18423) feeds its
+  expand-turn case.
+- **DraftHeroHeadline.** Upstream drops the h1 aria-label (#17877); the fork
+  keeps `font-display` and the "No project" row.
+- **Identity.** PR detail snapshot key `lecturn.pullRequests.recentDetails`;
+  preview partitions in tests `persist:lecturn-preview-*`; the mobile render
+  counter env is `EXPO_PUBLIC_LECTURN_RENDER_COUNTER`; Linux theme icons install
+  once (the fork app id is lowercase).
+- **Fixtures.** `GitManager.test.ts` keeps the inherited
+  `pingdotgg/codething-mvp` fixture inside existing fork tests; wholly new
+  upstream tests use `nurozen/codething-mvp`.
+- **Lockfile.** Regenerate from the fork lock as seed; a union seed triggers
+  broad re-resolution.
+- **Lecturn Apps (#159) on these changes.**
+  - MCP App full screen (#18548): app-thread cards and the embed render through
+    the one `McpAppFrame` gate; the embed host is inline-only. Mobile MCP App
+    hosts stay `ThreadFeed` and `McpAppFullscreenScreen`.
+  - Apps mode takes the subagent parent highlight (#15163) through
+    `appsSidebarActiveThreadKey`; Apps shortcuts start from that row.
+  - App-thread notifications use upstream's hashed `threadNotificationTag`
+    (#12289).
+  - Android (#21071 dropped the rail): the bottom bar has Chats/Apps/Pulls, and
+    each split-view sidebar toolbar has "Show <tab>" buttons for the other two
+    lists. When the threads sidebar row cannot fit the full wordmark beside
+    four buttons (320 dp at default font; `resolveSidebarHeaderButtons` scales
+    with the font), they move into a "More actions" menu (upstream's
+    `AndroidScreenHeader` overflow), and the `CompactBrandTitle` wordmark is
+    single-line, so "Lecturn" never wraps.
+    `ThreadNavigationSidebar` also takes the sidebar half of 325a7e2ae4.
+  - Mobile Apps code follows the compiler rules: promise `.finally` instead of
+    try/finally; LegendList rows built in `renderItem` keep `memo`.
+  - `ChatComposer` phone viewport is `useComposerPhoneViewport` (the embed keeps
+    the desktop composer), alongside upstream `useSoftwareKeyboardOpen`.
+  - Server: `ws.ts` socket auth goes through `AppRpcAuthorization.layer`, whose
+    second argument is upstream's `feature.used` callback;
+    `exitWithAppSidecarParent(config)` wraps `runServer` and the desktop
+    launcher-loss race wraps the result; OpenCode v2 re-adds Lecturn MCP each
+    turn (upstream), reports `mcp-activation-failed` only when an add fails
+    while Lecturn MCP is not yet up for the session, and appends
+    `connectedAppInstructionsSection` (fork).
 
 ## Recurring mechanical conflicts
 

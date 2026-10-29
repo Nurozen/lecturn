@@ -4,10 +4,17 @@ import { View } from "react-native";
 import { CompactBrandTitle } from "../../components/CompactBrandTitle";
 import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
 import { WorkspaceConnectionTitle } from "../home/WorkspaceConnectionTitle";
+import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
+import { useWorkspaceListNavigation } from "../workspace/useAndroidWorkspaceNavigation";
 
-/** Keeps the environment switcher and Settings reachable while the Apps tab is selected. */
-export function AppsToolbar() {
+/**
+ * Keeps the environment switcher and Settings reachable while the Apps tab is selected. The
+ * split-view sidebar has no navigation bar, so there it also switches to the other lists.
+ */
+export function AppsToolbar(props: { readonly sidebar?: boolean }) {
   const navigation = useNavigation();
+  const showThreads = useWorkspaceListNavigation("threads");
+  const showPullRequests = useWorkspaceListNavigation("pullRequests");
   return (
     <AndroidScreenHeader
       title="Apps"
@@ -16,7 +23,7 @@ export function AppsToolbar() {
           <WorkspaceConnectionTitle
             grow
             brand={
-              <CompactBrandTitle allowFontScaling={false} accessibilityLabel="Lecturn, Apps" />
+              <CompactBrandTitle allowFontScaling={false} accessibilityLabel="Lecturn, Apps" fit />
             }
             onPress={() =>
               navigation.navigate("SettingsSheet", {
@@ -28,6 +35,20 @@ export function AppsToolbar() {
         </View>
       }
       actions={[
+        ...(props.sidebar
+          ? [
+              {
+                accessibilityLabel: "Show threads",
+                icon: "text.bubble",
+                onPress: showThreads,
+              } as const,
+              {
+                accessibilityLabel: "Show pull requests",
+                icon: PullRequestGlyph.pullRequest,
+                onPress: showPullRequests,
+              } as const,
+            ]
+          : []),
         {
           accessibilityLabel: "Open settings",
           icon: "gearshape",

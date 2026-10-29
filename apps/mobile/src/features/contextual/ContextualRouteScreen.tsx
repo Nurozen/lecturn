@@ -125,12 +125,12 @@ export function ContextualThreadPanel({
   const run = async (work: () => Promise<{ _tag: string }>) => {
     setBusy(true);
     setError(null);
-    try {
+    await (async () => {
       if ((await work())._tag !== "Success")
         setError("The state changed or the request failed. Refresh and try again.");
-    } finally {
+    })().finally(() => {
       setBusy(false);
-    }
+    });
   };
   const data = status.data;
   const preparation = data?.preparation;
@@ -535,7 +535,7 @@ function ConflictCard({
               onPress={async () => {
                 setBusy(true);
                 setError(null);
-                try {
+                await (async () => {
                   const result = await resolve({
                     environmentId,
                     input: {
@@ -552,9 +552,9 @@ function ConflictCard({
                   });
                   if (result._tag !== "Success")
                     setError("This conflict changed. Reload before choosing again.");
-                } finally {
+                })().finally(() => {
                   setBusy(false);
-                }
+                });
               }}
             />
           ))}

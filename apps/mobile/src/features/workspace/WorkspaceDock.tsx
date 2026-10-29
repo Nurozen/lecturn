@@ -4,11 +4,12 @@ import { SymbolView } from "../../components/ui/AppSymbol";
 import { GlassSurface } from "../../components/ui/GlassSurface";
 import { useWorkspaceTabs } from "./WorkspaceTabsContext";
 import { WORKSPACE_DOCK, WORKSPACE_TABS } from "./workspace-tabs-state";
+import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
 
 const TAB_ITEMS = {
   threads: { label: "Threads", icon: "text.bubble" },
   apps: { label: "Apps", icon: "square.grid.2x2" },
-  pullRequests: { label: "Pull requests", icon: "arrow.triangle.pull" },
+  pullRequests: { label: "Pull requests", icon: PullRequestGlyph.pullRequest },
 } as const;
 
 export function WorkspaceDock(props: { readonly onNewTask: () => void }) {

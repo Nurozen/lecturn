@@ -95,6 +95,10 @@ import Migration0077 from "./Migrations/062_ThreadFailureLookupIndex.ts";
 import Migration0078 from "./Migrations/063_DropUnusedV1Projections.ts";
 import Migration0079 from "./Migrations/079_AppRegistrations.ts";
 import Migration0080 from "./Migrations/080_ProjectionProjectsAppBinding.ts";
+// Upstream published this as 64, which Lecturn's ledger already used
+// (ProjectionThreadMigrationCompatibility), so it runs here as 81, after
+// Lecturn's own 79 and 80.
+import Migration0081 from "./Migrations/064_CanonicalizeThreadPullRequestLinks.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -232,6 +236,9 @@ export const migrationEntries = [
   // upstream's id is safe to run again here.
   [78, "DropUnusedV1Projections", Migration0078],
   ...selfRepairingMigrations,
+  // Upstream 64. It only rewrites rows still missing pullRequests, so a
+  // database that already ran it under upstream's id is safe to run again here.
+  [81, "CanonicalizeThreadPullRequestLinks", Migration0081],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

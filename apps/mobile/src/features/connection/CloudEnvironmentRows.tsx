@@ -3,6 +3,7 @@ import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { ConnectionTraceId } from "./ConnectionTraceId";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import {
+  hasSavedBearerRoute,
   relayRouteTarget,
   type EnvironmentConnectionPhase,
 } from "@lecturn/client-runtime/connection";
@@ -23,6 +24,7 @@ import { cn } from "../../lib/cn";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import type { ConnectedEnvironmentSummary } from "../../state/remote-runtime-types";
 import { serverEnvironment } from "../../state/server";
+import { environmentPresentations } from "../../state/presentation";
 import { availableCloudEnvironmentPresentation } from "../cloud/cloudEnvironmentPresentation";
 import { environmentCatalog } from "../../connection/catalog";
 import { useConnectAccounts } from "../cloud/knownAccounts";
@@ -237,37 +239,35 @@ function ConnectedCloudEnvironmentRow(props: {
     serverEnvironment.configValueAtom(props.environment.environmentId),
   );
   const unsupported = props.environment.connectionState === "unsupported";
+  const presentation = useAtomValue(
+    environmentPresentations.presentationAtom(props.environment.environmentId),
+  );
+  const canRetry = presentation !== null && hasSavedBearerRoute(presentation.entry);
   const enabled = props.environment.isEnabled && !unsupported;
   const [lastDescriptor, setLastDescriptor] = useState(props.descriptor);
   if (props.descriptor !== undefined && props.descriptor !== lastDescriptor) {
     setLastDescriptor(props.descriptor);
   }
   return (
-    <Pressable
-      accessibilityHint="Long press to remove from this device"
-      accessibilityRole={props.onOpen ? "button" : undefined}
-      accessibilityLabel={props.onOpen ? `Manage ${props.environment.environmentLabel}` : undefined}
-      onPress={props.onOpen}
-      onLongPress={props.onRemove}
-    >
-      <CloudEnvironmentRowShell
-        borderTop={props.borderTop}
-        opensDetails={props.onOpen !== undefined}
-        connectionError={enabled || unsupported ? props.environment.connectionError : null}
-        connectionErrorTraceId={enabled ? props.environment.connectionErrorTraceId : null}
-        connectionState={enabled || unsupported ? props.environment.connectionState : "available"}
-        errorExpanded={props.errorExpanded}
-        label={props.environment.environmentLabel}
-        machine={resolveEnvironmentMachineKind(
-          serverConfig ?? (lastDescriptor === undefined ? null : { environment: lastDescriptor }),
-        )}
-        onValueChange={props.onSetEnabled}
-        onToggleError={props.onToggleError}
-        disabled={unsupported}
-        {...(enabled || unsupported ? {} : { statusText: "Off" })}
-        value={enabled}
-      />
-    </Pressable>
+    <CloudEnvironmentRowShell
+      borderTop={props.borderTop}
+      opensDetails={props.onOpen !== undefined}
+      onOpen={props.onOpen}
+      onRemove={props.onRemove}
+      connectionError={enabled || unsupported ? props.environment.connectionError : null}
+      connectionErrorTraceId={enabled ? props.environment.connectionErrorTraceId : null}
+      connectionState={enabled || unsupported ? props.environment.connectionState : "available"}
+      errorExpanded={props.errorExpanded}
+      label={props.environment.environmentLabel}
+      machine={resolveEnvironmentMachineKind(
+        serverConfig ?? (lastDescriptor === undefined ? null : { environment: lastDescriptor }),
+      )}
+      onValueChange={props.onSetEnabled}
+      onToggleError={props.onToggleError}
+      disabled={unsupported && !canRetry}
+      {...(enabled || unsupported ? {} : { statusText: "Off" })}
+      value={enabled}
+    />
   );
 }
 
@@ -317,6 +317,8 @@ function CloudEnvironmentRowShell(props: {
   readonly borderTop: boolean;
   readonly showChevron?: boolean;
   readonly opensDetails?: boolean;
+  readonly onOpen?: (() => void) | undefined;
+  readonly onRemove?: (() => void) | undefined;
   readonly connectionError: string | null;
   readonly connectionErrorTraceId: string | null;
   readonly connectionState: EnvironmentConnectionPhase;
@@ -354,6 +356,8 @@ function CloudEnvironmentRowShell(props: {
   const errorCanExpand = props.connectionError !== null && errorLineCount > 1;
   const isErrorExpanded = errorCanExpand && props.errorExpanded;
   const StatusContainer = errorCanExpand ? Pressable : View;
+  const ContentContainer = props.onOpen || props.onRemove ? Pressable : View;
+  const ChevronContainer = props.onOpen || props.onRemove ? Pressable : View;
   const onMeasuredErrorTextLayout = useCallback(
     (event: TextLayoutEvent) => {
       if (!props.connectionError) {
@@ -377,7 +381,20 @@ function CloudEnvironmentRowShell(props: {
         props.borderTop && "border-t border-border",
       )}
     >
-      <View className="min-w-0 flex-1 gap-0.5">
+      <ContentContainer
+        className="min-w-0 flex-1 gap-0.5"
+        accessibilityHint={props.onRemove ? "Long press to remove from this device" : undefined}
+        accessibilityRole={props.onOpen ? "button" : undefined}
+        accessibilityLabel={
+          props.onOpen
+            ? `Manage ${props.label}`
+            : props.onRemove
+              ? `Remove ${props.label} from this device`
+              : undefined
+        }
+        onPress={props.onOpen}
+        onLongPress={props.onRemove}
+      >
         <View className="min-w-0 flex-row items-center gap-2">
           <ConnectionStatusDot state={props.connectionState} pulse={shouldPulse} size={7} />
           <EnvironmentMachineSymbol
@@ -437,17 +454,37 @@ function CloudEnvironmentRowShell(props: {
             />
           ) : null}
         </StatusContainer>
-      </View>
+      </ContentContainer>
       <ThemedSwitch
+        accessibilityLabel={`Enable ${props.label}`}
         style={{ alignSelf: "center" }}
         disabled={props.disabled}
         onValueChange={props.onValueChange}
         value={props.value}
       />
       {props.opensDetails || props.showChevron ? (
-        <View style={{ opacity: props.opensDetails ? 1 : 0.4 }}>
+        <ChevronContainer
+          accessibilityRole={props.onOpen ? "button" : undefined}
+          accessibilityLabel={
+            props.onOpen
+              ? `Manage ${props.label}`
+              : props.onRemove
+                ? `Remove ${props.label} from this device`
+                : undefined
+          }
+          accessibilityHint={props.onRemove ? "Long press to remove from this device" : undefined}
+          onPress={props.onOpen}
+          onLongPress={props.onRemove}
+          style={{
+            opacity: props.opensDetails ? 1 : 0.4,
+            minWidth: 44,
+            minHeight: 44,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
           <SymbolView name="chevron.right" size={12} tintColorClassName="accent-icon-subtle" />
-        </View>
+        </ChevronContainer>
       ) : null}
     </View>
   );

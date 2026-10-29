@@ -10,7 +10,6 @@ import {
 } from "@lecturn/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { useMemo } from "react";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { useEnvironmentsWithScope } from "./session";
@@ -25,20 +24,16 @@ export function useAppStatusesByEnvironment(
   environments: ReadonlyArray<{ readonly environmentId: EnvironmentId }>,
 ): ReadonlyMap<EnvironmentId, ReadonlyArray<AppStatus>> {
   const readable = useEnvironmentsWithScope(environments, AuthAccessReadScope);
-  const statusesAtom = useMemo(
-    () =>
-      Atom.make((get) => {
-        const byEnvironment = new Map<EnvironmentId, ReadonlyArray<AppStatus>>();
-        for (const environmentId of readable) {
-          const apps = Option.getOrNull(
-            AsyncResult.value(get(appsEnvironment.statuses({ environmentId, input: null }))),
-          );
-          if (apps !== null && apps.length > 0) byEnvironment.set(environmentId, apps);
-        }
-        return byEnvironment;
-      }),
-    [readable],
-  );
+  const statusesAtom = Atom.make((get) => {
+    const byEnvironment = new Map<EnvironmentId, ReadonlyArray<AppStatus>>();
+    for (const environmentId of readable) {
+      const apps = Option.getOrNull(
+        AsyncResult.value(get(appsEnvironment.statuses({ environmentId, input: null }))),
+      );
+      if (apps !== null && apps.length > 0) byEnvironment.set(environmentId, apps);
+    }
+    return byEnvironment;
+  });
   return useAtomValue(statusesAtom);
 }
 

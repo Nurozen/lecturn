@@ -19,6 +19,10 @@ import * as TestClock from "effect/testing/TestClock";
 
 import * as ProviderHost from "./ProviderHost.ts";
 import { makeManagedServerProvider } from "./managedProvider.ts";
+import {
+  createProviderVersionAdvisory,
+  makeCachedProviderMaintenanceResolution,
+} from "./maintenanceResolver.ts";
 
 const emptyCapabilities = createModelCapabilities({ optionDescriptors: [] });
 const fastModeCapabilities = createModelCapabilities({
@@ -152,6 +156,57 @@ const enrichedSnapshotSecond: ServerProvider = {
 
 describe("makeManagedServerProvider", () => {
   it.effect(
+    "rereads installer metadata before explicit refresh while background checks stay cached",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const latestVersion = yield* Ref.make("1.0.0");
+          const published = yield* Queue.unbounded<ServerProvider>();
+          const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
+            Ref.get(latestVersion).pipe(
+              Effect.map((version) => ({ ...maintenanceCapabilities, latestVersion: version })),
+            ),
+          );
+          const provider = yield* makeManagedServerProvider<TestSettings>({
+            resolveMaintenance,
+            getSettings: Effect.succeed({ enabled: true }),
+            streamSettings: Stream.empty,
+            haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+            initialSnapshot: () => Effect.succeed(initialSnapshot),
+            checkProvider: Effect.gen(function* () {
+              const capabilities = yield* resolveMaintenance();
+              return {
+                ...refreshedSnapshot,
+                versionAdvisory: createProviderVersionAdvisory({
+                  driver: refreshedSnapshot.driver,
+                  currentVersion: refreshedSnapshot.version,
+                  latestVersion: capabilities.latestVersion ?? null,
+                  maintenanceCapabilities: capabilities,
+                }),
+              };
+            }),
+            enrichSnapshot: ({ snapshot }) => Queue.offer(published, snapshot).pipe(Effect.asVoid),
+            refreshInterval: "1 minute",
+          });
+          assert.strictEqual((yield* Queue.take(published)).versionAdvisory?.status, "current");
+
+          yield* Ref.set(latestVersion, "2.0.0");
+          // The interval carries up to 10% jitter.
+          yield* TestClock.adjust("66 seconds");
+          assert.strictEqual(
+            (yield* Queue.take(published)).versionAdvisory?.latestVersion,
+            "1.0.0",
+          );
+
+          const refreshed = yield* provider.refresh;
+          assert.strictEqual(refreshed.versionAdvisory?.latestVersion, "2.0.0");
+          assert.strictEqual(refreshed.versionAdvisory?.status, "behind_latest");
+          assert.deepStrictEqual(yield* provider.getSnapshot, refreshed);
+        }),
+      ).pipe(Effect.provide(Layer.mergeAll(layerAlwaysRunTest, TestClock.layer()))),
+  );
+
+  it.effect(
     "completes signed-out detection without hiding auth errors or automatically retrying",
     () =>
       Effect.scoped(
@@ -262,10 +317,13 @@ describe("makeManagedServerProvider", () => {
         const rederiveStarted = yield* Deferred.make<void>();
         const finishRederive = yield* Deferred.make<void>();
         const rederived = yield* Ref.make(false);
+        const freshReads = yield* Ref.make(0);
         const enrichedWith = yield* Deferred.make<string | undefined>();
         const resolveMaintenance = (options?: { readonly fresh?: boolean }) =>
           Effect.gen(function* () {
-            if (options?.fresh) {
+            // The second fresh read is the explicit refresh's own, which reads
+            // through instead of waiting on the background re-derivation.
+            if (options?.fresh && (yield* Ref.updateAndGet(freshReads, (n) => n + 1)) !== 2) {
               yield* Deferred.succeed(rederiveStarted, undefined);
               yield* Deferred.await(finishRederive);
               yield* Ref.set(rederived, true);

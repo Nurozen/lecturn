@@ -61,11 +61,12 @@ export function usePublishAppsNewThreadTarget(workspace: AppsSidebarWorkspace | 
 export function useAppsSidebarThreadJumps(input: {
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly routeThreadRef: ScopedThreadRef | null;
+  /** The row standing in for the open thread (an open subagent's ancestor). */
+  readonly routeRowThreadKey: string | null;
   readonly open: (threadRef: ScopedThreadRef) => void;
 }): ReadonlyMap<string, string> | null {
-  const { threads, routeThreadRef, open } = input;
+  const { threads, routeThreadRef, routeRowThreadKey, open } = input;
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
   const routeTerminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
@@ -100,7 +101,7 @@ export function useAppsSidebarThreadJumps(input: {
         direction !== null
           ? resolveAdjacentThreadId({
               threadIds: threadKeys,
-              currentThreadId: routeThreadKey,
+              currentThreadId: routeRowThreadKey,
               direction,
             })
           : jumpIndex === null
@@ -114,7 +115,7 @@ export function useAppsSidebarThreadJumps(input: {
     };
     window.addEventListener("keydown", onWindowKeyDown);
     return () => window.removeEventListener("keydown", onWindowKeyDown);
-  }, [keybindings, open, routeTerminalOpen, routeThreadKey, threadKeys, threadRefByKey]);
+  }, [keybindings, open, routeRowThreadKey, routeTerminalOpen, threadKeys, threadRefByKey]);
 
   const shortcutModifiers = useShortcutModifierState();
   const terminalFocused = useTerminalFocus();

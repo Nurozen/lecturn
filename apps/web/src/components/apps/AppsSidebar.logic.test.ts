@@ -16,6 +16,7 @@ import { makeThreadFixture } from "../../test-fixtures";
 import { scopedThreadKey, scopeThreadRef } from "@lecturn/client-runtime/environment";
 import {
   appsNewThreadWorkspace,
+  appsSidebarActiveThreadKey,
   appsSidebarVisibleThreads,
   appStatusChip,
   appTargetWorkspace,
@@ -410,5 +411,23 @@ describe("Apps-mode shortcuts", () => {
     expect(target(atlas, threadKey("active"))).toBe("desk");
     expect(target(null, "mac:not-an-app-thread")).toBe("liquid");
     expect(appsNewThreadWorkspace({ apps: [], selected: null, activeThreadKey: null })).toBeNull();
+  });
+
+  it("lights an open subagent's app thread row, which then anchors the shortcuts", () => {
+    const parent = threads.find((thread) => thread.title === "active")!;
+    const subagent = makeThread("helper", hopper, {
+      lineage: {
+        rootThreadId: parent.id,
+        parentThreadId: parent.id,
+        relationshipToParent: "subagent",
+      },
+    });
+    const all = [...threads, subagent];
+    const activeKey = (thread: EnvironmentThreadShell) =>
+      appsSidebarActiveThreadKey(scopeThreadRef(thread.environmentId, thread.id), all);
+
+    expect(activeKey(subagent)).toBe(threadKey("active"));
+    expect(activeKey(parent)).toBe(threadKey("active"));
+    expect(appsSidebarActiveThreadKey(null, all)).toBeNull();
   });
 });

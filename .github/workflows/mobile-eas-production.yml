@@ -82,6 +82,7 @@ concurrency:
 jobs:
   production:
     name: EAS Production ${{ github.event_name == 'push' && 'auto' || inputs.mode }}
+    if: github.repository == 'Nurozen/lecturn'
     runs-on: ubuntu-24.04
     permissions:
       contents: read

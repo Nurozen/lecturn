@@ -102,7 +102,7 @@ function DecisionsScreen(params: DecisionsRouteParams) {
     reviewState: "confirmed" | "unreviewed" | "dismissed",
   ) => {
     setBusy(true);
-    try {
+    await (async () => {
       const result = await mutate({
         environmentId,
         input: {
@@ -115,14 +115,15 @@ function DecisionsScreen(params: DecisionsRouteParams) {
       });
       if (result._tag !== "Success")
         Dialog.alert("Could not update decision", "Refresh the list and try again.");
-    } finally {
+    })().finally(() => {
       setBusy(false);
-    }
+    });
   };
   const exportAll = async (format: "markdown" | "json") => {
-    if (!list.data) return;
+    const listData = list.data;
+    if (!listData) return;
     setBusy(true);
-    try {
+    await (async () => {
       const pages: ThreadDecisionExportResult[] = [];
       let next: string | undefined;
       do {
@@ -131,7 +132,7 @@ function DecisionsScreen(params: DecisionsRouteParams) {
           input: {
             ...filters,
             format,
-            expectedProjectRevision: list.data.projectRevision,
+            expectedProjectRevision: listData.projectRevision,
             ...(next ? { cursor: next } : {}),
           },
         });
@@ -152,9 +153,9 @@ function DecisionsScreen(params: DecisionsRouteParams) {
             ? assembleDecisionJsonExport(projectId, pages)
             : pages.map((page) => page.content).join("\n\n"),
       });
-    } finally {
+    })().finally(() => {
       setBusy(false);
-    }
+    });
   };
   return (
     <View className="flex-1 bg-screen">

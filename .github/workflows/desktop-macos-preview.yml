@@ -97,6 +97,7 @@ jobs:
         env:
           LECTURN_DESKTOP_REUSE_RESOURCE_MONITOR: ${{ steps.resource_monitor_cache.outputs.cache-hit == 'true' }}
           PREVIEW_VERSION: ${{ steps.version.outputs.version }}
+          LECTURN_TELEMETRY_CHANNEL: ${{ github.repository == 'Nurozen/lecturn' && 'preview' || 'dev' }}
         run: |
           set -euo pipefail
 

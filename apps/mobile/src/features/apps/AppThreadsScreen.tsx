@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import type { AppId, EnvironmentId } from "@lecturn/contracts";
 import { LegendList } from "@legendapp/list/react-native";
 import { useNavigation } from "@react-navigation/native";
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { View, type ScrollViewProps } from "react-native";
 
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
@@ -84,48 +84,39 @@ export function AppsTree(props: {
   const statuses = useAppStatusesByEnvironment(environments);
   const projects = useAppProjects();
   const threads = useAppThreadShells();
-  const environmentLabels = useMemo(
-    () =>
-      new Map<EnvironmentId, string>(
-        environments.map((environment) => [environment.environmentId, environment.label]),
-      ),
-    [environments],
+  const environmentLabels = new Map<EnvironmentId, string>(
+    environments.map((environment) => [environment.environmentId, environment.label]),
   );
-  const cards = useMemo(() => {
-    const all = buildAppCards({ statuses, projects, threads, environmentLabels });
-    return props.appId === undefined ? all : all.filter((card) => card.appId === props.appId);
-  }, [statuses, projects, threads, environmentLabels, props.appId]);
+  const allCards = buildAppCards({ statuses, projects, threads, environmentLabels });
+  const cards =
+    props.appId === undefined ? allCards : allCards.filter((card) => card.appId === props.appId);
   const [displayStates, setDisplayStates] = useState<ReadonlyMap<string, HomeGroupDisplayState>>(
     () => new Map(),
   );
   const now = useMinuteClock();
-  const items = useMemo(
-    () =>
-      buildAppsTabItems({
-        cards,
-        displayStates,
-        searchQuery: props.searchQuery,
-        now,
-        environmentLabels,
-      }),
-    [cards, displayStates, props.searchQuery, now, environmentLabels],
-  );
-  const guides = useMemo(() => buildSidebarHierarchy(items), [items]);
-  const frames = useMemo(() => appCardFrames(items), [items]);
+  const items = buildAppsTabItems({
+    cards,
+    displayStates,
+    searchQuery: props.searchQuery,
+    now,
+    environmentLabels,
+  });
+  const guides = buildSidebarHierarchy(items);
+  const frames = appCardFrames(items);
   const { providersByEnvironmentId } = useAtomValue(threadListEnvironmentsAtom);
   const resolveProviderInstance = useThreadRowProviderInstanceResolver(providersByEnvironmentId);
   const selectThread = useHomeThreadSelection();
   const [detailAppId, setDetailAppId] = useState<AppId | null>(null);
   const detailCard = cards.find((card) => card.appId === detailAppId) ?? null;
 
-  const setCollapsed = useCallback((key: string, collapsed: boolean) => {
+  const setCollapsed = (key: string, collapsed: boolean) => {
     setDisplayStates((previous) => {
       const next = new Map(previous);
       next.set(key, { collapsed, visibleCount: previous.get(key)?.visibleCount ?? 0 });
       return next;
     });
-  }, []);
-  const updateWorkspaceDisplay = useCallback((key: string, action: HomeGroupDisplayAction) => {
+  };
+  const updateWorkspaceDisplay = (key: string, action: HomeGroupDisplayAction) => {
     setDisplayStates((previous) => {
       const next = new Map(previous);
       next.set(
@@ -134,24 +125,21 @@ export function AppsTree(props: {
       );
       return next;
     });
-  }, []);
+  };
 
-  const newThread = useCallback(
-    (card: AppCard) => {
-      const project = appCardTargetWorkspace(card);
-      if (project === null) return null;
-      return () =>
-        navigation.navigate("NewTaskSheet", {
-          screen: "NewTaskDraft",
-          params: {
-            environmentId: String(project.environmentId),
-            projectId: String(project.id),
-            title: project.title,
-          },
-        });
-    },
-    [navigation],
-  );
+  const newThread = (card: AppCard) => {
+    const project = appCardTargetWorkspace(card);
+    if (project === null) return null;
+    return () =>
+      navigation.navigate("NewTaskSheet", {
+        screen: "NewTaskDraft",
+        params: {
+          environmentId: String(project.environmentId),
+          projectId: String(project.id),
+          title: project.title,
+        },
+      });
+  };
 
   const renderRow = (item: AppsTabItem) => {
     switch (item.type) {

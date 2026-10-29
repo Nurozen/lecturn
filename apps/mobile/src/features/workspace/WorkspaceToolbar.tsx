@@ -25,11 +25,12 @@ import {
   workspaceTabSearchLabel,
   type WorkspaceTab,
 } from "./workspace-tabs-state";
+import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
 
 const TABS: ReadonlyArray<{ id: WorkspaceTab; label: string; icon: AppSymbolName }> = [
   { id: "threads", label: "Threads", icon: "text.bubble" },
   { id: "apps", label: "Apps", icon: "square.grid.2x2" },
-  { id: "pullRequests", label: "PRs", icon: "arrow.triangle.pull" },
+  { id: "pullRequests", label: "PRs", icon: PullRequestGlyph.pullRequest },
 ];
 
 function ToolbarButton(props: {

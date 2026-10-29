@@ -88,7 +88,7 @@ export const ChatHeader = memo(function ChatHeader({
       ? scopeProjectRef(activeProject.environmentId, activeProject.id)
       : null,
   );
-  const activeProjectName = activeProject?.title;
+  const activeProjectName = activeProject?.isScratch ? "No project" : activeProject?.title;
   const breadcrumbProjectName = breadcrumbApp?.name ?? activeProjectName;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const interfaceFont = useClientSettings((settings) => settings.fontFamilySans);

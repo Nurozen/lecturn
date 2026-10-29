@@ -12,12 +12,13 @@ import type {
 } from "@lecturn/client-runtime/state/shell";
 import { effectiveSnoozed } from "@lecturn/client-runtime/state/thread-settled";
 import { sortSettledThreads } from "@lecturn/client-runtime/state/thread-sort";
-import type { AppId, AppStatus, EnvironmentId } from "@lecturn/contracts";
+import type { AppId, AppStatus, EnvironmentId, ScopedThreadRef } from "@lecturn/contracts";
 import { expandAppOpenUrl } from "@lecturn/shared/appReferences";
 
 import {
   filterSidebarV2VisibleThreads,
   resolveProjectStatusIndicator,
+  resolveSidebarRowThreadId,
   resolveSidebarThreadSection,
   resolveSidebarThreadStatus,
   resolveThreadStatusPill,
@@ -334,6 +335,18 @@ export function appsSidebarVisibleThreads(input: {
               : workspace.sections[section],
           ),
     ),
+  );
+}
+
+/** The row the open thread lights: an open subagent's ancestor stands in for it, as in Projects mode. */
+export function appsSidebarActiveThreadKey(
+  routeThreadRef: ScopedThreadRef | null,
+  threads: ReadonlyArray<EnvironmentThreadShell>,
+): string | null {
+  if (routeThreadRef === null) return null;
+  const { environmentId, threadId } = routeThreadRef;
+  return scopedThreadKey(
+    scopeThreadRef(environmentId, resolveSidebarRowThreadId(threadId, environmentId, threads)),
   );
 }
 

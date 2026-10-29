@@ -4,7 +4,7 @@ import type { ChatAttachment, EnvironmentId, RunId, ThreadId } from "@lecturn/co
 import { Atom } from "effect/reactivity";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Animated, Platform, Pressable, ScrollView, View } from "react-native";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import ReanimatedSwipeable, {
@@ -113,12 +113,9 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
     busyRef.current = true;
     setBusyRunId(runId);
     void Haptics.selectionAsync();
-    try {
-      await reorder({ ...target, input: { threadId: target.threadId, runId, beforeRunId } });
-    } finally {
-      busyRef.current = false;
-      setBusyRunId(null);
-    }
+    await reorder({ ...target, input: { threadId: target.threadId, runId, beforeRunId } });
+    busyRef.current = false;
+    setBusyRunId(null);
   };
 
   const act = async (runId: RunId, action: QueueAction) => {
@@ -150,23 +147,20 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
     busyRef.current = true;
     setBusyRunId(runId);
     void Haptics.selectionAsync();
-    try {
-      if (action === "remove") {
-        await cancel(buildCancelQueuedRunCommand({ ...target, runId }));
-      } else if (workflow?.activeRun && workflow.canPromoteToSteer) {
-        await promote({
-          ...target,
-          input: {
-            threadId: target.threadId,
-            queuedRunId: runId,
-            targetRunId: workflow.activeRun.id,
-          },
-        });
-      }
-    } finally {
-      busyRef.current = false;
-      setBusyRunId(null);
+    if (action === "remove") {
+      await cancel(buildCancelQueuedRunCommand({ ...target, runId }));
+    } else if (workflow?.activeRun && workflow.canPromoteToSteer) {
+      await promote({
+        ...target,
+        input: {
+          threadId: target.threadId,
+          queuedRunId: runId,
+          targetRunId: workflow.activeRun.id,
+        },
+      });
     }
+    busyRef.current = false;
+    setBusyRunId(null);
   };
 
   const canReorder = workflow?.canReorder === true && queuedRuns.length > 1;
@@ -195,7 +189,7 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
     >
       {workflow?.isHeld && queuedRuns.length > 0 ? (
         <View className="gap-2 py-3">
-          <Text className="text-sm text-foreground-muted">Queue held after restart</Text>
+          <Text className="text-sm text-foreground-muted">Queue paused</Text>
           <Button
             label="Resume queue"
             disabled={resuming || busyRunId !== null}
@@ -203,12 +197,9 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
               if (busyRef.current) return;
               busyRef.current = true;
               setResuming(true);
-              try {
-                await resume({ ...target, input: { threadId: target.threadId } });
-              } finally {
-                busyRef.current = false;
-                setResuming(false);
-              }
+              await resume({ ...target, input: { threadId: target.threadId } });
+              busyRef.current = false;
+              setResuming(false);
             }}
           />
         </View>
@@ -596,22 +587,24 @@ function QueueDragHandle(props: {
   onMove: (y: number) => void;
   onEnd: (y: number, success: boolean) => void;
 }) {
-  const latest = useRef(props);
-  useLayoutEffect(() => {
-    latest.current = props;
-  });
-  const gesture = useMemo(
-    () =>
+  // Gesture callbacks fire outside render, so effect events hand them the latest props. React
+  // returns new effect events each render, so the builder keeps the first ones (they still call
+  // the latest props) and the compiler rebuilds the gesture only when `disabled` changes.
+  const onStart = useEffectEvent(() => props.onStart());
+  const onMove = useEffectEvent((y: number) => props.onMove(y));
+  const onEnd = useEffectEvent((y: number, success: boolean) => props.onEnd(y, success));
+  const [buildGesture] = useState(
+    () => (enabled: boolean) =>
       Gesture.Pan()
-        .enabled(!props.disabled)
+        .enabled(enabled)
         .minDistance(0)
         .shouldCancelWhenOutside(false)
         .runOnJS(true)
-        .onStart(() => latest.current.onStart())
-        .onUpdate((event) => latest.current.onMove(event.translationY))
-        .onFinalize((event, success) => latest.current.onEnd(event.translationY, success)),
-    [props.disabled],
+        .onStart(() => onStart())
+        .onUpdate((event) => onMove(event.translationY))
+        .onFinalize((event, success) => onEnd(event.translationY, success)),
   );
+  const gesture = buildGesture(!props.disabled);
   return (
     <GestureDetector gesture={gesture}>
       <View

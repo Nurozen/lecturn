@@ -10,7 +10,7 @@ import { LegendList } from "@legendapp/list/react-native";
 import { StackActions, useNavigation } from "@react-navigation/native";
 import { Atom } from "effect/reactivity";
 import * as Haptics from "expo-haptics";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -83,7 +83,7 @@ const ExternalSessionRow = memo(function ExternalSessionRow(props: {
 }) {
   const { row } = props;
   const blocked = row.target.kind === "blocked";
-  const onPress = useCallback(() => props.onSelect(row), [props.onSelect, row]);
+  const onPress = () => props.onSelect(row);
 
   return (
     <View
@@ -179,19 +179,11 @@ export function ImportSessionPickerRouteScreen() {
   const importingRef = useRef(false);
 
   const listCwd = allFolders ? null : (project?.workspaceRoot ?? null);
-  const instanceIds = useMemo(
-    () => instances?.map((instance) => instance.instanceId) ?? null,
-    [instances],
-  );
-  const providerLabelById = useMemo(
-    () =>
-      new Map(
-        instances?.map(
-          (instance) =>
-            [instance.instanceId, resolveProviderInstanceDisplayName(instance)] as const,
-        ),
-      ),
-    [instances],
+  const instanceIds = instances?.map((instance) => instance.instanceId) ?? null;
+  const providerLabelById = new Map(
+    instances?.map(
+      (instance) => [instance.instanceId, resolveProviderInstanceDisplayName(instance)] as const,
+    ),
   );
   const requestKey =
     environmentId === null || instanceIds === null || instanceIds.length === 0
@@ -208,21 +200,17 @@ export function ImportSessionPickerRouteScreen() {
     let cancelled = false;
     void Promise.all(
       instanceIds.map(async (providerInstanceId): Promise<ExternalSessionsInstanceResult> => {
-        try {
-          const result = await listSessions({
-            environmentId,
-            input: {
-              providerInstanceId,
-              ...(listCwd === null ? {} : { cwd: listCwd }),
-              limit: IMPORT_SESSION_LIST_LIMIT,
-            },
-          });
-          return result._tag === "Success"
-            ? { providerInstanceId, ok: true, ...result.value }
-            : { providerInstanceId, ok: false };
-        } catch {
-          return { providerInstanceId, ok: false };
-        }
+        const result = await listSessions({
+          environmentId,
+          input: {
+            providerInstanceId,
+            ...(listCwd === null ? {} : { cwd: listCwd }),
+            limit: IMPORT_SESSION_LIST_LIMIT,
+          },
+        }).catch(() => null);
+        return result?._tag === "Success"
+          ? { providerInstanceId, ok: true, ...result.value }
+          : { providerInstanceId, ok: false };
       }),
     ).then((results) => {
       if (!cancelled) {
@@ -249,7 +237,7 @@ export function ImportSessionPickerRouteScreen() {
   // Built once per fetch, ahead of the search. Rebuilding them per keystroke
   // would re-index every project and thread, re-derive each row's metadata,
   // and hand the memoized row component new props for rows that never changed.
-  const allRows = useMemo((): ReadonlyArray<SessionRow> => {
+  const allRows = ((): ReadonlyArray<SessionRow> => {
     if (merged === null || project === null) return [];
     const importedSessionIds = collectImportedSessionIds(environmentThreads);
     const resolveTarget = createImportTargetResolver({
@@ -275,18 +263,11 @@ export function ImportSessionPickerRouteScreen() {
       }).join(" · "),
       target: resolveTarget(session.cwd),
     }));
-  }, [
-    allFolders,
-    environmentProjectShells,
-    environmentThreads,
-    merged,
-    project,
-    providerLabelById,
-  ]);
+  })();
 
-  const rows = useMemo(() => filterSessionRows(allRows, searchQuery), [allRows, searchQuery]);
+  const rows = filterSessionRows(allRows, searchQuery);
 
-  const notes = useMemo((): ReadonlyArray<string> => {
+  const notes = ((): ReadonlyArray<string> => {
     if (merged === null) return [];
     return [
       ...(merged.sessions.length === 0 ? [] : [IMPORT_SESSION_COST_NOTE]),
@@ -296,86 +277,67 @@ export function ImportSessionPickerRouteScreen() {
       ),
       ...(merged.truncated ? [IMPORT_SESSION_TRUNCATED_NOTE] : []),
     ];
-  }, [merged, providerLabelById]);
+  })();
 
-  const selectSession = useCallback(
-    async (row: SessionRow) => {
-      // The ref, not the state, is what rejects a second row tapped in the
-      // same frame: both taps read the render's `importingKey` as null.
-      if (row.target.kind !== "importable" || environmentId === null || importingRef.current) {
-        return;
-      }
-      void Haptics.selectionAsync();
-      importingRef.current = true;
-      setImportingKey(row.key);
-      try {
-        // Read at tap time so the toolbar's latest permission and Plan/Build
-        // choices carry over, the same sources the draft's send path reads.
-        const draft = draftKey === null ? null : getComposerDraftSnapshot(draftKey);
-        const imported = await importThread({
-          session: row.session,
-          project: scopeProject(environmentId, row.target.project),
-          worktreePath: row.target.worktreePath,
-          branch: row.target.branch,
-          ...resolveImportThreadModes({
-            draftRuntimeMode: draft?.runtimeMode,
-            flowRuntimeMode: runtimeMode,
-            draftInteractionMode: draft?.interactionMode,
-            flowInteractionMode: interactionMode,
-            planModeEnabled,
-          }),
-        });
-        if (imported === null) return;
-        // The Thread route renders its loading state until the imported
-        // thread's shell arrives, matching the fork flow.
-        (navigation.getParent() ?? navigation).dispatch(
-          StackActions.replace("Thread", {
-            environmentId: String(imported.environmentId),
-            threadId: String(imported.threadId),
-          }),
-        );
-      } finally {
-        importingRef.current = false;
-        setImportingKey(null);
-      }
-    },
-    [
-      draftKey,
-      environmentId,
-      importThread,
-      interactionMode,
-      navigation,
-      planModeEnabled,
-      runtimeMode,
-    ],
-  );
+  const selectSession = async (row: SessionRow) => {
+    // The ref, not the state, is what rejects a second row tapped in the
+    // same frame: both taps read the render's `importingKey` as null.
+    if (row.target.kind !== "importable" || environmentId === null || importingRef.current) {
+      return;
+    }
+    void Haptics.selectionAsync();
+    importingRef.current = true;
+    setImportingKey(row.key);
+    // Read at tap time so the toolbar's latest permission and Plan/Build
+    // choices carry over, the same sources the draft's send path reads.
+    const draft = draftKey === null ? null : getComposerDraftSnapshot(draftKey);
+    const imported = await importThread({
+      session: row.session,
+      project: scopeProject(environmentId, row.target.project),
+      worktreePath: row.target.worktreePath,
+      branch: row.target.branch,
+      ...resolveImportThreadModes({
+        draftRuntimeMode: draft?.runtimeMode,
+        flowRuntimeMode: runtimeMode,
+        draftInteractionMode: draft?.interactionMode,
+        flowInteractionMode: interactionMode,
+        planModeEnabled,
+      }),
+    }).finally(() => {
+      importingRef.current = false;
+      setImportingKey(null);
+    });
+    if (imported === null) return;
+    // The Thread route renders its loading state until the imported
+    // thread's shell arrives, matching the fork flow.
+    (navigation.getParent() ?? navigation).dispatch(
+      StackActions.replace("Thread", {
+        environmentId: String(imported.environmentId),
+        threadId: String(imported.threadId),
+      }),
+    );
+  };
 
-  const renderRow = useCallback(
-    ({ item, index }: { readonly item: SessionRow; readonly index: number }) => (
-      <ExternalSessionRow
-        busy={importingKey !== null}
-        isFirst={index === 0}
-        isLast={index === rows.length - 1}
-        onSelect={selectSession}
-        row={item}
-      />
-    ),
-    [importingKey, rows.length, selectSession],
+  const renderRow = ({ item, index }: { readonly item: SessionRow; readonly index: number }) => (
+    <ExternalSessionRow
+      busy={importingKey !== null}
+      isFirst={index === 0}
+      isLast={index === rows.length - 1}
+      onSelect={selectSession}
+      row={item}
+    />
   );
 
   const usesNativeMailSearchToolbar = Platform.OS === "ios" && NATIVE_MAIL_SEARCH_TOOLBAR_SUPPORTED;
-  const listContentStyle = useMemo(
-    () => ({
-      paddingBottom: usesNativeMailSearchToolbar
-        ? NATIVE_MAIL_SEARCH_TOOLBAR_CONTENT_INSET + 16
-        : Platform.OS === "ios"
-          ? 16
-          : Math.max(insets.bottom, 16) + 16,
-      paddingHorizontal: 16,
-      paddingTop: 12,
-    }),
-    [insets.bottom, usesNativeMailSearchToolbar],
-  );
+  const listContentStyle = {
+    paddingBottom: usesNativeMailSearchToolbar
+      ? NATIVE_MAIL_SEARCH_TOOLBAR_CONTENT_INSET + 16
+      : Platform.OS === "ios"
+        ? 16
+        : Math.max(insets.bottom, 16) + 16,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  };
 
   const listHeader = <AllFoldersToggle onValueChange={setAllFolders} value={allFolders} />;
   const emptyMessage = !availability.available

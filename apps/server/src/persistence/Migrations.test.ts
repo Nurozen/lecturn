@@ -156,6 +156,7 @@ describe("runMigrations", () => {
         [78, "DropUnusedV1Projections"],
         [79, "AppRegistrations"],
         [80, "ProjectionProjectsAppBinding"],
+        [81, "CanonicalizeThreadPullRequestLinks"],
       ]);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),

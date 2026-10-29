@@ -1,6 +1,6 @@
 import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@lecturn/contracts";
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useState } from "react";
 
 import type { ThreadFeedEntry } from "../../lib/threadActivity";
 import { useAppEmbedContext } from "../../state/apps";
@@ -35,7 +35,7 @@ export function useAppRefPrefixes(): ReadonlyArray<string> {
 export function useAppReferenceLabels(
   feed: ReadonlyArray<ThreadFeedEntry>,
 ): ReadonlyMap<string, string> {
-  const next = useMemo(() => appReferenceLabelsFromFeed(feed), [feed]);
+  const next = appReferenceLabelsFromFeed(feed);
   const [labels, setLabels] = useState(next);
   if (labels !== next && !sameAppReferenceLabels(labels, next)) setLabels(next);
   return labels;

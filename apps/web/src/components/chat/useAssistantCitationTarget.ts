@@ -33,6 +33,7 @@ export function useAssistantCitationTarget({
   viewport,
   historyLoading,
   loadEarlier,
+  getTurnFoldRunId,
   onExpandTurn,
   expandedUserMessages,
   onExpandUserMessage,
@@ -45,6 +46,7 @@ export function useAssistantCitationTarget({
   viewport: HTMLElement | null;
   historyLoading: boolean;
   loadEarlier: CitationHistoryPage | null;
+  getTurnFoldRunId: (entryId: string) => RunId | undefined;
   onExpandTurn: (runId: RunId) => void;
   expandedUserMessages: ReadonlySet<MessageId>;
   onExpandUserMessage: (messageId: MessageId) => void;
@@ -148,9 +150,11 @@ export function useAssistantCitationTarget({
       case "expand-user":
         onExpandUserMessage(source.message.id);
         return;
-      case "expand-turn":
-        if (source.message.runId) onExpandTurn(source.message.runId);
+      case "expand-turn": {
+        const foldRunId = getTurnFoldRunId(source.id);
+        if (foldRunId) onExpandTurn(foldRunId);
         return;
+      }
       case "wait":
         return;
       case "ready":
@@ -158,6 +162,7 @@ export function useAssistantCitationTarget({
     }
   }, [
     entries,
+    getTurnFoldRunId,
     historyLoading,
     listLoaded,
     listRef,

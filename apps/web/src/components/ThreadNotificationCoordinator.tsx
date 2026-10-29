@@ -26,6 +26,7 @@ import {
   revealNotifiedAppThread,
   setNotificationBadge,
   threadNotificationApp,
+  threadNotificationTag,
   threadNotificationTitle,
   unlockNotificationAudio,
 } from "../threadNotifications";
@@ -236,7 +237,7 @@ function EnvironmentNotifications({
       try {
         const notification = new Notification(title, {
           body: thread.title,
-          tag: `${environmentId}:${thread.id}`,
+          tag: threadNotificationTag(environmentId, thread.id),
           silent: true,
         });
         onNotification(environmentId, notification);

@@ -4280,7 +4280,7 @@ export function markPromotedDraftThreadByRef(threadRef: ScopedThreadRef): void {
   }
 }
 
-export function restoreFailedBackgroundDraftThread(
+export function restoreFailedDraftThread(
   draftId: DraftId,
   draftThread: DraftThreadState,
   threadId: ThreadId,
@@ -4289,8 +4289,9 @@ export function restoreFailedBackgroundDraftThread(
     draftThreadsByThreadKey: {
       ...state.draftThreadsByThreadKey,
       [draftId]: {
-        ...draftThread,
+        ...(state.draftThreadsByThreadKey[draftId] ?? draftThread),
         threadId,
+        ...(threadId !== draftThread.threadId ? { createdAt: new Date().toISOString() } : {}),
         promotedTo: null,
       },
     },
