@@ -315,7 +315,7 @@ export const makeCursorAuth = Effect.fn("makeCursorAuth")(function* (options: Cu
                   new ProviderSetupError({
                     instanceId: options.instanceId,
                     operation: "start",
-                    detail: cause.message,
+                    detail: CursorSdk.CURSOR_SDK_NOT_INSTALLED_MESSAGE,
                     cause,
                   }),
               ),

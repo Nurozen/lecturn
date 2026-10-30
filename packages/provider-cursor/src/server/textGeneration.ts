@@ -85,7 +85,12 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       const apiKey = yield* resolveCursorApiKey(operation);
       const { Agent, SqliteLocalAgentStore } = yield* cursorSdk.load.pipe(
         Effect.mapError(
-          (cause) => new TextGenerationError({ operation, detail: cause.message, cause }),
+          (cause) =>
+            new TextGenerationError({
+              operation,
+              detail: CursorSdk.CURSOR_SDK_NOT_INSTALLED_MESSAGE,
+              cause,
+            }),
         ),
       );
       // Lecturn workflow inference must stay a pure text task: any tool call

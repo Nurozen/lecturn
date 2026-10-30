@@ -82,6 +82,7 @@ import {
   subagentThreadTitle,
 } from "@lecturn/provider-core/server/subagentProjection";
 import * as CursorAgentSdk from "./CursorAgentSdk.ts";
+import { isCursorSdkNotInstalledError } from "./CursorSdk.ts";
 export { cursorSdkModelSelection } from "./sdkModel.ts";
 
 export const CURSOR_DRIVER_KIND = CursorAgentSdk.CURSOR_PROVIDER;
@@ -358,19 +359,23 @@ class CursorModelUnavailableError extends Schema.TaggedError<CursorModelUnavaila
 }
 
 /**
- * Maps runner failures from opening or sending to an agent. The SDK checks the
- * model against the account catalog before either and rejects it with an
- * uncoded ConfigurationError listing every account model, so its message
- * prefix is the only signal. The SDK loads lazily, so the error is matched by
- * the name the SDK gives it rather than by class.
+ * Maps runner failures from opening or sending to an agent to the error a user
+ * reads. Turn start records the message of the error the adapter wraps, so a
+ * missing SDK is unwrapped rather than left behind the runner's generic one.
+ * The SDK checks the model against the account catalog before opening or
+ * sending and rejects it with an uncoded ConfigurationError listing every
+ * account model, so its message prefix is the only signal. The SDK loads
+ * lazily, so that error is matched by the name the SDK gives it, not by class.
  */
-const classifyCursorModelRejection =
-  (modelSelection: ModelSelection) => (error: CursorAgentSdk.CursorAgentSdkRunnerError) =>
-    error.cause instanceof Error &&
-    error.cause.name === "ConfigurationError" &&
-    error.cause.message.startsWith("Cannot use this model:")
+const classifyCursorRunnerFailure =
+  (modelSelection: ModelSelection) => (error: CursorAgentSdk.CursorAgentSdkRunnerError) => {
+    if (isCursorSdkNotInstalledError(error.cause)) return error.cause;
+    return error.cause instanceof Error &&
+      error.cause.name === "ConfigurationError" &&
+      error.cause.message.startsWith("Cannot use this model:")
       ? new CursorModelUnavailableError({ model: modelSelection.model, cause: error.cause })
       : error;
+  };
 
 function stableJson(value: unknown): string {
   try {
@@ -2179,7 +2184,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
               threadId: openInput.threadId,
               providerSessionId: input.providerSessionId,
             })
-            .pipe(Effect.mapError(classifyCursorModelRejection(openInput.modelSelection)));
+            .pipe(Effect.mapError(classifyCursorRunnerFailure(openInput.modelSelection)));
           const next = {
             nativeThreadId: sdkSession.agentId,
             session: sdkSession,
@@ -2317,7 +2322,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                   return handleInteractionUpdate(context, update);
                 },
               })
-              .pipe(Effect.mapError(classifyCursorModelRejection(turnInput.modelSelection)));
+              .pipe(Effect.mapError(classifyCursorRunnerFailure(turnInput.modelSelection)));
             const startedAt = yield* DateTime.now;
             const completed = yield* Deferred.make<void, never>();
             const providerTurnId = idAllocator.derive.providerTurn({

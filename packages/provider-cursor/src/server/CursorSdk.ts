@@ -7,6 +7,9 @@ import * as Schema from "effect/Schema";
 
 export type CursorSdkModule = typeof import("@cursor/sdk") & typeof import("@cursor/sdk/sqlite");
 
+export const CURSOR_SDK_NOT_INSTALLED_MESSAGE =
+  "Cursor SDK (`@cursor/sdk`) is not installed with this Lecturn server.";
+
 export class CursorSdkNotInstalledError extends Schema.TaggedError<CursorSdkNotInstalledError>()(
   "CursorSdkNotInstalledError",
   {
@@ -14,9 +17,11 @@ export class CursorSdkNotInstalledError extends Schema.TaggedError<CursorSdkNotI
   },
 ) {
   override get message(): string {
-    return "Cursor SDK (`@cursor/sdk`) is not installed with this Lecturn server.";
+    return CURSOR_SDK_NOT_INSTALLED_MESSAGE;
   }
 }
+
+export const isCursorSdkNotInstalledError = Schema.is(CursorSdkNotInstalledError);
 
 /** A missing dependency inside an installed SDK is a broken install, not an omitted one. */
 function isCursorSdkMissing(cause: unknown): boolean {

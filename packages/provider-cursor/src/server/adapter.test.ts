@@ -1204,6 +1204,59 @@ describe("CursorAdapterV2", () => {
     ),
   );
 
+  it.effect("names the missing Cursor SDK when a turn cannot open its agent", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "cursor-v2-no-sdk-" });
+      const instanceId = ProviderInstanceId.make("cursor");
+      const threadId = ThreadId.make("cursor-no-sdk-thread");
+      const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: workspace,
+      });
+      const runner = yield* CursorAgentSdk.makeCursorAgentSdkRunner(() => undefined).pipe(
+        Effect.provide(
+          CursorSdk.layerFromRequire((id) => {
+            throw Object.assign(new Error(`Cannot find module '${id}'`), {
+              code: "MODULE_NOT_FOUND",
+            });
+          }),
+        ),
+      );
+      const adapter = yield* makeCursorAdapterV2({
+        instanceId,
+        settings: yield* decodeCursorSettings({}),
+        environment: { HOME: workspace, CURSOR_API_KEY: "test-cursor-key" },
+      }).pipe(
+        Effect.provideService(CursorAgentSdk.CursorAgentSdkRunner, runner),
+        Effect.provide(TestProviderHost.layer({ cwd: workspace })),
+      );
+      const runtime = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("cursor-no-sdk-session"),
+        modelSelection: { instanceId, model: "composer-2.5" },
+        runtimePolicy,
+      });
+
+      const failure = yield* runtime
+        .ensureThread({
+          threadId,
+          modelSelection: { instanceId, model: "composer-2.5" },
+          runtimePolicy,
+        })
+        .pipe(Effect.flip);
+      // Turn start records the message of the error the adapter wrapped.
+      assert.instanceOf(failure.cause, CursorSdk.CursorSdkNotInstalledError);
+      assert.equal(failure.cause.message, CursorSdk.CURSOR_SDK_NOT_INSTALLED_MESSAGE);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(NodeServices.layer, IdAllocator.layer, McpProviderSessions.layer),
+      ),
+    ),
+  );
+
   it("maps Cursor auto and model parameters to SDK selections", () => {
     assert.deepEqual(
       cursorSdkModelSelection({
