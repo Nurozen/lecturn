@@ -36,6 +36,7 @@ import { ClaudeDriver, type ClaudeDriverEnv } from "./Drivers/ClaudeDriver.ts";
 import { CodexDriver, type CodexDriverEnv } from "./Drivers/CodexDriver.ts";
 import { CopilotDriver, type CopilotDriverEnv } from "./Drivers/CopilotDriver.ts";
 import { CursorDriver, type CursorDriverEnv } from "@lecturn/provider-cursor/server";
+import * as CursorSdk from "@lecturn/provider-cursor/server/CursorSdk";
 import { GrokDriver, type GrokDriverEnv } from "@lecturn/provider-grok/server";
 import { OpenCodeDriver, type OpenCodeDriverEnv } from "@lecturn/provider-opencode/server";
 import type { OpenCodeSettings } from "@lecturn/provider-opencode/settings";
@@ -439,6 +440,62 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
         auth: { status: "authenticated" },
       });
     }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.live("keeps other providers working when the server ships without the Cursor SDK", () =>
+    Effect.gen(function* () {
+      if (yield* HostProcess.isWindows) return;
+
+      const fixtures = yield* makeTildeProviderFixtures();
+      const codexId = ProviderInstanceId.make("codex_beside_cursor");
+      const cursorId = ProviderInstanceId.make("cursor_without_sdk");
+      const { registry } = yield* makeProviderInstanceRegistry<CodexDriverEnv | CursorDriverEnv>({
+        drivers: [CodexDriver, CursorDriver],
+        configMap: {
+          [codexId]: {
+            driver: ProviderDriverKind.make("codex"),
+            enabled: true,
+            environment: [
+              { name: "LECTURNX_COLLAB_SCRIPT", value: fixtures.codexScriptPath, sensitive: false },
+            ],
+            config: makeCodexConfig({ enabled: true, binaryPath: fixtures.codexBinaryPath }),
+          },
+          [cursorId]: {
+            driver: ProviderDriverKind.make("cursor"),
+            enabled: true,
+            environment: [{ name: "CURSOR_API_KEY", value: "test-cursor-key", sensitive: true }],
+            config: makeCursorConfig({ enabled: true }),
+          },
+        },
+      });
+
+      expect(yield* registry.listUnavailable).toEqual([]);
+      const codex = yield* registry.getInstance(codexId);
+      const cursor = yield* registry.getInstance(cursorId);
+      const [codexSnapshot, cursorSnapshot] = yield* Effect.all(
+        [codex!.snapshot.refresh, cursor!.snapshot.refresh],
+        { concurrency: "unbounded" },
+      );
+      expect(codexSnapshot).toMatchObject({ status: "ready", installed: true });
+      expect(cursorSnapshot).toMatchObject({
+        enabled: true,
+        installed: false,
+        status: "error",
+        message: "Cursor SDK (`@cursor/sdk`) is not installed with this Lecturn server.",
+      });
+    }).pipe(
+      Effect.provide(
+        // The right side of a merge wins, replacing the infrastructure's real SDK loader.
+        Layer.merge(
+          layerTest,
+          CursorSdk.layerFromRequire((id) => {
+            throw Object.assign(new Error(`Cannot find module '${id}'`), {
+              code: "MODULE_NOT_FOUND",
+            });
+          }),
+        ),
+      ),
+    ),
   );
 
   it.live("runs Claude instance probes in the server state dir, not the server cwd", () =>

@@ -91,6 +91,7 @@ export const CursorDriver: ProviderDriver<
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
       const keychain = yield* CursorKeychain.CursorKeychain;
+      const cursorSdk = yield* CursorSdk.CursorSdk;
       const sdkRunner = yield* CursorAgentSdk.CursorAgentSdkRunner;
       const processEnv = yield* mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
@@ -244,6 +245,7 @@ export const CursorDriver: ProviderDriver<
         Effect.provideService(CursorKeychain.CursorKeychain, keychain),
         Effect.map(stampSnapshot),
         Effect.provide(CursorSdkCatalog.layer),
+        Effect.provideService(CursorSdk.CursorSdk, cursorSdk),
       );
 
       const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);

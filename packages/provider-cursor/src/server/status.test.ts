@@ -1,6 +1,7 @@
 import type { SDKModel } from "@cursor/sdk";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import type { CursorSettings } from "../settings.ts";
 import { CursorSettings as CursorSettingsSchema } from "../settings.ts";
@@ -13,9 +14,11 @@ import {
   buildInitialCursorProviderSnapshot,
   checkCursorProviderStatus,
 } from "./status.ts";
+import * as CursorSdk from "./CursorSdk.ts";
 import * as CursorSdkCatalog from "./CursorSdkCatalog.ts";
 
 const decodeCursorSettings = Schema.decodeSync(CursorSettingsSchema);
+const layerCursorSdkInstalled = CursorSdk.layerFromRequire(() => ({}));
 
 function selectDescriptor(
   id: string,
@@ -176,17 +179,20 @@ describe("checkCursorProviderStatus", () => {
         { CURSOR_API_KEY: "test-cursor-key" },
       ).pipe(
         Effect.provide(
-          CursorSdkCatalog.layerTest((apiKey) => {
-            expect(apiKey).toBe("test-cursor-key");
-            return Effect.succeed({
-              user: {
-                apiKeyName: "test-key",
-                userEmail: "cursor@example.com",
-                createdAt: "2026-01-01T00:00:00.000Z",
-              },
-              models: [sdkParameterizedModel],
-            });
-          }),
+          Layer.merge(
+            layerCursorSdkInstalled,
+            CursorSdkCatalog.layerTest((apiKey) => {
+              expect(apiKey).toBe("test-cursor-key");
+              return Effect.succeed({
+                user: {
+                  apiKeyName: "test-key",
+                  userEmail: "cursor@example.com",
+                  createdAt: "2026-01-01T00:00:00.000Z",
+                },
+                models: [sdkParameterizedModel],
+              });
+            }),
+          ),
         ),
       );
 
@@ -212,12 +218,15 @@ describe("checkCursorProviderStatus", () => {
         CURSOR_API_KEY: "invalid-test-key",
       }).pipe(
         Effect.provide(
-          CursorSdkCatalog.layerTest(() =>
-            Effect.fail(
-              new CursorSdkCatalog.CursorSdkCatalogError({
-                authenticationFailure: true,
-                cause: new Error("unauthorized"),
-              }),
+          Layer.merge(
+            layerCursorSdkInstalled,
+            CursorSdkCatalog.layerTest(() =>
+              Effect.fail(
+                new CursorSdkCatalog.CursorSdkCatalogError({
+                  authenticationFailure: true,
+                  cause: new Error("unauthorized"),
+                }),
+              ),
             ),
           ),
         ),
@@ -235,8 +244,11 @@ describe("checkCursorProviderStatus", () => {
     Effect.gen(function* () {
       const provider = yield* checkCursorProviderStatus(baseCursorSettings).pipe(
         Effect.provide(
-          CursorSdkCatalog.layerTest(() =>
-            Effect.die("SDK catalog must not be used without CURSOR_API_KEY"),
+          Layer.merge(
+            layerCursorSdkInstalled,
+            CursorSdkCatalog.layerTest(() =>
+              Effect.die("SDK catalog must not be used without CURSOR_API_KEY"),
+            ),
           ),
         ),
       );
@@ -246,6 +258,34 @@ describe("checkCursorProviderStatus", () => {
         status: "error",
         auth: { status: "unauthenticated" },
         message: "Sign in with Cursor or add CURSOR_API_KEY in provider settings.",
+      });
+    }),
+  );
+
+  it.effect("reports Cursor as not installed when the server ships without its SDK", () =>
+    Effect.gen(function* () {
+      const provider = yield* checkCursorProviderStatus(baseCursorSettings, {
+        CURSOR_API_KEY: "test-cursor-key",
+      }).pipe(
+        Effect.provide(
+          Layer.merge(
+            CursorSdk.layerFromRequire((id) => {
+              throw Object.assign(new Error(`Cannot find module '${id}'`), {
+                code: "MODULE_NOT_FOUND",
+              });
+            }),
+            CursorSdkCatalog.layerTest(() =>
+              Effect.die("SDK catalog must not be used without the SDK"),
+            ),
+          ),
+        ),
+      );
+
+      expect(provider).toMatchObject({
+        enabled: true,
+        installed: false,
+        status: "error",
+        message: "Cursor SDK (`@cursor/sdk`) is not installed with this Lecturn server.",
       });
     }),
   );

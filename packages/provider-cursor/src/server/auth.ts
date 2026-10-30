@@ -16,7 +16,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
-import { Cursor, InMemoryCredentialStore } from "./sdk.ts";
+import * as CursorSdk from "./CursorSdk.ts";
 import type { ProviderAuthController } from "@lecturn/provider-core/server/auth";
 
 const AUTH_TIMEOUT_MS = 300_000;
@@ -51,6 +51,7 @@ export interface CursorAuthOptions {
 export const makeCursorAuth = Effect.fn("makeCursorAuth")(function* (options: CursorAuthOptions) {
   const scope = yield* Scope.Scope;
   const crypto = yield* Crypto.Crypto;
+  const cursorSdk = yield* CursorSdk.CursorSdk;
   const lock = yield* Semaphore.make(1);
   const configuredKey = options.apiKey?.trim() || undefined;
   const emptyState: ProviderAuthState = {
@@ -154,7 +155,11 @@ export const makeCursorAuth = Effect.fn("makeCursorAuth")(function* (options: Cu
     }),
   );
 
-  const runLogin = (flow: AuthFlow, stopSessions: Effect.Effect<void, ProviderSetupError>) =>
+  const runLogin = (
+    flow: AuthFlow,
+    stopSessions: Effect.Effect<void, ProviderSetupError>,
+    { Cursor, InMemoryCredentialStore }: CursorSdk.CursorSdkModule,
+  ) =>
     Effect.gen(function* () {
       yield* stopSessions.pipe(Effect.ensuring(stopSessionsWithCredentials));
       // The SDK first writes into memory. Cancellation must not save a late login result.
@@ -304,6 +309,17 @@ export const makeCursorAuth = Effect.fn("makeCursorAuth")(function* (options: Cu
                 operation: "start",
                 detail: "Enable Cursor before signing in.",
               });
+            const sdk = yield* cursorSdk.load.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderSetupError({
+                    instanceId: options.instanceId,
+                    operation: "start",
+                    detail: CursorSdk.CURSOR_SDK_NOT_INSTALLED_MESSAGE,
+                    cause,
+                  }),
+              ),
+            );
             if (configuredKey)
               return yield* new ProviderSetupError({
                 instanceId: options.instanceId,
@@ -343,7 +359,7 @@ export const makeCursorAuth = Effect.fn("makeCursorAuth")(function* (options: Cu
               message: "Starting Cursor sign-in.",
             };
             yield* SubscriptionRef.set(snapshot, { owner, state });
-            flow.fiber = yield* runLogin(flow, stopSessions).pipe(
+            flow.fiber = yield* runLogin(flow, stopSessions, sdk).pipe(
               Effect.interruptible,
               Effect.forkIn(scope),
             );

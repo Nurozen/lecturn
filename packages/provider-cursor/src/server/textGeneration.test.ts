@@ -33,12 +33,6 @@ const cursorSdkMock = vi.hoisted(() => ({
   })),
 }));
 
-vi.mock("./sdk.ts", () => ({
-  Agent: { create: cursorSdkMock.create },
-  createAgentPlatform: vi.fn(),
-  SqliteLocalAgentStore: { open: cursorSdkMock.storeOpen },
-}));
-
 let hasCustomPolicy = false;
 const tempPrefixes: Array<string | undefined> = [];
 const layerFs = FileSystem.layerNoop({
@@ -48,7 +42,13 @@ const layerFs = FileSystem.layerNoop({
     return Effect.succeed("/isolated-text-generation");
   },
 });
-const layerTest = Layer.merge(layerFs, CursorSdk.layer);
+const layerTest = Layer.merge(
+  layerFs,
+  CursorSdk.layerFromRequire(() => ({
+    Agent: { create: cursorSdkMock.create },
+    SqliteLocalAgentStore: { open: cursorSdkMock.storeOpen },
+  })),
+);
 
 const decodeCursorSettings = Schema.decodeSync(CursorSettings);
 const cursorSettings = decodeCursorSettings({ enabled: true });

@@ -7,13 +7,14 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
 import { makeCursorAuth, type CursorAuthOptions } from "./auth.ts";
-import { InMemoryCredentialStore } from "./sdk.ts";
+import * as CursorSdk from "./CursorSdk.ts";
 
 const instanceId = ProviderInstanceId.make("cursor-personal");
 const owner = "owner-client";
@@ -23,6 +24,7 @@ const authorizationUrl = "https://cursor.com/loginDeepControl?challenge=test-cha
 const makeHarness = Effect.fn("makeCursorAuthHarness")(function* (
   overrides: Partial<CursorAuthOptions> = {},
 ) {
+  const { InMemoryCredentialStore } = yield* (yield* CursorSdk.CursorSdk).load;
   const store = new InMemoryCredentialStore();
   const complete = Promise.withResolvers<void>();
   const returned = Promise.withResolvers<void>();
@@ -79,7 +81,7 @@ const phase = (auth: Auth, phase: ProviderAuthState["phase"], session = owner) =
     Effect.map(Option.getOrThrow),
   );
 
-it.layer(NodeServices.layer)("CursorAuth", (it) => {
+it.layer(Layer.merge(NodeServices.layer, CursorSdk.layer))("CursorAuth", (it) => {
   it.effect("closes SDK sessions and interrupts in-flight credential work before signing out", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
@@ -200,6 +202,7 @@ it.layer(NodeServices.layer)("CursorAuth", (it) => {
 
   it.effect("finishes saving a completed login atomically across the timeout", () =>
     Effect.gen(function* () {
+      const { InMemoryCredentialStore } = yield* (yield* CursorSdk.CursorSdk).load;
       const store = new InMemoryCredentialStore();
       const saving = Promise.withResolvers<void>();
       const finishSave = Promise.withResolvers<void>();

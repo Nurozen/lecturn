@@ -20,7 +20,6 @@ import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import * as StaveMemoryWiring from "@lecturn/provider-core/server/staveMemory";
 import * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
-import { Cursor } from "./sdk.ts";
 
 const layerTest = TestProviderHost.layer({ runBackgroundWork: false }).pipe(
   Layer.provideMerge(NodeServices.layer),
@@ -57,6 +56,7 @@ it.layer(layerTest)("CursorDriver", (it) => {
     "persists browser credentials, uses them for chat, and closes the SDK session on logout",
     () =>
       Effect.gen(function* () {
+        const { Cursor } = yield* (yield* CursorSdk.CursorSdk).load;
         const login = vi.spyOn(Cursor.auth, "login").mockImplementation(async (options) => {
           options?.onLoginUrl?.("https://cursor.com/loginDeepControl?challenge=test-only");
           await options?.store?.save({

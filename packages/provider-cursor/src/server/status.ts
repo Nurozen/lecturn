@@ -21,6 +21,7 @@ import {
   providerModelsFromSettings,
   type ServerProviderDraft,
 } from "@lecturn/provider-core/server/snapshotProbe";
+import * as CursorSdk from "./CursorSdk.ts";
 import * as CursorSdkCatalog from "./CursorSdkCatalog.ts";
 
 export const CURSOR_PRESENTATION = {
@@ -252,7 +253,11 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
   cursorSettings: CursorSettings,
   environment?: NodeJS.ProcessEnv,
   authenticationType: "api-key" | "browser" = "api-key",
-): Effect.fn.Return<ServerProviderDraft, never, CursorSdkCatalog.CursorSdkCatalog> {
+): Effect.fn.Return<
+  ServerProviderDraft,
+  never,
+  CursorSdk.CursorSdk | CursorSdkCatalog.CursorSdkCatalog
+> {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const fallbackModels = getCursorFallbackModels(cursorSettings);
 
@@ -268,6 +273,23 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
         status: "warning",
         auth: { status: "unknown" },
         message: "Cursor is disabled in Lecturn settings.",
+      },
+    });
+  }
+
+  const sdkLoad = yield* (yield* CursorSdk.CursorSdk).load.pipe(Effect.result);
+  if (Result.isFailure(sdkLoad)) {
+    return buildServerProvider({
+      presentation: CURSOR_PRESENTATION,
+      enabled: cursorSettings.enabled,
+      checkedAt,
+      models: fallbackModels,
+      probe: {
+        installed: false,
+        version: null,
+        status: "error",
+        auth: { status: "unknown" },
+        message: sdkLoad.failure.message,
       },
     });
   }
