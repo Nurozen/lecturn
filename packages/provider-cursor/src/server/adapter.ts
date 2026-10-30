@@ -82,7 +82,6 @@ import {
   subagentThreadTitle,
 } from "@lecturn/provider-core/server/subagentProjection";
 import * as CursorAgentSdk from "./CursorAgentSdk.ts";
-import { ConfigurationError } from "./sdk.ts";
 export { cursorSdkModelSelection } from "./sdkModel.ts";
 
 export const CURSOR_DRIVER_KIND = CursorAgentSdk.CURSOR_PROVIDER;
@@ -362,11 +361,13 @@ class CursorModelUnavailableError extends Schema.TaggedError<CursorModelUnavaila
  * Maps runner failures from opening or sending to an agent. The SDK checks the
  * model against the account catalog before either and rejects it with an
  * uncoded ConfigurationError listing every account model, so its message
- * prefix is the only signal.
+ * prefix is the only signal. The SDK loads lazily, so the error is matched by
+ * the name the SDK gives it rather than by class.
  */
 const classifyCursorModelRejection =
   (modelSelection: ModelSelection) => (error: CursorAgentSdk.CursorAgentSdkRunnerError) =>
-    error.cause instanceof ConfigurationError &&
+    error.cause instanceof Error &&
+    error.cause.name === "ConfigurationError" &&
     error.cause.message.startsWith("Cannot use this model:")
       ? new CursorModelUnavailableError({ model: modelSelection.model, cause: error.cause })
       : error;

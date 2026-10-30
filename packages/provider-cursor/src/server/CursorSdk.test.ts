@@ -1,7 +1,12 @@
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off -- The probe is a plain Node child; this deadline kills it if it hangs.
 import * as NodeChildProcess from "node:child_process";
-import { describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import { describe, expect } from "vite-plus/test";
 
+import * as CursorSdk from "./CursorSdk.ts";
 import { isCursorShellSpawnFailure } from "./CursorSdk.ts";
 
 const cursorSdkUrl = new URL("./CursorSdk.ts", import.meta.url).href;
@@ -116,6 +121,35 @@ function runProbe(mode: string): Promise<{ code: number | null; stdout: string; 
     });
   });
 }
+
+/** Node's error when `missing` cannot be resolved while requiring the SDK. */
+const requireWithMissingModule = (missing: string) => () => {
+  throw Object.assign(
+    new Error(
+      `Cannot find module '${missing}'\nRequire stack:\n- /app/node_modules/@cursor/sdk/dist/cjs/index.js`,
+    ),
+    { code: "MODULE_NOT_FOUND" },
+  );
+};
+
+const loadWith = (require: (id: string) => unknown) =>
+  Effect.flatMap(CursorSdk.CursorSdk, (cursorSdk) => cursorSdk.load).pipe(
+    Effect.provide(CursorSdk.layerFromRequire(require)),
+  );
+
+describe("CursorSdk.load", () => {
+  it.effect("treats only a missing @cursor/sdk as not installed", () =>
+    Effect.gen(function* () {
+      const omitted = yield* loadWith(requireWithMissingModule("@cursor/sdk")).pipe(Effect.flip);
+      expect(omitted._tag).toBe("CursorSdkNotInstalledError");
+
+      const broken = yield* loadWith(requireWithMissingModule("@connectrpc/connect")).pipe(
+        Effect.exit,
+      );
+      expect(Exit.isFailure(broken) && Cause.hasDies(broken.cause)).toBe(true);
+    }),
+  );
+});
 
 describe("isCursorShellSpawnFailure", () => {
   it("matches only Cursor's shell wrapper", () => {

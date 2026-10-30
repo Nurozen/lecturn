@@ -29,6 +29,9 @@ const decodeManifest = Schema.decodeUnknownSync(
 );
 
 const repoRoot = NodeURL.fileURLToPath(new URL("../..", import.meta.url));
+const providerRoot = NodePath.join(repoRoot, "packages/provider-cursor");
+// The probe is written outside the checkout, so its imports must be absolute.
+const providerRequire = NodeModule.createRequire(NodePath.join(providerRoot, "package.json"));
 
 async function stagePackage(name: string, from: string, destination: string): Promise<void> {
   const require = NodeModule.createRequire(from);
@@ -75,7 +78,13 @@ it("loads packaged Cursor catalog chunks without credentials or checkout depende
       entry,
       `
       import assert from 'node:assert/strict';
-      import { Cursor } from ${JSON.stringify(NodePath.join(repoRoot, "packages/provider-cursor/src/server/sdk.ts"))};
+      import * as Effect from ${JSON.stringify(providerRequire.resolve("effect/Effect"))};
+      import * as CursorSdk from ${JSON.stringify(NodePath.join(providerRoot, "src/server/CursorSdk.ts"))};
+      const { Cursor } = await Effect.runPromise(
+        Effect.flatMap(CursorSdk.CursorSdk, (cursorSdk) => cursorSdk.load).pipe(
+          Effect.provide(CursorSdk.layer),
+        ),
+      );
       for (const [operation, request] of [
         ['Cursor.models.list', () => Cursor.models.list({ apiKey: '' })],
         ['Cursor.me', () => Cursor.me({ apiKey: '' })],

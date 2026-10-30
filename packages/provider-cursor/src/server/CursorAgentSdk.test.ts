@@ -93,7 +93,7 @@ const cursorSdkMock = vi.hoisted(() => {
   };
 });
 
-vi.mock("./sdk.ts", () => ({
+const cursorSdkModule = {
   Agent: {
     create: cursorSdkMock.create,
     resume: cursorSdkMock.resume,
@@ -105,7 +105,7 @@ vi.mock("./sdk.ts", () => ({
   },
   createAgentPlatform: vi.fn(),
   SqliteLocalAgentStore: { open: vi.fn() },
-}));
+};
 
 const layerTest = CursorAgentSdk.layer.pipe(
   Layer.provide(
@@ -127,7 +127,7 @@ const layerTest = CursorAgentSdk.layer.pipe(
       canonical: undefined,
     }),
   ),
-  Layer.provide(CursorSdk.layer),
+  Layer.provide(CursorSdk.layerFromRequire(() => cursorSdkModule)),
   Layer.provide(NodeServices.layer),
 );
 

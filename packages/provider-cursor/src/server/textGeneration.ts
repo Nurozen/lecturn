@@ -54,7 +54,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
   withAccess?: CursorAuth["withAccess"],
 ) {
   const fs = yield* FileSystem.FileSystem;
-  const { Agent, SqliteLocalAgentStore } = yield* CursorSdk.CursorSdk;
+  const cursorSdk = yield* CursorSdk.CursorSdk;
   const resolvedEnvironment = environment ?? process.env;
 
   const resolveCursorApiKey = (operation: TextGenerationOperations.Operation) =>
@@ -83,6 +83,11 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
     const { operation, prompt, modelSelection } = input;
     return Effect.gen(function* () {
       const apiKey = yield* resolveCursorApiKey(operation);
+      const { Agent, SqliteLocalAgentStore } = yield* cursorSdk.load.pipe(
+        Effect.mapError(
+          (cause) => new TextGenerationError({ operation, detail: cause.message, cause }),
+        ),
+      );
       // Lecturn workflow inference must stay a pure text task: any tool call
       // discards the result (plan mode + the empty temp cwd already isolate it).
       const inference = operation === "generateWorkflowSummary";

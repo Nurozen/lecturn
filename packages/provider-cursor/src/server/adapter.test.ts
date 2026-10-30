@@ -37,7 +37,7 @@ import {
   nestedToolCallFromEnvelope,
 } from "./adapter.ts";
 import * as CursorAgentSdk from "./CursorAgentSdk.ts";
-import { ConfigurationError } from "./sdk.ts";
+import * as CursorSdk from "./CursorSdk.ts";
 
 const decodeCursorSettings = Schema.decodeEffect(CursorSettings);
 
@@ -1078,6 +1078,7 @@ describe("CursorAdapterV2", () => {
 
   it.effect("names a custom model Cursor's account catalog rejects", () =>
     Effect.gen(function* () {
+      const { ConfigurationError } = yield* (yield* CursorSdk.CursorSdk).load;
       const fileSystem = yield* FileSystem.FileSystem;
       const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "cursor-v2-model-" });
       const instanceId = ProviderInstanceId.make("cursor");
@@ -1193,7 +1194,12 @@ describe("CursorAdapterV2", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        Layer.mergeAll(NodeServices.layer, IdAllocator.layer, McpProviderSessions.layer),
+        Layer.mergeAll(
+          NodeServices.layer,
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          CursorSdk.layer,
+        ),
       ),
     ),
   );

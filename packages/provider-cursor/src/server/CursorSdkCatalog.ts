@@ -7,7 +7,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
-import { AuthenticationError, Cursor, CursorSdkError } from "./sdk.ts";
+import * as CursorSdk from "./CursorSdk.ts";
 
 export interface CursorSdkCatalogSnapshot {
   readonly user: SDKUser;
@@ -37,13 +37,6 @@ export class CursorSdkCatalog extends Context.Service<
   }
 >()("@lecturn/provider-cursor/server/CursorSdkCatalog") {}
 
-function isAuthenticationFailure(cause: unknown): boolean {
-  return (
-    cause instanceof AuthenticationError ||
-    (cause instanceof CursorSdkError && cause.status === 401)
-  );
-}
-
 export interface CursorSdkCatalogProbes {
   readonly readUser: (apiKey: string) => Effect.Effect<SDKUser, CursorSdkCatalogError>;
   readonly readModels: (
@@ -51,23 +44,33 @@ export interface CursorSdkCatalogProbes {
   ) => Effect.Effect<ReadonlyArray<SDKModel>, CursorSdkCatalogError>;
 }
 
-const sdkRequest = <A>(tryRequest: () => Promise<A>) =>
-  Effect.tryPromise({
-    try: tryRequest,
-    catch: (cause) =>
-      new CursorSdkCatalogError({
-        authenticationFailure: isAuthenticationFailure(cause),
-        cause,
+const sdkRequest = <A>(
+  cursorSdk: CursorSdk.CursorSdk["Service"],
+  request: (sdk: CursorSdk.CursorSdkModule) => Promise<A>,
+) =>
+  cursorSdk.load.pipe(
+    Effect.mapError((cause) => new CursorSdkCatalogError({ authenticationFailure: false, cause })),
+    Effect.flatMap((sdk) =>
+      Effect.tryPromise({
+        try: () => request(sdk),
+        catch: (cause) =>
+          new CursorSdkCatalogError({
+            authenticationFailure:
+              cause instanceof sdk.AuthenticationError ||
+              (cause instanceof sdk.CursorSdkError && cause.status === 401),
+            cause,
+          }),
       }),
-  });
+    ),
+  );
 
-const liveProbes: CursorSdkCatalogProbes = {
-  readUser: (apiKey) => sdkRequest(() => Cursor.me({ apiKey })),
-  readModels: (apiKey) => sdkRequest(() => Cursor.models.list({ apiKey })),
-};
+const makeLiveProbes = (cursorSdk: CursorSdk.CursorSdk["Service"]): CursorSdkCatalogProbes => ({
+  readUser: (apiKey) => sdkRequest(cursorSdk, ({ Cursor }) => Cursor.me({ apiKey })),
+  readModels: (apiKey) => sdkRequest(cursorSdk, ({ Cursor }) => Cursor.models.list({ apiKey })),
+});
 
 export const makeCursorSdkCatalog = Effect.fn("CursorSdkCatalog.make")(function* (
-  probes: CursorSdkCatalogProbes = liveProbes,
+  probes: CursorSdkCatalogProbes,
 ) {
   const modelCache = yield* Cache.makeWith(probes.readModels, {
     capacity: 32,
@@ -86,7 +89,12 @@ export const makeCursorSdkCatalog = Effect.fn("CursorSdkCatalog.make")(function*
   });
 });
 
-export const layer = Layer.effect(CursorSdkCatalog, makeCursorSdkCatalog());
+export const layer = Layer.effect(
+  CursorSdkCatalog,
+  Effect.flatMap(CursorSdk.CursorSdk, (cursorSdk) =>
+    makeCursorSdkCatalog(makeLiveProbes(cursorSdk)),
+  ),
+);
 
 export function layerTest(
   read: CursorSdkCatalog["Service"]["read"],
