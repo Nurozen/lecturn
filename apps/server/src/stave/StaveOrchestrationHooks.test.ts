@@ -12,7 +12,9 @@ import {
   RunId,
   ThreadId,
 } from "@lecturn/contracts";
-import { Deferred, Effect, Fiber, FileSystem, Layer, Option, Path, Ref, Result } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, Ref, Result } from "effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import { TestClock } from "effect/testing";
 
 import {

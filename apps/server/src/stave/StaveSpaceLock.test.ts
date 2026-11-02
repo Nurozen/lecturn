@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off -- filesystem alias boundary test
 import { describe, expect, it } from "@effect/vitest";
-import { Deferred, Duration, Effect, Fiber, FileSystem, Layer, Option, Path } from "effect";
+import { Deferred, Effect, Fiber, FileSystem, Layer, Option, Path } from "effect";
+import * as Duration from "effect/Duration";
 import { TestClock } from "effect/testing";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeFSP from "node:fs/promises";
@@ -297,6 +298,41 @@ describe("Stave space read/write lock", () => {
       yield* Deferred.await(writer.entered);
       yield* writer.release;
       yield* Fiber.join(writer.fiber);
+    }).pipe(Effect.provide(syncLayer)),
+  );
+
+  it.effect("makes a forked child that re-enters after its parent released acquire the lock", () =>
+    Effect.gen(function* () {
+      const lock = yield* StaveSpaceLock;
+      const log: Array<string> = [];
+      const go = yield* Deferred.make<void>();
+      const tried = yield* Deferred.make<Option.Option<void>>();
+      const child = yield* lock
+        .withSharedSpaceLock(
+          "/spaces/a",
+          Effect.forkDetach(
+            Effect.gen(function* () {
+              yield* Deferred.await(go);
+              yield* Deferred.succeed(
+                tried,
+                yield* lock.withSharedSpaceLock("/spaces/a", Effect.void, Duration.zero),
+              );
+              return yield* lock.withSharedSpaceLock(
+                "/spaces/a",
+                Effect.sync(() => log.push("child")),
+              );
+            }),
+          ),
+        )
+        .pipe(Effect.map(Option.getOrThrow));
+      const writer = yield* holder(lock, "/spaces/a", "exclusive", log, "writer");
+      yield* Deferred.await(writer.entered);
+      yield* Deferred.succeed(go, undefined);
+      expect(Option.isNone(yield* Deferred.await(tried))).toBe(true);
+      expect(log).toEqual(["writer"]);
+      yield* writer.release;
+      yield* Fiber.join(child);
+      expect(log).toEqual(["writer", "child"]);
     }).pipe(Effect.provide(syncLayer)),
   );
 });

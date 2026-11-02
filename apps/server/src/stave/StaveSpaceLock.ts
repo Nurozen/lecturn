@@ -2,7 +2,9 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 /** Shared process-lifetime fence for Stave admission and filesystem mutations. */
-import { Context, Deferred, Duration, Effect, FileSystem, Layer, Option, Path } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, Path } from "effect";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 
 export class StaveSpaceLock extends Context.Service<
   StaveSpaceLock,
@@ -16,9 +18,9 @@ export class StaveSpaceLock extends Context.Service<
      * Shared: admission that only has to exclude Stave operations, so any
      * number run together. Waits up to `wait` (unbounded when omitted;
      * `Duration.zero` never queues) and returns `None` when that runs out.
-     * Reentrant within the holding fiber, so a nested admission for a space
-     * the fiber already holds runs at once instead of queueing behind a writer
-     * that is waiting for this very holder.
+     * Reentrant while a shared hold the fiber inherited is live, so a nested
+     * admission runs at once instead of queueing behind a writer that is
+     * waiting for this very holder.
      */
     readonly withSharedSpaceLock: <A, E, R>(
       root: string,
@@ -39,10 +41,19 @@ export class StaveSpaceLock extends Context.Service<
   }
 >()("lecturn/stave/StaveSpaceLock") {}
 
-/** Canonical roots the current fiber holds shared. */
-class HeldSharedSpaces extends Context.Reference<ReadonlySet<string>>(
+/** A shared hold, live until the admission that took it returns. */
+interface SharedHold {
+  live: boolean;
+}
+
+/**
+ * Shared holds by canonical root. Forked children inherit this, so a child
+ * that outlives its parent's admission sees the hold go dead instead of
+ * reentering a lock nobody holds.
+ */
+class HeldSharedSpaces extends Context.Reference<ReadonlyMap<string, SharedHold>>(
   "lecturn/stave/StaveSpaceLock/HeldSharedSpaces",
-  { defaultValue: () => new Set() },
+  { defaultValue: () => new Map() },
 ) {}
 
 interface Waiter {
@@ -112,18 +123,28 @@ class SpaceRwLock {
     this.wake();
   }
 
-  /** `wait` undefined waits as long as it takes; zero only tries. */
+  /**
+   * `wait` undefined waits as long as it takes; zero only tries. `"join"`
+   * takes another read beside a live shared hold, skipping the queue: that
+   * hold already keeps writers out, and the joining read keeps them out even
+   * if the hold ends first.
+   */
   with<A, E, R>(
     exclusive: boolean,
     effect: Effect.Effect<A, E, R>,
-    wait?: Duration.Duration,
+    wait?: Duration.Duration | "join",
   ): Effect.Effect<Option.Option<A>, E, R> {
     const acquire =
-      wait === undefined
-        ? Effect.as(this.acquire(exclusive), true)
-        : Duration.isZero(wait)
-          ? Effect.sync(() => this.tryAcquire(exclusive))
-          : Effect.map(Effect.timeoutOption(this.acquire(exclusive), wait), Option.isSome);
+      wait === "join"
+        ? Effect.sync(() => {
+            this.readers += 1;
+            return true;
+          })
+        : wait === undefined
+          ? Effect.as(this.acquire(exclusive), true)
+          : Duration.isZero(wait)
+            ? Effect.sync(() => this.tryAcquire(exclusive))
+            : Effect.map(Effect.timeoutOption(this.acquire(exclusive), wait), Option.isSome);
     return Effect.uninterruptibleMask((restore) =>
       restore(acquire).pipe(
         Effect.flatMap((held) =>
@@ -169,7 +190,7 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const key = yield* canonical(root);
         // Waiting would never end: the writer would wait on this fiber's own read.
-        if ((yield* HeldSharedSpaces).has(key))
+        if ((yield* HeldSharedSpaces).get(key)?.live)
           return yield* Effect.die(new Error(`Stave space ${key} is already held shared.`));
         return Option.getOrThrow(yield* lockFor(key).with(true, effect));
       });
@@ -181,11 +202,21 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const key = yield* canonical(root);
         const held = yield* HeldSharedSpaces;
-        if (held.has(key)) return Option.some(yield* effect);
+        const hold: SharedHold = { live: true };
         return yield* lockFor(key).with(
           false,
-          Effect.provideService(effect, HeldSharedSpaces, new Set([...held, key])),
-          wait === undefined ? undefined : Duration.fromInputUnsafe(wait),
+          Effect.provideService(effect, HeldSharedSpaces, new Map([...held, [key, hold]])).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                hold.live = false;
+              }),
+            ),
+          ),
+          held.get(key)?.live
+            ? "join"
+            : wait === undefined
+              ? undefined
+              : Duration.fromInputUnsafe(wait),
         );
       });
     const tryWithWorkspaceLocks = <A, E, R>(
