@@ -115,6 +115,15 @@ import {
 } from "../../provider/EventNdjsonLogger.ts";
 import * as ProviderEventLoggers from "@lecturn/provider-core/server/ProviderEventLoggers";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "../../provider/codexLaunchArgs.ts";
+import {
+  CodexSquireSessionMismatchError,
+  makeCodexSquireHome,
+} from "../../provider/Drivers/CodexSquireHome.ts";
+import {
+  CODEX_NO_PLUGIN_CONFIG,
+  codexConfiguredMcpServerNames,
+  codexMcpServersOffConfig,
+} from "../../provider/codexMcpIsolation.ts";
 import { mergeProviderInstanceEnvironment } from "@lecturn/provider-core/server/instanceEnvironment";
 import * as McpProviderSession from "@lecturn/provider-core/server/mcpSession";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
@@ -128,6 +137,7 @@ import { snapshotMcpApp } from "../../mcpApps/McpAppSnapshot.ts";
 import { codexMcpToolResult } from "./codexMcpToolResult.ts";
 import {
   codexAppToolApprovals,
+  CODEX_SQUIRE_HOME_TOOL_APPROVALS,
   makeCodexMcpActivation,
   withConnectedAppInstructions,
 } from "./connectedAppAdapterHooks.ts";
@@ -714,6 +724,24 @@ function codexRuntimeModeTurnDefaults(runtimeMode: RuntimeMode): {
   }
 }
 
+/**
+ * Lecturn: the deny runtime for Squire homes and probes (D9): Codex never
+ * asks and runs read-only. Its read-only sandbox has no readable-roots field,
+ * so read-only shell commands can still read what the OS user can (D48).
+ */
+function codexSquireRuntimePolicy(
+  runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+): ProviderAdapter.ProviderAdapterV2RuntimePolicy {
+  return runtimePolicy.squireIsolation === undefined
+    ? runtimePolicy
+    : {
+        ...runtimePolicy,
+        interactionMode: "default",
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "readOnly", networkAccess: false },
+      };
+}
+
 export function buildCodexTurnStartParams(input: {
   readonly nativeThreadId: string;
   readonly codexInput: ReadonlyArray<CodexSchema.V2TurnStartParams__UserInput>;
@@ -726,17 +754,19 @@ export function buildCodexTurnStartParams(input: {
   readonly omitServiceTier?: boolean;
   readonly appContext?: ProviderAdapter.ProviderAdapterV2TurnInput["appContext"];
   readonly appInstructions?: string;
+  readonly squireInstructions?: ReadonlyArray<string>;
 }) {
   return Effect.gen(function* () {
-    const runtimeModeDefaults = codexRuntimeModeTurnDefaults(input.runtimePolicy.runtimeMode);
+    const runtimePolicy = codexSquireRuntimePolicy(input.runtimePolicy);
+    const runtimeModeDefaults = codexRuntimeModeTurnDefaults(runtimePolicy.runtimeMode);
     const approvalPolicy =
-      input.runtimePolicy.approvalPolicy === undefined
+      runtimePolicy.approvalPolicy === undefined
         ? runtimeModeDefaults.approvalPolicy
-        : yield* decodeTurnApprovalPolicy(input.runtimePolicy.approvalPolicy);
+        : yield* decodeTurnApprovalPolicy(runtimePolicy.approvalPolicy);
     const sandboxPolicy =
-      input.runtimePolicy.sandboxPolicy === undefined
+      runtimePolicy.sandboxPolicy === undefined
         ? runtimeModeDefaults.sandboxPolicy
-        : yield* decodeTurnSandboxPolicy(input.runtimePolicy.sandboxPolicy);
+        : yield* decodeTurnSandboxPolicy(runtimePolicy.sandboxPolicy);
     const selectedEffort = getModelSelectionStringOptionValue(
       input.modelSelection,
       "reasoningEffort",
@@ -752,7 +782,7 @@ export function buildCodexTurnStartParams(input: {
     const developerInstructions = withConnectedAppInstructions(
       input.hasLecturnMcp !== true
         ? undefined
-        : buildCodexDeveloperInstructions(input.runtimePolicy.interactionMode),
+        : buildCodexDeveloperInstructions(runtimePolicy.interactionMode),
       input.appInstructions,
     );
     // An app's context is text an MCP server wrote, so it goes in as untrusted
@@ -772,6 +802,7 @@ export function buildCodexTurnStartParams(input: {
               browser: input.browserToolsAvailable ?? true,
               device: input.deviceToolsAvailable ?? false,
             },
+            input.squireInstructions,
           )
         : undefined;
     const additionalContext =
@@ -779,10 +810,10 @@ export function buildCodexTurnStartParams(input: {
         ? undefined
         : { ...lecturnContext, ...appContext };
     const collaborationMode: CodexSchema.ClientRequest__CollaborationMode | undefined =
-      input.runtimePolicy.interactionMode !== "plan" && developerInstructions === undefined
+      runtimePolicy.interactionMode !== "plan" && developerInstructions === undefined
         ? undefined
         : {
-            mode: input.runtimePolicy.interactionMode === "plan" ? "plan" : "default",
+            mode: runtimePolicy.interactionMode === "plan" ? "plan" : "default",
             settings: {
               model: input.modelSelection.model,
               reasoning_effort: effort ?? "medium",
@@ -796,7 +827,7 @@ export function buildCodexTurnStartParams(input: {
       threadId: input.nativeThreadId,
       input: input.codexInput,
       ...(additionalContext ? { additionalContext } : {}),
-      cwd: input.runtimePolicy.cwd,
+      cwd: runtimePolicy.cwd,
       model: input.modelSelection.model,
       // Model catalogues can default summaries to "none". Request them on every
       // turn, including resumed threads, for Lecturn's reasoning timeline.
@@ -1299,6 +1330,56 @@ export const CODEX_THREAD_CONFIG = {
   mcp_optional_startup_grace_ms: 10_000,
 } as const;
 
+/**
+ * Lecturn: native tools and user context a Squire thread must not get (S0a2,
+ * request-level capture on Codex 0.165.0). Without these, a home was offered
+ * goal tools whose continuation turns run unprompted, image generation, plan
+ * and user-input tools, and its prompt carried the user's memories and skills
+ * list; the user's `notify` program and hooks ran on its turns, and memory
+ * consolidation read its rollouts. `multi_agent` is off so no model whose
+ * catalog offers sub-agents can spawn one outside the thread's config.
+ */
+export const CODEX_SQUIRE_THREAD_CONFIG = {
+  "tools.update_plan.enabled": false,
+  "tools.experimental_request_user_input.enabled": false,
+  "features.goals": false,
+  "features.memories": false,
+  "memories.use_memories": false,
+  "memories.generate_memories": false,
+  "features.multi_agent": false,
+  "features.multi_agent_v2": false,
+  "features.image_generation": false,
+  "features.browser_use": false,
+  "features.computer_use": false,
+  "features.in_app_browser": false,
+  "features.tool_suggest": false,
+  "features.sleep_tool": false,
+  "features.request_permissions_tool": false,
+  "features.send_message_to_user_async": false,
+  "features.deferred_executor": false,
+  "features.token_budget": false,
+  "features.current_time_reminder": false,
+  "features.hooks": false,
+  "features.skip_host_skill_discovery": true,
+  "skills.include_instructions": false,
+  "skills.bundled.enabled": false,
+  web_search: "disabled",
+  notify: [],
+} as const;
+
+/**
+ * Lecturn: a home acts only through its Lecturn tools, so it also loses the
+ * shell (the read-only sandbox still let it read any file, D48), image
+ * viewing, and project AGENTS.md. A probe keeps them: it answers about the
+ * target thread's own workspace.
+ */
+export const CODEX_SQUIRE_HOME_THREAD_CONFIG = {
+  "features.shell_tool": false,
+  "features.unified_exec": false,
+  "features.view_image": false,
+  project_doc_max_bytes: 0,
+} as const;
+
 // Lecturn wait tools can block for up to an hour. Keep Codex's MCP timeout above
 // that limit so the server's own wait timeout ends a long call.
 const CODEX_LECTURN_MCP_TOOL_TIMEOUT_SEC = 65 * 60;
@@ -1309,12 +1390,47 @@ export function codexThreadRuntimeParams(input: {
   readonly runtimePolicy?: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
   /** Lecturn: session `mcp_servers` overrides (Stave memory), merged under `lecturn`. */
   readonly extraMcpServers?: Readonly<Record<string, Schema.Json>>;
+  /** Lecturn: every server Codex would load itself, from `config/read`; Squire threads only. */
+  readonly configuredMcpServerNames?: ReadonlyArray<string>;
 }): {
   readonly cwd?: string;
   readonly model?: string;
   readonly config: Readonly<Record<string, Schema.Json>>;
 } {
   const { mcpSession } = input;
+  const squireIsolation = input.runtimePolicy?.squireIsolation;
+  if (squireIsolation !== undefined) {
+    // Lecturn: a home attaches Lecturn's server alone and a probe none
+    // (A5.9). Stave memory is left off, every server Codex loads itself is
+    // turned off by name (`mcp_servers` merges into them), and plugins and
+    // apps, which bring their own, are off.
+    const lecturn =
+      squireIsolation === "home" && mcpSession !== undefined
+        ? {
+            lecturn: {
+              url: mcpSession.endpoint,
+              tool_timeout_sec: CODEX_LECTURN_MCP_TOOL_TIMEOUT_SEC,
+              http_headers: { Authorization: mcpSession.authorizationHeader },
+              ...CODEX_SQUIRE_HOME_TOOL_APPROVALS,
+            },
+          }
+        : {};
+    const mcpServers = {
+      ...codexMcpServersOffConfig(input.configuredMcpServerNames ?? []),
+      ...lecturn,
+    };
+    return {
+      ...(input.runtimePolicy?.cwd == null ? {} : { cwd: input.runtimePolicy.cwd }),
+      ...(input.modelSelection === undefined ? {} : { model: input.modelSelection.model }),
+      config: {
+        ...CODEX_THREAD_CONFIG,
+        ...CODEX_NO_PLUGIN_CONFIG,
+        ...CODEX_SQUIRE_THREAD_CONFIG,
+        ...(squireIsolation === "home" ? CODEX_SQUIRE_HOME_THREAD_CONFIG : {}),
+        ...(Object.keys(mcpServers).length === 0 ? {} : { mcp_servers: mcpServers }),
+      },
+    };
+  }
   return {
     ...(input.runtimePolicy?.cwd == null ? {} : { cwd: input.runtimePolicy.cwd }),
     ...(input.modelSelection === undefined ? {} : { model: input.modelSelection.model }),
@@ -1643,6 +1759,7 @@ const layer: Layer.Layer<
   | FileSystem.FileSystem
   | IdAllocator.IdAllocatorV2
   | McpProviderSessions.McpProviderSessions
+  | Path.Path
   | ServerConfig
 > = Layer.effect(
   ProviderAdapter.ProviderAdapterV2,
@@ -1708,12 +1825,24 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
     threadId === null ? Effect.succeed(undefined) : mcpSessions.read(threadId);
   const { clientFactory, crypto, fileSystem, idAllocator, serverConfig } = adapterOptions;
   const continuationRequests = adapterOptions.continuationRequests;
+  const squireHome = yield* makeCodexSquireHome({
+    fileSystem,
+    path: yield* Path.Path,
+    stateDir: serverConfig.stateDir,
+    instanceId: adapterOptions.instanceId,
+    homeDirectory: yield* HostProcess.HomeDirectory,
+  });
 
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: adapterOptions.instanceId,
     driver: CODEX_PROVIDER,
     getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
     planSelectionTransition: () => Effect.succeed(turnScopedSelectionTransition()),
+    // Lecturn: a keyring-only login never reaches the Squire CODEX_HOME.
+    squireReadiness: squireHome.readiness({
+      settings: adapterOptions.settings,
+      environment: adapterOptions.environment,
+    }),
     openSession: (input) =>
       Effect.gen(function* () {
         const scope = yield* Scope.Scope;
@@ -1730,20 +1859,57 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     }),
                 ),
               );
+        // Lecturn: a session opened for a Squire home or probe runs in the
+        // instance's Squire CODEX_HOME (A5.9, OQ24) and serves only marked
+        // threads. The instance's shared session never becomes one.
+        const squireSession = input.runtimePolicy.squireIsolation !== undefined;
+        if (
+          squireSession &&
+          input.providerSessionId ===
+            idAllocator.derive.providerSession({ providerInstanceId: adapterOptions.instanceId })
+        ) {
+          return yield* new ProviderAdapter.ProviderAdapterOpenSessionError({
+            driver: CODEX_PROVIDER,
+            providerSessionId: input.providerSessionId,
+            cause: new CodexSquireSessionMismatchError({
+              squireThread: true,
+              squireSession: false,
+            }),
+          });
+        }
+        const instanceLaunch = {
+          settings: resolvedRuntime?.config ?? adapterOptions.settings,
+          environment: resolvedRuntime?.environment ?? adapterOptions.environment,
+        };
+        const launch = squireSession
+          ? yield* squireHome.prepare(instanceLaunch).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapter.ProviderAdapterOpenSessionError({
+                    driver: CODEX_PROVIDER,
+                    providerSessionId: input.providerSessionId,
+                    cause,
+                  }),
+              ),
+            )
+          : instanceLaunch;
         const client = yield* clientFactory.open({
           instanceId: adapterOptions.instanceId,
           threadId: input.threadId,
           providerSessionId: input.providerSessionId,
           runtimePolicy: input.runtimePolicy,
-          settings: resolvedRuntime?.config ?? adapterOptions.settings,
+          settings: launch.settings,
           // Lecturn: the opening thread's device CLI goes on the app-server PATH.
           environment: McpProviderSession.withAgentDeviceEnvironment(
-            resolvedRuntime?.environment ?? adapterOptions.environment,
+            launch.environment,
             yield* readMcpSession(input.threadId),
           ),
         });
         const extraMcpServers =
-          adapterOptions.resolveExtraMcpServers === undefined || input.runtimePolicy.cwd == null
+          adapterOptions.resolveExtraMcpServers === undefined ||
+          input.runtimePolicy.cwd == null ||
+          // Lecturn: a Squire session never wires Stave memory (A5.9).
+          input.runtimePolicy.squireIsolation !== undefined
             ? undefined
             : // Stave memory wiring reports its own failures; they are wrapped below.
               // @effect-diagnostics-next-line anyUnknownInErrorContext:off
@@ -1764,6 +1930,28 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   ),
                 );
         const sessionMcpParams = extraMcpServers === undefined ? {} : { extraMcpServers };
+        // Lecturn: the servers a Squire thread turns off, read fresh for each
+        // start, resume, and fork. A failed read fails that request rather
+        // than starting the thread with the user's servers on.
+        const squireMcpParams = (
+          runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy | undefined,
+        ) =>
+          runtimePolicy !== undefined &&
+          (runtimePolicy.squireIsolation !== undefined) !== squireSession
+            ? Effect.fail(
+                new CodexSquireSessionMismatchError({
+                  squireThread: runtimePolicy.squireIsolation !== undefined,
+                  squireSession,
+                }),
+              )
+            : runtimePolicy?.squireIsolation === undefined
+              ? Effect.succeed({})
+              : ensureInitialized.pipe(
+                  Effect.andThen(client.request("config/read", { cwd: runtimePolicy.cwd ?? null })),
+                  Effect.map((response) => ({
+                    configuredMcpServerNames: codexConfiguredMcpServerNames(response.config),
+                  })),
+                );
         const codexMcpActivation = makeCodexMcpActivation(mcpSessions, CODEX_PROVIDER);
         const additionalContextByThread = yield* Ref.make(
           new Map<
@@ -6271,6 +6459,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               ...(turnInput.appInstructions === undefined
                 ? {}
                 : { appInstructions: turnInput.appInstructions }),
+              ...(turnInput.squireInstructions === undefined
+                ? {}
+                : { squireInstructions: turnInput.squireInstructions }),
             });
             yield* Ref.update(pendingRootTurns, (current) => {
               const updated = new Map(current);
@@ -6531,13 +6722,19 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             }),
           ensureThread: (threadInput) =>
             ensureInitialized.pipe(
-              Effect.andThen(mcpSessions.read(threadInput.threadId)),
-              Effect.flatMap((mcpSession) =>
+              Effect.andThen(
+                Effect.all([
+                  mcpSessions.read(threadInput.threadId),
+                  squireMcpParams(threadInput.runtimePolicy),
+                ]),
+              ),
+              Effect.flatMap(([mcpSession, squireParams]) =>
                 client
                   .request(
                     "thread/start",
                     codexThreadRuntimeParams({
                       ...sessionMcpParams,
+                      ...squireParams,
                       mcpSession,
                       modelSelection: threadInput.modelSelection,
                       runtimePolicy: threadInput.runtimePolicy,
@@ -6579,12 +6776,14 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               const nativeThreadId = yield* getNativeThreadId(threadInput.providerThread);
               const appThreadId = threadInput.threadId ?? threadInput.providerThread.appThreadId;
               const mcpSession = yield* readMcpSession(appThreadId);
+              const squireParams = yield* squireMcpParams(threadInput.runtimePolicy);
               // excludeTurns is not in the generated request schema yet.
               const resume = client.raw.request("thread/resume", {
                 threadId: nativeThreadId,
                 excludeTurns: true,
                 ...codexThreadRuntimeParams({
                   ...sessionMcpParams,
+                  ...squireParams,
                   mcpSession,
                   ...(threadInput.modelSelection === undefined
                     ? {}
@@ -7352,6 +7551,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             Effect.gen(function* () {
               const threadId = yield* getNativeThreadId(threadInput.sourceProviderThread);
               const boundary = yield* resolveCodexForkBoundary(threadInput);
+              const squireParams = yield* squireMcpParams(threadInput.runtimePolicy);
               const response = yield* ensureInitialized.pipe(
                 Effect.andThen(
                   client.request("thread/fork", {
@@ -7361,6 +7561,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                       : { lastTurnId: boundary.lastTurnId }),
                     ...codexThreadRuntimeParams({
                       ...sessionMcpParams,
+                      ...squireParams,
                       mcpSession: yield* mcpSessions.read(threadInput.targetThreadId),
                       ...(threadInput.modelSelection === undefined
                         ? {}

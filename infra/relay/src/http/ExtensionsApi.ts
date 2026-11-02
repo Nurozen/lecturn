@@ -214,6 +214,8 @@ export const extensionsApi = (routeConfig: DecisionsRouteConfig) =>
           return json(yield* service.evaluate(host, payload, "equivalence"));
         if (path === "/v1/extensions/decisions")
           return json(yield* service.evaluate(host, payload, "decisions"));
+        if (path === "/v1/extensions/squire-routing")
+          return json(yield* service.evaluate(host, payload, "squire-routing"));
         return json({ message: "Not found" }, 404);
       }).pipe(
         Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(256 * 1024)),
@@ -241,6 +243,7 @@ export const extensionsApi = (routeConfig: DecisionsRouteConfig) =>
         .handleRaw("evaluate", () => handler)
         .handleRaw("conflicts", () => handler)
         .handleRaw("equivalence", () => handler)
-        .handleRaw("decisions", () => handler);
+        .handleRaw("decisions", () => handler)
+        .handleRaw("squireRouting", () => handler);
     }),
   );

@@ -19,7 +19,7 @@ export const makeExtensionsFundingStore = (config: ExtensionsConfig, approvalOri
       Effect.gen(function* () {
         const featureConfig = { ...config.shared, ...config[featureId], featureId };
         const paidAccess = yield* makeDecisionsAccess(featureConfig);
-        // Decisions remains compatible with phase 0; new feature consent requires promotion.
+        // Decisions remains compatible with phase 0; every newer feature's consent requires promotion.
         const ready =
           featureId === "decisions"
             ? Effect.succeed(true)
@@ -180,5 +180,9 @@ export const makeExtensionsFundingStore = (config: ExtensionsConfig, approvalOri
           }),
         };
       });
-    return { decisions: yield* feature("decisions"), contextual: yield* feature("contextual") };
+    return {
+      decisions: yield* feature("decisions"),
+      contextual: yield* feature("contextual"),
+      squires: yield* feature("squires"),
+    };
   });

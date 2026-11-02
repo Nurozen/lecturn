@@ -240,7 +240,13 @@ export const make = Effect.gen(function* () {
         return { items, truncated: more, continues: true, cursorAdvance: consumed };
       },
     ),
-    getChangeRequestSummary: (input) => getPull(input).pipe(Effect.map(forgejoChangeRequest)),
+    getChangeRequestSummary: (input) =>
+      getPull(input).pipe(
+        Effect.map((pr) => ({
+          ...forgejoChangeRequest(pr),
+          ...(pr.head.sha ? { headSha: pr.head.sha } : {}),
+        })),
+      ),
     getChangeRequestChecks: Effect.fn("ForgejoPullRequestProvider.getChangeRequestChecks")(
       function* (input) {
         const pr = yield* getPull(input);

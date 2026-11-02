@@ -9,6 +9,7 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import * as Notifications from "expo-notifications";
 import { useLinkTo, useNavigation } from "@react-navigation/native";
 
+import { useSquireHomeThreadOnScreen } from "../squires/squireLinks";
 import { setAndroidThreadOnScreen } from "./androidNotifications";
 import { foregroundNotificationBehavior } from "./foregroundNotificationBehavior";
 import { routeAgentNotificationResponseOnce, threadDeepLinkOnScreen } from "./notificationPayload";
@@ -33,11 +34,13 @@ export function useAgentNotificationNavigation(pathname: string): void {
   const notificationTapRevision = useRef(0);
   const observedLinkRevision = useRef(0);
   const deepLinkOnScreen = useRef<string | null>(null);
+  // Lecturn: a Squire's pushes carry its home thread, which its Squire screen shows.
+  const squireHomeThread = useSquireHomeThreadOnScreen(pathname);
   useLayoutEffect(() => {
-    const thread = threadDeepLinkOnScreen(pathname);
+    const thread = threadDeepLinkOnScreen(pathname) ?? squireHomeThread;
     deepLinkOnScreen.current = thread;
     setAndroidThreadOnScreen(thread);
-  }, [pathname]);
+  }, [pathname, squireHomeThread]);
 
   useEffect(() => {
     Notifications.setNotificationHandler({

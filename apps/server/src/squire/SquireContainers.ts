@@ -1,0 +1,175 @@
+import type { OrchestrationProjectShell, ProjectId } from "@lecturn/contracts";
+import * as Cache from "effect/Cache";
+import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
+
+import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
+import * as ProjectService from "../project/ProjectService.ts";
+
+/**
+ * A project's Stave containers. `unknown` means the project could not be read,
+ * so no space or saga grant may cover it; project grants still do.
+ */
+export type SquireStaveMembership =
+  | {
+      readonly status: "known";
+      readonly spaceId: string | null;
+      readonly sagaId: string | null;
+    }
+  | { readonly status: "unknown" };
+
+const noStave: SquireStaveMembership = { status: "known", spaceId: null, sagaId: null };
+
+/** The Stave space and saga a project belongs to, read through `project.stave` (A1). */
+export class SquireContainers extends Context.Service<
+  SquireContainers,
+  {
+    readonly ofProject: (projectId: ProjectId) => Effect.Effect<SquireStaveMembership>;
+  }
+>()("lecturn/squire/SquireContainers") {}
+
+/**
+ * D44: synthetic Stave memberships for fixture projects, which have no Stave
+ * workspace for `project.stave` to read. Provided only with test providers on
+ * (D44g); `loadSetup` registers them again after a restart.
+ */
+export class SquireFixtureStave extends Context.Service<
+  SquireFixtureStave,
+  {
+    readonly set: (
+      projectId: ProjectId,
+      membership: { readonly spaceId: string | null; readonly sagaId: string | null },
+    ) => Effect.Effect<void>;
+    readonly ofProject: (
+      projectId: ProjectId,
+    ) => Effect.Effect<Option.Option<SquireStaveMembership>>;
+    /** The fixture's own name for a synthetic space or saga, so views never show its id. */
+    readonly setName: (containerId: string, name: string) => Effect.Effect<void>;
+    readonly nameOf: (containerId: string) => Effect.Effect<Option.Option<string>>;
+  }
+>()("lecturn/squire/SquireContainers/SquireFixtureStave") {}
+
+export const layerFixtureStave = Layer.effect(
+  SquireFixtureStave,
+  Effect.gen(function* () {
+    const memberships = yield* Ref.make(new Map<ProjectId, SquireStaveMembership>());
+    const names = yield* Ref.make(new Map<string, string>());
+    return SquireFixtureStave.of({
+      setName: (containerId, name) =>
+        Ref.update(names, (current) => new Map(current).set(containerId, name)),
+      nameOf: (containerId) =>
+        Ref.get(names).pipe(
+          Effect.map((current) => Option.fromUndefinedOr(current.get(containerId))),
+        ),
+      set: (projectId, membership) =>
+        Ref.update(memberships, (current) =>
+          new Map(current).set(projectId, { status: "known", ...membership }),
+        ),
+      ofProject: (projectId) =>
+        Ref.get(memberships).pipe(
+          Effect.map((current) => Option.fromUndefinedOr(current.get(projectId))),
+        ),
+    });
+  }),
+);
+
+const fromShell = (shell: Option.Option<OrchestrationProjectShell>): SquireStaveMembership => {
+  const stave = Option.isSome(shell) ? shell.value.stave : null;
+  if (stave === null || stave === undefined) return noStave;
+  // A saga's own coordinating space is inside the saga it coordinates.
+  return {
+    status: "known",
+    spaceId: stave.spaceId,
+    sagaId: stave.isSaga ? stave.spaceId : (stave.memberOf ?? null),
+  };
+};
+
+// Matches StaveDisplayMembership's saga-list TTL, so a `stave` CLI change
+// Lecturn never hears about still shows up within the same window.
+const MEMBERSHIP_TTL = Duration.seconds(15);
+
+const makeLive = Effect.gen(function* () {
+  const projects = yield* ProjectService.ProjectService;
+  const events = yield* OrchestrationEventStore.OrchestrationEventStore;
+  const fixtureStave = yield* Effect.serviceOption(SquireFixtureStave);
+  const cache = yield* Cache.makeWith(
+    (projectId: ProjectId) => projects.getShell(projectId).pipe(Effect.map(fromShell)),
+    {
+      capacity: 512,
+      timeToLive: Exit.match({
+        onSuccess: () => MEMBERSHIP_TTL,
+        onFailure: () => Duration.zero,
+      }),
+    },
+  );
+
+  // Project writes and Stave refreshes are project application events.
+  const highWater = yield* events.latestApplicationSequence.pipe(Effect.option);
+  if (Option.isSome(highWater)) {
+    yield* Effect.forkScoped(
+      Stream.runForEach(
+        events.streamApplicationEvents({ afterSequence: highWater.value }),
+        (event) =>
+          "aggregateKind" in event && event.aggregateKind === "project"
+            ? Cache.invalidate(cache, event.aggregateId)
+            : Effect.void,
+      ).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Squire container invalidation stopped; entries expire by TTL.", {
+            cause,
+          }),
+        ),
+      ),
+    );
+  }
+
+  return SquireContainers.of({
+    ofProject: (projectId) =>
+      Effect.gen(function* () {
+        if (Option.isSome(fixtureStave)) {
+          const synthetic = yield* fixtureStave.value.ofProject(projectId);
+          if (Option.isSome(synthetic)) return synthetic.value;
+        }
+        return yield* Cache.get(cache, projectId).pipe(
+          Effect.orElseSucceed((): SquireStaveMembership => ({ status: "unknown" })),
+        );
+      }),
+  });
+});
+
+/** Over `ProjectService` shells; never runs the Stave binary itself (R31). */
+export const layer = Layer.effect(SquireContainers, makeLive);
+
+export interface SquireContainersTestSpace {
+  readonly spaceId: string;
+  readonly sagaId?: string;
+  readonly projectIds: ReadonlyArray<ProjectId>;
+}
+
+/** Synthetic spaces and sagas; projects in neither list have no Stave space. */
+export const layerTest = (input: {
+  readonly spaces?: ReadonlyArray<SquireContainersTestSpace>;
+  readonly unknownProjectIds?: ReadonlyArray<ProjectId>;
+}) =>
+  Layer.succeed(
+    SquireContainers,
+    SquireContainers.of({
+      ofProject: (projectId) => {
+        if (input.unknownProjectIds?.includes(projectId)) {
+          return Effect.succeed({ status: "unknown" });
+        }
+        const space = input.spaces?.find((candidate) => candidate.projectIds.includes(projectId));
+        return Effect.succeed(
+          space === undefined
+            ? noStave
+            : { status: "known", spaceId: space.spaceId, sagaId: space.sagaId ?? null },
+        );
+      },
+    }),
+  );

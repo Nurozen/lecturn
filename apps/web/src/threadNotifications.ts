@@ -1,4 +1,13 @@
-import type { AppBinding, AppId, EnvironmentId, ThreadId } from "@lecturn/contracts";
+import type { SquireEnvironmentState } from "@lecturn/client-runtime/state/squire";
+import type {
+  AppBinding,
+  AppId,
+  EnvironmentId,
+  SquireActionLogEntry,
+  SquireCardId,
+  SquireId,
+  ThreadId,
+} from "@lecturn/contracts";
 import type { ClientSettings } from "@lecturn/contracts/settings";
 
 import completionUrl from "./assets/notification-completion.mp3";
@@ -26,15 +35,18 @@ const TAG_HASH_OFFSET_BASIS = 0xcbf29ce484222325n;
 const TAG_HASH_PRIME = 0x100000001b3n;
 const TAG_HASH_MASK = 0xffffffffffffffffn;
 
-/** Windows drops toast notifications with the 73-character environment/thread tag. */
-export function threadNotificationTag(environmentId: EnvironmentId, threadId: ThreadId): string {
-  const key = `${environmentId}:${threadId}`;
+/** Windows drops toast notifications whose tag is as long as an environment and thread id. */
+function notificationTag(key: string): string {
   let hash = TAG_HASH_OFFSET_BASIS;
   for (let index = 0; index < key.length; index += 1) {
     hash ^= BigInt(key.charCodeAt(index));
     hash = (hash * TAG_HASH_PRIME) & TAG_HASH_MASK;
   }
   return hash.toString(16).padStart(16, "0");
+}
+
+export function threadNotificationTag(environmentId: EnvironmentId, threadId: ThreadId): string {
+  return notificationTag(`${environmentId}:${threadId}`);
 }
 
 export interface ThreadNotificationApp {
@@ -156,4 +168,77 @@ export async function playNotificationSound(
   } catch {
     buffers.delete(url);
   }
+}
+
+// ── Squire notification intents (10c.3, D27) ──────────────────
+
+export interface SquireNotificationIntent {
+  readonly squireId: SquireId;
+  /** The `notification.pushed` log row's sequence; one notification per intent. */
+  readonly sequence: number;
+  readonly title: string;
+  readonly body: string;
+}
+
+/**
+ * New `notification.pushed` intents since `seen`, the last intent sequence per Squire. The first
+ * look at an environment only records where it stands, so a reload never replays old intents.
+ */
+export function squireNotificationIntents(
+  seen: ReadonlyMap<SquireId, number> | null,
+  state: SquireEnvironmentState,
+): { readonly seen: ReadonlyMap<SquireId, number>; readonly intents: SquireNotificationIntent[] } {
+  const nextSeen = new Map<SquireId, number>();
+  const intents: SquireNotificationIntent[] = [];
+  for (const entry of state.squires) {
+    const pushed = entry.recentActivity
+      .filter((activity) => activity.kind === "notification.pushed")
+      .map((activity) => activity.sequence)
+      .toSorted((left, right) => left - right);
+    // A Squire created after the first look has no mark yet, so all of its intents are new.
+    const last = seen === null ? Number.POSITIVE_INFINITY : (seen.get(entry.squire.id) ?? -1);
+    nextSeen.set(entry.squire.id, Math.max(seen?.get(entry.squire.id) ?? -1, ...pushed));
+    // The server writes no intent while Notify is Off; this covers a toggle that lands between
+    // the write and this snapshot.
+    if (entry.squire.permissions.notify === "off") continue;
+    const count = entry.openDecisionCount;
+    const body =
+      count === 0
+        ? "New update"
+        : count === 1
+          ? "1 item waits on you"
+          : `${count} items wait on you`;
+    for (const sequence of pushed) {
+      if (sequence > last) {
+        intents.push({ squireId: entry.squire.id, sequence, title: entry.squire.name, body });
+      }
+    }
+  }
+  return { seen: nextSeen, intents };
+}
+
+export function squireNotificationTag(environmentId: EnvironmentId, squireId: SquireId): string {
+  return notificationTag(`${environmentId}:squire:${squireId}`);
+}
+
+/**
+ * D27: tells the server a shown intent was `alerted` on this desktop. The snapshot names an
+ * intent only by its log sequence, so its card comes from the `notification.pushed` log row.
+ */
+export async function reportSquireAlert(
+  intent: Pick<SquireNotificationIntent, "sequence">,
+  deps: {
+    readonly readLog: () => Promise<ReadonlyArray<
+      Pick<SquireActionLogEntry, "id" | "kind" | "cardId">
+    > | null>;
+    readonly report: (cardId: SquireCardId) => Promise<unknown>;
+  },
+): Promise<boolean> {
+  const entries = await deps.readLog();
+  const cardId = entries?.find(
+    (entry) => entry.id === intent.sequence && entry.kind === "notification.pushed",
+  )?.cardId;
+  if (cardId == null) return false;
+  await deps.report(cardId);
+  return true;
 }

@@ -6,7 +6,10 @@ import {
   getRowBottom,
   readTimelinePosition,
   rememberTimelinePosition,
+  resolveTimelineOpeningPosition,
+  TIMELINE_REVEAL_TOP_GAP_PX,
   timelineContentOverflowsViewport,
+  timelineNewestAppCardRowId,
 } from "./timelineScrollAnchoring";
 
 function buildState({
@@ -280,5 +283,38 @@ describe("remembered timeline positions", () => {
     expect(readTimelinePosition("scroll-test-a:unvisited")).toBeUndefined();
     rememberTimelinePosition("scroll-test-a:thread-1", following, true);
     expect(readTimelinePosition("scroll-test-a:thread-1")).toEqual(following);
+  });
+});
+
+describe("opening at the newest MCP App card (Lecturn D63)", () => {
+  it("finds the card only when it is the newest content row", () => {
+    const card = { id: "item-1:app-card", kind: "mcp-app" };
+    expect(timelineNewestAppCardRowId([{ id: "m1", kind: "message" }, card])).toBe(card.id);
+    expect(timelineNewestAppCardRowId([card, { id: "meta", kind: "assistant-meta" }])).toBe(
+      card.id,
+    );
+    expect(timelineNewestAppCardRowId([card, { id: "m2", kind: "message" }])).toBeNull();
+    expect(timelineNewestAppCardRowId([])).toBeNull();
+  });
+
+  it("opens at the card's top as a user-scrolled position, so follow does not pull it back", () => {
+    const opening = resolveTimelineOpeningPosition(undefined, "item-1:app-card");
+    expect(opening).toMatchObject({
+      rowId: "item-1:app-card",
+      atEnd: false,
+      offsetWithinRow: -TIMELINE_REVEAL_TOP_GAP_PX,
+    });
+    // Same object across renders, so the opening scroll is not restarted.
+    expect(resolveTimelineOpeningPosition(undefined, "item-1:app-card")).toBe(opening);
+    const atEnd = { rowId: "m1", offsetWithinRow: 0, scrollOffset: 900, atEnd: true };
+    expect(resolveTimelineOpeningPosition(atEnd, "item-1:app-card")).toBe(opening);
+  });
+
+  it("keeps a remembered reading position, and the end when there is no card", () => {
+    const reading = { rowId: "m1", offsetWithinRow: 40, scrollOffset: 300, atEnd: false };
+    expect(resolveTimelineOpeningPosition(reading, "item-1:app-card")).toBe(reading);
+    expect(resolveTimelineOpeningPosition(undefined, null)).toBeUndefined();
+    const atEnd = { rowId: "m1", offsetWithinRow: 0, scrollOffset: 900, atEnd: true };
+    expect(resolveTimelineOpeningPosition(atEnd, null)).toBe(atEnd);
   });
 });

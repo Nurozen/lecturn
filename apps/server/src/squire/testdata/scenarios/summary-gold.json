@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 2,
+  "id": "summary-gold",
+  "fixture": {
+    "thread": {
+      "threadId": "thr_fix_invoice_rounding",
+      "title": "Fix invoice rounding",
+      "project": "billing-service",
+      "provider": "claudeAgent"
+    },
+    "turnId": "t_42",
+    "session": {
+      "status": "completed",
+      "pendingRuntimeRequest": null,
+      "interruptedBy": null
+    },
+    "messages": [
+      {
+        "role": "user",
+        "text": "Invoice totals are off by a cent on some EUR invoices. Fix the rounding."
+      },
+      {
+        "role": "assistant",
+        "text": "Fixed. Totals now use round-half-even, which matches the ledger. I didn't touch PDF rendering; it formats the already-rounded total. Want me to open a PR?",
+        "final": true
+      }
+    ],
+    "toolCalls": [
+      {
+        "kind": "read",
+        "path": "src/invoice/InvoiceTotals.ts"
+      },
+      {
+        "kind": "edit",
+        "path": "src/invoice/InvoiceTotals.ts",
+        "note": "switch Math.round to banker's rounding helper"
+      },
+      {
+        "kind": "create",
+        "path": "src/invoice/roundHalfEven.ts"
+      },
+      {
+        "kind": "edit",
+        "path": "src/invoice/InvoiceTotals.test.ts",
+        "note": "+4 cases"
+      },
+      {
+        "kind": "command",
+        "command": "vp test run src/invoice",
+        "exitCode": 0
+      },
+      {
+        "kind": "command",
+        "command": "vp run typecheck --filter billing",
+        "exitCode": 0
+      }
+    ],
+    "files": [
+      {
+        "path": "src/invoice/roundHalfEven.ts",
+        "change": "added"
+      },
+      {
+        "path": "src/invoice/InvoiceTotals.ts",
+        "change": "modified"
+      },
+      {
+        "path": "src/invoice/InvoiceTotals.test.ts",
+        "change": "modified"
+      }
+    ],
+    "diffStats": {
+      "added": 1,
+      "modified": 2,
+      "deleted": 0,
+      "insertions": 61,
+      "deletions": 9
+    },
+    "pullRequest": null
+  },
+  "gold": {
+    "threadId": "thr_fix_invoice_rounding",
+    "threadTitle": "Fix invoice rounding",
+    "project": "billing-service",
+    "provider": "claudeAgent",
+    "turnId": "t_42",
+    "outcome": "finished",
+    "summaryStatus": "complete",
+    "goal": "Fix one-cent rounding errors on EUR invoice totals",
+    "completed": [
+      "Switched InvoiceTotals to round-half-even via new roundHalfEven helper",
+      "Added 4 test cases; tests and typecheck pass"
+    ],
+    "remaining": ["Open a PR (agent offered)"],
+    "blocked": [],
+    "files": {
+      "entries": [
+        {
+          "path": "src/invoice/roundHalfEven.ts",
+          "change": "added"
+        },
+        {
+          "path": "src/invoice/InvoiceTotals.ts",
+          "change": "modified"
+        },
+        {
+          "path": "src/invoice/InvoiceTotals.test.ts",
+          "change": "modified"
+        }
+      ],
+      "counts": {
+        "added": 1,
+        "modified": 2,
+        "deleted": 0
+      }
+    },
+    "commands": [
+      {
+        "command": "vp test run src/invoice",
+        "exitCode": 0,
+        "pass": true
+      },
+      {
+        "command": "vp run typecheck --filter billing",
+        "exitCode": 0,
+        "pass": true
+      }
+    ],
+    "pullRequest": null,
+    "pendingQuestion": "Want me to open a PR?",
+    "suggestedNextStep": "Ask it to open a PR"
+  },
+  "exactMatch": [
+    "threadId",
+    "threadTitle",
+    "project",
+    "provider",
+    "turnId",
+    "outcome",
+    "summaryStatus",
+    "files",
+    "commands",
+    "pullRequest"
+  ],
+  "judged": ["goal", "completed", "remaining", "blocked", "pendingQuestion", "suggestedNextStep"],
+  "failIf": [
+    "claims PDF rendering was changed",
+    "claims a PR exists",
+    "rendered summary exceeds 1,200 characters"
+  ]
+}

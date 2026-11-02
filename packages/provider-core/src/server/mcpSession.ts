@@ -28,6 +28,19 @@ export interface McpProviderSessionConfig {
   };
 }
 
+/**
+ * Lecturn: the name prefix of the tools Lecturn's MCP server gates itself on
+ * this thread, so adapters keep the provider's own approval prompt off them:
+ * a connected app's tools, or a Squire home's role tools. A Squire credential
+ * lists nothing else (D8), and its tools all start `squire_`.
+ */
+export function lecturnGatedToolPrefix(
+  config: Pick<McpProviderSessionConfig, "app" | "capabilities"> | undefined,
+): string | undefined {
+  if (config === undefined) return undefined;
+  return config.capabilities?.has("squire") === true ? "squire" : config.app?.toolPrefix;
+}
+
 export function withAgentDeviceEnvironment(
   base: NodeJS.ProcessEnv,
   config:

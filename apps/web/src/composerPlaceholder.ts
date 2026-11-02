@@ -19,3 +19,16 @@ export function idleComposerPlaceholder(input: {
     ? "Ask for changes, send follow-ups, or attach files"
     : "Ask for changes or send a follow-up";
 }
+
+/**
+ * Lecturn: a Squire's home thread prompts with what it is for (D63). Null is any other thread,
+ * or a Squire the snapshot does not list yet.
+ */
+export function squireComposerPlaceholder(
+  squire: { readonly name: string; readonly role: "lead" | "squire" } | null,
+): string | null {
+  if (squire === null) return null;
+  return squire.role === "lead"
+    ? "Ask the Lead to route a task or check on your Squires…"
+    : `Ask ${squire.name} about anything it watches…`;
+}

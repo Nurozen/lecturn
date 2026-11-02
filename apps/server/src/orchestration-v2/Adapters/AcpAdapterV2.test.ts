@@ -834,6 +834,283 @@ describe("AcpAdapterV2", () => {
     }).pipe(Effect.provide(layerTest), Effect.scoped),
   );
 
+  describe("Squire isolation", () => {
+    const protocolMessages = (events: ReadonlyArray<EffectAcpProtocol.AcpProtocolLogEvent>) =>
+      events.flatMap((event) =>
+        event.direction === "outgoing" && event.stage === "raw" && typeof event.payload === "string"
+          ? event.payload
+              .split("\n")
+              .flatMap((line) =>
+                line.trim().length === 0
+                  ? []
+                  : Option.toArray(decodeUnknownJson(line.trim())).flatMap((decoded) =>
+                      typeof decoded === "object" && decoded !== null ? [decoded] : [],
+                    ),
+              )
+          : [],
+      );
+    const requestParams = (messages: ReadonlyArray<object>, method: string) =>
+      messages.flatMap((message) =>
+        Reflect.get(message, "method") === method ? [Reflect.get(message, "params")] : [],
+      );
+    const serverNames = (params: unknown) => {
+      const servers: unknown = Reflect.get(Object(params), "mcpServers");
+      return Array.isArray(servers) ? servers.map((server) => Reflect.get(server, "name")) : [];
+    };
+
+    // A flavor with every client-side reach a normal thread can get: Stave
+    // memory, the device CLI, client terminals, and client file reads.
+    const openSquireSession = (input: {
+      readonly name: string;
+      readonly squireIsolation?: "home" | "probe";
+      readonly initialNativeThreadId?: string;
+      readonly environment?: Readonly<Record<string, string>>;
+    }) =>
+      Effect.gen(function* () {
+        const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const path = yield* Path.Path;
+        const selfInvocation = yield* resolveSelfInvocation().pipe(
+          Effect.provideService(HostProcess.IsExecutable, true),
+        );
+        const mockAgentPath = yield* path.fromFileUrl(
+          new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+        );
+        const instanceId = ProviderInstanceId.make(`acp-test-squire-${input.name}`);
+        const threadId = ThreadId.make(`thread-acp-squire-${input.name}`);
+        yield* (yield* McpProviderSessions.McpProviderSessions).set({
+          environmentId: EnvironmentId.make(`environment-acp-squire-${input.name}`),
+          threadId,
+          providerSessionId: `mcp-session-acp-squire-${input.name}`,
+          providerInstanceId: instanceId,
+          endpoint: "http://127.0.0.1:43123/mcp",
+          authorizationHeader: "Bearer squire-token",
+          browserToolsAvailable: false,
+          capabilities: new Set(["squire"]),
+          agentDeviceEnvironment: { PATH: "/state/device/bin" },
+        });
+        const protocolEvents = yield* Queue.unbounded<EffectAcpProtocol.AcpProtocolLogEvent>();
+        const runtimeInputs: Array<AcpAdapterV2RuntimeInput> = [];
+        const resolvedExtraCwds: Array<string> = [];
+        const makeRuntime = makeMockRuntime({
+          childProcessSpawner,
+          mockAgentPath,
+          protocolEvents,
+          ...(input.environment === undefined ? {} : { environment: input.environment }),
+        });
+        const adapter = yield* makeAcpAdapterV2({
+          instanceId,
+          flavor: {
+            driver: ACP_TEST_DRIVER,
+            capabilities: AcpProviderCapabilitiesV2,
+            lecturnMcpToolName: (tool) => `lecturn__${tool}`,
+            clientFileSystem: {
+              readTextFile: () => Effect.succeed({ content: "client file" }),
+              writeTextFile: () => Effect.succeed({}),
+            },
+            makeRuntime: (runtimeInput) =>
+              Effect.sync(() => {
+                runtimeInputs.push(runtimeInput);
+              }).pipe(Effect.andThen(makeRuntime(runtimeInput))),
+          },
+          selfInvocation,
+          clientTerminals: {},
+          extraMcpServers: (cwd) =>
+            Effect.sync(() => {
+              resolvedExtraCwds.push(cwd);
+              return [
+                { name: "context-marmot", command: "/opt/context-marmot", args: [], env: [] },
+              ];
+            }),
+        });
+        const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          cwd: process.cwd(),
+          ...(input.squireIsolation === undefined
+            ? {}
+            : { squireIsolation: input.squireIsolation }),
+        });
+        const modelSelection = { instanceId, model: "default" } as const;
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make(`provider-session-acp-squire-${input.name}`),
+          modelSelection,
+          runtimePolicy,
+          ...(input.initialNativeThreadId === undefined
+            ? {}
+            : { initialNativeThreadId: input.initialNativeThreadId }),
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection,
+          runtimePolicy,
+        });
+        const messages = Effect.map(Queue.takeAll(protocolEvents), protocolMessages);
+        return {
+          runtime,
+          providerThread,
+          runtimeInputs,
+          resolvedExtraCwds,
+          messages,
+          threadId,
+          instanceId,
+          runtimePolicy,
+          modelSelection,
+        };
+      });
+
+    it.effect("starts a home with Lecturn's server alone and a probe with none", () =>
+      Effect.gen(function* () {
+        const normal = yield* openSquireSession({ name: "start-normal" });
+        const home = yield* openSquireSession({ name: "start-home", squireIsolation: "home" });
+        const probe = yield* openSquireSession({ name: "start-probe", squireIsolation: "probe" });
+
+        const normalMessages = yield* normal.messages;
+        assert.deepStrictEqual(serverNames(requestParams(normalMessages, "session/new")[0]), [
+          "lecturn",
+          "context-marmot",
+        ]);
+        assert.isTrue(normal.runtimeInputs[0]?.clientCapabilities?.terminal);
+        assert.isTrue(normal.runtimeInputs[0]?.clientCapabilities?.fs?.readTextFile);
+
+        const homeMessages = yield* home.messages;
+        assert.deepStrictEqual(serverNames(requestParams(homeMessages, "session/new")[0]), [
+          "lecturn",
+        ]);
+        assert.deepStrictEqual(home.resolvedExtraCwds, []);
+        const homeInput = home.runtimeInputs[0];
+        assert.deepStrictEqual(
+          homeInput?.mcpServers.map((server) => server.name),
+          ["lecturn"],
+        );
+        assert.isUndefined(homeInput?.processEnvironment);
+        assert.isUndefined(homeInput?.agentDeviceEnvironment);
+
+        const probeMessages = yield* probe.messages;
+        assert.deepStrictEqual(serverNames(requestParams(probeMessages, "session/new")[0]), []);
+        assert.deepStrictEqual(probe.runtimeInputs[0]?.mcpServers, []);
+        assert.deepStrictEqual(probe.runtimeInputs[0]?.acpMcpServers, []);
+        assert.isUndefined(probe.runtimeInputs[0]?.processEnvironment);
+
+        for (const messages of [homeMessages, probeMessages]) {
+          assert.deepStrictEqual(
+            Reflect.get(Object(requestParams(messages, "initialize")[0]), "clientCapabilities")?.fs,
+            { readTextFile: false, writeTextFile: false },
+          );
+          assert.isFalse(
+            Reflect.get(Object(requestParams(messages, "initialize")[0]), "clientCapabilities")
+              ?.terminal,
+          );
+        }
+      }).pipe(Effect.provide(layerTest), Effect.scoped),
+    );
+
+    it.effect("resumes a home with Lecturn's server alone and a probe with none", () =>
+      Effect.gen(function* () {
+        const home = yield* openSquireSession({
+          name: "resume-home",
+          squireIsolation: "home",
+          initialNativeThreadId: "persisted-home",
+        });
+        const probe = yield* openSquireSession({
+          name: "resume-probe",
+          squireIsolation: "probe",
+          initialNativeThreadId: "persisted-probe",
+        });
+        const resumed = (messages: ReadonlyArray<object>) => [
+          ...requestParams(messages, "session/load"),
+          ...requestParams(messages, "session/resume"),
+        ];
+
+        const homeResumes = resumed(yield* home.messages);
+        assert.isAbove(homeResumes.length, 0);
+        for (const params of homeResumes) assert.deepStrictEqual(serverNames(params), ["lecturn"]);
+        const probeResumes = resumed(yield* probe.messages);
+        assert.isAbove(probeResumes.length, 0);
+        for (const params of probeResumes) assert.deepStrictEqual(serverNames(params), []);
+        assert.deepStrictEqual(home.resolvedExtraCwds, []);
+      }).pipe(Effect.provide(layerTest), Effect.scoped),
+    );
+
+    it.effect("forks into a probe with no server and into a home with Lecturn's alone", () =>
+      Effect.gen(function* () {
+        for (const squireIsolation of ["probe", "home"] as const) {
+          const session = yield* openSquireSession({
+            name: `fork-${squireIsolation}`,
+            squireIsolation,
+          });
+          const forked = yield* session.runtime.forkThread({
+            sourceProviderThread: session.providerThread,
+            targetThreadId: session.threadId,
+            runtimePolicy: session.runtimePolicy,
+          });
+          assert.equal(forked.nativeThreadRef?.nativeId, "mock-session-1-fork");
+          const forks = requestParams(yield* session.messages, "session/fork");
+          assert.lengthOf(forks, 1);
+          assert.deepStrictEqual(
+            serverNames(forks[0]),
+            squireIsolation === "home" ? ["lecturn"] : [],
+          );
+        }
+      }).pipe(Effect.provide(layerTest), Effect.scoped),
+    );
+
+    it.effect("approves a home's Squire tool and declines every other request without asking", () =>
+      Effect.gen(function* () {
+        for (const squireIsolation of ["home", "probe"] as const) {
+          const session = yield* openSquireSession({
+            name: `permissions-${squireIsolation}`,
+            squireIsolation,
+            environment: {
+              LECTURN_ACP_EMIT_TOOL_CALLS: "1",
+              LECTURN_ACP_PERMISSION_TOOL_CALLS:
+                "other|lecturn__squire_note,execute|`cat ~/.ssh/id_rsa`,edit|Write notes.md,read|Read /etc/hosts,fetch|Fetch https://example.com",
+            },
+          });
+          yield* session.messages;
+          yield* session.runtime.startTurn({
+            ...makeTurnInput({
+              threadId: session.threadId,
+              providerThread: session.providerThread,
+              instanceId: session.instanceId,
+              runtimePolicy: session.runtimePolicy,
+              now: yield* DateTime.now,
+            }),
+            squireInstructions: ["You are this project's Squire."],
+          });
+          const events = Array.from(
+            yield* session.runtime.events.pipe(
+              Stream.takeUntil((event) => event.type === "turn.terminal"),
+              Stream.runCollect,
+            ),
+          );
+          assert.isFalse(events.some((event) => event.type === "runtime_request.updated"));
+
+          const messages = yield* session.messages;
+          const promptText = requestParams(messages, "session/prompt")
+            .flatMap((params) => {
+              const prompt: unknown = Reflect.get(Object(params), "prompt");
+              return Array.isArray(prompt) ? prompt : [];
+            })
+            .map((block) => String(Reflect.get(Object(block), "text") ?? ""))
+            .join("\n");
+          assert.include(promptText, "You are this project's Squire.");
+          const chosen = messages.flatMap((message) => {
+            const outcome: unknown = Reflect.get(Object(Reflect.get(message, "result")), "outcome");
+            const optionId: unknown = Reflect.get(Object(outcome), "optionId");
+            return typeof optionId === "string" ? [optionId] : [];
+          });
+          assert.deepStrictEqual(
+            chosen,
+            squireIsolation === "home"
+              ? ["allow-once", "reject-once", "reject-once", "reject-once", "reject-once"]
+              : ["reject-once", "reject-once", "reject-once", "reject-once", "reject-once"],
+          );
+        }
+      }).pipe(Effect.provide(layerTest), Effect.scoped),
+    );
+  });
+
   it.live("refreshes ACP prompt instructions when the interaction mode changes", () =>
     Effect.gen(function* () {
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;

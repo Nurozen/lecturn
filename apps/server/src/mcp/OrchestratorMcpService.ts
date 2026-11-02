@@ -2230,6 +2230,7 @@ const make = Effect.gen(function* () {
               commandId,
               threadId: current.childThreadId,
               ...(reason === undefined ? {} : { reason }),
+              createdBy: "agent",
             })
             .pipe(
               Effect.mapError((error) =>
@@ -2723,6 +2724,7 @@ const make = Effect.gen(function* () {
             threadId: input.threadId,
             ...(input.runId === undefined ? {} : { runId: input.runId }),
             ...(input.reason === undefined ? {} : { reason: input.reason }),
+            createdBy: "agent",
           })
           .pipe(
             Effect.mapError((error) =>

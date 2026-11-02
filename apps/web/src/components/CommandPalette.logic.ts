@@ -5,6 +5,10 @@ import {
   type FilesystemBrowseEntry,
   type KeybindingCommand,
   type ScopedProjectRef,
+  type Squire,
+  type SquireId,
+  type SquireRoomId,
+  type SquireRoomRow,
   THREAD_JUMP_KEYBINDING_COMMANDS,
 } from "@lecturn/contracts";
 import {
@@ -19,6 +23,7 @@ import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { type ReactNode } from "react";
 import { getThreadSortTimestamp, sortThreads } from "../lib/threadSort";
+import { squireRoomPaletteEntries } from "./squire/rooms/squireRooms.logic";
 import { normalizeSearchText } from "../lib/utils";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
@@ -218,6 +223,220 @@ export function buildAppsPaletteItems(input: {
     ],
     openAppItems,
   };
+}
+
+type CommandPaletteSquire = Pick<Squire, "id" | "name" | "role">;
+
+export interface CommandPaletteSquireEnvironment<TSquire extends CommandPaletteSquire> {
+  readonly environmentId: EnvironmentId;
+  readonly state: {
+    readonly lead: SquireId | null;
+    readonly squires: ReadonlyArray<{ readonly squire: TSquire }>;
+  };
+}
+
+/**
+ * One "Open Squire: <name>" per Squire per Squire-capable environment, the Lead first in each.
+ * The environment is named only when several have Squires, so a single machine reads cleanly.
+ */
+export function buildSquirePaletteItems<TSquire extends CommandPaletteSquire>(input: {
+  readonly environments: ReadonlyArray<CommandPaletteSquireEnvironment<TSquire>>;
+  readonly environmentLabel: (environmentId: EnvironmentId) => string | null;
+  readonly icon: (squire: TSquire, isLead: boolean) => ReactNode;
+  readonly openSquire: (target: {
+    readonly environmentId: EnvironmentId;
+    readonly squireId: SquireId;
+  }) => Promise<void>;
+}): CommandPaletteActionItem[] {
+  const withSquires = input.environments.filter(({ state }) => state.squires.length > 0);
+  const nameEnvironment = withSquires.length > 1;
+  return withSquires.flatMap(({ environmentId, state }) => {
+    const isLead = (squire: CommandPaletteSquire) =>
+      squire.id === state.lead || squire.role === "lead";
+    const environmentLabel = nameEnvironment ? input.environmentLabel(environmentId) : null;
+    return state.squires
+      .map(({ squire }) => squire)
+      .toSorted((a, b) => Number(isLead(b)) - Number(isLead(a)))
+      .map((squire): CommandPaletteActionItem => {
+        const lead = isLead(squire);
+        return {
+          kind: "action",
+          value: `open-squire:${environmentId}:${squire.id}`,
+          searchTerms: [
+            `Open Squire: ${squire.name}`,
+            "squire",
+            ...(lead ? ["lead"] : []),
+            ...(environmentLabel === null ? [] : [environmentLabel]),
+          ],
+          title: `Open Squire: ${squire.name}`,
+          ...(environmentLabel === null ? {} : { description: environmentLabel }),
+          icon: input.icon(squire, lead),
+          run: () => input.openSquire({ environmentId, squireId: squire.id }),
+        };
+      });
+  });
+}
+
+/**
+ * "New Squire…" per environment that may create one, and "Edit Squire: <name>" per Squire,
+ * the Lead included, both opening the one setup sheet (P13.1).
+ */
+export function buildSquireSetupPaletteItems<TSquire extends CommandPaletteSquire>(input: {
+  readonly environments: ReadonlyArray<CommandPaletteSquireEnvironment<TSquire>>;
+  readonly access: (environmentId: EnvironmentId) => {
+    readonly canCreate: boolean;
+    readonly canEdit: boolean;
+  };
+  readonly environmentLabel: (environmentId: EnvironmentId) => string | null;
+  readonly icon: (squire: TSquire, isLead: boolean) => ReactNode;
+  readonly newIcon: ReactNode;
+  readonly openSetup: (
+    target:
+      | { readonly kind: "create"; readonly environmentId: EnvironmentId }
+      | {
+          readonly kind: "edit";
+          readonly environmentId: EnvironmentId;
+          readonly squireId: SquireId;
+        },
+  ) => void;
+}): CommandPaletteActionItem[] {
+  const creatable = input.environments.filter(
+    ({ environmentId }) => input.access(environmentId).canCreate,
+  );
+  const withSquires = input.environments.filter(
+    ({ environmentId, state }) => state.squires.length > 0 && input.access(environmentId).canEdit,
+  );
+  const createItems = creatable.map(({ environmentId }): CommandPaletteActionItem => {
+    const label = creatable.length > 1 ? input.environmentLabel(environmentId) : null;
+    return {
+      kind: "action",
+      value: `new-squire:${environmentId}`,
+      // "Squire" first, so a bare "squire" query ranks it as an exact match, above every
+      // per-Squire item.
+      searchTerms: ["Squire", "New Squire…", "create", ...(label === null ? [] : [label])],
+      title: "New Squire…",
+      ...(label === null ? {} : { description: label }),
+      icon: input.newIcon,
+      run: async () => input.openSetup({ kind: "create", environmentId }),
+    };
+  });
+  const editItems = withSquires.flatMap(({ environmentId, state }) => {
+    const label = withSquires.length > 1 ? input.environmentLabel(environmentId) : null;
+    return state.squires.map(({ squire }): CommandPaletteActionItem => {
+      const lead = squire.id === state.lead || squire.role === "lead";
+      return {
+        kind: "action",
+        value: `edit-squire:${environmentId}:${squire.id}`,
+        searchTerms: [
+          `Edit Squire: ${squire.name}`,
+          "squire",
+          "settings",
+          ...(lead ? ["lead"] : []),
+          ...(label === null ? [] : [label]),
+        ],
+        title: `Edit Squire: ${squire.name}`,
+        ...(label === null ? {} : { description: label }),
+        icon: input.icon(squire, lead),
+        run: async () => input.openSetup({ kind: "edit", environmentId, squireId: squire.id }),
+      };
+    });
+  });
+  return [...createItems, ...editItems];
+}
+
+/**
+ * P19.8: "Open room: <topic>" per open room and "New Squire room" per environment that may
+ * create one. Closed rooms stay reachable from the Lead view's Rooms menu.
+ */
+export function buildSquireRoomPaletteItems(input: {
+  readonly environments: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly rooms: ReadonlyArray<SquireRoomRow>;
+  }>;
+  readonly canCreateRoom: (environmentId: EnvironmentId) => boolean;
+  readonly environmentLabel: (environmentId: EnvironmentId) => string | null;
+  readonly icon: ReactNode;
+  readonly openRoom: (target: {
+    readonly environmentId: EnvironmentId;
+    readonly roomId: SquireRoomId;
+  }) => Promise<void>;
+  readonly newRoom: (environmentId: EnvironmentId) => void;
+}): CommandPaletteActionItem[] {
+  const named = input.environments.length > 1;
+  const label = (environmentId: EnvironmentId) =>
+    named ? input.environmentLabel(environmentId) : null;
+  const openItems = squireRoomPaletteEntries(input.environments).map(
+    ({ environmentId, roomId, title }): CommandPaletteActionItem => {
+      const description = label(environmentId);
+      return {
+        kind: "action",
+        value: `open-squire-room:${environmentId}:${roomId}`,
+        searchTerms: [title, "room", "squire", ...(description === null ? [] : [description])],
+        title,
+        ...(description === null ? {} : { description }),
+        icon: input.icon,
+        run: () => input.openRoom({ environmentId, roomId }),
+      };
+    },
+  );
+  const creatable = input.environments.filter(({ environmentId }) =>
+    input.canCreateRoom(environmentId),
+  );
+  const createItems = creatable.map(({ environmentId }): CommandPaletteActionItem => {
+    const description = creatable.length > 1 ? input.environmentLabel(environmentId) : null;
+    return {
+      kind: "action",
+      value: `new-squire-room:${environmentId}`,
+      searchTerms: [
+        "New Squire room",
+        "room",
+        "squire",
+        ...(description === null ? [] : [description]),
+      ],
+      title: "New Squire room",
+      ...(description === null ? {} : { description }),
+      icon: input.icon,
+      run: async () => input.newRoom(environmentId),
+    };
+  });
+  return [...openItems, ...createItems];
+}
+
+/** Contextual "Track with <name>" and "Stop tracking (<name>)" for the current thread or project. */
+export function buildSquireTrackPaletteItems(input: {
+  readonly environmentId: EnvironmentId;
+  readonly subject: string;
+  readonly menu: {
+    readonly squires: ReadonlyArray<{
+      readonly id: SquireId;
+      readonly name: string;
+      readonly tracked: boolean;
+    }>;
+    readonly canTrack: boolean;
+    readonly canUntrack: boolean;
+  };
+  readonly icons: { readonly track: ReactNode; readonly untrack: ReactNode };
+  readonly run: (choice: {
+    readonly action: "track" | "untrack";
+    readonly squireId: SquireId;
+  }) => Promise<void>;
+}): CommandPaletteActionItem[] {
+  return input.menu.squires.flatMap((squire): CommandPaletteActionItem[] => {
+    if (squire.tracked ? !input.menu.canUntrack : !input.menu.canTrack) return [];
+    const action = squire.tracked ? "untrack" : "track";
+    const title = squire.tracked ? `Stop tracking (${squire.name})` : `Track with ${squire.name}`;
+    return [
+      {
+        kind: "action",
+        value: `squire-${action}:${input.environmentId}:${squire.id}`,
+        searchTerms: [title, "squire", squire.tracked ? "untrack" : "track", "watch"],
+        title,
+        description: input.subject,
+        icon: squire.tracked ? input.icons.untrack : input.icons.track,
+        run: () => input.run({ action, squireId: squire.id }),
+      },
+    ];
+  });
 }
 
 export interface CommandPaletteThreadContentMatch {

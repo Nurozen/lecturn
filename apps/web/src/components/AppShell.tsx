@@ -59,6 +59,8 @@ import { ProviderAuthCallbackCoordinator } from "./settings/ProviderAuthCallback
 import { ThemeEditorHost } from "./settings/ThemeEditorHost";
 import { DesktopUpdateLaunchNotice } from "./sidebar/updateEverythingRun";
 import { StaveWizardDialog } from "./stave/StaveWizardDialog";
+import { SquireRoomCreateHost } from "./squire/rooms/SquireRoomCreateHost";
+import { SquireSetupHost } from "./squire/setup/SquireSetupHost";
 import { AnchoredToastProvider, stackedThreadToast, ToastProvider, toastManager } from "./ui/toast";
 
 /**
@@ -134,6 +136,8 @@ export default function AppShell({
           <ReopenClosedViewShortcut />
           <ConfirmDialogHost />
           <StaveWizardDialog />
+          <SquireSetupHost />
+          <SquireRoomCreateHost />
           <ImportFolderSessionsDialog />
           <CustomSnoozeDialogHost />
           <SlowRpcRequestToastCoordinator />

@@ -32,7 +32,7 @@ import * as Orchestrator from "../Orchestrator.ts";
 import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
 import * as ProviderReplayHarness from "../testkit/ProviderReplayHarness.ts";
 import { projectTurnItemForWire } from "../WireProjection.ts";
-import { makeScriptedAdapterV2, waitForFile } from "./ScriptedAdapterV2.ts";
+import { ASK_USER_QUESTION_ID, makeScriptedAdapterV2, waitForFile } from "./ScriptedAdapterV2.ts";
 import { scriptFromFile, scriptFromMessage, substitute } from "./scriptedScript.ts";
 
 const instanceId = ProviderInstanceId.make("scripted");
@@ -430,6 +430,36 @@ describe("ScriptedAdapterV2", () => {
     }).pipe(Effect.scoped, Effect.provide(layerScripted({ fake })));
   });
 
+  it.live("goes past a JSON-RPC error only on an onError: continue step", () => {
+    const fake = makeFakeMcp({});
+    return Effect.gen(function* () {
+      yield* startTurn(
+        fenced([
+          { toolCall: { name: "squire_send_steer" }, onError: "continue", saveAs: "refusal" },
+          { assistantText: "Refused." },
+          {
+            toolCall: {
+              name: "squire_create_thread",
+              arguments: { afterRefusal: "${refusal.isError}" },
+            },
+          },
+          { assistantText: "Never reached." },
+        ]),
+      );
+      const terminal = yield* persisted(isTerminal);
+      assert.equal(terminal.type === "provider-turn.updated" && terminal.payload.status, "failed");
+      assert.deepEqual(
+        (yield* toolRows).map((row) => [row.toolName, row.status, row.input]),
+        [
+          ["lecturn.squire_send_steer", "failed", {}],
+          ["lecturn.squire_create_thread", "failed", { afterRefusal: true }],
+        ],
+      );
+      assert.deepEqual(yield* assistantTexts, ["Refused."]);
+      assert.include(yield* persistedFailureMessage, "Unknown squire_create_thread");
+    }).pipe(Effect.scoped, Effect.provide(layerScripted({ fake })));
+  });
+
   it.live("fails a poll that never reaches its value", () => {
     const fake = makeFakeMcp({ ex_job_status: () => text(JSON.stringify({ state: "running" })) });
     return Effect.gen(function* () {
@@ -496,6 +526,75 @@ describe("ScriptedAdapterV2", () => {
         assert.deepEqual(yield* assistantTexts, ["Holding.", "Released."]);
       }).pipe(Effect.provide(layerScripted({ fake })));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
+  });
+
+  it.live("raises a real user_input request that runtime-request.respond resolves", () => {
+    const fake = makeFakeMcp({ ex_report: () => text("ok") });
+    return Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      yield* startTurn(
+        fenced([
+          {
+            askUser: { question: "Offline catalog or the API?", options: ["offline", "api"] },
+            saveAs: "first",
+          },
+          { askUser: { question: "Ship ${first}?" }, saveAs: "second" },
+          { toolCall: { name: "ex_report", arguments: { choice: "${second}" } } },
+        ]),
+      );
+      const answer = Effect.fn(function* (value: string, commandId: string) {
+        // The question row follows the request, so once it is stored both are.
+        const raised = yield* persisted(
+          (stored) =>
+            stored.event.type === "turn-item.updated" &&
+            stored.event.payload.type === "user_input_request" &&
+            stored.event.payload.status === "waiting" &&
+            !(stored.event.payload.requestId in answered),
+        );
+        const item = raised.type === "turn-item.updated" ? raised.payload : undefined;
+        if (item?.type !== "user_input_request") return assert.fail("no question row");
+        answered[item.requestId] = value;
+        const request = (yield* projection).runtimeRequests.find(
+          (candidate) => candidate.id === item.requestId,
+        );
+        assert.equal(request?.kind, "user_input");
+        assert.equal(request?.status, "pending");
+        assert.equal(request?.responseCapability.type, "live");
+        yield* orchestrator.dispatch({
+          type: "runtime-request.respond",
+          commandId: CommandId.make(commandId),
+          threadId,
+          requestId: item.requestId,
+          answers: { [ASK_USER_QUESTION_ID]: value },
+        });
+        yield* worker.drain();
+        return item;
+      });
+      const answered: Record<string, string> = {};
+      const first = yield* answer("offline", "answer-1");
+      assert.equal(first.questions[0]?.options.length, 2);
+      const second = yield* answer("yes", "answer-2");
+      const terminal = yield* persisted(isTerminal);
+      assert.equal(
+        terminal.type === "provider-turn.updated" && terminal.payload.status,
+        "completed",
+      );
+      // The second question read the first answer; the tool call read the second.
+      assert.equal(second.questions[0]?.question, "Ship offline?");
+      assert.deepEqual(
+        fake.calls.map((call) => call.arguments),
+        [{ choice: "yes" }],
+      );
+      const requests = (yield* projection).runtimeRequests;
+      assert.deepEqual(
+        requests.map((request) => [request.status, request.answers?.[ASK_USER_QUESTION_ID]]),
+        [
+          ["resolved", "offline"],
+          ["resolved", "yes"],
+        ],
+      );
+    }).pipe(Effect.scoped, Effect.provide(layerScripted({ fake })));
   });
 });
 

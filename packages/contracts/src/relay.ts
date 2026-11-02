@@ -1,6 +1,7 @@
 import * as Extensions from "./extensions.ts";
 import * as Contextual from "./contextual.ts";
 import * as Decisions from "./relayDecisions.ts";
+import * as ExtensionsEvaluator from "./extensionsEvaluator.ts";
 import * as Context from "effect/Context";
 import * as Schema from "effect/Schema";
 import * as HttpApi from "effect/http-api/HttpApi";
@@ -1422,6 +1423,12 @@ export const RelayExtensionsGroup = HttpApiGroup.make("extensions")
       headers: extensionHttpHeaders,
       error: extensionHttpErrors,
       success: Decisions.DecisionEvaluationResult,
+    }),
+    HttpApiEndpoint.post("squireRouting", "/v1/extensions/squire-routing", {
+      payload: ExtensionsEvaluator.SquireRoutingRequest,
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: ExtensionsEvaluator.SquireRoutingResult,
     }),
   )
   .annotate(

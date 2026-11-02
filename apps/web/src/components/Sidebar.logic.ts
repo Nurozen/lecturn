@@ -8,6 +8,10 @@ import {
 } from "@lecturn/client-runtime/state/runtime";
 import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { threadSearchMatchKey } from "@lecturn/client-runtime/state/thread-search";
+import {
+  isListedThread,
+  type ThreadListingCapabilitiesByEnvironment,
+} from "@lecturn/client-runtime/state/thread-shell";
 import type { ContextMenuItem, EnvironmentId, ThreadId } from "@lecturn/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@lecturn/contracts/settings";
 import type { AsyncResult } from "effect/reactivity";
@@ -538,15 +542,19 @@ export function resolveSidebarRowThreadId(
 }
 
 export function filterSidebarV2VisibleThreads<
-  T extends Pick<SidebarThreadSummary, "archivedAt" | "lineage"> & {
-    environmentId: string;
+  T extends Pick<SidebarThreadSummary, "archivedAt" | "lineage" | "squire"> & {
+    environmentId: EnvironmentId;
     projectId: string;
   },
->(threads: readonly T[], scopedProjectKeys: ReadonlySet<string> | null): T[] {
+>(
+  threads: readonly T[],
+  scopedProjectKeys: ReadonlySet<string> | null,
+  listing?: ThreadListingCapabilitiesByEnvironment,
+): T[] {
   return threads.filter(
     (thread) =>
       thread.archivedAt === null &&
-      !isSidebarSubagentThread(thread) &&
+      isListedThread(thread, listing?.get(thread.environmentId)) &&
       (scopedProjectKeys === null ||
         scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
   );
@@ -1354,15 +1362,17 @@ export function sortLogicalProjectsForSidebar<
 
 export function sortSidebarV2ProjectGroups<
   TProject extends LogicalSidebarProject,
-  TThread extends ScopedSidebarThread & Pick<SidebarThreadSummary, "lineage">,
+  TThread extends ScopedSidebarThread &
+    Pick<SidebarThreadSummary, "environmentId" | "lineage" | "squire">,
 >(
   projects: readonly TProject[],
   threads: readonly TThread[],
   sortOrder: SidebarProjectSortOrder,
+  listing?: ThreadListingCapabilitiesByEnvironment,
 ): TProject[] {
   return sortLogicalProjectsForSidebar(
     projects,
-    filterSidebarV2VisibleThreads(threads, null),
+    filterSidebarV2VisibleThreads(threads, null, listing),
     sortOrder,
   );
 }

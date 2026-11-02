@@ -16,6 +16,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   RunId,
+  SquireId,
   ThreadId,
 } from "@lecturn/contracts";
 import * as Deferred from "effect/Deferred";
@@ -73,10 +74,11 @@ it("stamps authoritative provenance on commands that create threads or messages"
 
 it("leaves commands that do not create durable authored content unchanged", () => {
   const command: OrchestrationV2Command = {
-    type: "run.interrupt",
-    commandId: CommandId.make("command:thread-management:interrupt"),
-    threadId: ThreadId.make("thread:thread-management:interrupt"),
-    runId: RunId.make("run:thread-management:interrupt"),
+    type: "subagent.stop",
+    commandId: CommandId.make("command:thread-management:subagent-stop"),
+    threadId: ThreadId.make("thread:thread-management:subagent-stop"),
+    runId: RunId.make("run:thread-management:subagent-stop"),
+    subagentId: NodeId.make("node:thread-management:subagent-stop"),
   };
 
   expect(
@@ -85,6 +87,23 @@ it("leaves commands that do not create durable authored content unchanged", () =
       creationSource: "web",
     }),
   ).toBe(command);
+});
+
+it("records a client interrupt as the user's, whatever actor the client claims", () => {
+  const command: OrchestrationV2Command = {
+    type: "run.interrupt",
+    commandId: CommandId.make("command:thread-management:interrupt"),
+    threadId: ThreadId.make("thread:thread-management:interrupt"),
+    runId: RunId.make("run:thread-management:interrupt"),
+    createdBy: "agent",
+  };
+
+  expect(
+    ThreadManagementService.withCreationProvenance(command, {
+      createdBy: "user",
+      creationSource: "web",
+    }),
+  ).toEqual({ ...command, createdBy: "user" });
 });
 
 it("identifies every existing thread that must be hydrated before dispatch", () => {
@@ -473,6 +492,48 @@ it.effect(
     }).pipe(Effect.provide(layerTest));
   },
 );
+
+it.effect("never lists a Squire thread", () => {
+  const projectId = ProjectId.make("project:thread-management:squire");
+  const thread = (id: string, extra: Partial<OrchestrationV2ThreadShell> = {}) =>
+    ({
+      id: ThreadId.make(id),
+      projectId,
+      lineage: {
+        rootThreadId: ThreadId.make(id),
+        parentThreadId: null,
+        relationshipToParent: null,
+      },
+      updatedAt: DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"),
+      ...extra,
+    }) as OrchestrationV2ThreadShell;
+  const layerTest = ThreadManagementService.layer.pipe(
+    Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
+    Layer.provide(
+      Layer.mock(Orchestrator.OrchestratorV2)({
+        getShellSnapshot: () =>
+          Effect.succeed({
+            threads: [
+              thread("user"),
+              thread("squire", {
+                squire: { squireId: SquireId.make("squire-1"), role: "home" },
+              }),
+            ],
+          } as unknown as Effect.Success<
+            ReturnType<Orchestrator.OrchestratorV2["Service"]["getShellSnapshot"]>
+          >),
+      }),
+    ),
+    Layer.provide(ServerSettings.layerTest()),
+    Layer.provide(layerReceiptsTest),
+  );
+
+  return Effect.gen(function* () {
+    const service = yield* ThreadManagementService.ThreadManagementService;
+    const threads = yield* service.listProjectThreads({ projectId, includeSubagents: true });
+    expect(threads.map((listed) => listed.id)).toEqual(["user"]);
+  }).pipe(Effect.provide(layerTest));
+});
 
 it.effect("classifies projection infrastructure failures separately from a missing thread", () => {
   const projectId = ProjectId.make("project:thread-management:projection-failure");

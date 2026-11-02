@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 2,
+  "id": "08-auto-hold-executes",
+  "fake": "01-ci-failure-recommend-auto",
+  "setup": {
+    "squire": {
+      "name": "Release",
+      "brief": "Done means CI green and PR approved. Stay quiet on routine progress. Prefer small, specific steers.",
+      "provider": "under-test",
+      "createdAt": "2026-10-01T09:00:00Z",
+      "timezone": "America/Los_Angeles"
+    },
+    "scope": [
+      {
+        "kind": "project",
+        "name": "billing-service"
+      },
+      {
+        "kind": "project",
+        "name": "Observatory"
+      }
+    ],
+    "threads": [
+      {
+        "threadId": "thr_fix_invoice_rounding",
+        "title": "Fix invoice rounding",
+        "project": "billing-service",
+        "provider": "claudeAgent"
+      }
+    ],
+    "permissions": {
+      "steer": "auto",
+      "createThread": "recommend",
+      "notify": "on"
+    },
+    "undoWindowSeconds": 10,
+    "budgetUsage": {
+      "steersPerDay": {
+        "used": 0,
+        "limit": 10
+      },
+      "threadsPerDay": {
+        "used": 0,
+        "limit": 3
+      },
+      "steersPerThreadPerHour": {
+        "limit": 2,
+        "usedByThread": {}
+      }
+    }
+  },
+  "events": [
+    {
+      "type": "pull-request-changed",
+      "summary": {
+        "threadId": "thr_fix_invoice_rounding",
+        "threadTitle": "Fix invoice rounding",
+        "project": "billing-service",
+        "provider": "claudeAgent",
+        "turnId": "t_43",
+        "outcome": "finished",
+        "summaryStatus": "complete",
+        "goal": "Fix one-cent rounding errors on EUR invoice totals",
+        "completed": [
+          "Switched rounding to banker's rounding in InvoiceTotals; updated 4 unit tests"
+        ],
+        "remaining": [],
+        "blocked": [],
+        "files": {
+          "entries": [
+            {
+              "path": "src/invoice/InvoiceTotals.ts",
+              "change": "modified"
+            },
+            {
+              "path": "src/invoice/InvoiceTotals.test.ts",
+              "change": "modified"
+            }
+          ],
+          "counts": {
+            "added": 0,
+            "modified": 2,
+            "deleted": 0
+          }
+        },
+        "commands": [],
+        "pullRequest": {
+          "repository": "billing-service",
+          "number": 318,
+          "headSha": "9f2c4e1",
+          "transition": "checks:failed",
+          "baseBranch": "main",
+          "checks": {
+            "passed": 11,
+            "failed": 1,
+            "failingJobs": ["api-e2e"]
+          },
+          "review": "approved",
+          "mergeable": "blocked-by-checks",
+          "merged": false,
+          "closed": false
+        },
+        "pendingQuestion": null,
+        "suggestedNextStep": null
+      },
+      "evidence": {
+        "errorLines": [
+          "FAIL tests/e2e/invoices.e2e.test.ts > POST /invoices/:id/finalize > EUR totals match the ledger",
+          "AssertionError: expected '€1,234.57' to equal '€1,234.56'",
+          "    at tests/e2e/invoices.e2e.test.ts:88:31",
+          "Tests  1 failed | 47 passed (48)"
+        ],
+        "headBranch": "fix/invoice-rounding",
+        "diffStats": {
+          "insertions": 38,
+          "deletions": 12,
+          "files": 2
+        },
+        "triggerText": "Required check api-e2e failed on billing-service #318 (head 9f2c4e1)."
+      }
+    }
+  ],
+  "timeline": [
+    {
+      "action": "advance",
+      "seconds": 9
+    },
+    {
+      "action": "advance",
+      "seconds": 2
+    }
+  ],
+  "expected": {
+    "toolCalls": ["squire_send_steer"],
+    "cardTarget": "Fix invoice rounding",
+    "effects": {
+      "action_held": 1,
+      "steer_sent": 1
+    },
+    "mustNotHappen": ["card_created", "proposal_created", "thread_created"],
+    "assertions": [
+      "no_send_before_undo_window",
+      "one_execution_budget_row",
+      "steer_created_by_agent",
+      "steer_dispatch_mode_d12"
+    ],
+    "note": "Steer Auto holds the send for the 10 s undo window, then executes once.",
+    "ignore": ["squire_list_tracked", "squire_get_summary", "squire_get_detail"]
+  }
+}

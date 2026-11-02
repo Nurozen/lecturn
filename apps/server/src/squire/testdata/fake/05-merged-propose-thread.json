@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "steps": [
+    {
+      "onEvent": "pull-request-changed",
+      "toolCalls": [
+        {
+          "name": "squire_propose_thread",
+          "args": {
+            "project": "billing-service",
+            "provider": "claudeAgent",
+            "reason": "PR #318 merged into main; the brief asks for a changelog update after each merge in the release saga.",
+            "firstPrompt": "Add a CHANGELOG entry for v2.5 covering billing-service #318 (banker's rounding in invoice totals). Match the existing changelog style; do not touch other entries."
+          }
+        }
+      ]
+    }
+  ]
+}

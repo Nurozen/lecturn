@@ -19,10 +19,15 @@ import {
   makeExtensionsUsageStore,
   decisionUsageDefaults,
 } from "../decisions/DecisionUsageStore.ts";
-import { ExtensionAllowance, type ContextualJudgment } from "@lecturn/contracts";
+import {
+  ExtensionAllowance,
+  SquireRoutingResult,
+  type ContextualJudgment,
+} from "@lecturn/contracts";
 const url = process.env.BILLING_TEST_DATABASE_URL;
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const validAllowance = Schema.is(ExtensionAllowance);
+const validSquireRouting = Schema.is(SquireRoutingResult);
 // PgClient uses the extended protocol, which accepts only one statement per query.
 // Execute each migration as one block so function bodies retain their semicolons.
 const migrate = (sql: RelayDb["Service"]["$client"], source: string) =>
@@ -87,7 +92,11 @@ const unpromotedFixture = Effect.gen(function* () {
     approvalOrigin: "https://fixture.invalid",
     featureId: "contextual",
   });
-  return { sql, payerId, host, config, decisions, contextual, now };
+  const squires = yield* makeDecisionFundingStore(access, {
+    approvalOrigin: "https://fixture.invalid",
+    featureId: "squires",
+  });
+  return { sql, payerId, host, config, decisions, contextual, squires, now };
 });
 const fixture = Effect.gen(function* () {
   const f = yield* unpromotedFixture;
@@ -97,7 +106,7 @@ const fixture = Effect.gen(function* () {
 });
 const fund = Effect.fn("extensionTest.fund")(function* (
   f: Effect.Success<typeof fixture>,
-  feature: "decisions" | "contextual",
+  feature: "decisions" | "contextual" | "squires",
 ) {
   const store = f[feature];
   const challenge = yield* store.challenge(f.host, 0);
@@ -183,6 +192,59 @@ const contextualRequest = (environmentId: string) => ({
     },
   ],
 });
+const squireMember = (squireId: string, name: string) => ({
+  squireId,
+  name,
+  brief: `${name} owns its area`,
+  scope: { containers: ["infra/relay"], threadTitles: [`${name} work`], pullRequests: [12] },
+  recentActivity: [`${name} merged a change`],
+});
+const squireRequest = (requestId: string) => ({
+  featureId: "squires",
+  requestId,
+  runId: requestId,
+  fundingGeneration: 1,
+  templateVersion: "squire-routing-v1",
+  members: [squireMember("squire-api", "API"), squireMember("squire-web", "Web")],
+  post: { body: "Who can look at the relay endpoint?" },
+});
+const squiresConfig = parseExtensionsConfig({
+  EXTENSIONS_DECISIONS_ENABLED: "true",
+  EXTENSIONS_DECISIONS_COHORT: "*",
+  EXTENSIONS_CONTEXTUAL_ENABLED: "true",
+  EXTENSIONS_CONTEXTUAL_COHORT: "*",
+  EXTENSIONS_SQUIRES_ENABLED: "true",
+  EXTENSIONS_SQUIRES_COHORT: "*",
+  // Leave account headroom so each refusal below comes from an environment slot.
+  EXTENSIONS_ACCOUNT_CONCURRENCY: "8",
+});
+/** Answers every routing request with `choice()`, recording what crossed the binding. */
+const squireEvaluator = (choice: () => string) => {
+  const sent: Array<{ featureId: string; policyVersion: string; request: unknown }> = [];
+  const binding = {
+    fetch: async (req: Request) => {
+      const body = (await req.json()) as {
+        attemptId: string;
+        featureId: string;
+        policyVersion: string;
+        request: unknown;
+      };
+      sent.push(body);
+      return Response.json({
+        status: "completed",
+        attemptId: body.attemptId,
+        replayed: false,
+        result: {
+          model: "extensions-v1",
+          policyVersion: body.policyVersion,
+          inputTokens: 40,
+          judgments: [{ choice: choice(), confidence: 0.8, noReplyConfidence: 0.1 }],
+        },
+      });
+    },
+  };
+  return { sent, binding };
+};
 describe.skipIf(!url)("Extensions PostgreSQL consent and shared ledger", () => {
   it.live.each(["phase-0", "phase-1", "missing-row", "missing-table"] as const)(
     "checks Contextual readiness before funding with %s",
@@ -217,6 +279,12 @@ describe.skipIf(!url)("Extensions PostgreSQL consent and shared ledger", () => {
               available: ready,
               eligible: ready,
               reason: ready ? "eligible" : "unavailable",
+            },
+            {
+              featureId: "squires",
+              available: ready,
+              eligible: false,
+              reason: ready ? "disabled" : "unavailable",
             },
           ]);
           if (schemaState !== "missing-table") {
@@ -467,8 +535,12 @@ describe.skipIf(!url)("Extensions PostgreSQL consent and shared ledger", () => {
             featureId: "contextual",
           });
           expect((yield* contextualAccess.status(f.payerId)).eligible).toBe(false);
+          const squiresAccess = yield* makeDecisionsAccess({ ...f.config, featureId: "squires" });
           yield* f.sql`INSERT INTO relay_extension_admission_grants(id,user_id,feature_id,starts_at,ends_at,operator,reason) VALUES (${f.payerId},${f.payerId},'contextual',${f.now - 1},${f.now + 1000},'fixture','feature admission')`;
           expect((yield* contextualAccess.status(f.payerId)).eligible).toBe(true);
+          expect((yield* squiresAccess.status(f.payerId)).eligible).toBe(false);
+          yield* f.sql`INSERT INTO relay_extension_admission_grants(id,user_id,feature_id,starts_at,ends_at,operator,reason) VALUES (${f.payerId + "squires"},${f.payerId},'squires',${f.now - 1},${f.now + 1000},'fixture','feature admission')`;
+          expect((yield* squiresAccess.status(f.payerId)).eligible).toBe(true);
         }),
       ),
   );
@@ -951,6 +1023,207 @@ describe.skipIf(!url)("Extensions PostgreSQL consent and shared ledger", () => {
         yield* service.cleanupPrivate();
         expect(watermarks[1]).toBeGreaterThan(oldEpoch);
         expect(watermarks[1]).toBeLessThanOrEqual(f.now - 86400 + 1);
+      }),
+    ),
+  );
+  it.live("widens every feature check to Squires while still refusing unknown features", () =>
+    run(
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        yield* f.sql`INSERT INTO relay_extension_admission_grants(id,user_id,feature_id,starts_at,ends_at,operator,reason) VALUES (${f.payerId},${f.payerId},'squires',${f.now - 1},${f.now + 1000},'fixture','squires admission')`;
+        yield* f.sql`INSERT INTO relay_decision_usage_runs(feature_id,payer_id,run_id) VALUES ('squires',${f.payerId},'squires-run')`;
+        expect(
+          (yield* f.sql`INSERT INTO relay_extension_admission_grants(id,user_id,feature_id,starts_at,ends_at,operator,reason) VALUES (${f.payerId + "bogus"},${f.payerId},'bogus',${f.now - 1},${f.now + 1000},'fixture','bogus admission')`.pipe(
+            Effect.result,
+          ))._tag,
+        ).toBe("Failure");
+        expect(
+          (yield* f.sql`INSERT INTO relay_decision_usage_runs(feature_id,payer_id,run_id) VALUES ('bogus',${f.payerId},'bogus-run')`.pipe(
+            Effect.result,
+          ))._tag,
+        ).toBe("Failure");
+      }),
+    ),
+  );
+  it.live(
+    "gives Squires its own environment slot while Decisions and Contextual keep sharing theirs",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const f = yield* fixture;
+          for (const feature of ["decisions", "contextual", "squires"] as const)
+            yield* fund(f, feature);
+          const { usage } = yield* makeExtensionsService(
+            squiresConfig,
+            "https://fixture.invalid",
+            Effect.succeed(undefined),
+          );
+          const input = (requestId: string) => ({
+            principal: f.host,
+            payerId: f.payerId,
+            fundingGeneration: 1,
+            requestId,
+            runId: requestId,
+            fingerprint: requestId,
+            templateVersion: "fixture",
+            model: "extensions-v1",
+            backend: "private-evaluator" as const,
+          });
+          const admit = Effect.fn("extensionTest.admit")(function* (
+            store: (typeof usage)["squires"],
+            requestId: string,
+          ) {
+            const admission = yield* store.reserve(input(requestId));
+            if (admission.kind !== "admitted") throw new Error(`Expected ${requestId} admission`);
+            return admission.attemptId;
+          });
+          const finish = Effect.fn("extensionTest.finish")(function* (
+            store: (typeof usage)["squires"],
+            attemptId: string,
+          ) {
+            yield* store.markDispatched(attemptId);
+            yield* store.settle(attemptId, { inputTokens: 1, judgments: [] });
+          });
+          const squireInFlight = yield* admit(usage.squires, "squire-a");
+          // A Squires attempt in flight never occupies the Decisions slot.
+          const decisionScan = yield* admit(usage.decisions, "scan");
+          expect((yield* usage.squires.reserve(input("squire-b")).pipe(Effect.flip)).code).toBe(
+            "rate-limited",
+          );
+          expect(
+            (yield* usage.contextual.reserve(input("contextual")).pipe(Effect.flip)).code,
+          ).toBe("rate-limited");
+          yield* finish(usage.squires, squireInFlight);
+          // The Decisions scan still holds the shared slot; routing is admitted without waiting.
+          const routed = yield* admit(usage.squires, "squire-b");
+          yield* finish(usage.decisions, decisionScan);
+          const contextual = yield* admit(usage.contextual, "contextual");
+          expect((yield* usage.decisions.reserve(input("scan-2")).pipe(Effect.flip)).code).toBe(
+            "rate-limited",
+          );
+          yield* finish(usage.contextual, contextual);
+          yield* finish(usage.squires, routed);
+          expect((yield* usage.squires.getSharedAllowance(f.payerId)).byFeature).toEqual(
+            expect.arrayContaining([
+              { featureId: "squires", usedInputTokens: 2, reservedInputTokens: 0 },
+              { featureId: "decisions", usedInputTokens: 1, reservedInputTokens: 0 },
+              { featureId: "contextual", usedInputTokens: 1, reservedInputTokens: 0 },
+            ]),
+          );
+        }),
+      ),
+  );
+  it.live(
+    "routes a post through the private evaluator once and replays without a second charge",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const f = yield* fixture;
+          yield* fund(f, "squires");
+          let choice = "squire-api";
+          const evaluator = squireEvaluator(() => choice);
+          const service = yield* makeExtensionsService(
+            squiresConfig,
+            "https://fixture.invalid",
+            Effect.succeed(evaluator.binding),
+          );
+          const used = () =>
+            service.usage.squires
+              .getSharedAllowance(f.payerId)
+              .pipe(Effect.map((allowance) => allowance.usedInputTokens));
+          const first = yield* service.evaluate(f.host, squireRequest("post-1"), "squire-routing");
+          expect(validSquireRouting(first)).toBe(true);
+          expect(first).toMatchObject({
+            requestId: "post-1",
+            templateVersion: "squire-routing-v1",
+            policyVersion: "squire-routing-v1",
+            replayed: false,
+            inputTokens: 40,
+            judgments: [{ choice: "squire-api", confidence: 0.8, noReplyConfidence: 0.1 }],
+          });
+          expect(evaluator.sent).toHaveLength(1);
+          expect(evaluator.sent[0]).toMatchObject({
+            featureId: "squires",
+            policyVersion: "squire-routing-v1",
+            request: squireRequest("post-1"),
+          });
+          expect(yield* used()).toBe(40);
+          const replay = yield* service.evaluate(f.host, squireRequest("post-1"), "squire-routing");
+          expect(replay).toMatchObject({ replayed: true, inputTokens: 40 });
+          expect(evaluator.sent).toHaveLength(1);
+          expect(yield* used()).toBe(40);
+          choice = "lead";
+          expect(
+            yield* service.evaluate(f.host, squireRequest("post-2"), "squire-routing"),
+          ).toMatchObject({ judgments: [{ choice: "lead" }] });
+          choice = "squire-from-another-room";
+          expect(
+            (yield* service
+              .evaluate(f.host, squireRequest("post-3"), "squire-routing")
+              .pipe(Effect.flip)).code,
+          ).toBe("unavailable");
+          expect(yield* used()).toBe(80);
+          const dispatched = evaluator.sent.length;
+          for (const [payload, operation] of [
+            [{ ...squireRequest("post-4"), transcript: "private transcript" }, "squire-routing"],
+            [
+              {
+                ...squireRequest("post-5"),
+                post: { body: "Who can look?", diff: "private diff" },
+              },
+              "squire-routing",
+            ],
+            [squireRequest("post-6"), "relevance"],
+            [contextualRequest(f.host.environmentId), "squire-routing"],
+          ] as const)
+            expect(
+              (yield* service.evaluate(f.host, payload, operation).pipe(Effect.flip)).code,
+            ).toBe("invalid");
+          expect(evaluator.sent).toHaveLength(dispatched);
+        }),
+      ),
+  );
+  it.live("keeps Squires consent, admission and enablement independent of other features", () =>
+    run(
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        yield* fund(f, "decisions");
+        yield* fund(f, "contextual");
+        const evaluator = squireEvaluator(() => "squire-api");
+        const service = yield* makeExtensionsService(
+          squiresConfig,
+          "https://fixture.invalid",
+          Effect.succeed(evaluator.binding),
+        );
+        expect((yield* service.funding.squires.status(f.host)).state).toBe("unfunded");
+        expect(
+          (yield* service
+            .evaluate(f.host, squireRequest("unfunded"), "squire-routing")
+            .pipe(Effect.flip)).code,
+        ).toBe("forbidden");
+        yield* fund(f, "squires");
+        yield* service.evaluate(f.host, squireRequest("funded"), "squire-routing");
+        yield* service.funding.squires.revokeByHost(f.host, 1);
+        expect((yield* service.funding.squires.status(f.host)).state).toBe("revoked");
+        expect((yield* service.funding.decisions.status(f.host)).state).toBe("active");
+        expect((yield* service.funding.contextual.status(f.host)).state).toBe("active");
+        const disabled = yield* makeExtensionsService(
+          parseExtensionsConfig({
+            EXTENSIONS_DECISIONS_ENABLED: "true",
+            EXTENSIONS_DECISIONS_COHORT: "*",
+          }),
+          "https://fixture.invalid",
+          Effect.succeed(evaluator.binding),
+        );
+        expect(
+          (yield* disabled
+            .evaluate(f.host, squireRequest("disabled"), "squire-routing")
+            .pipe(Effect.flip)).code,
+        ).toBe("unavailable");
+        expect((yield* disabled.status(f.payerId)).features).toContainEqual(
+          expect.objectContaining({ featureId: "squires", enabled: false, reason: "disabled" }),
+        );
+        expect(evaluator.sent).toHaveLength(1);
       }),
     ),
   );

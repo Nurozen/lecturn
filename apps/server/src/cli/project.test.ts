@@ -85,6 +85,7 @@ const makeConfig = (baseDir: string) =>
       tailscaleServePort: 443,
       threadForkingEnabled: true,
       staveEnabled: true,
+      squireEnabled: false,
     } satisfies ServerConfig.ServerConfig["Service"];
   });
 

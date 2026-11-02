@@ -49,6 +49,7 @@ export interface ProjectThreadAwarenessV2Input {
     | "pendingBackgroundTasks"
     | "pendingRuntimeRequest"
     | "settledOverride"
+    | "squire"
     | "status"
     | "title"
     | "updatedAt"
@@ -60,6 +61,10 @@ export function projectThreadAwarenessV2(
 ): AgentAwarenessState | null {
   const { environmentId, project, thread } = input;
   if (thread.lineage.relationshipToParent === "subagent") return null;
+  // Lecturn: a Squire's own threads wake on every batch; publishing them would
+  // turn each into an "Agent working" Live Activity and push. Checked here
+  // rather than on clients so apps that predate the marker are covered too.
+  if (thread.squire !== undefined) return null;
   // Lecturn: putting a conversation away removes its activity; finishing a
   // turn still publishes Done until the user settles the conversation.
   if (thread.settledOverride === "settled") return null;

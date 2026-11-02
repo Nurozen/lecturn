@@ -94,6 +94,28 @@ it.layer(SqlitePersistence.layerMemory)("Decision job storage", (it) => {
       assert.equal(coverage[0]?.state, "pending");
     }),
   );
+  it.effect("never indexes a Squire thread", () =>
+    Effect.gen(function* () {
+      const { sql, settings, jobs } = yield* fixture;
+      yield* settings.update(
+        {
+          operation: "update",
+          projectId,
+          expectedRevision: 0,
+          enabled: true,
+          description: "Storage",
+        },
+        0,
+      );
+      yield* sql`UPDATE orchestration_v2_projection_threads SET payload_json = json_set(payload_json, '$.squire', json('{"squireId":"squire-1","role":"home"}')) WHERE thread_id = ${threadId}`;
+      yield* jobs.processEvent(event(1));
+      assert.equal(yield* jobs.cursor, 1);
+      const rows = yield* sql<{ count: number }>`
+        SELECT (SELECT count(*) FROM decision_jobs) + (SELECT count(*) FROM decision_sources)
+          + (SELECT count(*) FROM decision_thread_state) AS count`;
+      assert.equal(rows[0]?.count, 0);
+    }),
+  );
   it.effect("rolls back the ingestion cursor when durable enqueue fails", () =>
     Effect.gen(function* () {
       const { sql, settings, jobs } = yield* fixture;

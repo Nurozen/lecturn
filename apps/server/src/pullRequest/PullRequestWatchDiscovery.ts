@@ -11,6 +11,7 @@ import { Context, DateTime, Effect, Layer, Path, Schema, Semaphore, type Scope }
 import { ProjectionStoreV2 } from "../orchestration-v2/ProjectionStore.ts";
 import { ProjectService } from "../project/ProjectService.ts";
 import { forkParked } from "../serverActivation.ts";
+import { isSquireThread } from "../squire/squireThread.ts";
 import { VcsDriverRegistry } from "../vcs/VcsDriverRegistry.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import {
@@ -170,7 +171,11 @@ export const make = Effect.gen(function* () {
     const at = DateTime.toEpochMillis(yield* DateTime.now);
     const snapshot = {
       projects: yield* projectService.listShells(),
-      threads: (yield* projections.getShellSnapshot({ location: "active" })).threads,
+      // A Squire's own threads never own PR work, and their frequent updates
+      // would otherwise reset the project cooldown and re-list its PRs.
+      threads: (yield* projections.getShellSnapshot({ location: "active" })).threads.filter(
+        (thread) => !isSquireThread(thread),
+      ),
     };
     const rosters = yield* loadWatchSagaRosters(snapshot.projects, staveRuntime);
     const known = (yield* watches.list({})).watches;

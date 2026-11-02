@@ -168,6 +168,7 @@ const EnvServerConfig = Config.all({
   // action, not a per-invocation option.
   threadForkingEnabled: Config.Boolean("LECTURN_THREAD_FORKING").pipe(Config.withDefault(true)),
   staveEnabled: Config.Boolean("LECTURN_STAVE").pipe(Config.withDefault(true)),
+  squireEnabled: Config.Boolean("LECTURN_SQUIRE").pipe(Config.withDefault(false)),
 });
 
 const DevAuthTokenConfig = Config.Redacted("LECTURN_DEV_AUTH_TOKEN").pipe(
@@ -493,6 +494,7 @@ export const resolveServerConfig = (
       tailscaleServePort,
       threadForkingEnabled: env.threadForkingEnabled,
       staveEnabled: env.staveEnabled,
+      squireEnabled: env.squireEnabled,
     };
 
     return config;

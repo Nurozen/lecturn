@@ -5,7 +5,7 @@ import {
 } from "@lecturn/contracts";
 
 /** Pick a small inference model within the triggering conversation's account. */
-export function resolveSagaInferenceModel(
+export function resolveInferenceModel(
   selection: ModelSelection,
   driverKind: ProviderDriverKind,
   models: ReadonlyArray<{ readonly slug: string }>,

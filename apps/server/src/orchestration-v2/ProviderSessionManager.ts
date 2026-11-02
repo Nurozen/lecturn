@@ -10,6 +10,8 @@ import {
   OrchestrationV2RuntimeRequest,
   ProviderInstanceId,
   ProviderSessionId,
+  type SquireId,
+  type SquireRole,
   ThreadId,
   type ProviderThreadId,
 } from "@lecturn/contracts";
@@ -46,6 +48,9 @@ import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderS
 import { makeAgentDeviceEnvironmentResolver } from "../device/AgentDeviceEnvironment.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
+import type { McpCapability, McpSquireCaller } from "../mcp/McpInvocationContext.ts";
+import type { PersistenceSqlError } from "../persistence/Errors.ts";
+import * as SquireRepository from "../squire/SquireRepository.ts";
 import { appCredentialFields, refreshedAppTools } from "../apps/appMcpCredential.ts";
 import * as EventSink from "./EventSink.ts";
 import * as CommandOutputHub from "./CommandOutputHub.ts";
@@ -55,6 +60,13 @@ import * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter"
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as LecturnOrchestrationHooks from "./fork/LecturnOrchestrationHooks.ts";
+
+type SquireMcpAccess =
+  | { readonly kind: "normal" }
+  | { readonly kind: "none" }
+  | { readonly kind: "home"; readonly squire: McpSquireCaller };
+const NORMAL_MCP_ACCESS: SquireMcpAccess = { kind: "normal" };
+const NO_MCP_ACCESS: SquireMcpAccess = { kind: "none" };
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_IDLE_PIN_MS = 4 * 60 * 60 * 1000;
@@ -336,6 +348,47 @@ export const layerWithOptions = (
       // so it is resolved here (not from device_open) for device-capable sessions.
       const resolveAgentDeviceEnvironment = yield* makeAgentDeviceEnvironmentResolver;
       const agentScope = yield* AgentScope;
+      // Lecturn: optional until Squire wiring lands, as appCredentialFields reaches apps state.
+      const squireRepository = yield* Effect.serviceOption(SquireRepository.SquireRepository);
+      /**
+       * A Squire home thread's credential reaches only its role's tools (D8);
+       * a probe gets no Lecturn MCP session. A missing record reads as the
+       * narrower Squire role, and an unreadable thread gets no session, since
+       * it could be a home.
+       */
+      const squireRole = (squireId: SquireId) =>
+        Option.isNone(squireRepository)
+          ? Effect.succeed<SquireRole>("squire")
+          : squireRepository.value
+              .getSquire(squireId)
+              .pipe(
+                Effect.map((record): SquireRole =>
+                  Option.isSome(record) ? record.value.role : "squire",
+                ),
+              );
+      const squireMcpAccess = (threadId: ThreadId): Effect.Effect<SquireMcpAccess> =>
+        projectionStore.getThread(threadId).pipe(
+          Effect.flatMap(
+            ({ squire: marker }): Effect.Effect<SquireMcpAccess, PersistenceSqlError> => {
+              if (marker === undefined) return Effect.succeed(NORMAL_MCP_ACCESS);
+              if (marker.role === "probe") return Effect.succeed(NO_MCP_ACCESS);
+              return squireRole(marker.squireId).pipe(
+                Effect.map(
+                  (role) =>
+                    ({ kind: "home", squire: { squireId: marker.squireId, role } }) as const,
+                ),
+              );
+            },
+          ),
+          Effect.catch((cause): Effect.Effect<SquireMcpAccess> =>
+            cause._tag === "ProjectionStoreThreadNotFoundError"
+              ? Effect.succeed(NORMAL_MCP_ACCESS)
+              : Effect.logWarning("Could not read the thread's Squire marker; withholding MCP.", {
+                  threadId,
+                  cause,
+                }).pipe(Effect.as(NO_MCP_ACCESS)),
+          ),
+        );
       const agentAccessSettings = Effect.fn("ProviderSessionManagerV2.agentAccessSettings")(
         function* (threadId: ThreadId) {
           if (Option.isNone(serverSettings)) return { browser: true, device: false };
@@ -439,14 +492,16 @@ export const layerWithOptions = (
        * Serialized per thread so two concurrent prepares cannot interleave
        * their rotate steps and revoke each other's freshly minted credential.
        */
+      const withoutMcpSession = (threadId: ThreadId) =>
+        mcpSessions
+          .clear(threadId)
+          .pipe(Effect.as<PreparedMcpCredential>({ mcpCredentialId: undefined, issued: false }));
       const prepareMcpSession = (
         threadId: ThreadId,
         providerInstanceId: ProviderInstanceId,
       ): Effect.Effect<PreparedMcpCredential> =>
         options.configureMcp === false
-          ? mcpSessions
-              .clear(threadId)
-              .pipe(Effect.as<PreparedMcpCredential>({ mcpCredentialId: undefined, issued: false }))
+          ? withoutMcpSession(threadId)
           : mcpPrepareLock.withLock(
               threadId,
               Effect.gen(function* () {
@@ -456,11 +511,21 @@ export const layerWithOptions = (
                 // the credential it started with, so a thread that detaches and
                 // re-attaches across a workspace handoff must come back to the
                 // same token or the process's tool calls fail auth.
+                const access = yield* squireMcpAccess(threadId);
+                if (access.kind === "none") {
+                  yield* mcpSessionRegistry.revokeThread(threadId);
+                  return yield* withoutMcpSession(threadId);
+                }
+                const squire = access.kind === "home" ? access.squire : undefined;
                 const { browser: browserToolsAvailable, device: deviceToolsAvailable } =
-                  yield* agentAccessSettings(threadId);
-                const capabilities = new Set<
-                  import("../mcp/McpInvocationContext.ts").McpCapability
-                >(["orchestration", "worktree", "pull-requests"]);
+                  squire === undefined
+                    ? yield* agentAccessSettings(threadId)
+                    : { browser: false, device: false };
+                const capabilities = new Set<Exclude<McpCapability, "squire">>([
+                  "orchestration",
+                  "worktree",
+                  "pull-requests",
+                ]);
                 if (browserToolsAvailable) capabilities.add("preview");
                 if (deviceToolsAvailable) capabilities.add("device");
                 const existing = yield* mcpSessions.read(threadId);
@@ -485,7 +550,9 @@ export const layerWithOptions = (
                     resolved.thread.threadId === threadId &&
                     resolved.thread.providerInstanceId === providerInstanceId &&
                     resolved.capabilities.has("preview") === browserToolsAvailable &&
-                    resolved.capabilities.has("device") === deviceToolsAvailable
+                    resolved.capabilities.has("device") === deviceToolsAvailable &&
+                    resolved.squire?.squireId === squire?.squireId &&
+                    resolved.squire?.role === squire?.role
                   ) {
                     const agentDeviceEnvironment =
                       deviceToolsAvailable && existing.agentDeviceEnvironment === undefined
@@ -516,7 +583,9 @@ export const layerWithOptions = (
                   providerInstanceId,
                   browserToolsAvailable,
                   capabilities,
-                  ...(yield* appCredentialFields(projectionStore, projectService, threadId)),
+                  ...(squire === undefined
+                    ? yield* appCredentialFields(projectionStore, projectService, threadId)
+                    : { squire }),
                 });
                 yield* mcpSessions.set({
                   ...credential.config,

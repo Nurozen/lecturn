@@ -8,6 +8,8 @@ import {
   type ProjectId,
   type ProviderInstanceId,
   type RuntimeMode,
+  type SquireId,
+  type SquireRole,
   type ThreadId,
 } from "@lecturn/contracts";
 import * as Context from "effect/Context";
@@ -20,6 +22,7 @@ const ALL_MCP_CAPABILITIES = [
   "device",
   "pull-requests",
   "app",
+  "squire",
 ] as const;
 export type McpCapability = (typeof ALL_MCP_CAPABILITIES)[number];
 
@@ -33,6 +36,12 @@ export interface McpThreadCaller {
 export interface McpAppCaller {
   readonly appId: AppId;
   readonly projectId: ProjectId;
+}
+
+/** The Squire whose home thread holds the credential (D8). */
+export interface McpSquireCaller {
+  readonly squireId: SquireId;
+  readonly role: SquireRole;
 }
 
 export interface McpClientCaller {
@@ -62,6 +71,11 @@ export interface McpInvocationScope {
   readonly client: McpClientCaller | undefined;
   /** Set exactly when `capabilities` has "app"; a capability alone cannot say which app. */
   readonly app?: McpAppCaller | undefined;
+  /**
+   * Set exactly when `capabilities` has "squire", which is then its only
+   * capability; `SquireMcpGate` limits such a credential to its role's tools.
+   */
+  readonly squire?: McpSquireCaller | undefined;
 }
 
 export class McpInvocationContext extends Context.Service<

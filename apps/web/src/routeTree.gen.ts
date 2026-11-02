@@ -18,6 +18,7 @@ import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsStorageRouteImport } from './routes/settings.storage'
+import { Route as SettingsSquiresRouteImport } from './routes/settings.squires'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
 import { Route as SettingsSnapShotRouteImport } from './routes/settings.snap-shot'
 import { Route as SettingsScheduledTasksRouteImport } from './routes/settings.scheduled-tasks'
@@ -47,7 +48,9 @@ import { Route as ChatAppsAppIdRouteImport } from './routes/_chat.apps.$appId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 import { Route as EmbedEnvironmentIdProjectIdProvidersRouteImport } from './routes/embed.$environmentId.$projectId.providers'
 import { Route as EmbedEnvironmentIdProjectIdThreadIdRouteImport } from './routes/embed.$environmentId.$projectId.$threadId'
+import { Route as ChatSquiresEnvironmentIdSquireIdRouteImport } from './routes/_chat.squires.$environmentId.$squireId'
 import { Route as ChatSagasEnvironmentIdProjectIdRouteImport } from './routes/_chat.sagas.$environmentId.$projectId'
+import { Route as ChatSquiresEnvironmentIdRoomsRoomIdRouteImport } from './routes/_chat.squires.$environmentId.rooms.$roomId'
 
 const WelcomeRoute = WelcomeRouteImport.update({
   id: '/welcome',
@@ -91,6 +94,11 @@ const ChatIndexRoute = ChatIndexRouteImport.update({
 const SettingsStorageRoute = SettingsStorageRouteImport.update({
   id: '/storage',
   path: '/storage',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsSquiresRoute = SettingsSquiresRouteImport.update({
+  id: '/squires',
+  path: '/squires',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsSourceControlRoute = SettingsSourceControlRouteImport.update({
@@ -245,10 +253,22 @@ const EmbedEnvironmentIdProjectIdThreadIdRoute =
     path: '/$threadId',
     getParentRoute: () => EmbedEnvironmentIdProjectIdRoute,
   } as any)
+const ChatSquiresEnvironmentIdSquireIdRoute =
+  ChatSquiresEnvironmentIdSquireIdRouteImport.update({
+    id: '/squires/$environmentId/$squireId',
+    path: '/squires/$environmentId/$squireId',
+    getParentRoute: () => ChatRoute,
+  } as any)
 const ChatSagasEnvironmentIdProjectIdRoute =
   ChatSagasEnvironmentIdProjectIdRouteImport.update({
     id: '/sagas/$environmentId/$projectId',
     path: '/sagas/$environmentId/$projectId',
+    getParentRoute: () => ChatRoute,
+  } as any)
+const ChatSquiresEnvironmentIdRoomsRoomIdRoute =
+  ChatSquiresEnvironmentIdRoomsRoomIdRouteImport.update({
+    id: '/squires/$environmentId/rooms/$roomId',
+    path: '/squires/$environmentId/rooms/$roomId',
     getParentRoute: () => ChatRoute,
   } as any)
 
@@ -280,6 +300,7 @@ export interface FileRoutesByFullPath {
   '/settings/scheduled-tasks': typeof SettingsScheduledTasksRoute
   '/settings/snap-shot': typeof SettingsSnapShotRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
+  '/settings/squires': typeof SettingsSquiresRoute
   '/settings/storage': typeof SettingsStorageRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/apps/$appId': typeof ChatAppsAppIdRoute
@@ -289,8 +310,10 @@ export interface FileRoutesByFullPath {
   '/embed/$environmentId/$projectId': typeof EmbedEnvironmentIdProjectIdRouteWithChildren
   '/extensions/funding/approve': typeof ExtensionsFundingApproveRoute
   '/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
+  '/squires/$environmentId/$squireId': typeof ChatSquiresEnvironmentIdSquireIdRoute
   '/embed/$environmentId/$projectId/$threadId': typeof EmbedEnvironmentIdProjectIdThreadIdRoute
   '/embed/$environmentId/$projectId/providers': typeof EmbedEnvironmentIdProjectIdProvidersRoute
+  '/squires/$environmentId/rooms/$roomId': typeof ChatSquiresEnvironmentIdRoomsRoomIdRoute
 }
 export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
@@ -319,6 +342,7 @@ export interface FileRoutesByTo {
   '/settings/scheduled-tasks': typeof SettingsScheduledTasksRoute
   '/settings/snap-shot': typeof SettingsSnapShotRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
+  '/settings/squires': typeof SettingsSquiresRoute
   '/settings/storage': typeof SettingsStorageRoute
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
@@ -329,8 +353,10 @@ export interface FileRoutesByTo {
   '/embed/$environmentId/$projectId': typeof EmbedEnvironmentIdProjectIdRouteWithChildren
   '/extensions/funding/approve': typeof ExtensionsFundingApproveRoute
   '/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
+  '/squires/$environmentId/$squireId': typeof ChatSquiresEnvironmentIdSquireIdRoute
   '/embed/$environmentId/$projectId/$threadId': typeof EmbedEnvironmentIdProjectIdThreadIdRoute
   '/embed/$environmentId/$projectId/providers': typeof EmbedEnvironmentIdProjectIdProvidersRoute
+  '/squires/$environmentId/rooms/$roomId': typeof ChatSquiresEnvironmentIdRoomsRoomIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -361,6 +387,7 @@ export interface FileRoutesById {
   '/settings/scheduled-tasks': typeof SettingsScheduledTasksRoute
   '/settings/snap-shot': typeof SettingsSnapShotRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
+  '/settings/squires': typeof SettingsSquiresRoute
   '/settings/storage': typeof SettingsStorageRoute
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
@@ -371,8 +398,10 @@ export interface FileRoutesById {
   '/embed/$environmentId/$projectId': typeof EmbedEnvironmentIdProjectIdRouteWithChildren
   '/extensions/funding/approve': typeof ExtensionsFundingApproveRoute
   '/_chat/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
+  '/_chat/squires/$environmentId/$squireId': typeof ChatSquiresEnvironmentIdSquireIdRoute
   '/embed/$environmentId/$projectId/$threadId': typeof EmbedEnvironmentIdProjectIdThreadIdRoute
   '/embed/$environmentId/$projectId/providers': typeof EmbedEnvironmentIdProjectIdProvidersRoute
+  '/_chat/squires/$environmentId/rooms/$roomId': typeof ChatSquiresEnvironmentIdRoomsRoomIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -404,6 +433,7 @@ export interface FileRouteTypes {
     | '/settings/scheduled-tasks'
     | '/settings/snap-shot'
     | '/settings/source-control'
+    | '/settings/squires'
     | '/settings/storage'
     | '/$environmentId/$threadId'
     | '/apps/$appId'
@@ -413,8 +443,10 @@ export interface FileRouteTypes {
     | '/embed/$environmentId/$projectId'
     | '/extensions/funding/approve'
     | '/sagas/$environmentId/$projectId'
+    | '/squires/$environmentId/$squireId'
     | '/embed/$environmentId/$projectId/$threadId'
     | '/embed/$environmentId/$projectId/providers'
+    | '/squires/$environmentId/rooms/$roomId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/connect'
@@ -443,6 +475,7 @@ export interface FileRouteTypes {
     | '/settings/scheduled-tasks'
     | '/settings/snap-shot'
     | '/settings/source-control'
+    | '/settings/squires'
     | '/settings/storage'
     | '/'
     | '/$environmentId/$threadId'
@@ -453,8 +486,10 @@ export interface FileRouteTypes {
     | '/embed/$environmentId/$projectId'
     | '/extensions/funding/approve'
     | '/sagas/$environmentId/$projectId'
+    | '/squires/$environmentId/$squireId'
     | '/embed/$environmentId/$projectId/$threadId'
     | '/embed/$environmentId/$projectId/providers'
+    | '/squires/$environmentId/rooms/$roomId'
   id:
     | '__root__'
     | '/_chat'
@@ -484,6 +519,7 @@ export interface FileRouteTypes {
     | '/settings/scheduled-tasks'
     | '/settings/snap-shot'
     | '/settings/source-control'
+    | '/settings/squires'
     | '/settings/storage'
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
@@ -494,8 +530,10 @@ export interface FileRouteTypes {
     | '/embed/$environmentId/$projectId'
     | '/extensions/funding/approve'
     | '/_chat/sagas/$environmentId/$projectId'
+    | '/_chat/squires/$environmentId/$squireId'
     | '/embed/$environmentId/$projectId/$threadId'
     | '/embed/$environmentId/$projectId/providers'
+    | '/_chat/squires/$environmentId/rooms/$roomId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -578,6 +616,13 @@ declare module '@tanstack/react-router' {
       path: '/storage'
       fullPath: '/settings/storage'
       preLoaderRoute: typeof SettingsStorageRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/squires': {
+      id: '/settings/squires'
+      path: '/squires'
+      fullPath: '/settings/squires'
+      preLoaderRoute: typeof SettingsSquiresRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/source-control': {
@@ -783,11 +828,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EmbedEnvironmentIdProjectIdThreadIdRouteImport
       parentRoute: typeof EmbedEnvironmentIdProjectIdRoute
     }
+    '/_chat/squires/$environmentId/$squireId': {
+      id: '/_chat/squires/$environmentId/$squireId'
+      path: '/squires/$environmentId/$squireId'
+      fullPath: '/squires/$environmentId/$squireId'
+      preLoaderRoute: typeof ChatSquiresEnvironmentIdSquireIdRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/sagas/$environmentId/$projectId': {
       id: '/_chat/sagas/$environmentId/$projectId'
       path: '/sagas/$environmentId/$projectId'
       fullPath: '/sagas/$environmentId/$projectId'
       preLoaderRoute: typeof ChatSagasEnvironmentIdProjectIdRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/squires/$environmentId/rooms/$roomId': {
+      id: '/_chat/squires/$environmentId/rooms/$roomId'
+      path: '/squires/$environmentId/rooms/$roomId'
+      fullPath: '/squires/$environmentId/rooms/$roomId'
+      preLoaderRoute: typeof ChatSquiresEnvironmentIdRoomsRoomIdRouteImport
       parentRoute: typeof ChatRoute
     }
   }
@@ -801,6 +860,8 @@ interface ChatRouteChildren {
   ChatAppsAppIdRoute: typeof ChatAppsAppIdRoute
   ChatDraftDraftIdRoute: typeof ChatDraftDraftIdRoute
   ChatSagasEnvironmentIdProjectIdRoute: typeof ChatSagasEnvironmentIdProjectIdRoute
+  ChatSquiresEnvironmentIdSquireIdRoute: typeof ChatSquiresEnvironmentIdSquireIdRoute
+  ChatSquiresEnvironmentIdRoomsRoomIdRoute: typeof ChatSquiresEnvironmentIdRoomsRoomIdRoute
 }
 
 const ChatRouteChildren: ChatRouteChildren = {
@@ -811,6 +872,9 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatAppsAppIdRoute: ChatAppsAppIdRoute,
   ChatDraftDraftIdRoute: ChatDraftDraftIdRoute,
   ChatSagasEnvironmentIdProjectIdRoute: ChatSagasEnvironmentIdProjectIdRoute,
+  ChatSquiresEnvironmentIdSquireIdRoute: ChatSquiresEnvironmentIdSquireIdRoute,
+  ChatSquiresEnvironmentIdRoomsRoomIdRoute:
+    ChatSquiresEnvironmentIdRoomsRoomIdRoute,
 }
 
 const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
@@ -831,6 +895,7 @@ interface SettingsRouteChildren {
   SettingsScheduledTasksRoute: typeof SettingsScheduledTasksRoute
   SettingsSnapShotRoute: typeof SettingsSnapShotRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
+  SettingsSquiresRoute: typeof SettingsSquiresRoute
   SettingsStorageRoute: typeof SettingsStorageRoute
 }
 
@@ -850,6 +915,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsScheduledTasksRoute: SettingsScheduledTasksRoute,
   SettingsSnapShotRoute: SettingsSnapShotRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,
+  SettingsSquiresRoute: SettingsSquiresRoute,
   SettingsStorageRoute: SettingsStorageRoute,
 }
 

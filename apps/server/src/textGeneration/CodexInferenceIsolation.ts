@@ -25,6 +25,11 @@ const ConfigSnapshot = Schema.Struct({
   ),
 });
 
+// Exact versions, not a minimum: each release can add default-on features or
+// change catalog fields, so a new version is admitted only after its outgoing
+// request is checked to carry no tools and no user instructions.
+const VERIFIED_CODEX_VERSIONS = ["0.155.1", "0.156.1", "0.165.0"];
+
 const decodeConfigSnapshot = Schema.decodeUnknownEffect(ConfigSnapshot);
 const decodeMcpNames = Schema.decodeUnknownEffect(
   Schema.Array(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/))),
@@ -73,7 +78,7 @@ export const prepareCodexInferenceIsolation = Effect.fn("prepareCodexInferenceIs
         });
         return {
           ...(yield* decodeConfigSnapshot(raw)),
-          verifiedVersion: ["0.155.1", "0.156.1"].some((version) =>
+          verifiedVersion: VERIFIED_CODEX_VERSIONS.some((version) =>
             initialized.userAgent.startsWith(`lecturn-inference-config/${version} `),
           ),
         };
@@ -92,7 +97,7 @@ export const prepareCodexInferenceIsolation = Effect.fn("prepareCodexInferenceIs
     if (!snapshot.verifiedVersion) {
       return yield* privateTextGenerationError(
         input.operation,
-        "Isolated background writing is verified for Codex 0.155.1 and 0.156.1. This installation requires verification.",
+        `Isolated background writing is verified for Codex ${VERIFIED_CODEX_VERSIONS.join(", ")}. This installation requires verification.`,
       );
     }
 

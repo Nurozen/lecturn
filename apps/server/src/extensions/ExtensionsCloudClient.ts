@@ -7,6 +7,9 @@ import {
   ContextualEvaluationResult,
   ContextualConflictCheckResult,
   ContextualEquivalenceCheckResult,
+  SquireRoutingRequest,
+  SquireRoutingResult,
+  squireRoutingJudgmentMatches,
   type ExtensionFeatureId,
   type ExtensionHostFundingRequest,
   type ExtensionHostFundingResult,
@@ -14,7 +17,7 @@ import {
   type ContextualConflictCheckRequest,
   type ContextualEquivalenceCheckRequest,
 } from "@lecturn/contracts";
-import { Context, Effect, Layer, Option, Schema, Semaphore } from "effect";
+import { Context, Data, type Duration, Effect, Layer, Option, Schema, Semaphore } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
@@ -44,6 +47,22 @@ const observeBody = HttpClientResponse.schemaBodyJson(ExtensionFundingObserveRes
 const evaluationBody = HttpClientResponse.schemaBodyJson(ContextualEvaluationResult);
 const conflictBody = HttpClientResponse.schemaBodyJson(ContextualConflictCheckResult);
 const equivalenceBody = HttpClientResponse.schemaBodyJson(ContextualEquivalenceCheckResult);
+const routingBody = HttpClientResponse.schemaBodyJson(SquireRoutingResult);
+// Encoding strips anything outside the contract, so only P19.4 state leaves the host.
+const encodeRoutingRequest = Schema.encodeEffect(SquireRoutingRequest);
+/** Room routing waits on this answer (D55), so it never gets the general 90 s. */
+export const ROUTE_TIMEOUT = "5 seconds";
+export class ExtensionsRouteError extends Data.TaggedError("ExtensionsRouteError")<{
+  readonly reason: "rate-limited" | "allowance" | "invalid" | "error";
+}> {}
+const routeReason = (code: string) =>
+  code === "rate-limited"
+    ? "rate-limited"
+    : code === "allowance-exhausted"
+      ? "allowance"
+      : code === "invalid"
+        ? "invalid"
+        : "error";
 const errorBody = HttpClientResponse.schemaBodyJson(
   Schema.Struct({
     code: Schema.String.check(Schema.isMaxLength(100)),
@@ -77,8 +96,13 @@ export const make = Effect.gen(function* () {
   const environmentId = yield* environment.getEnvironmentId;
   const sharedFunding = decisionFundingState(secrets);
   const contextualMutex = yield* Semaphore.make(1);
+  const squiresMutex = yield* Semaphore.make(1);
   const mutex = (feature: ExtensionFeatureId) =>
-    feature === "decisions" ? sharedFunding.mutex : contextualMutex;
+    feature === "decisions"
+      ? sharedFunding.mutex
+      : feature === "contextual"
+        ? contextualMutex
+        : squiresMutex;
   const read = (name: string) =>
     secrets.get(name).pipe(
       Effect.map((v) => (Option.isSome(v) ? new TextDecoder().decode(v.value) : null)),
@@ -137,7 +161,11 @@ export const make = Effect.gen(function* () {
       Effect.flatMap((encoded) => write(key(value.challenge.featureId, "pending"), encoded)),
       Effect.mapError(unavailable),
     );
-  const request = Effect.fn("Extensions.cloud.request")(function* (path: string, body?: unknown) {
+  const send = Effect.fn("Extensions.cloud.send")(function* (
+    path: string,
+    timeout: Duration.Input,
+    body?: unknown,
+  ) {
     const [url, credential] = yield* Effect.all([
       read(RELAY_URL_SECRET),
       read(RELAY_ENVIRONMENT_CREDENTIAL_SECRET),
@@ -152,15 +180,23 @@ export const make = Effect.gen(function* () {
       body === undefined
         ? Effect.succeed(HttpClientRequest.get(target))
         : HttpClientRequest.bodyJson(HttpClientRequest.post(target), body);
-    const response = yield* req.pipe(
+    return yield* req.pipe(
       Effect.map(HttpClientRequest.bearerToken(credential)),
       Effect.flatMap(http.execute),
-      Effect.timeout("90 seconds"),
+      Effect.timeout(timeout),
       Effect.mapError(unavailable),
     );
+  }, Effect.withTracerEnabled(false));
+  const failureCode = (response: HttpClientResponse.HttpClientResponse, timeout: Duration.Input) =>
+    errorBody(response).pipe(
+      Effect.timeout(timeout),
+      Effect.option,
+      Effect.map((error) => (Option.isSome(error) ? error.value.code : "unavailable")),
+    );
+  const request = Effect.fn("Extensions.cloud.request")(function* (path: string, body?: unknown) {
+    const response = yield* send(path, "90 seconds", body);
     if (response.status >= 200 && response.status < 300) return response;
-    const error = yield* errorBody(response).pipe(Effect.timeout("90 seconds"), Effect.option);
-    const code = Option.isSome(error) ? error.value.code : "unavailable";
+    const code = yield* failureCode(response, "90 seconds");
     if (code === "allowance-exhausted")
       return yield* new ContextualError({
         code,
@@ -204,17 +240,24 @@ export const make = Effect.gen(function* () {
     feature === "decisions"
       ? sharedFunding.revoked.pipe(Effect.mapError(unavailable))
       : read(key(feature, "revoked")).pipe(Effect.map((value) => value === "true"));
+  const revokedView = (local: ExtensionFundingStatusResult): ExtensionFundingStatusResult => ({
+    ...local,
+    state: "revoked",
+    eligible: false,
+    reason: "unavailable",
+  });
+  /** The stored status only: no network and no lock, for hot paths such as room posts. */
+  const localStatus = Effect.fn("Extensions.cloud.localStatus")(function* (
+    feature: ExtensionFeatureId,
+  ) {
+    const local = yield* stored(feature);
+    return (yield* revoked(feature)) ? revokedView(local) : local;
+  });
   const statusUnsafe = Effect.fn("Extensions.cloud.status")(function* (
     feature: ExtensionFeatureId,
   ) {
     const local = yield* stored(feature);
-    if (yield* revoked(feature))
-      return {
-        ...local,
-        state: "revoked" as const,
-        eligible: false,
-        reason: "unavailable" as const,
-      };
+    if (yield* revoked(feature)) return revokedView(local);
     return yield* fetchStatus(feature).pipe(
       Effect.tap(save),
       Effect.orElseSucceed(() => ({
@@ -331,7 +374,7 @@ export const make = Effect.gen(function* () {
   const funding = (input: ExtensionHostFundingRequest) =>
     fundingUnsafe(input).pipe(mutex(input.featureId).withPermits(1));
   const reconcilePending = Effect.gen(function* () {
-    for (const featureId of ["decisions", "contextual"] as const) {
+    for (const featureId of ["decisions", "contextual", "squires"] as const) {
       yield* Effect.gen(function* () {
         const saved = yield* stored(featureId);
         if (saved.remoteRevocationPending && (yield* revoked(featureId)))
@@ -392,7 +435,46 @@ export const make = Effect.gen(function* () {
       Effect.mapError(contextualBoundary),
     );
   }, Effect.withTracerEnabled(false));
-  return { status, funding, reconcilePending, evaluate, conflicts, equivalence, pending };
+  const route = Effect.fn("Extensions.cloud.route")(
+    function* (input: SquireRoutingRequest) {
+      yield* authorize("squires", input.fundingGeneration);
+      const body = yield* encodeRoutingRequest(input).pipe(
+        Effect.mapError(() => new ExtensionsRouteError({ reason: "invalid" })),
+      );
+      const response = yield* send("squire-routing", ROUTE_TIMEOUT, body);
+      if (response.status < 200 || response.status >= 300)
+        return yield* new ExtensionsRouteError({
+          reason: routeReason(yield* failureCode(response, ROUTE_TIMEOUT)),
+        });
+      const result = yield* routingBody(response).pipe(
+        Effect.mapError(() => new ExtensionsRouteError({ reason: "invalid" })),
+      );
+      if (
+        result.requestId !== input.requestId ||
+        result.runId !== input.runId ||
+        !result.judgments.every((judgment) => squireRoutingJudgmentMatches(input, judgment))
+      )
+        return yield* new ExtensionsRouteError({ reason: "invalid" });
+      return result;
+    },
+    Effect.timeout(ROUTE_TIMEOUT),
+    Effect.catchTags({
+      ContextualError: () => Effect.fail(new ExtensionsRouteError({ reason: "error" })),
+      TimeoutError: () => Effect.fail(new ExtensionsRouteError({ reason: "error" })),
+    }),
+    Effect.withTracerEnabled(false),
+  );
+  return {
+    status,
+    localStatus,
+    funding,
+    reconcilePending,
+    evaluate,
+    conflicts,
+    equivalence,
+    route,
+    pending,
+  };
 });
 export class ExtensionsCloudClient extends Context.Service<
   ExtensionsCloudClient,

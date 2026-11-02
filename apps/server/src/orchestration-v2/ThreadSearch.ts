@@ -92,6 +92,8 @@ export const make = Effect.gen(function* () {
           ON projects.project_id = threads.project_id
         WHERE threads.deleted_at IS NULL
           AND threads.archived_at IS NULL
+          -- Lecturn: a Squire's own threads are hidden from users and agents alike.
+          AND json_extract(threads.payload_json, '$.squire') IS NULL
           AND projects.deleted_at IS NULL
           AND messages.streaming = 0
           AND messages.role IN ('user', 'assistant')

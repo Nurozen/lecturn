@@ -16,6 +16,8 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderSessionId,
+  SquireId,
+  type SquireThreadMarker,
   ThreadId,
 } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
@@ -230,6 +232,7 @@ function makeThreadCreatedEvent(input: {
   readonly threadId: ThreadId;
   readonly now: DateTime.Utc;
   readonly projectId?: ProjectId;
+  readonly squire?: SquireThreadMarker;
 }) {
   return Effect.gen(function* () {
     const projectId =
@@ -267,6 +270,7 @@ function makeThreadCreatedEvent(input: {
       settledAt: null,
       lastVisitedAt: null,
       deletedAt: null,
+      ...(input.squire === undefined ? {} : { squire: input.squire }),
     };
     return {
       id: yield* input.idAllocator.allocate.event({ threadId: input.threadId }),
@@ -5073,5 +5077,95 @@ it.effect("ProviderSessionManagerV2 lets a fork hook wrap and refuse a fresh ses
       ),
     );
     assert.deepEqual(seen, ["codex:codex", "codex:codex"]);
+  }),
+);
+
+/** Opens a session on a new thread carrying `squire`, after `before` runs. */
+const openMarkedThread = (
+  threadId: ThreadId,
+  squire: SquireThreadMarker,
+  before: Effect.Effect<
+    void,
+    never,
+    McpSessionRegistry.McpSessionRegistry | McpProviderSessions.McpProviderSessions
+  > = Effect.void,
+) =>
+  Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    const mcpConfigs = yield* Ref.make<
+      ReadonlyArray<McpProviderSession.McpProviderSessionConfig | undefined>
+    >([]);
+    return yield* Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const registry = yield* McpSessionRegistry.McpSessionRegistry;
+      const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+      const now = yield* DateTime.now;
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId,
+      });
+      yield* eventSink.write({
+        events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now, squire })],
+      });
+      yield* before;
+      yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+      const captured = (yield* Ref.get(mcpConfigs))[0];
+      const resolved =
+        captured === undefined
+          ? undefined
+          : yield* registry.resolve(captured.authorizationHeader.replace(/^Bearer\s+/, ""));
+      return { captured, resolved, stored: yield* mcpSessions.read(threadId) };
+    }).pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 60_000, mcpConfigs })));
+  });
+
+it.effect("ProviderSessionManagerV2 gives a Squire home thread only the squire capability", () =>
+  Effect.gen(function* () {
+    const squireId = SquireId.make("squire-psm");
+    const { captured, resolved } = yield* openMarkedThread(
+      ThreadId.make("thread-psm-squire-home"),
+      { squireId, role: "home" },
+    );
+    assert.isDefined(captured);
+    assert.deepEqual(resolved?.capabilities, new Set(["squire"]));
+    // No Squire record is readable here, so the narrower role applies.
+    assert.deepEqual(resolved?.squire, { squireId, role: "squire" });
+    assert.equal(captured?.browserToolsAvailable, false);
+  }),
+);
+
+it.effect("ProviderSessionManagerV2 opens a probe without any Lecturn MCP session", () =>
+  Effect.gen(function* () {
+    const { captured, stored } = yield* openMarkedThread(ThreadId.make("thread-psm-probe"), {
+      squireId: SquireId.make("squire-psm"),
+      role: "probe",
+    });
+    assert.isUndefined(captured);
+    assert.isUndefined(stored);
+  }),
+);
+
+it.effect("ProviderSessionManagerV2 never reuses an ordinary credential for a home thread", () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread-psm-squire-reuse");
+    let ordinaryToken = "";
+    const { captured, resolved } = yield* openMarkedThread(
+      threadId,
+      { squireId: SquireId.make("squire-psm"), role: "home" },
+      Effect.gen(function* () {
+        const registry = yield* McpSessionRegistry.McpSessionRegistry;
+        const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+        const { config } = yield* registry.issue({
+          threadId,
+          providerInstanceId: modelSelection.instanceId,
+          browserToolsAvailable: false,
+        });
+        ordinaryToken = config.authorizationHeader;
+        yield* mcpSessions.set(config);
+      }),
+    );
+    assert.deepEqual(resolved?.capabilities, new Set(["squire"]));
+    assert.notEqual(captured?.authorizationHeader, ordinaryToken);
   }),
 );

@@ -99,6 +99,7 @@ import Migration0080 from "./Migrations/080_ProjectionProjectsAppBinding.ts";
 // (ProjectionThreadMigrationCompatibility), so it runs here as 81, after
 // Lecturn's own 79 and 80.
 import Migration0081 from "./Migrations/064_CanonicalizeThreadPullRequestLinks.ts";
+import Migration0082 from "./Migrations/082_Squire.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -138,10 +139,14 @@ const ThreadFailureLookupIndexCompatibility = Effect.gen(function* () {
  * ledger holds another name at one of these ids, the migration runs again on
  * its own. Their SQL is idempotent for that reason.
  */
-const selfRepairingMigrations = [
+const appMigrations = [
   [79, "AppRegistrations", Migration0079],
   [80, "ProjectionProjectsAppBinding", Migration0080],
 ] as const;
+// Listed apart from the app migrations so `migrationEntries` stays in id order
+// around 81.
+const squireMigration = [82, "Squire", Migration0082] as const;
+const selfRepairingMigrations = [...appMigrations, squireMigration] as const;
 const selfRepairingMigrationIds: ReadonlySet<number> = new Set(
   selfRepairingMigrations.map(([id]) => id),
 );
@@ -235,10 +240,11 @@ export const migrationEntries = [
   // Upstream 63. Idempotent, so a database that already ran it under
   // upstream's id is safe to run again here.
   [78, "DropUnusedV1Projections", Migration0078],
-  ...selfRepairingMigrations,
+  ...appMigrations,
   // Upstream 64. It only rewrites rows still missing pullRequests, so a
   // database that already ran it under upstream's id is safe to run again here.
   [81, "CanonicalizeThreadPullRequestLinks", Migration0081],
+  squireMigration,
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

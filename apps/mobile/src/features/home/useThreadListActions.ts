@@ -708,6 +708,7 @@ export function useThreadListActions(): {
     const ordered = getThreadListV2OrderedSection({
       threads: eligible,
       section,
+      listingCapabilities: appAtomRegistry.get(environmentThreadShells.listingCapabilitiesAtom),
       now: new Date().toISOString(),
       queuedThreadKeys: appAtomRegistry.get(queuedThreadKeysAtom),
       settlementEnvironmentIds: new Set(

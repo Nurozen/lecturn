@@ -1,12 +1,13 @@
 import { useMemo } from "react";
 import { AppBar } from "../../components/ui/AppBar";
 import { ScreenHeaderButton } from "../../components/ui/ScreenHeaderButton";
-import type { AppBarAction } from "../../components/ui/AppBar.types";
+import type { AppBarAction, AppBarMenu } from "../../components/ui/AppBar.types";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import type { ThreadInspectorMode } from "./thread-inspector-content-stack";
 import { useThreadHeaderOptions } from "./useThreadHeaderOptions";
 import { useWorkspaceListNavigation } from "../workspace/useAndroidWorkspaceNavigation";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
+import { allowsThreadRouteControl, type ThreadRouteControls } from "./threadRouteControls";
 
 export type NativeHeaderItem = Record<string, unknown>;
 
@@ -23,8 +24,19 @@ export function ThreadHeader(
     readonly threadActionsHeaderItem: NativeHeaderItem | null;
     /** Android in-flow fork action, appended after the git controls action. */
     readonly forkHeaderAction: AppBarAction | null;
+    /** Lecturn: the D63 allowlist; absent keeps every header control. */
+    readonly controls?: ThreadRouteControls;
+    /** Lecturn: Android's Squire Track and Stop tracking menu; iOS has them in the thread menu. */
+    readonly squireTrackingMenu?: AppBarMenu | null;
   },
 ) {
+  const allows = (control: Parameters<typeof allowsThreadRouteControl>[1]) =>
+    allowsThreadRouteControl(props.controls, control);
+  // The native iOS group (and its compact fallback) also carries terminal, files, and scripts.
+  const gitHeaderShown = allows("git");
+  const filesShown = allows("files");
+  const terminalShown = allows("terminal");
+  const mergeBackShown = allows("merge-back");
   const returnToList = useWorkspaceListNavigation("threads");
   const { layout, panes, toggleAuxiliaryPane } = useAdaptiveWorkspaceLayout();
   const { onOpenTerminal, onMergeBack } = props.gitControls;
@@ -34,12 +46,20 @@ export function ThreadHeader(
     | (() => ReadonlyArray<NativeHeaderItem>)
     | undefined;
   const nativeOptions =
-    threadActionsHeaderItem !== null && baseRightItems !== undefined
-      ? {
-          ...native.options,
-          unstable_headerRightItems: () => [...baseRightItems(), threadActionsHeaderItem],
-        }
-      : native.options;
+    baseRightItems === undefined
+      ? native.options
+      : !gitHeaderShown
+        ? {
+            ...native.options,
+            unstable_headerRightItems: () =>
+              threadActionsHeaderItem === null ? [] : [threadActionsHeaderItem],
+          }
+        : threadActionsHeaderItem !== null
+          ? {
+              ...native.options,
+              unstable_headerRightItems: () => [...baseRightItems(), threadActionsHeaderItem],
+            }
+          : native.options;
   const androidHeaderActions = useMemo<ReadonlyArray<AppBarAction>>(() => {
     const actions: AppBarAction[] = [];
     if (props.onReturnToThread) {
@@ -49,7 +69,7 @@ export function ThreadHeader(
         onPress: props.onReturnToThread,
       });
     }
-    if (props.hasThreadCwd) {
+    if (props.hasThreadCwd && filesShown) {
       const filesVisible = props.inspectorMode === "files" && panes.auxiliaryPaneVisible;
       actions.push({
         accessibilityLabel: filesVisible ? "Close files" : "Open files",
@@ -58,19 +78,21 @@ export function ThreadHeader(
         onPress: filesVisible ? toggleAuxiliaryPane : props.onOpenFilesInspector,
       });
     }
-    if (props.hasWorkspaceRoot && props.gitControls.canOpenTerminal) {
+    if (props.hasWorkspaceRoot && props.gitControls.canOpenTerminal && terminalShown) {
       actions.push({
         accessibilityLabel: "Open terminal",
         icon: "terminal",
         onPress: () => onOpenTerminal(null),
       });
     }
-    actions.push({
-      accessibilityLabel: "Open git controls",
-      icon: "point.topleft.down.curvedto.point.bottomright.up",
-      onPress: props.onOpenGitInspector,
-    });
-    if (onMergeBack) {
+    if (gitHeaderShown) {
+      actions.push({
+        accessibilityLabel: "Open git controls",
+        icon: "point.topleft.down.curvedto.point.bottomright.up",
+        onPress: props.onOpenGitInspector,
+      });
+    }
+    if (onMergeBack && mergeBackShown) {
       actions.push({
         accessibilityLabel: "Merge back to source",
         icon: PullRequestGlyph.merged,
@@ -80,6 +102,10 @@ export function ThreadHeader(
     if (props.forkHeaderAction) actions.push(props.forkHeaderAction);
     return actions;
   }, [
+    filesShown,
+    terminalShown,
+    mergeBackShown,
+    gitHeaderShown,
     props.forkHeaderAction,
     props.inspectorMode,
     panes.auxiliaryPaneVisible,
@@ -101,9 +127,10 @@ export function ThreadHeader(
         subtitle={props.subtitle}
         sidebar={native.sidebar}
         options={nativeOptions}
-        optionsVersion={[native.optionsVersion, threadActionsHeaderItem]}
+        optionsVersion={[native.optionsVersion, threadActionsHeaderItem, gitHeaderShown]}
+        menus={props.squireTrackingMenu ? [props.squireTrackingMenu] : undefined}
         trailing={
-          props.fileInspectorSupported && props.hasThreadCwd ? (
+          props.fileInspectorSupported && props.hasThreadCwd && filesShown ? (
             <ScreenHeaderButton
               accessibilityLabel={
                 props.inspectorMode !== null && panes.auxiliaryPaneVisible
@@ -120,7 +147,7 @@ export function ThreadHeader(
         actions={androidHeaderActions}
         hideBottomBorder
       />
-      {native.fallback}
+      {gitHeaderShown ? native.fallback : null}
     </>
   );
 }

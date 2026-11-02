@@ -1,4 +1,4 @@
-import { EnvironmentId, ThreadId } from "@lecturn/contracts";
+import { EnvironmentId, SquireId, ThreadId } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { matchComposerThreadItems } from "./composerThreadItems.ts";
@@ -26,6 +26,7 @@ describe("matchComposerThreadItems", () => {
         environmentId: env,
         excludeThreadId: null,
         query: "  ",
+        listing: null,
       }),
     ).toEqual([]);
   });
@@ -43,8 +44,32 @@ describe("matchComposerThreadItems", () => {
       environmentId: env,
       excludeThreadId: ThreadId.make("self"),
       query: "LOGIN",
+      listing: null,
     });
     expect(items.map((item) => item.thread.threadId)).toEqual(["new", "old"]);
     expect(items[0]).toMatchObject({ type: "thread", label: "Login redesign" });
+  });
+
+  it("leaves Squire threads out while the environment hides them", () => {
+    const shells = [
+      shell("home", "Release notes", {
+        squire: { squireId: SquireId.make("sq-1"), role: "home" },
+      }),
+      shell("probe", "Release probe", {
+        squire: { squireId: SquireId.make("sq-1"), role: "probe" },
+      }),
+      shell("plain", "Release checklist"),
+    ];
+    const ids = (listing: { squire?: boolean } | null) =>
+      matchComposerThreadItems({
+        shells,
+        environmentId: env,
+        excludeThreadId: null,
+        query: "release",
+        listing,
+      }).map((item) => item.thread.threadId);
+    expect(ids({ squire: true })).toEqual([ThreadId.make("plain")]);
+    // With the switch off they are ordinary threads, so their history stays reachable.
+    expect(ids(null)).toHaveLength(3);
   });
 });

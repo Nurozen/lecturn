@@ -157,6 +157,7 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 - Inferred types over annotations. `any` is the enemy.
 - Comments say why: a constraint, an external quirk, or an invariant the code can't show. Don't restate names or signatures, narrate steps, or record history. `lecturn/no-low-value-comments` catches the mechanical cases.
 - Our users drive agents all day and notice a dropped frame, a lying spinner, and a stale label. No continuously repainting animations; they peg the GPU on high-refresh displays.
+  - Exception, approved by the maintainer: a Squire's status indicator (its portrait ring or mark) may animate while the Squire is working. It is still when the Squire is idle or waiting on the user, and the animation pauses when the window is unfocused, the indicator is offscreen, or reduced motion is on.
 - If a rule here fights the task in front of you, say so loudly and get a human sign-off before breaking it.
 
 ## Additional tips

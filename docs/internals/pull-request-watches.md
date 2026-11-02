@@ -44,4 +44,9 @@ Environments republish unchanged state (PR heartbeats, restarts), so the relay d
 
 **Server redelivery loop.** Threads do not republish an unchanged state on their own. `AgentAwarenessRelay` adds a thread to `suppressedRingThreadIds` when it publishes a ring-eligible phase (`waiting_for_approval`, `waiting_for_input`, `completed`, `failed`) with `userPresent` true, and removes it on any other publish. A parked loop waits for its first 30-second interval and then runs every 30 seconds: once the user is no longer present it replaces each suppressed thread's published identity with a `redeliver` placeholder, so the publish cannot dedupe, and enqueues the thread. The placeholder keeps the thread counted as published, which skips the first-state confirmation delay for completed states.
 
+**Squire rows.** A Squire publishes one row on its home thread with `userPresent: false` and never
+enters the redelivery loop. Its presence hold-back runs on the server instead (see
+[Squires](./squire.md#notifications)). Squires do not read watches: they classify PR changes from
+the thread's `thread.pull-request-link-updated` events. Watch discovery skips Squire threads.
+
 **Desktop notch.** The notch gates its own unprompted alerts in the Electron main process. The panel asks over `activity:announce` whether a change may alert. `isUserPresent` in `apps/desktop/src/activity/presence.ts` requires the main window visible and focused and system idle under 45 seconds. `ActivityAttentionGate` holds attention, failed, and complete changes while present, and releases the most urgent one still in that state on blur, hide, or a 5 second idle poll that runs only while something is held. Snapshot revisions reject stale renderer announcements. Viewed, resolved, removed, and disconnected items are pruned; individual CI check identities survive unrelated job updates. Reload or renderer failure clears pending alerts. Hover and click expansion do not pass through the gate.

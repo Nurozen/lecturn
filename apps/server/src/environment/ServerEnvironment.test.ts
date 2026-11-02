@@ -1,16 +1,19 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ORCHESTRATION_PROTOCOL_VERSION } from "@lecturn/contracts";
 import { expect, it } from "@effect/vitest";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
 import { DEFAULT_SIGNAL_EXPORT } from "@lecturn/shared/observability";
 import * as HostProcess from "@lecturn/shared/HostProcess";
+import * as NetService from "@lecturn/shared/Net";
 import * as OtelEnvironment from "@lecturn/shared/otelEnvironment";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -19,6 +22,7 @@ import {
   RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
   RELAY_URL_SECRET,
 } from "../cloud/config.ts";
+import { resolveServerConfig } from "../cli/config.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "./ServerEnvironment.ts";
 
@@ -70,6 +74,7 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
     tailscaleServePort: 443,
     threadForkingEnabled: true,
     staveEnabled: true,
+    squireEnabled: false,
     port: 0,
     host: undefined,
     desktopBootstrapToken: undefined,
@@ -339,6 +344,83 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
 
       const disabled = yield* describeWith({ staveEnabled: false });
       expect(disabled.capabilities.stave).toBeUndefined();
+    }),
+  );
+
+  it.effect("advertises the Squire capability only when the kill switch is on", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "lecturn-server-environment-squire-capability-test-",
+      });
+      const serverConfig = yield* makeServerConfig(baseDir);
+      yield* fileSystem.makeDirectory(serverConfig.stateDir, { recursive: true });
+
+      const describeWith = (squireEnabled: boolean) =>
+        Effect.gen(function* () {
+          const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+          return yield* serverEnvironment.getDescriptor;
+        }).pipe(
+          Effect.provide(
+            ServerEnvironment.layer.pipe(
+              Layer.provide(ServerSecretStore.layer),
+              Layer.provide(ServerConfig.layer({ ...serverConfig, squireEnabled })),
+            ),
+          ),
+        );
+
+      expect((yield* describeWith(false)).capabilities).not.toHaveProperty("squire");
+      expect((yield* describeWith(true)).capabilities.squire).toBe(true);
+    }),
+  );
+
+  // OQ4: Squires stay opt-in, so an environment without LECTURN_SQUIRE never advertises them.
+  it.effect("does not advertise Squires when LECTURN_SQUIRE is unset", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "lecturn-server-environment-squire-default-test-",
+      });
+      const resolved = yield* resolveServerConfig(
+        {
+          mode: Option.none(),
+          port: Option.none(),
+          host: Option.none(),
+          baseDir: Option.none(),
+          cwd: Option.none(),
+          devUrl: Option.none(),
+          noBrowser: Option.none(),
+          bootstrapFd: Option.none(),
+          autoBootstrapProjectFromCwd: Option.none(),
+          logWebSocketEvents: Option.none(),
+          tailscaleServeEnabled: Option.none(),
+          tailscaleServePort: Option.none(),
+        },
+        Option.none(),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(ConfigProvider.fromEnv({ env: { LECTURN_HOME: baseDir } })),
+            NetService.layer,
+          ),
+        ),
+      );
+      yield* fileSystem.makeDirectory(resolved.stateDir, { recursive: true });
+
+      const descriptor = yield* Effect.gen(function* () {
+        const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+        return yield* serverEnvironment.getDescriptor;
+      }).pipe(
+        Effect.provide(
+          ServerEnvironment.layer.pipe(
+            Layer.provide(ServerSecretStore.layer),
+            Layer.provide(ServerConfig.layer(resolved)),
+          ),
+        ),
+      );
+
+      expect(resolved.squireEnabled).toBe(false);
+      expect(descriptor.capabilities).not.toHaveProperty("squire");
     }),
   );
 

@@ -68,7 +68,7 @@ import { isUsageLimitsCommand } from "@lecturn/shared/usageLimits";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
 import { useUsageLimitsPanel } from "./chat/useUsageLimitsPanel";
 import { useWorktreeSetup } from "./chat/useWorktreeSetup";
-import { useChatShortcuts, type ChatShortcutHandler } from "./chat/useChatShortcuts";
+import type { ChatShortcutHandler } from "./chat/useChatShortcuts";
 import {
   eventPathContainsSelector,
   pasteTextToFocusComposer,
@@ -189,6 +189,12 @@ import {
 import { flushSync } from "react-dom";
 import { useLocation } from "@tanstack/react-router";
 import { useEmbedPresentation } from "../embed/EmbedPresentationContext";
+import {
+  allowsChatViewControl,
+  useChatViewShortcuts,
+  type ChatViewControl,
+  type ChatViewControls,
+} from "./chat/chatViewControls";
 import { useComposerCardTimelineEntries } from "./embed/embedPendingApprovalRows";
 import { useEmbedAwareNavigate } from "../embed/embedNavigation";
 import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
@@ -939,6 +945,13 @@ type ChatViewProps =
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
+      /** Lecturn: an allowlist of the controls to show (D63); absent shows every control. */
+      controls?: ChatViewControls;
+      /**
+       * Lecturn (D63): open at the newest MCP App card's top, not the end, when it is the newest
+       * row; reading from there counts as user-scrolled, so new output does not snap to the end.
+       */
+      openAtNewestAppCard?: boolean;
       routeKind: "server";
       draftId?: never;
     }
@@ -948,6 +961,8 @@ type ChatViewProps =
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
+      controls?: never;
+      openAtNewestAppCard?: never;
       routeKind: "draft";
       draftId: DraftId;
     };
@@ -1113,6 +1128,10 @@ export default function ChatView(props: ChatViewProps) {
     reserveTitleBarControlInset = true,
     forceExpandedMobileComposer = false,
   } = props;
+  // Lecturn: absent `controls` allows every control (D63).
+  const controls = routeKind === "server" ? props.controls : undefined;
+  const openAtNewestAppCard = routeKind === "server" && props.openAtNewestAppCard === true;
+  const allows = (control: ChatViewControl) => allowsChatViewControl(controls, control);
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
   const hasTerminalWriteAccess = () =>
@@ -1735,7 +1754,8 @@ export default function ChatView(props: ChatViewProps) {
   );
   const canReuseTerminal = activeThreadKnownSessionsRaw !== null;
   const previewPanelOpen = activeRightPanelKind === "preview" && browserAvailable;
-  const rightPanelOpen = rightPanelState.isOpen && embedPresentation === null;
+  const rightPanelOpen =
+    rightPanelState.isOpen && embedPresentation === null && allows("right-panel");
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   const activeTerminalDrawerPresence = usePanelPresence(
@@ -1764,6 +1784,7 @@ export default function ChatView(props: ChatViewProps) {
   const renderedRightPanelSurfaces = rightPanelPresence.value?.surfaces ?? [];
   const previewMiniPlayerVisible =
     embedPresentation === null &&
+    allows("right-panel") &&
     shouldRenderPreviewMiniPlayer(
       activePreviewMiniPlayer?.source ?? null,
       renderedRightPanelSurface,
@@ -3189,7 +3210,7 @@ export default function ChatView(props: ChatViewProps) {
     remoteOpenMode: remoteOpenState.mode,
   });
   useOpenFavoriteEditorShortcut({
-    enabled: showOpenInPicker && embedPresentation === null,
+    enabled: showOpenInPicker && embedPresentation === null && allows("open-in"),
     environmentId: activeThread?.environmentId ?? environmentId,
     keybindings,
     availableEditors,
@@ -3303,7 +3324,8 @@ export default function ChatView(props: ChatViewProps) {
   const mountComposerContextStrip = shouldShowComposerContextStrip({
     isDraftHeroState,
     persistInActiveThreads: settings.persistComposerContextStrip,
-    hasActiveProject: activeProject !== null && !showProviderSubagentBar,
+    hasActiveProject:
+      allows("branch-toolbar") && activeProject !== null && !showProviderSubagentBar,
     isGitRepo,
     isStaveProject: Boolean(activeProject?.stave),
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
@@ -3312,7 +3334,8 @@ export default function ChatView(props: ChatViewProps) {
   const showComposerContextStrip = shouldShowComposerContextStrip({
     isDraftHeroState,
     persistInActiveThreads: settings.persistComposerContextStrip,
-    hasActiveProject: activeProject !== null && !showProviderSubagentBar,
+    hasActiveProject:
+      allows("branch-toolbar") && activeProject !== null && !showProviderSubagentBar,
     isGitRepo,
     isStaveProject: Boolean(activeProject?.stave),
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
@@ -5884,7 +5907,7 @@ export default function ChatView(props: ChatViewProps) {
     (({ event }) => {
       if (!event.repeat) composerRef.current?.openControl(command);
     }) satisfies ChatShortcutHandler;
-  useChatShortcuts({
+  useChatViewShortcuts(controls, {
     enabled: activeThreadId !== null,
     keybindings,
     scriptKeybindings,
@@ -6005,7 +6028,8 @@ export default function ChatView(props: ChatViewProps) {
     },
     fallback: (command) => {
       const scriptId = projectScriptIdFromCommand(command);
-      if (!scriptId || !activeProject || !canOperateTerminal) return undefined;
+      if (!scriptId || !activeProject || !canOperateTerminal || !allows("project-scripts"))
+        return undefined;
       const script = activeProjectScripts.find((entry) => entry.id === scriptId);
       return script ? () => void runProjectScriptStable(script) : undefined;
     },
@@ -6014,10 +6038,11 @@ export default function ChatView(props: ChatViewProps) {
   // A focused desktop browser page forwards these chords as menu actions.
   useEffect(() => {
     return window.desktopBridge?.onMenuAction((action) => {
+      if (!allowsChatViewControl(controls, "right-panel")) return;
       if (action === "rightPanel.toggle") toggleRightPanelStable();
       else if (action === "rightPanel.toggleMaximized") toggleRightPanelMaximizedStable();
     });
-  }, [toggleRightPanelStable, toggleRightPanelMaximizedStable]);
+  }, [controls, toggleRightPanelStable, toggleRightPanelMaximizedStable]);
 
   // Paste-to-focus: the resting composer blurs on a click into the timeline,
   // so a paste that follows has no editable target and would be dropped.
@@ -8426,7 +8451,7 @@ export default function ChatView(props: ChatViewProps) {
           <header
             ref={threadPanelPopoverAnchorRef}
             data-chat-header
-            hidden={embedPresentation !== null}
+            hidden={embedPresentation !== null || !allows("thread-actions")}
             className={cn(
               "relative bg-background [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
               isElectron
@@ -8464,7 +8489,11 @@ export default function ChatView(props: ChatViewProps) {
             />
           </header>
 
-          {supportsPullRequests && activeProject?.stave && activeProjectRef && activeThreadRef ? (
+          {supportsPullRequests &&
+          allows("git") &&
+          activeProject?.stave &&
+          activeProjectRef &&
+          activeThreadRef ? (
             <RepositoryPullRequestOverview
               projectRef={activeProjectRef}
               threadRef={activeThreadRef}
@@ -8488,10 +8517,7 @@ export default function ChatView(props: ChatViewProps) {
               detailsCardTopInset={isThreadFindActive ? THREAD_FIND_BAR_RESERVED_HEIGHT : 0}
               composerOverlayElement={isDraftHeroState ? null : composerOverlayElement}
               data-chat-workspace-drop-target="true"
-              onDragEnter={workspaceFileDropHandlers.onDragEnter}
-              onDragOver={workspaceFileDropHandlers.onDragOver}
-              onDragLeave={workspaceFileDropHandlers.onDragLeave}
-              onDrop={workspaceFileDropHandlers.onDrop}
+              {...(allows("attachments") ? workspaceFileDropHandlers : {})}
             >
               <ThreadFind onClose={focusComposerStable} />
               {isWorkspaceFileDragActive ? (
@@ -8539,8 +8565,10 @@ export default function ChatView(props: ChatViewProps) {
                   citationHistoryLoading={threadDetailLoading}
                   {...(!paintOnlyDisplayedTimeline
                     ? {
-                        onCiteAssistantText: citeAssistantTextStable,
-                        ...(activeProject ? { onRunShellCommand: runShellCommandStable } : {}),
+                        ...(allows("cite") ? { onCiteAssistantText: citeAssistantTextStable } : {}),
+                        ...(activeProject && allows("run-command")
+                          ? { onRunShellCommand: runShellCommandStable }
+                          : {}),
                       }
                     : {})}
                   isWorking={!paintOnlyDisplayedTimeline && isWorking}
@@ -8592,7 +8620,9 @@ export default function ChatView(props: ChatViewProps) {
                   latestRun={paintOnlyDisplayedTimeline ? null : activeActivityRun}
                   runningRunId={paintOnlyDisplayedTimeline ? null : activeRunningTurnId}
                   turnDiffSummaries={
-                    paintOnlyDisplayedTimeline ? EMPTY_HELD_TURN_DIFF_SUMMARIES : turnDiffSummaries
+                    paintOnlyDisplayedTimeline || !(allows("diff") || allows("edit-from-here"))
+                      ? EMPTY_HELD_TURN_DIFF_SUMMARIES
+                      : turnDiffSummaries
                   }
                   activeThreadEnvironmentId={
                     displayedThreadRef?.environmentId ?? activeThread.environmentId
@@ -8601,18 +8631,26 @@ export default function ChatView(props: ChatViewProps) {
                   displayThreadKey={displayedTimelineKey}
                   paintOnly={paintOnlyDisplayedTimeline}
                   onOpenTurnDiff={
-                    paintOnlyDisplayedTimeline ? noopHeldTurnDiff : onOpenTurnDiffStable
+                    !allows("diff")
+                      ? undefined
+                      : paintOnlyDisplayedTimeline
+                        ? noopHeldTurnDiff
+                        : onOpenTurnDiffStable
                   }
                   forkPointByUserMessageId={
-                    paintOnlyDisplayedTimeline ? EMPTY_FORK_POINTS : forkPointByUserMessageId
+                    paintOnlyDisplayedTimeline || !allows("fork")
+                      ? EMPTY_FORK_POINTS
+                      : forkPointByUserMessageId
                   }
                   onForkFromMessage={
                     paintOnlyDisplayedTimeline ? noopHeldFork : onForkFromMessageStable
                   }
                   forkPointByRunlessReplyId={
-                    paintOnlyDisplayedTimeline ? EMPTY_FORK_POINTS : forkPointByRunlessReplyId
+                    paintOnlyDisplayedTimeline || !allows("fork")
+                      ? EMPTY_FORK_POINTS
+                      : forkPointByRunlessReplyId
                   }
-                  forkFromRunEnabled={environmentSupportsForking}
+                  forkFromRunEnabled={environmentSupportsForking && allows("fork")}
                   forkWarning={paintOnlyDisplayedTimeline ? null : forkWarning}
                   revertDisabledReason={paintOnlyDisplayedTimeline ? null : revertDisabledReason}
                   importDivider={paintOnlyDisplayedTimeline ? null : importDivider}
@@ -8622,9 +8660,13 @@ export default function ChatView(props: ChatViewProps) {
                   parentThreadLink={paintOnlyDisplayedTimeline ? null : parentThreadLink}
                   workflowOpening={paintOnlyDisplayedTimeline ? null : workflowOpening}
                   onForkFromRun={paintOnlyDisplayedTimeline ? async () => {} : onForkFromRunStable}
-                  onRollbackCheckpoint={onTimelineRollbackCheckpointStable}
+                  onRollbackCheckpoint={
+                    allows("rollback") ? onTimelineRollbackCheckpointStable : undefined
+                  }
                   supportsConversationRollback={
-                    !paintOnlyDisplayedTimeline && supportsConversationRollback
+                    !paintOnlyDisplayedTimeline &&
+                    supportsConversationRollback &&
+                    allows("edit-from-here")
                   }
                   onRevertToTurnCount={
                     paintOnlyDisplayedTimeline ? noopHeldRevert : onRevertTimelineTurnStable
@@ -8632,7 +8674,9 @@ export default function ChatView(props: ChatViewProps) {
                   {...(!paintOnlyDisplayedTimeline
                     ? {
                         onUseArtifactTemplate: insertArtifactTemplateStable,
-                        onSendAppMessage: sendAppMessageStable,
+                        ...(allows("mcp-app-actions")
+                          ? { onSendAppMessage: sendAppMessageStable }
+                          : {}),
                       }
                     : {})}
                   isRevertingCheckpoint={isRevertingCheckpoint}
@@ -8669,12 +8713,18 @@ export default function ChatView(props: ChatViewProps) {
                   cancelPositionRestoreRef={cancelPositionRestoreRef}
                   hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                   topFadeEnabled={!hasTimelineTopBanner}
-                  {...(paintOnlyDisplayedTimeline || threadHistoryControls === undefined
+                  notesAllowed={allows("notes")}
+                  openAtNewestAppCard={openAtNewestAppCard}
+                  compactSquireEvents={!allows("turn-details")}
+                  minimapEnabled={allows("timeline-navigation")}
+                  {...(paintOnlyDisplayedTimeline ||
+                  threadHistoryControls === undefined ||
+                  !allows("load-earlier")
                     ? {}
                     : { historyControls: threadHistoryControls })}
                 />
 
-                {showScrollToBottom && !isThreadFindActive && (
+                {showScrollToBottom && !isThreadFindActive && allows("timeline-navigation") && (
                   <div
                     className="chat-scroll-to-bottom pointer-events-none absolute z-30 flex justify-center py-1.5"
                     style={{ bottom: scrollToEndClearance + 4 }}
@@ -8883,12 +8933,15 @@ export default function ChatView(props: ChatViewProps) {
                                   isPreparingWorktree={
                                     isPreparingWorktree && !sendQueuesBehindSetup
                                   }
-                                  queuedRunsControl={queuedRunsControl}
+                                  queuedRunsControl={
+                                    allows("queued-runs") ? queuedRunsControl : undefined
+                                  }
                                   bannerItems={composerBannerItems}
                                   resumeCompactionTokens={resumeCompactionTokens}
                                   keepFullHistory={keepFullHistory}
                                   onToggleKeepFullHistory={toggleKeepFullHistoryStable}
                                   onUsageLimitsCommand={
+                                    allows("usage-limits") &&
                                     usageLimitsOffered &&
                                     usageLimitsKey !== null &&
                                     !composerHasNonPromptContent
@@ -8905,7 +8958,7 @@ export default function ChatView(props: ChatViewProps) {
                                   activePendingDraftAnswers={activePendingDraftAnswers}
                                   activePendingQuestionIndex={activePendingQuestionIndex}
                                   respondingRequestIds={respondingRequestIds}
-                                  showPlanFollowUpPrompt={showPlanFollowUpPrompt}
+                                  showPlanFollowUpPrompt={showPlanFollowUpPrompt && allows("plan")}
                                   activeProposedPlan={activeProposedPlan}
                                   threadSyncPhase={
                                     activeEnvironmentUnavailable ? null : threadSyncPhase
@@ -8994,6 +9047,7 @@ export default function ChatView(props: ChatViewProps) {
                                   onRemoveEditingQueuedAttachment={
                                     queuedRunEdit.removeEditingAttachment
                                   }
+                                  controls={controls}
                                 />
                               )}
                             </div>
@@ -9109,7 +9163,7 @@ export default function ChatView(props: ChatViewProps) {
                 onConfirm={handleSwitchCheckoutToThreadStable}
               />
 
-              {embedPresentation === null ? (
+              {embedPresentation === null && allows("thread-panel") ? (
                 <ThreadDetailsPanel {...threadDetailsPanelProps} />
               ) : null}
 
@@ -9123,7 +9177,7 @@ export default function ChatView(props: ChatViewProps) {
             </ThreadFindCanvas>
           </div>
 
-          {(embedPresentation === null ? mountedTerminalThreadRefs : []).map(
+          {(embedPresentation === null && allows("terminal") ? mountedTerminalThreadRefs : []).map(
             ({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
               <PersistentThreadTerminalDrawer
                 key={mountedThreadKey}

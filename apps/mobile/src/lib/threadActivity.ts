@@ -550,6 +550,7 @@ function itemIcon(item: OrchestrationV2TurnItem): ThreadFeedActivity["icon"] {
       case "monitor":
         return "eye";
       case "background_task":
+      case "squire":
       case "system":
         return "zap";
       default:

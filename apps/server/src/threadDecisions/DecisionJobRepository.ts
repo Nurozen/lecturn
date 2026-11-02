@@ -152,6 +152,9 @@ interface ThreadRow {
   deleted_at: string | null;
   archived_at: string | null;
 }
+interface IngestedThreadRow extends ThreadRow {
+  squire: string | null;
+}
 interface StateRow {
   source_generation: number;
   pause_epoch: number;
@@ -427,9 +430,11 @@ export const make = Effect.gen(function* () {
     } else if (event.kind !== "ignored") {
       const threadId = event.threadId;
       const threads =
-        yield* sql<ThreadRow>`SELECT project_id,deleted_at,archived_at FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}`;
+        yield* sql<IngestedThreadRow>`SELECT project_id,deleted_at,archived_at,json_extract(payload_json,'$.squire') AS squire FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}`;
       const thread = threads[0];
-      if (thread) {
+      // A Squire's own threads are event batches and its reasoning, not the
+      // user's decisions; they never get decision state.
+      if (thread && thread.squire === null) {
         const projectId = ProjectId.make(thread.project_id);
         const state = yield* threadState(threadId, projectId);
         if (event.kind === "thread-generation") {
@@ -818,7 +823,7 @@ export const make = Effect.gen(function* () {
       role: "user" | "assistant";
       text: string;
       created_at: string;
-    }>`SELECT m.thread_id,m.message_id,m.role,m.text,m.created_at FROM ${v2Messages(sql)} m JOIN orchestration_v2_projection_threads t ON t.thread_id = m.thread_id AND t.project_id = ${projectId} AND t.deleted_at IS NULL AND t.archived_at IS NULL JOIN projection_projects p ON p.project_id = t.project_id AND p.deleted_at IS NULL WHERE m.is_streaming = 0 AND m.role IN ('user','assistant') AND length(trim(m.text)) > 0 AND ${threadId ? sql`m.thread_id = ${threadId}` : sql`1 = 1`} AND (m.thread_id > ${afterThread} OR (m.thread_id = ${afterThread} AND m.message_id > ${afterMessage})) ORDER BY m.thread_id,m.message_id LIMIT 200`;
+    }>`SELECT m.thread_id,m.message_id,m.role,m.text,m.created_at FROM ${v2Messages(sql)} m JOIN orchestration_v2_projection_threads t ON t.thread_id = m.thread_id AND t.project_id = ${projectId} AND t.deleted_at IS NULL AND t.archived_at IS NULL AND json_extract(t.payload_json,'$.squire') IS NULL JOIN projection_projects p ON p.project_id = t.project_id AND p.deleted_at IS NULL WHERE m.is_streaming = 0 AND m.role IN ('user','assistant') AND length(trim(m.text)) > 0 AND ${threadId ? sql`m.thread_id = ${threadId}` : sql`1 = 1`} AND (m.thread_id > ${afterThread} OR (m.thread_id = ${afterThread} AND m.message_id > ${afterMessage})) ORDER BY m.thread_id,m.message_id LIMIT 200`;
   });
   const snapshot = Effect.fn("DecisionJobs.scanSnapshot")(function* (
     projectId: ProjectId,

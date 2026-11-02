@@ -5,6 +5,7 @@ import * as Exit from "effect/Exit";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
+import Squire from "./Migrations/082_Squire.ts";
 
 // Lecturn's ledger runs upstream's V2 migrations (published from 55) from 70.
 const FIRST_V2_ID = 70;
@@ -18,6 +19,14 @@ const history = Effect.gen(function* () {
     SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id
   `;
   return rows.map((row) => [row.migration_id, row.name] as const);
+});
+
+const squireTableCount = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'squire%'
+  `;
+  return rows.length;
 });
 
 const v2TableCount = Effect.gen(function* () {
@@ -157,8 +166,46 @@ describe("runMigrations", () => {
         [79, "AppRegistrations"],
         [80, "ProjectionProjectsAppBinding"],
         [81, "CanonicalizeThreadPullRequestLinks"],
+        [82, "Squire"],
       ]);
       assert.deepStrictEqual(yield* history, migrationManifest);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("runs the Squire migration again without touching its rows", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations();
+      yield* sql`INSERT INTO squire_event (squire_id, kind, state_key, status, not_before, created_at)
+        VALUES ('squire-1', 'message', 'key-1', 'pending', 'now', 'now')`;
+      yield* sql`UPDATE squire_reactor_cursor SET sequence = 7, enabled = 1`;
+
+      yield* Squire;
+
+      assert.deepStrictEqual(yield* sql`SELECT state_key FROM squire_event`, [
+        { state_key: "key-1" },
+      ]);
+      assert.deepStrictEqual(yield* sql`SELECT id, sequence, enabled FROM squire_reactor_cursor`, [
+        { id: 1, sequence: 7, enabled: 1 },
+      ]);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("adds the Squire schema when another build recorded a different migration at 82", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 81 });
+      yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (82, 'UpstreamNext')`;
+
+      assert.deepStrictEqual(yield* runMigrations(), [[82, "Squire"]]);
+      assert.equal(yield* squireTableCount, 13);
+      assert.deepStrictEqual(
+        yield* sql`SELECT name FROM effect_sql_migrations WHERE migration_id = 82`,
+        [{ name: "UpstreamNext" }],
+      );
+      // Every later start repairs again, which the idempotent SQL makes a no-op.
+      assert.deepStrictEqual(yield* runMigrations(), [[82, "Squire"]]);
+      assert.equal(yield* squireTableCount, 13);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 });

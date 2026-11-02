@@ -1,7 +1,9 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   AppId,
+  AuthSessionId,
   EnvironmentId,
   EventId,
   MessageId,
@@ -11,8 +13,12 @@ import {
   type OrchestrationV2TurnItem,
   ProjectId,
   ProviderInstanceId,
+  RpcClientId,
   RunId,
+  type SquireError,
   RuntimeRequestId,
+  SquireCardId,
+  SquireId,
   ThreadId,
   TurnItemId,
 } from "@lecturn/contracts";
@@ -21,16 +27,22 @@ import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as BackgroundPolicyModule from "../background/BackgroundPolicy.ts";
 import { BackgroundPolicy } from "../background/BackgroundPolicy.ts";
+import * as HostPowerMonitor from "../background/HostPowerMonitor.ts";
 import { TeamPolicy } from "../cloud/TeamPolicy.ts";
 import {
   PUBLISH_AGENT_ACTIVITY_SECRET,
@@ -46,7 +58,14 @@ import {
   AppRegistrationRepository,
 } from "../persistence/AppRegistrations.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import type { PersistenceSqlError } from "../persistence/Errors.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as SquireMobileAttention from "../squire/SquireMobileAttention.ts";
+import * as SquirePresence from "../squire/SquirePresence.ts";
+import * as SquireRepository from "../squire/SquireRepository.ts";
+import { squireRow } from "../squire/testkit/scopeHarness.ts";
 import * as AgentAwarenessRelay from "./AgentAwarenessRelay.ts";
 
 const THREAD_ID = ThreadId.make("relay-thread");
@@ -161,6 +180,8 @@ const makeTestRelay = Effect.fnUntraced(function* (
     readonly userPresent?: () => boolean;
     /** Lecturn: binds the project to a connected app with this name. */
     readonly app?: { readonly name: string; readonly projectTitle?: string };
+    /** Lecturn: the Squire phone row's source (LECTURN_SQUIRE on). */
+    readonly squire?: SquireMobileAttention.SquireMobileAttention["Service"];
   } = {},
 ) {
   const values = new Map<string, Uint8Array>(
@@ -271,7 +292,13 @@ const makeTestRelay = Effect.fnUntraced(function* (
     },
     { preconnect: () => {} },
   );
-  const relay = yield* AgentAwarenessRelay.make.pipe(
+  const make =
+    options.squire === undefined
+      ? AgentAwarenessRelay.make
+      : AgentAwarenessRelay.make.pipe(
+          Effect.provideService(SquireMobileAttention.SquireMobileAttention, options.squire),
+        );
+  const relay = yield* make.pipe(
     Effect.provideService(ServerSecretStore.ServerSecretStore, secrets),
     Effect.provideService(TeamPolicy, {
       checkProvider: () => Effect.void,
@@ -950,6 +977,20 @@ describe("AgentAwarenessRelay", () => {
     }),
   );
 
+  it.effect("never publishes activity for a running Squire thread", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay();
+      yield* Ref.set(
+        currentShell,
+        shell({ squire: { squireId: SquireId.make("squire-1"), role: "home" } }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.equal(publications.length, 0);
+    }),
+  );
+
   it.effect("confirms a first completed state and respects disabling during confirmation", () =>
     Effect.gen(function* () {
       const { relay, secrets, currentShell, publications } = yield* makeTestRelay();
@@ -1196,5 +1237,599 @@ describe("startup catch-up", { concurrent: false }, () => {
       yield* TestClock.adjust("5 seconds");
       assert.equal(catchUp.shellSnapshotReads, 1);
     }).pipe(Effect.scoped),
+  );
+});
+
+// ── Squire phone row (D27, D52) ─────────────────────────────────
+
+const RELEASE = SquireId.make("squire:release");
+const LEAD = SquireId.make("squire:lead");
+const RELEASE_HOME = ThreadId.make("squire-home:release");
+const LEAD_HOME = ThreadId.make("squire-home:lead");
+const SQUIRE_START = Date.parse("2026-11-02T08:00:00.000Z");
+/** Every card's title and why carry this, so a leak shows up in the payload. */
+const ITEM_TEXT = "ITEM-TEXT";
+const SQUIRE_FIXTURE = "../../../../infra/relay/src/agentActivity/squireAttention.fixture.json";
+
+const layerSquireStorage = SquirePresence.layer.pipe(
+  Layer.provideMerge(
+    BackgroundPolicyModule.layer.pipe(
+      Layer.provide(
+        Layer.succeed(
+          HostPowerMonitor.HostPowerMonitor,
+          HostPowerMonitor.HostPowerMonitor.of({
+            snapshot: Effect.sync(() => ({
+              source: "unknown" as const,
+              idle: "unknown" as const,
+              idleSeconds: null,
+              locked: "unknown" as const,
+              suspended: false,
+              onBattery: "unknown" as const,
+              lowPowerMode: "unknown" as const,
+              thermalState: "unknown" as const,
+              stale: true,
+              updatedAt: DateTime.makeUnsafe(SQUIRE_START),
+            })),
+            report: () => Effect.void,
+            streamChanges: Stream.never,
+          }),
+        ),
+      ),
+    ),
+  ),
+  Layer.provideMerge(
+    Layer.mergeAll(
+      SquireRepository.layer,
+      ServerSettings.layerTest({ squire: { phoneAlertsWhileDesktop: "after-3-min" } }),
+    ),
+  ),
+  Layer.provideMerge(SqlitePersistence.layerMemory),
+  Layer.provideMerge(NodeServices.layer),
+);
+
+type SquireStack =
+  | Scope.Scope
+  | SquireRepository.SquireRepository
+  | SquirePresence.SquirePresence
+  | BackgroundPolicyModule.BackgroundPolicy
+  | SquireMobileAttention.SquireMobileAttention;
+
+/**
+ * The clock moves first (a lease sweep would replay from the epoch), the
+ * Squires exist before the attention set is built, as after any restart.
+ */
+const withSquires = <A, E>(body: Effect.Effect<A, E, SquireStack>) =>
+  TestClock.setTime(SQUIRE_START).pipe(
+    Effect.andThen(
+      Effect.gen(function* () {
+        const repository = yield* SquireRepository.SquireRepository;
+        yield* repository.createSquire(
+          squireRow(RELEASE, { name: "Release", home_thread_id: RELEASE_HOME }),
+        );
+        yield* repository.createSquire(
+          squireRow(LEAD, { role: "lead", name: "Lead", home_thread_id: LEAD_HOME }),
+        );
+        return yield* body.pipe(Effect.provide(SquireMobileAttention.layer));
+      }).pipe(Effect.provide(layerSquireStorage)),
+    ),
+    Effect.scoped,
+  );
+
+let squireCardSeq = 0;
+
+/** A card and its intent, as an intent site writes them in one transaction. */
+const raiseCard = (input: {
+  readonly kind: SquireRepository.SquireCardRow["kind"];
+  readonly squireId?: SquireId;
+  /** False: Notify Off, a digest with push off, or a question (D26). */
+  readonly push: boolean;
+  readonly source?: string;
+}) =>
+  Effect.gen(function* () {
+    const repository = yield* SquireRepository.SquireRepository;
+    const presence = yield* SquirePresence.SquirePresence;
+    const now = DateTime.formatIso(yield* DateTime.now);
+    const squireId = input.squireId ?? RELEASE;
+    squireCardSeq += 1;
+    const cardId = SquireCardId.make(`card:${squireCardSeq}`);
+    const targetThreadId = input.kind === "fyi" ? null : ThreadId.make(`thread:${squireCardSeq}`);
+    const log = (kind: string, data: Record<string, unknown>) =>
+      repository.insertActionLog({
+        squire_id: squireId,
+        kind,
+        room_id: null,
+        post_id: null,
+        trigger_id: null,
+        task_id: null,
+        thread_id: targetThreadId,
+        card_id: cardId,
+        event_id: null,
+        run_id: null,
+        invocation_key: null,
+        execution_key: null,
+        data_json: JSON.stringify(data),
+        created_at: now,
+      });
+    yield* repository.transaction(
+      Effect.gen(function* () {
+        yield* repository.insertCard({
+          id: cardId,
+          squire_id: squireId,
+          owner_squire_id: squireId,
+          kind: input.kind,
+          status: "open",
+          target_thread_id: targetThreadId,
+          project_id: null,
+          title: `${ITEM_TEXT} title ${squireCardSeq}`,
+          why: `${ITEM_TEXT} why`,
+          payload_json: "{}",
+          evidence_json: "{}",
+          trigger_json: "{}",
+          intent_json: null,
+          origin: "event",
+          steer_kind: null,
+          routed_task_id: null,
+          rule_id: null,
+          finding_key: null,
+          escalate_at: null,
+          opened_at: null,
+          executes_at: null,
+          attempt: 0,
+          command_id: null,
+          execution_key: null,
+          dedupe_key: null,
+          replaced_count: 0,
+          ask_json: null,
+          resolution: null,
+          created_at: now,
+          updated_at: now,
+        });
+        yield* log("card.created", { kind: input.kind });
+        if (!input.push) return;
+        yield* log("notification.pushed", { kind: input.kind, source: input.source ?? "card" });
+        yield* presence.holdIntent({
+          squireId,
+          cardId,
+          kind: input.kind,
+          threadId: targetThreadId,
+          runId: null,
+          now,
+        });
+      }),
+    );
+    return cardId;
+  });
+
+const closeCard = (cardId: SquireCardId, status: "resolved" | "dismissed") =>
+  Effect.gen(function* () {
+    const repository = yield* SquireRepository.SquireRepository;
+    const now = DateTime.formatIso(yield* DateTime.now);
+    yield* repository.updateCard({
+      id: cardId,
+      fromStatuses: ["open"],
+      patch: { status, resolution: status },
+      updatedAt: now,
+    });
+  });
+
+const desktopActive = Effect.gen(function* () {
+  const policy = yield* BackgroundPolicyModule.BackgroundPolicy;
+  yield* policy.reportClientActivity(AuthSessionId.make("session-1"), RpcClientId.make(1), {
+    clientId: "desktop-1",
+    clientKind: "desktop-renderer",
+    visible: true,
+    focused: true,
+    recentlyInteracted: true,
+    scopes: [],
+    ttlMs: 45_000,
+    observedAt: yield* DateTime.now,
+  });
+  assert.isTrue(yield* (yield* SquirePresence.SquirePresence).desktopActive);
+});
+
+const mobileDeliveries = (squireId: SquireId) =>
+  Effect.gen(function* () {
+    const repository = yield* SquireRepository.SquireRepository;
+    const rows = yield* repository.listActionLog({
+      squireId,
+      kinds: ["notification.delivery"],
+      limit: 1_000,
+    });
+    return rows.flatMap((row) => {
+      const data = JSON.parse(row.data_json) as {
+        readonly outcome: string;
+        readonly surface?: string;
+        readonly reason?: string;
+      };
+      return data.surface === "mobile"
+        ? [{ id: row.id, cardId: row.card_id, outcome: data.outcome, reason: data.reason }]
+        : [];
+    });
+  });
+
+const publishedThreadId = (url: string) =>
+  decodeURIComponent(/\/threads\/([^/]+)\/agent-activity$/.exec(url)?.[1] ?? "");
+
+interface ScenarioStep {
+  readonly step: string;
+  readonly squireId: SquireId;
+  readonly run: Effect.Effect<unknown, PersistenceSqlError | SquireError, SquireStack>;
+}
+
+/** Runs each step, then the relay publish its write triggers, and records both sides. */
+const runSquireScenario = (steps: ReadonlyArray<ScenarioStep>) =>
+  withSquires(
+    Effect.gen(function* () {
+      const attention = yield* SquireMobileAttention.SquireMobileAttention;
+      const { relay, publications } = yield* makeTestRelay({
+        squire: attention,
+        // The present-user suppression must not apply to Squire rows.
+        userPresent: () => true,
+      });
+      const recorded = [];
+      for (const { step, squireId, run } of steps) {
+        const publishedBefore = publications.length;
+        const deliveredBefore = (yield* mobileDeliveries(squireId)).length;
+        yield* run;
+        yield* relay.publishThread(squireId === LEAD ? LEAD_HOME : RELEASE_HOME);
+        recorded.push({
+          step,
+          publishes: publications.slice(publishedBefore).map((publication) => ({
+            threadId: publishedThreadId(publication.url),
+            state: publication.state,
+            userPresent: publication.userPresent,
+          })),
+          mobile: (yield* mobileDeliveries(squireId))
+            .slice(deliveredBefore)
+            .map((row) =>
+              row.reason === undefined ? row.outcome : `${row.outcome}:${row.reason}`,
+            ),
+        });
+      }
+      return recorded;
+    }),
+  );
+
+const squireScenarios = {
+  cards: [
+    { step: "first card", squireId: RELEASE, run: raiseCard({ kind: "steer", push: true }) },
+    { step: "second card", squireId: RELEASE, run: raiseCard({ kind: "proposal", push: true }) },
+    {
+      step: "queue cleared",
+      squireId: RELEASE,
+      run: Effect.gen(function* () {
+        const repository = yield* SquireRepository.SquireRepository;
+        for (const card of yield* repository.listCards({ squireId: RELEASE })) {
+          yield* closeCard(card.id, card.kind === "steer" ? "resolved" : "dismissed");
+        }
+      }),
+    },
+    { step: "next card", squireId: RELEASE, run: raiseCard({ kind: "steer", push: true }) },
+  ],
+  notify: [
+    {
+      step: "notify-only push",
+      squireId: RELEASE,
+      run: raiseCard({ kind: "fyi", push: true, source: "notify" }),
+    },
+    {
+      step: "its FYI dismissed",
+      squireId: RELEASE,
+      run: Effect.gen(function* () {
+        const repository = yield* SquireRepository.SquireRepository;
+        const [fyi] = yield* repository.listCards({ squireId: RELEASE, kinds: ["fyi"] });
+        yield* closeCard(fyi!.id, "dismissed");
+      }),
+    },
+    {
+      step: "second notify-only push",
+      squireId: RELEASE,
+      run: raiseCard({ kind: "fyi", push: true, source: "notify" }),
+    },
+  ],
+  digests: [
+    {
+      step: "pushed digest",
+      squireId: LEAD,
+      run: raiseCard({ kind: "fyi", squireId: LEAD, push: true, source: "digest" }),
+    },
+  ],
+  "digest push off": [
+    {
+      step: "digest with push off",
+      squireId: LEAD,
+      run: raiseCard({ kind: "fyi", squireId: LEAD, push: false }),
+    },
+  ],
+  "question alone": [
+    { step: "question card", squireId: RELEASE, run: raiseCard({ kind: "question", push: false }) },
+  ],
+  "notify off": [
+    { step: "steer card", squireId: RELEASE, run: raiseCard({ kind: "steer", push: false }) },
+    { step: "proposal card", squireId: RELEASE, run: raiseCard({ kind: "proposal", push: false }) },
+    { step: "notify FYI", squireId: RELEASE, run: raiseCard({ kind: "fyi", push: false }) },
+  ],
+  "held then escalated": [
+    {
+      step: "card while a desktop is active",
+      squireId: RELEASE,
+      run: desktopActive.pipe(Effect.andThen(raiseCard({ kind: "steer", push: true }))),
+    },
+    {
+      step: "escalated at 3 min",
+      squireId: RELEASE,
+      run: TestClock.adjust(SquirePresence.SQUIRE_ESCALATION_DELAY_MS).pipe(
+        Effect.andThen(Effect.flatMap(SquirePresence.SquirePresence, (p) => p.escalateDue)),
+      ),
+    },
+  ],
+  "opened before escalation": [
+    {
+      step: "card while a desktop is active",
+      squireId: RELEASE,
+      run: desktopActive.pipe(Effect.andThen(raiseCard({ kind: "steer", push: true }))),
+    },
+    {
+      step: "opened at 1 min",
+      squireId: RELEASE,
+      run: Effect.gen(function* () {
+        yield* TestClock.adjust("1 minute");
+        const repository = yield* SquireRepository.SquireRepository;
+        const [card] = yield* repository.listCards({ squireId: RELEASE });
+        const presence = yield* SquirePresence.SquirePresence;
+        yield* presence.markOpened({ requestId: "open-1", cardIds: [card!.id] });
+      }),
+    },
+    {
+      step: "3 min pass",
+      squireId: RELEASE,
+      run: TestClock.adjust("2 minutes").pipe(
+        Effect.andThen(Effect.flatMap(SquirePresence.SquirePresence, (p) => p.escalateDue)),
+      ),
+    },
+  ],
+  "held FYI": [
+    {
+      step: "notify FYI while a desktop is active",
+      squireId: RELEASE,
+      run: desktopActive.pipe(
+        Effect.andThen(raiseCard({ kind: "fyi", push: true, source: "notify" })),
+      ),
+    },
+    {
+      step: "3 min pass",
+      squireId: RELEASE,
+      run: TestClock.adjust(SquirePresence.SQUIRE_ESCALATION_DELAY_MS).pipe(
+        Effect.andThen(Effect.flatMap(SquirePresence.SquirePresence, (p) => p.escalateDue)),
+      ),
+    },
+  ],
+} satisfies Record<string, ReadonlyArray<ScenarioStep>>;
+
+describe("Squire phone row (D27)", () => {
+  it.effect("publishes the shared fixture's payload sequence and one mobile row per intent", () =>
+    Effect.gen(function* () {
+      const scenarios: Record<string, Effect.Success<ReturnType<typeof runSquireScenario>>> = {};
+      for (const [name, steps] of Object.entries(squireScenarios)) {
+        squireCardSeq = 0;
+        scenarios[name] = yield* runSquireScenario(steps);
+      }
+      const view = (name: string) =>
+        scenarios[name]!.map(({ step, publishes, mobile }) => ({
+          step,
+          publish: publishes.map((publish) =>
+            publish.state === null
+              ? null
+              : `${publish.state.threadTitle}: ${publish.state.headline}`,
+          ),
+          mobile,
+        }));
+
+      assert.deepStrictEqual(view("cards"), [
+        { step: "first card", publish: ["Release: 1 open decision"], mobile: ["alerted"] },
+        { step: "second card", publish: ["Release: 2 open decisions"], mobile: ["coalesced"] },
+        { step: "queue cleared", publish: [null], mobile: [] },
+        { step: "next card", publish: ["Release: 1 open decision"], mobile: ["alerted"] },
+      ]);
+      assert.deepStrictEqual(view("notify"), [
+        { step: "notify-only push", publish: ["Release: 1 update"], mobile: ["alerted"] },
+        { step: "its FYI dismissed", publish: [null], mobile: [] },
+        { step: "second notify-only push", publish: ["Release: 1 update"], mobile: ["alerted"] },
+      ]);
+      assert.deepStrictEqual(view("digests"), [
+        { step: "pushed digest", publish: ["Lead: 1 update"], mobile: ["alerted"] },
+      ]);
+      // No intent: no row, and nothing owed a delivery row.
+      for (const name of ["digest push off", "question alone", "notify off"]) {
+        for (const step of view(name)) {
+          assert.deepStrictEqual([step.publish, step.mobile], [[], []], `${name}: ${step.step}`);
+        }
+      }
+      // A held intent reaches the phone only by escalating; opened first, or an FYI, never.
+      assert.deepStrictEqual(view("held then escalated"), [
+        { step: "card while a desktop is active", publish: [], mobile: [] },
+        { step: "escalated at 3 min", publish: ["Release: 1 open decision"], mobile: ["alerted"] },
+      ]);
+      assert.deepStrictEqual(view("opened before escalation"), [
+        { step: "card while a desktop is active", publish: [], mobile: [] },
+        { step: "opened at 1 min", publish: [], mobile: [] },
+        { step: "3 min pass", publish: [], mobile: [] },
+      ]);
+      assert.deepStrictEqual(view("held FYI"), [
+        { step: "notify FYI while a desktop is active", publish: [], mobile: [] },
+        { step: "3 min pass", publish: [], mobile: [] },
+      ]);
+
+      const publishes = Object.values(scenarios).flatMap((steps) =>
+        steps.flatMap((step) => step.publishes),
+      );
+      for (const publish of publishes) {
+        // Presence is SquirePresence's call: the relay must ring a present user's phone.
+        assert.isFalse(publish.userPresent);
+        const encoded = JSON.stringify(publish.state);
+        assert.notInclude(encoded, ITEM_TEXT);
+        if (publish.state !== null) {
+          assert.strictEqual(publish.state.phase, "waiting_for_input");
+          assert.strictEqual(publish.state.threadId, publish.threadId);
+          assert.isAtMost(new TextEncoder().encode(encoded).byteLength, 1_024);
+        }
+      }
+
+      // The relay replays this file (SquireAttentionDelivery.test.ts). Rewrite
+      // it with SQUIRE_FIXTURE_WRITE=1 after an intended change, then format it.
+      const fs = yield* FileSystem.FileSystem;
+      const file = yield* (yield* Path.Path).fromFileUrl(new URL(SQUIRE_FIXTURE, import.meta.url));
+      const actual = JSON.stringify({ environmentId: "relay-environment", scenarios }, null, 2);
+      if (process.env.SQUIRE_FIXTURE_WRITE === "1") yield* fs.writeFileString(file, `${actual}\n`);
+      assert.deepStrictEqual(JSON.parse(actual), JSON.parse(yield* fs.readFileString(file)));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("keeps a long name within the relay's row cap and carries no item text", () =>
+    withSquires(
+      Effect.gen(function* () {
+        const repository = yield* SquireRepository.SquireRepository;
+        const release = Option.getOrThrow(yield* repository.getSquire(RELEASE));
+        yield* repository.updateSquire({
+          id: RELEASE,
+          expectedRevision: release.revision,
+          patch: { name: "Release ".repeat(100) },
+          updatedAt: DateTime.formatIso(yield* DateTime.now),
+        });
+        const attention = yield* SquireMobileAttention.SquireMobileAttention;
+        const { relay, publications } = yield* makeTestRelay({ squire: attention });
+        for (let n = 0; n < 40; n += 1) yield* raiseCard({ kind: "steer", push: true });
+        yield* relay.publishThread(RELEASE_HOME);
+        const state = publications.at(-1)?.state;
+        assert.strictEqual(state?.headline, "40 open decisions");
+        assert.isAtMost(state?.threadTitle.length ?? Infinity, 120);
+        assert.notInclude(JSON.stringify(state), ITEM_TEXT);
+        // The relay's 3.2 KB cap holds its five rows; one Squire row stays far below a fifth.
+        assert.isAtMost(new TextEncoder().encode(JSON.stringify(state)).byteLength, 640);
+      }),
+    ),
+  );
+
+  it.effect("records no_transport without Connect or team policy", () =>
+    Effect.gen(function* () {
+      const outcomes = [];
+      for (const options of [{ linked: false }, { canPublishActivity: false }] as const) {
+        outcomes.push(
+          yield* withSquires(
+            Effect.gen(function* () {
+              const attention = yield* SquireMobileAttention.SquireMobileAttention;
+              const { relay, publications } = yield* makeTestRelay({
+                squire: attention,
+                ...options,
+              });
+              yield* raiseCard({ kind: "steer", push: true });
+              yield* relay.publishThread(RELEASE_HOME);
+              yield* raiseCard({ kind: "proposal", push: true });
+              yield* relay.publishThread(RELEASE_HOME);
+              assert.lengthOf(publications, 0);
+              return (yield* mobileDeliveries(RELEASE)).map((row) => row.reason);
+            }),
+          ),
+        );
+      }
+      assert.deepStrictEqual(outcomes, [
+        // Never linked: Connect never turned publishing on.
+        ["disabled", "disabled"],
+        ["policy", "policy"],
+      ]);
+    }),
+  );
+
+  it.effect("records no_transport once a failed publish exhausts its retries", () =>
+    withSquires(
+      Effect.gen(function* () {
+        const attention = yield* SquireMobileAttention.SquireMobileAttention;
+        const { relay, publications } = yield* makeTestRelay({
+          squire: attention,
+          respond: () => new Response("unavailable", { status: 503 }),
+        });
+        yield* raiseCard({ kind: "steer", push: true });
+        yield* relay.publishThread(RELEASE_HOME);
+        // Still owed while a retry may succeed.
+        assert.lengthOf(yield* mobileDeliveries(RELEASE), 0);
+        for (const delay of [1_000, 2_000, 4_000, 8_000, 16_000]) {
+          yield* TestClock.adjust(delay);
+          yield* relay.drain;
+        }
+        assert.lengthOf(publications, 6);
+        assert.deepStrictEqual(
+          (yield* mobileDeliveries(RELEASE)).map((row) => `${row.outcome}:${row.reason}`),
+          ["no_transport:failed"],
+        );
+      }),
+    ),
+  );
+
+  it.effect("startup reconciles the rows and an intent a crash left without its mobile row", () =>
+    withSquires(
+      Effect.gen(function* () {
+        // Before this process: Release's intent committed, its publish never ran;
+        // the Lead's row may still sit on the relay with an emptied set.
+        yield* raiseCard({ kind: "steer", push: true });
+        const attention = yield* SquireMobileAttention.SquireMobileAttention;
+        const { relay, publications } = yield* makeTestRelay({ squire: attention });
+        yield* relay.start();
+        yield* TestClock.adjust("1 second");
+        yield* relay.drain;
+        assert.deepStrictEqual(
+          publications
+            .map((publication) => [
+              publishedThreadId(publication.url),
+              publication.state?.headline ?? null,
+            ])
+            .toSorted(),
+          [
+            [LEAD_HOME, null],
+            [RELEASE_HOME, "1 open decision"],
+          ],
+        );
+        assert.deepStrictEqual(
+          (yield* mobileDeliveries(RELEASE)).map((row) => row.outcome),
+          ["alerted"],
+        );
+      }),
+    ),
+  );
+
+  it.effect("signals a home thread on an intent, an escalation, and an emptied set", () =>
+    withSquires(
+      Effect.gen(function* () {
+        const attention = yield* SquireMobileAttention.SquireMobileAttention;
+        const signalled = yield* Queue.unbounded<ThreadId>();
+        yield* Stream.runForEach(yield* attention.subscribe, (threadId) =>
+          Queue.offer(signalled, threadId),
+        ).pipe(Effect.forkScoped);
+        const cardId = yield* raiseCard({ kind: "steer", push: true });
+        assert.strictEqual(yield* Queue.take(signalled), RELEASE_HOME);
+        yield* raiseCard({ kind: "fyi", squireId: LEAD, push: true, source: "digest" });
+        assert.strictEqual(yield* Queue.take(signalled), LEAD_HOME);
+        yield* closeCard(cardId, "dismissed");
+        assert.strictEqual(yield* Queue.take(signalled), RELEASE_HOME);
+      }),
+    ),
+  );
+
+  it.effect("never publishes a Squire's probe or other non-home thread", () =>
+    withSquires(
+      Effect.gen(function* () {
+        const attention = yield* SquireMobileAttention.SquireMobileAttention;
+        const { relay, currentShell, publications } = yield* makeTestRelay({ squire: attention });
+        yield* raiseCard({ kind: "steer", push: true });
+        yield* Ref.set(
+          currentShell,
+          shell({ id: ThreadId.make("probe"), squire: { squireId: RELEASE, role: "probe" } }),
+        );
+        yield* relay.publishThread(ThreadId.make("probe"));
+        yield* TestClock.adjust("5 seconds");
+        yield* relay.drain;
+        assert.lengthOf(publications, 0);
+        assert.lengthOf(yield* mobileDeliveries(RELEASE), 0);
+      }),
+    ),
   );
 });

@@ -177,3 +177,41 @@ export function rememberTimelinePosition(
     if (oldest !== undefined) rememberedTimelinePositions.delete(oldest);
   }
 }
+
+// Lecturn (D63): rows that close a turn without content of their own.
+const TRAILING_ROW_KINDS: ReadonlySet<string> = new Set(["assistant-meta", "working", "thinking"]);
+
+/** The newest content row's id when it is an MCP App card, else null. */
+export function timelineNewestAppCardRowId(
+  rows: ReadonlyArray<{ readonly id: string; readonly kind: string }>,
+): string | null {
+  const newest = rows.findLast((row) => !TRAILING_ROW_KINDS.has(row.kind));
+  return newest?.kind === "mcp-app" ? newest.id : null;
+}
+
+/** Below the timeline's top fade. */
+export const TIMELINE_REVEAL_TOP_GAP_PX = 12;
+
+let revealedPosition: RememberedTimelinePosition | undefined;
+
+/**
+ * Lecturn (D63): where a newly opened timeline lands. A remembered reading position always wins;
+ * otherwise `revealRowId`'s top, just below the fade, as a reading position (not at the end), so
+ * the opening scroll treats it as user-scrolled and live follow does not pull it back to the end.
+ * One entry is cached so a re-render keeps the same object and the opening scroll is not redone.
+ */
+export function resolveTimelineOpeningPosition(
+  remembered: RememberedTimelinePosition | undefined,
+  revealRowId: string | null,
+): RememberedTimelinePosition | undefined {
+  if (remembered?.atEnd === false || revealRowId === null) return remembered;
+  if (revealedPosition?.rowId !== revealRowId) {
+    revealedPosition = {
+      rowId: revealRowId,
+      offsetWithinRow: -TIMELINE_REVEAL_TOP_GAP_PX,
+      scrollOffset: 0,
+      atEnd: false,
+    };
+  }
+  return revealedPosition;
+}

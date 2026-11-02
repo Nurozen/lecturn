@@ -20,7 +20,14 @@ import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
+import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import * as Option from "effect/Option";
+import { resolveSpawnCommand } from "@lecturn/shared/shell";
+import {
+  parseGenericCliVersion,
+  spawnAndCollect,
+} from "@lecturn/provider-core/server/snapshotProbe";
 import * as EffectAcpErrors from "effect-acp/errors";
 
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
@@ -61,6 +68,7 @@ import {
   staveMemoryAcpExtraMcpServers,
 } from "@lecturn/provider-core/server/staveMemory";
 import { acpPermissionDisposition } from "@lecturn/provider-acp/server/clientPolicy";
+import { makeGrokSquireHome, type GrokSquireHome } from "./squireHome.ts";
 import { sessionModelStateFromInitialize } from "@lecturn/provider-acp/server/runtimeModel";
 import * as AcpSessionRuntime from "@lecturn/provider-acp/server/AcpSessionRuntime";
 import * as ProviderEventLoggers from "@lecturn/provider-core/server/ProviderEventLoggers";
@@ -126,6 +134,8 @@ export interface GrokAdapterV2Options {
   readonly testHooks?: Parameters<typeof makeAcpAdapterV2>[0]["testHooks"];
   /** Lecturn: Stave memory MCP servers for a session cwd. */
   readonly extraMcpServers?: Parameters<typeof makeAcpAdapterV2>[0]["extraMcpServers"];
+  /** Lecturn: where Squire homes and probes launch; without it they do not launch. */
+  readonly squireHome?: GrokSquireHome;
   readonly makeRuntime?: (
     input: AcpAdapterV2RuntimeInput,
   ) => Effect.Effect<
@@ -291,12 +301,28 @@ export function makeGrokAcpAdapterFlavor(
     makeRuntime:
       options.makeRuntime ??
       (({ runtimePolicy, ...input }) =>
-        makeGrokAcpRuntime({
-          ...input,
-          interruptPromptOnCancel: input.interruptPromptOnCancel ?? false,
-          grokSettings: options.settings,
-          environment: withAgentDeviceEnvironment(options.environment, input),
-          runtimeMode: grokLaunchRuntimeMode(runtimePolicy),
+        Effect.gen(function* () {
+          const environment = withAgentDeviceEnvironment(options.environment, input);
+          // Lecturn: a Squire never launches in the user's Grok home (A5.9).
+          const spawnError = (cause: unknown) =>
+            new EffectAcpErrors.AcpSpawnError({
+              command: options.settings.binaryPath || "grok",
+              cause,
+            });
+          const squireLaunch =
+            runtimePolicy.squireIsolation === undefined
+              ? undefined
+              : options.squireHome === undefined
+                ? yield* spawnError("This Grok instance has no Squire home.")
+                : yield* options.squireHome.prepare(environment).pipe(Effect.mapError(spawnError));
+          return yield* makeGrokAcpRuntime({
+            ...input,
+            interruptPromptOnCancel: input.interruptPromptOnCancel ?? false,
+            grokSettings: options.settings,
+            environment,
+            runtimeMode: grokLaunchRuntimeMode(runtimePolicy),
+            ...(squireLaunch === undefined ? {} : { squireLaunch }),
+          });
         })),
     // In its Auto mode Grok decides routine actions itself and only asks about
     // what its classifier blocked, so every prompt it sends goes to the user.
@@ -344,7 +370,7 @@ export function makeGrokAcpAdapterFlavor(
 export const makeGrokAdapterV2 = Effect.fn("makeGrokAdapterV2")(function* (
   options: GrokAdapterV2Options,
 ) {
-  return yield* makeAcpAdapterV2({
+  const adapter = yield* makeAcpAdapterV2({
     instanceId: options.instanceId,
     flavor: makeGrokAcpAdapterFlavor(options, yield* HostProcess.HomeDirectory),
     selfInvocation: options.selfInvocation,
@@ -355,7 +381,37 @@ export const makeGrokAdapterV2 = Effect.fn("makeGrokAdapterV2")(function* (
     ...(options.testHooks === undefined ? {} : { testHooks: options.testHooks }),
     ...(options.extraMcpServers === undefined ? {} : { extraMcpServers: options.extraMcpServers }),
   });
+  const { squireHome } = options;
+  return squireHome === undefined
+    ? adapter
+    : ProviderAdapter.ProviderAdapterV2.of({
+        ...adapter,
+        squireReadiness: squireHome.readiness(options.environment),
+      });
 });
+
+// Lecturn: the Squire version gate (squireHome.ts) reads `grok --version`; a
+// failed or slow read counts as unverified.
+export const grokCliVersion =
+  (settings: GrokSettings, spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]) =>
+  (environment: NodeJS.ProcessEnv) =>
+    Effect.gen(function* () {
+      const command = settings.binaryPath || "grok";
+      const spawn = yield* resolveSpawnCommand(command, ["--version"], { env: environment });
+      const output = yield* spawnAndCollect(
+        command,
+        ChildProcess.make(spawn.command, spawn.args, { env: environment, shell: spawn.shell }),
+      );
+      return output.code === 0
+        ? parseGenericCliVersion(`${output.stdout}\n${output.stderr}`)
+        : null;
+    }).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.scoped,
+      Effect.timeoutOption("4 seconds"),
+      Effect.map(Option.getOrNull),
+      Effect.catch(() => Effect.succeed(null)),
+    );
 
 export type GrokAdapterV2DriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -380,9 +436,19 @@ export const GrokAdapterV2Driver: ProviderAdapterDriver<GrokSettings, GrokAdapte
       const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
       const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
       const resolveStaveMemory = yield* currentStaveMemoryResolver;
+      const providerHost = yield* ProviderHost.ProviderHost;
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       return yield* makeGrokAdapterV2({
         instanceId: input.instanceId,
         extraMcpServers: staveMemoryAcpExtraMcpServers(resolveStaveMemory),
+        squireHome: makeGrokSquireHome({
+          fileSystem: yield* FileSystem.FileSystem,
+          path: yield* Path.Path,
+          stateDir: providerHost.paths.stateDir,
+          instanceId: input.instanceId,
+          homeDirectory: yield* HostProcess.HomeDirectory,
+          cliVersion: grokCliVersion(input.config, spawner),
+        }),
         settings: { ...input.config, enabled: input.enabled },
         environment: yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
         hostPlatform,

@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 2,
+  "id": "05-merged-propose-thread",
+  "setup": {
+    "squire": {
+      "name": "Release",
+      "brief": "Done means CI green and PR approved. Stay quiet on routine progress. Prefer small, specific steers. After each merge in the release saga, make sure the changelog gets updated.",
+      "provider": "under-test",
+      "createdAt": "2026-10-01T09:00:00Z",
+      "timezone": "America/Los_Angeles"
+    },
+    "scope": [
+      {
+        "kind": "project",
+        "name": "billing-service"
+      },
+      {
+        "kind": "project",
+        "name": "Observatory"
+      },
+      {
+        "kind": "staveSaga",
+        "name": "v2.5 release",
+        "covers": ["billing-service"]
+      }
+    ],
+    "threads": [
+      {
+        "threadId": "thr_fix_invoice_rounding",
+        "title": "Fix invoice rounding",
+        "project": "billing-service",
+        "provider": "claudeAgent"
+      }
+    ],
+    "permissions": {
+      "steer": "recommend",
+      "createThread": "recommend",
+      "notify": "on"
+    },
+    "undoWindowSeconds": 10,
+    "budgetUsage": {
+      "steersPerDay": {
+        "used": 0,
+        "limit": 10
+      },
+      "threadsPerDay": {
+        "used": 0,
+        "limit": 3
+      },
+      "steersPerThreadPerHour": {
+        "limit": 2,
+        "usedByThread": {}
+      }
+    }
+  },
+  "events": [
+    {
+      "type": "pull-request-changed",
+      "summary": {
+        "threadId": "thr_fix_invoice_rounding",
+        "threadTitle": "Fix invoice rounding",
+        "project": "billing-service",
+        "provider": "claudeAgent",
+        "turnId": "t_44",
+        "outcome": "finished",
+        "summaryStatus": "complete",
+        "goal": "Fix one-cent rounding errors on EUR invoice totals",
+        "completed": ["Opened PR #318"],
+        "remaining": [],
+        "blocked": [],
+        "files": {
+          "entries": [],
+          "counts": {
+            "added": 0,
+            "modified": 0,
+            "deleted": 0
+          }
+        },
+        "commands": [],
+        "pullRequest": {
+          "repository": "billing-service",
+          "number": 318,
+          "headSha": "c71d0a8",
+          "transition": "merged",
+          "baseBranch": "main",
+          "checks": {
+            "passed": 12,
+            "failed": 0,
+            "failingJobs": []
+          },
+          "review": "approved",
+          "mergeable": null,
+          "merged": true,
+          "closed": false
+        },
+        "pendingQuestion": null,
+        "suggestedNextStep": null
+      }
+    }
+  ],
+  "expected": {
+    "toolCalls": [
+      {
+        "anyOf": ["squire_propose_thread", "squire_create_thread"]
+      }
+    ],
+    "cardTarget": {
+      "newThread": true,
+      "project": "billing-service",
+      "provider": "claudeAgent"
+    },
+    "effects": {
+      "proposal_created": 1,
+      "notification_pushed": 1
+    },
+    "mustNotHappen": ["thread_created", "action_held", "card_created", "steer_sent"],
+    "ignore": ["squire_list_tracked", "squire_get_summary", "squire_get_detail"]
+  }
+}

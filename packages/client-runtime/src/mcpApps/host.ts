@@ -11,6 +11,8 @@ import {
   readMcpAppToolOutcome,
   type McpAppReference,
 } from "@lecturn/shared/mcpApp";
+import { parseSquireLink, type SquireLink } from "@lecturn/shared/promptLinks";
+import { LECTURN_MCP_APP_SERVER } from "@lecturn/shared/toolOutput";
 import * as Base64 from "effect/encoding/Base64";
 import * as Predicate from "effect/Predicate";
 import * as Result from "effect/Result";
@@ -102,6 +104,11 @@ export interface McpAppHostOptions {
     readonly refPrefixes: () => ReadonlyArray<string>;
     readonly open: (ref: string) => Promise<void>;
   };
+  /**
+   * Cards Lecturn serves only: a `lecturn://squires/...` link opens that Squire or room in
+   * Lecturn. Any other app, and any other `lecturn://` link, is refused.
+   */
+  readonly openSquireLink?: (link: SquireLink) => Promise<void>;
   readonly sendMessage: (text: string) => Promise<void>;
   /** Replaces what this app tells the agent on its next turn; undefined content clears it. */
   readonly updateModelContext: (context: {
@@ -288,6 +295,15 @@ export function makeMcpAppHost(options: McpAppHostOptions): McpAppHost {
           appRef.refPrefixes().some((prefix) => prefix !== "" && url.startsWith(prefix))
         ) {
           answer(id, () => appRef.open(url).then(() => ({})));
+          return;
+        }
+        const squireLink =
+          typeof url === "string" && options.app.server === LECTURN_MCP_APP_SERVER
+            ? parseSquireLink(url)
+            : null;
+        const openSquireLink = options.openSquireLink;
+        if (squireLink !== null && openSquireLink !== undefined) {
+          answer(id, () => openSquireLink(squireLink).then(() => ({})));
           return;
         }
         if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {

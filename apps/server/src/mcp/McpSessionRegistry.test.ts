@@ -1,6 +1,13 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { AppId, EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@lecturn/contracts";
+import {
+  AppId,
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  SquireId,
+  ThreadId,
+} from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import { HttpServer } from "effect/http";
 import * as NetAddress from "effect/net/NetAddress";
@@ -199,5 +206,39 @@ it.effect("hands adapters an app thread's tool names, and nothing on other threa
       appTools,
     });
     expect(plain.config.app).toBeUndefined();
+  }),
+);
+
+it.effect("issues a Squire home credential with only the squire capability and its scope", () =>
+  Effect.gen(function* () {
+    const registry = yield* makeRegistry(() => 1_000);
+    const squire = { squireId: SquireId.make("squire-1"), role: "lead" as const };
+    const issued = yield* registry.issue({
+      threadId: ThreadId.make("thread-squire-home"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      browserToolsAvailable: true,
+      capabilities: new Set(["preview", "device"]),
+      app: { appId: AppId.make("dev.lecturn.counter"), projectId: ProjectId.make("project-app") },
+      appTools: { toolPrefix: "ex", toolNames: ["ex_increment"] },
+      squire,
+    });
+    const resolved = yield* registry.resolve(
+      issued.config.authorizationHeader.replace(/^Bearer\s+/, ""),
+    );
+    expect(resolved?.capabilities).toEqual(new Set(["squire"]));
+    expect(resolved?.squire).toEqual(squire);
+    expect(resolved?.app).toBeUndefined();
+    expect(issued.config.browserToolsAvailable).toBe(false);
+    expect(issued.config.app).toBeUndefined();
+
+    const plain = yield* registry.issue({
+      threadId: ThreadId.make("thread-plain"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+    });
+    const plainScope = yield* registry.resolve(
+      plain.config.authorizationHeader.replace(/^Bearer\s+/, ""),
+    );
+    expect(plainScope?.squire).toBeUndefined();
+    expect(plainScope?.capabilities.has("squire")).toBe(false);
   }),
 );

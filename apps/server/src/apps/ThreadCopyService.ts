@@ -384,11 +384,13 @@ const make = Effect.gen(function* () {
         .getShellSnapshot({ projectId: row.projectId, location: "active" })
         .pipe(Effect.mapError(unavailable("Could not read threads")));
       // The app's rail: subagent children belong to their parent's turn.
+      // Lecturn: a Squire's threads belong to its Squire, never to a copy.
       const shells = snapshot.threads.filter(
         (shell) =>
           shell.projectId === row.projectId &&
           shell.deletedAt === null &&
-          shell.lineage.relationshipToParent !== "subagent",
+          shell.lineage.relationshipToParent !== "subagent" &&
+          shell.squire === undefined,
       );
       const revisions = yield* readHistoryRevisions(shells.map((shell) => shell.id)).pipe(
         Effect.provideService(SqlClient.SqlClient, sql),

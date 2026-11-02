@@ -679,6 +679,14 @@ const turnTokenUsage = (turn: ActiveTurn, status: OrchestrationV2ProviderTurn["s
         hasSubagents: turn.usedSubagents,
       };
 
+/**
+ * Lecturn: one 2.x server serves every thread of an instance and loads the
+ * user's instruction files, skills, and MCP servers for all of them, so a
+ * Squire home or probe cannot be isolated per session (A5.9).
+ */
+const OPENCODE2_SQUIRE_UNSUPPORTED =
+  "OpenCode 2 runs every thread on one shared server, so Lecturn cannot yet keep a Squire away from your own OpenCode instructions, skills, and tools.";
+
 export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: ProviderInstanceId) {
   const server = yield* OpenCode2Server.OpenCode2Server;
   const idAllocator = yield* IdAllocator.IdAllocatorV2;
@@ -3109,7 +3117,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       }
       const instructions = [
         buildRuntimeInstructions({ harness: "OpenCode", model: turnInput.modelSelection.model }),
-        lecturnOrchestrationSystemPrompt(mcpAvailable),
+        lecturnOrchestrationSystemPrompt(mcpAvailable, turnInput.squireInstructions),
         connectedAppInstructionsSection(turnInput.appInstructions),
       ]
         .filter((part) => part !== undefined && part.length > 0)
@@ -4089,10 +4097,17 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
     driver,
     getCapabilities: () => Effect.succeed(OpenCode2ProviderCapabilities),
     planSelectionTransition: () => Effect.succeed(turnScopedSelectionTransition()),
+    squireReadiness: Effect.succeed(OPENCODE2_SQUIRE_UNSUPPORTED),
     // The session borrows the instance's server for as long as it is open, so a
     // spawned server is not idle-stopped under a long tool call.
     openSession: (input) =>
       Effect.gen(function* () {
+        if (input.runtimePolicy.squireIsolation !== undefined) {
+          return yield* new OpenCodeRuntime.OpenCodeRuntimeError({
+            operation: "openSession",
+            detail: OPENCODE2_SQUIRE_UNSUPPORTED,
+          });
+        }
         const scope = yield* Scope.make();
         yield* Effect.addFinalizer((exit) => Scope.close(scope, exit));
         const connection = yield* borrow.pipe(Effect.provideService(Scope.Scope, scope));

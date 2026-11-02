@@ -173,6 +173,25 @@ describe("searchSettings", () => {
     });
   });
 
+  it("offers Squire settings only when an environment runs Squires", () => {
+    const base = {
+      hasCloudPublicConfig: false,
+      hasEnvironment: true,
+      hasProviderSettingsEnvironment: true,
+      hasMacProviderSettingsEnvironment: false,
+      canManageLocalBackend: true,
+      isWslSettingsRowVisible: false,
+      hasThreadAutoSettlement: false,
+      hasStave: false,
+    };
+    const squireIds = (hasSquires: boolean) =>
+      filterAvailableSettingsSearchItems({ ...base, hasSquires })
+        .filter((item) => item.to === "/settings/squires")
+        .map((item) => item.id);
+    expect(squireIds(false)).toEqual([]);
+    expect(squireIds(true)).toContain("squires-phone-alerts");
+  });
+
   it("hides settings whose controls are unavailable", () => {
     const available = filterAvailableSettingsSearchItems({
       hasCloudPublicConfig: false,

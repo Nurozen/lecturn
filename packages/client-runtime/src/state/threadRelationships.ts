@@ -5,6 +5,8 @@ import type {
 } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
 
+import { isHiddenSquireThread, type ThreadListingCapabilities } from "./threadShell.ts";
+
 export type ThreadRelationshipKind = "parent" | "fork" | "subagent" | "transfer";
 
 export interface ThreadRelationshipNode {
@@ -48,9 +50,12 @@ function edgeKey(edge: ThreadRelationshipEdge): string {
 export function deriveThreadRelationshipGraph(input: {
   readonly threads: ReadonlyArray<OrchestrationV2ThreadShell>;
   readonly projection: OrchestrationV2ThreadProjection | null;
+  /** The environment's; probes it hides never appear as forks. */
+  readonly capabilities?: ThreadListingCapabilities | null | undefined;
 }): ThreadRelationshipGraph {
   const threadsById = new Map<ThreadId, OrchestrationV2ThreadShell>();
   for (const thread of input.threads) {
+    if (isHiddenSquireThread(thread, input.capabilities)) continue;
     // Callers order shells from most to least authoritative. In particular,
     // live shells precede archived snapshots, which may still contain a stale
     // copy during archive refresh.

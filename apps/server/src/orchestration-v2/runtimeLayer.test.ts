@@ -4994,6 +4994,7 @@ it.layer(layerSharedApplicationDataPlaneTest)("pending provider interruption", (
         threadId,
         runId: run.id,
         reason: "Cancelled before provider start",
+        createdBy: "user",
       });
       assert.equal(interrupt.type, "interrupt_requested");
 

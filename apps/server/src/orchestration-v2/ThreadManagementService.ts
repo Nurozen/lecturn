@@ -56,6 +56,7 @@ import { DispatchModeLimit, exceededDispatchModeLimit } from "./DispatchModeLimi
 import { projectTurnItemForDetail } from "./WireProjection.ts";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { isSquireThread } from "../squire/squireThread.ts";
 
 export type ThreadManagementSendMode = "auto" | "queue" | "steer" | "restart";
 
@@ -75,6 +76,9 @@ export function withCreationProvenance(
     case "thread.merge_back":
     case "delegated_task.request":
       return { ...command, ...provenance };
+    // Lecturn: overwrites any client-sent actor, so a client cannot pose as an agent or the server.
+    case "run.interrupt":
+      return { ...command, createdBy: provenance.createdBy };
     default:
       return command;
   }
@@ -164,6 +168,8 @@ export interface ThreadManagementInterruptInput {
   readonly threadId: ThreadId;
   readonly runId?: RunId;
   readonly reason?: string;
+  /** Lecturn: who asked for the stop, recorded on the interrupt request. */
+  readonly createdBy: OrchestrationV2Actor;
 }
 
 export type ThreadManagementInterruptResult =
@@ -738,7 +744,9 @@ const make = Effect.gen(function* () {
         snapshot.threads
           .filter(
             (thread) =>
-              input.includeSubagents || thread.lineage.relationshipToParent !== "subagent",
+              // Lecturn: a Squire's own threads are not the user's work, so agents never list them.
+              !isSquireThread(thread) &&
+              (input.includeSubagents || thread.lineage.relationshipToParent !== "subagent"),
           )
           .toSorted(
             (left, right) =>
@@ -1002,6 +1010,7 @@ const make = Effect.gen(function* () {
         threadId: input.threadId,
         runId: interruptibleRun.id,
         ...(input.reason === undefined ? {} : { reason: input.reason }),
+        createdBy: input.createdBy,
       });
       return { type: "interrupt_requested", run: interruptibleRun, dispatch } as const;
     });
@@ -1104,6 +1113,8 @@ const make = Effect.gen(function* () {
           commandId: CommandId.make(`${input.commandId}:stop:${threadId}`),
           threadId,
           ...(input.reason === undefined ? {} : { reason: input.reason }),
+          // Lecturn: a cascaded stop is the server's, whoever stopped the parent.
+          createdBy: "system",
         }).pipe(
           Effect.andThen(stopDelegatedTasks({ ...input, threadId })),
           Effect.catch((error) =>

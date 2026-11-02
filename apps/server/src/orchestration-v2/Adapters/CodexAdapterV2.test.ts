@@ -73,6 +73,7 @@ import type * as ProviderContinuationRequests from "@lecturn/provider-core/serve
 import { stripUnservedToolOutputImageBytes } from "../toolOutputImageBytes.ts";
 import { projectTurnItemForDetail, projectTurnItemForWire } from "../WireProjection.ts";
 import * as CodexAdapterV2 from "./CodexAdapterV2.ts";
+import { CodexSquireSessionMismatchError } from "../../provider/Drivers/CodexSquireHome.ts";
 import { makeReplayServerConfig, withCodexReplayChildMetadata } from "./CodexAdapterV2.testkit.ts";
 import * as CodexAdapterV2Testkit from "./CodexAdapterV2.testkit.ts";
 
@@ -10071,5 +10072,511 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         ),
       ),
     );
+  });
+});
+
+describe("CodexAdapterV2 Squire isolation", () => {
+  const SQUIRE_CWD = "/squire-scratch";
+  const squirePolicy = (squireIsolation: "home" | "probe") =>
+    ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      cwd: SQUIRE_CWD,
+      squireIsolation,
+    });
+  const mcpSessionFor = (threadId: ThreadId) => ({
+    environmentId: EnvironmentId.make("environment-codex-squire"),
+    threadId,
+    providerSessionId: `mcp-session-${threadId}`,
+    providerInstanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
+    endpoint: "http://127.0.0.1:43123/mcp",
+    authorizationHeader: "Bearer squire-credential",
+    browserToolsAvailable: false,
+  });
+  const LECTURN = {
+    url: "http://127.0.0.1:43123/mcp",
+    tool_timeout_sec: 3_900,
+    http_headers: { Authorization: "Bearer squire-credential" },
+  };
+  const STAVE_MEMORY = { stave_memory: { command: "stave-memory", args: ["serve"] } };
+
+  it("keeps ordinary threads' Stave memory and Lecturn servers as before", () => {
+    const threadId = ThreadId.make("thread-codex-ordinary");
+    assert.deepEqual(
+      CodexAdapterV2.codexThreadRuntimeParams({
+        mcpSession: mcpSessionFor(threadId),
+        extraMcpServers: STAVE_MEMORY,
+        configuredMcpServerNames: ["github"],
+        runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+      }).config,
+      {
+        ...CodexAdapterV2.CODEX_THREAD_CONFIG,
+        mcp_servers: { ...STAVE_MEMORY, lecturn: LECTURN },
+      },
+    );
+  });
+
+  // The keys S0a2's request capture showed close each exposure (Codex 0.165.0).
+  it.each(["home", "probe"] as const)(
+    "turns off goals, memories, sub-agents, skills, and user hooks for a %s",
+    (role) => {
+      const { config } = CodexAdapterV2.codexThreadRuntimeParams({
+        mcpSession: mcpSessionFor(ThreadId.make(`thread-codex-squire-${role}-tools`)),
+        runtimePolicy: squirePolicy(role),
+      });
+      assert.deepInclude(config, {
+        "features.goals": false,
+        "features.memories": false,
+        "features.multi_agent": false,
+        "features.multi_agent_v2": false,
+        "features.image_generation": false,
+        "features.hooks": false,
+        "skills.include_instructions": false,
+        "tools.update_plan.enabled": false,
+        "tools.experimental_request_user_input.enabled": false,
+        web_search: "disabled",
+        notify: [],
+      });
+      // Only a home loses the shell and project docs; a probe reads its target's workspace.
+      const homeOnly = {
+        "features.shell_tool": false,
+        "features.unified_exec": false,
+        "features.view_image": false,
+        project_doc_max_bytes: 0,
+      };
+      if (role === "home") assert.deepInclude(config, homeOnly);
+      else for (const key of Object.keys(homeOnly)) assert.notProperty(config, key);
+    },
+  );
+
+  it("leaves an ordinary thread's native tools and user context alone", () => {
+    const { config } = CodexAdapterV2.codexThreadRuntimeParams({
+      mcpSession: undefined,
+      runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+    });
+    assert.deepEqual(config, CodexAdapterV2.CODEX_THREAD_CONFIG);
+  });
+
+  it.effect.each(["home", "probe"] as const)(
+    "runs a %s turn with approvalPolicy never in a read-only sandbox",
+    (role) =>
+      Effect.gen(function* () {
+        const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+          nativeThreadId: "native-squire",
+          codexInput: [{ type: "text", text: "Report.", text_elements: [] }],
+          runtimePolicy: { ...squirePolicy(role), interactionMode: "plan" },
+          modelSelection: CODEX_TEST_MODEL_SELECTION,
+          hasLecturnMcp: role === "home",
+        });
+        assert.equal(params.approvalPolicy, "never");
+        assert.deepEqual(params.sandboxPolicy, { type: "readOnly", networkAccess: false });
+        assert.notEqual(params.collaborationMode?.mode, "plan");
+      }),
+  );
+
+  // Every path that hands Codex thread config: start, resume, and native fork.
+  it.effect.each(["home", "probe"] as const)(
+    "gives a %s's start, resume, and fork only Lecturn's server or none",
+    (role) =>
+      Effect.gen(function* () {
+        const nativeThreadId = `squire-${role}-thread`;
+        const forkNativeThreadId = `squire-${role}-fork`;
+        const threadId = ThreadId.make(`thread-codex-squire-${role}`);
+        const forkTargetId = ThreadId.make(`thread-codex-squire-${role}-fork`);
+        const sessions = yield* McpProviderSessions.McpProviderSessions;
+        // A session exists even for the probe, so the adapter's own drop is tested.
+        yield* sessions.set(mcpSessionFor(threadId));
+        yield* sessions.set(mcpSessionFor(forkTargetId));
+        const preamble = codexReplayPreamble({
+          nativeThreadId,
+          nativeTurnId: "unused",
+          prompt: "unused",
+        });
+        const startEntry = preamble[4] as {
+          readonly frame: { readonly result: { thread: object } };
+        };
+        const startResult = startEntry.frame.result;
+        const config = {
+          ...CodexAdapterV2.CODEX_THREAD_CONFIG,
+          "features.plugins": false,
+          "features.apps": false,
+          ...CodexAdapterV2.CODEX_SQUIRE_THREAD_CONFIG,
+          ...(role === "home" ? CodexAdapterV2.CODEX_SQUIRE_HOME_THREAD_CONFIG : {}),
+          mcp_servers: {
+            github: { enabled: false },
+            "acme.docs": { enabled: false },
+            // A home's credential lists only its gated Squire tools, so the
+            // whole server is approved; an ordinary thread's is not.
+            ...(role === "home"
+              ? { lecturn: { ...LECTURN, default_tools_approval_mode: "approve" } }
+              : {}),
+          },
+        };
+        const configRead = (id: number): Array<CodexReplay.CodexAppServerReplayEntry> => [
+          {
+            type: "expect_outbound",
+            label: "config/read",
+            frame: { id, method: "config/read", params: { cwd: SQUIRE_CWD } },
+          },
+          {
+            type: "emit_inbound",
+            label: "config/read",
+            frame: {
+              id,
+              result: {
+                config: {
+                  mcp_servers: {
+                    github: { command: "gh-mcp" },
+                    "acme.docs": { url: "https://docs.example/mcp" },
+                  },
+                },
+                origins: {},
+              },
+            },
+          },
+        ];
+        const threadParams = { cwd: SQUIRE_CWD, model: CODEX_TEST_MODEL_SELECTION.model, config };
+        const sent: Array<{ readonly method: string; readonly params: unknown }> = [];
+        const transcript = makeCodexReplayTranscript({
+          scenario: `codex-squire-${role}`,
+          entries: [
+            ...preamble.slice(0, 3),
+            ...configRead(2),
+            {
+              type: "expect_outbound",
+              label: "thread/start",
+              frame: { id: 3, method: "thread/start", params: threadParams },
+            },
+            { type: "emit_inbound", label: "thread/start", frame: { id: 3, result: startResult } },
+            ...configRead(4),
+            {
+              type: "expect_outbound",
+              label: "thread/resume",
+              frame: {
+                id: 5,
+                method: "thread/resume",
+                params: { threadId: nativeThreadId, excludeTurns: true, ...threadParams },
+              },
+            },
+            {
+              type: "emit_inbound",
+              label: "thread/resume",
+              frame: {
+                id: 5,
+                result: { thread: { id: nativeThreadId, updatedAt: 1782622450, turns: [] } },
+              },
+            },
+            ...configRead(6),
+            {
+              type: "expect_outbound",
+              label: "thread/fork",
+              frame: {
+                id: 7,
+                method: "thread/fork",
+                params: { threadId: nativeThreadId, ...threadParams },
+              },
+            },
+            {
+              type: "emit_inbound",
+              label: "thread/fork",
+              frame: {
+                id: 7,
+                result: {
+                  ...startResult,
+                  thread: {
+                    ...startResult.thread,
+                    id: forkNativeThreadId,
+                    sessionId: forkNativeThreadId,
+                    forkedFromId: nativeThreadId,
+                  },
+                },
+              },
+            },
+          ],
+        });
+        const clientFactory: CodexAdapterV2.CodexAppServerClientFactoryShape = {
+          open: (openInput) =>
+            Layer.build(CodexReplay.layerReplay(transcript)).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapter.ProviderAdapterOpenSessionError({
+                    driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+                    providerSessionId: openInput.providerSessionId,
+                    cause,
+                  }),
+              ),
+              Effect.flatMap((context) =>
+                Effect.service(CodexClient.CodexAppServerClient).pipe(
+                  // The replay ignores thread `mcp_servers`, `cwd`, and `model`,
+                  // so the sent params are captured and compared whole.
+                  Effect.map(
+                    (client) =>
+                      ({
+                        ...client,
+                        request: (method, params) =>
+                          Effect.sync(() => sent.push({ method, params })).pipe(
+                            Effect.andThen(client.request(method, params)),
+                          ),
+                        raw: {
+                          ...client.raw,
+                          request: (method, params) =>
+                            Effect.sync(() => sent.push({ method, params })).pipe(
+                              Effect.andThen(client.raw.request(method, params)),
+                            ),
+                        },
+                      }) satisfies CodexClient.CodexAppServerClient["Service"],
+                  ),
+                  Effect.provide(context),
+                ),
+              ),
+            ),
+        };
+        let staveMemoryResolved = false;
+        const adapter = yield* CodexAdapterV2.makeCodexAdapterV2({
+          instanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
+          settings: DEFAULT_CODEX_SETTINGS,
+          environment: {},
+          clientFactory,
+          crypto: yield* Crypto.Crypto,
+          fileSystem: yield* FileSystem.FileSystem,
+          idAllocator: yield* IdAllocator.IdAllocatorV2,
+          serverConfig: yield* makeReplayServerConfig(transcript.scenario).pipe(Effect.orDie),
+          resolveExtraMcpServers: () =>
+            Effect.sync(() => {
+              staveMemoryResolved = true;
+              return STAVE_MEMORY;
+            }),
+        });
+        const runtimePolicy = squirePolicy(role);
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make(`provider-session-codex-squire-${role}`),
+          modelSelection: CODEX_TEST_MODEL_SELECTION,
+          runtimePolicy,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: CODEX_TEST_MODEL_SELECTION,
+          runtimePolicy,
+        });
+        yield* runtime.resumeThread({
+          providerThread,
+          modelSelection: CODEX_TEST_MODEL_SELECTION,
+          runtimePolicy,
+        });
+        const forked = yield* runtime.forkThread({
+          sourceProviderThread: providerThread,
+          targetThreadId: forkTargetId,
+          modelSelection: CODEX_TEST_MODEL_SELECTION,
+          runtimePolicy,
+        });
+        assert.equal(forked.nativeThreadRef?.nativeId, forkNativeThreadId);
+        assert.isFalse(staveMemoryResolved, "a Squire session never resolves Stave memory");
+        // The Squire session runs in the Squire CODEX_HOME, so an ordinary
+        // thread is refused before Codex sees a request.
+        const mismatch = yield* runtime
+          .ensureThread({
+            threadId: ThreadId.make(`thread-codex-ordinary-on-${role}`),
+            modelSelection: CODEX_TEST_MODEL_SELECTION,
+            runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+          })
+          .pipe(Effect.flip);
+        assert.instanceOf(mismatch.cause, CodexSquireSessionMismatchError);
+        assert.deepEqual(
+          sent.filter(({ method }) => method !== "initialize"),
+          [
+            { method: "config/read", params: { cwd: SQUIRE_CWD } },
+            { method: "thread/start", params: threadParams },
+            { method: "config/read", params: { cwd: SQUIRE_CWD } },
+            {
+              method: "thread/resume",
+              params: { threadId: nativeThreadId, excludeTurns: true, ...threadParams },
+            },
+            { method: "config/read", params: { cwd: SQUIRE_CWD } },
+            { method: "thread/fork", params: { threadId: nativeThreadId, ...threadParams } },
+          ],
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provideServiceEffect(
+          HostProcess.HomeDirectory,
+          Effect.flatMap(FileSystem.FileSystem, (fs) =>
+            fs.makeTempDirectoryScoped({ prefix: "lecturn-codex-squire-user-" }).pipe(
+              // A Squire session needs the source home's file login.
+              Effect.tap((home) =>
+                fs
+                  .makeDirectory(`${home}/.codex`)
+                  .pipe(Effect.andThen(fs.writeFileString(`${home}/.codex/auth.json`, "{}"))),
+              ),
+              Effect.orDie,
+            ),
+          ),
+        ),
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+  );
+
+  describe("Squire CODEX_HOME", () => {
+    // What a user's home holds that reaches an ordinary thread's prompt.
+    const USER_CONTEXT = ["AGENTS.md", "config.toml", "skills", "memories", "plugins", "rules"];
+    const makeSourceHome = Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const source = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-codex-source-home-" });
+      yield* fs.writeFileString(path.join(source, "auth.json"), '{"auth_mode":"chatgpt"}');
+      yield* fs.writeFileString(path.join(source, "AGENTS.md"), "Always say PINEAPPLE.");
+      yield* fs.writeFileString(path.join(source, "config.toml"), 'model = "user-model"\n');
+      yield* fs.writeFileString(path.join(source, "state_5.sqlite"), "");
+      for (const directory of ["skills/sentinel", "memories", "plugins/cache", "rules"]) {
+        yield* fs.makeDirectory(path.join(source, directory), { recursive: true });
+      }
+      yield* fs.writeFileString(path.join(source, "memories", "memory_summary.md"), "otters");
+      return source;
+    });
+    const openCaptured = (input: {
+      readonly settings: CodexSettings;
+      readonly environment: NodeJS.ProcessEnv;
+      readonly serverConfig: ServerConfig.ServerConfig["Service"];
+      readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
+      readonly providerSessionId: ProviderSessionId;
+    }) =>
+      Effect.gen(function* () {
+        let opened: { settings: CodexSettings; environment: NodeJS.ProcessEnv } | undefined;
+        const adapter = yield* CodexAdapterV2.makeCodexAdapterV2({
+          instanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
+          settings: input.settings,
+          environment: input.environment,
+          crypto: yield* Crypto.Crypto,
+          clientFactory: {
+            open: (openInput) => {
+              opened = { settings: openInput.settings, environment: openInput.environment };
+              return Effect.fail(
+                new ProviderAdapter.ProviderAdapterOpenSessionError({
+                  driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+                  providerSessionId: openInput.providerSessionId,
+                  cause: "captured",
+                }),
+              );
+            },
+          },
+          fileSystem: yield* FileSystem.FileSystem,
+          idAllocator: yield* IdAllocator.IdAllocatorV2,
+          serverConfig: input.serverConfig,
+        });
+        const exit = yield* adapter
+          .openSession({
+            threadId: ThreadId.make("thread-codex-squire-home-env"),
+            providerSessionId: input.providerSessionId,
+            modelSelection: CODEX_TEST_MODEL_SELECTION,
+            runtimePolicy: input.runtimePolicy,
+          })
+          .pipe(Effect.scoped, Effect.exit);
+        return { opened, exit };
+      });
+
+    it.effect(
+      "opens a marked session in the instance's Squire home with only the login, and an ordinary one in the instance's home",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const source = yield* makeSourceHome;
+          const serverConfig = yield* makeReplayServerConfig("squire-home").pipe(Effect.orDie);
+          const settings = { ...DEFAULT_CODEX_SETTINGS, homePath: source };
+          const environment = {
+            PATH: "/usr/bin",
+            CODEX_HOME: "/elsewhere",
+            LECTURN_CODEX_LAUNCH_ARGS: "--enable env-feature",
+          };
+          const squireHome = path.join(
+            serverConfig.stateDir,
+            "providers",
+            "codex",
+            CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
+            "squire-home",
+          );
+
+          const marked = yield* openCaptured({
+            settings,
+            environment,
+            serverConfig,
+            runtimePolicy: squirePolicy("home"),
+            providerSessionId: ProviderSessionId.make("provider-session-codex-squire-home-env"),
+          });
+          assert.equal(marked.opened?.settings.homePath, squireHome);
+          assert.equal(
+            marked.opened?.settings.launchArgs,
+            `--enable env-feature -c 'cli_auth_credentials_store="file"'`,
+          );
+          assert.notProperty(marked.opened?.environment ?? {}, "CODEX_HOME");
+          assert.notProperty(marked.opened?.environment ?? {}, "LECTURN_CODEX_LAUNCH_ARGS");
+          // The login is the source's own file, so a refresh from either home lands in one place.
+          assert.equal(
+            yield* fs.readLink(path.join(squireHome, "auth.json")),
+            path.join(source, "auth.json"),
+          );
+          assert.equal(
+            yield* fs.readFileString(path.join(squireHome, "auth.json")),
+            '{"auth_mode":"chatgpt"}',
+          );
+          const entries = yield* fs.readDirectory(squireHome);
+          for (const name of USER_CONTEXT) assert.notInclude(entries, name);
+          assert.includeMembers(entries, ["auth.json", "sessions", "state_5.sqlite"]);
+
+          const ordinary = yield* openCaptured({
+            settings,
+            environment,
+            serverConfig,
+            runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+            providerSessionId: ProviderSessionId.make("provider-session-codex-ordinary-env"),
+          });
+          assert.equal(ordinary.opened?.settings.homePath, source);
+          assert.equal(ordinary.opened?.settings.launchArgs, settings.launchArgs);
+          assert.equal(ordinary.opened?.environment.CODEX_HOME, "/elsewhere");
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          ),
+        ),
+    );
+
+    it.effect("never opens the instance's shared session for a marked thread", () =>
+      Effect.gen(function* () {
+        const source = yield* makeSourceHome;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const { opened, exit } = yield* openCaptured({
+          settings: { ...DEFAULT_CODEX_SETTINGS, homePath: source },
+          environment: {},
+          serverConfig: yield* makeReplayServerConfig("squire-shared").pipe(Effect.orDie),
+          runtimePolicy: squirePolicy("probe"),
+          providerSessionId: idAllocator.derive.providerSession({
+            providerInstanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
+          }),
+        });
+        assert.isUndefined(opened, "no app-server was started");
+        assert.isTrue(exit._tag === "Failure");
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    );
+  });
+
+  it("sends a probe with no configured server no mcp_servers at all", () => {
+    const params = CodexAdapterV2.codexThreadRuntimeParams({
+      mcpSession: mcpSessionFor(ThreadId.make("thread-codex-probe-empty")),
+      extraMcpServers: STAVE_MEMORY,
+      configuredMcpServerNames: [],
+      runtimePolicy: squirePolicy("probe"),
+    });
+    assert.notProperty(params.config, "mcp_servers");
+    assert.propertyVal(params.config, "features.plugins", false);
+    assert.propertyVal(params.config, "features.apps", false);
   });
 });

@@ -1,5 +1,7 @@
 import { ContextualRouteScreen } from "./features/contextual/ContextualRouteScreen";
 import { DecisionsRouteScreen } from "./features/decisions/DecisionsRouteScreen";
+import { SquireRoomRouteScreen } from "./features/squires/SquireRoomRouteScreen";
+import { SquireRouteScreen } from "./features/squires/SquireRouteScreen";
 import { ComponentCatalogScreen } from "./features/development/ComponentCatalogScreen";
 import { PullRequestGuideStopScreen } from "./features/pull-requests/guide/PullRequestGuideScreen";
 import { PullRequestInlineCommentScreen } from "./features/pull-requests/PullRequestInlineCommentScreen";
@@ -752,6 +754,17 @@ const RootStackConfig = createWorkspaceStackNavigator({
       screen: DecisionsRouteScreen,
       linking: "decisions/:environmentId/:projectId",
       options: { ...SOLID_HEADER_OPTIONS, title: "Decisions" },
+    }),
+    // Lecturn: Squire queue and room screens (capability-gated inside the screens).
+    Squire: createNativeStackScreen({
+      screen: SquireRouteScreen,
+      linking: "squires/:environmentId/:squireId",
+      options: { ...SOLID_HEADER_OPTIONS, title: "" },
+    }),
+    SquireRoom: createNativeStackScreen({
+      screen: SquireRoomRouteScreen,
+      linking: "squires/:environmentId/rooms/:roomId",
+      options: { ...SOLID_HEADER_OPTIONS, title: "Room" },
     }),
     PullRequestWatch: createNativeStackScreen({
       screen: PullRequestWatchRouteScreen,

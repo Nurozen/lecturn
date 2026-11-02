@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "steps": [
+    {
+      "onEvent": "voice-note",
+      "toolCalls": [
+        {
+          "name": "squire_send_steer",
+          "args": {
+            "threadId": "thr_fix_invoice_rounding",
+            "reason": "Voice note: \"tell the billing thread to rerun the e2e suite and ping me when it's green.\"",
+            "steer": "Rerun the e2e suite (api-e2e). When it passes, say so in one line so I get notified."
+          }
+        }
+      ]
+    }
+  ]
+}

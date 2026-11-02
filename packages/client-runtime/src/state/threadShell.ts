@@ -1,5 +1,6 @@
 import type {
   EnvironmentId,
+  ExecutionEnvironmentCapabilities,
   OrchestrationV2ShellSnapshot,
   ProjectId,
   ScopedProjectRef,
@@ -93,6 +94,42 @@ export function childThreadInputsTitle(
     : `${children.length} subagents need ${need}`;
 }
 
+export type ThreadListingCapabilities = Pick<ExecutionEnvironmentCapabilities, "squire">;
+
+/** Environments whose capabilities hide Squire threads, keyed for `isListedThread`. */
+export type ThreadListingCapabilitiesByEnvironment = ReadonlyMap<
+  EnvironmentId,
+  ThreadListingCapabilities
+>;
+
+const SQUIRE_LISTING: ThreadListingCapabilities = Object.freeze({ squire: true });
+const EMPTY_LISTING_CAPABILITIES: ThreadListingCapabilitiesByEnvironment = new Map();
+
+/**
+ * Squire home and probe threads belong to the Squire view. They are hidden only
+ * while their environment advertises `capabilities.squire`; with the switch off
+ * they list as ordinary threads so their history stays reachable.
+ */
+export function isHiddenSquireThread(
+  shell: { readonly squire?: OrchestrationV2ThreadShell["squire"] },
+  capabilities: ThreadListingCapabilities | null | undefined,
+): boolean {
+  return shell.squire !== undefined && capabilities?.squire === true;
+}
+
+/** A thread with its own row in thread lists, palettes and pickers. */
+export function isListedThread(
+  shell: {
+    readonly lineage: Pick<OrchestrationV2ThreadShell["lineage"], "relationshipToParent">;
+    readonly squire?: OrchestrationV2ThreadShell["squire"];
+  },
+  capabilities: ThreadListingCapabilities | null | undefined,
+): boolean {
+  return (
+    shell.lineage.relationshipToParent !== "subagent" && !isHiddenSquireThread(shell, capabilities)
+  );
+}
+
 const sameWireThreadShell = Schema.toEquivalence(OrchestrationV2ThreadShell);
 
 // While a run streams, the server bumps the shell's timestamps, item counts and
@@ -133,7 +170,26 @@ export function createEnvironmentThreadShellAtoms(input: {
   readonly snapshotAtom: (
     environmentId: EnvironmentId,
   ) => Atom.Atom<OrchestrationV2ShellSnapshot | null>;
+  readonly serverConfigAtom?: (environmentId: EnvironmentId) => Atom.Atom<{
+    readonly environment: { readonly capabilities: ThreadListingCapabilities };
+  } | null>;
 }) {
+  const { serverConfigAtom } = input;
+  // A boolean per environment, so unrelated config updates (provider status,
+  // settings) stop here instead of re-running every thread list.
+  const hidesSquireThreadsAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make((get) =>
+      serverConfigAtom === undefined
+        ? false
+        : get(serverConfigAtom(environmentId))?.environment.capabilities.squire === true,
+    ).pipe(Atom.withLabel(`environment-hides-squire-threads:${environmentId}`)),
+  );
+  const environmentListingCapabilitiesAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make((get): ThreadListingCapabilities | null =>
+      get(hidesSquireThreadsAtom(environmentId)) ? SQUIRE_LISTING : null,
+    ).pipe(Atom.withLabel(`environment-thread-listing-capabilities:${environmentId}`)),
+  );
+
   // Point reads and aggregate lists share values without keeping an atom alive
   // for every listed thread. Replaced source objects can be collected.
   const scopedThreads = new WeakMap<
@@ -339,6 +395,7 @@ export function createEnvironmentThreadShellAtoms(input: {
         if (refs.length === 0) continue;
         const threads = get(environmentThreadIndexAtom(projectRef.environmentId));
         const subagentRequests = get(pendingSubagentRequestsAtom(projectRef.environmentId));
+        const capabilities = get(environmentListingCapabilitiesAtom(projectRef.environmentId));
         for (const ref of refs) {
           const key = threadKey(ref);
           if (seen.has(key)) {
@@ -346,7 +403,8 @@ export function createEnvironmentThreadShellAtoms(input: {
           }
           seen.add(key);
           const thread = threads.get(ref.threadId);
-          if (thread !== undefined) {
+          // Probes are forks inside the user's project; project rows never show them.
+          if (thread !== undefined && !isHiddenSquireThread(thread, capabilities)) {
             next.push(scopedThread(ref.environmentId, thread, subagentRequests));
           }
         }
@@ -388,14 +446,49 @@ export function createEnvironmentThreadShellAtoms(input: {
     return previousThreadShells;
   }).pipe(Atom.withLabel("environment-thread-shell-list"));
 
+  let previousListingCapabilities = EMPTY_LISTING_CAPABILITIES;
+  const listingCapabilitiesAtom = Atom.make((get) => {
+    const next = new Map<EnvironmentId, ThreadListingCapabilities>();
+    for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
+      const capabilities = get(environmentListingCapabilitiesAtom(environmentId));
+      if (capabilities !== null) next.set(environmentId, capabilities);
+    }
+    if (
+      next.size === previousListingCapabilities.size &&
+      [...next.keys()].every((environmentId) => previousListingCapabilities.has(environmentId))
+    ) {
+      return previousListingCapabilities;
+    }
+    previousListingCapabilities = next.size === 0 ? EMPTY_LISTING_CAPABILITIES : next;
+    return previousListingCapabilities;
+  }).pipe(Atom.withLabel("environment-thread-listing-capabilities"));
+
+  // Every shell except the Squire threads their environment hides: a drop-in for
+  // threadShellsAtom wherever threads are offered to the user.
+  let previousVisibleShells: ReadonlyArray<EnvironmentThreadShell> = [];
+  const visibleThreadShellsAtom = Atom.make((get) => {
+    const shells = get(threadShellsAtom);
+    const listing = get(listingCapabilitiesAtom);
+    const next =
+      listing.size === 0
+        ? shells
+        : shells.filter(
+            (thread) => !isHiddenSquireThread(thread, listing.get(thread.environmentId)),
+          );
+    if (next.length === shells.length) return shells;
+    if (arrayElementsEqual(previousVisibleShells, next)) return previousVisibleShells;
+    previousVisibleShells = next;
+    return next;
+  }).pipe(Atom.withLabel("environment-visible-thread-shell-list"));
+
   let previousNavigationShells: ReadonlyArray<EnvironmentThreadShell> = [];
   const navigationThreadShellsAtom = Atom.make((get) => {
     const next: EnvironmentThreadShell[] = [];
     for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
       const subagentRequests = get(pendingSubagentRequestsAtom(environmentId));
+      const capabilities = get(environmentListingCapabilitiesAtom(environmentId));
       for (const thread of get(environmentThreadsAtom(environmentId))) {
-        if (thread.archivedAt !== null || thread.lineage.relationshipToParent === "subagent")
-          continue;
+        if (thread.archivedAt !== null || !isListedThread(thread, capabilities)) continue;
         next.push(scopedThread(environmentId, thread, subagentRequests));
       }
     }
@@ -411,7 +504,10 @@ export function createEnvironmentThreadShellAtoms(input: {
     environmentThreadRefsByProjectAtom,
     threadRefsAtom,
     threadShellsAtom,
+    visibleThreadShellsAtom,
     navigationThreadShellsAtom,
+    listingCapabilitiesAtom,
+    environmentListingCapabilitiesAtom,
     threadShellsForProjectRefsAtom: (refs: ReadonlyArray<ScopedProjectRef>) =>
       threadShellsForProjectRefsAtomFamily(projectRefCollectionKey(refs)),
     threadShellAtom: (ref: ScopedThreadRef) => threadShellAtomFamily(threadKey(ref)),

@@ -11,6 +11,7 @@ import { isSqlError } from "effect/sql/SqlError";
 import * as EventStore from "../orchestration-v2/EventStore.ts";
 import * as ProjectionMaintenance from "../orchestration-v2/ProjectionMaintenance.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import * as SquireCompactionFloor from "../squire/SquireCompactionFloor.ts";
 
 export class DatabaseMissingError extends Schema.TaggedError<DatabaseMissingError>()(
   "DatabaseMissingError",
@@ -198,7 +199,13 @@ const make = Effect.gen(function* () {
       }).pipe(
         Effect.provide(
           ProjectionMaintenance.layer.pipe(
-            Layer.provide(Layer.merge(EventStore.layer, ProjectionStore.layer)),
+            Layer.provide(
+              Layer.mergeAll(
+                EventStore.layer,
+                ProjectionStore.layer,
+                SquireCompactionFloor.layerOffline,
+              ),
+            ),
             Layer.provideMerge(NodeSqliteClient.layer({ filename: databasePath })),
           ),
         ),

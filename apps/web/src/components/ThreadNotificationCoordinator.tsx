@@ -2,29 +2,47 @@ import {
   type PendingSubagentRequest,
   presentThreadShell,
 } from "@lecturn/client-runtime/state/models";
-import { pendingSubagentRequestsByThread } from "@lecturn/client-runtime/state/threads";
-import { useAtomValue } from "@effect/atom-react";
-import { useNavigate, useParams } from "@tanstack/react-router";
-import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@lecturn/contracts";
-import * as Option from "effect/Option";
 import {
+  isListedThread,
+  pendingSubagentRequestsByThread,
+} from "@lecturn/client-runtime/state/threads";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
+import { useNavigate, useParams } from "@tanstack/react-router";
+import type {
+  EnvironmentId,
+  OrchestrationV2ThreadShell,
+  SquireId,
+  ThreadId,
+} from "@lecturn/contracts";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import { AtomRegistry } from "effect/reactivity";
+import {
+  BellIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   MessageCircleQuestionIcon,
   ShieldQuestionIcon,
 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useContext, useEffect, useRef } from "react";
 
 import { getClientSettings, useClientSettings } from "../hooks/useSettings";
 import { useAppStatuses } from "../state/apps";
 import { useEnvironmentIds } from "../state/environments";
 import { environmentShell } from "../state/shell";
+import { randomUUID } from "../lib/utils";
+import { squireEnvironment, useSquireEnvironments } from "../state/squires";
+import { environmentThreadShells } from "../state/threads";
 import {
   hasDesktopNotifications,
   hasNotificationSound,
   playNotificationSound,
   revealNotifiedAppThread,
   setNotificationBadge,
+  reportSquireAlert,
+  squireNotificationIntents,
+  type SquireNotificationIntent,
+  squireNotificationTag,
   threadNotificationApp,
   threadNotificationTag,
   threadNotificationTitle,
@@ -47,14 +65,25 @@ export function ThreadNotificationCoordinator() {
     pending.current.set(notification.tag, { environmentId, notification });
     setNotificationBadge(pending.current.size);
   };
+  // The badge counts threads waiting on the user, so Squire alerts close with the thread ones but
+  // stay out of that count.
+  const squirePending = useRef(
+    new Map<string, { environmentId: EnvironmentId; notification: Notification }>(),
+  );
+  const onSquireNotification = (environmentId: EnvironmentId, notification: Notification) => {
+    squirePending.current.get(notification.tag)?.notification.close();
+    squirePending.current.set(notification.tag, { environmentId, notification });
+  };
 
   useEffect(() => {
     const activeIds = new Set(environmentIds);
     const count = pending.current.size;
-    for (const [tag, entry] of pending.current) {
-      if (activeIds.has(entry.environmentId)) continue;
-      entry.notification.close();
-      pending.current.delete(tag);
+    for (const notifications of [pending.current, squirePending.current]) {
+      for (const [tag, entry] of notifications) {
+        if (activeIds.has(entry.environmentId)) continue;
+        entry.notification.close();
+        notifications.delete(tag);
+      }
     }
     if (count !== pending.current.size) setNotificationBadge(pending.current.size);
   }, [environmentIds]);
@@ -62,7 +91,9 @@ export function ThreadNotificationCoordinator() {
   useEffect(() => {
     const clear = () => {
       for (const { notification } of pending.current.values()) notification.close();
+      for (const { notification } of squirePending.current.values()) notification.close();
       pending.current.clear();
+      squirePending.current.clear();
       setNotificationBadge(0);
     };
     clear();
@@ -88,13 +119,150 @@ export function ThreadNotificationCoordinator() {
 
   if (mode === "off" && !inAppNotificationsEnabled) return null;
 
-  return environmentIds.map((environmentId) => (
-    <EnvironmentNotifications
-      key={environmentId}
-      environmentId={environmentId}
-      onNotification={onNotification}
-    />
-  ));
+  return (
+    <>
+      {environmentIds.map((environmentId) => (
+        <EnvironmentNotifications
+          key={environmentId}
+          environmentId={environmentId}
+          onNotification={onNotification}
+        />
+      ))}
+      <SquireNotifications onNotification={onSquireNotification} />
+    </>
+  );
+}
+
+/** One alert per `notification.pushed` intent (D27); a question card writes none. */
+function SquireNotifications({
+  onNotification,
+}: {
+  onNotification: (environmentId: EnvironmentId, notification: Notification) => void;
+}) {
+  const environments = useSquireEnvironments();
+  const mode = useClientSettings((settings) => settings.notificationMode);
+  const inAppNotificationsEnabled = useClientSettings(
+    (settings) => settings.inAppNotificationsEnabled,
+  );
+  const navigate = useNavigate();
+  const { environmentId: activeEnvironmentId, squireId: activeSquireId } = useParams({
+    strict: false,
+  });
+  const seenByEnvironment = useRef(new Map<EnvironmentId, ReadonlyMap<SquireId, number>>());
+  const registry = useContext(RegistryContext);
+
+  useEffect(() => {
+    // D27: each shown alert is recorded once; the server ignores a repeat for the same card.
+    const alerted = (environmentId: EnvironmentId, intent: SquireNotificationIntent) => {
+      if (!registry.get(squireEnvironment.notificationAlerted.permissionAtom(environmentId)))
+        return;
+      const pushedLog = squireEnvironment.actionLog({
+        environmentId,
+        input: { squireId: intent.squireId, kinds: ["notification.pushed"], limit: 20 },
+      });
+      void reportSquireAlert(intent, {
+        readLog: () =>
+          Effect.runPromise(
+            AtomRegistry.getResult(registry, pushedLog, { suspendOnWaiting: true }).pipe(
+              Effect.map((result) => result.entries),
+              Effect.timeout("10 seconds"),
+              Effect.orElseSucceed(() => null),
+            ),
+          ),
+        report: (cardId) =>
+          squireEnvironment.notificationAlerted.run(registry, {
+            environmentId,
+            input: {
+              requestId: randomUUID(),
+              squireId: intent.squireId,
+              cardId,
+              surface: "desktop",
+            },
+          }),
+      });
+    };
+    const nextSeen = new Map<EnvironmentId, ReadonlyMap<SquireId, number>>();
+    for (const { environmentId, state } of environments) {
+      const { seen, intents } = squireNotificationIntents(
+        seenByEnvironment.current.get(environmentId) ?? null,
+        state,
+      );
+      nextSeen.set(environmentId, seen);
+      for (const intent of intents) {
+        const open = () => {
+          void navigate({
+            to: "/squires/$environmentId/$squireId",
+            params: { environmentId, squireId: intent.squireId },
+          });
+        };
+        if (hasNotificationSound(mode)) {
+          void playNotificationSound("input", () =>
+            hasNotificationSound(getClientSettings().notificationMode),
+          );
+        }
+        if (
+          inAppNotificationsEnabled &&
+          document.visibilityState === "visible" &&
+          document.hasFocus() &&
+          (activeEnvironmentId !== environmentId || activeSquireId !== intent.squireId)
+        ) {
+          const toastId = toastManager.add({
+            type: "info",
+            title: intent.title,
+            description: intent.body,
+            data: {
+              hideCopyButton: true,
+              leadingIcon: <BellIcon aria-hidden className="size-4 text-info-foreground" />,
+            },
+            actionProps: {
+              children: "Open Squire",
+              onClick: () => {
+                toastManager.close(toastId);
+                open();
+              },
+            },
+          });
+          alerted(environmentId, intent);
+          continue;
+        }
+        if (
+          !hasDesktopNotifications(mode) ||
+          (document.visibilityState === "visible" && document.hasFocus()) ||
+          typeof Notification === "undefined" ||
+          Notification.permission !== "granted"
+        )
+          continue;
+        try {
+          const notification = new Notification(intent.title, {
+            body: intent.body,
+            tag: squireNotificationTag(environmentId, intent.squireId),
+            silent: true,
+          });
+          onNotification(environmentId, notification);
+          alerted(environmentId, intent);
+          notification.addEventListener("click", () => {
+            notification.close();
+            window.focus();
+            open();
+          });
+        } catch {
+          // Some browsers expose Notification but reject desktop presentation.
+        }
+      }
+    }
+    seenByEnvironment.current = nextSeen;
+  }, [
+    activeEnvironmentId,
+    activeSquireId,
+    environments,
+    inAppNotificationsEnabled,
+    mode,
+    navigate,
+    onNotification,
+    registry,
+  ]);
+
+  return null;
 }
 
 interface NotificationState {
@@ -116,6 +284,9 @@ function EnvironmentNotifications({
     shell.status === "live" && Option.isSome(shell.snapshot) ? shell.snapshot.value : null;
   const threads = snapshot?.threads ?? null;
   const projects = snapshot?.projects ?? null;
+  const listingCapabilities = useAtomValue(
+    environmentThreadShells.environmentListingCapabilitiesAtom(environmentId),
+  );
   const appStatuses = useAppStatuses();
   const mode = useClientSettings((settings) => settings.notificationMode);
   const inAppNotificationsEnabled = useClientSettings(
@@ -135,7 +306,7 @@ function EnvironmentNotifications({
     const next = new Map<ThreadId, NotificationState>();
     const subagentRequests = pendingSubagentRequestsByThread(threads);
     for (const rawThread of threads) {
-      if (rawThread.lineage.relationshipToParent === "subagent") continue;
+      if (!isListedThread(rawThread, listingCapabilities)) continue;
       const prior = previous.current.get(rawThread.id);
       const subagentRequest = subagentRequests.get(rawThread.id) ?? null;
       if (prior?.raw === rawThread && prior.subagentRequest === subagentRequest) {
@@ -257,6 +428,7 @@ function EnvironmentNotifications({
     appStatuses,
     environmentId,
     inAppNotificationsEnabled,
+    listingCapabilities,
     mode,
     navigate,
     onNotification,

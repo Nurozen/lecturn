@@ -75,6 +75,9 @@ export * from "./relayTeams.ts";
 
 export * from "./threadNotes.ts";
 export * from "./threadDecisions.ts";
+export * from "./squire.ts";
+export * from "./squireFixture.ts";
+export * from "./squireSummary.ts";
 export * from "./relayDecisions.ts";
 
 export * from "./manualCloudLink.ts";

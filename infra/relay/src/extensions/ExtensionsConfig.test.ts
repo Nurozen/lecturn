@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { parseExtensionsConfig } from "./ExtensionsConfig.ts";
+import { extensionEnvironmentKeys, parseExtensionsConfig } from "./ExtensionsConfig.ts";
 
 const enabled = {
   EXTENSIONS_DECISIONS_ENABLED: "true",
@@ -114,5 +114,98 @@ describe("shared extension configuration", () => {
     expect(JSON.stringify(config.issues)).not.toContain("private-invalid-marker");
     expect(JSON.stringify(config)).not.toContain("private-provider-marker");
     expect(config.contextual.enabled).toBe(false);
+  });
+});
+describe("Squires extension configuration", () => {
+  const squires = { EXTENSIONS_SQUIRES_ENABLED: "true", EXTENSIONS_SQUIRES_COHORT: "user_fixture" };
+  it("stays disabled until explicitly enabled for a cohort", () => {
+    const config = parseExtensionsConfig(enabled);
+    expect(config.squires.enabled).toBe(false);
+    expect(config.squires.cohort).toEqual([]);
+    expect(parseExtensionsConfig({ EXTENSIONS_SQUIRES_ENABLED: "true" }).issues).toContainEqual({
+      scope: "squires",
+      key: "EXTENSIONS_SQUIRES_COHORT",
+      reason: "missing-cohort",
+    });
+  });
+  it("parses its own keys with one attempt per routed post and a bounded hold", () => {
+    const config = parseExtensionsConfig({
+      ...squires,
+      EXTENSIONS_SQUIRES_ATTEMPT_HOLD_NANO_USD: "800000",
+      EXTENSIONS_SQUIRES_RUN_BUDGET_NANO_USD: "900000",
+      EXTENSIONS_SQUIRES_MAX_ATTEMPTS_PER_REQUEST: "5",
+    });
+    expect(config.squires).toMatchObject({
+      enabled: true,
+      cohort: ["user_fixture"],
+      attemptHoldNanoUsd: 800000,
+      runBudgetNanoUsd: 900000,
+      maxActualInputTokens: 16000,
+      maxAttemptsPerRun: 1,
+      maxAttemptsPerRequest: 1,
+      environmentConcurrency: 1,
+    });
+    expect(parseExtensionsConfig(squires).squires).toMatchObject({
+      attemptHoldNanoUsd: 1_000_000,
+      runBudgetNanoUsd: 1_000_000,
+    });
+    for (const key of [
+      "EXTENSIONS_SQUIRES_ENABLED",
+      "EXTENSIONS_SQUIRES_COHORT",
+      "EXTENSIONS_SQUIRES_ATTEMPT_HOLD_NANO_USD",
+      "EXTENSIONS_SQUIRES_RUN_BUDGET_NANO_USD",
+      "EXTENSIONS_SQUIRES_MAX_ATTEMPTS_PER_RUN",
+      "EXTENSIONS_SQUIRES_ENVIRONMENT_CONCURRENCY",
+    ])
+      expect(extensionEnvironmentKeys).toContain(key);
+  });
+  it("owns an environment slot without changing the slot Decisions and Contextual share", () => {
+    const config = parseExtensionsConfig({
+      ...enabled,
+      ...squires,
+      EXTENSIONS_ENVIRONMENT_CONCURRENCY: "3",
+      EXTENSIONS_SQUIRES_ENVIRONMENT_CONCURRENCY: "2",
+    });
+    expect(config.shared.environmentConcurrency).toBe(3);
+    expect({ ...config.shared, ...config.squires }.environmentConcurrency).toBe(2);
+    expect({ ...config.shared, ...config.decisions }.environmentConcurrency).toBe(3);
+    expect({ ...config.shared, ...config.contextual }.environmentConcurrency).toBe(3);
+    expect(
+      { ...config.shared, ...parseExtensionsConfig(squires).squires }.environmentConcurrency,
+    ).toBe(1);
+  });
+  it("fences only Squires on its invalid or unsafe values", () => {
+    for (const invalid of [
+      { EXTENSIONS_SQUIRES_ENVIRONMENT_CONCURRENCY: "5" },
+      { EXTENSIONS_SQUIRES_MAX_ATTEMPTS_PER_RUN: "2" },
+      { EXTENSIONS_SQUIRES_ENABLED: "yes" },
+      { EXTENSIONS_SQUIRES_ATTEMPT_HOLD_NANO_USD: "671999" },
+      { EXTENSIONS_SQUIRES_RUN_BUDGET_NANO_USD: "999999" },
+    ]) {
+      const config = parseExtensionsConfig({ ...enabled, ...squires, ...invalid });
+      expect(config.squires.enabled).toBe(false);
+      expect(config.issues.length).toBeGreaterThan(0);
+      expect(config.issues.every((issue) => issue.scope === "squires")).toBe(true);
+      expect(config.decisions.enabled).toBe(true);
+      expect(config.contextual.enabled).toBe(true);
+    }
+    expect(
+      parseExtensionsConfig({ ...squires, EXTENSIONS_SQUIRES_ATTEMPT_HOLD_NANO_USD: "672000" })
+        .squires.enabled,
+    ).toBe(true);
+  });
+  it("leaves Decisions and Contextual bounds unchanged", () => {
+    const config = parseExtensionsConfig({ ...enabled, ...squires });
+    for (const feature of [config.decisions, config.contextual]) {
+      expect(feature).not.toHaveProperty("environmentConcurrency");
+      expect(feature).toMatchObject({
+        maxActualInputTokens: 64000,
+        attemptHoldNanoUsd: 10_000_000,
+        runBudgetNanoUsd: 30_000_000,
+        maxAttemptsPerRequest: 2,
+      });
+    }
+    expect(config.decisions.maxAttemptsPerRun).toBe(24);
+    expect(config.contextual.maxAttemptsPerRun).toBe(6);
   });
 });

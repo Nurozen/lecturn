@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" role="img" aria-labelledby="threadkeeper-small-title">
+  <title id="threadkeeper-small-title">Squire Threadkeeper small icon</title>
+  <g stroke-linecap="round" stroke-linejoin="round" stroke-width="1.25">
+    <path stroke="#dfc7a4" d="M16 4C9 2 5 6 7 9C9 12 19 11 19 16C19 20 14 22 9 20"/>
+    <path stroke="#d9a34e" d="M4.5 12C4.5 16 11 15.5 14 17C17 19 13 21 9 20"/>
+  </g>
+  <g fill="#d9a34e">
+    <circle cx="4.5" cy="12" r="1"/>
+    <circle cx="9" cy="20" r="1"/>
+    <path d="M16 1.5C16.3 3.4 16.6 3.7 18.5 4C16.6 4.3 16.3 4.6 16 6.5C15.7 4.6 15.4 4.3 13.5 4C15.4 3.7 15.7 3.4 16 1.5Z"/>
+  </g>
+</svg>

@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 2,
+  "id": "research-idle",
+  "setup": {
+    "squire": {
+      "name": "Research",
+      "brief": "Answer questions about what changed and why across tracked threads. Flag work that collides with other threads. Recommend only; never steer on routine progress.",
+      "provider": "under-test",
+      "createdAt": "2026-10-02T09:00:00Z",
+      "timezone": "America/Los_Angeles"
+    },
+    "scope": [
+      {
+        "kind": "thread",
+        "threadId": "thr_currency_display_cleanup"
+      }
+    ],
+    "threads": [
+      {
+        "threadId": "thr_currency_display_cleanup",
+        "title": "Currency display cleanup",
+        "project": "billing-service",
+        "provider": "codex"
+      }
+    ],
+    "permissions": {
+      "steer": "recommend",
+      "createThread": "recommend",
+      "notify": "on"
+    },
+    "undoWindowSeconds": 10,
+    "budgetUsage": {
+      "steersPerDay": {
+        "used": 0,
+        "limit": 10
+      },
+      "threadsPerDay": {
+        "used": 0,
+        "limit": 3
+      },
+      "steersPerThreadPerHour": {
+        "limit": 2,
+        "usedByThread": {}
+      }
+    },
+    "companion": {
+      "presence": "figure",
+      "appearance": "female",
+      "hood": "up",
+      "equipment": "astrolabe",
+      "palette": "sage",
+      "motion": "subtle"
+    }
+  },
+  "events": []
+}

@@ -2,7 +2,12 @@ import type { AppEmbedContext, AppStatus, EnvironmentId } from "@lecturn/contrac
 
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { useAppEmbedContext, useAppStatuses } from "../../state/apps";
-import { useProjects, useServerConfigs, useThreadShells } from "../../state/entities";
+import {
+  useProjects,
+  useServerConfigs,
+  useThreadListingCapabilities,
+  useThreadShells,
+} from "../../state/entities";
 import { useEnvironmentIdentities } from "../../state/environments";
 import {
   appStatusChip,
@@ -25,6 +30,7 @@ export function useAppsSidebarApps(
   const threads = useThreadShells(options.withThreads);
   const environments = useEnvironmentIdentities();
   const serverConfigs = useServerConfigs();
+  const listing = useThreadListingCapabilities();
   const nowMinute = useNowMinute();
   return buildAppsSidebarApps({
     statuses,
@@ -33,6 +39,7 @@ export function useAppsSidebarApps(
     environmentLabels: new Map(
       environments.map((environment) => [environment.environmentId, environment.label] as const),
     ),
+    listing,
     now: `${nowMinute}:00.000Z`,
     supports: (environmentId: EnvironmentId) => {
       const capabilities = serverConfigs.get(environmentId)?.environment.capabilities;

@@ -61,10 +61,12 @@ const insertThread = (input: {
   readonly deletedAt?: string | null;
   readonly settledAt?: string | null;
   readonly relationship?: "fork" | "subagent" | null;
+  readonly squire?: boolean;
 }) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const payload = yield* toJson({
+      ...(input.squire ? { squire: { squireId: "squire-1", role: "home" } } : {}),
       createdAt: NOW,
       settledAt: input.settledAt ?? null,
       unsettledAt: null,
@@ -114,6 +116,8 @@ it.layer(layer)("StaveOrchestrationLive reads", (it) => {
         projectId: "anchor-project",
         relationship: "subagent",
       });
+      // An unsettled Squire thread would hold the space open forever.
+      yield* insertThread({ id: "squire", projectId: "anchor-project", squire: true });
       const orchestration = yield* StaveOrchestration;
       const rows = yield* orchestration.listThreadLifecycleAnchorsByProjectId(
         ProjectId.make("anchor-project"),

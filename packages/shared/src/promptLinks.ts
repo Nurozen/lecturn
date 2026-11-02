@@ -188,6 +188,58 @@ export function buildNewThreadLink(input: {
 // Only the OS-registered schemes; `lecturn-thread:` is a chat-markdown link, not an app link.
 const APP_SCHEME = /^lecturn(?:-dev|-preview)?:$/;
 const THREAD_PATH = /^\/([^/]+)\/([^/]+)\/?$/;
+const SQUIRE_ROUTE_PATH = /^\/squires\/[^/]+\/(?:rooms\/)?[^/]+\/?$/;
+const SQUIRE_LINK_PATH = /^\/([^/]+)\/(?:rooms\/([^/]+)|([^/]+))\/?$/;
+
+/** A `lecturn://squires/...` link: a Squire's queue, optionally on one card, or a room. */
+export type SquireLink =
+  | {
+      readonly kind: "squire";
+      readonly environmentId: string;
+      readonly squireId: string;
+      readonly item: string | null;
+    }
+  | { readonly kind: "room"; readonly environmentId: string; readonly roomId: string };
+
+function decodedSegment(segment: string | undefined): string | null {
+  if (segment === undefined) return null;
+  try {
+    return decodeURIComponent(segment) || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads `lecturn://squires/<env>/<squireId>[?item=<cardId>]` and
+ * `lecturn://squires/<env>/rooms/<roomId>`; any other link is null.
+ */
+export function parseSquireLink(value: string): SquireLink | null {
+  if (!URL.canParse(value)) return null;
+  const url = new URL(value);
+  if (!APP_SCHEME.test(url.protocol) || url.host !== "squires") return null;
+  const match = SQUIRE_LINK_PATH.exec(url.pathname);
+  const environmentId = decodedSegment(match?.[1]);
+  if (match === null || environmentId === null) return null;
+  if (match[2] !== undefined) {
+    const roomId = decodedSegment(match[2]);
+    return roomId === null ? null : { kind: "room", environmentId, roomId };
+  }
+  const squireId = decodedSegment(match[3]);
+  // `squires/<env>/rooms` names no room; it is never a Squire.
+  if (squireId === null || squireId === "rooms") return null;
+  return { kind: "squire", environmentId, squireId, item: url.searchParams.get("item") || null };
+}
+
+/** The web route a Squire link opens. */
+export function squireLinkAppPath(link: SquireLink): string {
+  const environment = encodeURIComponent(link.environmentId);
+  if (link.kind === "room") {
+    return `/squires/${environment}/rooms/${encodeURIComponent(link.roomId)}`;
+  }
+  const search = link.item === null ? "" : `?${new URLSearchParams({ item: link.item })}`;
+  return `/squires/${environment}/${encodeURIComponent(link.squireId)}${search}`;
+}
 
 export function promptLinkAppPath(
   value: string,
@@ -200,6 +252,10 @@ export function promptLinkAppPath(
       return `/new${url.search}`;
     }
     if (url.host === "apps") return appLinkPathFromUrl(url);
+    if (url.host === "squires") {
+      const squire = parseSquireLink(value);
+      return squire === null ? null : squireLinkAppPath(squire);
+    }
     const thread = url.host === "threads" ? THREAD_PATH.exec(url.pathname) : null;
     return thread ? `/${thread[1]}/${thread[2]}${url.search}` : null;
   }
@@ -213,6 +269,11 @@ export function promptLinkDeepLink(appPath: string, scheme = "lecturn"): string 
   const appLink = appLinkFromPath(appPath, scheme);
   if (appLink !== null) return appLink;
   const url = new URL(appPath, "https://app.invalid");
-  const host = url.pathname === "/new" ? "new" : `threads${url.pathname}`;
+  const host =
+    url.pathname === "/new"
+      ? "new"
+      : SQUIRE_ROUTE_PATH.test(url.pathname)
+        ? url.pathname.slice(1)
+        : `threads${url.pathname}`;
   return `${scheme}://${host}${url.search}`;
 }

@@ -60,6 +60,15 @@ import { makeStaveAutoPullOwnerCheck } from "./stave/StaveAutoPullOwnership.ts";
 import { StaveProjectShells } from "./stave/StaveProjectShells.ts";
 import { DecisionCloudClient } from "./threadDecisions/DecisionCloudClient.ts";
 import { DecisionIngestion } from "./threadDecisions/DecisionIngestion.ts";
+import { SquireActions } from "./squire/SquireActions.ts";
+import { SquireClock } from "./squire/SquireClock.ts";
+import { SquireDelivery } from "./squire/SquireDelivery.ts";
+import { SquireJevRouting } from "./squire/SquireJevRouter.ts";
+import { SquireLifecycle } from "./squire/SquireLifecycle.ts";
+import { SquireCiExcerpt } from "./squire/SquireCiExcerpt.ts";
+import { SquireProbe } from "./squire/SquireProbe.ts";
+import { SquireReactor } from "./squire/SquireReactor.ts";
+import { SquireSummaries } from "./squire/SquireSummaries.ts";
 import { DecisionRelations } from "./threadDecisions/DecisionRelations.ts";
 import { DecisionWorker } from "./threadDecisions/DecisionWorker.ts";
 import {
@@ -465,6 +474,67 @@ export const startLecturnReactors = Effect.gen(function* () {
   if (Option.isSome(watches)) yield* watches.value.start;
   const discovery = yield* Effect.serviceOption(PullRequestWatchDiscovery);
   if (Option.isSome(discovery)) yield* discovery.value.start;
+  // Present only with LECTURN_SQUIRE on: resumes setups and deletes a crash interrupted.
+  const squireLifecycle = yield* Effect.serviceOption(SquireLifecycle);
+  if (Option.isSome(squireLifecycle)) yield* forkParked(squireLifecycle.value.reconcileAll);
+  // A9: summaries a crash left `generating` settle to `partial` before the
+  // reactor could start new ones for the same run.
+  const squireSummaries = yield* Effect.serviceOption(SquireSummaries);
+  const settleSquireSummaries = Option.isSome(squireSummaries)
+    ? squireSummaries.value.settleInterrupted.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Squire summary settle at startup failed", { cause }),
+        ),
+      )
+    : Effect.void;
+  const squireReactor = yield* Effect.serviceOption(SquireReactor);
+  if (Option.isSome(squireReactor))
+    yield* forkParked(settleSquireSummaries.pipe(Effect.andThen(squireReactor.value.start)));
+  const squireDelivery = yield* Effect.serviceOption(SquireDelivery);
+  if (Option.isSome(squireDelivery))
+    yield* forkParked(
+      squireDelivery.value.redispatchBatched.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Squire batch re-dispatch failed; the next wake retries", { cause }),
+        ),
+      ),
+    );
+  // Lecturn: D55, a Jev request in flight at a restart is asked again under its request id.
+  const squireJev = yield* Effect.serviceOption(SquireJevRouting);
+  if (Option.isSome(squireJev))
+    yield* forkParked(
+      squireJev.value.resumePending.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Squire Jev resume failed; the deadline falls back", { cause }),
+        ),
+      ),
+    );
+  const squireClock = yield* Effect.serviceOption(SquireClock);
+  // A9: executions a crash left unfinished are settled from their receipts
+  // (charged once) before the clock can run a hold against the same budget.
+  const squireActions = yield* Effect.serviceOption(SquireActions);
+  const reconcileSquireActions = Option.isSome(squireActions)
+    ? squireActions.value.reconcileStartup.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Squire action reconcile at startup failed", { cause }),
+        ),
+      )
+    : Effect.void;
+  if (Option.isSome(squireClock))
+    yield* forkParked(reconcileSquireActions.pipe(Effect.andThen(squireClock.value.start)));
+  // D21: excerpts CI-failure cards off committed rows; a restart re-reads its window.
+  const squireCiExcerpt = yield* Effect.serviceOption(SquireCiExcerpt);
+  if (Option.isSome(squireCiExcerpt)) yield* forkParked(squireCiExcerpt.value.start);
+  // A9: an ask a crash left running resumes or settles from its derived ids.
+  const squireProbe = yield* Effect.serviceOption(SquireProbe);
+  if (Option.isSome(squireProbe))
+    yield* forkParked(
+      squireProbe.value.reconcileStartup.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Squire probe reconcile at startup failed", { cause }),
+        ),
+      ),
+    );
 });
 
 interface StartupOptions {

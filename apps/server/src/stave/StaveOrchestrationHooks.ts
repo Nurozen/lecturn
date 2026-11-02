@@ -66,7 +66,9 @@ export function describeStaveThreadIntent(
       return {
         intent: "thread.create",
         projectId: command.projectId,
-        worktreePath: command.worktreePath,
+        // Lecturn: a Squire home runs in its scratch workspace under userdata,
+        // not a worktree of the space, so the worktree rule does not apply.
+        worktreePath: command.squire?.role === "home" ? null : command.worktreePath,
       };
     case "thread.import":
       // An import creates a thread, so it answers to the creation rule.
@@ -119,6 +121,19 @@ const reject = (reason: string, cause?: unknown, hook = "aroundCommand") =>
     reason,
     ...(cause === undefined ? {} : { cause }),
   });
+
+const SPACE_BUSY_REASON = "A Stave operation is changing this space. Retry when it finishes.";
+
+/**
+ * Lecturn: Stave refuses a thread command, rather than waits, while another
+ * command holds the space lock. That refusal alone is transient: the same
+ * command passes once the holder lets go.
+ */
+export const isStaveSpaceBusy = (error: LecturnHookRejectedError) =>
+  error.contribution === CONTRIBUTION && error.reason === SPACE_BUSY_REASON;
+
+/** Lecturn: the refusal `isStaveSpaceBusy` recognizes, for a stand-in admission hook. */
+export const staveSpaceBusyRejection = () => reject(SPACE_BUSY_REASON);
 
 const isRuntimeFenced = Schema.is(StaveRuntimeFenced);
 
@@ -204,7 +219,12 @@ const make = Effect.gen(function* () {
         projectId,
         intent: intent.intent,
         worktreePath:
-          intent.worktreePath !== undefined ? intent.worktreePath : (thread?.worktreePath ?? null),
+          intent.worktreePath !== undefined
+            ? intent.worktreePath
+            : // Lecturn: see `describeStaveThreadIntent`; a Squire home is not a space worktree.
+              thread?.squire?.role === "home"
+              ? null
+              : (thread?.worktreePath ?? null),
         ...(intent.prepareWorktree === undefined
           ? {}
           : { prepareWorktree: intent.prepareWorktree }),
@@ -232,8 +252,7 @@ const make = Effect.gen(function* () {
         Effect.andThen(commit),
       );
       const result = yield* locks.tryWithSpaceLock(input.projectRoot, checked);
-      if (Option.isNone(result))
-        return yield* reject("A Stave operation is changing this space. Retry when it finishes.");
+      if (Option.isNone(result)) return yield* reject(SPACE_BUSY_REASON);
       return result.value;
     });
   };

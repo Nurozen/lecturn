@@ -13,6 +13,9 @@ import { Badge } from "../ui/badge";
 import { StaveConfirmDialog } from "./StaveConfirmDialog";
 import { useSagaSidebarTree } from "./useSagaSidebarTree";
 import { staveSagaMemberBadges } from "./staveSaga.logic";
+import { readSquireContainerTrackMenu } from "../squire/track/readSquireTrack";
+import { buildSquireTrackMenuItems } from "../squire/track/squireTrack.logic";
+import { useSquireTrack } from "../squire/track/useSquireTrack";
 
 export function SagaSidebarSection({
   projects,
@@ -22,6 +25,7 @@ export function SagaSidebarSection({
   onOpen: (project: SidebarProjectSnapshot) => void;
 }) {
   const { tree, enabledKeys, availableKeys, nest } = useSagaSidebarTree(projects);
+  const squireTrack = useSquireTrack();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [confirmation, setConfirmation] = useState<{
     member: SidebarProjectGroupMember;
@@ -38,13 +42,21 @@ export function SagaSidebarSection({
       availableKeys.has(member.physicalProjectKey) &&
       !!member.stave.createdAt &&
       member.stave.state !== "archived";
+    const squireMenu = readSquireContainerTrackMenu(member.environmentId, {
+      kind: "staveSaga",
+      targetId: member.stave.spaceId,
+    });
     const action = await api.contextMenu.show(
       [
         { id: "add-member", label: "Add member", disabled: !enabled },
         { id: "archive-saga", label: "Archive saga", disabled: !enabled },
+        ...(squireMenu
+          ? buildSquireTrackMenuItems(squireMenu.state, { separatorBefore: true })
+          : []),
       ],
       position,
     );
+    if (action && squireTrack.handleContainerMenu(squireMenu, action)) return;
     if (action === "add-member")
       openStaveWizard({
         environmentId: member.environmentId,

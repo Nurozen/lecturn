@@ -13,6 +13,7 @@
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Thread notes](./user/thread-notes.md)
 - [Decisions](./user/decisions.md)
+- [Squires](./user/squires.md)
 - [Forking threads](./user/forking-threads.md)
 - [Importing sessions](./user/importing-sessions.md)
 - [SnapShots](./user/snap-shot.md)
@@ -81,3 +82,4 @@ source alone does not explain. Most code changes do not need an internal documen
 - [Decisions operations](./operations/decisions.md)
 
 - [Thread Decisions architecture](internals/thread-decisions.md)
+- [Squires](./internals/squire.md)

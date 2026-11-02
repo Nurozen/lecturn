@@ -3,7 +3,8 @@ import { PullRequestCheckStatus } from "./pullRequest.ts";
 import * as Schema from "effect/Schema";
 
 import { SnapShotSource } from "./chatAttachment.ts";
-import { EnvironmentId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { EnvironmentId, SquireCardId, SquireId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { SquireCardKind, SquirePalette } from "./squire.ts";
 import { BrowserProfileId } from "./browserProfile.ts";
 import type {
   BrowserImportResult,
@@ -1046,6 +1047,15 @@ export const DesktopActivityActionKindSchema = Schema.Literals([
   "revoke-merge",
   "steer",
 ]);
+export type DesktopActivityActionKind = typeof DesktopActivityActionKindSchema.Type;
+/** Lecturn: Squire card buttons. */
+export const DesktopActivitySquireActionKindSchema = Schema.Literals([
+  "squire-accept",
+  "squire-dismiss",
+  "squire-undo",
+  "squire-open",
+]);
+export type DesktopActivitySquireActionKind = typeof DesktopActivitySquireActionKindSchema.Type;
 export const DesktopActivityIdentitySchema = Schema.Struct({
   watchRevision: Schema.optionalKey(Schema.Int),
   rowId: Schema.String,
@@ -1054,13 +1064,35 @@ export const DesktopActivityIdentitySchema = Schema.Struct({
   threadId: Schema.optionalKey(Schema.String),
   watchId: Schema.optionalKey(Schema.String),
 });
-export const DesktopActivityActionSchema = Schema.Struct({
-  ...DesktopActivityIdentitySchema.fields,
-  kind: DesktopActivityActionKindSchema,
-  text: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(8000))),
-  mergeMode: Schema.optionalKey(Schema.Literals(["follow-pr", "revision-only"])),
-});
+const DesktopActivityRequestIdSchema = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(100),
+);
+export const DesktopActivityActionSchema = Schema.Union([
+  Schema.Struct({
+    ...DesktopActivityIdentitySchema.fields,
+    kind: DesktopActivityActionKindSchema,
+    text: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(8000))),
+    mergeMode: Schema.optionalKey(Schema.Literals(["follow-pr", "revision-only"])),
+  }),
+  /**
+   * Lecturn: the notch matches `requestId` to the result the renderer sends back, because the
+   * host's reply to the action only confirms it was forwarded.
+   */
+  Schema.Struct({
+    ...DesktopActivityIdentitySchema.fields,
+    kind: DesktopActivitySquireActionKindSchema,
+    requestId: DesktopActivityRequestIdSchema,
+  }),
+]);
 export type DesktopActivityAction = typeof DesktopActivityActionSchema.Type;
+/** Lecturn: the renderer's RPC outcome for a Squire action, relayed to the notch. */
+export const DesktopActivitySquireResultSchema = Schema.Struct({
+  requestId: DesktopActivityRequestIdSchema,
+  ok: Schema.Boolean,
+  error: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(1000))),
+});
+export type DesktopActivitySquireResult = typeof DesktopActivitySquireResultSchema.Type;
 export const ActivityVisualState = Schema.Literals([
   "active",
   "attention",
@@ -1110,6 +1142,29 @@ export const DesktopActivityRowSchema = Schema.Struct({
   ),
   watchRevision: Schema.optionalKey(Schema.Int),
   defaultMergeMode: Schema.optionalKey(Schema.Literals(["follow-pr", "revision-only"])),
+  /** Lecturn: present on a Squire card row; its buttons are the row's `squire-*` actions. */
+  squire: Schema.optionalKey(
+    Schema.Struct({
+      squireId: SquireId,
+      cardId: SquireCardId,
+      cardKind: SquireCardKind,
+      palette: SquirePalette,
+      holdRemainingMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+      caption: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(300))),
+      /**
+       * P7.6: a newer held action of this open card's kind sits beside it. The notch shows it as a
+       * line under the card with its countdown and the row's `squire-undo`, which acts on it.
+       */
+      heldOver: Schema.optionalKey(
+        Schema.Struct({
+          heldCardId: SquireCardId,
+          label: Schema.String.check(Schema.isMaxLength(80)),
+          remainingMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+          ruleLabel: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(300))),
+        }),
+      ),
+    }),
+  ),
   id: Schema.String,
   environmentId: Schema.String,
   projectId: Schema.String,
@@ -1121,7 +1176,7 @@ export const DesktopActivityRowSchema = Schema.Struct({
   detail: Schema.optionalKey(Schema.String),
   actions: Schema.Array(
     Schema.Struct({
-      id: DesktopActivityActionKindSchema,
+      id: Schema.Union([DesktopActivityActionKindSchema, DesktopActivitySquireActionKindSchema]),
       label: Schema.String,
       disabled: Schema.optionalKey(Schema.Boolean),
     }),
@@ -1156,6 +1211,8 @@ export interface DesktopBridge {
     setEnabled: (enabled: boolean) => Promise<void>;
     getEnabled: () => Promise<boolean>;
     onEnabledChange: (listener: (enabled: boolean) => void) => () => void;
+    /** Lecturn: the RPC outcome of a Squire action, relayed to the notch press with its `requestId`. */
+    reportSquireResult: (result: DesktopActivitySquireResult) => Promise<void>;
   };
   getAppBranding: () => DesktopAppBranding | null;
   getPathForFile?: (file: File) => string;

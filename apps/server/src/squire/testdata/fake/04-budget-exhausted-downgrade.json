@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "steps": [
+    {
+      "onEvent": "thread-stopped",
+      "toolCalls": [
+        {
+          "name": "squire_send_steer",
+          "args": {
+            "threadId": "thr_fix_invoice_rounding",
+            "reason": "Session crashed mid-turn: context window exceeded after 3 of 5 formatters.",
+            "steer": "Your last session hit the context limit after 3 of 5 formatters. Start from the remaining two (list them first), and keep each change small."
+          }
+        }
+      ]
+    }
+  ]
+}

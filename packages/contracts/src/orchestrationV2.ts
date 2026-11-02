@@ -33,6 +33,7 @@ import {
   RunId,
   RuntimeRequestId,
   ScheduledTaskId,
+  SquireId,
   ThreadId,
   TrimmedNonEmptyString,
   TrimmedString,
@@ -432,9 +433,20 @@ export type OrchestrationV2ThreadForkPrepareWorktree =
   typeof OrchestrationV2ThreadForkPrepareWorktree.Type;
 
 /**
- * Lecturn: connected-app thread metadata. Omitted on every other thread, so
- * non-app payloads are unchanged. The owning app comes from the project's
- * `appBinding`, never from the thread.
+ * Lecturn: marks a Squire's hidden home thread or a temporary "Ask about
+ * this" probe fork. Only the server sets it; clients that predate it drop the
+ * key and list the thread as an ordinary one.
+ */
+export const SquireThreadMarker = Schema.Struct({
+  squireId: SquireId,
+  role: Schema.Literals(["home", "probe"]),
+});
+export type SquireThreadMarker = typeof SquireThreadMarker.Type;
+
+/**
+ * Lecturn: server-set thread metadata (connected-app fields and the Squire
+ * marker). Omitted on every other thread, so ordinary payloads are unchanged.
+ * The owning app comes from the project's `appBinding`, never from the thread.
  */
 const ConnectedAppThreadFields = {
   copiedFrom: Schema.optionalKey(ConnectedAppThreadCopyOrigin),
@@ -442,6 +454,7 @@ const ConnectedAppThreadFields = {
   appSubtitle: Schema.optionalKey(ConnectedAppThreadSubtitle),
   appOrigin: Schema.optionalKey(AppOrigin),
   continuedIn: Schema.optionalKey(ConnectedAppThreadContinuedIn),
+  squire: Schema.optionalKey(SquireThreadMarker),
 };
 
 export const OrchestrationV2AppThread = Schema.Struct({
@@ -1128,12 +1141,22 @@ const SubagentNotificationSource = Schema.Struct({
   childThreadId: Schema.optional(ThreadId),
 });
 const CommandNotificationSource = Schema.Struct({ kind: Schema.Literal("command") });
+const SquireNotificationSource = Schema.Struct({
+  kind: Schema.Literal("squire"),
+  squireId: SquireId,
+  eventCount: NonNegativeInt,
+  /** The batch's event kinds in delivery order (`onboarding`, `pr-failed`, ...). */
+  eventKinds: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+});
 
 /**
  * Sources are stored and sent in the shape clients before `subagent` and `command` existed decode,
  * since they reject a kind they do not know: a command is `background_command`, and a subagent is
  * `background_task` with `work: "subagent"`, a field those clients ignore. Encoding picks the first
  * member that fits, so those come first.
+ *
+ * Lecturn: a Squire wake is `background_task` with `work: "squire"` for the same reason. Decoding
+ * also tries members in order and plain `background_task` ignores `work`, so it must come after.
  */
 export const OrchestrationV2NotificationSource = kindUnionWithFallback(
   [
@@ -1160,9 +1183,34 @@ export const OrchestrationV2NotificationSource = kindUnionWithFallback(
         })),
       }),
     ),
+    Schema.Struct({
+      kind: Schema.Literal("background_task"),
+      work: Schema.Literal("squire"),
+      squireId: SquireId,
+      eventCount: NonNegativeInt,
+      eventKinds: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+    }).pipe(
+      Schema.decodeTo(Schema.toType(SquireNotificationSource), {
+        decode: SchemaGetter.transform(({ squireId, eventCount, eventKinds }) => ({
+          kind: "squire" as const,
+          squireId,
+          eventCount,
+          ...(eventKinds === undefined ? {} : { eventKinds }),
+        })),
+        encode: SchemaGetter.transform(({ squireId, eventCount, eventKinds }) => ({
+          kind: "background_task" as const,
+          work: "squire" as const,
+          squireId,
+          eventCount,
+          ...(eventKinds === undefined ? {} : { eventKinds }),
+        })),
+      }),
+    ),
     Schema.Struct({ kind: Schema.Literal("background_command").transform("command") }),
     SubagentNotificationSource,
     CommandNotificationSource,
+    // Lecturn: the decoded form too, since stored events are decoded twice (OrchestrationEventStore).
+    SquireNotificationSource,
     Schema.Struct({ kind: Schema.Literal("monitor") }),
     Schema.Struct({ kind: Schema.Literal("background_task") }),
     Schema.Struct({ kind: Schema.Literal("system") }),
@@ -1535,6 +1583,8 @@ export const OrchestrationV2TurnItem = Schema.Union([
     ...OrchestrationV2TurnItemBaseFields,
     type: Schema.Literal("run_interrupt_request"),
     message: Schema.String,
+    /** Lecturn: copied from the interrupt command; absent in older history. */
+    createdBy: Schema.optionalKey(OrchestrationV2Actor),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -2298,6 +2348,8 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     ...OrchestrationV2TurnItemJsonBaseFields,
     type: Schema.Literal("run_interrupt_request"),
     message: Schema.String,
+    /** Lecturn: copied from the interrupt command; absent in older history. */
+    createdBy: Schema.optionalKey(OrchestrationV2Actor),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,
@@ -2981,6 +3033,8 @@ export const OrchestrationV2Command = Schema.Union([
     runId: RunId,
     reason: Schema.optional(Schema.String),
     holdQueue: Schema.optional(Schema.Boolean),
+    /** Lecturn: who asked for the stop; absent in history and from older callers. */
+    createdBy: Schema.optionalKey(OrchestrationV2Actor),
   }),
   Schema.Struct({
     type: Schema.Literal("queued-message.promote-to-steer"),
@@ -3056,6 +3110,11 @@ export const OrchestrationV2Command = Schema.Union([
     workspace: Schema.optional(Schema.Literals(["inherit", "new-worktree"])),
     /** Lecturn: required with workspace "new-worktree". */
     prepareWorktree: Schema.optional(OrchestrationV2ThreadForkPrepareWorktree),
+    /**
+     * Lecturn: server-only, for a Squire "Ask about this" probe fork. Client
+     * intake must refuse it, since this union is also the client payload.
+     */
+    squireProbe: Schema.optionalKey(Schema.Struct({ squireId: SquireId })),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.merge_back"),
@@ -3127,8 +3186,10 @@ export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
  * Commands only the server dispatches. They stay out of
  * `OrchestrationV2Command`, the `dispatchCommand` payload, so no client can
  * send them.
+ *
+ * Lecturn: the schema is exported only so tests can decode server-built commands.
  */
-const OrchestrationV2InternalCommand = Schema.Union([
+export const OrchestrationV2InternalCommand = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("thread.pull-request-watch.sync"),
     commandId: CommandId,
@@ -3176,6 +3237,8 @@ const OrchestrationV2InternalCommand = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     reason: Schema.optional(Schema.String),
+    /** Lecturn: see run.interrupt createdBy. */
+    createdBy: Schema.optionalKey(OrchestrationV2Actor),
   }),
   /** Lecturn: only the owning app may set its thread data, through the apps service. */
   Schema.Struct({

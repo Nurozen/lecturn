@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 2,
+  "id": "summary-stress",
+  "summary": {
+    "threadId": "thr_fix_invoice_rounding",
+    "threadTitle": "Fix invoice rounding across every currency, tax mode, and export path before the v2.5 release",
+    "project": "billing-service",
+    "provider": "claudeAgent",
+    "turnId": "t_97",
+    "outcome": "error",
+    "summaryStatus": "complete",
+    "goal": "Make every invoice total, tax line, credit note, PDF, and CSV export round half-even in the currency's minor unit so the ledger reconciliation job stops flagging one-cent drifts",
+    "completed": [
+      "Replaced Math.round with roundHalfEven in InvoiceTotalsCalculator and TaxBreakdownFormatter, keyed by currency minor unit",
+      "Added CurrencyMinorUnitTable covering ISO 4217 zero-, two-, and three-decimal currencies, with JPY and KWD fixtures",
+      "Moved exchange-rate snapshots behind ExchangeRateSnapshotCache so totals and exports read the same rate",
+      "Rewrote the CSV export writer to format from rounded minor units instead of floats, matching the PDF renderer",
+      "Deleted the legacy InvoicePdfRenderer rounding shim and added 23 regression cases across 9 currencies"
+    ],
+    "remaining": [
+      "Re-run the ledger reconciliation job against last month's production snapshot and compare drift counts",
+      "Allocate credit notes with largest-remainder rounding so split refunds still sum to the original total",
+      "Update the billing webhook payload docs to state that amounts are integer minor units"
+    ],
+    "blocked": [
+      {
+        "item": "api-e2e on PR #318",
+        "reason": "EUR finalize test expects the old half-up total; needs product sign-off before changing the fixture"
+      },
+      {
+        "item": "KWD three-decimal fixtures",
+        "reason": "staging exchange-rate service returns two decimals for KWD, so the snapshot cache rejects it"
+      },
+      {
+        "item": "ledger reconciliation dry run",
+        "reason": "read replica credentials expired; the job exits before comparing any invoices"
+      }
+    ],
+    "files": {
+      "entries": [
+        {
+          "path": "packages/billing-service/src/invoice/rendering/localization/currency-formatting/InvoiceTotalsCalculator.ts",
+          "change": "modified"
+        },
+        {
+          "path": "packages/billing-service/src/invoice/rendering/localization/currency-formatting/RoundingStrategyRegistry.ts",
+          "change": "added"
+        },
+        {
+          "path": "packages/billing-service/src/invoice/rendering/localization/currency-formatting/CurrencyMinorUnitTable.ts",
+          "change": "modified"
+        },
+        {
+          "path": "packages/billing-service/src/invoice/rendering/localization/currency-formatting/LedgerReconciliationJob.integration.test.ts",
+          "change": "modified"
+        },
+        {
+          "path": "packages/billing-service/src/invoice/rendering/localization/currency-formatting/InvoicePdfRenderer.ts",
+          "change": "deleted"
+        },
+        {
+          "path": "packages/billing-service/src/invoice/rendering/localization/currency-formatting/TaxBreakdownFormatter.ts",
+          "change": "added"
+        },
+        {
+          "path": "packages/billing-service/src/invoice/rendering/localization/currency-formatting/ExchangeRateSnapshotCache.ts",
+          "change": "modified"
+        },
+        {
+          "path": "packages/billing-service/src/invoice/rendering/localization/currency-formatting/InvoiceExportCsvWriter.ts",
+          "change": "modified"
+        },
+        {
+          "path": "packages/billing-service/src/invoice/rendering/localization/currency-formatting/CreditNoteAllocationService.ts",
+          "change": "added"
+        },
+        {
+          "path": "packages/billing-service/src/invoice/rendering/localization/currency-formatting/BillingWebhookSignatureVerifier.ts",
+          "change": "modified"
+        }
+      ],
+      "counts": {
+        "added": 17,
+        "modified": 41,
+        "deleted": 6
+      }
+    },
+    "commands": [
+      {
+        "command": "vp test run packages/billing-service/src/invoice --reporter=verbose",
+        "exitCode": 0,
+        "pass": true
+      },
+      {
+        "command": "vp run typecheck --filter @billing/service --filter @billing/invoice-rendering",
+        "exitCode": 0,
+        "pass": true
+      },
+      {
+        "command": "vp test run packages/billing-service/tests/e2e/invoices.e2e.test.ts --project api-e2e",
+        "exitCode": 1,
+        "pass": false
+      },
+      {
+        "command": "node scripts/ledger-reconcile.ts --snapshot 2026-09 --currencies EUR,JPY,KWD --dry-run",
+        "exitCode": 2,
+        "pass": false
+      },
+      {
+        "command": "vp run lint --filter @billing/service -- --max-warnings=0",
+        "exitCode": 0,
+        "pass": true
+      }
+    ],
+    "pullRequest": {
+      "repository": "billing-service",
+      "number": 31842,
+      "headSha": "9f2c4e1d7a3b5c6e8f90a1b2c3d4e5f6a7b8c9d0",
+      "transition": "checks:failed",
+      "baseBranch": "release/v2.5-invoice-rounding-and-currency-display",
+      "checks": {
+        "passed": 118,
+        "failed": 3,
+        "failingJobs": [
+          "api-e2e (EUR, finalize)",
+          "ledger-reconcile-dry-run",
+          "pdf-snapshot-diff (de-DE, ja-JP)"
+        ]
+      },
+      "review": "changes-requested",
+      "mergeable": "blocked-by-checks",
+      "merged": false,
+      "closed": false
+    },
+    "pendingQuestion": "Should the EUR finalize e2e fixture change to the half-even total, or do you want product to confirm the customer-visible change first?",
+    "suggestedNextStep": "Ask product to confirm the half-even EUR total, then update the api-e2e fixture and re-run the ledger dry run with fresh replica credentials"
+  },
+  "note": "Every array at its schema maximum, long paths and model text, and a PR with three failing jobs. Rendered in full it exceeds SQUIRE_SUMMARY_MAX_CHARS, so renderSquireTurnSummary must trim model text first and elide trailing deterministic entries."
+}

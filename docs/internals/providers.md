@@ -241,6 +241,24 @@ handoff instead of a native fork. Clients show the fork action from the environm
 `threadForking` capability and a completed source run, not from this flag. See
 [thread-forking.md](./thread-forking.md) and [context-handoffs.md](./context-handoffs.md).
 
+## Squire support
+
+A driver hosts [Squires](./squire.md) only once it is decided in `DRIVER_SUPPORT`
+([SquireService.ts](../../apps/server/src/squire/SquireService.ts)), and enablement requires
+provider-side MCP isolation on start, resume, and fork. A home thread attaches Lecturn's MCP server
+and nothing else. A probe attaches none. The scratch cwd is not a read boundary, so read restriction
+is decided per adapter.
+
+| Driver kind     | MCP isolation                                                                                                                                              | Read restriction                                                                          | Probes | Enabled                                  |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------ | ---------------------------------------- |
+| `claudeAgent`   | strict MCP config plus safe mode; refused when a managed `managed-mcp.json` is present                                                                     | no native tools; readOnly sandbox with no readable roots under `dontAsk`                  | yes    | yes                                      |
+| `codex`         | Squire-specific `CODEX_HOME` (auth only); user servers, plugins, apps, and Stave memory off                                                                | homes lose shell and image tools; a probe's read-only shell can read what the OS user can | yes    | yes                                      |
+| `cursor`        | `tools: ["mcp"]` with no setting sources; Stave memory and autoReview off                                                                                  | no native tools; the tool limit is enforced by Cursor's servers                           | no     | not yet verified live                    |
+| `grok`          | Squire-specific `GROK_HOME` and empty `HOME`; an agent profile denies every native tool; refused under an organization policy or an unverified CLI version | no native tools                                                                           | yes    | yes, verified at 1.0.70                  |
+| `githubCopilot` | cannot turn off Copilot's own tools                                                                                                                        | none                                                                                      | no     | unsupported                              |
+| `opencode`      | v1: its own `opencode serve` with an isolated config and home, every non-Lecturn tool denied; v2: one shared server, refused                               | v1: no native tools                                                                       | no     | v1 not yet verified live; v2 unsupported |
+| `antigravity`   | cannot turn off its own tools, skills, or helper agents                                                                                                    | none                                                                                      | no     | unsupported                              |
+
 ## External sessions
 
 An external session is a provider session created outside Lecturn: Claude Code CLI or Claude

@@ -313,6 +313,37 @@ const CURSOR_AGENT_SETTING_SOURCES = [
   "plugins",
 ] as const satisfies ReadonlyArray<SettingSource>;
 
+/**
+ * Lecturn: a Squire home or probe (A5.9, D9). `tools` limits the model to MCP
+ * (home) or nothing (probe), and without `settingSources` the SDK loads no
+ * project or user MCP server, rule, skill, hook, or AGENTS.md. Cursor's
+ * servers enforce `tools`; the local shell, read, and write executors stay
+ * wired (D48 residual).
+ *
+ * The home runs unsandboxed with autoReview off because both put the SDK in
+ * allowlist mode, where every MCP call needs an approval its headless
+ * decider always refuses. The probe keeps the sandbox on: it has no tools, so
+ * that refusal is the auto-decline (D25).
+ */
+function cursorSquireAgentOptions(input: {
+  readonly squireIsolation: "home" | "probe";
+  readonly cwd: string | null;
+  readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
+}): Pick<AgentOptions, "tools" | "local" | "mcpServers"> {
+  const mcpServers =
+    input.squireIsolation === "home" ? cursorMcpServers(input.mcpSession) : undefined;
+  return {
+    tools: input.squireIsolation === "home" ? ["mcp"] : [],
+    local: {
+      ...(input.cwd === null ? {} : { cwd: input.cwd }),
+      autoReview: false,
+      sandboxOptions: { enabled: input.squireIsolation === "probe" },
+      enableAgentRetries: true,
+    },
+    ...(mcpServers === undefined ? {} : { mcpServers }),
+  };
+}
+
 export function makeCursorAgentOptions(input: {
   readonly apiKey?: string;
   readonly modelSelection: ModelSelection;
@@ -322,6 +353,20 @@ export function makeCursorAgentOptions(input: {
   /** Lecturn: Stave memory MCP servers for the session cwd. */
   readonly extraMcpServers?: Record<string, McpServerConfig>;
 }): AgentOptions {
+  const squireIsolation = input.runtimePolicy.squireIsolation;
+  if (squireIsolation !== undefined) {
+    return {
+      model: cursorSdkModelSelection(input.modelSelection),
+      name: `Lecturn ${input.threadId}`,
+      mode: "agent",
+      ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
+      ...cursorSquireAgentOptions({
+        squireIsolation,
+        cwd: input.runtimePolicy.cwd,
+        mcpSession: input.mcpSession,
+      }),
+    };
+  }
   const policy = cursorRuntimeAgentPolicy(input.runtimePolicy);
   const mcpServers = cursorMcpServers(input.mcpSession, input.extraMcpServers);
   return {
@@ -937,8 +982,14 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
     openSession: Effect.fn("CursorAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
         const sessionScope = yield* Effect.scope;
+        // Lecturn: a session opened for a Squire serves only Squire threads of
+        // the same role, and the reverse, so one agent never carries the
+        // other's tools or settings. It never wires Stave memory (A5.9).
+        const squireIsolation = input.runtimePolicy.squireIsolation;
         const memoryMcpServers =
-          adapterOptions.resolveStaveMemory === undefined || input.runtimePolicy.cwd === null
+          squireIsolation !== undefined ||
+          adapterOptions.resolveStaveMemory === undefined ||
+          input.runtimePolicy.cwd === null
             ? undefined
             : staveMemoryCursorMcpServers(
                 yield* adapterOptions.resolveStaveMemory(input.runtimePolicy.cwd),
@@ -2157,6 +2208,15 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
           readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
           readonly agentId?: string;
         }) {
+          if (openInput.runtimePolicy.squireIsolation !== squireIsolation) {
+            return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+              driver: CursorAgentSdk.CURSOR_PROVIDER,
+              detail:
+                squireIsolation === undefined
+                  ? "A Squire thread cannot run in an ordinary Cursor session."
+                  : "This Cursor session only serves its own Squire role.",
+            });
+          }
           const existing = yield* Ref.get(liveAgent);
           if (
             existing !== null &&
@@ -2202,7 +2262,12 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
           if (rawText.trim() === "/compress" && turnInput.message.attachments.length === 0) {
             return "/compress";
           }
-          if (hasCursorSkillMention(rawText) && cursorSkillNames === undefined) {
+          // Lecturn: a Squire has no skills, so its text is never rewritten for one.
+          if (
+            squireIsolation === undefined &&
+            hasCursorSkillMention(rawText) &&
+            cursorSkillNames === undefined
+          ) {
             const skills = yield* discoverCursorSkills(
               turnInput.runtimePolicy.cwd ?? undefined,
               adapterOptions.environment,
@@ -2227,6 +2292,9 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
             }),
             runOrdinal: turnInput.runOrdinal,
             hasLecturnMcp: mcpServers !== undefined,
+            ...(turnInput.squireInstructions === undefined
+              ? {}
+              : { squireInstructions: turnInput.squireInstructions }),
           });
           const images = yield* Effect.forEach(
             turnInput.message.attachments.filter(isProviderNativeImageAttachment),

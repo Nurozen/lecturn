@@ -322,6 +322,44 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
       }),
     );
 
+    it.effect("lists name-status kinds with a rename split into delete plus add", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const threadId = ThreadId.make("name-status-checkpoint");
+        const fromCheckpointRef = checkpointRefForThreadTurn(threadId, 0);
+        const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1);
+        const fileSystem = yield* FileSystem.FileSystem;
+        yield* writeTextFile(NodePath.join(tmp, "doomed.txt"), "remove me\n");
+        yield* writeTextFile(NodePath.join(tmp, "before.txt"), buildLargeText(50));
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: fromCheckpointRef });
+        yield* writeTextFile(NodePath.join(tmp, "added.txt"), "new\n");
+        yield* fileSystem.remove(NodePath.join(tmp, "doomed.txt"));
+        yield* fileSystem.rename(NodePath.join(tmp, "before.txt"), NodePath.join(tmp, "after.txt"));
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: toCheckpointRef });
+
+        const nameStatus = yield* checkpointStore.diffCheckpoints({
+          cwd: tmp,
+          fromCheckpointRef,
+          toCheckpointRef,
+          ignoreWhitespace: false,
+          format: "name-status",
+        });
+
+        const fields = nameStatus.split("\0").filter((field) => field.length > 0);
+        const entries = Array.from({ length: fields.length / 2 }, (_, index) =>
+          [fields[index * 2], fields[index * 2 + 1]].join(" "),
+        );
+        expect(entries.toSorted()).toEqual([
+          "A added.txt",
+          "A after.txt",
+          "D before.txt",
+          "D doomed.txt",
+        ]);
+      }),
+    );
+
     it.effect("preserves file paths and turn ranges without changing the user index", () =>
       Effect.gen(function* () {
         const tmp = yield* makeTmpDir();

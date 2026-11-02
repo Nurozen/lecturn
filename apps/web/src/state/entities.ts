@@ -8,6 +8,7 @@ import {
   EMPTY_THREAD_HISTORY_META,
   type EnvironmentThreadStatus,
   type ThreadHistoryMeta,
+  type ThreadListingCapabilitiesByEnvironment,
 } from "@lecturn/client-runtime/state/threads";
 import {
   arrayElementsEqual,
@@ -107,6 +108,16 @@ export function useThreadShells(enabled = true): ReadonlyArray<EnvironmentThread
   return useAtomValue(
     enabled ? environmentThreadShells.threadShellsAtom : EMPTY_THREAD_SHELLS_ATOM,
   );
+}
+
+/** Shells offered to the user: Squire threads their environment hides are left out. */
+export function useVisibleThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
+  return useAtomValue(environmentThreadShells.visibleThreadShellsAtom);
+}
+
+/** Per-environment input to `isListedThread` for pure list builders. */
+export function useThreadListingCapabilities(): ThreadListingCapabilitiesByEnvironment {
+  return useAtomValue(environmentThreadShells.listingCapabilitiesAtom);
 }
 
 export function useAllEnvironmentShellsBootstrapped(): boolean {

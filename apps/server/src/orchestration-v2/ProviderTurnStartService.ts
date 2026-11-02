@@ -1315,6 +1315,7 @@ export const layer: Layer.Layer<
           ...(message.senderThreadId === undefined
             ? {}
             : { senderThreadId: message.senderThreadId }),
+          ...(message.notification === undefined ? {} : { notification: message.notification }),
         },
         modelSelection: run.modelSelection,
         runtimePolicy: resolvedRuntimePolicy,

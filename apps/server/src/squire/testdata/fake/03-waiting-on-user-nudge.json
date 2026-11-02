@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 2,
+  "steps": [
+    {
+      "onEvent": "waiting-on-user",
+      "toolCalls": [
+        {
+          "name": "squire_notify",
+          "args": {
+            "threadId": "thr_plan_constellation_explorer",
+            "message": "Plan the constellation explorer has been waiting 45 min on: offline-only catalog, or fetch from the Yale Bright Star API?"
+          }
+        }
+      ]
+    }
+  ]
+}

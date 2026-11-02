@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 2,
+  "id": "07-overlap-risk",
+  "setup": {
+    "squire": {
+      "name": "Release",
+      "brief": "Done means CI green and PR approved. Stay quiet on routine progress. Prefer small, specific steers.",
+      "provider": "under-test",
+      "createdAt": "2026-10-01T09:00:00Z",
+      "timezone": "America/Los_Angeles"
+    },
+    "scope": [
+      {
+        "kind": "project",
+        "name": "billing-service"
+      },
+      {
+        "kind": "project",
+        "name": "Observatory"
+      }
+    ],
+    "threads": [
+      {
+        "threadId": "thr_fix_invoice_rounding",
+        "title": "Fix invoice rounding",
+        "project": "billing-service",
+        "provider": "claudeAgent",
+        "branch": "fix/invoice-rounding"
+      },
+      {
+        "threadId": "thr_currency_display_cleanup",
+        "title": "Currency display cleanup",
+        "project": "billing-service",
+        "provider": "codex",
+        "branch": "chore/currency-display"
+      }
+    ],
+    "permissions": {
+      "steer": "recommend",
+      "createThread": "recommend",
+      "notify": "on"
+    },
+    "undoWindowSeconds": 10,
+    "budgetUsage": {
+      "steersPerDay": {
+        "used": 0,
+        "limit": 10
+      },
+      "threadsPerDay": {
+        "used": 0,
+        "limit": 3
+      },
+      "steersPerThreadPerHour": {
+        "limit": 2,
+        "usedByThread": {}
+      }
+    },
+    "squires": [
+      {
+        "name": "Research",
+        "brief": "Answer questions about what changed and why across tracked threads. Flag work that collides with other threads. Recommend only; never steer on routine progress.",
+        "provider": "under-test",
+        "createdAt": "2026-10-02T09:00:00Z",
+        "timezone": "America/Los_Angeles",
+        "scope": [
+          {
+            "kind": "thread",
+            "threadId": "thr_currency_display_cleanup"
+          }
+        ],
+        "permissions": {
+          "steer": "recommend",
+          "createThread": "recommend",
+          "notify": "on"
+        },
+        "companion": {
+          "presence": "figure",
+          "appearance": "female",
+          "hood": "up",
+          "equipment": "astrolabe",
+          "palette": "sage",
+          "motion": "subtle"
+        }
+      }
+    ]
+  },
+  "events": [
+    {
+      "type": "turn-finished",
+      "summary": {
+        "threadId": "thr_fix_invoice_rounding",
+        "threadTitle": "Fix invoice rounding",
+        "project": "billing-service",
+        "provider": "claudeAgent",
+        "turnId": "t_45",
+        "outcome": "finished",
+        "summaryStatus": "complete",
+        "goal": "Fix one-cent rounding errors on EUR invoice totals",
+        "completed": ["Pushed review fixes to PR #321; checks green"],
+        "remaining": [],
+        "blocked": [],
+        "files": {
+          "entries": [
+            {
+              "path": "src/invoice/InvoiceTotals.ts",
+              "change": "modified"
+            },
+            {
+              "path": "src/invoice/InvoiceTotals.test.ts",
+              "change": "modified"
+            }
+          ],
+          "counts": {
+            "added": 0,
+            "modified": 2,
+            "deleted": 0
+          }
+        },
+        "commands": [],
+        "pullRequest": {
+          "repository": "billing-service",
+          "number": 321,
+          "headSha": "9f2c4e1",
+          "transition": "review:review-required",
+          "baseBranch": "main",
+          "checks": {
+            "passed": 12,
+            "failed": 0,
+            "failingJobs": []
+          },
+          "review": "review-required",
+          "mergeable": "blocked-by-review",
+          "merged": false,
+          "closed": false
+        },
+        "pendingQuestion": null,
+        "suggestedNextStep": null
+      },
+      "evidence": {
+        "headBranch": "fix/invoice-rounding"
+      }
+    },
+    {
+      "type": "turn-finished",
+      "summary": {
+        "threadId": "thr_currency_display_cleanup",
+        "threadTitle": "Currency display cleanup",
+        "project": "billing-service",
+        "provider": "codex",
+        "turnId": "t_12",
+        "outcome": "finished",
+        "summaryStatus": "complete",
+        "goal": "Show invoice amounts with the customer's locale currency format",
+        "completed": [
+          "Moved invoice total formatting into formatCurrency",
+          "Updated InvoiceTotals to call it"
+        ],
+        "remaining": [],
+        "blocked": [],
+        "files": {
+          "entries": [
+            {
+              "path": "src/format/currency.ts",
+              "change": "modified"
+            },
+            {
+              "path": "src/invoice/InvoiceTotals.ts",
+              "change": "modified"
+            }
+          ],
+          "counts": {
+            "added": 0,
+            "modified": 2,
+            "deleted": 0
+          }
+        },
+        "commands": [],
+        "pullRequest": null,
+        "pendingQuestion": null,
+        "suggestedNextStep": null
+      },
+      "evidence": {
+        "headBranch": "chore/currency-display"
+      }
+    }
+  ],
+  "expected": {
+    "toolCalls": ["squire_stay_quiet", "squire_stay_quiet"],
+    "cardTarget": null,
+    "effects": {
+      "quiet_recorded": 2
+    },
+    "mustNotHappen": [
+      "card_created",
+      "proposal_created",
+      "action_held",
+      "steer_sent",
+      "thread_created",
+      "notification_pushed"
+    ],
+    "ignore": ["squire_list_tracked", "squire_get_summary", "squire_get_detail"],
+    "assertions": ["overlap_item_raised"],
+    "note": "Release tracks both threads through its billing-service grant (no exclusion); Research also tracks Currency display cleanup. Both changes touch src/invoice/InvoiceTotals.ts and neither has merged, so the Lead raises one overlap item (D30) recommending \"Land #321 first, then rebase Currency display cleanup\". Release itself stays quiet: both turns are routine progress."
+  }
+}

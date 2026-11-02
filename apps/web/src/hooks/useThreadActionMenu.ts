@@ -1,3 +1,5 @@
+import { readSquireThreadTrackMenu } from "../components/squire/track/readSquireTrack";
+import { useSquireTrack } from "../components/squire/track/useSquireTrack";
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
 import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
@@ -69,6 +71,7 @@ export function useThreadActionMenu(input: {
 }) {
   const { threadRef, projectCwd, onStartRename } = input;
   const router = useRouter();
+  const squireTrack = useSquireTrack();
   const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
@@ -135,6 +138,7 @@ export function useThreadActionMenu(input: {
       };
       const isRegeneratingTitle = thread.titleRegeneration != null;
       const snoozePresets = resolveSnoozePresets(now, timestampFormat);
+      const squireTrackMenu = readSquireThreadTrackMenu(thread);
       const items = buildThreadActionMenuItems({
         canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
         branch: thread.branch ?? null,
@@ -149,6 +153,9 @@ export function useThreadActionMenu(input: {
         canForkNow: readForkAtLatestTurn(threadRef).blockReason === null,
         supports,
         snoozePresets,
+        squireTrack: squireTrackMenu
+          ? { isSquireThread: thread.squire != null, menu: squireTrackMenu.state }
+          : null,
       });
       const clicked = await settlePromise(() => api.contextMenu.show(items, position));
       if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -163,6 +170,7 @@ export function useThreadActionMenu(input: {
         );
         return;
       }
+      if (squireTrack.handleThreadMenu(squireTrackMenu, action)) return;
       if (action.startsWith("snooze:")) {
         const preset =
           action === "snooze:custom"

@@ -7,6 +7,7 @@ import {
   EventId,
   ProviderInstanceId,
   ProviderSessionId,
+  SquireId,
   ThreadId,
   type OrchestrationProjectShell,
   type OrchestrationV2AppThread,
@@ -102,7 +103,7 @@ function shell(overrides: Partial<SettlementShell> = {}): SettlementShell {
 }
 
 describe("isAutoSettlementCandidate", () => {
-  it("excludes overridden, pinned, blocked, and working threads", () => {
+  it("excludes overridden, pinned, Squire, blocked, and working threads", () => {
     expect(ThreadSettlementService.isAutoSettlementCandidate(shell(), NOW_MS)).toBe(true);
     expect(
       ThreadSettlementService.isAutoSettlementCandidate(shell({ archivedAt: at(-1) }), NOW_MS),
@@ -121,6 +122,12 @@ describe("isAutoSettlementCandidate", () => {
     ).toBe(false);
     expect(
       ThreadSettlementService.isAutoSettlementCandidate(shell({ pinnedAt: at(-1) }), NOW_MS),
+    ).toBe(false);
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(
+        shell({ squire: { squireId: SquireId.make("squire-1"), role: "home" } }),
+        NOW_MS,
+      ),
     ).toBe(false);
     expect(
       ThreadSettlementService.isAutoSettlementCandidate(

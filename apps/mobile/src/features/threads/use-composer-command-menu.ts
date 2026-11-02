@@ -9,6 +9,7 @@ import type {
 } from "@lecturn/contracts";
 import { matchComposerThreadItems } from "@lecturn/client-runtime/composerThreadItems";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/models";
+import type { ThreadListingCapabilitiesByEnvironment } from "@lecturn/client-runtime/state/threads";
 
 const EMPTY_THREAD_SHELLS: ReadonlyArray<EnvironmentThreadShell> = [];
 import {
@@ -172,6 +173,7 @@ export function useComposerCommandMenu({
   ownerKey,
   environmentId,
   threadShells = EMPTY_THREAD_SHELLS,
+  threadListing = null,
   currentThreadId = null,
   projectCwd,
   pullRequestProjectId = null,
@@ -190,6 +192,8 @@ export function useComposerCommandMenu({
   readonly ownerKey: string | null;
   readonly environmentId: EnvironmentId | null;
   readonly threadShells?: ReadonlyArray<EnvironmentThreadShell>;
+  /** Listing capabilities per environment, so Squire threads are not mentionable. */
+  readonly threadListing?: ThreadListingCapabilitiesByEnvironment | null;
   readonly currentThreadId?: ThreadId | null;
   readonly projectCwd: string | null;
   readonly pullRequestProjectId?: ProjectId | null;
@@ -500,6 +504,7 @@ export function useComposerCommandMenu({
             environmentId,
             excludeThreadId: currentThreadId,
             query: trigger.query,
+            listing: threadListing?.get(environmentId),
           })
         : [];
       return [

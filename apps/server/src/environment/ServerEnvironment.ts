@@ -268,6 +268,7 @@ export const make = Effect.gen(function* () {
       manualCloudLink: true,
       ...(serverConfig.threadForkingEnabled ? { threadForking: true } : {}),
       ...(serverConfig.staveEnabled ? { stave: { protocolVersion: STAVE_PROTOCOL_VERSION } } : {}),
+      ...(serverConfig.squireEnabled ? { squire: true } : {}),
       serverResolvedCommandContext: true,
       environmentIcon: true,
       projectCloneTracking: true,

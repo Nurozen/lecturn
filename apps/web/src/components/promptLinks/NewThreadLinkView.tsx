@@ -24,7 +24,7 @@ import { isElectron } from "~/env";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useScratchProject } from "~/hooks/useScratchProject";
 import { newProjectId } from "~/lib/utils";
-import { useProjects, useThreadShells, waitForProject } from "~/state/entities";
+import { useProjects, useVisibleThreadShells, waitForProject } from "~/state/entities";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { environmentPresentations } from "~/state/presentation";
@@ -52,7 +52,7 @@ type LinkState =
     };
 
 type LinkLaunch =
-  | { readonly kind: "thread"; readonly thread: ReturnType<typeof useThreadShells>[number] }
+  | { readonly kind: "thread"; readonly thread: ReturnType<typeof useVisibleThreadShells>[number] }
   | { readonly kind: "draft"; readonly project: EnvironmentProject }
   | { readonly kind: "scratch" }
   | { readonly kind: "settled" };
@@ -64,7 +64,7 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
   const navigate = useNavigate();
   const ready = useAtomValue(allReachableShellsLiveAtom);
   const projects = useProjects();
-  const threads = useThreadShells();
+  const threads = useVisibleThreadShells();
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const handleNewThread = useNewThreadHandler();

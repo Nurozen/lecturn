@@ -41,6 +41,7 @@ import * as ThreadTitleRegenerationService from "./ThreadTitleRegenerationServic
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
+import * as SquireRepository from "../squire/SquireRepository.ts";
 import * as CommandOutputHub from "./CommandOutputHub.ts";
 import * as ProviderRuntimeRecoveryService from "./ProviderRuntimeRecoveryService.ts";
 import * as ProviderSwitchService from "./ProviderSwitchService.ts";
@@ -149,6 +150,8 @@ const layerProviderSessionManagerProvided = ProviderSessionManager.layer.pipe(
       IdAllocator.layer,
       layerProviderEventIngestorProvided,
       ProjectionStore.layer,
+      // Lecturn: a Squire home thread's MCP credential follows its record's role.
+      SquireRepository.layer,
     ),
   ),
 );
@@ -395,7 +398,8 @@ export const layerProduction = Layer.mergeAll(
   layerAgentSessionImporterProvided,
   EffectOutbox.layerPruneWorker.pipe(Layer.provide(EffectOutbox.layer)),
 ).pipe(
-  Layer.provide(Scheduler.layer),
+  // Lecturn: exposed so the Squire clock ticks on this one Scheduler.
+  Layer.provideMerge(Scheduler.layer),
   Layer.provideMerge(layerEventInfrastructure),
   Layer.provideMerge(layerLecturnOrchestrationHooks),
 );

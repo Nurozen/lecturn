@@ -9,7 +9,7 @@ import {
 const id = TrimmedNonEmptyString.check(Schema.isMaxLength(256));
 const text = (max: number) => Schema.String.check(Schema.isMaxLength(max));
 const counter = NonNegativeInt.check(Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER));
-export const ExtensionFeatureId = Schema.Literals(["decisions", "contextual"]);
+export const ExtensionFeatureId = Schema.Literals(["decisions", "contextual", "squires"]);
 export type ExtensionFeatureId = typeof ExtensionFeatureId.Type;
 export const ExtensionEligibilityReason = Schema.Literals([
   "eligible",
@@ -25,7 +25,7 @@ export const ExtensionFeatureUsage = Schema.Struct({
   usedInputTokens: counter,
   reservedInputTokens: counter,
 });
-/** Both features report against this one payer/window descriptor, never separate balances. */
+/** Every feature reports against this one payer/window descriptor, never separate balances. */
 export const ExtensionAllowance = Schema.Struct({
   poolId: id,
   basis: Schema.Literals(["subscription", "grant"]),
@@ -35,7 +35,7 @@ export const ExtensionAllowance = Schema.Struct({
   usedInputTokens: counter,
   reservedInputTokens: counter,
   remainingInputTokens: counter,
-  byFeature: Schema.Array(ExtensionFeatureUsage).check(Schema.isMaxLength(2)),
+  byFeature: Schema.Array(ExtensionFeatureUsage).check(Schema.isMaxLength(3)),
 }).check(
   Schema.makeFilter(
     (v) =>
@@ -63,7 +63,7 @@ export const ExtensionFeatureAvailability = Schema.Struct({
 );
 export const ExtensionServiceStatus = Schema.Struct({
   features: Schema.Array(ExtensionFeatureAvailability).check(
-    Schema.isMaxLength(2),
+    Schema.isMaxLength(3),
     Schema.makeFilter((v) => new Set(v.map((f) => f.featureId)).size === v.length),
   ),
   allowance: Schema.NullOr(ExtensionAllowance),

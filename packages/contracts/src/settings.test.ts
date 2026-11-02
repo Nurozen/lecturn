@@ -1102,6 +1102,44 @@ describe("ServerSettings.stave", () => {
   });
 });
 
+describe("ServerSettings.squire", () => {
+  it("defaults the whole block for settings files written before Squires existed", () => {
+    const settings = decodeServerSettings({ stave: { enabled: true } });
+
+    expect(settings.squire).toEqual({
+      phoneAlertsWhileDesktop: "after-3-min",
+      inactivityDays: 7,
+      botMessages: true,
+      roomIdleTtlHours: 24,
+    });
+    expect(DEFAULT_SERVER_SETTINGS.squire).toEqual(settings.squire);
+  });
+
+  it("fills missing fields when only part of the block is persisted", () => {
+    const settings = decodeServerSettings({ squire: { botMessages: false } });
+
+    expect(settings.squire.botMessages).toBe(false);
+    expect(settings.squire.inactivityDays).toBe(7);
+    expect(encodeServerSettings(settings).squire).toMatchObject({ botMessages: false });
+  });
+
+  it("accepts a one-field patch and rejects out-of-range values", () => {
+    expect(decodeServerSettingsPatch({ squire: { roomIdleTtlHours: 168 } }).squire).toEqual({
+      roomIdleTtlHours: 168,
+    });
+
+    for (const squire of [
+      { inactivityDays: 0 },
+      { inactivityDays: 31 },
+      { inactivityDays: 2.5 },
+      { roomIdleTtlHours: 169 },
+      { phoneAlertsWhileDesktop: "after-10-min" },
+    ]) {
+      expect(() => decodeServerSettingsPatch({ squire })).toThrow();
+    }
+  });
+});
+
 describe("ClientSettings saga nesting", () => {
   const decodeSagaClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
   const decodeSagaClientSettingsPatch = Schema.decodeUnknownSync(ClientSettingsPatch);

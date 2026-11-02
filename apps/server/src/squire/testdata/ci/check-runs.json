@@ -1,0 +1,65 @@
+{
+  "total_count": 5,
+  "check_runs": [
+    {
+      "id": 101,
+      "name": "api-e2e",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/acme/billing-service/actions/runs/9001/job/101",
+      "app": {
+        "slug": "github-actions"
+      }
+    },
+    {
+      "id": 102,
+      "name": "typecheck",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/acme/billing-service/actions/runs/9001/job/102",
+      "app": {
+        "slug": "github-actions"
+      }
+    },
+    {
+      "id": 103,
+      "name": "lint",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/acme/billing-service/actions/runs/9001/job/103",
+      "app": {
+        "slug": "github-actions"
+      }
+    },
+    {
+      "id": 201,
+      "name": "codecov/patch",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://app.codecov.io/gh/acme/billing-service",
+      "app": {
+        "slug": "codecov"
+      }
+    },
+    {
+      "id": 104,
+      "name": "unit",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/acme/billing-service/actions/runs/9001/job/104",
+      "app": {
+        "slug": "github-actions"
+      }
+    },
+    {
+      "id": 105,
+      "name": "build",
+      "status": "completed",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/acme/billing-service/actions/runs/9001/job/105",
+      "app": {
+        "slug": "github-actions"
+      }
+    }
+  ]
+}

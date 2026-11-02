@@ -516,7 +516,7 @@ export const relayDecisionFunding = pgTable(
   (table) => [
     check(
       "relay_decision_funding_feature_id_check",
-      sql`${table.featureId} IN ('decisions','contextual')`,
+      sql`${table.featureId} IN ('decisions','contextual','squires')`,
     ),
     index("relay_decision_funding_payer").on(table.payerId),
     check("relay_decision_funding_state", sql`${table.state} IN ('unfunded','active','revoked')`),
@@ -542,7 +542,7 @@ export const relayDecisionFundingChallenges = pgTable(
   (table) => [
     check(
       "relay_decision_funding_challenges_feature_id_check",
-      sql`${table.featureId} IN ('decisions','contextual')`,
+      sql`${table.featureId} IN ('decisions','contextual','squires')`,
     ),
     index("relay_decision_challenges_environment").on(table.environmentId),
   ],
@@ -618,7 +618,7 @@ export const relayDecisionUsageRuns = pgTable(
   (table) => [
     check(
       "relay_decision_usage_runs_feature_id_check",
-      sql`${table.featureId} IN ('decisions','contextual')`,
+      sql`${table.featureId} IN ('decisions','contextual','squires')`,
     ),
     primaryKey({ columns: [table.payerId, table.runId] }),
     check("decision_usage_run_counts", sql`${table.attemptCount} >= 0 AND ${table.spentNano} >= 0`),
@@ -655,7 +655,7 @@ export const relayDecisionUsageRequests = pgTable(
   (table) => [
     check(
       "relay_decision_usage_requests_feature_id_check",
-      sql`${table.featureId} IN ('decisions','contextual')`,
+      sql`${table.featureId} IN ('decisions','contextual','squires')`,
     ),
     check(
       "decision_usage_qualification",
@@ -705,7 +705,7 @@ export const relayDecisionUsageAttempts = pgTable(
       .where(sql`${table.backend}='private-evaluator' AND ${table.costNano} IS NULL`),
     check(
       "relay_decision_usage_attempts_feature_id_check",
-      sql`${table.featureId} IN ('decisions','contextual')`,
+      sql`${table.featureId} IN ('decisions','contextual','squires')`,
     ),
     index("decision_usage_attempt_account").on(table.payerId, table.createdAt),
     index("decision_usage_attempt_reconcile").on(table.status, table.deadline),
@@ -761,7 +761,7 @@ export const relayExtensionAdmissionGrants = pgTable(
   (table) => [
     check(
       "relay_extension_admission_grants_feature_id_check",
-      sql`${table.featureId} IN ('decisions','contextual')`,
+      sql`${table.featureId} IN ('decisions','contextual','squires')`,
     ),
     check("relay_extension_admission_grants_check", sql`${table.endsAt} > ${table.startsAt}`),
   ],

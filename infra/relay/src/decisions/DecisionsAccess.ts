@@ -88,9 +88,10 @@ export const makeDecisionsAccess = (config: DecisionsAccessConfig) =>
       ORDER BY starts_at DESC,id DESC LIMIT 1`);
       const grant = grants[0];
       if (grant) {
-        if (config.featureId === "contextual") {
+        // A Decisions grant never silently admits a newer feature; each needs its own admission.
+        if (config.featureId !== undefined && config.featureId !== "decisions") {
           const admission = yield* decisionStorage(
-            sql`SELECT 1 FROM relay_extension_admission_grants WHERE user_id=${userId} AND feature_id='contextual' AND revoked_at IS NULL AND starts_at<=${time} AND ends_at>${time} LIMIT 1`,
+            sql`SELECT 1 FROM relay_extension_admission_grants WHERE user_id=${userId} AND feature_id=${config.featureId} AND revoked_at IS NULL AND starts_at<=${time} AND ends_at>${time} LIMIT 1`,
           );
           if (!admission.length) return denied("not-paid");
         }

@@ -26,7 +26,9 @@ import {
   latestProviderTurnForAttempt,
   OrchestrationV2Checkpoint,
   OrchestrationV2CheckpointScope,
+  OrchestrationV2AppThreadJson,
   OrchestrationV2Command,
+  OrchestrationV2InternalCommand,
   OrchestrationV2LimitRecoveryUpdate,
   OrchestrationV2DomainEvent,
   OrchestrationV2ProviderCapabilities,
@@ -97,6 +99,16 @@ const LegacyShellStreamItem = Schema.Union([
     snapshot: OrchestrationV2ShellSnapshot,
   }),
 ]);
+/** A notification source as a server from before Squire decodes it. */
+const PreSquireSource = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("background_task"),
+    work: Schema.Literal("subagent"),
+    childThreadId: Schema.optional(ThreadId),
+  }),
+  Schema.Struct({ kind: Schema.Literal("background_task") }),
+]);
+const decodePreSquireSource = Schema.decodeUnknownSync(PreSquireSource);
 const LegacySubscribeThreadInput = Schema.Struct({
   threadId: ThreadId,
   afterSequence: Schema.optionalKey(NonNegativeInt),
@@ -1458,6 +1470,30 @@ describe("background work kinds from older or newer servers", () => {
     }
   });
 
+  it("sends a Squire notification source as background work older clients decode", () => {
+    const squireSource = { kind: "squire", squireId: "squire-1", eventCount: 3 };
+    const wireSource = {
+      kind: "background_task",
+      work: "squire",
+      squireId: "squire-1",
+      eventCount: 3,
+    };
+    const item = decodeOrchestrationV2TurnItemJson(storedNotification(wireSource));
+    expect(item).toMatchObject({ type: "notification", source: squireSource });
+    const encoded = encodeOrchestrationV2TurnItemJson(item);
+    expect(encoded).toMatchObject({ source: wireSource });
+    expect(decodeOrchestrationV2TurnItemJson(encoded)).toEqual(item);
+
+    expect(decodePreSquireSource("source" in encoded ? encoded.source : undefined)).toEqual({
+      kind: "background_task",
+    });
+
+    const incomplete = decodeOrchestrationV2TurnItemJson(
+      storedNotification({ kind: "background_task", work: "squire" }),
+    );
+    expect(incomplete).toMatchObject({ source: { kind: "background_task" } });
+  });
+
   it("decodes a notification source kind from a newer server as generic background work", () => {
     const item = decodeOrchestrationV2TurnItemJson(
       storedNotification({ kind: "workflow", workflowId: "wf-1" }),
@@ -1615,6 +1651,12 @@ describe("connected app thread fields", () => {
     expect(JSON.stringify(roundTrip(shell))).toBe(JSON.stringify(shell));
   });
 
+  it("adds the Squire marker to the wire shell only when set", () => {
+    const marker = { squireId: "squire-1", role: "probe" };
+    expect("squire" in roundTrip(shell)).toBe(false);
+    expect(roundTrip({ ...shell, squire: marker })).toEqual({ ...shell, squire: marker });
+  });
+
   it("round-trips app metadata on the wire shell", () => {
     expect(roundTrip({ ...shell, ...appFields })).toEqual({ ...shell, ...appFields });
     expect(() => roundTrip({ ...shell, appOrigin: "app" })).toThrow();
@@ -1670,5 +1712,81 @@ describe("connected app thread fields", () => {
       appOrigin: "embed",
     });
     expect(create.type === "thread.create" && create.appOrigin).toBe("embed");
+  });
+});
+
+describe("Squire contract additions", () => {
+  const at = "2026-10-31T00:00:00.000Z";
+  const marker = { squireId: "squire-1", role: "home" };
+  const createdThread = {
+    createdBy: "system",
+    creationSource: "server",
+    id: "thread-1",
+    projectId: "project-1",
+    title: "Squire · Ada",
+    providerInstanceId: "claudeAgent",
+    modelSelection: { instanceId: "claudeAgent", model: "claude-sonnet" },
+    runtimeMode: "approval-required",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+    activeProviderThreadId: null,
+    lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: "thread-1" },
+    forkedFrom: null,
+    createdAt: at,
+    updatedAt: at,
+    archivedAt: null,
+    deletedAt: null,
+  };
+  const decodeCreated = Schema.decodeUnknownSync(OrchestrationV2AppThreadJson);
+  const encodeCreated = Schema.encodeSync(OrchestrationV2AppThreadJson);
+  const decodeInternalCommand = Schema.decodeUnknownSync(OrchestrationV2InternalCommand);
+
+  it("sends no squire key for an unmarked thread and round-trips the marker", () => {
+    const unmarked = encodeCreated(decodeCreated(createdThread));
+    expect("squire" in unmarked).toBe(false);
+
+    const marked = encodeCreated(decodeCreated({ ...createdThread, squire: marker }));
+    expect(marked.squire).toEqual(marker);
+    expect(decodeCreated(marked).squire).toEqual(marker);
+    expect(() =>
+      decodeCreated({ ...createdThread, squire: { squireId: "s", role: "x" } }),
+    ).toThrow();
+  });
+
+  it("decodes interrupts and stops with and without provenance", () => {
+    const interrupt = {
+      type: "run.interrupt",
+      commandId: "command-1",
+      threadId: "thread-1",
+      runId: "run-1",
+    };
+    expect(decodeOrchestrationV2Command(interrupt)).not.toHaveProperty("createdBy");
+    expect(decodeOrchestrationV2Command({ ...interrupt, createdBy: "agent" })).toMatchObject({
+      createdBy: "agent",
+    });
+    expect(() => decodeOrchestrationV2Command({ ...interrupt, createdBy: "squire" })).toThrow();
+
+    const stop = { type: "thread.stop", commandId: "command-2", threadId: "thread-1" };
+    expect(decodeInternalCommand(stop)).not.toHaveProperty("createdBy");
+    expect(decodeInternalCommand({ ...stop, createdBy: "system" })).toMatchObject({
+      createdBy: "system",
+    });
+  });
+
+  it("decodes thread.fork with and without a probe", () => {
+    const fork = {
+      type: "thread.fork",
+      createdBy: "system",
+      creationSource: "server",
+      commandId: "command-3",
+      sourceThreadId: "thread-1",
+      targetThreadId: "thread-2",
+      sourcePoint: { type: "latest_stable" },
+    };
+    expect(decodeOrchestrationV2Command(fork)).not.toHaveProperty("squireProbe");
+    expect(
+      decodeOrchestrationV2Command({ ...fork, squireProbe: { squireId: "squire-1" } }),
+    ).toMatchObject({ squireProbe: { squireId: "squire-1" } });
   });
 });

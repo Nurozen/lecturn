@@ -27,7 +27,8 @@ import {
   ProviderTurnId,
   NodeId,
   RunId,
-  type ThreadId,
+  SquireId,
+  ThreadId,
   TurnItemId,
   WS_METHODS,
 } from "@lecturn/contracts";
@@ -1622,6 +1623,66 @@ describe("thread copy ownership", () => {
         bundle.assets.map((asset) => asset.sourceAttachmentId),
         [ownCard],
       );
+    }),
+  );
+});
+
+describe("Squire threads", () => {
+  it.effect("an export leaves out a Squire's thread and an import never carries the marker", () =>
+    Effect.gen(function* () {
+      const sidecar = yield* startEnvironment("sidecar");
+      const user = yield* startEnvironment("user");
+      const plain = yield* sidecar.run(createSourceThread("/work/rocket", "Plain"));
+      yield* sidecar.run(writeTurn(plain.threadId, 1));
+      const markedId = ThreadId.make("thread:squire-home");
+      yield* sidecar.run(
+        Effect.flatMap(Orchestrator.OrchestratorV2, (orchestrator) =>
+          orchestrator.dispatch({
+            type: "thread.create",
+            createdBy: "system",
+            creationSource: "server",
+            commandId: CommandId.make("squire-home:create"),
+            threadId: markedId,
+            projectId: plain.projectId,
+            title: "Squire · Lead",
+            modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            squire: { squireId: SquireId.make("squire:lead"), role: "home" },
+          }),
+        ),
+      );
+      yield* sidecar.run(writeTurn(markedId, 1));
+
+      const bundle = yield* sidecar.run(exportAll);
+      assert.deepEqual(
+        bundle.projects.flatMap((project) =>
+          project.threads.map((thread) => thread.sourceThreadId),
+        ),
+        [plain.threadId],
+      );
+
+      // A forged bundle naming a marker decodes without it.
+      const encoded = encodeBundle(bundle);
+      const forged = yield* decodeBundleJson(
+        JSON.stringify({
+          ...encoded,
+          projects: encoded.projects.map((project) => ({
+            ...project,
+            threads: project.threads.map((thread) => ({
+              ...thread,
+              squire: { squireId: "squire:forged", role: "home" },
+            })),
+          })),
+        }),
+      );
+      assert.deepEqual(yield* user.run(importBundle(forged)), { imported: 1, skipped: 0 });
+      const copy = yield* user.run(
+        projectionOf(copyThreadId(app, sidecar.environmentId, plain.threadId)),
+      );
+      assert.notProperty(copy.thread, "squire");
     }),
   );
 });

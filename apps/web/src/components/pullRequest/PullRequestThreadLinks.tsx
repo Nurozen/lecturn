@@ -9,7 +9,12 @@ import { usePullRequestLinking } from "~/hooks/usePullRequestLinking";
 
 import { parseChangeRequestUrl } from "~/lib/openPullRequestLink";
 import { normalizeThreadPullRequestKey } from "@lecturn/shared/threadPullRequests";
-import { useProjects, useServerConfigs, useThreadShell, useThreadShells } from "~/state/entities";
+import {
+  useProjects,
+  useServerConfigs,
+  useThreadShell,
+  useVisibleThreadShells,
+} from "~/state/entities";
 import { pullRequestEnvironment } from "~/state/pullRequests";
 import { useEnvironmentQuery } from "~/state/query";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
@@ -185,7 +190,7 @@ function ThreadPicker({
   pending: boolean;
   onSelect: (threadId: ThreadId) => void;
 }) {
-  const threads = useThreadShells();
+  const threads = useVisibleThreadShells();
   const linking = usePullRequestLinking(environmentId);
   const projects = useProjects();
   const [query, setQuery] = useState("");

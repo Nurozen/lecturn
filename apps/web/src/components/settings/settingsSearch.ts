@@ -23,6 +23,7 @@ export type SettingsPath =
   | "/settings/providers"
   | "/settings/integrations"
   | "/settings/scheduled-tasks"
+  | "/settings/squires"
   | "/settings/source-control"
   | "/settings/relay"
   | "/settings/storage"
@@ -84,6 +85,8 @@ export interface SettingsSearchAvailability {
   readonly hasStaveGrace?: boolean;
   readonly hasStaveDestroy?: boolean;
   readonly managedTunnelActive?: boolean;
+  /** A connected environment runs Squires (`capabilities.squire`). */
+  readonly hasSquires?: boolean;
 }
 
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
@@ -96,6 +99,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
   "/settings/scheduled-tasks": "Scheduled Tasks",
+  "/settings/squires": "Squires",
   "/settings/source-control": "Source Control",
   "/settings/storage": "Storage",
   "/settings/connections": "Connections",
@@ -1111,6 +1115,36 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "squires-phone-alerts",
+    title: "Phone alerts while I'm at my desktop",
+    to: "/settings/squires",
+    searchTerms: ["squire push notification mobile iphone android desktop presence hold delay"],
+  },
+  {
+    id: "squires-inactivity",
+    title: "Pause triggers after inactivity",
+    to: "/settings/squires",
+    searchTerms: ["squire triggers sweep schedule webhook inactive days resume automation"],
+  },
+  {
+    id: "squires-bot-messages",
+    title: "Squire-to-Squire messages",
+    to: "/settings/squires",
+    searchTerms: ["squire lead messaging rooms bot posts send message"],
+  },
+  {
+    id: "squires-room-ttl",
+    title: "Room idle timeout",
+    to: "/settings/squires",
+    searchTerms: ["squire rooms close idle hours ttl default"],
+  },
+  {
+    id: "squires-room-routing",
+    title: "Room routing with Jev",
+    to: "/settings/squires",
+    searchTerms: ["squire rooms routing jev funding rules extensions"],
+  },
+  {
     id: "archive",
     title: "Archived threads",
     to: "/settings/archived",
@@ -1138,6 +1172,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   // Relay health and publishing belong to this device's Connect account.
   "/settings/relay": null,
   "/settings/scheduled-tasks": null,
+  "/settings/squires": null,
   "/settings/archived": "project-defaults",
 };
 
@@ -1256,7 +1291,8 @@ export function filterAvailableSettingsSearchItems(
       (!item.requiresStaveLifecycle || availability.hasStaveLifecycle === true) &&
       (!item.requiresStaveGrace || availability.hasStaveGrace === true) &&
       (!item.requiresStaveDestroy || availability.hasStaveDestroy === true) &&
-      (!item.managedTunnelOnly || availability.managedTunnelActive === true),
+      (!item.managedTunnelOnly || availability.managedTunnelActive === true) &&
+      (item.to !== "/settings/squires" || availability.hasSquires === true),
   );
 }
 

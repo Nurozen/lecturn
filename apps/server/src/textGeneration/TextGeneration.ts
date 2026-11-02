@@ -23,6 +23,7 @@ export type {
   PrContentGenerationResult,
   ReviewGuideGenerationInput,
   ReviewGuideGenerationResult,
+  SquireTurnSummaryGenerationInput,
   ThreadTitleGenerationInput,
   ThreadTitleGenerationResult,
   WorkflowSummaryGenerationInput,
@@ -40,6 +41,7 @@ type TextGenerationOp =
   | "generateThreadTitle"
   | "generateWorkflowSummary"
   | "generateContextualSummary"
+  | "generateSquireTurnSummary"
   | "generateDecisionNotes"
   | "checkDecisionWriter"
   | "generateReviewGuide";
@@ -66,7 +68,10 @@ export type RoutedTextGeneration = TextGeneration["Service"] &
   Required<
     Pick<
       TextGeneration["Service"],
-      "checkDecisionWriter" | "generateDecisionNotes" | "generateContextualSummary"
+      | "checkDecisionWriter"
+      | "generateDecisionNotes"
+      | "generateContextualSummary"
+      | "generateSquireTurnSummary"
     >
   >;
 
@@ -119,6 +124,21 @@ export const makeTextGenerationFromRegistry = (
             new TextGenerationError({
               operation: "generateContextualSummary",
               detail: "This provider does not support isolated Contextual summaries.",
+            }),
+          ),
+      ),
+    ),
+  // Fails rather than falling back, so callers can treat this error as "unsupported" and keep
+  // the deterministic summary.
+  generateSquireTurnSummary: (input) =>
+    resolveInstance(registry, "generateSquireTurnSummary", input.modelSelection.instanceId).pipe(
+      Effect.flatMap(
+        (generation) =>
+          generation.generateSquireTurnSummary?.(input) ??
+          Effect.fail(
+            new TextGenerationError({
+              operation: "generateSquireTurnSummary",
+              detail: "This provider does not support isolated Squire summaries.",
             }),
           ),
       ),

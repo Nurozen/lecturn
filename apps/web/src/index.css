@@ -569,6 +569,28 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(lecturn-
   will-change: var(--visible-animation-will-change, auto);
 }
 
+/* The Squire indicator's working motion, the AGENTS.md exception: mounted only while working,
+   stepped to ten updates a second, and paused by observeVisibleAnimation when unfocused or
+   offscreen. The portrait arc rotates only; the mark's dash moves along its stroke, a repaint
+   confined to a mark under 22 px. */
+@utility squire-indicator-arc {
+  transform-origin: center;
+  animation: squire-indicator-arc 3.6s steps(36) infinite;
+  animation-play-state: var(--visible-animation-state, paused);
+  will-change: var(--visible-animation-will-change, auto);
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+@utility squire-mark-trace {
+  animation: squire-mark-trace 2.4s steps(24) infinite;
+  animation-play-state: var(--visible-animation-state, paused);
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
 @keyframes live-activity-focus {
   from {
     transform: translateX(0);
@@ -2475,6 +2497,18 @@ body,
 @keyframes lecturn-thread-orbit {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes squire-indicator-arc {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes squire-mark-trace {
+  to {
+    stroke-dashoffset: -100;
   }
 }
 

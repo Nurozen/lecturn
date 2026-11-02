@@ -80,6 +80,7 @@ const liveProcess = Effect.acquireRelease(
 it.layer(NodeServices.layer)("cli config resolution", (it) => {
   const defaultRuntimeConfig = {
     staveEnabled: true,
+    squireEnabled: false,
     threadForkingEnabled: true,
     desktopTelemetryFd: undefined,
     desktopTelemetryControlFd: undefined,
@@ -451,6 +452,44 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
       expect(resolved.staveEnabled).toBe(false);
       expect(resolved.stavePath).toBeUndefined();
+    }),
+  );
+
+  it.effect.each([
+    { env: {}, expected: false },
+    { env: { LECTURN_SQUIRE: "1" }, expected: true },
+  ])("reads the Squire kill switch from LECTURN_SQUIRE ($expected)", ({ env, expected }) =>
+    Effect.gen(function* () {
+      const { join } = yield* Path.Path;
+      const baseDir = join(NodeOS.tmpdir(), "lecturn-cli-config-squire-base");
+      const resolved = yield* resolveServerConfig(
+        {
+          mode: Option.none(),
+          port: Option.none(),
+          host: Option.none(),
+          baseDir: Option.none(),
+          cwd: Option.none(),
+          devUrl: Option.none(),
+          noBrowser: Option.none(),
+          bootstrapFd: Option.none(),
+          autoBootstrapProjectFromCwd: Option.none(),
+          logWebSocketEvents: Option.none(),
+          tailscaleServeEnabled: Option.none(),
+          tailscaleServePort: Option.none(),
+        },
+        Option.none(),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(
+              ConfigProvider.fromEnv({ env: { LECTURN_HOME: baseDir, ...env } }),
+            ),
+            NetService.layer,
+          ),
+        ),
+      );
+
+      expect(resolved.squireEnabled).toBe(expected);
     }),
   );
 

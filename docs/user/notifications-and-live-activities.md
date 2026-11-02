@@ -36,6 +36,8 @@ While you are actively using a connected environment in Lecturn, its phone notif
 
 If an item still needs approval or input when you stop using Lecturn, it rings once then, normally within about 30 seconds. Done and Failed ring only if you leave within about two minutes of the completion. An item you already handled does not ring.
 
+Squire alerts follow their own timing. See [Squires](./squires.md#phone-alerts).
+
 ## If updates do not appear
 
 - Confirm the account has active Connect access and the host is online with **Publish agent activity** enabled.

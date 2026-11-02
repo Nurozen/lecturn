@@ -64,7 +64,14 @@ import {
 } from "./Sidebar.logic";
 import { threadSearchMatchKey } from "@lecturn/client-runtime/state/thread-search";
 import { sortSettledThreads } from "@lecturn/client-runtime/state/thread-sort";
-import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@lecturn/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  RunId,
+  SquireId,
+  ThreadId,
+} from "@lecturn/contracts";
 
 import {
   DEFAULT_INTERACTION_MODE,
@@ -446,6 +453,33 @@ describe("sidebar thread lineage helpers", () => {
         new Set([`${environmentId}:${projectId}`]),
       ).map((thread) => thread.id),
     ).toEqual([parentId, fork.id]);
+  });
+
+  it("hides Squire home and probe threads only where the environment advertises Squires", () => {
+    const squireEnvironmentId = EnvironmentId.make("environment-squire");
+    const plainEnvironmentId = EnvironmentId.make("environment-plain");
+    const marked = (id: string, environmentId: EnvironmentId, role: "home" | "probe") => ({
+      ...makeThreadFixture({ id: ThreadId.make(id), environmentId }),
+      squire: { squireId: SquireId.make("squire"), role },
+    });
+    const ordinary = makeThreadFixture({
+      id: ThreadId.make("thread-ordinary"),
+      environmentId: squireEnvironmentId,
+    });
+    const threads = [
+      ordinary,
+      marked("home", squireEnvironmentId, "home"),
+      marked("probe", squireEnvironmentId, "probe"),
+      marked("old-home", plainEnvironmentId, "home"),
+    ];
+    const listing = new Map([[squireEnvironmentId, { squire: true }]]);
+
+    expect(
+      filterSidebarV2VisibleThreads(threads, null, listing).map((thread) => thread.id),
+    ).toEqual([ordinary.id, ThreadId.make("old-home")]);
+    expect(filterSidebarV2VisibleThreads(threads, null).map((thread) => thread.id)).toEqual(
+      threads.map((thread) => thread.id),
+    );
   });
 
   it("identifies subagent threads so the sidebar can hide them", () => {

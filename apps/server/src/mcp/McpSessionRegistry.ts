@@ -21,9 +21,15 @@ export interface McpCredentialRequest {
    * token is honored (#7083). Defaults to full access.
    */
   readonly browserToolsAvailable?: boolean;
-  readonly capabilities?: ReadonlySet<McpInvocationContext.McpCapability>;
+  /** Only `squire` below grants "squire", so the capability never comes without its scope. */
+  readonly capabilities?: ReadonlySet<Exclude<McpInvocationContext.McpCapability, "squire">>;
   /** Only threads in an app-bound project get one; it grants that app's tools on `/mcp`. */
   readonly app?: McpInvocationContext.McpAppCaller;
+  /**
+   * A Squire home thread's credential: overrides every other capability field,
+   * so it carries exactly `{"squire"}` plus this scope (D8).
+   */
+  readonly squire?: McpInvocationContext.McpSquireCaller;
   /** Handed to adapters with the config, so they can keep their own prompt off app tools. */
   readonly appTools?: {
     readonly toolPrefix: string;
@@ -127,14 +133,21 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
           providerInstanceId: ProviderInstanceId.make(request.providerInstanceId),
         },
         client: undefined,
-        capabilities: new Set<McpInvocationContext.McpCapability>([
-          "orchestration",
-          "worktree",
-          "pull-requests",
-          ...(request.capabilities ?? (browserToolsAvailable ? (["preview"] as const) : [])),
-          ...(request.app === undefined ? [] : (["app"] as const)),
-        ]),
-        ...(request.app === undefined ? {} : { app: request.app }),
+        capabilities:
+          request.squire === undefined
+            ? new Set<McpInvocationContext.McpCapability>([
+                "orchestration",
+                "worktree",
+                "pull-requests",
+                ...(request.capabilities ?? (browserToolsAvailable ? (["preview"] as const) : [])),
+                ...(request.app === undefined ? [] : (["app"] as const)),
+              ])
+            : new Set<McpInvocationContext.McpCapability>(["squire"]),
+        ...(request.squire === undefined
+          ? request.app === undefined
+            ? {}
+            : { app: request.app }
+          : { squire: { squireId: request.squire.squireId, role: request.squire.role } }),
         issuedAt,
       };
       yield* SynchronizedRef.update(state, ({ records }) => {
@@ -152,7 +165,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
           authorizationHeader: `Bearer ${rawToken}`,
           browserToolsAvailable: scope.capabilities.has("preview"),
           capabilities: scope.capabilities,
-          ...(request.app === undefined || request.appTools === undefined
+          ...(scope.app === undefined || request.app === undefined || request.appTools === undefined
             ? {}
             : { app: { appId: request.app.appId, ...request.appTools } }),
         },

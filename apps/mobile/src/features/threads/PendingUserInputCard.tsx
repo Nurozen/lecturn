@@ -2,7 +2,7 @@ import { RequestActionButton } from "./RequestActionButton";
 import { QuestionAttachments } from "./QuestionAttachments";
 import type { RuntimeRequestId } from "@lecturn/contracts";
 import type { ThreadUserInputQuestion } from "@lecturn/client-runtime/state/thread-requests";
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, type ReactNode } from "react";
 import { Platform, Pressable, ScrollView, View, type LayoutChangeEvent } from "react-native";
 import Animated, {
   Easing,
@@ -251,73 +251,27 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
             run to continue.
           </Text>
         ) : null}
-        {props.pendingUserInput.questions.map((question) => {
-          const draft = props.drafts[question.id];
-          return (
-            <View key={question.id} className="gap-2 pt-1">
-              <Text className="font-lecturn-bold text-xs uppercase tracking-[1px] text-foreground-muted">
-                {question.header}
-              </Text>
-              <QuestionText markdown={question.question} />
-              <View className="gap-2">
-                {question.options.map((option) => {
-                  const optionValue = option.value ?? option.label.trim();
-                  const selected = isPendingUserInputOptionSelected(question, draft, optionValue);
-                  const description =
-                    option.description !== option.label ? option.description : undefined;
-                  return (
-                    <Pressable
-                      key={optionValue}
-                      accessibilityRole={question.multiSelect ? "checkbox" : "radio"}
-                      accessibilityState={{ checked: selected, disabled: responseDisabled }}
-                      disabled={responseDisabled}
-                      className={cn(
-                        "min-h-12 w-full rounded-2xl border px-3.5 py-3",
-                        selected ? "border-primary bg-primary/10" : "border-border bg-input",
-                      )}
-                      onPress={() =>
-                        props.onSelectOption(
-                          props.pendingUserInput.requestId,
-                          question,
-                          optionValue,
-                        )
-                      }
-                    >
-                      <View className="min-w-0 flex-1 gap-0.5">
-                        <Text
-                          className={cn(
-                            "font-lecturn-bold text-sm",
-                            selected ? "text-foreground" : "text-foreground-secondary",
-                          )}
-                        >
-                          {option.label}
-                        </Text>
-                        {description ? (
-                          <Text className="font-sans text-sm leading-5 text-foreground-muted">
-                            {description}
-                          </Text>
-                        ) : null}
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              {question.allowCustomAnswer !== false ? (
-                <QuestionAttachments
-                  requestId={props.pendingUserInput.requestId}
-                  question={question}
-                  questions={props.pendingUserInput.questions}
-                  disabled={responseDisabled}
-                  value={draft?.customAnswer ?? ""}
-                  onChangeText={(value) =>
-                    props.onChangeCustomAnswer(props.pendingUserInput.requestId, question.id, value)
-                  }
-                  onInputFocusChange={props.onInputFocusChange}
-                />
-              ) : null}
-            </View>
-          );
-        })}
+        <PendingUserInputQuestionList
+          questions={props.pendingUserInput.questions}
+          drafts={props.drafts}
+          disabled={responseDisabled}
+          onSelectOption={(question, optionValue) =>
+            props.onSelectOption(props.pendingUserInput.requestId, question, optionValue)
+          }
+          renderCustomAnswer={(question, draft) => (
+            <QuestionAttachments
+              requestId={props.pendingUserInput.requestId}
+              question={question}
+              questions={props.pendingUserInput.questions}
+              disabled={responseDisabled}
+              value={draft?.customAnswer ?? ""}
+              onChangeText={(value) =>
+                props.onChangeCustomAnswer(props.pendingUserInput.requestId, question.id, value)
+              }
+              onInputFocusChange={props.onInputFocusChange}
+            />
+          )}
+        />
       </ScrollView>
       <RequestActionButton
         label="Submit answers"
@@ -360,5 +314,76 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
         card
       )}
     </View>
+  );
+}
+
+// Lecturn: prop-driven so a Squire question card answers a thread that is not selected with
+// exactly the thread's options; the custom answer slot differs because attachments bind to
+// the selected thread.
+export function PendingUserInputQuestionList(props: {
+  readonly questions: ReadonlyArray<ThreadUserInputQuestion>;
+  readonly drafts: Record<string, PendingUserInputDraftAnswer>;
+  readonly disabled: boolean;
+  readonly onSelectOption: (question: ThreadUserInputQuestion, optionValue: string) => void;
+  readonly renderCustomAnswer: (
+    question: ThreadUserInputQuestion,
+    draft: PendingUserInputDraftAnswer | undefined,
+  ) => ReactNode;
+}) {
+  const responseDisabled = props.disabled;
+  return (
+    <>
+      {props.questions.map((question) => {
+        const draft = props.drafts[question.id];
+        return (
+          <View key={question.id} className="gap-2 pt-1">
+            <Text className="font-lecturn-bold text-xs uppercase tracking-[1px] text-foreground-muted">
+              {question.header}
+            </Text>
+            <QuestionText markdown={question.question} />
+            <View className="gap-2">
+              {question.options.map((option) => {
+                const optionValue = option.value ?? option.label.trim();
+                const selected = isPendingUserInputOptionSelected(question, draft, optionValue);
+                const description =
+                  option.description !== option.label ? option.description : undefined;
+                return (
+                  <Pressable
+                    key={optionValue}
+                    accessibilityRole={question.multiSelect ? "checkbox" : "radio"}
+                    accessibilityState={{ checked: selected, disabled: responseDisabled }}
+                    disabled={responseDisabled}
+                    className={cn(
+                      "min-h-12 w-full rounded-2xl border px-3.5 py-3",
+                      selected ? "border-primary bg-primary/10" : "border-border bg-input",
+                    )}
+                    onPress={() => props.onSelectOption(question, optionValue)}
+                  >
+                    <View className="min-w-0 flex-1 gap-0.5">
+                      <Text
+                        className={cn(
+                          "font-lecturn-bold text-sm",
+                          selected ? "text-foreground" : "text-foreground-secondary",
+                        )}
+                      >
+                        {option.label}
+                      </Text>
+                      {description ? (
+                        <Text className="font-sans text-sm leading-5 text-foreground-muted">
+                          {description}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {question.allowCustomAnswer !== false
+              ? props.renderCustomAnswer(question, draft)
+              : null}
+          </View>
+        );
+      })}
+    </>
   );
 }

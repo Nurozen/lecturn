@@ -1,3 +1,4 @@
+import { SquireId } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -243,6 +244,35 @@ describe("buildThreadActionMenuItems", () => {
       (item) => item.id === "archive",
     );
     expect(archiveItem?.disabled).toBe(true);
+  });
+});
+
+describe("Squire track items", () => {
+  const menu = (tracked: boolean) => ({
+    canTrack: true,
+    canUntrack: true,
+    squires: [{ id: SquireId.make("release"), name: "Release", tracked }],
+  });
+  const squireLabels = (state: ThreadActionMenuState) =>
+    buildThreadActionMenuItems(state)
+      .filter((item) => item.id.startsWith("squire-"))
+      .map((item) => item.label);
+
+  it("appears only with a Squire-capable environment and on ordinary threads", () => {
+    expect(squireLabels(baseState)).toEqual([]);
+    expect(squireLabels({ ...baseState, squireTrack: null })).toEqual([]);
+    expect(
+      squireLabels({ ...baseState, squireTrack: { isSquireThread: true, menu: menu(false) } }),
+    ).toEqual([]);
+    expect(
+      squireLabels({ ...baseState, squireTrack: { isSquireThread: false, menu: menu(false) } }),
+    ).toEqual(["Track with Release"]);
+  });
+
+  it("offers Stop tracking once the thread is tracked", () => {
+    expect(
+      squireLabels({ ...baseState, squireTrack: { isSquireThread: false, menu: menu(true) } }),
+    ).toEqual(["Stop tracking (Release)"]);
   });
 });
 

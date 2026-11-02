@@ -22,6 +22,11 @@ import * as TextGeneration from "./TextGeneration.ts";
 import { sanitizeThreadTitle } from "@lecturn/provider-core/server/textGenerationUtils";
 import { makeClaudeTextGeneration } from "./ClaudeTextGeneration.ts";
 import { writeFakeCli } from "@lecturn/provider-testing/fakeCli";
+import {
+  squireSummaryExpectedFixture,
+  squireSummaryInputFixture,
+  squireSummaryReplyFixture,
+} from "./squireSummaryTestFixtures.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const layerClaudeTextGenerationTest = ServerConfig.ServerConfig.layerTest(process.cwd(), {
@@ -284,6 +289,50 @@ it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
             },
           });
           expect(result).toEqual({ text: "SQLite supports the local cache." });
+        }),
+    ),
+  );
+  it.effect("generates Squire turn summaries in an isolated tool-free run", () =>
+    withFakeClaudeEnv(
+      {
+        argsMustContain: "--tools  --disable-slash-commands --strict-mcp-config --safe-mode",
+        argsMustNotContain: "--dangerously-skip-permissions",
+        cwdMustNotBe: process.cwd(),
+        stdinMustContain: "Fix the login redirect",
+        output: JSON.stringify({ structured_output: squireSummaryReplyFixture }),
+      },
+      (generation) =>
+        Effect.gen(function* () {
+          const result = yield* generation.generateSquireTurnSummary!({
+            cwd: process.cwd(),
+            summaryInput: squireSummaryInputFixture,
+            outcome: "finished",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+            },
+          });
+          expect(result).toEqual(squireSummaryExpectedFixture);
+        }),
+    ),
+  );
+  it.effect("hides Claude failures behind the stable Squire summary error", () =>
+    withFakeClaudeEnv(
+      { output: "", stderr: "PRIVATE_CONVERSATION_SENTINEL", exitCode: 1 },
+      (generation) =>
+        Effect.gen(function* () {
+          const error = yield* generation.generateSquireTurnSummary!({
+            cwd: process.cwd(),
+            summaryInput: squireSummaryInputFixture,
+            outcome: "finished",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+            },
+          }).pipe(Effect.flip);
+          expect(error.detail).toBe("Squire turn summary generation is unavailable.");
+          expect(error.cause).toBeUndefined();
+          expect(JSON.stringify(error)).not.toContain("PRIVATE_CONVERSATION_SENTINEL");
         }),
     ),
   );

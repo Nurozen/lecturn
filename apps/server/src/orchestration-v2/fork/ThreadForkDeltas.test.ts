@@ -7,6 +7,7 @@ import {
   type OrchestrationV2TurnItem,
   ProviderInstanceId,
   RunId,
+  SquireId,
   ThreadId,
   TurnItemId,
 } from "@lecturn/contracts";
@@ -246,6 +247,16 @@ describe("applyForkDeltas", () => {
       threadId: sourceThreadId,
       messageId: null,
     });
+  });
+  it("leaves a fork of a Squire thread unmarked", () => {
+    const forked = applyForkDeltas({
+      targetThread: {
+        ...childThread,
+        squire: { squireId: SquireId.make("squire:lead"), role: "home" },
+      },
+      command,
+    });
+    assert.notProperty(forked, "squire");
   });
   it("moves a new-worktree child onto its own branch", () => {
     const forked = applyForkDeltas({

@@ -16,6 +16,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
 import type { AppMcpAppRoute } from "../mcpApps/AppMcpAppRoute.ts";
+import type { SquireMcpAppRoute } from "../squire/showcase/showcaseApp.ts";
 
 export type AppHostContextKey = `thread:${ThreadId}` | `project:${ProjectId}`;
 
@@ -78,6 +79,8 @@ export class AppRuntimeState extends Context.Service<
      * is built below AppsLayer and reaches the route through here.
      */
     readonly mcpAppRoute: Ref.Ref<Option.Option<AppMcpAppRoute>>;
+    /** Lecturn: showcase cards' requests, set while the Squire layer is up (D32). */
+    readonly squireMcpAppRoute: Ref.Ref<Option.Option<SquireMcpAppRoute>>;
     /**
      * A granted app's instructions for turns in its projects, set while
      * AppsOrchestrationHooks is up: RunExecutionService cannot see the
@@ -101,6 +104,7 @@ export const layer = Layer.effect(
     headlessIdleWatch: Ref.make(Option.none<HeadlessIdleWatch>()),
     appsLayerBuilt: Ref.make(false),
     mcpAppRoute: Ref.make(Option.none<AppMcpAppRoute>()),
+    squireMcpAppRoute: Ref.make(Option.none<SquireMcpAppRoute>()),
     appInstructions: Ref.make(Option.none<AppInstructionsLookup>()),
     appTools: Ref.make(Option.none<AppToolsLookup>()),
   }),

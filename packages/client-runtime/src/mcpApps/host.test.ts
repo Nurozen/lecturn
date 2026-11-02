@@ -502,6 +502,77 @@ describe("makeMcpAppHost", () => {
   });
 });
 
+describe("Squire links from cards", () => {
+  const showcase = { ...app, server: "lecturn", tool: "squire_showcase" };
+  const squireUrl = "lecturn://squires/env-1/squire-1?item=card-1";
+  const linkSetup = (server: typeof app) => {
+    const navigated: Array<unknown> = [];
+    const links: Array<string> = [];
+    const setupResult = setup({
+      app: server,
+      openLink: async (url) => {
+        links.push(url);
+      },
+      openSquireLink: async (link) => {
+        navigated.push(link);
+      },
+    });
+    return { ...setupResult, navigated, links };
+  };
+  const refused = (id: number) => ({
+    jsonrpc: "2.0",
+    id,
+    error: { code: -32602, message: "Only http(s) links can be opened." },
+  });
+
+  it("navigates a Lecturn-served card's Squire and room links in the app", async () => {
+    const { host, sent, navigated, links } = linkSetup(showcase);
+    host.receive({ jsonrpc: "2.0", id: 1, method: "ui/open-link", params: { url: squireUrl } });
+    host.receive({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "ui/open-link",
+      params: { url: "lecturn://squires/env-1/rooms/room-1" },
+    });
+    await flush();
+    expect(navigated).toEqual([
+      { kind: "squire", environmentId: "env-1", squireId: "squire-1", item: "card-1" },
+      { kind: "room", environmentId: "env-1", roomId: "room-1" },
+    ]);
+    expect(links).toEqual([]);
+    expect(sent).toEqual([
+      { jsonrpc: "2.0", id: 1, result: {} },
+      { jsonrpc: "2.0", id: 2, result: {} },
+    ]);
+  });
+
+  it("refuses the same link from a third-party app", async () => {
+    const { host, sent, navigated, links } = linkSetup(app);
+    host.receive({ jsonrpc: "2.0", id: 1, method: "ui/open-link", params: { url: squireUrl } });
+    await flush();
+    expect(navigated).toEqual([]);
+    expect(links).toEqual([]);
+    expect(sent).toEqual([refused(1)]);
+  });
+
+  it("refuses other lecturn:// links, even from a Lecturn-served card", async () => {
+    const { host, sent, navigated, links } = linkSetup(showcase);
+    const urls = [
+      "lecturn://threads/env-1/thread-1",
+      "lecturn://new?prompt=hi",
+      "lecturn://apps/com.rw",
+      "lecturn://squires/env-1",
+    ];
+    for (const [index, url] of urls.entries()) {
+      host.receive({ jsonrpc: "2.0", id: index + 1, method: "ui/open-link", params: { url } });
+    }
+    await flush();
+    expect(navigated).toEqual([]);
+    expect(links).toEqual([]);
+    expect(sent).toEqual(urls.map((_, index) => refused(index + 1)));
+  });
+});
+
 describe("connectedAppCardTheme", () => {
   const theme = (appearance: "light" | "dark") => ({
     appearance,

@@ -29,6 +29,7 @@ export interface WatchThreadFixture {
   readonly archivedAt?: string | null;
   /** V1 provider session: running work, a bound idle session, or none (offline). */
   readonly session?: { readonly status: string } | null;
+  readonly squire?: OrchestrationV2ThreadShell["squire"];
   readonly [key: string]: unknown;
 }
 
@@ -80,6 +81,7 @@ export function toWatchThreadShell(fixture: WatchThreadFixture): OrchestrationV2
     pinnedAt: null,
     lastVisitedAt: null,
     deletedAt: null,
+    ...(fixture.squire === undefined ? {} : { squire: fixture.squire }),
   } as OrchestrationV2ThreadShell;
 }
 

@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { BrowserWindow, screen, type IpcMainInvokeEvent } from "electron";
 import { installDesktopActivity } from "./DesktopActivity.ts";
 import * as Channels from "./channels.ts";
+import type { DesktopActivitySquireResult } from "@lecturn/contracts";
+import { SquireRequests, SquireResults, squireCardView, type SquireActivityRow } from "./squire.ts";
 
 const state = vi.hoisted(() => ({
   handlers: new Map<string, (event: IpcMainInvokeEvent, value: unknown) => unknown>(),
@@ -737,5 +739,111 @@ describe("foreground chat previews", () => {
     dispose();
     expect(main.listenerCount("focus")).toBe(0);
     expect(main.listenerCount("blur")).toBe(0);
+  });
+});
+
+describe("notch Squire actions", () => {
+  const squireRow = {
+    id: "squire-row",
+    environmentId: "e",
+    projectId: "p",
+    threadId: "t",
+    title: "Rebase onto main",
+    subtitle: "Release",
+    status: "Action · Rebase",
+    squire: { squireId: "squire-1", cardId: "card-1", cardKind: "steer", palette: "brass" },
+    actions: [
+      { id: "squire-accept", label: "Send steer" },
+      { id: "squire-open", label: "Open" },
+    ],
+  };
+  const setup = () => {
+    const main = new BrowserWindow();
+    const dispose = installDesktopActivity(main, options);
+    const panel = state.windows[1]!;
+    panel.emit("ready-to-show");
+    invoke(Channels.ACTIVITY_PUBLISH, eventFor(main), { summary: "Squire", rows: [squireRow] });
+    const event = eventFor(panel as never);
+    const act = (kind: string, requestId: string) =>
+      invoke(Channels.ACTIVITY_ACTION, event, {
+        rowId: squireRow.id,
+        environmentId: "e",
+        projectId: "p",
+        threadId: "t",
+        kind,
+        requestId,
+      });
+    const results = () =>
+      panel.webContents.send.mock.calls.filter(
+        ([channel]) => channel === Channels.ACTIVITY_SQUIRE_RESULT,
+      );
+    return { main, panel, dispose, event, act, results };
+  };
+
+  it("collapses the notch and shows Lecturn for squire-open", () => {
+    const { panel, dispose, event, act } = setup();
+    invoke(Channels.ACTIVITY_MODE, event, "expand");
+    expect(panel.bounds.height).toBe(588);
+    act("squire-open", "request-1");
+    expect(panel.bounds.height).toBe(38);
+    expect(state.windows[0]!.visible).toBe(true);
+    expect(state.windows[0]!.focused).toBe(true);
+    dispose();
+  });
+
+  it("shows a refused accept's reason on the card it was pressed on", () => {
+    const { main, panel, dispose, act } = setup();
+    expect(state.windows[0]).toBe(main);
+    const requests = new SquireRequests(() => "request-9");
+    const results = new SquireResults(() => undefined);
+    act("squire-accept", requests.begin(squireRow.id, "squire-accept"));
+    const [, forwarded] = state.windows[0]!.webContents.send.mock.calls.find(
+      ([channel]) => channel === Channels.ACTIVITY_ACTION,
+    )!;
+    // The renderer's RPC refused the accept; it reports the server's words back by requestId.
+    const reason = "Release is paused. Resume it to act on cards.";
+    invoke(Channels.ACTIVITY_SQUIRE_RESULT, eventFor(main), {
+      requestId: (forwarded as { requestId: string }).requestId,
+      ok: false,
+      error: reason,
+    });
+    const [, delivered] = panel.webContents.send.mock.calls.find(
+      ([channel]) => channel === Channels.ACTIVITY_SQUIRE_RESULT,
+    )!;
+    const settled = requests.settle(delivered as DesktopActivitySquireResult)!;
+    results.record({
+      rowId: settled.rowId,
+      kind: settled.result,
+      text: settled.message,
+      title: "",
+    });
+    const row = squireRow as unknown as SquireActivityRow;
+    expect(
+      squireCardView(row, requests.isPending(row.id), results.get(row.id)).result,
+    ).toMatchObject({
+      rowId: squireRow.id,
+      kind: "error",
+      text: reason,
+      title: "",
+    });
+    dispose();
+  });
+
+  it("relays the renderer's result for a forwarded request to the notch, once", () => {
+    const { main, dispose, event, act, results } = setup();
+    act("squire-accept", "request-1");
+    expect(main.webContents.send).toHaveBeenCalledWith(
+      Channels.ACTIVITY_ACTION,
+      expect.objectContaining({ kind: "squire-accept", requestId: "request-1" }),
+    );
+    expect(state.windows[0]!.visible).toBe(false);
+    const result = { requestId: "request-1", ok: false, error: "Already resolved" };
+    expect(() => invoke(Channels.ACTIVITY_SQUIRE_RESULT, event, result)).toThrow("Untrusted");
+    invoke(Channels.ACTIVITY_SQUIRE_RESULT, eventFor(main), { requestId: "unknown", ok: true });
+    expect(results()).toEqual([]);
+    invoke(Channels.ACTIVITY_SQUIRE_RESULT, eventFor(main), result);
+    invoke(Channels.ACTIVITY_SQUIRE_RESULT, eventFor(main), result);
+    expect(results()).toEqual([[Channels.ACTIVITY_SQUIRE_RESULT, result]]);
+    dispose();
   });
 });

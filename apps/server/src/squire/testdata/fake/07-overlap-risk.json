@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "steps": [
+    {
+      "onEvent": "turn-finished",
+      "toolCalls": [
+        {
+          "name": "squire_stay_quiet",
+          "args": {
+            "threadId": "{{event.summary.threadId}}",
+            "reason": "Routine progress on {{event.summary.threadTitle}}; nothing needs the user."
+          }
+        }
+      ]
+    },
+    {
+      "onEvent": "*",
+      "toolCalls": [
+        {
+          "name": "squire_stay_quiet",
+          "args": {
+            "reason": "Nothing needs the user."
+          }
+        }
+      ]
+    }
+  ]
+}

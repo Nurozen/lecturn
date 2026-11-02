@@ -3,10 +3,12 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import type { PersistenceSqlError } from "../persistence/Errors.ts";
 import * as EventStore from "./EventStore.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 
@@ -46,6 +48,16 @@ export class ProjectionMaintenanceV2 extends Context.Service<
   ProjectionMaintenanceV2Shape
 >()("lecturn/orchestration-v2/ProjectionMaintenance/ProjectionMaintenanceV2") {}
 
+/**
+ * Lecturn: a durable cursor consumer that classifies each PR link event from
+ * its own payload needs the intermediate ones it has not read yet. Read at
+ * each compaction run; `Some(sequence)` keeps every PR link event above it.
+ */
+export class CompactionFloor extends Context.Service<
+  CompactionFloor,
+  { readonly pullRequestLinkFloor: Effect.Effect<Option.Option<number>, PersistenceSqlError> }
+>()("lecturn/orchestration-v2/ProjectionMaintenance/CompactionFloor") {}
+
 type ProjectionMetadataRow = {
   readonly schema_version: number;
   readonly last_sequence: number;
@@ -65,6 +77,8 @@ export const layer: Layer.Layer<
     const sql = yield* SqlClient.SqlClient;
     const eventStore = yield* EventStore.EventStoreV2;
     const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+    // Lecturn: optional so upstream and offline callers compact as before.
+    const compactionFloor = yield* Effect.serviceOption(CompactionFloor);
 
     const verify = Effect.gen(function* () {
       const expectedThreadRows = yield* sql<{ readonly thread_id: string }>`
@@ -252,6 +266,12 @@ export const layer: Layer.Layer<
           COALESCE((SELECT MAX(rowid) FROM orchestration_command_receipts), 0) AS receipt_row_id
       `;
       let throughSequence = bounds[0]?.event_sequence ?? 0;
+      // Lecturn: read after the bounds, so the floor is never older than the scan.
+      const pullRequestLinkFloor = Option.isSome(compactionFloor)
+        ? yield* compactionFloor.value.pullRequestLinkFloor
+        : Option.none<number>();
+      const keepsPullRequestLink = (sequence: number) =>
+        Option.isSome(pullRequestLinkFloor) && sequence > pullRequestLinkFloor.value;
       let throughReceiptRowId = bounds[0]?.receipt_row_id ?? 0;
       const retainedThreadIds = new Set<string>();
       const retainedReadStateThreadIds = new Set<string>();
@@ -328,7 +348,7 @@ export const layer: Layer.Layer<
               retainedThreadIds.has(row.stream_id)
             ) {
               // A newer whole-thread payload already carries this link's state.
-              obsolete.push(row.sequence);
+              if (!keepsPullRequestLink(row.sequence)) obsolete.push(row.sequence);
             } else if (
               row.event_type === "thread.pull-request-link-updated" ||
               row.event_type === "message.updated" ||
@@ -338,7 +358,15 @@ export const layer: Layer.Layer<
               const candidate = oldestCandidateByEntityKey.get(key);
               if (candidate === undefined) oldestCandidateByEntityKey.set(key, null);
               else {
-                if (candidate !== null) obsolete.push(candidate);
+                if (
+                  candidate !== null &&
+                  !(
+                    row.event_type === "thread.pull-request-link-updated" &&
+                    keepsPullRequestLink(candidate)
+                  )
+                ) {
+                  obsolete.push(candidate);
+                }
                 oldestCandidateByEntityKey.set(key, row.sequence);
               }
             }

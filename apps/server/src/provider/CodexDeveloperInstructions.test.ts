@@ -11,6 +11,7 @@ import {
   buildCodexDeveloperInstructions,
   CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES,
 } from "./CodexDeveloperInstructions.ts";
+import { squireSkillSections } from "../squire/skill/skill.ts";
 
 describe("buildCodexAdditionalContext", () => {
   describe.each([
@@ -59,6 +60,34 @@ describe("buildCodexAdditionalContext", () => {
       LECTURN_ORCHESTRATION_INSTRUCTIONS.trim(),
     );
   });
+
+  it.each(["squire", "lead"] as const)(
+    "gives a %s home its skill in numbered entries in place of orchestration and tools",
+    (role) => {
+      const skill = squireSkillSections(role);
+      const context = buildCodexAdditionalContext(
+        { model: "gpt-5.3-codex", reasoningEffort: "high" },
+        { browser: true, device: true },
+        skill,
+      );
+      const keys = Object.keys(context);
+      NodeAssert.deepEqual(
+        keys
+          .filter((key) => key.startsWith("lecturn_squire_"))
+          .sort()
+          .map((key) => context[key]!.value),
+        skill,
+      );
+      NodeAssert.ok(!keys.some((key) => key.startsWith("lecturn_orchestration_")));
+      NodeAssert.ok(!keys.includes("lecturn_tools"), "no browser or device sections");
+      NodeAssert.ok(keys.includes("lecturn_runtime"));
+      for (const entry of Object.values(context)) {
+        NodeAssert.ok(
+          Buffer.byteLength(entry.value, "utf8") <= CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES,
+        );
+      }
+    },
+  );
 });
 
 describe("buildCodexDeveloperInstructions", () => {

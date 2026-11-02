@@ -207,14 +207,20 @@ export function buildCodexDeveloperInstructions(interactionMode: ProviderInterac
 export function buildCodexAdditionalContext(
   runtime: CodexRuntimeInfo,
   toolsAvailable: boolean | LecturnToolAvailability = true,
+  /** Lecturn: a Squire home's skill replaces the orchestration and tool sections (D22). */
+  squireInstructions?: ReadonlyArray<string>,
 ): Record<string, V2TurnStartParams__AdditionalContextEntry> {
-  const tools = toolInstructions(toolsAvailable);
+  const squire = squireInstructions !== undefined && squireInstructions.length > 0;
+  const tools = squire ? "" : toolInstructions(toolsAvailable);
+  const [prefix, sections] = squire
+    ? ["lecturn_squire", squireInstructions]
+    : ["lecturn_orchestration", LECTURN_ORCHESTRATION_SECTIONS];
   // Separate keys keep each value under Codex's per-entry cap. Codex emits
   // entries in key order, so the numbering preserves the authored order.
   return {
     ...Object.fromEntries(
-      LECTURN_ORCHESTRATION_SECTIONS.map((section, index) => [
-        `lecturn_orchestration_${String(index + 1).padStart(2, "0")}`,
+      sections.map((section, index) => [
+        `${prefix}_${String(index + 1).padStart(2, "0")}`,
         { kind: "application" as const, value: section },
       ]),
     ),

@@ -11,6 +11,7 @@ import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { useEnvironmentQuery } from "~/state/query";
 import { primaryServerConfigAtom } from "~/state/server";
 import { useEnvironmentScope } from "~/state/session";
+import { useSquireEnvironments } from "~/state/squires";
 import { isWslSettingsRowVisible } from "./ConnectionsSettings.logic";
 import { isProviderSettingsEnvironmentAvailable } from "./ProviderSettingsPanel.logic";
 import type { SettingsScopeSearch } from "./settingsScope";
@@ -64,6 +65,7 @@ export function useAvailableSettingsSearchItems(scopeSearch: SettingsScopeSearch
   const managedTunnelActive =
     cloudLinkState?.linkRevoked !== true &&
     (cloudLinkState?.managedTunnelActive ?? cloudLinkState?.linked ?? false) === true;
+  const hasSquires = useSquireEnvironments().length > 0;
   const localEnvironmentDisabled = isLocalEnvironmentDisabled() === true;
   const canManageLocalBackend = !localEnvironmentDisabled && canMaintain;
   const desktopWsl = useEnvironmentQuery(
@@ -88,5 +90,6 @@ export function useAvailableSettingsSearchItems(scopeSearch: SettingsScopeSearch
     hasStaveGrace,
     hasStaveDestroy,
     managedTunnelActive,
+    hasSquires,
   });
 }

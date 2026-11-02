@@ -2267,6 +2267,7 @@ describe("batched pull request summaries", () => {
     mergedAt: "2026-08-24T00:00:00Z",
     closedAt: "2026-08-24T00:00:00Z",
     headRefName: "feat/seven",
+    headRefOid: "0123456789abcdef0123456789abcdef01234567",
     baseRefName: "main",
     author: { __typename: "Bot", login: "renovate", avatarUrl: "https://a/r.png" },
     latestReviews: { nodes: [] },
@@ -2287,6 +2288,12 @@ describe("batched pull request summaries", () => {
     });
     // The read did not ask about stacks, so the summary does not claim an answer.
     expect(mapped).not.toHaveProperty("stack");
+  });
+
+  it("carries the head commit, so a push with nothing else changed still reads as a change", () => {
+    expect(toPullRequestSummary(decodeSummary(summary({}))).headSha).toBe(
+      "0123456789abcdef0123456789abcdef01234567",
+    );
   });
 
   it("reads stack membership only where the read asked for it", () => {

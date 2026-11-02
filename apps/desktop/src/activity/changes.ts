@@ -78,6 +78,9 @@ export function activityChanges(
     candidates.push({ rowId: row.id, state, label, priority: rank, ...(check ? { check } : {}) });
   };
   for (const row of nextRows) {
+    // A Squire card has no visual state (D40): its status names a kind, such as "Action · Fix
+    // failing check", not an outcome, and its card shows its own results. It never tints the count.
+    if (row.squire !== undefined) continue;
     const prior = previous.get(identity(row));
     const state = stateOf(row);
     if (!prior) {

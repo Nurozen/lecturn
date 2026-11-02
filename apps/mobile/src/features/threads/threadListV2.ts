@@ -9,6 +9,10 @@ import {
 } from "@lecturn/client-runtime/state/thread-settled";
 import type { SnoozePreset } from "@lecturn/client-runtime/state/thread-settled";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
+import {
+  isListedThread,
+  type ThreadListingCapabilitiesByEnvironment,
+} from "@lecturn/client-runtime/state/thread-shell";
 import { resolveThreadProviderStack } from "@lecturn/client-runtime/state/models";
 import { threadSearchMatchKey } from "@lecturn/client-runtime/state/thread-search";
 import {
@@ -204,10 +208,15 @@ export function getThreadListV2OrderedSection(input: {
   readonly settlementEnvironmentIds?: ReadonlySet<EnvironmentId>;
   readonly snoozeEnvironmentIds?: ReadonlySet<EnvironmentId>;
   readonly queuedThreadKeys?: ReadonlySet<string>;
+  /** Needed when `threads` still holds Squire threads, so moves never land beside a hidden row. */
+  readonly listingCapabilities?: ThreadListingCapabilitiesByEnvironment;
 }): EnvironmentThreadShell[] {
   const queuedThreadKeys = input.queuedThreadKeys?.size ? input.queuedThreadKeys : undefined;
   const threads = input.threads.filter((thread) => {
-    if (thread.archivedAt !== null || thread.lineage.relationshipToParent === "subagent")
+    if (
+      thread.archivedAt !== null ||
+      !isListedThread(thread, input.listingCapabilities?.get(thread.environmentId))
+    )
       return false;
     if (
       (input.settlementEnvironmentIds?.has(thread.environmentId) ?? true) &&

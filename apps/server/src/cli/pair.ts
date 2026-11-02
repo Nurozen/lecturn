@@ -321,6 +321,7 @@ const makePairServerConfig = Effect.fn(function* (input: {
     tailscaleServePort: DEFAULT_TAILSCALE_SERVE_PORT,
     threadForkingEnabled: true,
     staveEnabled: true,
+    squireEnabled: false,
   });
 });
 

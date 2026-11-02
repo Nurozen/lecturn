@@ -41,7 +41,7 @@ import type {
 } from "@lecturn/contracts";
 import { isRepositoryWatchManagerEligible } from "@lecturn/client-runtime/state/repositoryScope";
 import { formatEnvironmentQueryError } from "../../state/query";
-import { useProjects, useThreadShells, useThreadProjection } from "../../state/entities";
+import { useProjects, useThreadProjection, useVisibleThreadShells } from "../../state/entities";
 import { pullRequestWatchEnvironment, usePullRequestWatches } from "../../state/pullRequestWatch";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
@@ -165,7 +165,7 @@ function WatchCard({
   const environment = useEnvironment(environmentId);
   const environmentProviders = useEnvironmentProviders().get(environmentId);
   const sagaIndex = useSagaRepositoryIndex(projects);
-  const allThreads = useThreadShells();
+  const allThreads = useVisibleThreadShells();
   const threads = allThreads.filter(
     (thread) =>
       !thread.archivedAt &&

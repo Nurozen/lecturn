@@ -2,7 +2,7 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 /** Shared process-lifetime fence for Stave admission and filesystem mutations. */
-import { Context, Effect, FileSystem, Layer, Option, Path, Semaphore } from "effect";
+import { Context, Deferred, Effect, FileSystem, Layer, Option, Path, Semaphore } from "effect";
 
 export class StaveSpaceLock extends Context.Service<
   StaveSpaceLock,
@@ -21,6 +21,11 @@ export class StaveSpaceLock extends Context.Service<
       root: string,
       effect: Effect.Effect<A, E, R>,
     ) => Effect.Effect<Option.Option<A>, E, R>;
+    /**
+     * Lecturn: returns once the space lock is free, without taking it, so a
+     * background retry never turns away a command arriving as it frees.
+     */
+    readonly awaitFree: (root: string) => Effect.Effect<void>;
   }
 >()("lecturn/stave/StaveSpaceLock") {}
 
@@ -29,7 +34,13 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const locks = new Map<string, Semaphore.Semaphore>();
+    interface Space {
+      readonly mutex: Semaphore.Semaphore;
+      held: boolean;
+      /** Completed, then replaced, each time a holder lets go. */
+      freed: Deferred.Deferred<void>;
+    }
+    const locks = new Map<string, Space>();
     const canonical = Effect.fn("StaveSpaceLock.canonical")(function* (root: string) {
       let candidate = path.resolve(root);
       const missing: string[] = [];
@@ -46,15 +57,54 @@ export const layer = Layer.effect(
       const key = yield* canonical(root);
       let lock = locks.get(key);
       if (lock === undefined) {
-        lock = Semaphore.makeUnsafe(1);
+        lock = { mutex: Semaphore.makeUnsafe(1), held: false, freed: Deferred.makeUnsafe() };
         locks.set(key, lock);
       }
       return lock;
     });
+    // Signalled after the permit is back, so a woken waiter finds the lock takeable.
+    const holding = <A, E, R, B>(
+      space: Space,
+      acquire: (inner: Effect.Effect<A, E, R>) => Effect.Effect<B, E, R>,
+      effect: Effect.Effect<A, E, R>,
+    ) =>
+      Effect.suspend(() => {
+        let mine = false;
+        const inner = Effect.suspend(() => {
+          mine = true;
+          space.held = true;
+          return effect;
+        });
+        return acquire(inner).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (!mine) return;
+              space.held = false;
+              const freed = space.freed;
+              space.freed = Deferred.makeUnsafe();
+              Deferred.doneUnsafe(freed, Effect.void);
+            }),
+          ),
+        );
+      });
     const withSpaceLock = <A, E, R>(root: string, effect: Effect.Effect<A, E, R>) =>
-      getLock(root).pipe(Effect.flatMap((lock) => lock.withPermits(1)(effect)));
+      getLock(root).pipe(
+        Effect.flatMap((space) => holding(space, space.mutex.withPermits(1), effect)),
+      );
     const tryWithSpaceLock = <A, E, R>(root: string, effect: Effect.Effect<A, E, R>) =>
-      getLock(root).pipe(Effect.flatMap((lock) => lock.withPermitsIfAvailable(1)(effect)));
+      getLock(root).pipe(
+        Effect.flatMap((space) => holding(space, space.mutex.withPermitsIfAvailable(1), effect)),
+      );
+    const awaitFree = (root: string) =>
+      getLock(root).pipe(
+        Effect.flatMap((space) =>
+          Effect.suspend(() => {
+            // The signal is read before the state, so a release between them still wakes us.
+            const freed = space.freed;
+            return space.held ? Deferred.await(freed) : Effect.void;
+          }),
+        ),
+      );
     const tryWithWorkspaceLocks = <A, E, R>(
       roots: ReadonlyArray<string>,
       effect: Effect.Effect<A, E, R>,
@@ -80,12 +130,20 @@ export const layer = Layer.effect(
         }
         let guarded = Effect.map(effect, Option.some);
         for (const root of [...keys].sort().toReversed()) {
-          const mutex = yield* getLock(root);
-          guarded = mutex.withPermitsIfAvailable(1)(guarded).pipe(Effect.map(Option.flatten));
+          const space = yield* getLock(root);
+          const inner = guarded;
+          guarded = holding(space, space.mutex.withPermitsIfAvailable(1), inner).pipe(
+            Effect.map(Option.flatten),
+          );
         }
         return yield* guarded;
       });
-    return StaveSpaceLock.of({ withSpaceLock, tryWithSpaceLock, tryWithWorkspaceLocks });
+    return StaveSpaceLock.of({
+      withSpaceLock,
+      tryWithSpaceLock,
+      tryWithWorkspaceLocks,
+      awaitFree,
+    });
   }),
 );
 

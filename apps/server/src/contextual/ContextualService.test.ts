@@ -316,6 +316,8 @@ const fixture = (runtime?: ExtensionsRuntime["Service"]) =>
         }),
       funding: () => Effect.fail(unavailable),
       pending: () => Effect.succeed(null),
+      localStatus: () => Effect.fail(unavailable),
+      route: () => Effect.die("unused"),
       equivalence: () => Effect.fail(unavailable),
       evaluate: (input) => {
         evaluateCalls++;

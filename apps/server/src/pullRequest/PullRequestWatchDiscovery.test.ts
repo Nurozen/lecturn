@@ -3,6 +3,7 @@ import { Effect, Layer, Path } from "effect";
 import {
   GitCommandError,
   ProjectId,
+  SquireId,
   ThreadId,
   type OrchestrationProjectShell,
   type PullRequestListEntry,
@@ -462,6 +463,47 @@ it.effect(
       assert.equal(tracked[0]!.threadId, thread.id);
       assert.isUndefined(tracked[0]!.manage);
     }),
+);
+
+it.effect("never lists pull requests for a Squire thread", () =>
+  Effect.gen(function* () {
+    let reads = 0;
+    const projections = watchReadLayer({
+      threads: [{ ...thread, squire: { squireId: SquireId.make("squire-1"), role: "home" } }],
+      projects: [project],
+    });
+    const requests = Layer.succeed(PullRequestService, {
+      list: () =>
+        Effect.sync(() => {
+          reads++;
+          return {
+            entries: [],
+            viewers: {},
+            providers: [],
+            errors: [],
+            truncated: false,
+            nextCursors: {},
+          };
+        }),
+    } as unknown as PullRequestService["Service"]);
+    const watches = Layer.succeed(PullRequestWatchService, {
+      list: () => Effect.succeed({ defaultMergeMode: "follow-pr", watches: [] }),
+    } as unknown as PullRequestWatchService["Service"]);
+    const git = Layer.succeed(GitVcsDriver, {
+      resolveDefaultBranchName: () => Effect.succeed("main"),
+      execute: ({ cwd }: { cwd: string }) =>
+        Effect.succeed({
+          exitCode: 0,
+          stdout: `work/${cwd.split("/").at(-1)}`,
+          stdoutTruncated: false,
+        }),
+    } as unknown as GitVcsDriver["Service"]);
+    const service = yield* make.pipe(
+      Effect.provide(Layer.mergeAll(projections, requests, watches, git, Path.layer)),
+    );
+    yield* service.tick;
+    assert.equal(reads, 0);
+  }),
 );
 
 it.effect("verified remote binding permits only the matching editable checkout alias", () =>

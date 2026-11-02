@@ -108,6 +108,8 @@ export interface EnvironmentThreadShell {
   readonly importedFrom?: ThreadImportOrigin | null;
   /** "v1_import" when the thread's early history came from a V1 migration (run-less). */
   readonly historyOrigin?: OrchestrationV2ThreadShell["historyOrigin"];
+  /** Lecturn: server-set on Squire home and probe threads; see `isListedThread`. */
+  readonly squire?: OrchestrationV2ThreadShell["squire"];
   readonly activeProviderThreadId: OrchestrationV2ThreadShell["activeProviderThreadId"];
   readonly latestRun: ThreadRunSummary | null;
   readonly runtime: ThreadRuntimeSummary | null;
@@ -250,6 +252,7 @@ export function presentThreadShell(
     forkOrigin: thread.forkOrigin ?? null,
     importedFrom: thread.importedFrom ?? null,
     ...(thread.historyOrigin === undefined ? {} : { historyOrigin: thread.historyOrigin }),
+    ...(thread.squire === undefined ? {} : { squire: thread.squire }),
     activeProviderThreadId: thread.activeProviderThreadId,
     latestRun,
     runtime: shellRuntime(thread),

@@ -35,6 +35,7 @@ import { projectEnvironment } from "../../state/projects";
 import { serverEnvironment } from "../../state/server";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { StaveProjectSection } from "./StaveProjectSection";
+import { SquireProjectWatchersRow } from "../squire/track/SquireProjectWatchersRow";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -598,6 +599,10 @@ function ProjectDetail({
               }
             />
           ) : null}
+          <SquireProjectWatchersRow
+            environmentId={selectedCheckout.environmentId}
+            project={selectedCheckout}
+          />
           <SettingsRow
             title="Name"
             description="The shared name for this project group in the sidebar and thread lists."

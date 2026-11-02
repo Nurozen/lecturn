@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none" color="#d9a34e" role="img" aria-labelledby="threadkeeper-mono-title">
+  <title id="threadkeeper-mono-title">Squire Threadkeeper monochrome</title>
+  <g stroke-linecap="round" stroke-linejoin="round" stroke-width="2.1">
+    <path stroke="currentColor" d="M82 22C48 13 25 29 32 48C39 67 95 62 97 86C98.5 104 75 113 49 106"/>
+    <path stroke="currentColor" d="M82 22C55 17 44 34 51 46C61 61 101 61 105 83C110 103 79 114 49 106"/>
+    <path stroke="currentColor" d="M25 62C24 80 48 82 65 84C87 87 91 104 49 106"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="25" cy="62" r="2.7"/>
+    <circle cx="49" cy="106" r="2.7"/>
+    <path d="M82 12C83 20 84 21 92 22C84 23 83 24 82 32C81 24 80 23 72 22C80 21 81 20 82 12Z"/>
+  </g>
+</svg>

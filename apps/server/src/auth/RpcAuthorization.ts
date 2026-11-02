@@ -252,6 +252,20 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.subscribeServerLifecycle]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeAuthAccess]: AuthAccessReadScope,
   [WS_METHODS.subscribeBackgroundPolicy]: AuthOrchestrationReadScope,
+  // Lecturn: Squire reads never write; mutations are client-guarded above.
+  [WS_METHODS.squireSubscribe]: AuthOrchestrationReadScope,
+  [WS_METHODS.squireItemsList]: AuthOrchestrationReadScope,
+  [WS_METHODS.squireItemGet]: AuthOrchestrationReadScope,
+  [WS_METHODS.squireSummaryGet]: AuthOrchestrationReadScope,
+  [WS_METHODS.squireActionLogList]: AuthOrchestrationReadScope,
+  [WS_METHODS.squireVocabulary]: AuthOrchestrationReadScope,
+  [WS_METHODS.squireRoomPosts]: AuthOrchestrationReadScope,
+  [WS_METHODS.squireRuleList]: AuthOrchestrationReadScope,
+  [WS_METHODS.squireTriggerList]: AuthOrchestrationReadScope,
+  [WS_METHODS.squireTriggerRuns]: AuthOrchestrationReadScope,
+  [WS_METHODS.squireLeadReceipts]: AuthOrchestrationReadScope,
+  [WS_METHODS.squireGet]: AuthOrchestrationReadScope,
+  [WS_METHODS.squireProviderSupport]: AuthOrchestrationReadScope,
 } as const satisfies Readonly<Record<WsRpcMethod, AuthEnvironmentScope>>;
 
 export function requiredScopeForRpcMethod(method: string): AuthEnvironmentScope {

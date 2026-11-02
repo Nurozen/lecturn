@@ -238,4 +238,50 @@ describe("Extensions authenticated HTTP", () => {
         });
       }),
   );
+  it.effect("routes a Squires post to the evaluator only for an authenticated environment", () =>
+    Effect.gen(function* () {
+      const f = fixture();
+      const payload = {
+        featureId: "squires",
+        requestId: "post",
+        runId: "post",
+        fundingGeneration: 1,
+        templateVersion: "squire-routing-v1",
+        members: [
+          {
+            squireId: "squire-api",
+            name: "API",
+            brief: "",
+            scope: { containers: [], threadTitles: [], pullRequests: [] },
+            recentActivity: [],
+          },
+        ],
+        post: { body: "Who owns the relay?" },
+      };
+      const routed = {
+        requestId: "post",
+        runId: "post",
+        templateVersion: "squire-routing-v1",
+        policyVersion: "squire-routing-v1",
+        model: "extensions-v1",
+        judgments: [{ choice: "squire-api", confidence: 0.7, noReplyConfidence: 0.2 }],
+        inputTokens: 40,
+        replayed: false,
+      };
+      f.evaluate.mockReturnValueOnce(Effect.succeed(routed) as never);
+      const response = yield* run(request("squire-routing", payload), f);
+      expect(response.status).toBe(200);
+      expect(yield* Effect.promise(() => response.json())).toEqual(routed);
+      expect(f.evaluate).toHaveBeenCalledWith(host, payload, "squire-routing");
+      f.evaluate.mockClear();
+      expect(
+        (yield* run(request("squire-routing", payload, "Bearer forged-token"), f)).status,
+      ).toBe(401);
+      expect(f.evaluate).not.toHaveBeenCalled();
+      f.evaluate.mockReturnValueOnce(
+        Effect.fail(decisionError("unavailable", "This extension is unavailable")) as never,
+      );
+      expect((yield* run(request("squire-routing", payload), f)).status).toBe(503);
+    }),
+  );
 });

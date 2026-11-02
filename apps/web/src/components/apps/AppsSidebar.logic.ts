@@ -10,6 +10,7 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@lecturn/client-runtime/state/shell";
+import type { ThreadListingCapabilitiesByEnvironment } from "@lecturn/client-runtime/state/thread-shell";
 import { effectiveSnoozed } from "@lecturn/client-runtime/state/thread-settled";
 import { sortSettledThreads } from "@lecturn/client-runtime/state/thread-sort";
 import type { AppId, AppStatus, EnvironmentId, ScopedThreadRef } from "@lecturn/contracts";
@@ -148,6 +149,7 @@ export function buildAppsSidebarApps(input: {
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly environmentLabels: ReadonlyMap<EnvironmentId, string>;
+  readonly listing?: ThreadListingCapabilitiesByEnvironment;
   readonly now: string;
   readonly supports: (environmentId: EnvironmentId) => {
     readonly settlement: boolean;
@@ -163,7 +165,7 @@ export function buildAppsSidebarApps(input: {
   const groupsByApp = new Map(
     appGroups({
       projects: input.projects,
-      threads: filterSidebarV2VisibleThreads(input.threads, null),
+      threads: filterSidebarV2VisibleThreads(input.threads, null, input.listing),
       environmentLabels: input.environmentLabels,
     }).map((group) => [group.appId, group] as const),
   );

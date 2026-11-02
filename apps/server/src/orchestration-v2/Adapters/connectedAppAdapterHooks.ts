@@ -44,6 +44,15 @@ export function codexAppToolApprovals(mcpSession: McpSessionConfig): {
 }
 
 /**
+ * Lecturn: a Squire home's credential lists only its role's tools, each one
+ * gated by Lecturn's server (D8), so there the whole server is approved. Any
+ * approval Codex raised on a home would be auto-declined (D9), failing the call.
+ */
+export const CODEX_SQUIRE_HOME_TOOL_APPROVALS = {
+  default_tools_approval_mode: "approve",
+} as const;
+
+/**
  * One per Codex session. Codex starts a thread's MCP servers after
  * `thread/start` or resume answers, and reports a failure by native thread id,
  * possibly before this session knows which app thread that is.

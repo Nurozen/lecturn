@@ -540,6 +540,7 @@ export const make = Effect.gen(function* () {
           ...Json.toChangeRequest(pull, input),
           closedAt: pull.closedAt,
           mergedAt: pull.mergedAt,
+          ...(pull.headOid ? { headSha: pull.headOid } : {}),
         })),
       ),
     getChangeRequest: Effect.fn("GitCafePullRequestProvider.getChangeRequest")(function* (input) {

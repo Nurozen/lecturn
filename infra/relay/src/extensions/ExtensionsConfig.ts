@@ -1,6 +1,6 @@
 import { Option, Schema } from "effect";
 
-export type ExtensionConfigScope = "shared" | "decisions" | "contextual";
+export type ExtensionConfigScope = "shared" | "decisions" | "contextual" | "squires";
 export interface ExtensionConfigIssue {
   readonly scope: ExtensionConfigScope;
   readonly key: string;
@@ -119,23 +119,39 @@ export function parseExtensionsConfig(env: Readonly<Record<string, string | unde
       reason: "unsafe-bound",
     });
   const sharedValid = !issues.some((issue) => issue.scope === "shared");
-  const feature = (scope: "decisions" | "contextual") => {
+  const feature = (scope: "decisions" | "contextual" | "squires") => {
     const prefix = `EXTENSIONS_${scope.toUpperCase()}_`;
+    const squires = scope === "squires";
     const requested = read(scope, `${prefix}ENABLED`, false, boolean);
     const admittedCohort = read(scope, `${prefix}COHORT`, [] as readonly string[], cohort);
     const bounds = {
       priceNanoUsdPerInputToken: 42,
       // One admitted attempt includes every bounded internal evaluation step.
-      maxActualInputTokens: 64000,
-      attemptHoldNanoUsd: number(scope, `${prefix}ATTEMPT_HOLD_NANO_USD`, 10_000_000),
-      runBudgetNanoUsd: number(scope, `${prefix}RUN_BUDGET_NANO_USD`, 30_000_000),
+      maxActualInputTokens: squires ? 16000 : 64000,
+      attemptHoldNanoUsd: number(
+        scope,
+        `${prefix}ATTEMPT_HOLD_NANO_USD`,
+        squires ? 1_000_000 : 10_000_000,
+      ),
+      runBudgetNanoUsd: number(
+        scope,
+        `${prefix}RUN_BUDGET_NANO_USD`,
+        squires ? 1_000_000 : 30_000_000,
+      ),
+      // A Squires run is one routed post, so its run and request share one attempt.
       maxAttemptsPerRun: number(
         scope,
         `${prefix}MAX_ATTEMPTS_PER_RUN`,
-        scope === "decisions" ? 24 : 6,
-        scope === "decisions" ? 100 : 6,
+        scope === "decisions" ? 24 : squires ? 1 : 6,
+        scope === "decisions" ? 100 : squires ? 1 : 6,
       ),
-      maxAttemptsPerRequest: number(scope, `${prefix}MAX_ATTEMPTS_PER_REQUEST`, 2, 5),
+      maxAttemptsPerRequest: squires ? 1 : number(scope, `${prefix}MAX_ATTEMPTS_PER_REQUEST`, 2, 5),
+      // Interactive routing must never queue behind a Decisions scan on the shared slot.
+      ...(squires
+        ? {
+            environmentConcurrency: number(scope, `${prefix}ENVIRONMENT_CONCURRENCY`, 1, 4),
+          }
+        : {}),
     };
     if (requested && admittedCohort.length === 0)
       issues.push({ scope, key: `${prefix}COHORT`, reason: "missing-cohort" });
@@ -150,7 +166,15 @@ export function parseExtensionsConfig(env: Readonly<Record<string, string | unde
   };
   const decisions = feature("decisions");
   const contextual = feature("contextual");
-  return { shared: { ...shared, valid: sharedValid }, decisions, contextual, issues, legacyKeys };
+  const squires = feature("squires");
+  return {
+    shared: { ...shared, valid: sharedValid },
+    decisions,
+    contextual,
+    squires,
+    issues,
+    legacyKeys,
+  };
 }
 export type ExtensionsConfig = ReturnType<typeof parseExtensionsConfig>;
 
@@ -164,4 +188,10 @@ export const extensionEnvironmentKeys = [
   "EXTENSIONS_CONTEXTUAL_RUN_BUDGET_NANO_USD",
   "EXTENSIONS_CONTEXTUAL_MAX_ATTEMPTS_PER_RUN",
   "EXTENSIONS_CONTEXTUAL_MAX_ATTEMPTS_PER_REQUEST",
+  "EXTENSIONS_SQUIRES_ENABLED",
+  "EXTENSIONS_SQUIRES_COHORT",
+  "EXTENSIONS_SQUIRES_ATTEMPT_HOLD_NANO_USD",
+  "EXTENSIONS_SQUIRES_RUN_BUDGET_NANO_USD",
+  "EXTENSIONS_SQUIRES_MAX_ATTEMPTS_PER_RUN",
+  "EXTENSIONS_SQUIRES_ENVIRONMENT_CONCURRENCY",
 ] as const;

@@ -126,6 +126,9 @@ import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "./thread-sw
 import { useFabScroll } from "./FabScrollContext";
 import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
 import { ThreadListFilters } from "./ThreadListFilters";
+import { SquireHomeListRow, useSquireHomeItems } from "../squires/SquireHomeRows";
+import { SquireMotionClock } from "../squires/SquireIndicator";
+import { isHomeSquireItem } from "../squires/squireHomeItems.logic";
 
 interface HomeScreenProps {
   readonly projects: ReadonlyArray<EnvironmentProject>;
@@ -269,6 +272,10 @@ function hierarchyItemsAreEqual(previous: HomeHierarchyV2Item, item: HomeHierarc
     (previous.type === "header" || previous.type === "account-header") &&
     (item.type === "header" || item.type === "account-header")
   ) {
+    return homeListItemsAreEqual(previous, item);
+  }
+  // Lecturn: Squires-section rows compare by structure; their state is read per row.
+  if (isHomeSquireItem(previous) && isHomeSquireItem(item)) {
     return homeListItemsAreEqual(previous, item);
   }
   return false;
@@ -759,6 +766,12 @@ export function HomeScreen(props: HomeScreenProps) {
     shelfPreferencesLoading: !shelfPreferencesLoaded,
   });
 
+  // Lecturn: the Squires section (P13.2) above the project tree.
+  const squireItems = useSquireHomeItems({
+    environments: props.environments,
+    selectedEnvironmentId: props.selectedEnvironmentId,
+    searching: hasSearchQuery,
+  });
   const threadListV2Items = buildHomeHierarchyV2Items({
     accountSections,
     groups: projectGroups,
@@ -766,6 +779,7 @@ export function HomeScreen(props: HomeScreenProps) {
     sagaIndex,
     displayStates: accountDisplayStates,
     searching: hasSearchQuery,
+    squires: squireItems,
   });
   // Jump shortcuts walk the rendered thread rows in order; hierarchy headers
   // and collapsed groups contribute none.
@@ -778,6 +792,8 @@ export function HomeScreen(props: HomeScreenProps) {
   }, [activateVisibleRows, swipeEnabled, threadListV2Items]);
 
   const renderV2Row = ({ item }: { readonly item: HomeHierarchyV2Item }) => {
+    if (isHomeSquireItem(item))
+      return <SquireHomeListRow item={item} pane={primaryColumn ? "sidebar" : "screen"} />;
     if (item.type === "account-header")
       return (
         <AccountSectionHeader
@@ -1100,66 +1116,69 @@ export function HomeScreen(props: HomeScreenProps) {
         {/* Sticky headers are deliberately not wired up: LegendList's JS sticky
             implementation mispositions pinned headers under iOS automatic
             content insets. */}
-        <SwipeableScrollGateProvider enabled={swipeEnabled} activation={swipeRowActivation}>
-          <GestureDetector gesture={homeScrollGesture}>
-            <AnimatedLegendList
-              ref={listRef}
-              onLoad={() => activateVisibleRows(threadListV2Items)}
-              onTouchStart={(event) => trackListTouches(event, true)}
-              onTouchEnd={(event) => trackListTouches(event, false)}
-              onTouchCancel={(event) => trackListTouches(event, false)}
-              itemLayoutAnimation={HIERARCHY_LAYOUT_TRANSITION}
-              viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
-              renderScrollComponent={Platform.OS === "ios" ? renderHomeScrollView : undefined}
-              data={threadListV2Items}
-              renderItem={renderV2Item}
-              keyExtractor={v2KeyExtractor}
-              getItemType={(item) => item.type}
-              itemsAreEqual={hierarchyItemsAreEqual}
-              estimatedItemSize={ESTIMATED_THREAD_LIST_V2_ROW_HEIGHT}
-              drawDistance={THREAD_LIST_V2_DRAW_DISTANCE}
-              recycleItems
-              extraData={v2ExtraData}
-              ListHeaderComponent={v2ListHeader}
-              ListFooterComponent={
-                settledShelfExpanded && threadListV2Layout.hiddenSettledCount > 0 ? (
-                  <ThreadListV2ShowMoreRow
-                    hiddenCount={threadListV2Layout.hiddenSettledCount}
-                    onPress={showMoreSettled}
-                  />
-                ) : null
-              }
-              ListEmptyComponent={v2ListEmpty}
-              style={{ flex: 1 }}
-              automaticallyAdjustsScrollIndicatorInsets={Platform.OS === "ios"}
-              contentInsetAdjustmentBehavior="never"
-              contentInset={Platform.OS === "ios" ? { top: insets.top } : undefined}
-              contentInsetStartAdjustment={Platform.OS === "ios" ? insets.top : 0}
-              initialScrollOffset={
-                initialScrollOffset > 0
-                  ? initialScrollOffset - (Platform.OS === "ios" ? insets.top : 0)
-                  : undefined
-              }
-              showsVerticalScrollIndicator={false}
-              keyboardDismissMode="on-drag"
-              keyboardShouldPersistTaps="handled"
-              {...scrollGateHandlers}
-              scrollEventThrottle={16}
-              contentContainerStyle={{
-                paddingLeft:
-                  (contentSideInsets?.left ?? 0) + (primaryColumn ? 8 : 0) + androidListGutter,
-                paddingRight:
-                  (contentSideInsets?.right ?? 0) + (primaryColumn ? 8 : 0) + androidListGutter,
-                paddingBottom:
-                  Platform.OS === "ios"
-                    ? iosBottomClearance
-                    : (workspace?.bottomClearance ??
-                      Math.max(insets.bottom, 16) +
-                        (Platform.OS === "android" ? fabClearance : 88)),
-              }}
-            />
-          </GestureDetector>
-        </SwipeableScrollGateProvider>
+        {/* Lecturn: one motion clock for every Squire indicator in the list. */}
+        <SquireMotionClock>
+          <SwipeableScrollGateProvider enabled={swipeEnabled} activation={swipeRowActivation}>
+            <GestureDetector gesture={homeScrollGesture}>
+              <AnimatedLegendList
+                ref={listRef}
+                onLoad={() => activateVisibleRows(threadListV2Items)}
+                onTouchStart={(event) => trackListTouches(event, true)}
+                onTouchEnd={(event) => trackListTouches(event, false)}
+                onTouchCancel={(event) => trackListTouches(event, false)}
+                itemLayoutAnimation={HIERARCHY_LAYOUT_TRANSITION}
+                viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
+                renderScrollComponent={Platform.OS === "ios" ? renderHomeScrollView : undefined}
+                data={threadListV2Items}
+                renderItem={renderV2Item}
+                keyExtractor={v2KeyExtractor}
+                getItemType={(item) => item.type}
+                itemsAreEqual={hierarchyItemsAreEqual}
+                estimatedItemSize={ESTIMATED_THREAD_LIST_V2_ROW_HEIGHT}
+                drawDistance={THREAD_LIST_V2_DRAW_DISTANCE}
+                recycleItems
+                extraData={v2ExtraData}
+                ListHeaderComponent={v2ListHeader}
+                ListFooterComponent={
+                  settledShelfExpanded && threadListV2Layout.hiddenSettledCount > 0 ? (
+                    <ThreadListV2ShowMoreRow
+                      hiddenCount={threadListV2Layout.hiddenSettledCount}
+                      onPress={showMoreSettled}
+                    />
+                  ) : null
+                }
+                ListEmptyComponent={v2ListEmpty}
+                style={{ flex: 1 }}
+                automaticallyAdjustsScrollIndicatorInsets={Platform.OS === "ios"}
+                contentInsetAdjustmentBehavior="never"
+                contentInset={Platform.OS === "ios" ? { top: insets.top } : undefined}
+                contentInsetStartAdjustment={Platform.OS === "ios" ? insets.top : 0}
+                initialScrollOffset={
+                  initialScrollOffset > 0
+                    ? initialScrollOffset - (Platform.OS === "ios" ? insets.top : 0)
+                    : undefined
+                }
+                showsVerticalScrollIndicator={false}
+                keyboardDismissMode="on-drag"
+                keyboardShouldPersistTaps="handled"
+                {...scrollGateHandlers}
+                scrollEventThrottle={16}
+                contentContainerStyle={{
+                  paddingLeft:
+                    (contentSideInsets?.left ?? 0) + (primaryColumn ? 8 : 0) + androidListGutter,
+                  paddingRight:
+                    (contentSideInsets?.right ?? 0) + (primaryColumn ? 8 : 0) + androidListGutter,
+                  paddingBottom:
+                    Platform.OS === "ios"
+                      ? iosBottomClearance
+                      : (workspace?.bottomClearance ??
+                        Math.max(insets.bottom, 16) +
+                          (Platform.OS === "android" ? fabClearance : 88)),
+                }}
+              />
+            </GestureDetector>
+          </SwipeableScrollGateProvider>
+        </SquireMotionClock>
       </View>
     </View>
   );

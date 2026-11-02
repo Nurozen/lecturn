@@ -331,6 +331,31 @@ export function ThreadMcpApp(props: {
           throw new McpAppHostRefusal("The link could not be opened.");
         }
       },
+      // A card Lecturn serves opens its Squire or room links as screens here; the host
+      // refuses them from any other app. Only a tap navigates, so a card cannot leave the
+      // thread on a timer.
+      ...(app.server === LECTURN_MCP_APP_SERVER
+        ? {
+            openSquireLink: async (link) => {
+              const { navigation } = latest.current;
+              if (!userActive.current || !navigation.isFocused()) {
+                throw new McpAppHostRefusal("Links open only from a tap in the app.");
+              }
+              if (link.kind === "room") {
+                navigation.navigate("SquireRoom", {
+                  environmentId: link.environmentId,
+                  roomId: link.roomId,
+                });
+                return;
+              }
+              navigation.navigate("Squire", {
+                environmentId: link.environmentId,
+                squireId: link.squireId,
+                ...(link.item === null ? {} : { item: link.item }),
+              });
+            },
+          }
+        : {}),
       sendMessage: async (text) => {
         if (!(await confirm(`Send this message from ${app.server}?`, text, "Send"))) {
           throw new McpAppHostRefusal("Declined by the user.");

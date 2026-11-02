@@ -52,6 +52,13 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
   approvalPolicy: Schema.optional(Schema.Unknown),
   sandboxPolicy: Schema.optional(Schema.Unknown),
   reasoningEffort: Schema.optional(Schema.String),
+  /**
+   * Lecturn: set on a Squire's home thread or probe fork. An adapter that
+   * reads it applies its own deny runtime and attaches Lecturn's MCP server
+   * alone (home) or no MCP server (probe); one that ignores it is not a
+   * Squire provider.
+   */
+  squireIsolation: Schema.optional(Schema.Literals(["home", "probe"])),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
 
@@ -63,6 +70,8 @@ export const ProviderAdapterV2TurnMessage = Schema.Struct({
   creationSource: OrchestrationV2ConversationMessage.fields.creationSource,
   scheduledTaskId: OrchestrationV2ConversationMessage.fields.scheduledTaskId,
   senderThreadId: OrchestrationV2ConversationMessage.fields.senderThreadId,
+  /** Lecturn: tells a background delivery (a Squire event batch) from a typed message. */
+  notification: OrchestrationV2ConversationMessage.fields.notification,
 });
 export type ProviderAdapterV2TurnMessage = typeof ProviderAdapterV2TurnMessage.Type;
 
@@ -440,6 +449,12 @@ export interface ProviderAdapterV2TurnInput {
    * Each adapter appends them where it has a system-prompt hook.
    */
   readonly appInstructions?: string;
+  /**
+   * Lecturn: the Squire skill on a Squire home thread, in sections of at most
+   * 4,000 bytes. It replaces the orchestration, browser, and device sections,
+   * which steer to tools a Squire's credential never lists (D22).
+   */
+  readonly squireInstructions?: ReadonlyArray<string>;
 }
 
 export interface ProviderAdapterV2SteerInput {
@@ -662,5 +677,11 @@ export class ProviderAdapterV2 extends Context.Service<
     readonly openSession: (
       input: ProviderAdapterV2OpenSessionInput,
     ) => Effect.Effect<ProviderAdapterV2SessionRuntime, ProviderAdapterV2Error, Scope.Scope>;
+    /**
+     * Lecturn: why this instance cannot open a Squire home or probe session
+     * now (for example a login the Squire's own provider home cannot reach),
+     * or null. Absent means no instance-level gap.
+     */
+    readonly squireReadiness?: Effect.Effect<string | null>;
   }
 >()("@lecturn/provider-core/server/ProviderAdapter/ProviderAdapterV2") {}

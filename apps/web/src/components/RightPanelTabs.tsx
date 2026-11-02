@@ -1,6 +1,6 @@
 import { pullRequestHostOf, type SourceControlProviderKind } from "@lecturn/contracts";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
-import { useProjects, useServerConfigs, useThreadShells } from "~/state/entities";
+import { useProjects, useServerConfigs, useVisibleThreadShells } from "~/state/entities";
 import {
   threadPullRequestKeysEqual,
   visibleThreadPullRequests,
@@ -748,7 +748,7 @@ function PullRequestSurfaceIcon({
   const resolvedEnvironmentId =
     (surface.environmentId as EnvironmentId | undefined) ?? environmentId;
   const projects = useProjects();
-  const threads = useThreadShells();
+  const threads = useVisibleThreadShells();
   const project = projects.find(
     (entry) => entry.environmentId === resolvedEnvironmentId && entry.id === surface.projectId,
   );

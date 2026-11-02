@@ -350,12 +350,13 @@ export const makeExtensionsUsageStore = <J = DecisionEvaluationJudgment>(
               "run-budget-exhausted",
               "This analysis reached its spending limit",
             );
+          // Squires owns its environment slot so routing never waits on Decisions or Contextual.
           const counts = yield* decisionStorage(
             sql<{
               account_live: number;
               environment_live: number;
               recent: number;
-            }>`SELECT count(*) FILTER(WHERE status IN ('admitted','dispatched'))::integer AS account_live,(SELECT count(*)::integer FROM relay_decision_usage_attempts e WHERE e.status IN ('admitted','dispatched') AND e.environment_id=${input.principal.environmentId}) AS environment_live,count(*) FILTER(WHERE created_at>${time - 60})::integer AS recent FROM relay_decision_usage_attempts WHERE payer_id=${input.payerId}`,
+            }>`SELECT count(*) FILTER(WHERE status IN ('admitted','dispatched'))::integer AS account_live,(SELECT count(*)::integer FROM relay_decision_usage_attempts e WHERE e.status IN ('admitted','dispatched') AND e.environment_id=${input.principal.environmentId} AND (e.feature_id='squires')=${featureId === "squires"}) AS environment_live,count(*) FILTER(WHERE created_at>${time - 60})::integer AS recent FROM relay_decision_usage_attempts WHERE payer_id=${input.payerId}`,
           );
           const count = counts[0]!;
           if (

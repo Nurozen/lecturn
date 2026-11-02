@@ -17,6 +17,7 @@ import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as ThreadManagementService from "../ThreadManagementService.ts";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
+import type * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 import * as McpSessionRegistryTestkit from "../../mcp/McpSessionRegistry.testkit.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
@@ -135,6 +136,7 @@ export function makeReplayServerConfig(
       logWebSocketEvents: false,
       threadForkingEnabled: true,
       staveEnabled: false,
+      squireEnabled: false,
       stateDir,
       dbPath: path.join(stateDir, "state.sqlite"),
       keybindingsConfigPath: path.join(stateDir, "keybindings.json"),
@@ -273,6 +275,13 @@ export function layerWithRegistry<Error>(
     readonly runContinuationWorker?: boolean;
     readonly recoverOnStartup?: boolean;
     readonly continueThreadsAfterServerUpdate?: boolean;
+    /**
+     * A real session registry: the session manager then issues MCP
+     * credentials from it, as the server does, instead of a placeholder.
+     */
+    readonly mcpSessionRegistry?: Layer.Layer<McpSessionRegistry.McpSessionRegistry>;
+    /** The runtime policy in place of the record-only test policy, e.g. the server's own. */
+    readonly runtimePolicy?: Layer.Layer<RuntimePolicy.RuntimePolicyV2>;
   } = {},
 ): Layer.Layer<
   | Orchestrator.OrchestratorV2
@@ -288,7 +297,7 @@ export function layerWithRegistry<Error>(
   ).pipe(Layer.provide(NodeServices.layer));
   const layerRuntime =
     scenario.runtimePolicyOverride === undefined
-      ? RuntimePolicy.layer
+      ? (options.runtimePolicy ?? RuntimePolicy.layer)
       : RuntimePolicy.layerWithOverride(scenario.runtimePolicyOverride).pipe(
           Layer.provide(RuntimePolicy.layer),
         );
@@ -361,7 +370,7 @@ export function layerWithRegistry<Error>(
     Layer.provide(Layer.merge(layerEventSinkProvided, layerStores)),
   );
   const layerProviderSessionManagerProvided = ProviderSessionManager.layerWithOptions({
-    configureMcp: false,
+    configureMcp: options.mcpSessionRegistry !== undefined,
   }).pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -370,7 +379,7 @@ export function layerWithRegistry<Error>(
         layerEventSinkProvided,
         IdAllocator.layer,
         McpProviderSessions.layer,
-        McpSessionRegistryTestkit.layer,
+        options.mcpSessionRegistry ?? McpSessionRegistryTestkit.layer,
         layerProviderEventIngestorProvided,
         layerStores,
       ),

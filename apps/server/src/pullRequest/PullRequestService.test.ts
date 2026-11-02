@@ -2614,6 +2614,29 @@ it.effect("resolves a project's repository identity when its shell has none cach
   }),
 );
 
+it.effect("carries the host's head commit on the summary the background sync reads", () =>
+  Effect.gen(function* () {
+    const service = yield* makeService({
+      projects: [
+        project({ id: "web", title: "web", workspaceRoot: "/web", repository: "acme/web" }),
+      ],
+      providers: [
+        fakeProvider(SourceControlProviderKind.make("github"), {
+          getChangeRequestSummary: () =>
+            Effect.succeed({ ...changeRequest(7, "2026-07-02T00:00:00Z"), headSha: "abc123" }),
+        }),
+      ],
+    });
+
+    const summary = yield* service.summary(
+      { projectId: "web" as ProjectId, host: "github.com", repository: "acme/web", number: 7 },
+      { recoverTransientFailure: false },
+    );
+
+    assert.strictEqual(summary.headSha, "abc123");
+  }),
+);
+
 it.effect("routes a hosted reference to another repository through a project on that host", () =>
   Effect.gen(function* () {
     const seen: Array<{ cwd: string; repository: string; host: string }> = [];

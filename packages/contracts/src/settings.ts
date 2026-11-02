@@ -951,6 +951,33 @@ export const StaveSettings = Schema.Struct({
   lifecycle: StaveLifecycleSettings,
 }).pipe(Schema.withDecodingDefault(Effect.succeed({})));
 export type StaveSettings = typeof StaveSettings.Type;
+
+// ── Squires ────────────────────────────────────────────────────
+
+/** When a Squire's decision item reaches the phone while a desktop is active. */
+export const SquirePhoneAlertsWhileDesktop = Schema.Literals([
+  "after-3-min",
+  "immediately",
+  "never",
+]);
+export type SquirePhoneAlertsWhileDesktop = typeof SquirePhoneAlertsWhileDesktop.Type;
+export const SquireInactivityDays = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 30 }));
+export const SquireRoomIdleTtlHours = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: 168 }),
+);
+
+// Environment-wide, so per-Squire records stay free of settings every Squire
+// shares. Defaulted as a whole, like `stave`.
+export const SquireEnvironmentSettings = Schema.Struct({
+  phoneAlertsWhileDesktop: SquirePhoneAlertsWhileDesktop.pipe(
+    Schema.withDecodingDefault(Effect.succeed("after-3-min" as const)),
+  ),
+  inactivityDays: SquireInactivityDays.pipe(Schema.withDecodingDefault(Effect.succeed(7))),
+  botMessages: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  roomIdleTtlHours: SquireRoomIdleTtlHours.pipe(Schema.withDecodingDefault(Effect.succeed(24))),
+}).pipe(Schema.withDecodingDefault(Effect.succeed({})));
+export type SquireEnvironmentSettings = typeof SquireEnvironmentSettings.Type;
+
 export const ResponseStreamingMode = Schema.Literals(["turn", "paragraph"]);
 export type ResponseStreamingMode = typeof ResponseStreamingMode.Type;
 
@@ -1313,6 +1340,7 @@ export const ServerSettings = Schema.Struct({
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   stave: StaveSettings,
+  squire: SquireEnvironmentSettings,
   sourceControlHosts: Schema.Record(Schema.String, SourceControlHostSettings).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
@@ -1585,6 +1613,15 @@ export const ServerSettingsPatch = Schema.Struct({
           settleOnSagaMerge: Schema.optionalKey(Schema.Boolean),
         }),
       ),
+    }),
+  ),
+  // Deep-merged into the current `squire` block, like `stave`.
+  squire: Schema.optionalKey(
+    Schema.Struct({
+      phoneAlertsWhileDesktop: Schema.optionalKey(SquirePhoneAlertsWhileDesktop),
+      inactivityDays: Schema.optionalKey(SquireInactivityDays),
+      botMessages: Schema.optionalKey(Schema.Boolean),
+      roomIdleTtlHours: Schema.optionalKey(SquireRoomIdleTtlHours),
     }),
   ),
   /**

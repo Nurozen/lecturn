@@ -2,12 +2,14 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   CommandId,
+  MessageId,
   NodeId,
   type OrchestrationV2ServerCommand,
   ProjectId,
   ProviderInstanceId,
   ProviderSessionId,
   RunId,
+  SquireId,
   ThreadId,
 } from "@lecturn/contracts";
 import { Effect, FileSystem, Layer, Option, Path, Ref, Result } from "effect";
@@ -49,6 +51,8 @@ const projectRow = (projectId: ProjectId, workspaceRoot: string): ProjectRow => 
   updatedAt: NOW,
   deletedAt: null,
 });
+
+const SQUIRE_HOME = ThreadId.make("squire-home");
 
 const threadCreate = (worktreePath: string | null): OrchestrationV2ServerCommand => ({
   type: "thread.create",
@@ -156,7 +160,16 @@ const makeLayer = (
                   } as unknown as NonNullable<
                     Effect.Success<ReturnType<ProjectionStoreV2["Service"]["getThreadShell"]>>
                   >)
-                : null,
+                : threadId === SQUIRE_HOME
+                  ? ({
+                      id: SQUIRE_HOME,
+                      projectId: PROJECT,
+                      worktreePath: "/home/userdata/squires/s1/workspace",
+                      squire: { squireId: "s1", role: "home" },
+                    } as unknown as NonNullable<
+                      Effect.Success<ReturnType<ProjectionStoreV2["Service"]["getThreadShell"]>>
+                    >)
+                  : null,
             ),
         }),
       ),
@@ -207,6 +220,34 @@ it.layer(NodeServices.layer)("StaveOrchestrationHooks", (it) => {
             lockHeld: true,
           },
         ]);
+      }),
+    ),
+  );
+
+  it.effect("starts a Squire home's turn in a space: its scratch workspace is not a worktree", () =>
+    withHarness([projectRow(PROJECT, "/spaces/squire")], (harness, hooks) =>
+      Effect.gen(function* () {
+        yield* hooks.aroundCommand(
+          {
+            scope: "thread",
+            command: {
+              type: "message.dispatch",
+              commandId: CommandId.make("squire-deliver"),
+              threadId: SQUIRE_HOME,
+              messageId: MessageId.make("squire-batch"),
+              text: "events",
+              attachments: [],
+              dispatchMode: { type: "queue_after_active" },
+              createdBy: "agent",
+              creationSource: "server",
+            },
+          },
+          Effect.void,
+        );
+        assert.deepEqual(
+          (yield* Ref.get(harness.calls)).map((call) => [call.intent, call.worktreePath]),
+          [["thread.turn.start", null]],
+        );
       }),
     ),
   );
@@ -484,6 +525,25 @@ it("maps V2 thread commands to the V1 admission intents", () => {
     projectId: PROJECT,
     worktreePath: "/spaces/x/wt",
   });
+  // A Squire home's scratch workspace lives under userdata, outside the space.
+  assert.deepEqual(
+    describeStaveThreadIntent({
+      type: "thread.create",
+      createdBy: "system",
+      creationSource: "server",
+      commandId: CommandId.make("squire-home"),
+      threadId: ThreadId.make("squire-home"),
+      projectId: PROJECT,
+      title: "Squire · Release",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: "/home/userdata/squires/s1/workspace",
+      squire: { squireId: SquireId.make("s1"), role: "home" },
+    }),
+    { intent: "thread.create", projectId: PROJECT, worktreePath: null },
+  );
   assert.deepEqual(
     describeStaveThreadIntent({
       type: "thread.fork",

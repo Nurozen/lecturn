@@ -519,6 +519,8 @@ export function withRateLimitBackoff(
     ...(api.listAcceptanceCandidates
       ? { listAcceptanceCandidates: wrap("listAcceptanceCandidates", api.listAcceptanceCandidates) }
       : {}),
+    // Lecturn: the Squire CI excerpt (D21).
+    ...(api.readCiFailure ? { readCiFailure: wrap("readCiFailure", api.readCiFailure) } : {}),
     getChangeRequest: wrap("getChangeRequest", api.getChangeRequest),
     ...(api.getChangeRequestPreview === undefined
       ? {}
@@ -1740,6 +1742,7 @@ export const make = Effect.gen(function* () {
               ? {}
               : { mergeability: changeRequest.mergeability }),
             ...(changeRequest.stack === undefined ? {} : { stack: changeRequest.stack }),
+            ...(changeRequest.headSha ? { headSha: changeRequest.headSha } : {}),
           })),
         );
       }),
@@ -3163,6 +3166,7 @@ export const make = Effect.gen(function* () {
     mergedAt: detail.mergedAt,
     updatedAt: detail.updatedAt,
     observedAt: detail.observedAt,
+    ...(detail.headSha === undefined ? {} : { headSha: detail.headSha }),
   });
   const shouldReplaceHeldSummary = (key: string, next: PullRequestSummary) =>
     supersedesReading(lastGoodSummary.peek(key), next);

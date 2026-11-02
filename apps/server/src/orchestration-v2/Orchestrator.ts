@@ -898,10 +898,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     readonly adapter: ProviderAdapter.ProviderAdapterV2["Service"];
     readonly providerInstanceId: ProviderInstanceId;
     readonly threadId: ThreadId;
+    /**
+     * Lecturn: a marked thread never shares the instance's session; its
+     * provider process runs with an isolated provider home (A5.9).
+     */
+    readonly marked: boolean;
   }) =>
     input.adapter.getCapabilities().pipe(
       Effect.flatMap((capabilities) =>
-        capabilities.sessions.supportsMultipleProviderThreadsPerSession
+        capabilities.sessions.supportsMultipleProviderThreadsPerSession && !input.marked
           ? Effect.succeed(
               idAllocator.derive.providerSession({
                 providerInstanceId: input.providerInstanceId,
@@ -1660,6 +1665,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               adapter,
               providerInstanceId: queuedRun.providerInstanceId,
               threadId,
+              marked: projection.thread.squire !== undefined,
             }),
           ),
           Effect.mapError(
@@ -4546,6 +4552,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               adapter: targetAdapter,
               providerInstanceId: input.modelSelection.instanceId,
               threadId: input.command.threadId,
+              marked: input.projection.thread.squire !== undefined,
             }),
           ));
         const targetProviderThreadBase: OrchestrationV2ProviderThread =
@@ -5748,6 +5755,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               adapter,
               providerInstanceId: modelSelection.instanceId,
               threadId: command.threadId,
+              marked: projection.thread.squire !== undefined,
             }),
           ));
         const providerThreadId =
@@ -6140,6 +6148,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             adapter,
             providerInstanceId: modelSelection.instanceId,
             threadId: command.threadId,
+            marked: projection.thread.squire !== undefined,
           }),
         ));
       const existingProviderSession = projection.providerSessions.find(
@@ -9258,6 +9267,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         updatedAt: now,
         type: "run_interrupt_request",
         message: command.reason ?? "Interrupt requested",
+        // Lecturn: provenance of the stop, read by Squire to tell user stops from others.
+        ...(command.createdBy === undefined ? {} : { createdBy: command.createdBy }),
       },
     });
   });
@@ -9705,6 +9716,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         updatedAt: now,
         type: "run_interrupt_request",
         message: command.reason ?? "Interrupt requested",
+        // Lecturn: see markStoppedRun.
+        ...(command.createdBy === undefined ? {} : { createdBy: command.createdBy }),
       };
 
       const otherProviderInterrupts: Array<PendingOrchestrationEffectV2> = [];
@@ -10119,6 +10132,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               runId: target.id,
               holdQueue: true,
               ...(command.reason === undefined ? {} : { reason: command.reason }),
+              // Lecturn: the rebuilt interrupt keeps the stop's provenance.
+              ...(command.createdBy === undefined ? {} : { createdBy: command.createdBy }),
             },
             interruptEvents,
             interruptEffects,

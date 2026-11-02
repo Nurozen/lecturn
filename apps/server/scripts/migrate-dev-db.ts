@@ -213,6 +213,19 @@ const CLEARED_TABLES: ReadonlyArray<string> = [
   "provider_session_runtime",
   "auth_sessions",
   "auth_pairing_links",
+  "squire",
+  "squire_grant",
+  "squire_event",
+  "squire_summary",
+  "squire_card",
+  "squire_budget_usage",
+  "squire_action_log",
+  "squire_rule",
+  "squire_trigger",
+  "squire_room",
+  "squire_room_member",
+  "squire_room_post",
+  "squire_reactor_cursor",
 ];
 
 const PROVIDER_SESSIONS_TABLE = "orchestration_v2_projection_provider_sessions";
@@ -245,11 +258,16 @@ const copySourceSlice = Effect.fn("copyDevDbSourceSlice")(function* (sourcePath:
       for (const table of tables) yield* sql.unsafe(table.sql).unprepared;
       if (filtered) {
         yield* sql`CREATE TEMP TABLE copied_threads (thread_id TEXT PRIMARY KEY)`;
+        // Squire-marked threads stay behind with the cleared squire_* rows: a
+        // copied home or probe thread would have no Squire, and its family
+        // (forks of a home thread) goes with it.
         yield* sql`INSERT OR IGNORE INTO copied_threads
           SELECT family.thread_id FROM src.orchestration_v2_projection_threads family
           JOIN src.orchestration_v2_projection_threads root ON root.thread_id =
             COALESCE(json_extract(family.payload_json, '$.lineage.rootThreadId'), family.thread_id)
-          WHERE ${rootIsVisible(sql)}`;
+          WHERE ${rootIsVisible(sql)}
+            AND json_extract(root.payload_json, '$.squire') IS NULL
+            AND json_extract(family.payload_json, '$.squire') IS NULL`;
       }
       for (const { name } of tables) {
         if (CLEARED_TABLES.includes(name)) continue;

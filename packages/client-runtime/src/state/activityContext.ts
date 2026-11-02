@@ -1,5 +1,6 @@
 // @effect-diagnostics globalDate:off -- UI activity timestamps use the device locale.
-import * as DateTime from "effect/DateTime";
+// Type-only: the sandboxed desktop activity preload bundles this module and cannot require Effect.
+import type * as DateTime from "effect/DateTime";
 
 import type { EnvironmentThreadShell } from "./models.ts";
 
@@ -29,7 +30,7 @@ export interface ActivityMessage {
 }
 
 function timestampMs(value: ActivityTimestamp): number {
-  return typeof value === "string" ? Date.parse(value) : DateTime.toEpochMillis(value);
+  return typeof value === "string" ? Date.parse(value) : value.epochMilliseconds;
 }
 
 function latestCurrentTurnResponse(

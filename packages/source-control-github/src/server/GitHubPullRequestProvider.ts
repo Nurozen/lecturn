@@ -256,6 +256,13 @@ export const make = Effect.gen(function* () {
               Effect.mapError(fail("readAcceptanceEvidence")),
             ),
         }),
+    ...(cli.readCiFailure === undefined
+      ? {}
+      : {
+          readCiFailure: (
+            input: Parameters<NonNullable<PullRequestProviderApi["readCiFailure"]>>[0],
+          ) => cli.readCiFailure!(input).pipe(Effect.mapError(fail("readCiFailure"))),
+        }),
     mergeMessageRewrite: removeAgentCredits,
     getRoutingIdentity: (input) =>
       cli.getRoutingIdentity(input).pipe(Effect.mapError(fail("routeIdentity"))),

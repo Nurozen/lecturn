@@ -203,6 +203,8 @@ export type ProjectionSettlementCandidate = Pick<
   | "pendingRuntimeRequest"
   | "pendingBackgroundTasks"
   | "importedFrom"
+  // Lecturn: the Squire marker, so auto-settle can skip Squire threads.
+  | "squire"
 > &
   Pick<OrchestrationV2AppThread, "lastSnoozeWakeAt"> & {
     readonly latestUserAuthoredMessageAt: DateTime.Utc | null;

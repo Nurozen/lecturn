@@ -6,6 +6,7 @@ import {
   ExtensionFundingObserveResult,
   ExtensionFundingAccountListResult,
   ExtensionFundingChallengeResult,
+  ExtensionServiceStatus,
 } from "./extensions.ts";
 
 const allowance = {
@@ -23,6 +24,9 @@ const allowance = {
   ],
 };
 const isAllowance = Schema.is(ExtensionAllowance);
+const decodeAllowance = Schema.decodeUnknownSync(ExtensionAllowance);
+const encodeAllowance = Schema.encodeSync(ExtensionAllowance);
+const decodeServiceStatus = Schema.decodeUnknownSync(ExtensionServiceStatus);
 const isObservation = Schema.is(ExtensionFundingObserveResult);
 const isAccountList = Schema.is(ExtensionFundingAccountListResult);
 const isChallenge = Schema.is(ExtensionFundingChallengeResult);
@@ -41,6 +45,52 @@ describe("extension paid contracts", () => {
     expect(isAllowance({ ...allowance, windowEnd: allowance.windowStart })).toBe(false);
     expect(isAllowance({ ...allowance, limitInputTokens: 100, remainingInputTokens: 0 })).toBe(
       true,
+    );
+  });
+  it("accounts for Squires as a third feature while two-feature payloads still decode", () => {
+    const decode = decodeAllowance;
+    expect(decode(allowance).byFeature).toHaveLength(2);
+    const three = {
+      ...allowance,
+      usedInputTokens: 260,
+      remainingInputTokens: 540,
+      byFeature: [
+        ...allowance.byFeature,
+        { featureId: "squires", usedInputTokens: 10, reservedInputTokens: 0 },
+      ],
+    };
+    const encoded = encodeAllowance(decode(three));
+    expect(decode(encoded)).toEqual(three);
+    expect(
+      isAllowance({
+        ...three,
+        byFeature: [
+          ...three.byFeature,
+          { featureId: "squires", usedInputTokens: 0, reservedInputTokens: 0 },
+        ],
+      }),
+    ).toBe(false);
+    const feature = (featureId: string) => ({
+      featureId,
+      available: true,
+      enabled: false,
+      eligible: false,
+      reason: "disabled",
+    });
+    expect(
+      decodeServiceStatus({
+        features: [feature("decisions"), feature("contextual")],
+        allowance: null,
+      }).features,
+    ).toHaveLength(2);
+    expect(
+      decodeServiceStatus({
+        features: [feature("decisions"), feature("contextual"), feature("squires")],
+        allowance: null,
+      }).features.map((entry) => entry.featureId),
+    ).toEqual(["decisions", "contextual", "squires"]);
+    expect(strictApproval({ featureId: "squires", challengeId: "challenge" }).featureId).toBe(
+      "squires",
     );
   });
   it("does not accept wildcard consent, caller-selected payer or credentials", () => {

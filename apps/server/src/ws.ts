@@ -77,6 +77,7 @@ import {
   ContextualRpcs,
   APPS_WS_METHODS,
   AppsRpcs,
+  SquireRpcs,
   ProjectListEntriesError,
   ProjectReadFileError,
   ProjectSearchContentsError,
@@ -289,6 +290,8 @@ import * as ProjectionStoreV2 from "./orchestration-v2/ProjectionStore.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
 import { previewCheckpointRevert } from "./orchestration-v2/fork/CheckpointRevertPreview.ts";
 import { guardWorktreeRemoval } from "./orchestration-v2/fork/WorktreeRemovalGuard.ts";
+import * as SquireRpcHandlers from "./squire/SquireRpcHandlers.ts";
+import { refuseSquireWorkspacePath } from "./squire/SquireWorkspace.ts";
 
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
 
@@ -1356,7 +1359,10 @@ const makeWsRpcHandlers = (
     const staveAdmission = yield* StaveAdmission.StaveAdmission;
     const staveProjectShells = yield* Effect.serviceOption(StaveProjectShells);
     const forkReadContext = yield* Effect.context<
-      ProjectionStoreV2.ProjectionStoreV2 | CheckpointStore.CheckpointStore | Path.Path
+      | ProjectionStoreV2.ProjectionStoreV2
+      | CheckpointStore.CheckpointStore
+      | FileSystem.FileSystem
+      | Path.Path
     >();
 
     const providerSessionsV2 = yield* ProviderSessionManager.ProviderSessionManagerV2;
@@ -1931,6 +1937,8 @@ const makeWsRpcHandlers = (
     // group middleware and RpcScopeAuthorization checks their scopes like any RPC.
     const staveRpcHandlers = yield* makeStaveRpcHandlers();
     const appsRpcHandlers = yield* AppsRpcHandlers.make(currentSession);
+    // Lecturn: Squire RPCs refuse `disabled_by_server` while LECTURN_SQUIRE is off.
+    const squireRpcHandlers = yield* SquireRpcHandlers.make();
 
     const getOrchestrationV2ArchivedShellSnapshot = Effect.gen(function* () {
       const { threads, projects, snapshotSequence } = yield* loadShellSnapshotParts({
@@ -2025,6 +2033,7 @@ const makeWsRpcHandlers = (
     const handlers = ServerWsRpcGroup.of({
       ...staveRpcHandlers,
       ...appsRpcHandlers,
+      ...squireRpcHandlers,
       [WS_METHODS.contextualStatus]: (input) => contextual.status(input),
       [WS_METHODS.contextualProjectSettings]: (input) => contextual.projectSettings(input),
       [WS_METHODS.contextualUpdateProjectSettings]: (input) =>
@@ -3133,11 +3142,15 @@ const makeWsRpcHandlers = (
           Effect.tap(() => refreshGitStatus(input.cwd)),
         ),
       [WS_METHODS.vcsRemoveWorktree]: (input) =>
-        // Lecturn: never remove a worktree another thread still works in.
-        guardWorktreeRemoval(
-          input.path,
-          gitWorkflow.removeWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
-        ).pipe(
+        // Lecturn: never remove a Squire's scratch workspace, or a worktree
+        // another thread still works in.
+        refuseSquireWorkspacePath(config.stateDir, input.path).pipe(
+          Effect.andThen(
+            guardWorktreeRemoval(
+              input.path,
+              gitWorkflow.removeWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            ),
+          ),
           Effect.mapError((error) =>
             error._tag === "GitCommandError"
               ? error
@@ -3146,7 +3159,8 @@ const makeWsRpcHandlers = (
                   command: "git",
                   cwd: input.cwd,
                   detail:
-                    error._tag === "WorktreeStillInUseError"
+                    error._tag === "WorktreeStillInUseError" ||
+                    error._tag === "SquireWorkspacePathError"
                       ? error.message
                       : `failed to check which threads reference worktree ${input.path}`,
                   cause: error,
@@ -3421,6 +3435,7 @@ const makeWsRpcHandlers = (
 // RpcServer finds handlers by tag, so the layers serve the one WsRpcGroup.
 type ContextualRpcTag = (typeof CONTEXTUAL_WS_METHODS)[keyof typeof CONTEXTUAL_WS_METHODS];
 type AppsRpcTag = (typeof APPS_WS_METHODS)[keyof typeof APPS_WS_METHODS];
+type SquireRpcTag = (typeof SquireRpcs)[number]["_tag"];
 const LECTURN_WS_METHODS = [
   WS_METHODS.staveGetStatus,
   WS_METHODS.staveSpaceStatus,
@@ -3471,10 +3486,12 @@ const lecturnRpcTags: ReadonlySet<string> = new Set(LECTURN_WS_METHODS);
 const WsCoreRpcGroup = ServerWsRpcGroup.omit(
   ...Object.values(CONTEXTUAL_WS_METHODS),
   ...Object.values(APPS_WS_METHODS),
+  ...SquireRpcs.map((rpc) => rpc._tag),
   ...LECTURN_WS_METHODS,
 );
 const WsContextualRpcGroup = RpcGroup.make(...ContextualRpcs);
 const WsAppsRpcGroup = RpcGroup.make(...AppsRpcs);
+const WsSquireRpcGroup = RpcGroup.make(...SquireRpcs);
 const WsLecturnRpcGroup = ServerWsRpcGroup.omit(
   ...([...ServerWsRpcGroup.requests.keys()].filter((tag) => !lecturnRpcTags.has(tag)) as Array<
     Exclude<WsRpcTag, LecturnRpcTag>
@@ -3486,6 +3503,7 @@ export const WS_RPC_HANDLER_GROUPS = {
   core: WsCoreRpcGroup,
   contextual: WsContextualRpcGroup,
   apps: WsAppsRpcGroup,
+  squire: WsSquireRpcGroup,
   lecturn: WsLecturnRpcGroup,
 } as const;
 
@@ -3505,15 +3523,19 @@ const layerWsRpc = (
       serverBrowser,
     ).pipe(
       Effect.map((handlers) => {
-        const coreHandlers: Omit<typeof handlers, ContextualRpcTag | AppsRpcTag | LecturnRpcTag> =
-          handlers;
+        const coreHandlers: Omit<
+          typeof handlers,
+          ContextualRpcTag | AppsRpcTag | SquireRpcTag | LecturnRpcTag
+        > = handlers;
         const contextualHandlers: Pick<typeof handlers, ContextualRpcTag> = handlers;
         const appsHandlers: Pick<typeof handlers, AppsRpcTag> = handlers;
+        const squireHandlers: Pick<typeof handlers, SquireRpcTag> = handlers;
         const lecturnHandlers: Pick<typeof handlers, LecturnRpcTag> = handlers;
         return Layer.mergeAll(
           WsCoreRpcGroup.toLayer(coreHandlers),
           WsContextualRpcGroup.toLayer(contextualHandlers),
           WsAppsRpcGroup.toLayer(appsHandlers),
+          WsSquireRpcGroup.toLayer(squireHandlers),
           WsLecturnRpcGroup.toLayer(lecturnHandlers),
         );
       }),

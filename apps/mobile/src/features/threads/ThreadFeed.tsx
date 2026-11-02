@@ -319,6 +319,8 @@ export interface ThreadFeedProps {
   readonly queuedMessages: ReadonlyArray<QueuedThreadMessage>;
   readonly dispatchingMessageId: MessageId | null;
   readonly onEditPendingMessage: ((message: QueuedThreadMessage) => void) | null;
+  /** Lecturn: false hides "Fork from this response" (the D63 allowlist); absent forks as today. */
+  readonly forkEnabled?: boolean;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly threadTitle: string;
@@ -1032,6 +1034,7 @@ function renderFeedEntry(
     | "skills"
     | "dispatchingMessageId"
     | "onEditPendingMessage"
+    | "forkEnabled"
     | "threadId"
     | "workspaceRoot"
   > & {
@@ -1515,7 +1518,7 @@ function renderFeedEntry(
               buttonSize={28}
               iconSize={13}
             />
-            {message.projectedItem ? (
+            {message.projectedItem && props.forkEnabled !== false ? (
               <AssistantForkButton
                 environmentId={props.environmentId}
                 iconColor={iconSubtleColor}
@@ -2111,6 +2114,9 @@ function ThreadFeedView(props: ThreadFeedProps) {
     worktreeSetup: props.worktreeSetup,
     setupWorkingStartedAt: props.setupWorkingStartedAt,
     dispatchingMessageId: props.dispatchingMessageId,
+    // Lecturn: the allowlist can arrive with the server config, after rows rendered.
+    forkEnabled: props.forkEnabled,
+    pendingEditEnabled: props.onEditPendingMessage !== null,
     unsettledTurnId,
     copiedRowId,
     expandedWorkGroups,
@@ -2561,6 +2567,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
             environmentId: props.environmentId,
             dispatchingMessageId: props.dispatchingMessageId,
             onEditPendingMessage: props.onEditPendingMessage,
+            forkEnabled: props.forkEnabled,
             onUseArtifactTemplate: props.onUseArtifactTemplate,
             threadId: props.threadId,
             copiedRowId,

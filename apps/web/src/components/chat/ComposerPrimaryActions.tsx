@@ -1,4 +1,4 @@
-import { memo, type MouseEventHandler, type PointerEventHandler } from "react";
+import { memo, type ComponentProps, type MouseEventHandler, type PointerEventHandler } from "react";
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -90,6 +90,34 @@ const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
   event.preventDefault();
 };
 
+/**
+ * Lecturn: the composer's send button face, glass or the dev and nightly stage art. Shared with
+ * the Squire view's one-line composer, so its send matches the full composer's it stands in for.
+ */
+export function ComposerSendButton({ children, ...props }: ComponentProps<"button">) {
+  const stageBackdropVariant = useSidebarStageBackdropVariant(
+    useEnvironmentIdentificationMode() === "artwork",
+  );
+  return (
+    <button
+      {...props}
+      className={cn(
+        "lecturn-composer-send relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-control-highlight hover:scale-105 active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:opacity-50 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
+        stageBackdropVariant
+          ? "bg-transparent text-white enabled:shadow-black/24 enabled:hover:brightness-110"
+          : "text-foreground",
+      )}
+    >
+      {stageBackdropVariant ? (
+        <span className="pointer-events-none absolute inset-0 -z-10" aria-hidden="true">
+          <StageBackdropButtonArt variant={stageBackdropVariant} />
+        </span>
+      ) : null}
+      {children}
+    </button>
+  );
+}
+
 export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compact,
   canOperateThread,
@@ -123,7 +151,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const pointerFocusProps = preserveComposerFocusOnPointerDown
     ? { onPointerDown: preventPointerFocus }
     : undefined;
-  const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const shortcutModifiers = useShortcutModifierState();
   const isQueuing =
     !isEditingQueuedMessage &&
@@ -139,9 +166,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   // offers the stop instead (ComposerPendingApprovalActions).
   const embedded = useEmbedPresentation() !== null;
   const embedApprovalHoldsSend = approvalPending && embedded;
-  const stageBackdropVariant = useSidebarStageBackdropVariant(
-    environmentIdentificationMode === "artwork",
-  );
 
   const renderStopGenerationButton = (insidePendingAction: boolean) => (
     <Tooltip key="interrupt">
@@ -320,14 +344,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         : submitLabel);
 
   const sendButton = (
-    <button
+    <ComposerSendButton
       type={showResume ? "button" : "submit"}
-      className={cn(
-        "lecturn-composer-send relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-control-highlight hover:scale-105 active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:opacity-50 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
-        stageBackdropVariant
-          ? "bg-transparent text-white enabled:shadow-black/24 enabled:hover:brightness-110"
-          : "text-foreground",
-      )}
       {...pointerFocusProps}
       onClick={showResume ? onResume : onSubmitMessage}
       disabled={
@@ -339,11 +357,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       }
       aria-label={submitStatus ?? submitLabel}
     >
-      {stageBackdropVariant ? (
-        <span className="pointer-events-none absolute inset-0 -z-10" aria-hidden="true">
-          <StageBackdropButtonArt variant={stageBackdropVariant} />
-        </span>
-      ) : null}
       {isConnecting || isSendBusy ? (
         <Spinner size="sm" aria-hidden="true" />
       ) : showResume ? (
@@ -355,7 +368,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       ) : (
         <SendIcon aria-hidden className="size-[19px]" strokeWidth={1.5} />
       )}
-    </button>
+    </ComposerSendButton>
   );
 
   const submit = (
