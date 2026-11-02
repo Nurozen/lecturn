@@ -1,7 +1,7 @@
 /**
  * Stave space locks, admission and the runtime fence against the real V2
  * orchestrator and project service: Stave operations hold a space while
- * thread commands in it are refused, unrelated commands advance, and runtime
+ * thread commands in it wait, unrelated commands advance, and runtime
  * starts drain or stay fenced through teardown and reconciliation.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -209,7 +209,7 @@ const hookRejection = (error: unknown): LecturnHookRejectedError | undefined => 
 };
 
 it.effect(
-  "refuses a contended space command while operations refresh and unrelated commands advance",
+  "holds a contended space command until the operation finishes while unrelated commands advance",
   () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -301,15 +301,16 @@ it.effect(
           })
           .pipe(Stream.runCollect, Effect.forkChild);
         yield* Deferred.await(cliEntered);
-        const refused = yield* pin(threadId, "refused-pin").pipe(Effect.flip);
-        expect(hookRejection(refused)?.reason).toContain("Retry when it finishes");
+        const held = yield* pin(threadId, "held-pin").pipe(Effect.forkChild);
         yield* pin(ordinaryThreadId, "unrelated-pin");
         expect((yield* orchestrator.getThreadShell(threadId))?.pinnedAt ?? null).toBeNull();
         expect((yield* orchestrator.getThreadShell(ordinaryThreadId))?.pinnedAt).not.toBeNull();
-        expect(Option.isNone(yield* lock.tryWithSpaceLock(space, Effect.void))).toBe(true);
+        expect(Option.isNone(yield* lock.tryWithWorkspaceLocks([space], Effect.void))).toBe(true);
         yield* Deferred.succeed(releaseCli, undefined);
         const progress = yield* Fiber.join(mutation);
         expect(progress.at(-1)?.kind).toBe("finished");
+        yield* Fiber.join(held);
+        expect((yield* orchestrator.getThreadShell(threadId))?.pinnedAt).not.toBeNull();
         expect(mutationCalls).toBe(1);
         const persisted = yield* events
           .readApplicationEvents({
@@ -331,12 +332,12 @@ it.effect(
         yield* Deferred.await(commitEntered);
         expect(
           Option.isNone(
-            yield* lock.tryWithSpaceLock(space, Effect.die("must not run during commit")),
+            yield* lock.tryWithWorkspaceLocks([space], Effect.die("must not run during commit")),
           ),
         ).toBe(true);
         yield* Deferred.succeed(releaseCommit, undefined);
         yield* Fiber.join(accepted);
-        expect(yield* lock.tryWithSpaceLock(space, Effect.succeed("available"))).toEqual(
+        expect(yield* lock.tryWithWorkspaceLocks([space], Effect.succeed("available"))).toEqual(
           Option.some("available"),
         );
         expect((yield* orchestrator.getThreadShell(threadId))?.pinnedAt).not.toBeNull();
@@ -500,7 +501,7 @@ it.effect(
         expect(yield* Deferred.await(fenceEntered)).toBe(1);
         expect(calls).toEqual([]);
         expect(
-          yield* lock.tryWithSpaceLock(space, Effect.succeed("not held while draining")),
+          yield* lock.tryWithWorkspaceLocks([space], Effect.succeed("not held while draining")),
         ).toEqual(Option.some("not held while draining"));
         const refusedWhileDraining = yield* runtimeFence
           .withStart(repo, Effect.die("must not start while draining"))
@@ -517,7 +518,7 @@ it.effect(
           "archive",
         ]);
         expect(stopped).toEqual([pendingThread]);
-        expect(Option.isNone(yield* lock.tryWithSpaceLock(space, Effect.void))).toBe(true);
+        expect(Option.isNone(yield* lock.tryWithWorkspaceLocks([space], Effect.void))).toBe(true);
         for (const cwd of [repo, path.join(alias, "repo")]) {
           const refusal = yield* runtimeFence
             .withStart(cwd, Effect.die("must not start during teardown"))
@@ -535,11 +536,11 @@ it.effect(
           .pipe(Effect.flip);
         expect(refusedDuringReconciliation.message).toContain("transitioning");
         expect(checkedStarts).toHaveLength(admissionCount);
-        expect(Option.isNone(yield* lock.tryWithSpaceLock(space, Effect.void))).toBe(true);
+        expect(Option.isNone(yield* lock.tryWithWorkspaceLocks([space], Effect.void))).toBe(true);
         yield* Deferred.succeed(releaseReconciliation, undefined);
         const progress = yield* Fiber.join(archiveOperation);
         expect(progress.at(-1)?.kind).toBe("finished");
-        expect(yield* lock.tryWithSpaceLock(space, Effect.succeed("released"))).toEqual(
+        expect(yield* lock.tryWithWorkspaceLocks([space], Effect.succeed("released"))).toEqual(
           Option.some("released"),
         );
         const after = yield* runtimeFence
@@ -677,7 +678,7 @@ it.effect(
           ).toBe("StaveRuntimeFenced");
         }
         for (const cwd of [archive, live])
-          expect(Option.isNone(yield* locks.tryWithSpaceLock(cwd, Effect.void))).toBe(true);
+          expect(Option.isNone(yield* locks.tryWithWorkspaceLocks([cwd], Effect.void))).toBe(true);
         expect(yield* projects.listShells()).toHaveLength(1);
         yield* Deferred.succeed(finishRebuild, undefined);
         yield* Deferred.await(reconciling);
@@ -696,7 +697,7 @@ it.effect(
           "provider may start",
         );
         for (const cwd of [archive, live])
-          expect(yield* locks.tryWithSpaceLock(cwd, Effect.succeed("released"))).toEqual(
+          expect(yield* locks.tryWithWorkspaceLocks([cwd], Effect.succeed("released"))).toEqual(
             Option.some("released"),
           );
       }).pipe(Effect.provide(testLayer));
