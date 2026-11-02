@@ -12,7 +12,7 @@ import {
 // ── Schedules and intent sentences (P3.6, OQ27) ───────────────
 
 /** `HH:MM` as the client's clock reads it: "9:00" on 24 h, "9:00 AM" on 12 h. */
-export function squireLocalTimeLabel(time: string, hour12: boolean): string {
+function squireLocalTimeLabel(time: string, hour12: boolean): string {
   const [hourText = "0", minute = "00"] = time.split(":");
   const hour = Number(hourText);
   if (!hour12) return `${hour}:${minute}`;
@@ -273,7 +273,7 @@ export function squireTriggerDraftInput(
 
 // ── Sweep (P17.10) ────────────────────────────────────────────
 
-export const SQUIRE_SWEEP_ACCEPTANCE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const SQUIRE_SWEEP_ACCEPTANCE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Over the Lead's `sweep.finding` rows, each carrying `{ outcome, findingKey }`. */
 export function squireSweepAcceptance(

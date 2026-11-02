@@ -156,7 +156,7 @@ export class SquireToolRegistry extends Context.Service<
   // @effect-diagnostics-next-line deterministicKeys:off -- the seam's fixed tag, shared by every feature layer.
 >()("lecturn/squire/SquireToolRegistry") {}
 
-export const makeRegistry = Effect.sync(() => {
+const makeRegistry = Effect.sync(() => {
   const handlers = new Map<string, SquireToolHandler>();
   return SquireToolRegistry.of({
     register: (added) =>

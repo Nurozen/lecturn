@@ -97,7 +97,7 @@ const ServerFailure = Schema.Struct({ message: Schema.String });
 const decodeServerFailure = Schema.decodeUnknownOption(ServerFailure);
 
 /** `k=v`; the value is JSON when it parses, else the raw string. */
-export const parseFixtureSet = (entries: ReadonlyArray<string>) =>
+const parseFixtureSet = (entries: ReadonlyArray<string>) =>
   Effect.forEach(entries, (entry) => {
     const index = entry.indexOf("=");
     if (index <= 0) {
@@ -254,7 +254,7 @@ const runFixtureOps = Effect.fn("squire.runFixtureOps")(function* (input: {
   );
 });
 
-export const loadFixture = Effect.fn("squire.loadFixture")(function* (flags: {
+const loadFixture = Effect.fn("squire.loadFixture")(function* (flags: {
   readonly file: Option.Option<string>;
   readonly set: ReadonlyArray<string>;
   readonly reset: Option.Option<string>;

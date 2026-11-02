@@ -55,7 +55,7 @@ export function squirePageState(
 // ── Layout (D38) ──────────────────────────────────────────────
 
 /** Main width from which the 340 px companion panel fits beside the queue. */
-export const SQUIRE_VIEW_WIDE_PX = 1100;
+const SQUIRE_VIEW_WIDE_PX = 1100;
 /**
  * Main width from which the inbox is offered: its 28rem list, a 30rem detail, the gap, and the
  * page inset. Lower than the panel's, since an open inbox collapses the panel; at a 1280 px
@@ -74,7 +74,7 @@ export interface SquireViewLayout {
   readonly queueLayout: "list" | "inbox";
 }
 
-export const isSquireViewWide = (mainWidthPx: number) => mainWidthPx >= SQUIRE_VIEW_WIDE_PX;
+const isSquireViewWide = (mainWidthPx: number) => mainWidthPx >= SQUIRE_VIEW_WIDE_PX;
 
 /** Which side of each layout breakpoint a width is on, so a resize re-renders only on a cross. */
 export const squireViewBreakpoint = (mainWidthPx: number) =>
@@ -192,7 +192,7 @@ export function squireActivityLabel(entry: Pick<SquireActionLogEntry, "kind" | "
 }
 
 /** How many rows the companion panel's "Recent" list shows. */
-export const SQUIRE_RECENT_ACTIVITY_LIMIT = 4;
+const SQUIRE_RECENT_ACTIVITY_LIMIT = 4;
 
 /**
  * Log kinds that never get their own Recent row: each only accompanies a row that already says

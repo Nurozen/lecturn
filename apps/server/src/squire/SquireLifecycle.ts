@@ -39,7 +39,7 @@ const homeCommandId = (squireId: SquireId, generation: number, step: string) =>
   CommandId.make(`server:squire:home:${squireId}:${generation}:${step}`);
 
 /** Explicit, so the orchestrator never generates a title for a home thread. */
-export const homeThreadTitle = (name: string) => `Squire · ${name}`;
+const homeThreadTitle = (name: string) => `Squire · ${name}`;
 
 const isSquireError = Schema.is(SquireError);
 

@@ -1,7 +1,7 @@
 import { SQUIRE_ROOM_PORTRAIT_CAP, squireRoomUnread } from "@lecturn/client-runtime/state/squire";
 import type { EnvironmentId, SquireId, SquireRoomId, SquireRoomRow } from "@lecturn/contracts";
 
-export const SQUIRE_ROOM_MIN_MEMBERS = 2;
+const SQUIRE_ROOM_MIN_MEMBERS = 2;
 export const SQUIRE_ROOM_MAX_MEMBERS = 6;
 
 export interface SquireRoomSidebarRow {

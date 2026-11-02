@@ -179,7 +179,7 @@ const WHOLE_TEMPLATE = /^\{\{\s*event((?:\.[A-Za-z0-9_]+)+)\s*\}\}$/;
  * one template takes the value with its JSON type; a path the event lacks
  * (or no event yet) leaves the template as written.
  */
-export function fillEventTemplates(value: unknown, event: unknown): unknown {
+function fillEventTemplates(value: unknown, event: unknown): unknown {
   if (typeof value === "string") {
     if (event === undefined) return value;
     const whole = WHOLE_TEMPLATE.exec(value);
@@ -339,7 +339,7 @@ const otherStateKey = (event: OtherEvent): string => {
 };
 
 /** The link snapshot an event's PR claims (D44j: head, checks, review, merge state). */
-export function fixturePullRequestSnapshot(
+function fixturePullRequestSnapshot(
   pr: SquirePullRequestSnapshot,
   input: { readonly title: string; readonly headBranch?: string; readonly at: string },
 ): ThreadPullRequestSnapshot {

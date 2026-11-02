@@ -91,8 +91,7 @@ const LOCKFILES: ReadonlySet<string> = new Set([
 ]);
 
 const normalizePath = (path: string) => path.replaceAll("\\", "/").replace(/^\.\//, "");
-export const isLockfile = (path: string) =>
-  LOCKFILES.has(normalizePath(path).split("/").at(-1) ?? "");
+const isLockfile = (path: string) => LOCKFILES.has(normalizePath(path).split("/").at(-1) ?? "");
 
 /** Repository identity plus the unordered thread set (A4). */
 export const overlapDedupeKey = (identity: string, threadIds: ReadonlyArray<ThreadId>) =>
@@ -223,7 +222,7 @@ const rankFromSummary = (
     (pullRequest.mergeable === "mergeable" ? 1 : 0),
 });
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const repository = yield* SquireRepository.SquireRepository;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const scope = yield* SquireScope.SquireScope;

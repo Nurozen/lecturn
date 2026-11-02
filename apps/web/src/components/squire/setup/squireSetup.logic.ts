@@ -4,7 +4,6 @@ import {
   type AtomCommandResult,
 } from "@lecturn/client-runtime/state/runtime";
 import {
-  DEFAULT_LEAD_SQUIRE_PERMISSIONS,
   DEFAULT_SQUIRE_BUDGETS,
   DEFAULT_SQUIRE_COMPANION,
   DEFAULT_SQUIRE_PERMISSIONS,
@@ -130,7 +129,7 @@ export function squireCompanionForRole(
 // ── Drafts ────────────────────────────────────────────────────
 
 const DEFAULT_EVENTS = Schema.decodeSync(SquireEventToggles)({});
-export const SQUIRE_DEFAULT_UNDO_WINDOW_SECONDS = 10;
+const SQUIRE_DEFAULT_UNDO_WINDOW_SECONDS = 10;
 export const SQUIRE_DEFAULT_DIGEST: SquireDigest = { time: "09:00", push: false };
 export const SQUIRE_MIN_SWEEP_INTERVAL_HOURS = 4;
 
@@ -215,11 +214,6 @@ export function squireSetupDraftFromProposal(
     permissions,
     companion: squireCompanionForRole(proposal.companion, "squire"),
   };
-}
-
-/** The Lead's permissions always carry Manage Squires; a Squire's never do. */
-export function squireDefaultPermissions(role: SquireRole): SquirePermissions {
-  return role === "lead" ? DEFAULT_LEAD_SQUIRE_PERMISSIONS : DEFAULT_SQUIRE_PERMISSIONS;
 }
 
 // ── Provider and save ─────────────────────────────────────────

@@ -29,7 +29,7 @@ import { SquireCardRow, SquireRepository } from "./SquireRepository.ts";
 import { touchUserActivity } from "./squireUserActivity.ts";
 
 /** D52: a lease reports interaction over its last 45 s; a desktop stays active this long after it. */
-export const SQUIRE_DESKTOP_INTERACTION_WINDOW_MS = 2 * 60_000;
+const SQUIRE_DESKTOP_INTERACTION_WINDOW_MS = 2 * 60_000;
 /** P7.10: measured from the intent, server-side. */
 export const SQUIRE_ESCALATION_DELAY_MS = 3 * 60_000;
 

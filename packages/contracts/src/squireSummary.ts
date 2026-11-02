@@ -272,7 +272,7 @@ export function renderSquireTurnSummary(
 // ── Event batch message ───────────────────────────────────────
 
 /** The bound on one delivered event message; whole entries past it become "+N more". */
-export const SQUIRE_EVENT_BATCH_MAX_CHARS = 16_000;
+const SQUIRE_EVENT_BATCH_MAX_CHARS = 16_000;
 
 export type SquireThreadEventKind =
   | "turn-finished"

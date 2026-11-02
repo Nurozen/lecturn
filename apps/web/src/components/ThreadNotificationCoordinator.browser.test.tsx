@@ -157,6 +157,44 @@ vi.mock(import("../state/apps"), async (original) => ({
   ...(await original()),
   useAppStatuses: (() => state.appStatuses) as never,
 }));
+// A store, not a plain return: the compiled coordinator only re-renders Squire alerts when
+// their snapshot changes, as the real atom subscription would signal.
+const squireStore = vi.hoisted(() => ({
+  environments: [] as ReadonlyArray<unknown>,
+  listeners: new Set<() => void>(),
+}));
+function pushSquireNotifications(sequences: number[]) {
+  squireStore.environments = [
+    {
+      environmentId: "env-1",
+      state: {
+        squires: [
+          {
+            squire: { id: "lead", name: "Lead", permissions: { notify: "on" } },
+            openDecisionCount: 1,
+            recentActivity: sequences.map((sequence) => ({
+              kind: "notification.pushed",
+              sequence,
+            })),
+          },
+        ],
+      },
+    },
+  ];
+  for (const listener of squireStore.listeners) listener();
+}
+vi.mock(import("../state/squires"), async (original) => {
+  const { useSyncExternalStore } = await import("react");
+  const subscribe = (listener: () => void) => {
+    squireStore.listeners.add(listener);
+    return () => squireStore.listeners.delete(listener);
+  };
+  return {
+    ...(await original()),
+    useSquireEnvironments: (() =>
+      useSyncExternalStore(subscribe, () => squireStore.environments)) as never,
+  };
+});
 vi.mock(import("../threadNotifications"), async (original) => ({
   ...(await original()),
   playNotificationSound: state.sound,
@@ -208,6 +246,7 @@ beforeEach(() => {
     appStatuses: [],
   });
   stableParent = null;
+  squireStore.environments = [];
   useUiStateStore.setState({ sidebarMode: "projects", sidebarAppScopeKey: null });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.spyOn(document, "visibilityState", "get").mockImplementation(
@@ -384,6 +423,23 @@ describe("thread notifications", () => {
       body: "Fix the login form",
       tag: expect.any(String),
       silent: true,
+    });
+  });
+});
+
+describe("squire notifications", () => {
+  it("toasts only for intents pushed after the first look and opens the Squire", async () => {
+    pushSquireNotifications([1]);
+    await render();
+    expect(state.add).not.toHaveBeenCalled();
+    await act(() => pushSquireNotifications([1, 2]));
+    expect(state.add).toHaveBeenCalledTimes(1);
+    const toast = state.add.mock.calls[0]?.[0];
+    expect(toast).toMatchObject({ title: "Lead", description: "1 item waits on you" });
+    toast?.actionProps.onClick();
+    expect(state.navigate).toHaveBeenCalledWith({
+      to: "/squires/$environmentId/$squireId",
+      params: { environmentId: "env-1", squireId: "lead" },
     });
   });
 });

@@ -1911,14 +1911,14 @@ export interface ClaudeRuntimeQueryPolicy {
  * denies anything not pre-approved; the read-only sandbox with no readable
  * roots pre-approves no native read tool.
  */
-export const CLAUDE_SQUIRE_SANDBOX_POLICY = {
+const CLAUDE_SQUIRE_SANDBOX_POLICY = {
   type: "readOnly",
   access: { type: "restricted", includePlatformDefaults: false, readableRoots: [] },
   networkAccess: false,
 } as const;
 
 /** Lecturn: a Squire acts through Lecturn's server alone, the only one a home attaches (D9). */
-export function claudeSquireToolPermission(
+function claudeSquireToolPermission(
   toolName: string,
   toolInput: Record<string, unknown>,
   toolUseID: string,

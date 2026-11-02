@@ -631,7 +631,7 @@ function acpMcpActivation(context: AcpMcpContext) {
  * lists only its Squire tools, and a probe reaches no server (A5.9). Neither
  * gets the bridge credential or the device CLI in the agent's environment.
  */
-export function acpSquireMcpContext(
+function acpSquireMcpContext(
   context: AcpMcpContext,
   squireIsolation: ProviderAdapter.ProviderAdapterV2RuntimePolicy["squireIsolation"],
 ): AcpMcpContext {

@@ -179,7 +179,7 @@ const deliveredAlone = (row: SquireEventRow) =>
   isTestRow(row);
 
 /** The next batch from ready rows, oldest first (P3.3, P19.1). */
-export function chooseBatch(ready: ReadonlyArray<SquireEventRow>): ReadonlyArray<SquireEventRow> {
+function chooseBatch(ready: ReadonlyArray<SquireEventRow>): ReadonlyArray<SquireEventRow> {
   const first = ready[0];
   if (!first) return [];
   if (deliveredAlone(first)) return [first];

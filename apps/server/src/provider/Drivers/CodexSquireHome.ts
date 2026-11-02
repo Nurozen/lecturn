@@ -112,7 +112,7 @@ export interface CodexLaunch {
 }
 
 /** The home an instance's ordinary threads run in: as Codex resolves it when Lecturn sets none. */
-export const codexSourceHomePath = (
+const codexSourceHomePath = (
   path: Path.Path,
   launch: CodexLaunch,
   homeDirectory: string,

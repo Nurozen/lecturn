@@ -214,7 +214,7 @@ const ok: Ok = { ok: true };
 const refusal = (reason: string, text: string): RoomRefusal => ({ ok: false, reason, text });
 
 /** Deterministic, so a retried create or execution lands on the same room. */
-export const roomIdFor = (key: string) => SquireRoomId.make(`room:${key}`);
+const roomIdFor = (key: string) => SquireRoomId.make(`room:${key}`);
 
 const ERROR_CODES: Readonly<Record<string, SquireError["code"]>> = {
   "not-found": "not_found",

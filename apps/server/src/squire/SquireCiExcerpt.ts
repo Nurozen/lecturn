@@ -65,7 +65,7 @@ const EXIT_CODE = /^Process completed with exit code \d+\.?$/;
 const ERROR_WORDS =
   /\b(?:errors?|failed|failures?|fail|exception|panic(?:ked)?|fatal|traceback|assert(?:ion)?(?:error)?)\b|[✖✗×]/i;
 
-export const stripAnsi = (text: string) => text.replace(ANSI, "");
+const stripAnsi = (text: string) => text.replace(ANSI, "");
 
 /** Token shapes and generic `key=value` secrets, then each known secret value verbatim. */
 export function redactSecrets(text: string, secrets: ReadonlyArray<string> = []): string {
@@ -137,7 +137,7 @@ export function squireCiExcerpt(
 }
 
 /** A check failure that could not be read at all. */
-export const unavailableCiLog = (headSha: string): SquireCiLog => ({
+const unavailableCiLog = (headSha: string): SquireCiLog => ({
   status: "unavailable",
   headSha,
   jobs: [],
@@ -217,7 +217,7 @@ const ALL_STATUSES = [
 ] as const;
 
 /** The thread's linked open PR whose checks fail on a known head, if any. */
-export const failingPullRequestOf = (
+const failingPullRequestOf = (
   links: ReadonlyArray<ThreadPullRequestLink>,
 ): Option.Option<ThreadPullRequestLink & { readonly headSha: string }> =>
   Option.fromNullishOr(

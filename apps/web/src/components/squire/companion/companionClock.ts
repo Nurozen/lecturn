@@ -41,7 +41,7 @@ export function onCompanionFocusChange(listener: () => void): () => void {
   };
 }
 
-export function notifyFocusChange() {
+function notifyFocusChange() {
   for (const listener of focusListeners) listener();
 }
 

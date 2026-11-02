@@ -86,7 +86,7 @@ export type SquireActionsActInput = typeof SquireItemsActInput.Type & {
 };
 
 /** D13: a hold this far past `executes_at` (server down, switch toggled) never executes. */
-export const SQUIRE_OVERDUE_MS = 60_000;
+const SQUIRE_OVERDUE_MS = 60_000;
 
 export const squireActionMessageId = (cardId: SquireCardId, attempt: number) =>
   MessageId.make(`message:squire-action:${cardId}:${attempt}`);

@@ -29,7 +29,7 @@ import { initRepo, scripted, scriptedModel, seedProject, tempRoot } from "./life
 import { type Phase4Options, type Phase4Services, phase4Layer } from "./phase4Harness.ts";
 
 export const billing = ProjectId.make("billing-service");
-export const webApp = ProjectId.make("web-app");
+const webApp = ProjectId.make("web-app");
 export const invoiceThread = ThreadId.make("thr_fix_invoice_rounding");
 export const currencyThread = ThreadId.make("thr_currency_formatter");
 

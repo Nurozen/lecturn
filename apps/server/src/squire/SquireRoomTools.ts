@@ -45,7 +45,7 @@ import {
   SquireToolRegistry,
 } from "./squireToolKit.ts";
 
-export const ROOM_PROPOSAL_TTL_MS = 24 * 60 * 60 * 1000;
+const ROOM_PROPOSAL_TTL_MS = 24 * 60 * 60 * 1000;
 /** `squire_read_room` returns at most this many characters, newest posts kept. */
 export const ROOM_READ_MAX_CHARS = 4000;
 

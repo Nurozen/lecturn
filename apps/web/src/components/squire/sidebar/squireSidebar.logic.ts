@@ -101,7 +101,7 @@ export function squireRowLabel(name: string, indicator: SquireIndicatorState): s
 
 // ── Decision child rows ───────────────────────────────────────
 
-export const SQUIRE_CHILD_ROW_CAP = 5;
+const SQUIRE_CHILD_ROW_CAP = 5;
 
 /** The queued statuses a view lists under "Needs a decision"; held items have their own group. */
 const AWAITING_DECISION: ReadonlySet<SquireCardRow["status"]> = new Set([
@@ -164,7 +164,7 @@ export function squireTeamRaisedCounts<
 export type SquireKindDotTone = "info" | "warning" | "destructive" | "success";
 
 /** One tone per decision kind, so a glance tells a steer from a question; FYI is never a row. */
-export const SQUIRE_KIND_DOT: Readonly<
+const SQUIRE_KIND_DOT: Readonly<
   Record<
     Exclude<SquireCardKind, "fyi">,
     { readonly tone: SquireKindDotTone; readonly label: string }

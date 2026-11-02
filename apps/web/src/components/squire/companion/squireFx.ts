@@ -840,7 +840,7 @@ type ExchangeBurst = Extract<Burst, { kind: "exchange" }>;
 
 type Pose = FxFrame["pose"];
 
-export class SquireFxController implements FxController {
+class SquireFxController implements FxController {
   private readonly ctx: FxContext;
   private readonly L: SquireFxLandmarks = SQUIRE_FX_LANDMARKS;
   private config: FxConfig | null = null;

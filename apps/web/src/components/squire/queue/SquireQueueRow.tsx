@@ -108,7 +108,7 @@ function useSquireOverlapProviderNames(environmentId: EnvironmentId, row: Squire
  * What a row points at: its thread, or for a thread proposal the project it would start in and
  * the provider it would run on; an overlap names its thread count. `open` is the row's "↗".
  */
-export function useSquireRowTarget(environmentId: EnvironmentId, row: SquireCardRow) {
+function useSquireRowTarget(environmentId: EnvironmentId, row: SquireCardRow) {
   const navigate = useNavigate();
   const shell = useSquireThreadShell(environmentId, row.targetThreadId);
   const project = useProject(

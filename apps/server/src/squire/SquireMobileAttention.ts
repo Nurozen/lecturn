@@ -113,7 +113,7 @@ const openDecisionCount = (
     .reduce((sum, stat) => sum + stat.n, 0);
 
 /** Pure: the attention set and the unsettled intents of one Squire's intent rows. */
-export const resolveAttention = (rows: ReadonlyArray<SquireNotificationIntentRow>) => {
+const resolveAttention = (rows: ReadonlyArray<SquireNotificationIntentRow>) => {
   const attention = new Map<SquireCardId, SquireNotificationIntentRow["kind"]>();
   const pending: Array<SquireMobileIntent> = [];
   let alreadyAlerted = false;
@@ -149,7 +149,7 @@ export const resolveAttention = (rows: ReadonlyArray<SquireNotificationIntentRow
 };
 
 /** Pure: each pending intent's mobile outcome for one publish report. */
-export const deliveryOutcomes = (row: SquireRelayRow, report: SquireMobileReport) => {
+const deliveryOutcomes = (row: SquireRelayRow, report: SquireMobileReport) => {
   if (report.kind === "no_transport") {
     return row.pending.map((intent) => ({
       intent,

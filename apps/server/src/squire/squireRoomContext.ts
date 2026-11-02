@@ -23,7 +23,7 @@ import type { PersistenceSqlError } from "../persistence/Errors.ts";
 import type * as SquireRepository from "./SquireRepository.ts";
 import type * as SquireRoomStore from "./SquireRoomStore.ts";
 
-export const ROOM_CONTEXT_MAX_POSTS = 20;
+const ROOM_CONTEXT_MAX_POSTS = 20;
 export const ROOM_CONTEXT_MAX_CHARS = 4_000;
 
 export interface RoomContextPost {
@@ -99,7 +99,7 @@ const windowsOf = (dataJson: string): ReadonlyArray<RoomContextWindow> => {
  * A post the Jev router showed to the Lead without waking it (P19.4): the
  * routed post itself, or the room's "· shown to Lead" system row.
  */
-export const isShownToLead = (post: Pick<Post, "author_kind" | "body" | "routing_json">) => {
+const isShownToLead = (post: Pick<Post, "author_kind" | "body" | "routing_json">) => {
   if (post.author_kind === "system" && post.body.endsWith("shown to Lead")) return true;
   const via = Option.getOrNull(decodeRouting(post.routing_json))?.via;
   return via !== undefined && !isUnknownUnionMember(via) && via.kind === "jev" && via.shownToLead;

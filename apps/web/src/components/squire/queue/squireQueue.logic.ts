@@ -57,8 +57,6 @@ export {
   squireRowAction,
   squireRowProviderName,
   squireRowTargetName,
-  squireSameText,
-  squireSettledLabel,
   squireTimelineRows,
   squireUndoOffer,
   squireWaitingSince,

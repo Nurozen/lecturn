@@ -58,8 +58,8 @@ const DAY_MS = 24 * HOUR_MS;
 const WEEKDAYS = [1, 2, 3, 4, 5];
 
 /** P3.6: how long the inactivity FYI waits for an answer before triggers and the sweep pause. */
-export const INACTIVITY_ANSWER_MS = 48 * HOUR_MS;
-export const INACTIVITY_TITLE = "Keep Squire triggers running?";
+const INACTIVITY_ANSWER_MS = 48 * HOUR_MS;
+const INACTIVITY_TITLE = "Keep Squire triggers running?";
 
 const RECEIVED = "trigger.received";
 const RATE_LIMITED = "trigger.rate-limited";

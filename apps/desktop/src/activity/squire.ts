@@ -165,13 +165,13 @@ export function squirePressSuccess(
 
 export const SQUIRE_RESULT_CLEAR_MS = 4_000;
 export const SQUIRE_TOAST_CLEAR_MS = 10_000;
-export const SQUIRE_TOAST_LIMIT = 2;
+const SQUIRE_TOAST_LIMIT = 2;
 
 /**
  * When a result clears: on its card, a success or info after 4 s and an error never (it waits
  * for a dismissal or the card's next press); as a toast once its card is gone, after 10 s.
  */
-export function squireResultExpiry(result: SquireResult, onCard: boolean): number | null {
+function squireResultExpiry(result: SquireResult, onCard: boolean): number | null {
   if (!onCard) return result.at + SQUIRE_TOAST_CLEAR_MS;
   return result.kind === "error" ? null : result.at + SQUIRE_RESULT_CLEAR_MS;
 }
@@ -408,7 +408,7 @@ export interface SquireSettledRequest {
  * A v4 UUID from `getRandomValues`: the notch is a `data:` document, not a secure context, so
  * `crypto.randomUUID` does not exist there.
  */
-export function squireRequestId(): string {
+function squireRequestId(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   bytes[6] = (bytes[6]! & 0x0f) | 0x40;
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;

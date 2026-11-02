@@ -17,7 +17,3 @@ export class SquireDispatchOrigin extends Context.Reference<boolean>(
 export const withSquireDispatchOrigin = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, R> => Effect.provideService(effect, SquireDispatchOrigin, true);
-
-export const isSquireDispatchOrigin: Effect.Effect<boolean> = Effect.gen(function* () {
-  return yield* SquireDispatchOrigin;
-});

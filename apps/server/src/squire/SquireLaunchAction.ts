@@ -85,7 +85,7 @@ export interface SquireLaunchReceipts {
 }
 
 /** The id ThreadLaunchService gives the initial message's `message.dispatch`. */
-export const initialMessageCommandId = (commandId: CommandId) =>
+const initialMessageCommandId = (commandId: CommandId) =>
   CommandId.make(`${commandId}:initial-message`);
 
 export interface SquireLaunchIntentInput {
@@ -216,7 +216,7 @@ const receiptState = (
         : { status: "rejected", reason: found.error ?? "The command was rejected." },
   });
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const launches = yield* ThreadLaunch.ThreadLaunchService;
   const receiptStore = yield* CommandReceiptStore.CommandReceiptStoreV2;
   const threads = yield* ThreadManagement.ThreadManagementService;

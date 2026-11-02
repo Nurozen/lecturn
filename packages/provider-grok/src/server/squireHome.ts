@@ -121,7 +121,7 @@ skills = false
 `;
 
 /** Organization policy Grok applies over any `GROK_HOME`, which a Squire cannot fence. */
-export const GROK_MANAGED_POLICY_PATHS = [
+const GROK_MANAGED_POLICY_PATHS = [
   "/etc/grok/requirements.toml",
   "/etc/grok/managed_config.toml",
   "/Library/Managed Preferences/ai.x.grok.plist",
@@ -148,7 +148,7 @@ export interface GrokSquireLaunch {
   readonly environment: NodeJS.ProcessEnv;
 }
 
-export const grokSourceHomePath = (
+const grokSourceHomePath = (
   path: Path.Path,
   environment: NodeJS.ProcessEnv,
   homeDirectory: string,
@@ -159,7 +159,7 @@ export const grokSourceHomePath = (
   );
 };
 
-export const grokSquireRootPath = (
+const grokSquireRootPath = (
   path: Path.Path,
   stateDir: string,
   instanceId: ProviderInstanceId,

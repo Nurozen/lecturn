@@ -51,7 +51,7 @@ const routingBody = HttpClientResponse.schemaBodyJson(SquireRoutingResult);
 // Encoding strips anything outside the contract, so only P19.4 state leaves the host.
 const encodeRoutingRequest = Schema.encodeEffect(SquireRoutingRequest);
 /** Room routing waits on this answer (D55), so it never gets the general 90 s. */
-export const ROUTE_TIMEOUT = "5 seconds";
+const ROUTE_TIMEOUT = "5 seconds";
 export class ExtensionsRouteError extends Data.TaggedError("ExtensionsRouteError")<{
   readonly reason: "rate-limited" | "allowance" | "invalid" | "error";
 }> {}

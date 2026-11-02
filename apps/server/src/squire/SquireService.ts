@@ -99,7 +99,7 @@ export class SquireService extends Context.Service<
 >()("lecturn/squire/SquireService") {}
 
 // P16.2: so sidebar rows tell apart at a glance; see `squireDistinctCompanion`.
-export const nextDefaultCompanion = (taken: ReadonlyArray<SquireCompanion>): SquireCompanion =>
+const nextDefaultCompanion = (taken: ReadonlyArray<SquireCompanion>): SquireCompanion =>
   squireDistinctCompanion(taken);
 
 // The client draws the Lead's crest from its role, so the record only keeps gold.
@@ -166,7 +166,7 @@ const sameModel = Schema.toEquivalence(ModelSelection);
 const encodeEventJson = Schema.encodeSync(Schema.fromJsonString(SquireEvent));
 
 /** The event key: a retried request carries the same id, so it lands on the same row. */
-export const voiceNoteIdFor = (requestId: string) => SquireVoiceNoteId.make(`vn_${requestId}`);
+const voiceNoteIdFor = (requestId: string) => SquireVoiceNoteId.make(`vn_${requestId}`);
 
 const make = Effect.gen(function* () {
   const repository = yield* SquireRepository.SquireRepository;

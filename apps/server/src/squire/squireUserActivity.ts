@@ -9,7 +9,7 @@ import * as Option from "effect/Option";
 import type * as SquireRepository from "./SquireRepository.ts";
 
 /** The window is days long, so finer stamps would only add writes. */
-export const USER_ACTIVITY_THROTTLE_MS = 10 * 60 * 1000;
+const USER_ACTIVITY_THROTTLE_MS = 10 * 60 * 1000;
 
 /**
  * Call after a user Squire mutation commits, never from server-internal

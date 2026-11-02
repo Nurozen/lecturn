@@ -646,7 +646,7 @@ function openCodeSquirePermissionRules(isolation: OpenCodeSquireIsolation): Perm
  * agents, and plugins), instruction files, or skills. The data home stays the
  * user's: it holds the login, and the session store a native fork reads.
  */
-export function openCodeSquireServerEnvironment(
+function openCodeSquireServerEnvironment(
   environment: NodeJS.ProcessEnv,
   squireHome: string,
   isolation: OpenCodeSquireIsolation,

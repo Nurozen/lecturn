@@ -114,7 +114,7 @@ class CardMoved extends Data.TaggedError("CardMoved")<{ readonly reason: string 
 const grantKey = (grant: Grant) => `${grant.kind}\u0000${grant.targetId}`;
 
 /** P17.6: a rescope widens when it adds a grant or removes an exclusion. */
-export const rescopeWidens = (current: ReadonlyArray<Grant>, next: ReadonlyArray<Grant>) => {
+const rescopeWidens = (current: ReadonlyArray<Grant>, next: ReadonlyArray<Grant>) => {
   const before = new Set(current.map(grantKey));
   const after = new Set(next.map(grantKey));
   return (

@@ -484,7 +484,7 @@ export const withBarTimeline = <A, E>(
 
 // ── Effects (P14.2, D45) ──
 
-export const BAR_EFFECTS = [
+const BAR_EFFECTS = [
   "card_created",
   "proposal_created",
   "action_held",

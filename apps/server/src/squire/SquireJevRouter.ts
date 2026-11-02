@@ -44,8 +44,8 @@ import * as SquireRoomStore from "./SquireRoomStore.ts";
 import * as SquireScope from "./SquireScope.ts";
 
 /** Server settings, tuned on `room.routed` and `room.rerouted` rows (P19.4). */
-export const JEV_FLOOR = 0.6;
-export const JEV_HIGH = 0.85;
+const JEV_FLOOR = 0.6;
+const JEV_HIGH = 0.85;
 /** Routing's own deadline; the general extension timeout is 90 s. */
 export const JEV_DEADLINE_MS = 5_000;
 
@@ -89,8 +89,6 @@ const unfundedRelay = SquireJevRelay.of({
   availability: Effect.succeed({ available: false, reason: "unfunded" }),
   route: () => Effect.fail(new SquireJevRelayError({ reason: "error" })),
 });
-
-export const layerRelayUnfunded = Layer.succeed(SquireJevRelay, unfundedRelay);
 
 const toAvailability = (status: ExtensionFundingStatusResult): JevAvailability => {
   switch (status.state) {

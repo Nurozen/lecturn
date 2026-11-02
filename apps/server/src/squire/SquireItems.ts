@@ -320,7 +320,7 @@ export interface SquireItemsAnswerInput {
 
 export type SquireItemResult = (typeof SquireItemsActResult.Type)["results"][number];
 
-export const squireAnswerCommandId = (cardId: SquireCardId, requestId: string) =>
+const squireAnswerCommandId = (cardId: SquireCardId, requestId: string) =>
   CommandId.make(`server:squire:answer:${cardId}:${requestId}`);
 
 export const SECRET_CARD_ANSWER_MESSAGE =

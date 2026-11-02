@@ -2,23 +2,13 @@ import * as Schema from "effect/Schema";
 
 /**
  * Turning off the MCP servers Codex loads by itself: the user's, a project's,
- * and those plugins and apps bring. Text generation does it on the `codex exec`
- * command line; Squire threads do it in app-server thread config.
- *
- * Lecturn: `textGeneration/CodexTextGeneration.ts` still carries its own copy
- * of the CLI half; it switches to this module in Squire Phase 2.
+ * and those plugins and apps bring. Squire threads do it in app-server thread
+ * config; `textGeneration/CodexTextGeneration.ts` does it on the `codex exec`
+ * command line with its own flags.
  */
 
 // Plugins and apps bring MCP servers of their own; the user's are listed and
-// turned off by name. These follow the user's launch args, so they win over a
-// `-c features.plugins=true` there, which `--disable plugins` does not.
-export const CODEX_NO_PLUGIN_ARGS = [
-  "--config",
-  "features.plugins=false",
-  "--config",
-  "features.apps=false",
-] as const;
-
+// turned off by name.
 export const CODEX_NO_PLUGIN_CONFIG = {
   "features.plugins": false,
   "features.apps": false,

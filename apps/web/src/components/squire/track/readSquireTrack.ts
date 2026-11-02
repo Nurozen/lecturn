@@ -34,7 +34,7 @@ export interface SquireTrackSource {
  * group keeps the state subscribed for every readable, Squire-capable environment; the
  * checks come first so a menu never opens a subscription of its own.
  */
-export function readSquireTrackSource(environmentId: EnvironmentId): SquireTrackSource | null {
+function readSquireTrackSource(environmentId: EnvironmentId): SquireTrackSource | null {
   if (!appAtomRegistry.get(squireCapableAtom(environmentId))) return null;
   if (!readEnvironmentScope(environmentId, AuthOrchestrationReadScope)) return null;
   const canTrack = appAtomRegistry.get(squireEnvironment.track.permissionAtom(environmentId));

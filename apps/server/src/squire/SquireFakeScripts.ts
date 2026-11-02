@@ -23,7 +23,7 @@ import { ScriptedScriptSource } from "../orchestration-v2/Adapters/ScriptedAdapt
 import type { ScriptedScript } from "../orchestration-v2/Adapters/scriptedScript.ts";
 
 /** A typed message on the home thread, as opposed to a delivered Squire event batch. */
-export const USER_MESSAGE_KIND = "user-message";
+const USER_MESSAGE_KIND = "user-message";
 /** The script for any turn no other entry matches. */
 export const ANY_KIND = "*";
 
@@ -52,7 +52,7 @@ export function squireFakeEventKinds(message: ProviderAdapterV2TurnMessage): Rea
 }
 
 /** The entry a batch runs: the first kind in it with a script, else `*` when there is one. */
-export function pickSquireFakeKind(
+function pickSquireFakeKind(
   scripts: SquireFakeScriptSet,
   kinds: ReadonlyArray<string>,
 ): string | undefined {

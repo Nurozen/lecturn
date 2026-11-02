@@ -16,7 +16,7 @@ import type {
   SquireStatus,
 } from "@lecturn/contracts";
 
-export const RECENT_REPLY_WINDOW_MS = 2 * 60 * 1000;
+const RECENT_REPLY_WINDOW_MS = 2 * 60 * 1000;
 
 export interface RoutingMember {
   readonly squireId: SquireId;

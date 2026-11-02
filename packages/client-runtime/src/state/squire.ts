@@ -51,8 +51,6 @@ import {
 
 export {
   squireFigureState,
-  squireGestureEvents,
-  squireIndicatorState,
   type SquireFigureState,
   type SquireGesture,
   type SquireIndicatorState,
@@ -125,7 +123,7 @@ export function applySquireSubscribeEvent(
 }
 
 /** D7: only a client that may operate calls ensure, and only once there is a project to home it. */
-export function shouldEnsureSquireLead(
+function shouldEnsureSquireLead(
   state: SquireEnvironmentState | null,
   canEnsure: boolean,
   hasProject: boolean,
@@ -643,7 +641,7 @@ export function squireVocabularyHints(
 type SquireOverlapPayload = Extract<SquireCardPayload, { readonly type: "overlap" }>;
 
 /** Shared files an overlap card lists before folding the rest into "+N more". */
-export const SQUIRE_OVERLAP_PATHS_SHOWN = 5;
+const SQUIRE_OVERLAP_PATHS_SHOWN = 5;
 
 /** P17.3 overlap card: the shared files capped with "+N more", and the recommended order. */
 export function squireOverlapView(
@@ -1190,7 +1188,7 @@ export function applySquireMention(
 
 export const SQUIRE_ROOM_PORTRAIT_CAP = 3;
 /** One page of the log, small enough to render without virtualizing. */
-export const SQUIRE_ROOM_PAGE_SIZE = 50;
+const SQUIRE_ROOM_PAGE_SIZE = 50;
 
 /** The `squire.room.posts` input for the newest page (`before` null) or the page before a post. */
 export function squireRoomPostsInput(roomId: SquireRoomId, before: SquireRoomPostId | null) {

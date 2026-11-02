@@ -63,7 +63,7 @@ const toolOf = (name: string) =>
 const decodeCardId = Schema.decodeUnknownOption(SquireCardId);
 
 /** The ids the publish call put in its result (`SquireShowcase`). */
-export const shownItemIds = (output: unknown): ReadonlySet<string> => {
+const shownItemIds = (output: unknown): ReadonlySet<string> => {
   const result = readMcpAppToolOutcome(output).result;
   const structured = Predicate.isObject(result) ? result.structuredContent : undefined;
   const showcase = Predicate.isObject(structured) ? structured.showcase : undefined;
@@ -86,7 +86,7 @@ const text = (
 const outdated = (cardId: string, status: string) =>
   text("This item is no longer open.", { cardId, status, outdated: true });
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const repository = yield* SquireRepository.SquireRepository;
   const actions = yield* SquireActions.SquireActions;
 

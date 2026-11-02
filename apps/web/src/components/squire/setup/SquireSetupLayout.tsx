@@ -156,7 +156,7 @@ export function SetupSelect<T extends string>(props: {
   );
 }
 
-export const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 
 export function setupOptions<T extends string>(
   values: ReadonlyArray<T>,

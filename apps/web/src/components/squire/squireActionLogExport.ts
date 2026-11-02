@@ -11,7 +11,7 @@ import { FetchHttpClient, HttpClient } from "effect/http";
 import { connectionAtomRuntime } from "../../connection/runtime";
 import { squireActionLogUrl } from "./squireActionLogExport.logic";
 
-export class SquireActionLogExportError extends Data.TaggedError("SquireActionLogExportError")<{
+class SquireActionLogExportError extends Data.TaggedError("SquireActionLogExportError")<{
   readonly message: string;
 }> {}
 

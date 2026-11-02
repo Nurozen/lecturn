@@ -175,7 +175,7 @@ export function squireTimeline(
 }
 
 /** The card's own lifecycle rows; a card can carry others (notifications, tool calls). */
-export const SQUIRE_CARD_LOG_KINDS = [
+const SQUIRE_CARD_LOG_KINDS = [
   "card.created",
   "action.held",
   "action.executed",

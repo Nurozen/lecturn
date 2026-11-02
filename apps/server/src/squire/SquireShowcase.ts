@@ -144,7 +144,7 @@ const itemLink = (environmentId: EnvironmentId | null, card: SquireRepository.Sq
  * (a barycentric sort): a thread's own files sit beside it and a file two threads share sits
  * between them, so edges from an earlier thread never cross below a later thread's edges.
  */
-export const orderFilesByThreads = <
+const orderFilesByThreads = <
   File extends { readonly path: string; readonly threads: ReadonlyArray<ThreadId> },
 >(
   threadOrder: ReadonlyArray<ThreadId>,
@@ -333,7 +333,7 @@ export const showcaseDecisionBreakdown = (counts: {
     )
     .join(", ");
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const registry = yield* SquireToolRegistry;
   const repository = yield* SquireRepository.SquireRepository;
   const scope = yield* SquireScope.SquireScope;

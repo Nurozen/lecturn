@@ -98,7 +98,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 const DROPPED_ENV = /^(CLAUDE|CLAUDECODE|ANTHROPIC_|CODEX_|OPENAI_|LECTURN_|MCP_)/u;
 
 /** The test process's environment without provider, session, or Lecturn variables. */
-export const providerBaseEnvironment = (): NodeJS.ProcessEnv =>
+const providerBaseEnvironment = (): NodeJS.ProcessEnv =>
   Object.fromEntries(Object.entries(process.env).filter(([name]) => !DROPPED_ENV.test(name)));
 
 export interface BarProviderHome {
@@ -448,7 +448,7 @@ const SECRET_KEY = /authorization|token|secret|api[-_]?key|bearer|password|cooki
 const NOT_SECRET_KEY = /token_budget$/u;
 
 /** A JSON-safe copy with every credential-looking key replaced. */
-export const redact = (value: unknown, depth = 0): unknown => {
+const redact = (value: unknown, depth = 0): unknown => {
   if (depth > 12) return "[deep]";
   if (typeof value === "function") return "[function]";
   if (typeof value === "string") return value.startsWith("Bearer ") ? "[redacted]" : value;

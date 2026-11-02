@@ -48,7 +48,7 @@ export class SquireClock extends Context.Service<
 >()("lecturn/squire/SquireClock") {}
 
 /** D47: finished rows keep their key, so a recurring absolute PR state stays deduped. */
-export const SQUIRE_PAYLOAD_RETENTION = Duration.days(30);
+const SQUIRE_PAYLOAD_RETENTION = Duration.days(30);
 const PRUNE_EVERY = Duration.days(1);
 /** A row that stays due after `runDue` (it cannot move yet) is retried at the backstop's pace. */
 const STUCK_RETRY = Duration.seconds(5);

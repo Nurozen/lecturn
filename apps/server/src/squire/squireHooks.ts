@@ -56,7 +56,7 @@ const runAll = <A>(
     { discard: true },
   );
 
-export const make = Effect.sync(() => {
+const make = Effect.sync(() => {
   const summaryHooks: Array<SquireSummaryStoredHook> = [];
   const threadHooks: Array<SquireThreadChangedHook> = [];
   return SquireHooks.of({

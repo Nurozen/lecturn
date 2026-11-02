@@ -13,7 +13,7 @@ import { readMessages, writeMessages } from "../app/AppToolInterceptor.ts";
  * The tools each role may list and call on `/mcp` while Squires are on: the
  * role tools `SquireToolInterceptor` serves, and the Lead's `html_render`.
  */
-export const SQUIRE_ROLE_TOOLS: Readonly<Record<SquireRole, ReadonlyArray<string>>> = {
+const SQUIRE_ROLE_TOOLS: Readonly<Record<SquireRole, ReadonlyArray<string>>> = {
   lead: [...SQUIRE_TOOL_NAMES.lead, "html_render"],
   squire: SQUIRE_TOOL_NAMES.squire,
 };

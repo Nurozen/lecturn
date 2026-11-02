@@ -27,7 +27,7 @@ import { SquireHooks } from "./squireHooks.ts";
 import { squireDeterministicSummary, squireSummaryWithModel } from "./SquireSummaryInput.ts";
 
 /** P3.4: delivery waits this long for a summary; the model call gets the same budget. */
-export const SQUIRE_SUMMARY_BUDGET = Duration.seconds(20);
+const SQUIRE_SUMMARY_BUDGET = Duration.seconds(20);
 
 /** `terminal` at run end; `request:<requestId>` for the provisional summary taken at a wait (D18). */
 export type SquireSummaryStage = "terminal" | `request:${string}`;

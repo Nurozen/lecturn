@@ -12,7 +12,6 @@ import { UnknownUnionMember } from "@lecturn/contracts";
 export {
   squireProposalCardText,
   squireProposalPaletteLabel,
-  squireProposalPermissionsLabel,
   squireProposalScopeLabels,
 } from "@lecturn/client-runtime/state/squire";
 

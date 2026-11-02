@@ -104,13 +104,6 @@ export function squireTrackGrant(target: SquireTrackTarget): SquireGrantInput {
     : { kind: target.kind, targetId: target.targetId };
 }
 
-export function squireTrackedBy(
-  trackers: ReadonlyArray<SquireTracker>,
-  target: SquireTrackTarget,
-): SquireTracker[] {
-  return trackers.filter((tracker) => squireTracksTarget(tracker.grants, target));
-}
-
 // ── Menus ─────────────────────────────────────────────────────
 
 export type SquireTrackMenuId =

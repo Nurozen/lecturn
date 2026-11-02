@@ -344,7 +344,7 @@ const firstLine = (value: string, max: number) => cut(value.split("\n")[0]!.trim
  * A3, A9: the key is Squire-owned, since MCP command ids are random. It names
  * the Squire too: calls outside a run all share the run id `none`.
  */
-export const squireInvocationKey = (squireId: string, runId: string, tool: string, args: unknown) =>
+const squireInvocationKey = (squireId: string, runId: string, tool: string, args: unknown) =>
   NodeCrypto.createHash("sha256")
     .update(`${squireId}\n${runId}\n${tool}\n${stableStringify(args ?? null)}`)
     .digest("hex");
@@ -458,7 +458,7 @@ export const squireBudgetCaption = (input: {
 };
 
 /** A bounded excerpt: the start of the request, then as much of the end as fits. */
-export const squireDetailExcerpt = (text: string, max = SQUIRE_DETAIL_MAX_CHARS) => {
+const squireDetailExcerpt = (text: string, max = SQUIRE_DETAIL_MAX_CHARS) => {
   if (text.length <= max) return text;
   const marker = "\n…\n";
   const head = Math.floor(max / 4);

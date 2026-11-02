@@ -464,7 +464,7 @@ function squireHoldOf(
  * kind. The notch shows the two as one card, the open card with the hold's countdown and Undo,
  * keyed by that open card. One hold per card; any other keeps its own row.
  */
-export function squireActivityHoldPairs(
+function squireActivityHoldPairs(
   source: Pick<SquireActivitySource, "state" | "items">,
 ): ReadonlyMap<SquireCardId, SquireCardRow> {
   const open = new Set(

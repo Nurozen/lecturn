@@ -72,7 +72,7 @@ export class SquireLeadOnboarding extends Context.Service<
 >()("lecturn/squire/SquireLeadOnboarding") {}
 
 /** Matches the key the dev fixture's `inject` gives the event, so the two dedupe. */
-export const ONBOARDING_STATE_KEY = "onboarding";
+const ONBOARDING_STATE_KEY = "onboarding";
 const QUEUED_LOG_KIND = "onboarding.queued";
 const MAX_GRANTS = 10;
 
