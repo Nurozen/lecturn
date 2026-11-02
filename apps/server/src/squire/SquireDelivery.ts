@@ -118,7 +118,7 @@ const TERMINAL_DISPATCH_ERRORS: ReadonlySet<string> = new Set([
 ]);
 
 const isHookRejection = Schema.is(LecturnHookRejectedError);
-/** Stave refused the turn only because another command held the project's space lock. */
+/** Stave refused the turn only because a Stave operation outlasted the admission wait. */
 const isSpaceBusy = (error: Orchestrator.OrchestratorV2Error) =>
   error._tag === "OrchestratorCommandRejectedError" &&
   isHookRejection(error.cause) &&
@@ -559,7 +559,11 @@ const make = Effect.gen(function* () {
     return Option.isSome(sender) ? sender.value.home_thread_id : null;
   });
 
-  /** Follows the lock's release rather than a timer, and never takes the lock while waiting. */
+  /**
+   * Follows the operation's end rather than a timer: queues for the space
+   * shared, so it never blocks a user turn and FIFO keeps the operation fair,
+   * then lets go before the resend, which goes through normal admission.
+   */
   const retryWhenSpaceFrees = Effect.fn("SquireDelivery.retryWhenSpaceFrees")(function* (
     squireId: SquireId,
     homeThreadId: ThreadId,
@@ -572,7 +576,9 @@ const make = Effect.gen(function* () {
     if (Option.isNone(project)) return;
     yield* FiberSet.run(
       fibers,
-      spaceLock.value.awaitFree(project.value.workspaceRoot).pipe(Effect.andThen(wake(squireId))),
+      spaceLock.value
+        .withSharedSpaceLock(project.value.workspaceRoot, Effect.void)
+        .pipe(Effect.andThen(wake(squireId))),
     );
   });
 

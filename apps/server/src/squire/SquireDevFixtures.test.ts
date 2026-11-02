@@ -816,8 +816,9 @@ describe("SquireDevFixtures (4.7, 4.8)", () => {
     ),
   );
 
-  it.effect("inject resends a turn Stave refused while another command held the space", () =>
+  it.effect("inject waits out a short Stave operation in its project", () =>
     Effect.gen(function* () {
+      const waiting = yield* Deferred.make<void>();
       const refused = yield* Deferred.make<void>();
       yield* inHome(
         Effect.gen(function* () {
@@ -829,7 +830,6 @@ describe("SquireDevFixtures (4.7, 4.8)", () => {
           const project = Option.getOrThrow(
             yield* projects.get(ProjectId.make(loaded.projects["billing-service"]!)),
           );
-          // A Squire home turn in the same project, as the previous inject's delivery starts.
           const release = yield* Deferred.make<void>();
           const holding = yield* Deferred.make<void>();
           yield* locks
@@ -840,10 +840,11 @@ describe("SquireDevFixtures (4.7, 4.8)", () => {
             .pipe(Effect.forkChild);
           yield* Deferred.await(holding);
           const injecting = yield* service.inject(event).pipe(Effect.forkChild);
-          yield* Deferred.await(refused);
+          yield* Deferred.await(waiting);
           yield* Deferred.succeed(release, undefined);
           const sequence = yield* Fiber.join(injecting);
 
+          assert.isFalse(yield* Deferred.isDone(refused));
           const [row] = yield* threadRows(event.summary.threadId);
           assert.strictEqual(row!.id, sequence);
           const { runs } = yield* (yield* ProjectionStore.ProjectionStoreV2).getThreadRecords(
@@ -855,7 +856,12 @@ describe("SquireDevFixtures (4.7, 4.8)", () => {
             ["completed"],
           );
         }),
-        { staveSpaceLock: { onRefused: Deferred.succeed(refused, undefined).pipe(Effect.asVoid) } },
+        {
+          staveSpaceLock: {
+            onWaiting: Deferred.succeed(waiting, undefined).pipe(Effect.asVoid),
+            onRefused: Deferred.succeed(refused, undefined).pipe(Effect.asVoid),
+          },
+        },
       );
     }),
   );

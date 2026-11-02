@@ -22,7 +22,10 @@ import {
   ProviderDriverKind,
 } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
@@ -47,7 +50,10 @@ import * as LecturnOrchestrationHooks from "../../orchestration-v2/fork/LecturnO
 import { planProjectCommand } from "../../orchestration-v2/ProjectCommands.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../../orchestration-v2/ProjectStore.ts";
-import { staveSpaceBusyRejection } from "../../stave/StaveOrchestrationHooks.ts";
+import {
+  STAVE_ADMISSION_WAIT,
+  staveSpaceBusyRejection,
+} from "../../stave/StaveOrchestrationHooks.ts";
 import * as StaveSpaceLock from "../../stave/StaveSpaceLock.ts";
 import type * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
 import * as ProviderAdapterRegistry from "../../orchestration-v2/ProviderAdapterRegistry.ts";
@@ -105,15 +111,20 @@ export interface Phase4Options {
   /** `threadForkingEnabled`; on unless set. */
   readonly threadForkingEnabled?: boolean;
   /**
-   * The server's Stave space lock, with Stave's refusal of a turn or new
-   * thread while another command holds its project's lock.
+   * The server's Stave space lock, with Stave's admission of a turn or new
+   * thread: it waits up to `STAVE_ADMISSION_WAIT` for an operation holding its
+   * project's space, then refuses. `onWaiting` runs when a command has to
+   * queue, `onRefused` when the wait runs out.
    */
-  readonly staveSpaceLock?: { readonly onRefused?: Effect.Effect<void> };
+  readonly staveSpaceLock?: {
+    readonly onWaiting?: Effect.Effect<void>;
+    readonly onRefused?: Effect.Effect<void>;
+  };
 }
 
 // Stave's thread admission (StaveOrchestrationHooks) without the manifest
-// checks: only its non-waiting lock, which is what a concurrent command trips.
-const layerStaveSpaceAdmission = (onRefused: Effect.Effect<void>) =>
+// checks: only its shared, bounded wait for the space lock.
+const layerStaveSpaceAdmission = (options: NonNullable<Phase4Options["staveSpaceLock"]>) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const hooks = yield* LecturnOrchestrationHooks.LecturnOrchestrationHooks;
@@ -131,16 +142,32 @@ const layerStaveSpaceAdmission = (onRefused: Effect.Effect<void>) =>
             : Effect.succeed(undefined);
       yield* hooks.register({
         name: "stave",
-        aroundCommand: (input, commit) =>
+        aroundThreadLock: (command, dispatch) =>
           Effect.gen(function* () {
-            if (input.scope !== "thread") return yield* commit;
-            const projectId = yield* projectOf(input.command);
-            if (projectId === undefined) return yield* commit;
+            const projectId = yield* projectOf(command);
+            if (projectId === undefined) return yield* dispatch;
             const project = yield* projects.get(projectId).pipe(Effect.orDie);
-            if (Option.isNone(project)) return yield* commit;
-            const result = yield* locks.tryWithSpaceLock(project.value.workspaceRoot, commit);
-            if (Option.isSome(result)) return result.value;
-            yield* onRefused;
+            if (Option.isNone(project)) return yield* dispatch;
+            const root = project.value.workspaceRoot;
+            const now = yield* locks.withSharedSpaceLock(root, dispatch, Duration.zero);
+            if (Option.isSome(now)) return now.value;
+            // Timed here rather than by the lock, which resolves the root with
+            // real I/O before its timer starts: this timer exists once
+            // `onWaiting` runs, so a test's TestClock adjustment never races it.
+            const granted = yield* Deferred.make<void>();
+            const admitted = yield* locks
+              .withSharedSpaceLock(
+                root,
+                Deferred.succeed(granted, undefined).pipe(Effect.andThen(dispatch)),
+              )
+              .pipe(Effect.map(Option.getOrThrow), Effect.forkChild);
+            yield* options.onWaiting ?? Effect.void;
+            const inTime = yield* Deferred.await(granted).pipe(
+              Effect.timeoutOption(STAVE_ADMISSION_WAIT),
+            );
+            if (Option.isSome(inTime)) return yield* Fiber.join(admitted);
+            yield* Fiber.interrupt(admitted);
+            yield* options.onRefused ?? Effect.void;
             return yield* staveSpaceBusyRejection();
           }),
       });
@@ -318,10 +345,7 @@ export const phase4Layer = (baseDir: string, options: Phase4Options = {}) => {
   const instances = instancesLayer(options.instanceModels ?? {});
   const hooks = (
     options.staveSpaceLock
-      ? Layer.merge(
-          SquireCommandHook.layer,
-          layerStaveSpaceAdmission(options.staveSpaceLock.onRefused ?? Effect.void),
-        )
+      ? Layer.merge(SquireCommandHook.layer, layerStaveSpaceAdmission(options.staveSpaceLock))
       : SquireCommandHook.layer
   ).pipe(Layer.provideMerge(LecturnOrchestrationHooks.layer));
   // Merged below, so a test can register a contribution beside the server's.
@@ -418,7 +442,7 @@ export const phase4Layer = (baseDir: string, options: Phase4Options = {}) => {
     Layer.provideMerge(AppRuntimeState.layer),
     Layer.provideMerge(settings),
     Layer.provideMerge(stores),
-    // The server provides it beside the Squire layer; only `staveSpaceLock` refuses on it.
+    // The server provides it beside the Squire layer; only `staveSpaceLock` admits through it.
     Layer.provideMerge(StaveSpaceLock.layer),
     Layer.provideMerge(config),
     Layer.provideMerge(database),

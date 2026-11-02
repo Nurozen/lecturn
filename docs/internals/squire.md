@@ -38,8 +38,9 @@ enclosing repository. That repo is not a read boundary; read restriction is per 
 
 **Stave.** Stave admission treats a home thread as outside its project's space, and Stave settle
 queries skip marked threads, because a Squire thread never settles and would hold a space open. A
-home turn can still be refused while another command holds the space lock. Delivery treats that as
-retryable and redelivers when `StaveSpaceLock.awaitFree` resolves, without taking the lock.
+home turn waits for the space like any turn, and is refused only when a Stave operation outlasts
+that wait. Delivery keeps the batch, queues for the space in shared mode until the operation ends,
+then lets go and resends the same command once.
 
 **Rooms are not threads.** Events, routed tasks, and direct messages are `message.dispatch` into
 the recipient's home thread. Rooms keep their own log (`squire_room_post`), because every

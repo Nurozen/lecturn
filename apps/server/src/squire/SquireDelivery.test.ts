@@ -26,12 +26,14 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import { TestClock } from "effect/testing";
 
 import * as EffectWorker from "../orchestration-v2/EffectWorker.ts";
 import * as LecturnOrchestrationHooks from "../orchestration-v2/fork/LecturnOrchestrationHooks.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { STAVE_ADMISSION_WAIT } from "../stave/StaveOrchestrationHooks.ts";
 import * as StaveSpaceLock from "../stave/StaveSpaceLock.ts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
@@ -1306,7 +1308,7 @@ const withStaveHome = <A, E>(
     return yield* body({ squireId: squire.id, homeThreadId: squire.homeThreadId!, restart });
   }).pipe(Effect.scoped);
 
-/** Another command holds the home project's space lock until the returned Deferred completes. */
+/** A Stave operation holds the home project's space until the returned Deferred completes. */
 const holdSpace = (scope: Scope.Scope) =>
   Effect.gen(function* () {
     const locks = yield* StaveSpaceLock.StaveSpaceLock;
@@ -1330,11 +1332,17 @@ const deliveryLog = (squireId: SquireId) =>
   );
 
 describe("SquireDelivery under the Stave space lock", () => {
-  it.effect("resends a turn refused for a busy space once the lock frees, exactly once", () =>
+  it.effect("delivers a turn a long Stave operation refused exactly once, after it ends", () =>
     withStaveHome(({ squireId, homeThreadId, restart }) =>
       Effect.gen(function* () {
+        const waiting = yield* Deferred.make<void>();
         const refused = yield* Deferred.make<void>();
-        yield* restart({ staveSpaceLock: { onRefused: Deferred.succeed(refused, undefined) } })(
+        yield* restart({
+          staveSpaceLock: {
+            onWaiting: Deferred.succeed(waiting, undefined),
+            onRefused: Deferred.succeed(refused, undefined),
+          },
+        })(
           Effect.gen(function* () {
             const delivery = yield* need(SquireDelivery.SquireDelivery);
             // Held before the row exists: the startup sweep may wake delivery at any time.
@@ -1344,6 +1352,9 @@ describe("SquireDelivery under the Stave space lock", () => {
             yield* turnFinished(squireId, tracked, "run-1");
 
             yield* delivery.wake(squireId);
+            yield* Deferred.await(waiting);
+            // The operation outlasts the admission wait.
+            yield* TestClock.adjust(STAVE_ADMISSION_WAIT);
             yield* Deferred.await(refused);
             const cursor = yield* cursorOf(squireId);
             // Posted while the batch waits: the retry shows the window it stored.
@@ -1368,11 +1379,51 @@ describe("SquireDelivery under the Stave space lock", () => {
     ),
   );
 
-  it.effect("never turns away a user turn that arrives as the lock frees", () =>
+  it.effect("delivers on the first attempt when a short Stave operation ends inside the wait", () =>
     withStaveHome(({ squireId, homeThreadId, restart }) =>
       Effect.gen(function* () {
+        const waiting = yield* Deferred.make<void>();
         const refused = yield* Deferred.make<void>();
-        yield* restart({ staveSpaceLock: { onRefused: Deferred.succeed(refused, undefined) } })(
+        yield* restart({
+          staveSpaceLock: {
+            onWaiting: Deferred.succeed(waiting, undefined),
+            onRefused: Deferred.succeed(refused, undefined),
+          },
+        })(
+          Effect.gen(function* () {
+            const delivery = yield* need(SquireDelivery.SquireDelivery);
+            const release = yield* holdSpace(yield* Effect.scope);
+            yield* turnFinished(squireId, tracked, "run-1");
+
+            yield* delivery.wake(squireId);
+            yield* Deferred.await(waiting);
+            yield* TestClock.adjust("4 seconds");
+            assert.lengthOf(yield* squireMessages(homeThreadId), 0);
+            yield* Deferred.succeed(release, undefined);
+            yield* delivery.drain;
+
+            assert.lengthOf(yield* squireMessages(homeThreadId), 1);
+            // Never refused, so the retry path never ran.
+            assert.isFalse(yield* Deferred.isDone(refused));
+            assert.deepEqual(yield* statuses(squireId), ["turn-finished:batched"]);
+            assert.lengthOf(yield* deliveryLog(squireId), 0);
+          }),
+        );
+      }),
+    ),
+  );
+
+  it.effect("never refuses a user turn because a Squire delivery waits for the space", () =>
+    withStaveHome(({ squireId, homeThreadId, restart }) =>
+      Effect.gen(function* () {
+        const waiting = yield* Deferred.make<void>();
+        const refused = yield* Deferred.make<void>();
+        yield* restart({
+          staveSpaceLock: {
+            onWaiting: Deferred.succeed(waiting, undefined),
+            onRefused: Deferred.succeed(refused, undefined),
+          },
+        })(
           Effect.gen(function* () {
             const delivery = yield* need(SquireDelivery.SquireDelivery);
             const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -1381,8 +1432,8 @@ describe("SquireDelivery under the Stave space lock", () => {
             const root = Option.getOrThrow(yield* projects.get(homeProject)).workspaceRoot;
             const held = yield* Deferred.make<void>();
             const release = yield* Deferred.make<void>();
-            // The user's turn is sent by the holder the moment it lets go, before
-            // any other fiber can run.
+            // The user's turn is sent by the holder the moment it lets go, as
+            // the delivery's shared wait for the space is granted.
             const holder = yield* locks
               .withSpaceLock(
                 root,
@@ -1408,6 +1459,8 @@ describe("SquireDelivery under the Stave space lock", () => {
             yield* turnFinished(squireId, tracked, "run-1");
 
             yield* delivery.wake(squireId);
+            yield* Deferred.await(waiting);
+            yield* TestClock.adjust(STAVE_ADMISSION_WAIT);
             yield* Deferred.await(refused);
             yield* Deferred.succeed(release, undefined);
             // A refusal would fail the join.
@@ -1505,18 +1558,26 @@ describe("SquireDelivery under the Stave space lock", () => {
     ),
   );
 
-  it.effect("delivers a batch refused for a busy space once across restarts", () =>
+  it.effect("delivers a batch a long Stave operation refused once across restarts", () =>
     withStaveHome(({ squireId, homeThreadId, restart }) =>
       Effect.gen(function* () {
         // The holder outlives the first server, so its lock never frees there.
         const outlives = yield* Effect.scope;
+        const waiting = yield* Deferred.make<void>();
         const refused = yield* Deferred.make<void>();
-        yield* restart({ staveSpaceLock: { onRefused: Deferred.succeed(refused, undefined) } })(
+        yield* restart({
+          staveSpaceLock: {
+            onWaiting: Deferred.succeed(waiting, undefined),
+            onRefused: Deferred.succeed(refused, undefined),
+          },
+        })(
           Effect.gen(function* () {
             const delivery = yield* need(SquireDelivery.SquireDelivery);
             yield* holdSpace(outlives);
             yield* turnFinished(squireId, tracked, "run-1");
             yield* delivery.wake(squireId);
+            yield* Deferred.await(waiting);
+            yield* TestClock.adjust(STAVE_ADMISSION_WAIT);
             yield* Deferred.await(refused);
           }),
         );

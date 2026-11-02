@@ -145,7 +145,8 @@ export const isStaveSpaceBusy = (error: LecturnHookRejectedError) =>
   error.contribution === CONTRIBUTION && error.reason === SPACE_BUSY_REASON;
 
 /** Lecturn: the refusal `isStaveSpaceBusy` recognizes, for a stand-in admission hook. */
-export const staveSpaceBusyRejection = () => reject(SPACE_BUSY_REASON);
+export const staveSpaceBusyRejection = () =>
+  reject(SPACE_BUSY_REASON, undefined, "aroundThreadLock");
 
 const isRuntimeFenced = Schema.is(StaveRuntimeFenced);
 

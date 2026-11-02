@@ -67,7 +67,6 @@ import {
   type ScriptedStep,
 } from "../orchestration-v2/Adapters/scriptedScript.ts";
 import * as EffectWorker from "../orchestration-v2/EffectWorker.ts";
-import { LecturnHookRejectedError } from "../orchestration-v2/fork/LecturnOrchestrationHooks.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
@@ -75,8 +74,6 @@ import { FIXTURE_PULL_REQUEST_HOST } from "../orchestration-v2/PullRequestSyncRe
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
-import { isStaveSpaceBusy } from "../stave/StaveOrchestrationHooks.ts";
-import * as StaveSpaceLock from "../stave/StaveSpaceLock.ts";
 import * as SquireContainers from "./SquireContainers.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
 import * as SquireFakeScripts from "./SquireFakeScripts.ts";
@@ -377,9 +374,6 @@ const isSettledRun = (run: OrchestrationV2Run) =>
   ((run.status === "interrupted" || run.status === "cancelled") && run.checkpointId !== null);
 const SETTLED_ROW_STATUSES: ReadonlySet<string> = new Set(["delivered", "dropped"]);
 
-const SPACE_LOCK_ATTEMPTS = 10;
-const isHookRejection = Schema.is(LecturnHookRejectedError);
-
 const decodeSetup = Schema.decodeUnknownEffect(SquireFixtureSetup);
 const encodeSetup = Schema.encodeSync(SquireFixtureSetup);
 const decodeEvent = Schema.decodeUnknownEffect(SquireEvent);
@@ -445,7 +439,6 @@ const make = Effect.gen(function* () {
   const worker = yield* Effect.serviceOption(EffectWorker.OrchestrationEffectWorkerV2);
   const fakes = yield* Effect.serviceOption(SquireFakeScripts.SquireFakeScripts);
   const fixtureStave = yield* Effect.serviceOption(SquireContainers.SquireFixtureStave);
-  const spaceLock = yield* Effect.serviceOption(StaveSpaceLock.StaveSpaceLock);
   // D44j: injected summaries run the same post-store hooks as live ones (7.3).
   const postStore = yield* Effect.serviceOption(SquireHooks);
 
@@ -460,32 +453,6 @@ const make = Effect.gen(function* () {
   const sandboxRoot = path.join(config.baseDir, "squire-fixtures");
 
   const drainWorker = Option.isSome(worker) ? Effect.asVoid(worker.value.drain()) : Effect.void;
-
-  /**
-   * Stave admits a turn or a new thread only while no other command holds the
-   * project's space lock, and refuses rather than waits. A Squire's home turn
-   * runs in the fixture's first project, so the delivery one inject wakes
-   * races the next inject's turn there. A refused command commits no receipt,
-   * so it is resent once the holder lets go.
-   */
-  const dispatchInProject = (projectId: ProjectId, command: OrchestrationV2ServerCommand) =>
-    Effect.gen(function* () {
-      for (let attempt = 1; ; attempt++) {
-        const result = yield* Effect.result(orchestrator.dispatch(command));
-        if (result._tag === "Success") return result.success;
-        const error = result.failure;
-        const contended =
-          Option.isSome(spaceLock) &&
-          attempt < SPACE_LOCK_ATTEMPTS &&
-          error._tag === "OrchestratorCommandRejectedError" &&
-          isHookRejection(error.cause) &&
-          isStaveSpaceBusy(error.cause);
-        if (!contended) return yield* error;
-        const project = yield* projects.get(projectId, { includeDeleted: true });
-        if (Option.isNone(project)) return yield* error;
-        yield* spaceLock.value.awaitFree(project.value.workspaceRoot);
-      }
-    });
 
   /**
    * Re-checks `check` after each committed event on the thread, driving the
@@ -585,7 +552,7 @@ const make = Effect.gen(function* () {
         }
         return;
       }
-      yield* dispatchInProject(projectId, {
+      yield* orchestrator.dispatch({
         type: "thread.create",
         commandId: CommandId.make(`fixture:thread:${thread.threadId}`),
         threadId: thread.threadId,
@@ -1178,8 +1145,8 @@ const make = Effect.gen(function* () {
       if (latest !== undefined && (yield* reusable(latest.run))) return latest.generation;
       const generation = latest === undefined ? 0 : latest.generation + 1;
       const suffix = generation === 0 ? "" : `:g${generation}`;
-      const shell = yield* requireFixtureThread(threadId);
-      yield* dispatchInProject(shell.projectId, {
+      yield* requireFixtureThread(threadId);
+      yield* orchestrator.dispatch({
         type: "message.dispatch",
         commandId: CommandId.make(`fixture:turn:${threadId}:${turnId}${suffix}`),
         threadId,
