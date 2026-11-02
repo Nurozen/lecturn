@@ -929,13 +929,14 @@ describe("<squire-emblem> v5 contract", () => {
     e.setAttribute("frame", "orbit");
     document.body.append(e);
     mounted.push(e);
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-    );
-    expect(e.debugState.reason).toBe("offscreen");
+    // The first static frame can land before layout gives the emblem its size; wait for
+    // the sized redraw instead of a fixed number of animation frames.
+    await vi.waitFor(() => {
+      expect(e.debugState.reason).toBe("offscreen");
+      expect(threads(e).length, "threads drawn offscreen").toBeGreaterThanOrEqual(2);
+    });
     expect(e.debugState.frameCount, "a static frame was drawn").toBeGreaterThanOrEqual(1);
     expect(e.debugState.pendingRAF).toBe(0);
-    expect(threads(e).length, "threads drawn offscreen").toBeGreaterThanOrEqual(2);
     const before = e.debugState.frameCount;
     clock.advance(300);
     expect(e.debugState.frameCount, "no frames while offscreen").toBe(before);
