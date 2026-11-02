@@ -725,9 +725,9 @@ function codexRuntimeModeTurnDefaults(runtimeMode: RuntimeMode): {
 }
 
 /**
- * Lecturn: the deny runtime for Squire homes and probes (D9): Codex never
+ * Lecturn: the deny runtime for Squire homes and probes: Codex never
  * asks and runs read-only. Its read-only sandbox has no readable-roots field,
- * so read-only shell commands can still read what the OS user can (D48).
+ * so read-only shell commands can still read what the OS user can.
  */
 function codexSquireRuntimePolicy(
   runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
@@ -1369,7 +1369,7 @@ export const CODEX_SQUIRE_THREAD_CONFIG = {
 
 /**
  * Lecturn: a home acts only through its Lecturn tools, so it also loses the
- * shell (the read-only sandbox still let it read any file, D48), image
+ * shell (the read-only sandbox still let it read any file), image
  * viewing, and project AGENTS.md. A probe keeps them: it answers about the
  * target thread's own workspace.
  */
@@ -1400,8 +1400,8 @@ export function codexThreadRuntimeParams(input: {
   const { mcpSession } = input;
   const squireIsolation = input.runtimePolicy?.squireIsolation;
   if (squireIsolation !== undefined) {
-    // Lecturn: a home attaches Lecturn's server alone and a probe none
-    // (A5.9). Stave memory is left off, every server Codex loads itself is
+    // Lecturn: a home attaches Lecturn's server alone and a probe none.
+    // Stave memory is left off, every server Codex loads itself is
     // turned off by name (`mcp_servers` merges into them), and plugins and
     // apps, which bring their own, are off.
     const lecturn =
@@ -1860,7 +1860,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 ),
               );
         // Lecturn: a session opened for a Squire home or probe runs in the
-        // instance's Squire CODEX_HOME (A5.9, OQ24) and serves only marked
+        // instance's Squire CODEX_HOME and serves only marked
         // threads. The instance's shared session never becomes one.
         const squireSession = input.runtimePolicy.squireIsolation !== undefined;
         if (
@@ -1908,7 +1908,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         const extraMcpServers =
           adapterOptions.resolveExtraMcpServers === undefined ||
           input.runtimePolicy.cwd == null ||
-          // Lecturn: a Squire session never wires Stave memory (A5.9).
+          // Lecturn: a Squire session never wires Stave memory.
           input.runtimePolicy.squireIsolation !== undefined
             ? undefined
             : // Stave memory wiring reports its own failures; they are wrapped below.

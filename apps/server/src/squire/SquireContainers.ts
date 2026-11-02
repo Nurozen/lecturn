@@ -26,7 +26,7 @@ export type SquireStaveMembership =
 
 const noStave: SquireStaveMembership = { status: "known", spaceId: null, sagaId: null };
 
-/** The Stave space and saga a project belongs to, read through `project.stave` (A1). */
+/** The Stave space and saga a project belongs to, read through `project.stave`. */
 export class SquireContainers extends Context.Service<
   SquireContainers,
   {
@@ -35,9 +35,9 @@ export class SquireContainers extends Context.Service<
 >()("lecturn/squire/SquireContainers") {}
 
 /**
- * D44: synthetic Stave memberships for fixture projects, which have no Stave
- * workspace for `project.stave` to read. Provided only with test providers on
- * (D44g); `loadSetup` registers them again after a restart.
+ * Synthetic Stave memberships for fixture projects, which have no Stave
+ * workspace for `project.stave` to read. Provided only with test providers on;
+ * `loadSetup` registers them again after a restart.
  */
 export class SquireFixtureStave extends Context.Service<
   SquireFixtureStave,
@@ -78,6 +78,24 @@ export const layerFixtureStave = Layer.effect(
     });
   }),
 );
+
+/**
+ * A Stave space's or saga's display name, as the Squire views show it: the
+ * title of its own coordinating project, else a fixture's name for a
+ * synthetic one. None when neither knows it.
+ */
+export const staveContainerName = (
+  shells: ReadonlyArray<{
+    readonly title: string;
+    readonly stave?: { readonly spaceId: string } | null | undefined;
+  }>,
+  fixture: Option.Option<SquireFixtureStave["Service"]>,
+  containerId: string,
+): Effect.Effect<Option.Option<string>> => {
+  const own = shells.find((shell) => shell.stave?.spaceId === containerId);
+  if (own !== undefined) return Effect.succeedSome(own.title);
+  return Option.isSome(fixture) ? fixture.value.nameOf(containerId) : Effect.succeedNone;
+};
 
 const fromShell = (shell: Option.Option<OrchestrationProjectShell>): SquireStaveMembership => {
   const stave = Option.isSome(shell) ? shell.value.stave : null;
@@ -143,7 +161,7 @@ const makeLive = Effect.gen(function* () {
   });
 });
 
-/** Over `ProjectService` shells; never runs the Stave binary itself (R31). */
+/** Over `ProjectService` shells; never runs the Stave binary itself. */
 export const layer = Layer.effect(SquireContainers, makeLive);
 
 export interface SquireContainersTestSpace {

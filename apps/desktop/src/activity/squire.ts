@@ -20,7 +20,7 @@ export function isSquireActionKind(
   return id.startsWith("squire-");
 }
 
-/** Threadkeeper small (P16.1), inline because the notch's CSP allows no remote images. */
+/** The small Threadkeeper mark, inline because the notch's CSP allows no remote images. */
 export const threadkeeperSmallMark = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" aria-hidden="true" viewBox="0 0 24 24" fill="none">
   <g stroke-linecap="round" stroke-linejoin="round" stroke-width="1.25">
     <path stroke="#dfc7a4" d="M16 4C9 2 5 6 7 9C9 12 19 11 19 16C19 20 14 22 9 20"/>
@@ -43,13 +43,13 @@ export interface SquireCardButton {
   readonly disabled: boolean;
 }
 
-/** Everything a notch Squire card shows; no logo on cards (P1.5). */
+/** Everything a notch Squire card shows; no logo on cards. */
 export interface SquireCardView {
   readonly title: string;
   readonly subtitle: string;
   readonly status: string;
   readonly excerpt: string | null;
-  /** Origin and rule labels, e.g. "Auto by rule: …" (P7.3). */
+  /** Origin and rule labels, e.g. "Auto by rule: …". */
   readonly labels: ReadonlyArray<string>;
   readonly caption: string | null;
   /** Present on a held row: what remained when the snapshot arrived. */
@@ -57,7 +57,7 @@ export interface SquireCardView {
   /** The row publishes its buttons in card order: the primary, then Dismiss, then Open. */
   readonly buttons: ReadonlyArray<SquireCardButton>;
   /**
-   * P7.6: an open card with a newer hold of its kind beside it. The hold's countdown and Undo
+   * An open card with a newer hold of its kind beside it. The hold's countdown and Undo
    * show on this line under the card instead of as a second card with the same title.
    */
   readonly heldLine: {
@@ -227,7 +227,7 @@ const defaultResultTimers: SquireResultTimers = {
 
 /**
  * The notch's results, through `reduceSquireResults`. One timeout waits for the next expiry and
- * tells the notch which nodes to remove, never a render (D40, R47).
+ * tells the notch which nodes to remove, never a render.
  */
 export class SquireResults {
   private results: ReadonlyArray<SquireResult> = [];
@@ -346,7 +346,7 @@ const defaultTimers: SquireCountdownTimers = {
 };
 
 /**
- * D40, R47: patches countdown text nodes once a second. It never rebuilds the notch, and its
+ * Patches countdown text nodes once a second. It never rebuilds the notch, and its
  * interval exists only while some hold has time left.
  */
 export class SquireCountdown {
@@ -416,7 +416,7 @@ function squireRequestId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-/** Matches the renderer's RPC outcome to the press that asked for it (D40). */
+/** Matches the renderer's RPC outcome to the press that asked for it. */
 export class SquireRequests {
   private readonly makeId: () => string;
   private readonly pending = new Map<

@@ -3,7 +3,7 @@ import type { KeybindingCommand } from "@lecturn/contracts";
 import { useChatShortcuts, type ChatShortcutsInput } from "./useChatShortcuts";
 
 /**
- * Lecturn: every control ChatView renders or wires, for its `controls` allowlist (D63). Absent
+ * Lecturn: every control ChatView renders or wires, for its `controls` allowlist. Absent
  * `controls` keeps today's view; a set shows only what it lists. A control ChatView gains
  * upstream must join this list, or the allowlist browser test fails.
  */

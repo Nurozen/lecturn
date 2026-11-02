@@ -1,4 +1,4 @@
-// Behavior the port adds to v5 (plan D43 "Added" row, spec P16.3 and P16.6), on an injected
+// Behavior the port adds to v5, on an injected
 // clock. The ported v5 contract checks live in squireEmblem.browser.test.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 

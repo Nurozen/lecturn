@@ -7,7 +7,7 @@ import type { SquireGrantInput, SquireId } from "@lecturn/contracts";
  */
 export type SquireThreadTracking = "tracked" | "untracked" | "unknown";
 
-/** P2.1, as the server reads it: an exclusion on the thread beats every container grant. */
+/** As the server reads it: an exclusion on the thread beats every container grant. */
 export function squireThreadTracking(
   grants: ReadonlyArray<SquireGrantInput>,
   target: { readonly threadId: string; readonly projectId: string },

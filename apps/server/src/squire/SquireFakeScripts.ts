@@ -1,10 +1,10 @@
 /**
- * `squireFake` (D44e): the scripted provider plus a per-thread script registry.
+ * `squireFake`: the scripted provider plus a per-thread script registry.
  * The fixture route writes a Squire home thread's scripts keyed by event kind;
  * each turn on that thread runs the script for the kind it was woken by.
  *
  * Test-only. The server provides `layerServer`, which is empty unless
- * `LECTURN_TEST_PROVIDERS=1` and the Squire switch are both on (D44g), in the
+ * `LECTURN_TEST_PROVIDERS=1` and the Squire switch are both on, in the
  * context the provider registry builds instances in: the scripted adapter
  * resolves `ScriptedScriptSource` once, when the instance is made.
  *
@@ -137,7 +137,7 @@ export const layer = layerScriptSource.pipe(
 );
 
 /**
- * D44g: `layer` with both gates on, else nothing. Promises no service, so
+ * `layer` with both gates on, else nothing. Promises no service, so
  * the scripted adapter and the fixture seam reach it with `serviceOption`.
  */
 export const layerServer = Layer.unwrap(

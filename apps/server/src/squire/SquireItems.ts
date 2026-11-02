@@ -1,6 +1,6 @@
 /**
  * The read side of Squire items. A question card stores only the request id
- * and its title (D66): its question text and options are read from the
+ * and its title: its question text and options are read from the
  * target thread's request on every load, so the card never goes stale and
  * never holds a copy, and a secret request's card never holds the secret.
  */
@@ -47,7 +47,7 @@ export interface SquireQuestion {
   readonly question: string;
   readonly options: ReadonlyArray<SquireAnswerOption>;
   readonly pending: boolean;
-  /** The pending runtime request in the thread's own shape (P7.4). */
+  /** The pending runtime request in the thread's own shape. */
   readonly request?: SquireQuestionRequest;
 }
 
@@ -95,7 +95,7 @@ export const readSquireQuestion = (
       return Option.some({
         requestKind: "secret",
         question: reason ? `${item.label}: ${reason}` : item.label,
-        // Answered through the secret store, never through the card (A6).
+        // Answered through the secret store, never through the card.
         options: [],
         pending: item.secretStatus === "pending",
       });
@@ -266,7 +266,7 @@ const fyiFieldsOf = (row: SquireRepository.SquireCardRow) => {
 
 const decodeTriggerOption = Schema.decodeUnknownOption(Schema.fromJsonString(SquireCardTrigger));
 
-/** D33: set only on a card a voice-note turn raised or last updated. */
+/** Set only on a card a voice-note turn raised or last updated. */
 const speakerVerifiedOf = (row: SquireRepository.SquireCardRow) => {
   if (row.origin !== "voice") return {};
   const verified = Option.getOrUndefined(decodeTriggerOption(row.trigger_json))?.speakerVerified;
@@ -399,7 +399,7 @@ const make = Effect.gen(function* () {
     message: string,
   ): SquireItemResult => ({ cardId: card.id, status: card.status, error: { code, message } });
 
-  /** P7.8: a request no longer pending was settled elsewhere; the reactor moves the card. */
+  /** A request no longer pending was settled elsewhere; the reactor moves the card. */
   const settledElsewhere = (card: SquireRepository.SquireCardRow, status: string | undefined) =>
     refused(
       card,
@@ -450,7 +450,7 @@ const make = Effect.gen(function* () {
         ...(input.answer.decision === undefined ? {} : { decision: input.answer.decision }),
         ...(input.answer.answers === undefined ? {} : { answers: input.answer.answers }),
       });
-      // A Squire's own threads pass the marked-thread allowlist only with this origin (A5.11a).
+      // A Squire's own threads pass the marked-thread allowlist only with this origin.
       const outcome = yield* (
         shell?.squire === undefined ? dispatch : withSquireDispatchOrigin(dispatch)
       ).pipe(Effect.result);
@@ -469,7 +469,7 @@ const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(SquireItems, make);
 
-/** The question card's stored trigger (D66: no question text, options, or secret). */
+/** The question card's stored trigger: no question text, options, or secret. */
 export const questionCardTrigger = (input: {
   readonly runId: RunId | null;
   readonly requestId: string;

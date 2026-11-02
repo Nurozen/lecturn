@@ -1,5 +1,5 @@
 /**
- * The Lead's first run (P17.2, D29, D31): `open` enqueues one `onboarding`
+ * The Lead's first run: `open` enqueues one `onboarding`
  * event with a bounded scan of the environment and captures the client's
  * timezone; `squire_propose_squire` turns the Lead's answer into proposal
  * items the user accepts (SquireActions runs the `squire-create` executor).
@@ -60,7 +60,7 @@ export class SquireLeadOnboarding extends Context.Service<
   SquireLeadOnboarding,
   {
     /**
-     * `squire.lead.open`: creates the Lead if absent (D7), stores the
+     * `squire.lead.open`: creates the Lead if absent, stores the
      * client's timezone when the Lead has none, and on the first open
      * enqueues `onboarding` once. A Lead without a provider keeps the row
      * pending until it has one.
@@ -173,7 +173,7 @@ const proposeSquireDefinition: SquireToolHandler["definition"] = {
   },
 };
 
-/** P17.2: recommend-only by default; only the user raises a proposal to Auto, from Edit. */
+/** Recommend-only by default; only the user raises a proposal to Auto, from Edit. */
 const proposalPermissions = (asked: ProposeSquireArgs["permissions"]) => {
   const atMost = (value: SquirePermissionLevel | undefined): SquirePermissionLevel =>
     value === "off" ? "off" : "recommend";
@@ -225,7 +225,7 @@ const make = Effect.gen(function* () {
       return cut(text, 280);
     });
 
-  /** P17.2's scan, bounded to the most recently active projects and threads. */
+  /** The first-run scan, bounded to the most recently active projects and threads. */
   const scan = Effect.gen(function* () {
     const rows = yield* userProjects;
     const snapshot = yield* projections.getShellSnapshot({ location: "active" });
@@ -325,7 +325,7 @@ const make = Effect.gen(function* () {
       const queued = yield* repository
         .transaction(
           Effect.gen(function* () {
-            // D31: the first client's zone; a later client never moves it.
+            // The first client's zone; a later client never moves it.
             if (zone !== null && (lead.timezone ?? null) === null) {
               yield* repository.updateSquire({
                 id: lead.id,
@@ -541,7 +541,7 @@ const make = Effect.gen(function* () {
             { tool: ctx.tool, outcome: "proposal", reason: args.reason ?? null },
             { cardId },
           );
-          // D29: the Lead's own proposals never wake it, so nothing to wake.
+          // The Lead's own proposals never wake it, so nothing to wake.
           return {
             result: kit.ok(`Proposed ${args.name} for the user to accept.`, {
               outcome: "proposal",

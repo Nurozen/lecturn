@@ -1,5 +1,5 @@
 /**
- * Lead control (7.4, P17.6) and the Squire-store accept executors on the
+ * Lead control and the Squire-store accept executors on the
  * server's switch-on Squire layer over a real orchestrator: the five Lead
  * control tools in every Manage Squires cell, their execution after the undo
  * window, their revert, and accepting a Lead Squire proposal. A crash is the
@@ -474,7 +474,7 @@ describe("Lead control in every Manage Squires cell (P8, P17.6)", () => {
       withTeam((team) =>
         Effect.gen(function* () {
           yield* setManage(team, "auto");
-          // P17.8 intersects thread classes only: a recommend-only Squire does
+          // The permission intersection covers thread classes only: a recommend-only Squire does
           // not lower the Lead's own Manage Squires.
           const pause = cardIdOf(
             yield* leadCall(team, "squire_pause", { squireId: team.research }),

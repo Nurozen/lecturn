@@ -18,7 +18,7 @@ class SquireActionLogExportError extends Data.TaggedError("SquireActionLogExport
 const fail = (message: string) => new SquireActionLogExportError({ message });
 
 /**
- * P14.1: fetches the read-scoped NDJSON export with the environment's own credentials. A plain
+ * Fetches the read-scoped NDJSON export with the environment's own credentials. A plain
  * link carries only a same-origin cookie, so a remote, bearer, or relayed (DPoP) environment
  * would refuse it; this signs the request the way the Contextual export download does.
  */

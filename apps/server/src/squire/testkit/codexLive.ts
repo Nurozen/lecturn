@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off globalFetch:off - A local recording proxy and a raw app-server driver for a live run; evidence is raw JSON.
 /**
- * Live Codex evidence for S0a2 (OQ24): a recording proxy every Codex process
+ * Live Codex evidence for S0a2: a recording proxy every Codex process
  * of the bar instance sends its model requests through, so the test reads
  * exactly what reached the model, and a raw app-server driver that forks a
  * thread from inside another CODEX_HOME.

@@ -1,13 +1,12 @@
 /**
- * Held executions and accepts under the durable action protocol (A9, D11,
- * D12, D13, D24). Every execution runs under the budget owner's lock, then
+ * Held executions and accepts under the durable action protocol. Every execution runs under the budget owner's lock, then
  * the target's, reconciles every unfinished execution for both by receipt
  * before it is admitted, and holds the policy lock from re-validation through
  * finalize, so a pause, untrack, permission or rule change either commits
  * before re-validation (which then refuses) or waits until the dispatch has
  * committed. A dispatch error never decides the outcome: the receipt does.
  *
- * Held actions run as the granting user outside the MCP mode guard (OQ1(a)):
+ * Held actions run as the granting user outside the MCP mode guard:
  * nothing raises the target's modes, and the steer is attributed to the
  * Squire (`createdBy: "agent"` plus `senderThreadId`).
  *
@@ -18,14 +17,17 @@ import {
   MessageId,
   type SquireCardId,
   SquireCardPayload,
+  SquireCardStatus,
   SquireCardTrigger,
   SquireError,
+  SquireErrorCode,
   type SquireId,
   type SquireItemsActInput,
   type SquireItemsActResult,
   type ThreadId,
   isUnknownUnionMember,
 } from "@lecturn/contracts";
+import { threadPullRequestKeyOf } from "@lecturn/shared/threadPullRequests";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -60,6 +62,7 @@ import * as SquireContainers from "./SquireContainers.ts";
 import * as SquireControl from "./SquireControl.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
 import { withSquireDispatchOrigin } from "./SquireDispatchOrigin.ts";
+import { squirePullRequestRevision, squirePullRequestStates } from "./squireEvents.ts";
 import * as SquireItems from "./SquireItems.ts";
 import * as SquireLaunchAction from "./SquireLaunchAction.ts";
 import { writeLeadItemsResolved } from "./squireLeadItems.ts";
@@ -79,13 +82,30 @@ type ItemResult = (typeof SquireItemsActResult.Type)["results"][number];
 
 /**
  * `squire.items.act`. A question card's answer rides along as `answer` until
- * the RPC contract carries it (Phase 8); the act contract itself has only `text`.
+ * the RPC contract carries it; the act contract itself has only `text`.
  */
 export type SquireActionsActInput = typeof SquireItemsActInput.Type & {
   readonly answer?: SquireItems.SquireQuestionAnswer;
 };
 
-/** D13: a hold this far past `executes_at` (server down, switch toggled) never executes. */
+/** The log row mapping an accept request to its attempt and, once settled, its result. */
+const ACCEPTED = "action.accepted";
+const decodeAccepted = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({
+      requestId: Schema.String,
+      attempt: Schema.Number,
+      result: Schema.optionalKey(
+        Schema.Struct({
+          status: SquireCardStatus,
+          error: Schema.NullOr(Schema.Struct({ code: SquireErrorCode, message: Schema.String })),
+        }),
+      ),
+    }),
+  ),
+);
+
+/** A hold this far past `executes_at` (server down, switch toggled) never executes. */
 const SQUIRE_OVERDUE_MS = 60_000;
 
 export const squireActionMessageId = (cardId: SquireCardId, attempt: number) =>
@@ -94,14 +114,14 @@ export const squireActionMessageId = (cardId: SquireCardId, attempt: number) =>
 export class SquireActions extends Context.Service<
   SquireActions,
   {
-    /** Every hold due by now: past the D13 limit it becomes a card, else it runs A9 steps 2-6. */
+    /** Every hold due by now: past the overdue limit it becomes a card, else it executes. */
     readonly executeDue: Effect.Effect<void, SquireError>;
     /** The earliest `executes_at` among holds and unfinished executions, for the clock. */
     readonly nextDueAt: Effect.Effect<Option.Option<DateTime.Utc>, SquireError>;
     readonly act: (
       input: SquireActionsActInput,
     ) => Effect.Effect<typeof SquireItemsActResult.Type, SquireError>;
-    /** A9 step 3 for every unfinished execution; runs once at startup, before the clock arms. */
+    /** Settles every unfinished execution from its receipts; runs once at startup, before the clock arms. */
     readonly reconcileStartup: Effect.Effect<void, SquireError>;
   }
 >()("lecturn/squire/SquireActions") {}
@@ -121,7 +141,7 @@ const decodeModelJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.
 type Outcome =
   | { readonly status: "accepted" }
   | { readonly status: "rejected"; readonly reason: string }
-  /** Create committed, initial message not: re-launch replays the create (A9 "Thread create"). */
+  /** Create committed, initial message not: re-launch replays the create. */
   | { readonly status: "partial" }
   | { readonly status: "absent" };
 
@@ -226,7 +246,7 @@ const make = Effect.gen(function* () {
       },
     });
 
-  // ── Receipts (A9 step 3) ──
+  // ── Receipts ──
 
   const outcomeOf = (card: CardRow, intent: SquireActionIntent) =>
     Effect.gen(function* () {
@@ -263,7 +283,7 @@ const make = Effect.gen(function* () {
 
   // ── Card transitions ──
 
-  /** A9 step 6: one transaction, unique on the execution key, so it charges once. */
+  /** One transaction, unique on the execution key, so it charges once. */
   const finalize = (card: CardRow, intent: SquireActionIntent, verb: SquireActionVerb) =>
     Effect.gen(function* () {
       const executionKey = card.command_id!;
@@ -353,8 +373,8 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * The action becomes a recommendation card (P9.4, P10.2, D13, D34, D58).
-   * `push` is false for Undo: the user is already looking (D26). P7.6: an
+   * The action becomes a recommendation card.
+   * `push` is false for Undo: the user is already looking. An
    * older open card for the same target and kind is superseded.
    */
   const reopen = (
@@ -461,7 +481,7 @@ const make = Effect.gen(function* () {
           Effect.asVoid,
         );
 
-  // ── Reconcile (A9 step 3) ──
+  // ── Reconcile ──
 
   /** Settles one unfinished execution from its receipts; no re-validation, no `sendToThread`. */
   const reconcileOne = (card: CardRow) =>
@@ -496,7 +516,7 @@ const make = Effect.gen(function* () {
       }
     });
 
-  // ── Re-validation (A9 step 4, D11) ──
+  // ── Re-validation ──
 
   const budgetRowsOf = (squireId: SquireId, now: string) =>
     repository
@@ -547,6 +567,39 @@ const make = Effect.gen(function* () {
   const refusalOf = (decision: squirePolicy.SquirePolicyDecision, caption: () => string): Refusal =>
     toOpen(reasonText[decision.reason], decision.reason === "budget" ? caption() : undefined);
 
+  /**
+   * The user's own accept needs only a class that is not Off, paused or not.
+   * `decide` answers a pause before it reads the class or the Lead's
+   * intersection with the owner, so both are read here as if active.
+   */
+  const acceptRefusal = (input: squirePolicy.SquirePolicyInput) => {
+    const decision = squirePolicy.decide({
+      ...input,
+      squire: { ...input.squire, status: "active" },
+      ...(input.lead === undefined ? {} : { lead: { ...input.lead, status: "active" } }),
+    });
+    return decision.level === "off" ? toOpen(reasonText[decision.reason]) : undefined;
+  };
+
+  /** Why the PR transition a steer answers (its card's trigger) no longer holds, if it does not. */
+  const pullRequestMoved = (card: CardRow, threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const trigger = Option.getOrUndefined(decodeTrigger(card.trigger_json));
+      const { prKey, headSha, transition } = trigger ?? {};
+      if (prKey === undefined || headSha === undefined || transition === undefined) {
+        return undefined;
+      }
+      const shell = yield* projections.getThreadShell(threadId);
+      const snapshot =
+        (shell?.pullRequests ?? []).find((link) => threadPullRequestKeyOf(link) === prKey)
+          ?.snapshot ?? null;
+      const holds =
+        snapshot !== null &&
+        squirePullRequestRevision(snapshot) === headSha &&
+        squirePullRequestStates(snapshot).some((state) => state === transition);
+      return holds ? undefined : "the pull request changed";
+    });
+
   /** Undefined when the action may dispatch now. Runs inside the policy lock. */
   const revalidate = (card: CardRow, intent: SquireActionIntent, verb: SquireActionVerb) =>
     Effect.gen(function* () {
@@ -557,7 +610,7 @@ const make = Effect.gen(function* () {
         return toOutdated("the Squire was deleted");
       }
       const squire = policySquireOf(row.value);
-      // P17.8: a Lead-raised item acts at the lower of the Lead's and the owner's levels.
+      // A Lead-raised item acts at the lower of the Lead's and the owner's levels.
       const raiser =
         card.squire_id === card.owner_squire_id
           ? Option.none()
@@ -579,7 +632,9 @@ const make = Effect.gen(function* () {
           intent.precondition,
         );
         if (broken !== undefined) return toOutdated(broken);
-        const decision = squirePolicy.decide({
+        const moved = yield* pullRequestMoved(card, intent.threadId);
+        if (moved !== undefined) return toOutdated(moved);
+        const input: squirePolicy.SquirePolicyInput = {
           actionClass: "steer",
           squire,
           rules: yield* rulesOf(squire.id),
@@ -590,13 +645,9 @@ const make = Effect.gen(function* () {
           steerKind: intent.steerKind,
           now,
           ...lead,
-        });
-        // The user's own accept needs only a class that is not Off (P8).
-        if (verb === "accept") {
-          return decision.level === "off" && decision.reason !== "paused"
-            ? toOpen(reasonText[decision.reason])
-            : undefined;
-        }
+        };
+        if (verb === "accept") return acceptRefusal(input);
+        const decision = squirePolicy.decide(input);
         if (decision.level === "auto") return undefined;
         return refusalOf(decision, () =>
           squireBudgetCaption({
@@ -633,7 +684,7 @@ const make = Effect.gen(function* () {
       ) {
         return toOpen("the project is no longer in scope");
       }
-      const decision = squirePolicy.decide({
+      const input: squirePolicy.SquirePolicyInput = {
         actionClass: "createThread",
         squire,
         rules: yield* rulesOf(squire.id),
@@ -648,12 +699,9 @@ const make = Effect.gen(function* () {
         origin: card.origin,
         now,
         ...lead,
-      });
-      if (verb === "accept") {
-        return decision.level === "off" && decision.reason !== "paused"
-          ? toOpen(reasonText[decision.reason])
-          : undefined;
-      }
+      };
+      if (verb === "accept") return acceptRefusal(input);
+      const decision = squirePolicy.decide(input);
       if (decision.level === "auto") return undefined;
       return refusalOf(decision, () =>
         squireBudgetCaption({
@@ -666,7 +714,7 @@ const make = Effect.gen(function* () {
       );
     });
 
-  // ── Dispatch (A9 step 5) ──
+  // ── Dispatch ──
 
   const sendSteer = (card: CardRow, intent: SquireSteerIntent, verb: SquireActionVerb) =>
     Effect.gen(function* () {
@@ -682,7 +730,7 @@ const make = Effect.gen(function* () {
         ...(verb === "execute" && sender !== null ? { senderThreadId: sender } : {}),
         text: intent.text,
         attachments: [],
-        // D12: never `steer`/`restart`, so no interrupt-restart on drivers without active steering.
+        // Never `steer`/`restart`, so no interrupt-restart on drivers without active steering.
         mode: intent.dispatchMode,
         createdBy: verb === "execute" ? "agent" : "user",
         creationSource: "server",
@@ -767,7 +815,7 @@ const make = Effect.gen(function* () {
           }
           const reason = failure ?? "The action did not run.";
           // An accept answers the user now; a held execution keeps its timer
-          // and retries until it is overdue (D13).
+          // and retries until it is overdue.
           if (verb === "accept") yield* reopen(card, [card.status], reason, { push: false });
           else
             yield* Effect.logWarning("Squire held action did not dispatch; retrying", {
@@ -795,7 +843,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (isRoomOpenIntent(intent) ? Option.isNone(rooms) : Option.isNone(control)) {
         const reason = "Lead actions are not available on this server.";
-        // A hold without its executor waits; D13 turns it into a card once overdue.
+        // A hold without its executor waits; the overdue limit turns it into a card.
         if (verb === "execute") return reason;
         yield* reopen(card, [card.status], reason, { push: false });
         return reason;
@@ -812,8 +860,9 @@ const make = Effect.gen(function* () {
         current = executing.value;
       }
       const options = { executionKey: current.command_id!, now: yield* nowIso, verb };
+      // `applyOpen` gates a Lead room open on Manage Squires under the policy lock.
       const outcome = isRoomOpenIntent(intent)
-        ? yield* openRoom(intent, options)
+        ? yield* Option.getOrThrow(rooms).applyOpen(intent, options)
         : yield* Option.getOrThrow(control).apply(intent, options);
       if (outcome.ok) {
         yield* finalize(current, intent, verb);
@@ -825,41 +874,6 @@ const make = Effect.gen(function* () {
             Effect.asVoid,
           );
       return outcome.reason;
-    });
-
-  /**
-   * A Lead room open (P19.6): Manage Squires gates it as it gates a control
-   * action, unless the open already committed, then `applyOpen` re-checks
-   * and commits it under the policy lock.
-   */
-  const openRoom = (
-    intent: SquireRoomOpenIntent,
-    options: {
-      readonly executionKey: string;
-      readonly now: string;
-      readonly verb: SquireActionVerb;
-    },
-  ) =>
-    Effect.gen(function* () {
-      if (Option.isNone(yield* repository.getExecution(options.executionKey))) {
-        const lead = yield* repository.getSquire(intent.leadId);
-        if (Option.isNone(lead) || lead.value.lifecycle === "deleting") {
-          return { ok: false, to: "outdated", reason: "the Lead no longer exists" } as const;
-        }
-        const level = policySquireOf(lead.value).permissions.manageSquires ?? "off";
-        const refused =
-          options.verb === "execute"
-            ? lead.value.status === "paused"
-              ? "the Lead is paused"
-              : level !== "auto"
-                ? "Manage Squires is no longer Auto"
-                : undefined
-            : level === "off"
-              ? "Manage Squires is Off for the Lead"
-              : undefined;
-        if (refused !== undefined) return { ok: false, to: "open", reason: refused } as const;
-      }
-      return yield* Option.getOrThrow(rooms).applyOpen(intent, options);
     });
 
   // ── Held execution ──
@@ -890,7 +904,7 @@ const make = Effect.gen(function* () {
             const due = card.executes_at === null ? now : Date.parse(card.executes_at);
             if (due > now) return;
             if (now - due > SQUIRE_OVERDUE_MS) {
-              // D13: never executed late; outdated when the trigger went obsolete meanwhile.
+              // Never executed late; outdated when the trigger went obsolete meanwhile.
               const broken =
                 stored.value.type === "steer"
                   ? yield* squirePreconditionBroken(
@@ -994,7 +1008,7 @@ const make = Effect.gen(function* () {
     Effect.withSpan("SquireActions.reconcileStartup"),
   );
 
-  // ── Accept (D24) ──
+  // ── Accept ──
 
   /** Steps 4-6 of an accept whose intent is stored; the caller holds the owner and target locks. */
   const admitAccept = (card: CardRow, intent: SquireActionIntent) =>
@@ -1013,7 +1027,7 @@ const make = Effect.gen(function* () {
           }),
         );
 
-  /** The accept's intent: the user's final text, the target as it is now (A9 step 1). */
+  /** The accept's intent: the user's final text, the target as it is now. */
   const acceptIntent = (card: CardRow, text: string | undefined, attempt: number) =>
     Effect.gen(function* () {
       const decoded = decodePayload(card.payload_json);
@@ -1033,7 +1047,7 @@ const make = Effect.gen(function* () {
       if (payload?.type === "thread-proposal") {
         if (Option.isNone(launcher))
           return notBuilt("Thread creation is not available on this server.");
-        // The new thread's Squire is the owner; the Lead creates no threads (P17.8).
+        // The new thread's Squire is the owner; the Lead creates no threads.
         const squire = yield* repository.getSquire(card.owner_squire_id);
         if (Option.isNone(squire)) return notBuilt("The Squire was deleted.");
         const launch = yield* launcher.value
@@ -1083,7 +1097,7 @@ const make = Effect.gen(function* () {
         if (Option.isNone(lead)) return notBuilt("The Lead no longer exists.");
         const instance = lead.value.provider_instance_id;
         if (instance === null) return notBuilt("Choose a provider for the Lead first.");
-        // P17.2: the proposed Squire runs on the Lead's provider, with default events and budgets.
+        // The proposed Squire runs on the Lead's provider, with default events and budgets.
         const model =
           lead.value.model_selection_json === null
             ? undefined
@@ -1114,7 +1128,7 @@ const make = Effect.gen(function* () {
       return notBuilt("This item cannot be accepted.");
     });
 
-  /** P7.8: an open card whose trigger is already obsolete is outdated, even if the reactor lags. */
+  /** An open card whose trigger is already obsolete is outdated, even if the reactor lags. */
   const triggerObsolete = (card: CardRow) =>
     Effect.gen(function* () {
       if (card.target_thread_id === null) return undefined;
@@ -1140,7 +1154,27 @@ const make = Effect.gen(function* () {
     error: error ?? null,
   });
 
-  const acceptOne = (cardId: SquireCardId, text: string | undefined) =>
+  /**
+   * The newest `action.accepted` row of this request for the card: the
+   * attempt it allocated and, once it settled, the result it returned.
+   */
+  const acceptedFor = (cardId: SquireCardId, requestId: string) =>
+    repository
+      .listCardLog({ cardId, kinds: [ACCEPTED] })
+      .pipe(
+        Effect.map((rows) =>
+          rows
+            .flatMap((row) => Option.toArray(decodeAccepted(row.data_json)))
+            .findLast((logged) => logged.requestId === requestId),
+        ),
+      );
+
+  /**
+   * The same request retried replays its result and never allocates a new
+   * attempt: after a rejection reopened the card, a new attempt would send
+   * whatever the card holds now.
+   */
+  const acceptOne = (cardId: SquireCardId, text: string | undefined, requestId: string) =>
     Effect.gen(function* () {
       const found = yield* repository.getCard(cardId);
       if (Option.isNone(found))
@@ -1157,6 +1191,21 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             yield* reconcileFor(first.owner_squire_id, targetKey(first, intent));
             let card = Option.getOrThrow(yield* repository.getCard(cardId));
+            const earlier = yield* acceptedFor(card.id, requestId);
+            if (earlier?.result !== undefined) {
+              return {
+                cardId: card.id,
+                status: earlier.result.status,
+                error: earlier.result.error,
+              };
+            }
+            // Settled without its result row (a crash, then the startup reconcile).
+            if (
+              earlier !== undefined &&
+              !(card.status === "accepting" && card.attempt === earlier.attempt)
+            ) {
+              return result(card);
+            }
             switch (card.status) {
               case "outdated":
                 return result(card, { code: "outdated", message: "This item is outdated." });
@@ -1171,7 +1220,7 @@ const make = Effect.gen(function* () {
                 // An identical retry, or the hold is already running.
                 return result(card);
               case "accepting":
-                // A retry of the same accept (A9 step 1): the stored attempt and intent.
+                // A retry of the same accept: the stored attempt and intent.
                 break;
               case "held":
               case "open": {
@@ -1200,18 +1249,27 @@ const make = Effect.gen(function* () {
                 if (!prepared.ok) {
                   return result(card, { code: "invalid_request", message: prepared.reason });
                 }
-                const written = yield* repository.updateCard({
-                  id: card.id,
-                  fromStatuses: [card.status],
-                  patch: {
-                    status: "accepting",
-                    attempt,
-                    command_id: squireActionCommandId("accept", card.id, attempt),
-                    intent_json: encodeSquireActionIntent(prepared.intent),
-                    executes_at: null,
-                  },
-                  updatedAt: yield* nowIso,
-                });
+                const acceptedAt = yield* nowIso;
+                const written = yield* repository.transaction(
+                  Effect.gen(function* () {
+                    const accepting = yield* repository.updateCard({
+                      id: card.id,
+                      fromStatuses: [card.status],
+                      patch: {
+                        status: "accepting",
+                        attempt,
+                        command_id: squireActionCommandId("accept", card.id, attempt),
+                        intent_json: encodeSquireActionIntent(prepared.intent),
+                        executes_at: null,
+                      },
+                      updatedAt: acceptedAt,
+                    });
+                    if (Option.isSome(accepting)) {
+                      yield* logRow(accepting.value, ACCEPTED, { requestId, attempt }, acceptedAt);
+                    }
+                    return accepting;
+                  }),
+                );
                 if (Option.isNone(written)) {
                   return result(card, {
                     code: "outdated",
@@ -1236,24 +1294,35 @@ const make = Effect.gen(function* () {
             }
             const failure = yield* admitAccept(card, stored.value);
             const after = Option.getOrElse(yield* repository.getCard(cardId), () => card);
-            if (after.status === "resolved") {
-              const offer = Option.isSome(rules)
-                ? yield* rules.value.offerFor(after)
-                : Option.none();
-              return Option.match(offer, {
-                onNone: () => result(after),
-                onSome: (ruleOffer) => ({ ...result(after), ruleOffer }),
-              });
-            }
-            return result(
+            const settled: ItemResult =
+              after.status === "resolved"
+                ? Option.match(
+                    Option.isSome(rules) ? yield* rules.value.offerFor(after) : Option.none(),
+                    {
+                      onNone: () => result(after),
+                      onSome: (ruleOffer) => ({ ...result(after), ruleOffer }),
+                    },
+                  )
+                : result(
+                    after,
+                    failure === undefined
+                      ? undefined
+                      : {
+                          code: after.status === "outdated" ? "outdated" : "not_available",
+                          message: failure,
+                        },
+                  );
+            yield* logRow(
               after,
-              failure === undefined
-                ? undefined
-                : {
-                    code: after.status === "outdated" ? "outdated" : "not_available",
-                    message: failure,
-                  },
+              ACCEPTED,
+              {
+                requestId,
+                attempt: card.attempt,
+                result: { status: settled.status, error: settled.error },
+              },
+              yield* nowIso,
             );
+            return settled;
           }),
         ),
       );
@@ -1301,7 +1370,7 @@ const make = Effect.gen(function* () {
       });
     });
 
-  /** P10.2: Undo turns the hold into a recommendation card; nothing is charged or pushed. */
+  /** Undo turns the hold into a recommendation card; nothing is charged or pushed. */
   const undoOne = (cardId: SquireCardId) =>
     Effect.gen(function* () {
       const found = yield* repository.getCard(cardId);
@@ -1354,7 +1423,7 @@ const make = Effect.gen(function* () {
           )
         : items.value.answer({ cardId: card.id, requestId: input.requestId, answer: input.answer });
 
-  /** P3.6: the inactivity check's FYI, whose accept is Keep and dismiss is Pause. */
+  /** The inactivity check's FYI, whose accept is Keep and dismiss is Pause. */
   const isInactivityCheck = (card: CardRow) =>
     card.kind === "fyi" &&
     Option.exists(
@@ -1404,9 +1473,11 @@ const make = Effect.gen(function* () {
         // Accept-all applies the edited text only to a single card.
         else
           results.push(
-            yield* acceptOne(cardId, input.cardIds.length === 1 ? input.text : undefined).pipe(
-              asItem,
-            ),
+            yield* acceptOne(
+              cardId,
+              input.cardIds.length === 1 ? input.text : undefined,
+              input.requestId,
+            ).pipe(asItem),
           );
       }
       yield* touchUserActivity(repository, yield* nowIso);

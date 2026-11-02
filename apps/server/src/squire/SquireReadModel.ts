@@ -54,7 +54,7 @@ import * as SquireScope from "./SquireScope.ts";
 import { toRule } from "./SquireTools.ts";
 
 /**
- * Read side of the Squire RPCs (A6, A7). Reads never write. The always-on
+ * Read side of the Squire RPCs. Reads never write. The always-on
  * stream carries compact snapshots only (about 0.5 KB per Squire): evidence,
  * card bodies, and logs are fetched by query. Each Squire has its own
  * `itemsRevision` and `decisionRevision`, so one Squire's FYI does not refetch
@@ -89,6 +89,9 @@ const RECENT_ACTIVITY = 8;
 const DEFAULT_PAGE = 50;
 const TRIGGER_RUNS = 20;
 const DAY_MS = 24 * 60 * 60 * 1000;
+// The snapshot reaches every client on every connect, so it carries open rooms
+// and recently closed ones only; older rooms stay readable through room posts.
+const SNAPSHOT_CLOSED_ROOM_MS = 7 * DAY_MS;
 // Thread lifecycle events refresh tracking at once; the TTL catches Stave
 // membership changes, which arrive without an event Lecturn sees.
 const TRACKING_TTL_MS = 60_000;
@@ -134,7 +137,7 @@ const logData = (row: Pick<LogRow, "data_json">): Readonly<Record<string, unknow
   Option.getOrElse(decodeLogData(row.data_json), () => ({}));
 
 /**
- * P16.3 gesture for one log row; `previous` is the Squire's row just before
+ * The figure's gesture for one log row; `previous` is the Squire's row just before
  * it, so only the first `event.received` of a delivery batch starts one.
  * Squire creation has no log row, so clients play `greet` from the snapshot.
  */
@@ -380,16 +383,13 @@ const make = Effect.gen(function* () {
             ];
           case "staveSpace":
           case "staveSaga": {
-            // A space's or saga's own coordinating project carries its name.
-            const shell = projectShells.find(
-              (candidate) => candidate.stave?.spaceId === grant.target_id,
+            const name = yield* SquireContainers.staveContainerName(
+              projectShells,
+              fixtureStave,
+              grant.target_id,
             );
-            if (shell !== undefined) return [shell.title];
-            const fixtureName = Option.isSome(fixtureStave)
-              ? yield* fixtureStave.value.nameOf(grant.target_id)
-              : Option.none();
             return [
-              Option.getOrElse(fixtureName, () =>
+              Option.getOrElse(name, () =>
                 grant.kind === "staveSaga" ? "Stave saga" : "Stave space",
               ),
             ];
@@ -461,7 +461,7 @@ const make = Effect.gen(function* () {
       const leadId = rows.find((row) => row.role === "lead")?.id ?? null;
       const stats = yield* repository.listCardStats;
       const heldCards = yield* repository.listCards({ statuses: ["held"] });
-      // P7.6: a hold is not an item, so it sits beside the open card of the same raiser, thread,
+      // A hold is not an item, so it sits beside the open card of the same raiser, thread,
       // and kind instead of replacing it. Read here so the pairing follows that card as it moves.
       const heldOver = new Map<SquireCardRow["id"], SquireCardRow["id"]>();
       for (const card of heldCards) {
@@ -528,12 +528,12 @@ const make = Effect.gen(function* () {
         if (squire === undefined) continue;
         const id = squire.id;
         const isLead = id === leadId;
-        // The Lead's queue is every Squire's items (P7.1); a Squire's is what it raised or owns.
+        // The Lead's queue is every Squire's items; a Squire's is what it raised or owns.
         const inQueue = (stat: Pick<CardStat, "squire_id" | "owner_squire_id">) =>
           isLead || stat.squire_id === id || stat.owner_squire_id === id;
         // A row counts what its view lists, so the badge matches the view's "Needs a decision":
         // a Squire's view lists what it raised or owns, Lead-raised items on its threads included.
-        // The Lead's lists every Squire's, but its badge counts only what the Lead raised (D50).
+        // The Lead's lists every Squire's, but its badge counts only what the Lead raised.
         const countsHere = (card: {
           readonly squire_id: SquireId;
           readonly owner_squire_id: SquireId;
@@ -624,7 +624,8 @@ const make = Effect.gen(function* () {
       }
 
       const rooms = new Map<SquireRoomId, { readonly row: SquireRoomRow; readonly key: string }>();
-      for (const roomRow of yield* repository.listRoomRows) {
+      const closedSince = DateTime.formatIso(DateTime.makeUnsafe(nowMs - SNAPSHOT_CLOSED_ROOM_MS));
+      for (const roomRow of yield* repository.listRoomRows({ closedSince })) {
         const row = toRoomRow(roomRow);
         rooms.set(row.id, { row, key: toKey(row) });
       }
@@ -795,7 +796,7 @@ const make = Effect.gen(function* () {
         input.runId === undefined
           ? yield* repository.listLatestRunSummaries(input.threadId)
           : yield* repository.listRunSummaries({ thread_id: input.threadId, run_id: input.runId });
-      // The terminal summary once the run ends, else the latest provisional one (D18).
+      // The terminal summary once the run ends, else the latest provisional one.
       const row = rows.find((candidate) => candidate.stage === "terminal") ?? rows.at(-1);
       if (row === undefined) return { summary: null };
       const summary = yield* decodeSummary(row.summary_json);
@@ -858,8 +859,9 @@ const make = Effect.gen(function* () {
       // A delivered run's items are the cards its Squire turn raised; the turn
       // is found through the batch's deterministic message id.
       const homeThreadId = Option.getOrNull(squire)?.home_thread_id ?? null;
-      // Another Squire's post in the batch's room context made it `message`
-      // (P19.7), which the rows alone cannot tell; one batch sent one message.
+      // Another Squire's post in the batch's room context made it `message`,
+      // and a user-started Lead turn's message kept `lead`, which the rows
+      // alone cannot tell; one batch sent one message.
       const messageIdsOf = new Map<string, ReadonlyArray<MessageId>>();
       for (const event of events) {
         if (event.status !== "delivered" || event.batch_id === null) continue;
@@ -867,7 +869,7 @@ const make = Effect.gen(function* () {
         const origin = batchOrigin(yield* repository.listBatch(event.batch_id));
         messageIdsOf.set(
           event.batch_id,
-          [...new Set([origin, "message" as const])].map((candidate) =>
+          [...new Set([origin, "message" as const, "lead" as const])].map((candidate) =>
             deliverMessageId(candidate, event.batch_id!),
           ),
         );

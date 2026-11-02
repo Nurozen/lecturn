@@ -52,7 +52,6 @@ import {
   type SettingsPath,
   type SettingsSearchItem,
 } from "./settingsSearch";
-import { useSquireEnvironments } from "../../state/squires";
 import { useAvailableSettingsSearchItems } from "./useAvailableSettingsSearchItems";
 import { validateSettingsScopeSearch } from "./settingsScope";
 
@@ -123,12 +122,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const currentHash = useLocation({ select: (location) => location.hash });
   const currentSearch = useLocation({ select: (location) => location.search });
   const scopeSearch = validateSettingsScopeSearch(currentSearch);
-  // Lecturn: Squires shows only when a connected environment runs them.
-  const hasSquires = useSquireEnvironments().length > 0;
   const navItems = SETTINGS_NAV_ITEMS.filter(
-    (item) =>
-      (item.to !== "/settings/projects" || isSettingsOverviewVisible(scopeSearch)) &&
-      (item.to !== "/settings/squires" || hasSquires),
+    (item) => item.to !== "/settings/projects" || isSettingsOverviewVisible(scopeSearch),
   );
   const { isMobile, setOpenMobile, open, setOpen } = useSidebar();
   const searchInputRef = useRef<HTMLInputElement>(null);

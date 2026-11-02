@@ -1,6 +1,6 @@
 /**
- * `squire_send_message` over the real switch-on stack (Acceptance
- * "Messaging", P19.1, P19.7): Release and Research are Squires, plus the Lead.
+ * `squire_send_message` over the real switch-on stack: Release and Research
+ * are Squires, plus the Lead.
  */
 import { assert, describe, it } from "@effect/vitest";
 import {
@@ -28,10 +28,12 @@ import {
   invoiceThread,
   need,
   type RoomCast,
+  seedBotPost,
   withRoomCast,
 } from "./testkit/roomHarness.ts";
 
 const decodeEvent = Schema.decodeUnknownSync(Schema.fromJsonString(SquireEvent));
+const encodeEvent = Schema.encodeSync(Schema.fromJsonString(SquireEvent));
 const messageEvent = (json: string | null) => {
   const event = decodeEvent(json);
   if (isUnknownUnionMember(event) || event.type !== "message") throw new Error("not a message");
@@ -83,7 +85,7 @@ const homeMessages = (threadId: ThreadId) =>
   Effect.gen(function* () {
     const orchestrator = yield* need(Orchestrator.OrchestratorV2);
     const projection = yield* orchestrator.getThreadProjection(threadId);
-    // A Lead-authored batch has origin `lead` (D56), a Squire-authored one `message`.
+    // A Lead-authored batch has origin `lead`, a Squire-authored one `message`.
     return projection.messages.filter(
       (message) =>
         message.id.startsWith("message:squire:message:") ||
@@ -290,6 +292,45 @@ describe("squire_send_message", () => {
         assert.lengthOf(yield* messageRows(cast.research.squireId), 1);
         const [replied] = yield* messageRows(cast.release.squireId);
         assert.strictEqual(messageEvent(replied!.payload_json).replyTo, structured(two).messageKey);
+      }),
+    ),
+  );
+
+  it.effect("counts another Squire's post shown as room context toward the hop limit", () =>
+    withRoomCast((cast) =>
+      Effect.gen(function* () {
+        yield* seedBotPost(cast, { author: cast.research.squireId, hop: 3 });
+        // The user's message starts Release's batch; Research's hop-3 post rides it as context.
+        const repository = yield* need(SquireRepository.SquireRepository);
+        const now = DateTime.formatIso(yield* DateTime.now);
+        yield* repository.insertEvent({
+          squire_id: cast.release.squireId,
+          thread_id: null,
+          kind: "message",
+          state_key: "mk-user",
+          payload_json: encodeEvent({
+            type: "message",
+            messageKey: "mk-user",
+            from: { kind: "user" },
+            hop: 0,
+            body: "What does Research think?",
+          }),
+          status: "pending",
+          defer_reason: null,
+          not_before: now,
+          batch_id: null,
+          created_at: now,
+        });
+        yield* deliver(cast.release.squireId);
+        const [batch] = yield* homeMessages(cast.release.homeThreadId);
+        assert.include(batch!.text, "Rerun the checks on Auto, it is safe.");
+
+        const sent = yield* send(cast.release, "squire", {
+          to: cast.research.squireId,
+          body: "Agreed.",
+        });
+        assert.strictEqual(structured(sent).reason, "hop-limit", sent.text);
+        assert.deepEqual(yield* rejectedReasons(cast.release.squireId), ["hop-limit"]);
       }),
     ),
   );

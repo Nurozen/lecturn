@@ -1,5 +1,5 @@
 /**
- * Squire server wiring (A0). The always-on part runs with the switch off too,
+ * Squire server wiring. The always-on part runs with the switch off too,
  * so it stays a no-op until a marked thread exists. The command allowlist
  * hook, the MCP gate, and the runtime policy branch sit inside the
  * orchestration runtime and read `SquireRepository` there. Everything else is
@@ -64,7 +64,7 @@ import * as SquireWorkspace from "./SquireWorkspace.ts";
 // lifecycle, rules, and policy lock with `serviceOption`, so they must sit
 // below it here: a missing one would silently skip re-homing, rule disabling,
 // or the lock instead of failing the build.
-// D44g: the fixture seam and its synthetic Stave memberships exist only with
+// The fixture seam and its synthetic Stave memberships exist only with
 // test providers on, so the dev route and the fake are unreachable otherwise.
 const testProvidersOnly = <ROut, E, RIn>(layer: Layer.Layer<ROut, E, RIn>) =>
   Layer.unwrap(
@@ -79,7 +79,7 @@ const layerSwitchOnServices = Layer.mergeAll(
   // The RPC seams (SquireRpcHandlers.ts) sit on top, so they see every service below.
   SquireReadModel.layer,
   SquireLeadRpc.layer,
-  // Read by AgentAwarenessRelay for the Squire phone row (D27).
+  // Read by AgentAwarenessRelay for the Squire phone row.
   SquireMobileAttention.layer,
 ).pipe(
   // Lead services, below the RPC seam that delegates to them.
@@ -91,7 +91,7 @@ const layerSwitchOnServices = Layer.mergeAll(
       SquireMcpAppRoute.layer,
     ),
   ),
-  // Above delivery, so a decision card can wake the Lead (P17.5).
+  // Above delivery, so a decision card can wake the Lead.
   Layer.provideMerge(SquireTools.layer),
   Layer.provideMerge(SquireClock.layer),
   // Read by the clock, the tools (findings), and the RPC seam; the digest reads the sweep.
@@ -113,7 +113,7 @@ const layerSwitchOnServices = Layer.mergeAll(
   ),
   // Lead control and Squire-create executions, read by SquireActions.
   Layer.provideMerge(SquireControl.layer),
-  // Below the tools and the clock, which hold intents and arm on escalate_at (P7.10).
+  // Below the tools and the clock, which hold intents and arm on escalate_at.
   Layer.provideMerge(SquirePresence.layer),
   Layer.provideMerge(SquireReactor.layer),
   // The reactor hands a probe's finished run to SquireProbe.
@@ -161,14 +161,16 @@ const layerSwitchOn = Layer.unwrap(
   }),
 );
 
-export const layer = Layer.mergeAll(SquireCursorStartup.layer, layerSwitchOn).pipe(
+// The cursor startup builds first, so the reactor reads whether this start turned the switch on.
+export const layer = layerSwitchOn.pipe(
+  Layer.provide(SquireCursorStartup.layer),
   Layer.provide(SquireRepository.layer),
 );
 
 /**
  * The server's database storage branch, named so its test builds what the
  * server builds. Maintenance is exposed for that test; compaction keeps the
- * PR link events a Squire has not consumed (A5.12).
+ * PR link events a Squire has not consumed.
  */
 export const layerDatabaseStorage = DatabaseStorage.layer.pipe(
   Layer.provideMerge(

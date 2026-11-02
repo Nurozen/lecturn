@@ -92,7 +92,7 @@ export function squireScreenState(
   };
 }
 
-/** D7: a Lead waiting on a provider has no home thread, so it offers setup instead of Chat. */
+/** A Lead waiting on a provider has no home thread, so it offers setup instead of Chat. */
 export function squireHeaderActions(
   squire: Pick<SquireSnapshotEntry["squire"], "status" | "lifecycle" | "homeThreadId">,
 ) {
@@ -115,7 +115,7 @@ export function squireTeamFilterToggle(
   return current === tapped ? null : tapped;
 }
 
-// ── Holds (P10.1) ─────────────────────────────────────────────
+// ── Holds ─────────────────────────────────────────────────────
 
 export interface SquireHeldRow {
   readonly cardId: SquireCardId;
@@ -124,7 +124,7 @@ export interface SquireHeldRow {
   readonly squireId: SquireId;
   readonly receivedAt: number;
   readonly executesInMs: number;
-  /** The open card of the same raiser, thread, and kind this hold sits beside (P7.6). */
+  /** The open card of the same raiser, thread, and kind this hold sits beside. */
   readonly heldOverCardId?: SquireCardId;
 }
 
@@ -167,7 +167,7 @@ export function squireHoldText(
 }
 
 /**
- * P7.6: a hold is not an item, so it sits beside the open card of the same raiser, thread, and
+ * A hold is not an item, so it sits beside the open card of the same raiser, thread, and
  * kind (`heldOverCardId`). When that card is listed, the hold shows under it as one block, and
  * the held card's own row and banner are left out; any other hold keeps its banner.
  */
@@ -273,7 +273,7 @@ export function squireCardRecommendation(
   }
 }
 
-// ── Rules (P8.1) ──────────────────────────────────────────────
+// ── Rules ─────────────────────────────────────────────────────
 
 export type SquireRuleOfferPromptView = NonNullable<ReturnType<typeof squireUndoOffer>>;
 
@@ -330,7 +330,7 @@ interface SquireActResultValue {
   }>;
 }
 
-// ── Question answers (P7.4) ───────────────────────────────────
+// ── Question answers ──────────────────────────────────────────
 
 export type SquireQuestionMode =
   | { readonly type: "approval" }
@@ -340,7 +340,7 @@ export type SquireQuestionMode =
 
 /**
  * How a question card answers: in place with the thread's own options, read from the card's
- * live copy of the request (D66), or in the thread. A request whose provider is gone cannot be
+ * live copy of the request, or in the thread. A request whose provider is gone cannot be
  * answered from here, so it sends the user to the thread instead of offering dead buttons.
  */
 export function squireQuestionMode(payload: SquireKnownPayload): SquireQuestionMode | null {
@@ -408,7 +408,7 @@ export function squireUserInputAnswer(
 
 export type { QuestionPayload as SquireQuestionPayload };
 
-// ── Opened (D52) ──────────────────────────────────────────────
+// ── Opened ────────────────────────────────────────────────────
 
 /**
  * One `squire.items.markOpened` per card per app session: the first open cancels the card's

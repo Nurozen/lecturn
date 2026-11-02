@@ -682,7 +682,7 @@ const turnTokenUsage = (turn: ActiveTurn, status: OrchestrationV2ProviderTurn["s
 /**
  * Lecturn: one 2.x server serves every thread of an instance and loads the
  * user's instruction files, skills, and MCP servers for all of them, so a
- * Squire home or probe cannot be isolated per session (A5.9).
+ * Squire home or probe cannot be isolated per session.
  */
 const OPENCODE2_SQUIRE_UNSUPPORTED =
   "OpenCode 2 runs every thread on one shared server, so Lecturn cannot yet keep a Squire away from your own OpenCode instructions, skills, and tools.";

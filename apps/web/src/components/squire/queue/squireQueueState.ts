@@ -155,7 +155,7 @@ export function useSquireItemsAct(environmentId: EnvironmentId) {
   return { canAct, run };
 }
 
-/** D52: marks the expanded or selected card opened, once per card per session. */
+/** Marks the expanded or selected card opened, once per card per session. */
 export function useSquireMarkOpened(
   environmentId: EnvironmentId,
   cardId: SquireCardId | null,

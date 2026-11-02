@@ -26,6 +26,7 @@ import { SquireMotionClock } from "./SquireIndicator";
 import { SquireRoomComposer } from "./SquireRoomComposer";
 import { SquireRoomHeader } from "./SquireRoomHeader";
 import { SquireRoomLog } from "./SquireRoomLog";
+import { SquireViewportContext, useSquireScrollViewport } from "./SquireViewport";
 import { squireRoomPinned, squireRoomScreenState, withSquireRoomSeen } from "./squireRooms.logic";
 import { squireRoomSeenAtom } from "./squireRoomSeen";
 
@@ -112,6 +113,7 @@ function SquireRoomView(props: {
   const canMarkRead = useAtomValue(squireEnvironment.roomMarkRead.permissionAtom(environmentId));
   const markRead = useAtomCommand(squireEnvironment.roomMarkRead, { reportFailure: false });
   const scrollRef = useRef<ScrollViewInstance>(null);
+  const scrollViewport = useSquireScrollViewport(scrollRef);
   // The ref drives scrolling synchronously; the state drives the mark-read effect.
   const pinnedRef = useRef(true);
   const [pinned, setPinned] = useState(true);
@@ -163,61 +165,67 @@ function SquireRoomView(props: {
 
   return (
     <KeyboardAvoidingView automaticOffset behavior="padding" className="flex-1 bg-screen">
-      <ScrollView
-        ref={scrollRef}
-        className="flex-1"
-        contentInsetAdjustmentBehavior="automatic"
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="interactive"
-        // Earlier pages insert above what the user is reading; keep it in place.
-        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-        contentContainerStyle={{ padding: 16, gap: 14 }}
-        scrollEventThrottle={100}
-        onScroll={({ nativeEvent }) => {
-          const next = squireRoomPinned({
-            contentHeight: nativeEvent.contentSize.height,
-            offsetY: nativeEvent.contentOffset.y,
-            viewportHeight: nativeEvent.layoutMeasurement.height,
-          });
-          pinnedRef.current = next;
-          if (next !== pinned) setPinned(next);
-        }}
-        onContentSizeChange={followEnd}
-        onLayout={followEnd}
-      >
-        <SquireRoomHeader
-          environmentId={environmentId}
-          row={row}
-          room={room}
-          nameOf={nameOf}
-          leadName={lead?.squire.name ?? null}
-        />
-        {room === null || newest.data === null ? (
-          newest.error === null ? null : (
-            <Text className="py-8 text-center font-sans text-sm text-foreground-muted">
-              The room could not be loaded.
-            </Text>
-          )
-        ) : (
-          <SquireRoomLog
-            context={{
-              environmentId,
-              room,
-              squires,
-              leadId: lead?.squire.id ?? null,
-              nameOf,
-              onLoadEarlier: () => {
-                pinnedRef.current = false;
-                setPinned(false);
-                setEarlierPages(earlierPages + 1);
-              },
-            }}
-            posts={newest.data.posts}
-            nextBefore={newest.data.nextBefore}
-            earlierPages={earlierPages}
+      <SquireViewportContext.Provider value={scrollViewport.viewport}>
+        <ScrollView
+          ref={scrollRef}
+          className="flex-1"
+          contentInsetAdjustmentBehavior="automatic"
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          // Earlier pages insert above what the user is reading; keep it in place.
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          contentContainerStyle={{ padding: 16, gap: 14 }}
+          scrollEventThrottle={100}
+          onScroll={({ nativeEvent }) => {
+            const next = squireRoomPinned({
+              contentHeight: nativeEvent.contentSize.height,
+              offsetY: nativeEvent.contentOffset.y,
+              viewportHeight: nativeEvent.layoutMeasurement.height,
+            });
+            pinnedRef.current = next;
+            if (next !== pinned) setPinned(next);
+            scrollViewport.onScroll();
+          }}
+          onContentSizeChange={followEnd}
+          onLayout={() => {
+            followEnd();
+            scrollViewport.onLayout();
+          }}
+        >
+          <SquireRoomHeader
+            environmentId={environmentId}
+            row={row}
+            room={room}
+            nameOf={nameOf}
+            leadName={lead?.squire.name ?? null}
           />
-        )}
-      </ScrollView>
+          {room === null || newest.data === null ? (
+            newest.error === null ? null : (
+              <Text className="py-8 text-center font-sans text-sm text-foreground-muted">
+                The room could not be loaded.
+              </Text>
+            )
+          ) : (
+            <SquireRoomLog
+              context={{
+                environmentId,
+                room,
+                squires,
+                leadId: lead?.squire.id ?? null,
+                nameOf,
+                onLoadEarlier: () => {
+                  pinnedRef.current = false;
+                  setPinned(false);
+                  setEarlierPages(earlierPages + 1);
+                },
+              }}
+              posts={newest.data.posts}
+              nextBefore={newest.data.nextBefore}
+              earlierPages={earlierPages}
+            />
+          )}
+        </ScrollView>
+      </SquireViewportContext.Provider>
       <SquireRoomComposer
         environmentId={environmentId}
         roomId={row.id}

@@ -9,7 +9,7 @@ import {
   type SquireWebhookSecret,
 } from "@lecturn/contracts";
 
-// ── Schedules and intent sentences (P3.6, OQ27) ───────────────
+// ── Schedules and intent sentences ────────────────────────────
 
 /** `HH:MM` as the client's clock reads it: "9:00" on 24 h, "9:00 AM" on 12 h. */
 function squireLocalTimeLabel(time: string, hour12: boolean): string {
@@ -52,7 +52,7 @@ export type SquireTriggerControl =
   | "test";
 
 /**
- * OQ27: a webhook's URL, secret, Rotate, Revoke, and Test now sit behind the collapsed
+ * A webhook's URL, secret, Rotate, Revoke, and Test now sit behind the collapsed
  * "Advanced: custom webhook" disclosure, never in the default view; a schedule's Test now is.
  */
 export function squireTriggerControls(
@@ -163,7 +163,7 @@ function runOutcomeLabel(run: Pick<SquireTriggerRun, "outcome" | "itemCount">): 
   }
 }
 
-/** P3.6 run history row: time, origin, outcome, item count. */
+/** A run history row: time, origin, outcome, item count. */
 export function squireTriggerRunLabel(
   run: SquireTriggerRun,
   formatTime: (iso: string) => string,
@@ -271,7 +271,7 @@ export function squireTriggerDraftInput(
   };
 }
 
-// ── Sweep (P17.10) ────────────────────────────────────────────
+// ── Sweep ─────────────────────────────────────────────────────
 
 const SQUIRE_SWEEP_ACCEPTANCE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 

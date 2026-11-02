@@ -1,5 +1,5 @@
 /**
- * The expanded card's server-built parts (P7.3, D28): the evidence block, read live from the
+ * The expanded card's server-built parts: the evidence block, read live from the
  * target thread over what the card stored (the CI excerpt), the "Open in thread" message, and
  * the event timeline. Built per `squire.item.get`, so nothing here is copied into rows.
  */
@@ -238,7 +238,7 @@ const byTime = (entries: ReadonlyArray<SquireTimelineEntry>) =>
     .map(({ entry }) => entry);
 
 /**
- * P7.2: a card's own history from its action-log rows (raised, updated, held,
+ * A card's own history from its action-log rows (raised, updated, held,
  * executed, undone, cancelled), plus when it was opened and how it settled when
  * no row records that. Oldest first, newest `limit` kept.
  */
@@ -323,7 +323,7 @@ export const makeSquireCardDetail = (deps: {
 }) => {
   const { repository, projections } = deps;
 
-  /** D28: the run's last assistant message; none for a PR-only trigger. */
+  /** The run's last assistant message; none for a PR-only trigger. */
   const triggerMessage = (threadId: ThreadId, trigger: SquireCardTrigger) =>
     Effect.gen(function* () {
       if (trigger.triggerMessageId !== undefined || trigger.runId === undefined) {

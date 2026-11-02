@@ -26,7 +26,7 @@ describe("Squire skill text", () => {
     // A tool the skill tells the model to call must be on the role's list,
     // or sit in the section that says it applies once its tool exists.
     const sections = squireSkillSections(role);
-    const known = new Set<string>([...SQUIRE_TOOL_NAMES[role], "html_render"]);
+    const known = new Set<string>(SQUIRE_TOOL_NAMES[role]);
     for (const section of sections) {
       const later = section.includes("apply once their events and tools exist");
       for (const [name] of section.matchAll(/squire_[a-z_]+/g)) {

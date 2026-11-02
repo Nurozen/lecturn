@@ -460,7 +460,7 @@ function squireHoldOf(
 }
 
 /**
- * P7.6: a hold is not an item, so it sits beside the open card of the same raiser, thread, and
+ * A hold is not an item, so it sits beside the open card of the same raiser, thread, and
  * kind. The notch shows the two as one card, the open card with the hold's countdown and Undo,
  * keyed by that open card. One hold per card; any other keeps its own row.
  */
@@ -481,7 +481,7 @@ function squireActivityHoldPairs(
   return pairs;
 }
 
-/** P8.1 "Always ask first for this", offered in the notch after an Undo there. */
+/** The "Always ask first for this" rule offer, shown in the notch after an Undo there. */
 export interface SquireActivityOffer {
   readonly environmentId: EnvironmentId;
   readonly card: Pick<SquireCardRow, "id" | "squireId" | "ownerSquireId" | "kind">;
@@ -599,7 +599,7 @@ export function squireActivityRows(
                   { id: "squire-undo", label: "Undo" },
                   { id: "squire-open", label: "Open" },
                 ]
-              : // Every card reads primary, Dismiss, Open to its Squire's view (P7.7). The notch
+              : // Every card reads primary, Dismiss, Open to its Squire's view. The notch
                 // cannot answer a question or show overlap evidence, so Answer and Review open
                 // the card there too; Open thread appears only for a single target thread.
                 primary?.type === "expand"
@@ -725,7 +725,7 @@ export function resolveSquireActivityAction(
   if (row.id !== squireActivityRowId(environmentId, cardId)) return null;
   const source = sources.find((candidate) => candidate.environmentId === environmentId);
   const open = source?.items.find((candidate) => candidate.id === cardId) ?? null;
-  // An open card's Undo is the paired hold's (P7.6): it acts on the held card beside it.
+  // An open card's Undo is the paired hold's: it acts on the held card beside it.
   const newer =
     action.kind === "squire-undo" && open?.status === "open" && source?.state !== undefined
       ? (squireActivityHoldPairs({ state: source.state, items: source.items }).get(cardId) ?? null)
@@ -771,7 +771,7 @@ export interface SquireActivityDeps {
   ) => Promise<void>;
 }
 
-/** Not a failure: the card already settled, went out of date, or is gone (P7.7). */
+/** Not a failure: the card already settled, went out of date, or is gone. */
 const SQUIRE_SETTLED_STATUSES = new Set([
   "resolved",
   "executed",
@@ -807,7 +807,7 @@ export function squireActivityInfo(
 }
 
 export interface SquireActivityOutcome {
-  /** What the notch shows for this press (D40): the server's own outcome. */
+  /** What the notch shows for this press: the server's own outcome. */
   readonly result: DesktopActivitySquireResult;
   /** An Undo's ask-first offer, or an accept's "Always allow this". */
   readonly offer: SquireActivityOffer | null;

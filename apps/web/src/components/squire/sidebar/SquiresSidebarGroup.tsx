@@ -82,7 +82,7 @@ function NestedList(props: ComponentProps<"ul">) {
 }
 
 export interface SquiresSidebarGroupProps {
-  /** Thread search replaces the whole list, this group included (D37). */
+  /** Thread search replaces the whole list, this group included. */
   readonly isSearching: boolean;
 }
 
@@ -109,7 +109,7 @@ function useSquireRoute(): SquireRouteSelection | null {
 }
 
 /**
- * The Squires group at the top of the sidebar scroll list (D37). Its own memo component with its
+ * The Squires group at the top of the sidebar scroll list. Its own memo component with its
  * own atom reads, so the sidebar's re-renders never reach it and its updates never reach them.
  */
 export const SquiresSidebarGroup = memo(function SquiresSidebarGroup(
@@ -509,7 +509,7 @@ function SquireRow(props: {
   );
 }
 
-/** Mounted only while the row is open, so a folded Squire runs no items query (R37). */
+/** Mounted only while the row is open, so a folded Squire runs no items query. */
 function SquireDecisionRows(props: {
   readonly environmentId: EnvironmentId;
   readonly squireId: SquireId;

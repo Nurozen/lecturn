@@ -1,6 +1,6 @@
 /**
- * The loop guards every bot-authored message passes (P19.7): the hop count
- * and the sender's message budgets (P9.1). Messages have no undo window, so
+ * The loop guards every bot-authored message passes: the hop count
+ * and the sender's message budgets. Messages have no undo window, so
  * a budget is charged when the send commits and an exhausted one rejects.
  */
 import {
@@ -8,6 +8,7 @@ import {
   SQUIRE_MAX_HOP,
   SquireBudgets,
   SquireEvent,
+  type SquireId,
   type SquireRoomId,
   isUnknownUnionMember,
 } from "@lecturn/contracts";
@@ -26,11 +27,15 @@ export const HOP_LIMIT_TEXT = `This would be hop ${SQUIRE_MAX_HOP + 1}, past the
 
 /**
  * The hop a message sent during this turn carries: 1 plus the highest hop
- * among the message events of the turn's batch, 1 when there were none (a
- * user turn or a thread-event batch is hop 0).
+ * among the bot-authored input the turn was shown (its batch's message
+ * events, plus `shownHops` for room posts in its context or read mid-turn),
+ * 1 when there was none (a user turn or a thread-event batch is hop 0).
  */
-export function nextHop(batch: ReadonlyArray<SquireRepository.SquireEventRow>): number {
-  let highest = 0;
+export function nextHop(
+  batch: ReadonlyArray<SquireRepository.SquireEventRow>,
+  shownHops: ReadonlyArray<number> = [],
+): number {
+  let highest = Math.max(0, ...shownHops);
   for (const row of batch) {
     if (row.kind !== "message") continue;
     const event = Option.getOrNull(decodeEvent(row.payload_json ?? ""));
@@ -40,6 +45,102 @@ export function nextHop(batch: ReadonlyArray<SquireRepository.SquireEventRow>): 
   }
   return highest + 1;
 }
+
+// ── Squire-written text ──
+//
+// Text a Squire wrote never drives Auto or a rule, directly or through the
+// Lead. The Lead's words count as the user's only when a user started the
+// Lead turn that wrote them: its plain message, or a room post of the user's.
+const USER_STARTED_ORIGINS: ReadonlySet<string> = new Set(["user", "room"]);
+
+const ToolCallData = Schema.Struct({
+  tool: Schema.optional(Schema.String),
+  origin: Schema.optional(Schema.String),
+  result: Schema.optional(
+    Schema.Struct({
+      structuredContent: Schema.optional(
+        Schema.Struct({
+          squireText: Schema.optional(Schema.Boolean),
+          botPostHop: Schema.optional(Schema.Number),
+        }),
+      ),
+    }),
+  ),
+});
+const decodeToolCallData = Schema.decodeUnknownOption(Schema.fromJsonString(ToolCallData));
+
+/**
+ * Whether the Lead message or post written under `messageKey` (the sending
+ * call's invocation key) came from a Lead turn the user started; anything
+ * unreadable is Squire text.
+ */
+export const sentInUserStartedTurn = (
+  repository: SquireRepository.SquireRepository["Service"],
+  messageKey: string,
+) =>
+  repository.getToolCall(messageKey).pipe(
+    Effect.map((row) => {
+      if (Option.isNone(row)) return false;
+      const origin = Option.getOrNull(decodeToolCallData(row.value.data_json))?.origin;
+      return origin !== undefined && USER_STARTED_ORIGINS.has(origin);
+    }),
+  );
+
+/** The message keys of the batch's Lead messages that a user-started Lead turn sent. */
+export const userStartedLeadKeys = (
+  repository: SquireRepository.SquireRepository["Service"],
+  rows: ReadonlyArray<SquireRepository.SquireEventRow>,
+) =>
+  Effect.gen(function* () {
+    const keys = new Set<string>();
+    for (const row of rows) {
+      if (row.kind !== "message") continue;
+      const event = Option.getOrNull(decodeEvent(row.payload_json ?? ""));
+      if (event === null || isUnknownUnionMember(event) || event.type !== "message") continue;
+      if (event.from.kind !== "lead") continue;
+      if (yield* sentInUserStartedTurn(repository, event.messageKey)) keys.add(event.messageKey);
+    }
+    return keys as ReadonlySet<string>;
+  });
+
+/** The `squire_read_room` result fields that record what the read showed. */
+export const roomReadMarks = (input: {
+  readonly squireText: boolean;
+  readonly botPostHop: number | null;
+}) => ({
+  ...(input.squireText ? { squireText: true } : {}),
+  ...(input.botPostHop === null ? {} : { botPostHop: input.botPostHop }),
+});
+
+/**
+ * What the run's `squire_read_room` calls showed: whether another Squire's
+ * words reached the model (the run then only recommends), and the highest
+ * hop among other bots' posts.
+ */
+export const readSquireText = (
+  repository: SquireRepository.SquireRepository["Service"],
+  input: { readonly squireId: SquireId; readonly runId: string },
+) =>
+  repository
+    .listActionLogForRuns({
+      squireId: input.squireId,
+      kinds: ["tool.called"],
+      runIds: [input.runId],
+    })
+    .pipe(
+      Effect.map((rows) => {
+        let tainted = false;
+        const hops: Array<number> = [];
+        for (const row of rows) {
+          const data = Option.getOrNull(decodeToolCallData(row.data_json));
+          if (data?.tool !== "squire_read_room") continue;
+          const marks = data.result?.structuredContent;
+          if (marks?.squireText === true) tainted = true;
+          if (marks?.botPostHop !== undefined) hops.push(marks.botPostHop);
+        }
+        return { tainted, hops };
+      }),
+    );
 
 export const overHopLimit = (hop: number) => hop > SQUIRE_MAX_HOP;
 
@@ -54,7 +155,7 @@ export type MessageBudgetCheck =
     };
 
 /**
- * P9.1: `messagesPerDay` counts every `message` usage row of the sender; a
+ * `messagesPerDay` counts every `message` usage row of the sender; a
  * room post also counts against `roomPostsPerRoomPerDay` for that room
  * (per sender, per room). Rolling 24 h, like steers.
  */

@@ -379,7 +379,7 @@ describe("holds", () => {
   });
 });
 
-describe("hold pairing (P7.6)", () => {
+describe("hold pairing", () => {
   const held = (cardId: string, heldOverCardId?: string) => ({
     cardId: cardId as SquireCardId,
     kind: "steer" as const,
@@ -474,7 +474,7 @@ describe("createSquireOpenedTracker", () => {
   });
 });
 
-describe("rule offers (P8.1)", () => {
+describe("rule offers", () => {
   function offer(overrides: Partial<SquireRuleOffer> = {}): SquireRuleOffer {
     return {
       effect: "allow",
@@ -508,7 +508,7 @@ describe("rule offers (P8.1)", () => {
   });
 });
 
-describe("question recommendation (P7.3)", () => {
+describe("question recommendation", () => {
   it("shows the Squire's suggestion only when it adds something", () => {
     const title = "Migration question";
     const ask = (recommendation: string | undefined) =>

@@ -26,10 +26,10 @@ import { SquireRepository, type SquireSummaryRow } from "./SquireRepository.ts";
 import { SquireHooks } from "./squireHooks.ts";
 import { squireDeterministicSummary, squireSummaryWithModel } from "./SquireSummaryInput.ts";
 
-/** P3.4: delivery waits this long for a summary; the model call gets the same budget. */
+/** Delivery waits this long for a summary; the model call gets the same budget. */
 const SQUIRE_SUMMARY_BUDGET = Duration.seconds(20);
 
-/** `terminal` at run end; `request:<requestId>` for the provisional summary taken at a wait (D18). */
+/** `terminal` at run end; `request:<requestId>` for the provisional summary taken at a wait. */
 export type SquireSummaryStage = "terminal" | `request:${string}`;
 
 export interface SquireSummaryKey {
@@ -50,7 +50,7 @@ export interface SquireSummaryTracker {
 export interface SquireSummaryRequest extends SquireSummaryKey {
   readonly trackers: ReadonlyArray<SquireSummaryTracker>;
   /**
-   * Set for a fixture-owned thread (D44j): its summary is the fixture's, or
+   * Set for a fixture-owned thread: its summary is the fixture's, or
    * deterministic fields only, and no provider is ever called.
    */
   readonly fixture?: { readonly summary: SquireTurnSummary | null };
@@ -121,7 +121,7 @@ const toStored = (row: SquireSummaryRow): SquireStoredSummary => {
 };
 
 /**
- * D18 payer chain: the summary setting of the earliest-created active Squire
+ * Who pays for a summary: the summary setting of the earliest-created active Squire
  * tracking the thread with turn-finished on; then the thread's own provider;
  * then the environment's text generation model; else none (partial).
  */
@@ -147,13 +147,13 @@ export const make = Effect.gen(function* () {
   const source = yield* SquireRunSource;
   const generator = yield* TextGeneration;
   const settings = yield* ServerSettingsService;
-  // 7.3: the overlap detector follows every stored summary (D30).
+  // The overlap detector follows every stored summary.
   const hooks = yield* Effect.serviceOption(SquireHooks);
   const inFlight = new Map<
     string,
     Deferred.Deferred<SquireStoredSummary, PersistenceSqlError | SquireRunSourceError>
   >();
-  // One summary call at a time per provider instance (D18), so a burst of
+  // One summary call at a time per provider instance, so a burst of
   // run ends never fans out into parallel CLI processes.
   const permits = new Map<ProviderInstanceId, Semaphore.Semaphore>();
   const permitFor = (instanceId: ProviderInstanceId) => {

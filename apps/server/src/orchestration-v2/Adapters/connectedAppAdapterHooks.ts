@@ -45,8 +45,8 @@ export function codexAppToolApprovals(mcpSession: McpSessionConfig): {
 
 /**
  * Lecturn: a Squire home's credential lists only its role's tools, each one
- * gated by Lecturn's server (D8), so there the whole server is approved. Any
- * approval Codex raised on a home would be auto-declined (D9), failing the call.
+ * gated by Lecturn's server, so there the whole server is approved. Any
+ * approval Codex raised on a home would be auto-declined, failing the call.
  */
 export const CODEX_SQUIRE_HOME_TOOL_APPROVALS = {
   default_tools_approval_mode: "approve",

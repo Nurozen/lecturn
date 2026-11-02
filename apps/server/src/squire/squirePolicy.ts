@@ -28,7 +28,7 @@ export type SquirePolicySquire = Pick<
   "id" | "role" | "status" | "permissions" | "budgets" | "createdAt"
 >;
 
-/** A Squire tracking the target thread, with its own rules (P2.4 rule holders). */
+/** A Squire tracking the target thread, with its own rules. */
 export interface SquirePolicyTracker {
   readonly squire: SquirePolicySquire;
   readonly rules: ReadonlyArray<SquireRule>;
@@ -51,7 +51,7 @@ export interface SquirePolicyBudgetRow {
 
 export interface SquirePolicyInput {
   readonly actionClass: SquirePolicyActionClass;
-  /** The acting Squire, or the owning Squire when `lead` acts on its item (P17.8). */
+  /** The acting Squire, or the owning Squire when `lead` acts on its item. */
   readonly squire: SquirePolicySquire;
   readonly rules: ReadonlyArray<SquireRule>;
   readonly target: SquirePolicyTarget;
@@ -89,7 +89,7 @@ const recommendOnlyOrigins: ReadonlySet<SquireCardOrigin> = new Set([
   "message",
   "unknown",
 ]);
-// Test runs and sweep findings never push (P3.6, P17.10, D26).
+// Test runs and sweep findings never push.
 const silentOrigins: ReadonlySet<SquireCardOrigin> = new Set(["test", "sweep"]);
 
 const classLevel = (
@@ -135,7 +135,7 @@ const ruleApplies = (
     (rule.steerKind !== null && rule.steerKind !== "other" && rule.steerKind === steerKind)) &&
   ruleCovers(rule, target);
 
-// A steer allow rule of any matchable kind covering the thread makes its Squire a holder (P2.4).
+// A steer allow rule of any matchable kind covering the thread makes its Squire a holder.
 const holdsAuto = (tracker: SquirePolicyTracker, target: SquirePolicyTarget): boolean => {
   const { squire } = tracker;
   if (squire.role === "lead" || squire.status === "paused") return false;
@@ -154,7 +154,7 @@ const earlier = (a: SquirePolicySquire, b: SquirePolicySquire): boolean =>
   Date.parse(a.createdAt) < Date.parse(b.createdAt);
 
 /**
- * D15: the earliest-created Squire that holds steer Auto on the thread, if
+ * The earliest-created Squire that holds steer Auto on the thread, if
  * any. `trackers` come in creation order (created_at, then rowid, as
  * `SquireScope.trackersOf` lists them), so a created_at tie goes to the
  * earlier entry.
@@ -201,7 +201,7 @@ export type SquireBudgetCheck =
   | { readonly exhausted: false }
   | { readonly exhausted: true; readonly recommendingUntil?: string };
 
-/** P9.2 rolling windows; `recommendingUntil` is when every exhausted window frees a slot. */
+/** Rolling budget windows;`recommendingUntil` is when every exhausted window frees a slot. */
 export const checkBudget = (input: {
   readonly actionClass: "steer" | "createThread";
   readonly budgets: SquirePolicySquire["budgets"];
@@ -259,7 +259,7 @@ const lowerTo = (
   ceiling: SquirePermissionLevel,
 ): SquirePermissionLevel => (rank[ceiling] < rank[level] ? ceiling : level);
 
-/** The off/recommend/auto decision for one action, at call time and again at execution (D11, D58). */
+/** The off/recommend/auto decision for one action, at call time and again at execution. */
 export const decide = (input: SquirePolicyInput): SquirePolicyDecision => {
   const { actionClass, squire, lead, origin, target } = input;
   const actor = lead ?? squire;
@@ -269,7 +269,7 @@ export const decide = (input: SquirePolicyInput): SquirePolicyDecision => {
   let reason: SquirePolicyReason = "permission";
   if (level === "off") return { level, reason };
 
-  // P17.8: class levels intersect; the owner's rules do not carry over to the Lead.
+  // Class levels intersect; the owner's rules do not carry over to the Lead.
   if (lead !== undefined && actionClass !== "manageSquires") {
     const owned = lowerTo(level, classLevel(squire, actionClass));
     if (owned !== level) {

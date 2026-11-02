@@ -1,5 +1,5 @@
 /**
- * Lecturn: a Squire home or probe on OpenCode 1.x (A5.9, D9, D25, D48).
+ * Lecturn: a Squire home or probe on OpenCode 1.x.
  *
  * Each session owns its `opencode serve` process, so a Squire session's server
  * is launched without the user's config, project config, instruction files,
@@ -322,7 +322,7 @@ describe("OpenCode Squire isolation", () => {
       }
       assert.isFalse(removed(rules, SQUIRE_TOOL));
       assert.equal(lastMatch(rules, SQUIRE_TOOL)?.action, "allow");
-      // Nothing that would ask the user is left to ask (D9).
+      // Nothing that would ask the user is left to ask.
       for (const permission of ["bash", "external_directory", "doom_loop", "read"]) {
         assert.equal(lastMatch(rules, permission)?.action, "deny");
       }

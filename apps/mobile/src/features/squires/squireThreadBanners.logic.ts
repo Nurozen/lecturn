@@ -17,7 +17,7 @@ export type SquireComposerBannerState =
       readonly budget: { readonly text: string; readonly detail: string | null } | null;
     };
 
-/** P9.2: shown while a budget is spent; a zero allowance is a choice, not an exhausted budget. */
+/** Shown while a budget is spent; a zero allowance is a choice, not an exhausted budget. */
 function squireBudgetLine(
   entry: Pick<SquireSnapshotEntry, "budget" | "squire">,
   formatTime: (iso: string) => string,
@@ -40,7 +40,7 @@ function squireBudgetLine(
   };
 }
 
-/** P10.1 holds and the P9.2 budget notice above the home thread's composer. */
+/** Holds and the budget notice above the home thread's composer. */
 export function squireComposerBannerState(
   entry: Pick<SquireSnapshotEntry, "budget" | "squire" | "held" | "receivedAt"> | null,
   now: number,

@@ -1,12 +1,12 @@
-// Dev-only Squire lab (plan 9.4, CP3). Rendered by apps/web/scripts/squire-lab/, never by the
-// app. Fixtures other than "lab" exist for apps/web/scripts/squire-b4-capture.ts: each one renders
+// Dev-only Squire lab, rendered by main.tsx beside it and never by the app. Fixtures other
+// than "lab" exist for apps/web/scripts/squire-b4-capture.ts: each one renders
 // only what a capture needs, so no other animation can paint during a trace or a recording.
 import type { SquireIndicatorStateName } from "@lecturn/client-runtime/state/squireIndicator";
 import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
 
-import { SquireCompanion, type SquireCompanionHandle } from "../SquireCompanion";
-import { SquireIndicator } from "../SquireIndicator";
-import { SquireMark } from "../SquireMark";
+import { SquireCompanion, type SquireCompanionHandle } from "~/components/squire/SquireCompanion";
+import { SquireIndicator } from "~/components/squire/SquireIndicator";
+import { SquireMark } from "~/components/squire/SquireMark";
 import {
   COMPANION_GESTURES,
   COMPANION_STATES,
@@ -17,7 +17,7 @@ import {
   type CompanionState,
   type GestureResult,
   type SquireCompanion as SquireCompanionChoice,
-} from "./types";
+} from "~/components/squire/companion/types";
 
 const INDICATOR_STATES = [
   "idle",

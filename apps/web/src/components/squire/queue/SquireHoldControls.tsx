@@ -41,7 +41,7 @@ function useHoldSeconds(receivedAt: number, executesInMs: number): number {
 }
 
 /**
- * P10.1: one hold's countdown text, its "Auto by rule" label, and Undo. Mounted only while the
+ * One hold's countdown text, its "Auto by rule" label, and Undo. Mounted only while the
  * snapshot carries the hold, so the 1 Hz text stops with it.
  */
 export function useSquireHoldUndo(input: {
@@ -51,7 +51,7 @@ export function useSquireHoldUndo(input: {
   readonly squireId: SquireId;
   readonly receivedAt: number;
   readonly onUndone: (offer: SquireRuleOffer) => void;
-  /** Shown under the open card it sits beside (P7.6), so it names itself as the newer one. */
+  /** Shown under the open card it sits beside, so it names itself as the newer one. */
   readonly paired?: boolean;
 }) {
   const { environmentId, hold } = input;

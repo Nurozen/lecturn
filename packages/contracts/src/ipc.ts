@@ -1152,7 +1152,7 @@ export const DesktopActivityRowSchema = Schema.Struct({
       holdRemainingMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
       caption: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(300))),
       /**
-       * P7.6: a newer held action of this open card's kind sits beside it. The notch shows it as a
+       * A newer held action of this open card's kind sits beside it. The notch shows it as a
        * line under the card with its countdown and the row's `squire-undo`, which acts on it.
        */
       heldOver: Schema.optionalKey(

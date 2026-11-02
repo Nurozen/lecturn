@@ -1,5 +1,5 @@
 /**
- * The Lead's overlap detector (7.3, D30) over a real orchestrator: stored
+ * The Lead's overlap detector over a real orchestrator: stored
  * summaries run it through the post-store hook, thread changes through the
  * thread hook the reactor calls, and inject's summaries through the same hook.
  */
@@ -323,7 +323,7 @@ const linkPr = (threadId: ThreadId, number: number, state: "open" | "merged" | "
     });
   });
 
-describe("SquireOverlap (7.3, D30)", () => {
+describe("SquireOverlap", () => {
   it.effect("two Squires' threads sharing a path raise one Lead item owned per thread", () =>
     withOverlap(
       Effect.gen(function* () {
@@ -365,6 +365,22 @@ describe("SquireOverlap (7.3, D30)", () => {
           SquireOverlap.overlapDedupeKey(billing, [currency, invoice]),
         );
         assert.lengthOf(yield* leadEvents, 0);
+      }),
+    ),
+  );
+
+  it.effect("compares a new summary only with recently summarized threads", () =>
+    withOverlap(
+      Effect.gen(function* () {
+        yield* pairInBilling;
+        yield* store(invoice, [SHARED]);
+        yield* TestClock.adjust(SquireOverlap.OVERLAP_ACTIVE_WINDOW_MS + 60_000);
+        // The quiet thread is outside the window, so this store never loads it.
+        yield* store(currency, [SHARED]);
+        assert.lengthOf(yield* overlapCards, 0);
+        // Its next summary brings it back, and the pair is compared again.
+        yield* store(invoice, [SHARED]);
+        assert.lengthOf(yield* openOverlaps, 1);
       }),
     ),
   );
@@ -430,7 +446,7 @@ describe("SquireOverlap (7.3, D30)", () => {
         yield* store(currency, [SHARED]);
         const cards = yield* overlapCards;
         assert.lengthOf(cards, 1);
-        // The earliest-created tracker owns a co-tracked thread (D15 order).
+        // The earliest-created tracker owns a co-tracked thread.
         assert.deepStrictEqual(
           overlapOf(cards[0]!).threads.map((thread) => thread.squireId),
           [release, release],
@@ -498,7 +514,7 @@ describe("SquireOverlap (7.3, D30)", () => {
         assert.strictEqual(updated!.status, "open");
         assert.strictEqual(updated!.replaced_count, 1);
         assert.deepStrictEqual(overlapOf(updated!).paths, ["src/format/currency.ts", SHARED]);
-        // D29: the Lead's own items never wake it.
+        // The Lead's own items never wake it.
         assert.lengthOf(yield* leadEvents, 0);
       }),
     ),
@@ -749,7 +765,7 @@ const fakeKit = (
   };
 };
 
-// ── D44j: inject runs the same post-store hook ──
+// ── Inject runs the same post-store hook ──
 
 const decodeScenario = Schema.decodeUnknownSync(SquireFixtureScenario);
 const scenario07 = decodeScenario(scenario07Json);
@@ -759,8 +775,8 @@ const scenario01At321 = decodeScenario(
   JSON.parse(JSON.stringify(scenario01Json).replace('"number":318', '"number":321')),
 );
 
-describe("SquireOverlap over inject (D44j)", () => {
-  it.effect("an injected summary raises the overlap through the post-store hook (B1 step 5)", () =>
+describe("SquireOverlap over inject", () => {
+  it.effect("an injected summary raises the overlap through the post-store hook", () =>
     Effect.gen(function* () {
       const { baseDir } = yield* tempRoot;
       return yield* Effect.gen(function* () {
@@ -805,58 +821,56 @@ describe("SquireOverlap over inject (D44j)", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect(
-    "after B1 steps 1-2 (#318 merged, #321 opened), the overlap names #321 and only its moments",
-    () =>
-      Effect.gen(function* () {
-        const { baseDir } = yield* tempRoot;
-        return yield* Effect.gen(function* () {
-          yield* ServerRuntimeStartup.startLecturnReactors;
-          const fixtures = yield* need(SquireDevFixtures.SquireDevFixtures);
-          const service = yield* need(SquireService.SquireService);
-          const run = (scenario: typeof scenario07) =>
-            Effect.gen(function* () {
-              yield* fixtures.loadSetup(scenario.setup);
-              // The Lead exists before any event, as B1 step 0a has it (it needs a project).
-              yield* service.ensureLead({ requestId: "lead" });
-              // Each command lands later than the last, as the boundaries need: 07 moves the
-              // thread onto its branch, and #318 merged before 07's turns.
-              yield* TestClock.adjust("1 minute");
-              for (const event of scenario.events) yield* fixtures.inject(event);
-              yield* TestClock.adjust("1 minute");
-            });
-          yield* run(scenario05);
-          // B1 step 2: `--set events.0.summary.pullRequest.number=321`.
-          yield* run(scenario01At321);
-          yield* run(scenario07);
-          const leadRow = Option.getOrThrow(yield* service.ensureLead({ requestId: "lead" }));
-          const repository = yield* SquireRepository.SquireRepository;
-          const [card, ...rest] = yield* repository.listCards({
-            squireId: leadRow.id,
-            kinds: ["overlap"],
+  it.effect("after #318 merged and #321 opened, the overlap names #321 and only its moments", () =>
+    Effect.gen(function* () {
+      const { baseDir } = yield* tempRoot;
+      return yield* Effect.gen(function* () {
+        yield* ServerRuntimeStartup.startLecturnReactors;
+        const fixtures = yield* need(SquireDevFixtures.SquireDevFixtures);
+        const service = yield* need(SquireService.SquireService);
+        const run = (scenario: typeof scenario07) =>
+          Effect.gen(function* () {
+            yield* fixtures.loadSetup(scenario.setup);
+            // The Lead exists before any event, as in the stills procedure (it needs a project).
+            yield* service.ensureLead({ requestId: "lead" });
+            // Each command lands later than the last, as the boundaries need: 07 moves the
+            // thread onto its branch, and #318 merged before 07's turns.
+            yield* TestClock.adjust("1 minute");
+            for (const event of scenario.events) yield* fixtures.inject(event);
+            yield* TestClock.adjust("1 minute");
           });
-          assert.lengthOf(rest, 0);
-          const payload = overlapOf(card!);
-          assert.strictEqual(
-            payload.recommendation,
-            "Land #321 first, then rebase Currency display cleanup",
-          );
-          assert.deepStrictEqual(
-            payload.threads.map((thread) => thread.pullRequest),
-            [321, undefined],
-          );
-          const items = yield* need(SquireItems.SquireItems);
-          const full = Option.getOrThrow(yield* items.get(card!.id));
-          const texts = full.timeline.map((entry) => entry.text);
-          assert.isTrue(
-            texts.some((text) => text.includes("PR #321")),
-            texts.join(" | "),
-          );
-          assert.isFalse(
-            texts.some((text) => text.includes("#318")),
-            texts.join(" | "),
-          );
-        }).pipe(Effect.scoped, Effect.provide(phase4Layer(baseDir)), Effect.orDie);
-      }).pipe(Effect.scoped),
+        yield* run(scenario05);
+        // The stills procedure's `--set events.0.summary.pullRequest.number=321`.
+        yield* run(scenario01At321);
+        yield* run(scenario07);
+        const leadRow = Option.getOrThrow(yield* service.ensureLead({ requestId: "lead" }));
+        const repository = yield* SquireRepository.SquireRepository;
+        const [card, ...rest] = yield* repository.listCards({
+          squireId: leadRow.id,
+          kinds: ["overlap"],
+        });
+        assert.lengthOf(rest, 0);
+        const payload = overlapOf(card!);
+        assert.strictEqual(
+          payload.recommendation,
+          "Land #321 first, then rebase Currency display cleanup",
+        );
+        assert.deepStrictEqual(
+          payload.threads.map((thread) => thread.pullRequest),
+          [321, undefined],
+        );
+        const items = yield* need(SquireItems.SquireItems);
+        const full = Option.getOrThrow(yield* items.get(card!.id));
+        const texts = full.timeline.map((entry) => entry.text);
+        assert.isTrue(
+          texts.some((text) => text.includes("PR #321")),
+          texts.join(" | "),
+        );
+        assert.isFalse(
+          texts.some((text) => text.includes("#318")),
+          texts.join(" | "),
+        );
+      }).pipe(Effect.scoped, Effect.provide(phase4Layer(baseDir)), Effect.orDie);
+    }).pipe(Effect.scoped),
   );
 });

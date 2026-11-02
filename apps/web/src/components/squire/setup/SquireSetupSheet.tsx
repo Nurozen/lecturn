@@ -50,13 +50,13 @@ import { SquireScopeSection } from "./SquireScopeSection";
 import { SquireTriggersSection } from "./SquireTriggersSection";
 
 // Paths come from assets/squire/threadkeeper.svg (two-tone, dark) and threadkeeper-mono.svg
-// (currentColor, light), the sources of truth; the pale strand washes out on light (P16.1).
+// (currentColor, light), the sources of truth; the pale strand washes out on light.
 const LOGO_STRAND = "M82 22C48 13 25 29 32 48C39 67 95 62 97 86C98.5 104 75 113 49 106";
 const LOGO_THREAD = "M82 22C55 17 44 34 51 46C61 61 101 61 105 83C110 103 79 114 49 106";
 const LOGO_LOOP = "M25 62C24 80 48 82 65 84C87 87 91 104 49 106";
 const LOGO_STAR = "M82 12C83 20 84 21 92 22C84 23 83 24 82 32C81 24 80 23 72 22C80 21 81 20 82 12Z";
 
-/** One of the two logo placements (P1.5). */
+/** One of the two logo placements. */
 function SquireSetupLogo() {
   return (
     <svg
@@ -100,7 +100,7 @@ export function SquireSetupFrame(props: { readonly title: string; readonly child
   );
 }
 
-/** Shown in place of the form while the brief loads, with save disabled (R37). */
+/** Shown in place of the form while the brief loads, with save disabled. */
 export function SquireSetupPending(props: { readonly error: string | null }) {
   return (
     <>
@@ -224,7 +224,7 @@ export function SquireSetupForm(props: SquireSetupFormProps) {
       return failed(squireCommandError(created, "The Squire could not be created."));
     }
     if (target.kind !== "proposal") return SAVED;
-    // P17.2: the server's accept ignores edits, so Edit creates here and retires the proposal.
+    // The server's accept ignores edits, so Edit creates here and retires the proposal.
     const dismissed = await itemsAct({
       environmentId,
       input: { requestId: randomUUID(), cardIds: [target.cardId], action: "dismiss" },

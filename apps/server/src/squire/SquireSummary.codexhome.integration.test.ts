@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off - Evidence goes to the repo-root artifacts folder as raw JSON.
 /**
- * OQ24 carry-in (p7): a Codex Squire summary runs in the instance's Squire
+ * A Codex Squire summary runs in the instance's Squire
  * CODEX_HOME, so the source home's AGENTS.md, skill, and memories never reach
  * the model. Spends provider tokens, so it runs only with
  * SQUIRE_CODEX_SUMMARY_LIVE=1. Every model request goes through the S0a2

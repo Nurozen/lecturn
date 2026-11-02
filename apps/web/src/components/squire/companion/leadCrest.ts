@@ -1,4 +1,4 @@
-// The Lead's crest (OQ22): a guiding star over a gathered thread, simplified so the star stays
+// The Lead's crest: a guiding star over a gathered thread, simplified so the star stays
 // apart from the thread at the 9 px indicator badge. Source of truth:
 // artifacts/squire-concepts/v5/assets/logo/lead-crest.svg. One 24 x 24 geometry for the cloak
 // crest and every indicator badge.

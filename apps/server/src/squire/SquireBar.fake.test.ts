@@ -1,11 +1,11 @@
 /**
- * B2-fake (5.7 CP2, 6.8 CP7): the gold scenarios on the scripted `squireFake`
+ * The scripted bar: the gold scenarios on the scripted `squireFake`
  * provider, whose tool calls go through the production `/mcp` route to
  * `SquireTools`, with the held-action executor on. 08-11 run their timeline
  * on the test clock (holds execute through the server's clock, the real
- * thread services, and the A5.11b command hook against the fixture's real PR
- * link and run); 01-06 keep their CP2 gold with the executor present. Judged
- * on effects from the Squire's action log (P14.2, D45). Ungated: CI runs it.
+ * thread services, and the command hook against the fixture's real PR
+ * link and run); 01-06 keep their recommend-only gold with the executor present.
+ * Judged on effects from the Squire's action log. Ungated: CI runs it.
  */
 import { assert, describe, it } from "@effect/vitest";
 import {
@@ -71,7 +71,7 @@ const DECISION_REASON: Readonly<Record<string, string>> = {
   "06-voice-steer": "voice",
 };
 
-/** Past the longest undo window plus the D13 overdue limit: any hold would have run or lapsed. */
+/** Past the longest undo window plus the overdue limit: any hold would have run or lapsed. */
 const PAST_EVERY_HOLD = 61 + 60;
 
 const cp2Cases = [
@@ -110,7 +110,7 @@ const eventPullRequest = (scenario: SquireFixtureScenario) => {
 };
 
 /**
- * D44j, A5.11b: every hold's intent names the fixture's real PR link (key and
+ * Every hold's intent names the fixture's real PR link (key and
  * head) and the target's real latest run, which the hook re-checks under the
  * target's command lock; every executed hold's dispatch was admitted by the
  * orchestrator (an accepted receipt on its `server:squire:execute:*` id).
@@ -185,7 +185,7 @@ const judgeTimeline = (id: string, scenario: SquireFixtureScenario, run: BarTime
     return { observed, failures };
   });
 
-describe("B2-fake with the executor (CP7)", () => {
+describe("scripted bar timelines with the executor", () => {
   it.effect.each(cp7Cases)("$id meets gold", ({ id, scenario }) =>
     withBarTimeline(
       scenario,
@@ -320,7 +320,7 @@ describe("B2-fake with the executor (CP7)", () => {
   );
 });
 
-describe("B2-fake (CP2) with the executor on", () => {
+describe("scripted bar recommend scenarios with the executor on", () => {
   it.effect.each(cp2Cases)("$id meets gold", ({ id, scenario, fake }) =>
     withBarTimeline(
       scenario,

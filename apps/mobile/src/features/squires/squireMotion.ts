@@ -41,3 +41,47 @@ export function squireClockActive(input: {
 }) {
   return input.registered > 0 && input.focused && input.foreground && !input.reducedMotion;
 }
+
+export interface SquireRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Window rects; any overlap counts, so a portrait half under the header keeps moving. */
+export function squireRectInView(item: SquireRect, viewport: SquireRect) {
+  return (
+    item.width > 0 &&
+    item.height > 0 &&
+    item.x < viewport.x + viewport.width &&
+    item.x + item.width > viewport.x &&
+    item.y < viewport.y + viewport.height &&
+    item.y + item.height > viewport.y
+  );
+}
+
+/** A scroll view's window rect plus a scroll signal its indicators re-measure on. */
+export function createSquireViewport() {
+  let rect: SquireRect | null = null;
+  const listeners = new Set<() => void>();
+  const notify = () => {
+    for (const listener of listeners) listener();
+  };
+  return {
+    rect: () => rect,
+    setRect: (next: SquireRect) => {
+      rect = next;
+      notify();
+    },
+    notify,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+}
+
+export type SquireViewport = ReturnType<typeof createSquireViewport>;

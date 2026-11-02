@@ -40,7 +40,7 @@ body:is(.expanded,.peek,.micro):not(.hidden) .activity-state.active.visible:befo
 .activity-state.account-surface.active:before{background:conic-gradient(from var(--thread-angle),transparent 0deg 260deg,color-mix(in srgb,var(--surface-accent) 60%,transparent) 315deg,color-mix(in srgb,var(--surface-accent) 60%,white) 348deg,transparent 360deg)}
 @media(prefers-reduced-motion:reduce){.activity-state,.check-summary:before{transition:none}}
 @media(prefers-reduced-transparency:reduce){.activity-state,.activity-state.account-surface{background:var(--activity-input);box-shadow:inset 2px 0 0 var(--surface-accent)}#shell{background-image:none;background-color:var(--activity-input)}}
-/* Squire cards stay still (D40): no state classes, transitions, or pseudo-element pulses. */
+/* Squire cards stay still: no state classes, transitions, or pseudo-element pulses. */
 .squire-section-title{display:flex;align-items:center;gap:6px}.squire-section-title svg{width:16px;height:16px;flex-shrink:0}
 /* Sticky within its own section with its toasts, opaque so cards scroll under it: the shell's wallpaper tint over the bar color. */
 .squire-section-head .squire-section-title{margin:0}.squire-section>.squire-section-head{position:sticky;top:0;z-index:1;margin:0 -12px 0;padding:10px 14px 9px;background:linear-gradient(var(--activity-wallpaper-bottom),var(--activity-wallpaper-bottom)),var(--activity-bar)}

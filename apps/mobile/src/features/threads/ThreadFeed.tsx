@@ -319,7 +319,7 @@ export interface ThreadFeedProps {
   readonly queuedMessages: ReadonlyArray<QueuedThreadMessage>;
   readonly dispatchingMessageId: MessageId | null;
   readonly onEditPendingMessage: ((message: QueuedThreadMessage) => void) | null;
-  /** Lecturn: false hides "Fork from this response" (the D63 allowlist); absent forks as today. */
+  /** Lecturn: false hides "Fork from this response" (the controls allowlist); absent forks as today. */
   readonly forkEnabled?: boolean;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;

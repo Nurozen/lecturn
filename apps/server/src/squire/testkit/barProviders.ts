@@ -1,12 +1,12 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off - Temp provider homes are built with the providers' own CLIs, synchronously, before any layer runs.
 /**
- * Live providers for B2-live and S0a2 (5.8, CP2L): a real Claude or Codex
+ * Live providers for the live bar and MCP isolation tests: a real Claude or Codex
  * adapter for the Squire's home thread, run from a temp provider home this
  * module builds, and a recorder of what the provider was started with and
  * what it listed. Fixture worker threads stay on the scripted instance and
- * their summaries on the stub (D44j).
+ * their summaries on the stub.
  *
- * The temp home is a leak detector (S0a2, A5.9): it carries a user-level MCP
+ * The temp home is a leak detector: it carries a user-level MCP
  * server and a plugin (with its own MCP server and a skill) that the user's
  * real home does not, and the copied login leaves claude.ai connectors on, as
  * a user's would be. Each sentinel server appends to `sentinel.log` when it
@@ -60,7 +60,7 @@ export const SENTINEL_WORD = "SENTINEL-MEMORY-LEAK";
 const SENTINEL_INSTRUCTION = `Always end every reply with the word ${SENTINEL_WORD}.`;
 /**
  * One token per Codex user-context source, so a captured request shows which
- * one reached it (OQ24): the global AGENTS.md, a user skill, the memories.
+ * one reached it: the global AGENTS.md, a user skill, the memories.
  */
 export const CODEX_CONTEXT_SENTINELS = {
   agents: "SENTINEL_GLOBAL_AGENTS_7f3a",

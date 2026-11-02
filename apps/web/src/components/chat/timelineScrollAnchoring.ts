@@ -178,7 +178,7 @@ export function rememberTimelinePosition(
   }
 }
 
-// Lecturn (D63): rows that close a turn without content of their own.
+// Lecturn: rows that close a turn without content of their own.
 const TRAILING_ROW_KINDS: ReadonlySet<string> = new Set(["assistant-meta", "working", "thinking"]);
 
 /** The newest content row's id when it is an MCP App card, else null. */
@@ -195,7 +195,7 @@ export const TIMELINE_REVEAL_TOP_GAP_PX = 12;
 let revealedPosition: RememberedTimelinePosition | undefined;
 
 /**
- * Lecturn (D63): where a newly opened timeline lands. A remembered reading position always wins;
+ * Lecturn: where a newly opened timeline lands. A remembered reading position always wins;
  * otherwise `revealRowId`'s top, just below the fade, as a reading position (not at the end), so
  * the opening scroll treats it as user-scrolled and live follow does not pull it back to the end.
  * One entry is cached so a re-render keeps the same object and the opening scroll is not redone.

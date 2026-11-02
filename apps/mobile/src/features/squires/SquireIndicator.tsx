@@ -80,15 +80,15 @@ export interface SquireIndicatorProps {
   readonly state: SquireIndicatorStateName;
   readonly companion: Pick<SquireCompanion, "presence" | "appearance" | "hood" | "palette">;
   readonly isLead?: boolean;
-  /** Points. Below 22 the indicator is the mark (P16.4). */
+  /** Points. Below 22 the indicator is the mark. */
   readonly size: number;
   readonly label: string;
   /** False while the row is offscreen (list viewability); the working motion pauses. */
-  readonly visible?: boolean;
+  readonly visible?: boolean | undefined;
 }
 
 /**
- * D42 encoding, readable from one still: idle is partly desaturated and slightly dim with a faint
+ * The state encoding, readable from one still: idle is partly desaturated and slightly dim with a faint
  * ring (muted, not disabled); working
  * is full color with a tapered arc, under half the ring, travelling it; waiting is full color with a solid ring.
  */

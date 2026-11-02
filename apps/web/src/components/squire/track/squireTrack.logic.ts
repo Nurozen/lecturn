@@ -11,7 +11,7 @@ type Grant = Pick<SquireGrantInput, "kind" | "targetId">;
 
 export type SquireContainerKind = Exclude<SquireGrantKind, "thread" | "exclusion">;
 
-/** Where a thread sits, for the grants that can cover it (P2.1). */
+/** Where a thread sits, for the grants that can cover it. */
 export interface SquireThreadScope {
   readonly threadId: string;
   readonly projectId: string;
@@ -65,7 +65,7 @@ export function squireTrackers(
   );
 }
 
-/** P2.1: a thread grant or a granted container covers a thread; an exclusion beats both. */
+/** A thread grant or a granted container covers a thread; an exclusion beats both. */
 export function squireCoversThread(
   grants: ReadonlyArray<Grant>,
   scope: SquireThreadScope,

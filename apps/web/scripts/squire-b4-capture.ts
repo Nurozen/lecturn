@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - standalone dev capture script, no Effect runtime.
 /**
- * CP3 (B4-lab) capture for the Squire companion port (plan 9.4). Serves the dev-only lab page
+ * B4 lab capture for the Squire companion port. Serves the dev-only lab page
  * (scripts/squire-lab/) with Vite's JS API and the v5 baseline with a read-only static server,
  * drives both with Playwright, and writes everything to artifacts/squire-bar/b4/lab/.
  *
@@ -1473,7 +1473,7 @@ interface OracleSubject {
   readonly label: string;
 }
 
-/** D44i: no clipped Paint, frozen animation time, unchanged arc transform, over `seconds`. */
+/** The indicator oracle: no clipped Paint, frozen animation time, unchanged arc transform, over `seconds`. */
 async function runOracle(
   session: Session,
   name: string,

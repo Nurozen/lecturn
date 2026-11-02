@@ -1,10 +1,10 @@
 /**
- * `lecturn squire load-fixture` (D44f): loads a Squire fixture scenario into a
+ * `lecturn squire load-fixture`: loads a Squire fixture scenario into a
  * running dev or test server through the dev fixture route. It targets the
  * worktree's own Lecturn home unless `--base-dir` names one, never the shared
  * home, and refuses before it issues an auth session unless that server
  * serves the fixture route, which exists only with `LECTURN_SQUIRE=1` and
- * `LECTURN_TEST_PROVIDERS=1` (R26).
+ * `LECTURN_TEST_PROVIDERS=1`.
  */
 import {
   AuthOrchestrationOperateScope,

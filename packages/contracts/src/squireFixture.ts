@@ -1,5 +1,5 @@
 /**
- * Squire test fixtures: B2 scenarios, `squireFake` scripts, and summary golds.
+ * Squire test fixtures: gold scenarios, `squireFake` scripts, and summary golds.
  * Decoded by the reactor test seam, the dev fixture route, and
  * `squire load-fixture`. Version 1 files carry no `schemaVersion`; every
  * version 2 addition is optional, so they still decode.
@@ -36,7 +36,7 @@ import {
 } from "./squire.ts";
 
 const SchemaVersion = Schema.optionalKey(Schema.Literals([1, 2]));
-/** The Squire's provider: a driver kind, or `under-test` for the one B2 is judging. */
+/** The Squire's provider: a driver kind, or `under-test` for the one the gold scenarios judge. */
 const FixtureProvider = Schema.Union([Schema.Literal("under-test"), ProviderDriverKind]);
 
 // ── Setup ─────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ export const SquireFixturePermissions = Schema.Struct({
   manageSquires: Schema.optionalKey(SquirePermissionLevel),
 });
 
-/** Seeded as `squire_budget_usage` rows, never log rows, so seeding is never a B2 effect. */
+/** Seeded as `squire_budget_usage` rows, never log rows, so seeding never counts as a scenario effect. */
 export const SquireFixtureBudgetUsage = Schema.Struct({
   steersPerDay: Schema.Struct({ used: NonNegativeInt, limit: NonNegativeInt }),
   threadsPerDay: Schema.Struct({ used: NonNegativeInt, limit: NonNegativeInt }),
@@ -289,7 +289,7 @@ export const SquireFixtureScenario = Schema.Struct({
   setup: SquireFixtureSetup,
   events: Schema.Array(SquireEvent),
   timeline: Schema.optionalKey(Schema.Array(SquireFixtureTimelineAction)),
-  /** Absent on setup-only fixtures that B1 loads for stills. */
+  /** Absent on setup-only fixtures loaded for stills. */
   expected: Schema.optionalKey(SquireFixtureExpected),
 });
 export type SquireFixtureScenario = typeof SquireFixtureScenario.Type;

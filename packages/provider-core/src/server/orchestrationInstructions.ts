@@ -81,7 +81,7 @@ export interface LecturnAcpInstructionState {
 
 /**
  * Lecturn: on a Squire home the skill replaces the orchestration, browser,
- * and device sections, which steer to tools its credential never lists (D22).
+ * and device sections, which steer to tools its credential never lists.
  * `undefined` on every other thread.
  */
 export function squireInstructionsText(

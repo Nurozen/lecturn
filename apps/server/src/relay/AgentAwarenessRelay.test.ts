@@ -1240,7 +1240,7 @@ describe("startup catch-up", { concurrent: false }, () => {
   );
 });
 
-// ── Squire phone row (D27, D52) ─────────────────────────────────
+// ── Squire phone row ────────────────────────────────────────────
 
 const RELEASE = SquireId.make("squire:release");
 const LEAD = SquireId.make("squire:lead");
@@ -1321,7 +1321,7 @@ let squireCardSeq = 0;
 const raiseCard = (input: {
   readonly kind: SquireRepository.SquireCardRow["kind"];
   readonly squireId?: SquireId;
-  /** False: Notify Off, a digest with push off, or a question (D26). */
+  /** False: Notify Off, a digest with push off, or a question. */
   readonly push: boolean;
   readonly source?: string;
 }) =>
@@ -1606,7 +1606,7 @@ const squireScenarios = {
   ],
 } satisfies Record<string, ReadonlyArray<ScenarioStep>>;
 
-describe("Squire phone row (D27)", () => {
+describe("Squire phone row", () => {
   it.effect("publishes the shared fixture's payload sequence and one mobile row per intent", () =>
     Effect.gen(function* () {
       const scenarios: Record<string, Effect.Success<ReturnType<typeof runSquireScenario>>> = {};

@@ -15,7 +15,7 @@ import { RequestActionButton } from "../threads/RequestActionButton";
 import { squireOfferRuleInput, type SquireRuleOfferPromptView } from "./squireQueue.logic";
 
 /**
- * P8.1 "Always allow this" after an accept, or "Always ask first for this" after an Undo: the
+ * "Always allow this" after an accept, or "Always ask first for this" after an Undo: the
  * exact rule text, then save or leave it. It lives outside the card, so it outlasts the row.
  */
 export function SquireRuleOfferPrompt(props: {

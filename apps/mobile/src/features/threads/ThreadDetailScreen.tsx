@@ -270,7 +270,7 @@ export interface ThreadDetailScreenProps {
   readonly onSubmitUserInput: () => Promise<unknown>;
   readonly onDismissUserInput: () => Promise<unknown>;
   readonly showContent?: boolean;
-  /** Lecturn: the D63 allowlist from the thread route; absent keeps every control. */
+  /** Lecturn: the controls allowlist from the thread route; absent keeps every control. */
   readonly controls?: ThreadRouteControls;
   /** Lecturn: a Squire's home thread prompts with what it is for. */
   readonly composerPlaceholder?: string;
@@ -483,7 +483,7 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
 ) {
   const usesNativeWorkspaceColumns = useNativeWorkspaceColumnsSupported();
   const navigation = useNavigation();
-  // Lecturn: each gated control site below reads the D63 allowlist through this.
+  // Lecturn: each gated control site below reads the controls allowlist through this.
   const allows = (control: ThreadRouteControl) => allowsThreadRouteControl(props.controls, control);
   const { session: voiceInputSession } = useGlobalVoiceInput();
   const reportedModelSelection = useThreadReportedModelSelection(props.selectedThreadDetailRef);

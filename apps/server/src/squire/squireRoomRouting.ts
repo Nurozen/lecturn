@@ -1,5 +1,5 @@
 /**
- * Who answers a room post (P19.3): deterministic rules on every tier, first
+ * Who answers a room post: deterministic rules on every tier, first
  * match wins. Pure: `SquireRooms` gathers the members, scope cover, recent
  * posts, and switches, and applies the decision.
  *
@@ -39,7 +39,7 @@ export interface RoomRoutingInput {
   /** Squire members only, in member order; the Lead and the user are apart. */
   readonly members: ReadonlyArray<RoutingMember>;
   readonly lead: { readonly squireId: SquireId; readonly name: string } | null;
-  /** The room's bot messaging and the environment switch (P19.1), both on. */
+  /** The room's bot messaging and the environment switch, both on. */
   readonly botMessagingOn: boolean;
   /** Members whose scope covers the ref (SquireScope); empty for none. */
   readonly coverOf: (ref: RoutingRef) => ReadonlyArray<SquireId>;
@@ -56,7 +56,7 @@ export interface RoomRoutingDecision {
   readonly via: Extract<SquireRouting["via"], { readonly kind: "rule" }>;
   /** Squire or Lead ids to wake; empty wakes nobody. */
   readonly recipients: ReadonlyArray<SquireId>;
-  /** Rule (e) delivered to the Lead, so Jev may retarget it on the funded tier (P19.4). */
+  /** Rule (e) delivered to the Lead, so Jev may retarget it on the funded tier. */
   readonly jevEligible: boolean;
 }
 

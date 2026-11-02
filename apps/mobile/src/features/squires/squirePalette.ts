@@ -26,7 +26,7 @@ const LIGHT: Readonly<Record<SquirePalette, SquireTint>> = {
   gold: { ring: "#e8b23a", strand: "#6b4e12", thread: "#b07f12", trace: "#c98a00" },
 };
 
-/** Gold belongs to the Lead (OQ22), whatever its stored palette. */
+/** Gold belongs to the Lead, whatever its stored palette. */
 export function squireTint(
   palette: SquirePalette,
   isLead: boolean | undefined,

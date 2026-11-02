@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off - Evidence goes to the repo-root artifacts folder; marker files prove what a provider could touch.
 /**
- * S0a2 (OQ20): MCP surface, deny runtime, and skill on a live provider.
+ * S0a2: MCP surface, deny runtime, and skill on a live provider.
  * Spends provider tokens, so it runs only with SQUIRE_S0A2_PROVIDER set
  * (claudeAgent or codex); SQUIRE_BAR_MODEL picks the model.
  *
@@ -11,14 +11,13 @@
  * - control: an ordinary thread on the same provider home lists what leaks;
  * - deny: a user message asks the home to run a shell command, write a
  *   file, and read a file outside any workspace;
- * - probe: a thread with the probe marker (A5.9: no server), since the
- *   "Ask about this" fork path that sets it lands in Phase 6;
- * - home fork: refused by the command hook (A5.11a);
+ * - probe: a thread created with the probe marker (no server);
+ * - home fork: refused by the command hook;
  * - resume: after a restart over the same homes, the home and probe again.
  * Evidence (what the provider was opened with and listed) goes to
  * artifacts/squire-bar/s0a2/<provider>/.
  *
- * Codex also runs every model request through a recording proxy (OQ24): the
+ * Codex also runs every model request through a recording proxy: the
  * home and probe, which run in the instance's Squire CODEX_HOME, must carry
  * none of the temp home's AGENTS.md, skill, or memory sentinels, while the
  * control on the same instance must carry all three. A native fork of the
@@ -522,10 +521,8 @@ describe.runIf(enabled)(`S0a2 MCP surface live on ${provider} (${model})`, () =>
           yield* dispatch(userMessage(home, "deny-1", denyPrompt));
           const denied = yield* awaitSettled(home, 2);
 
-          // The fork's `squireProbe` reaches only the command hook until
-          // "Ask about this" lands (Phase 6): the forked thread carries no
-          // marker, so it runs as an ordinary thread. The probe runtime is
-          // reached here through a thread created with the probe marker.
+          // The probe runtime is reached here through a thread created with
+          // the probe marker.
           yield* withSquireDispatchOrigin(
             dispatch({
               type: "thread.create",
@@ -683,7 +680,7 @@ describe.runIf(enabled)(`S0a2 MCP surface live on ${provider} (${model})`, () =>
         );
         const homeReplies = [...replies(second.resumedHome), ...replies(first.denied)];
         // A Codex home and probe run in the instance's Squire CODEX_HOME, so
-        // the user's AGENTS.md never reaches them (OQ24).
+        // the user's AGENTS.md never reaches them.
         check(
           !homeReplies.some((text) => text.includes(SENTINEL_WORD)),
           "the home obeyed the user's instruction file",

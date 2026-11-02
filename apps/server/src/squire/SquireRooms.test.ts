@@ -1,5 +1,5 @@
 /**
- * Rooms over the real switch-on Squire stack (7b.3, 7b.4 rooms half): caps,
+ * Rooms over the real switch-on Squire stack: caps,
  * members, idle close, the delete cascade, paging, routing writes, reroute,
  * read state, and the unfunded Jev fallback.
  */
@@ -298,7 +298,7 @@ describe("SquireRooms", () => {
         assert.include(row?.payload_json ?? "", `"postId":${post.id}`);
         assert.lengthOf(yield* messageRows(cast.research.squireId, "scope-post"), 0);
 
-        // A bot post too: room posts never raise items or Notify intents (P19.2).
+        // A bot post too: room posts never raise items or Notify intents.
         yield* botPost(room.id, cast.release, "@Research can you check?", "bot-post");
         const store = yield* repository;
         for (const squireId of [cast.release, cast.research, cast.lead].map(

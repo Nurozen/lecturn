@@ -717,7 +717,7 @@ export const make = Effect.gen(function* () {
       }).pipe(Effect.withSpan("relay.agent_activity.publish"), withRelayClientTracing);
     };
 
-  // D27: one row per Squire, keyed by its home thread. SquireMobileAttention
+  // One row per Squire, keyed by its home thread. SquireMobileAttention
   // owns the attention set and the delivery rows; this publishes and reports.
   const publishSquireRow = Effect.fnUntraced(function* (
     attention: SquireMobileAttention["Service"],

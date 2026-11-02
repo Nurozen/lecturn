@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off - Live harness: local HTTP fakes and evidence files.
 /**
- * S0a2 (OQ20) for Grok: a Squire home and probe on the real `grok agent
+ * S0a2 for Grok: a Squire home and probe on the real `grok agent
  * stdio`. Spends provider tokens, so it runs only with
  * SQUIRE_S0A2_PROVIDER=grok and an installed, signed-in `grok`.
  *

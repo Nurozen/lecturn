@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  createSquireViewport,
   SQUIRE_ARC_STEPS,
   SQUIRE_TRACE_STEPS,
   squireArcDegrees,
   squireClockActive,
   squireIndicatorAnimates,
   squireMotionTick,
+  squireRectInView,
   squireTraceOffset,
 } from "./squireMotion";
 
@@ -62,5 +64,41 @@ describe("squire stepped phase", () => {
     expect(wrap).toBe(0);
     expect(squireArcDegrees(squireMotionTick(7100))).toBe(350);
     expect(squireTraceOffset(squireMotionTick(7100), 48)).toBe(-46);
+  });
+});
+
+describe("squire scroll viewport", () => {
+  const viewport = { x: 0, y: 100, width: 390, height: 600 };
+  const at = (x: number, y: number) => ({ x, y, width: 40, height: 40 });
+
+  it("counts an indicator in view while any of it overlaps the scroll view", () => {
+    expect(squireRectInView(at(16, 300), viewport)).toBe(true);
+    expect(squireRectInView(at(16, 80), viewport)).toBe(true);
+    expect(squireRectInView(at(16, 680), viewport)).toBe(true);
+  });
+
+  it("pauses one scrolled out vertically or out of a horizontal strip", () => {
+    expect(squireRectInView(at(16, 40), viewport)).toBe(false);
+    expect(squireRectInView(at(16, 700), viewport)).toBe(false);
+    expect(squireRectInView(at(420, 300), viewport)).toBe(false);
+    expect(squireRectInView(at(-60, 300), viewport)).toBe(false);
+    // An unmeasured (zero-size) view is not in view.
+    expect(squireRectInView({ x: 16, y: 300, width: 0, height: 0 }, viewport)).toBe(false);
+  });
+
+  it("re-measures subscribers on scroll and layout until they unsubscribe", () => {
+    const store = createSquireViewport();
+    let checks = 0;
+    const unsubscribe = store.subscribe(() => {
+      checks += 1;
+    });
+    expect(store.rect()).toBeNull();
+    store.setRect(viewport);
+    store.notify();
+    expect(store.rect()).toEqual(viewport);
+    expect(checks).toBe(2);
+    unsubscribe();
+    store.notify();
+    expect(checks).toBe(2);
   });
 });

@@ -1,6 +1,6 @@
-// @effect-diagnostics nodeBuiltinImport:off -- the invocation key is a durable deterministic hash (A9)
+// @effect-diagnostics nodeBuiltinImport:off -- the invocation key is a durable deterministic hash
 /**
- * Every Squire role tool as one service method (P6, P8, P9, A9). Scope,
+ * Every Squire role tool as one service method. Scope,
  * permission, rules, and budgets are enforced here, never by the prompt:
  * a refusal is an `isError` result with its reason, a downgrade is a
  * success that names the card it made. The `tool.called` row, unique on
@@ -9,7 +9,7 @@
  *
  * A decision of Auto commits a hold: a `held` card with its immutable
  * execution intent and `executes_at`, which `SquireActions` runs after the
- * undo window (A9, P10).
+ * undo window.
  *
  * @module squire/SquireTools
  */
@@ -44,6 +44,7 @@ import {
 } from "@lecturn/contracts";
 import type { ProviderInstance } from "@lecturn/provider-core/server/driver";
 import { stableStringify } from "@lecturn/shared/relaySigning";
+import { threadPullRequestKeyOf } from "@lecturn/shared/threadPullRequests";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -71,6 +72,7 @@ import * as SquirePresence from "./SquirePresence.ts";
 import { isFixtureWorkspaceRoot } from "./SquireReactor.ts";
 import * as SquireRepository from "./SquireRepository.ts";
 import { writeLeadItemEvent } from "./squireLeadItems.ts";
+import { readSquireText } from "./squireMessageGuards.ts";
 import * as SquireScope from "./SquireScope.ts";
 import * as SquireSummaries from "./SquireSummaries.ts";
 import * as SquireSweep from "./SquireSweep.ts";
@@ -98,11 +100,12 @@ const ThreadReadArgs = Schema.Struct({
   turnId: Schema.optionalKey(RunId),
 });
 /**
- * B2 pins a steer at under 280 characters. Enforced as a readable refusal, not
- * a schema bound, so the model reads why and retries with a shorter steer.
+ * The gold scenarios pin a steer at under 280 characters, so 280 itself is refused. Enforced
+ * as a readable refusal, not a schema bound, so the model reads why and
+ * retries with a shorter steer.
  */
 export const SQUIRE_STEER_MAX_CHARS = 280;
-/** P8.1: `steerKind` is optional and defaults to `other`, so older fixtures stay valid. */
+/** `steerKind` is optional and defaults to `other`, so older fixtures stay valid. */
 export const SquireSteerArgs = Schema.Struct({
   threadId: ThreadId,
   reason: nonEmpty(2000),
@@ -125,7 +128,7 @@ const QuietArgs = Schema.Struct({
   threadId: Schema.optionalKey(ThreadId),
 });
 const NoArgs = Schema.Struct({});
-/** P17.7: the Lead names the Squire that will track the thread; `aboutThreadId` names a sweep candidate. */
+/** The Lead names the Squire that will track the thread; `aboutThreadId` names a sweep candidate. */
 const LeadProposalArgs = Schema.Struct({
   ...ThreadProposalArgs.fields,
   squireId: SquireId,
@@ -273,7 +276,7 @@ const DEFINITIONS: Readonly<Record<string, SquireToolDefinition>> = {
   },
 };
 
-/** The Lead's variants: its steers and proposals act for the owning Squire (P17.8). */
+/** The Lead's variants: its steers and proposals act for the owning Squire. */
 const LEAD_DEFINITIONS: Readonly<Record<string, SquireToolDefinition>> = {
   squire_recommend_steer: {
     name: "squire_recommend_steer",
@@ -325,6 +328,14 @@ const decodeBudgets = Schema.decodeUnknownOption(Schema.fromJsonString(SquireBud
 const decodeRule = Schema.decodeUnknownOption(SquireRule);
 const decodeEventPayload = Schema.decodeUnknownOption(SquireEventPayloadJson);
 const encodeEvent = Schema.encodeSync(Schema.fromJsonString(SquireEvent));
+
+/** The PR states a steer kind answers, by transition prefix (`squirePullRequestStates`). */
+const STEER_PULL_REQUEST_AREA: Partial<Record<SquireSteerKind, string>> = {
+  "rerun-checks": "checks:",
+  "fix-failing-check": "checks:",
+  rebase: "mergeable:",
+  "address-review": "review:",
+};
 const decodeEvent = Schema.decodeUnknownOption(Schema.fromJsonString(SquireEvent));
 const decodeTurnOrigin = Schema.decodeUnknownSync(SquireTurnOrigin);
 const decodeStoredResult = Schema.decodeUnknownOption(
@@ -341,7 +352,7 @@ const cut = (value: string, max: number) =>
 const firstLine = (value: string, max: number) => cut(value.split("\n")[0]!.trim(), max);
 
 /**
- * A3, A9: the key is Squire-owned, since MCP command ids are random. It names
+ * The key is Squire-owned, since MCP command ids are random. It names
  * the Squire too: calls outside a run all share the run id `none`.
  */
 const squireInvocationKey = (squireId: string, runId: string, tool: string, args: unknown) =>
@@ -390,7 +401,7 @@ const reasonText = (reason: Reason, origin: SquireCardOrigin, until: string | un
   }
 };
 
-// Policy origins that never raise a class level (P3.4, P8.1, P12.2).
+// Policy origins that never raise a class level.
 const recommendOnlyOrigins: ReadonlySet<SquireCardOrigin> = new Set([
   "voice",
   "webhook",
@@ -433,7 +444,7 @@ export const toRule = (row: SquireRepository.SquireRuleRow) =>
     createdAt: row.created_at,
   });
 
-/** P9.3: the card's budget line. */
+/** The card's budget line. */
 export const squireBudgetCaption = (input: {
   readonly actionClass: "steer" | "createThread";
   readonly budgets: squirePolicy.SquirePolicySquire["budgets"];
@@ -542,8 +553,14 @@ const make = Effect.gen(function* () {
       created_at: ctx.now,
     });
 
+  // The origin is the sending turn's, read back when a Lead message or post is delivered.
   const toolCalled = (ctx: Ctx, result: SquireToolResult, threadId: ThreadId | null) =>
-    logRow(ctx, "tool.called", { tool: ctx.tool, result }, { threadId, invocationKey: ctx.key });
+    logRow(
+      ctx,
+      "tool.called",
+      { tool: ctx.tool, result, origin: ctx.run.origin },
+      { threadId, invocationKey: ctx.key },
+    );
 
   /** A keyed tool call that only records its refusal. */
   const refuse = (
@@ -611,10 +628,10 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * P17.8: the Squire whose item the Lead acts on. A thread several Squires
+   * The Squire whose item the Lead acts on. A thread several Squires
    * track resolves deterministically: the raiser of the newest item-raised
    * event for it in the Lead's batch, else the owner of its newest open
-   * decision item, else its earliest-created tracker (the D15 tie-break).
+   * decision item, else its earliest-created tracker.
    */
   const ownerOf = (ctx: Ctx, threadId: ThreadId) =>
     Effect.gen(function* () {
@@ -647,7 +664,7 @@ const make = Effect.gen(function* () {
       return Option.fromNullishOr(trackers[0]);
     });
 
-  /** P17.10: a Lead sweep finding, admitted inside the card's transaction. */
+  /** A Lead sweep finding, admitted inside the card's transaction. */
   const admitFinding = (ctx: Ctx, finding: NonNullable<CardPlan["finding"]>) =>
     Effect.gen(function* () {
       if (Option.isNone(sweep)) {
@@ -662,7 +679,7 @@ const make = Effect.gen(function* () {
       });
     });
 
-  /** The Lead reads any thread one of its Squires tracks (P17.7). */
+  /** The Lead reads any thread one of its Squires tracks. */
   const readable = (ctx: Ctx, threadId: ThreadId) =>
     ctx.squire.role === "lead"
       ? scope.trackersOf(threadId).pipe(Effect.map((ids) => ids.length > 0))
@@ -676,24 +693,37 @@ const make = Effect.gen(function* () {
       .get(projectId, { includeDeleted: true })
       .pipe(Effect.map((row) => Option.match(row, { onNone: () => "", onSome: (p) => p.title })));
 
-  // ── Run and origin (A3) ──
+  // ── Run and origin ──
 
-  const callRun = (homeThreadId: ThreadId) =>
+  /**
+   * The call's run, read once when it arrives: the turn in flight, else the
+   * last one (a call that outlived its turn). Only a run the user's own
+   * message started is `user`; no run, or one that cannot be read, is
+   * `unknown`, which only recommends. A run that read another Squire's room
+   * posts acts as `message` from then on.
+   */
+  const callRun = (squireId: SquireId, homeThreadId: ThreadId) =>
     Effect.gen(function* () {
       const shell = yield* projections.getThreadShell(homeThreadId);
       const runId = shell?.activeRunId ?? shell?.latestRunId ?? null;
-      if (runId === null) return { runId: "none", origin: "user", batchId: null } satisfies CallRun;
+      if (runId === null) {
+        return { runId: "none", origin: "unknown", batchId: null } satisfies CallRun;
+      }
       const { runs } = yield* projections.getThreadRecords(homeThreadId, ["runs"], {
         runIds: [runId],
       });
       const run = runs.find((entry) => entry.id === runId);
-      const parsed = run
-        ? SquireDelivery.parseSquireMessageId(run.userMessageId)
-        : Option.none<{ readonly origin: string; readonly batchId: string }>();
-      const origin: SquireCardOrigin = Option.match(parsed, {
+      if (run === undefined) return { runId, origin: "unknown", batchId: null } satisfies CallRun;
+      const parsed = SquireDelivery.parseSquireMessageId(run.userMessageId);
+      const started: SquireCardOrigin = Option.match(parsed, {
         onNone: () => "user",
         onSome: ({ origin: value }) => decodeTurnOrigin(value),
       });
+      const origin: SquireCardOrigin =
+        !recommendOnlyOrigins.has(started) &&
+        (yield* readSquireText(repository, { squireId, runId })).tainted
+          ? "message"
+          : started;
       const batchId = Option.match(parsed, {
         onNone: () => null,
         onSome: ({ batchId: value }) => value,
@@ -874,23 +904,23 @@ const make = Effect.gen(function* () {
     readonly payload: SquireCardPayload;
     readonly trigger: SquireCardTrigger;
     readonly intent: SquireActionIntent | null;
-    /** Auto: the card is committed `held` and executes at `executesAt` (A9, P10). */
+    /** Auto: the card is committed `held` and executes at `executesAt`. */
     readonly hold: { readonly executesAt: string } | null;
     readonly steerKind: SquireSteerKind | null;
     readonly ruleId: SquireRepository.SquireCardRow["rule_id"];
     readonly caption: string | null;
-    /** D26: steer and proposal cards push when Notify is On. */
+    /** Steer and proposal cards push when Notify is On. */
     readonly push: boolean;
     readonly logData: Record<string, unknown>;
-    /** P17.8: the Squire a Lead card acts for; the raiser otherwise. */
+    /** The Squire a Lead card acts for; the raiser otherwise. */
     readonly owner?: SquireId;
-    /** A Lead sweep finding, admitted by `SquireSweep` in the card's transaction (P17.10). */
+    /** A Lead sweep finding, admitted by `SquireSweep` in the card's transaction. */
     readonly finding?: { readonly threadId: ThreadId | null; readonly kind: "steer" | "proposal" };
   }
 
   type Admitted = { readonly findingKey: string; readonly trigger: SquireCardTrigger };
 
-  /** The task a routed-task turn answers (7.7); its cards and quiet row name it. */
+  /** The task a routed-task turn answers; its cards and quiet row name it. */
   const routedTaskOf = (ctx: Ctx) =>
     ctx.squire.role === "lead" || ctx.run.batchId === null
       ? Effect.succeed(null)
@@ -908,12 +938,12 @@ const make = Effect.gen(function* () {
     SquireCardId.make(`card:${kind}:${ctx.squire.id}:${ctx.key.slice(0, 24)}`);
 
   /**
-   * Inside the caller's transaction. P7.6: an open card of the same
+   * Inside the caller's transaction. An open card of the same
    * (Squire, target, kind) is replaced in place and counted as "updated".
    */
   const writeCard = (ctx: Ctx, plan: CardPlan, finding: Admitted | null = null) =>
     Effect.gen(function* () {
-      // P17.9: an item the Lead raises for a typed task is that task's receipt (D53).
+      // An item the Lead raises for a typed task is that task's receipt.
       const leadTask =
         ctx.squire.role === "lead" &&
         ctx.run.origin === "user" &&
@@ -922,13 +952,13 @@ const make = Effect.gen(function* () {
           ? `task:${ctx.key.slice(0, 24)}`
           : null;
       const routedTaskId = leadTask ?? (yield* routedTaskOf(ctx));
-      // D33: a voice turn's card says whether the note's speaker was verified.
+      // A voice turn's card says whether the note's speaker was verified.
       const speakerVerified =
         ctx.run.origin === "voice" && ctx.run.batchId !== null
           ? SquireDelivery.batchSpeakerVerified(yield* repository.listBatch(ctx.run.batchId))
           : undefined;
       const trigger = finding?.trigger ?? plan.trigger;
-      // A sweep finding is its own item, keyed for the dismissal memory (D59).
+      // A sweep finding is its own item, keyed for the dismissal memory.
       const [open] =
         plan.targetThreadId === null || finding !== null
           ? []
@@ -954,7 +984,7 @@ const make = Effect.gen(function* () {
       };
       let cardId: SquireCardId;
       let replacedCount = 0;
-      // A hold is its own card; P7.6 replacement applies to open cards only.
+      // A hold is its own card; in-place replacement applies to open cards only.
       if (open !== undefined && plan.hold === null) {
         cardId = open.id;
         replacedCount = open.replaced_count + 1;
@@ -991,7 +1021,8 @@ const make = Effect.gen(function* () {
           ...columns,
         });
       }
-      // The D26 FYI rule reads these rows by run, so an update writes one too.
+      // The fallback FYI for threads a turn raised nothing on reads these rows
+      // by run, so an update writes one too.
       // A hold is not a card until it is undone or refused at execution.
       yield* logRow(
         ctx,
@@ -1025,7 +1056,7 @@ const make = Effect.gen(function* () {
       }
       let wakeLead: SquireId | null = null;
       if (replacedCount === 0) {
-        // A hold pushes only if it becomes a card (P10).
+        // A hold pushes only if it becomes a card.
         if (plan.push && plan.hold === null) {
           yield* logRow(
             ctx,
@@ -1033,7 +1064,7 @@ const make = Effect.gen(function* () {
             { kind: plan.kind, source: plan.kind === "fyi" ? "notify" : "card" },
             { threadId: plan.targetThreadId, cardId },
           );
-          // P7.10: held back while a desktop is active; it reaches the phone on
+          // Held back while a desktop is active; it reaches the phone on
           // escalation. SquireMobileAttention writes the mobile delivery row.
           if (Option.isSome(presence)) {
             yield* presence.value.holdIntent({
@@ -1046,7 +1077,7 @@ const make = Effect.gen(function* () {
             });
           }
         }
-        // P17.5: a decision item wakes the Lead, as the reactor's question card does.
+        // A decision item wakes the Lead, as the reactor's question card does.
         if (ctx.squire.role !== "lead") {
           const lead = yield* writeLeadItemEvent(repository, {
             transition: "raised",
@@ -1141,7 +1172,7 @@ const make = Effect.gen(function* () {
       now: ctx.now,
     }).level === "auto";
 
-  /** P10.1: the undo window, server-owned. */
+  /** The undo window, server-owned. */
   const holdUntil = (ctx: Ctx) =>
     DateTime.formatIso(
       DateTime.add(DateTime.makeUnsafe(ctx.now), { seconds: ctx.squire.undo_window_seconds }),
@@ -1154,10 +1185,46 @@ const make = Effect.gen(function* () {
 
   // ── Steers ──
 
+  /**
+   * The PR transition in this turn's batch that the steer answers, stored on
+   * its card: a run id alone survives a failing check turning green on the
+   * same commit, so a rerun-checks hold would still send. The reactor
+   * outdates the card, and execution re-checks it, once the PR leaves it.
+   */
+  const pullRequestTriggerOf = (
+    ctx: Ctx,
+    threadId: ThreadId,
+    steerKind: (typeof SquireSteerArgs.Type)["steerKind"],
+  ) =>
+    batchEvents(ctx).pipe(
+      Effect.map((rows): SquireCardTrigger => {
+        const changes = rows.flatMap((row) => {
+          if (row.kind !== "pull-request-changed" || row.thread_id !== threadId) return [];
+          const payload = decodeEventPayload(row.payload_json ?? "");
+          return Option.isSome(payload) && payload.value.pullRequest !== null
+            ? [payload.value.pullRequest]
+            : [];
+        });
+        const area = STEER_PULL_REQUEST_AREA[steerKind];
+        const change =
+          (area === undefined
+            ? undefined
+            : changes.findLast((candidate) => candidate.transition.startsWith(area))) ??
+          changes.at(-1);
+        return change === undefined
+          ? {}
+          : {
+              prKey: threadPullRequestKeyOf(change),
+              headSha: change.headSha,
+              transition: change.transition,
+            };
+      }),
+    );
+
   const steer = (ctx: Ctx, args: typeof SquireSteerArgs.Type, send: boolean) =>
     Effect.gen(function* () {
       const lead = ctx.squire.role === "lead";
-      // P17.8: the Lead's steer belongs to, and is charged to, the thread's owning Squire.
+      // The Lead's steer belongs to, and is charged to, the thread's owning Squire.
       const owner = lead
         ? yield* ownerOf(ctx, args.threadId)
         : (yield* scope.isTracked(ctx.squire.id, args.threadId))
@@ -1234,7 +1301,10 @@ const make = Effect.gen(function* () {
           steer: args.steer,
           steerKind: args.steerKind,
         },
-        trigger: shell?.latestRunId ? { runId: shell.latestRunId } : {},
+        trigger: {
+          ...(shell?.latestRunId ? { runId: shell.latestRunId } : {}),
+          ...(yield* pullRequestTriggerOf(ctx, args.threadId, args.steerKind)),
+        },
         intent: {
           type: "steer",
           threadId: args.threadId,
@@ -1290,7 +1360,7 @@ const make = Effect.gen(function* () {
   const isFixtureProject = (workspaceRoot: string) =>
     isFixtureWorkspaceRoot(config.baseDir, workspaceRoot);
 
-  /** P6: by id or name, among projects a project, space, or saga grant covers. */
+  /** By id or name, among projects a project, space, or saga grant covers. */
   const scopedProject = (squireId: SquireId, wanted: string) =>
     Effect.gen(function* () {
       const grants = yield* repository.listGrants(squireId);
@@ -1338,7 +1408,7 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const lead = ctx.squire.role === "lead";
-      // P17.7, P17.8: the Lead proposes for a named Squire, inside that Squire's grants.
+      // The Lead proposes for a named Squire, inside that Squire's grants.
       let owner = ctx.squire;
       if (lead) {
         const named =
@@ -1375,7 +1445,7 @@ const make = Effect.gen(function* () {
       const proposed =
         instances.find((instance) => instance.instanceId === args.provider) ??
         instances.find((instance) => String(instance.driverKind) === args.provider);
-      // D44j: fixtures always launch on the scripted instance, never a real provider.
+      // Fixtures always launch on the scripted instance, never a real provider.
       const fixture =
         (owner.create_request_id?.startsWith("fixture:") ?? false) ||
         isFixtureProject(project.value.workspaceRoot);
@@ -1457,7 +1527,7 @@ const make = Effect.gen(function* () {
         model: shownModel,
         firstPrompt: args.firstPrompt,
       };
-      // A9 "Thread create": a hold stores the full launch input with its
+      // A hold stores the full launch input with its
       // deterministic ids; one that cannot be prepared waits for an accept.
       let launch: SquireLaunchAction.SquireLaunchIntent | null = null;
       let unprepared: string | null = null;
@@ -1613,7 +1683,7 @@ const make = Effect.gen(function* () {
       return result;
     });
 
-  // ── Lead (P17.7, P17.9) ──
+  // ── Lead ──
 
   const ITEM_KIND: Record<(typeof ITEM_TYPES)[number], SquireRepository.SquireCardRow["kind"]> = {
     action: "steer",
@@ -1673,7 +1743,7 @@ const make = Effect.gen(function* () {
 
   const routeTask = (ctx: Ctx, args: typeof RouteTaskArgs.Type) =>
     Effect.gen(function* () {
-      // P17.9: only work the user typed; a Squire turn of any origin never routes.
+      // Only work the user typed; a Squire turn of any origin never routes.
       if (ctx.squire.role !== "lead" || ctx.run.origin !== "user") {
         return yield* refuse(
           ctx,
@@ -1781,7 +1851,7 @@ const make = Effect.gen(function* () {
           const decoded = yield* decodeArgs(SquireSteerArgs, ctx.args);
           if (!decoded.ok) return yield* bad(decoded.message);
           const length = [...decoded.value.steer.trim()].length;
-          if (length > SQUIRE_STEER_MAX_CHARS) {
+          if (length >= SQUIRE_STEER_MAX_CHARS) {
             return yield* bad(
               `the steer is ${length} characters; shorten it to one action under ${SQUIRE_STEER_MAX_CHARS} characters and call ${ctx.tool} again.`,
             );
@@ -1889,7 +1959,7 @@ const make = Effect.gen(function* () {
         return refused("caller", "This credential does not belong to an active Squire thread.");
       }
       const squire = found.value;
-      const runInfo = yield* callRun(caller.threadId);
+      const runInfo = yield* callRun(squire.id, caller.threadId);
       const now = DateTime.formatIso(yield* DateTime.now);
       const builtIn = DEFINITIONS[name] !== undefined;
       const handler = builtIn ? Option.none() : registered(caller.role, name);
@@ -1899,7 +1969,7 @@ const make = Effect.gen(function* () {
       const key = squireInvocationKey(caller.squireId, runInfo.runId, name, withoutNulls(args));
       const ctx: Ctx = { caller, squire, run: runInfo, tool: name, key, args, now };
       if (!allowed) {
-        // P6.2: a forbidden or unknown tool is refused and logged, never run.
+        // A forbidden or unknown tool is refused and logged, never run.
         return yield* lockFor(squire.id).withPermits(1)(
           Effect.gen(function* () {
             const stored = yield* storedResult(key);
@@ -1928,7 +1998,7 @@ const make = Effect.gen(function* () {
           const stored = yield* storedResult(key);
           if (Option.isSome(stored)) return stored.value;
           return yield* run(ctx).pipe(
-            // A duplicate that committed first owns the result (A9).
+            // A duplicate that committed first owns the result.
             Effect.catchCause((cause) =>
               storedResult(key).pipe(
                 Effect.flatMap((again) =>

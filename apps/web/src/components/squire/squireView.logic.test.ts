@@ -6,7 +6,7 @@ import { parseSquireViewSearch, squireViewForThread } from "./squireView.logic";
 const environmentId = EnvironmentId.make("env-a");
 const squireId = SquireId.make("release");
 
-describe("squireViewForThread (D63)", () => {
+describe("squireViewForThread", () => {
   it("opens a marked home thread as its Squire view", () => {
     expect(squireViewForThread(environmentId, { squire: { squireId, role: "home" } })).toEqual({
       environmentId,

@@ -1,5 +1,5 @@
 /**
- * The fixture seam and fixture mode (4.7, 4.8) over the server's switch-on
+ * The fixture seam and fixture mode over the server's switch-on
  * Squire layer, a real orchestrator, and the scripted provider.
  */
 import { assert, describe, it } from "@effect/vitest";
@@ -186,7 +186,7 @@ const answer = (threadId: ThreadId, requestId: RuntimeRequestId) =>
     }),
   );
 
-describe("SquireDevFixtures (4.7, 4.8)", () => {
+describe("SquireDevFixtures", () => {
   it("keys the first step per kind, tolerates refusals, and fills {{event.*}} per event", () => {
     const script = decodeFakeScript({
       steps: [
@@ -717,7 +717,7 @@ describe("SquireDevFixtures (4.7, 4.8)", () => {
           const service = yield* fixtures;
           const squires = yield* need(SquireService.SquireService);
           const repository = yield* SquireRepository.SquireRepository;
-          // B1 order: Release from the step 1-4 fixtures, then Research from 07.
+          // The stills procedure's order: Release from the step 1-4 fixtures, then Research from 07.
           const release = (yield* service.loadSetup(scenario01.setup)).squireId;
           const lead = Option.getOrThrow(yield* squires.ensureLead({ requestId: "lead" }));
           const research = (yield* service.loadSetup(scenario07.setup)).squires["Research"]!;

@@ -12,7 +12,7 @@ import { Tooltip, TooltipTrigger } from "../../ui/tooltip";
 import { SquireCompanion } from "../SquireCompanion";
 import { squireRecentFromSnapshot, squireRecentLabel } from "../squirePage.logic";
 
-// Spec P16.5(b): one card at a time. The open card's key lives here, so opening a second card
+// One card at a time. The open card's key lives here, so opening a second card
 // closes the first rather than leaving two live busts.
 let openCard: string | null = null;
 const openCardListeners = new Set<() => void>();
@@ -30,7 +30,7 @@ function subscribeOpenCard(listener: () => void) {
   };
 }
 
-// Never on touch (P16.5(b)). Base UI's hover is mouse-only already; this also refuses pen.
+// Never on touch. Base UI's hover is mouse-only already; this also refuses pen.
 let lastPointerType = "mouse";
 
 /** "just now", "5m ago": re-renders only when the text changes. */

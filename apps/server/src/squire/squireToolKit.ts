@@ -1,7 +1,7 @@
 /**
  * The seam feature layers use to add Squire role tools without editing
  * `SquireTools`: a handler gets the call's context and the kit, whose keyed
- * writes keep A9 (card, hold, and log rows commit with `tool.called` in one
+ * writes stay idempotent (card, hold, and log rows commit with `tool.called` in one
  * transaction). Handlers register into `SquireToolRegistry` when their layer
  * is built, so layer order does not matter.
  *
@@ -48,7 +48,7 @@ export interface SquireToolDefinition {
 export interface SquireToolCaller {
   readonly squireId: SquireId;
   readonly role: SquireRole;
-  /** The Squire's home thread, whose active run is the call's run (A3). */
+  /** The Squire's home thread, whose active run is the call's run. */
   readonly threadId: ThreadId;
 }
 
@@ -64,7 +64,7 @@ export interface SquireToolContext {
   readonly squire: SquireRepository.SquireRow;
   readonly run: SquireToolRun;
   readonly tool: string;
-  /** The invocation key (A9). */
+  /** The invocation key. */
   readonly key: string;
   readonly args: unknown;
   readonly now: string;
@@ -121,7 +121,7 @@ export interface SquireToolKit {
     schema: S,
     args: unknown,
   ) => Effect.Effect<SquireToolDecoded<S["Type"]>>;
-  /** Now plus the Squire's undo window (P10.1). */
+  /** Now plus the Squire's undo window. */
   readonly holdUntil: (ctx: SquireToolContext) => string;
   /** Whether the caller's Notify is On for this turn's origin. */
   readonly notifyOn: (ctx: SquireToolContext) => boolean;

@@ -52,7 +52,7 @@ export function SquireMark({ state, palette, isLead, size, label, className }: S
         className={cn("block size-full", dimmed ? "opacity-50 grayscale" : "opacity-100")}
       >
         {/* While working the base recedes to a faint rest, so the bold full-color dash alone
-            carries the still at 16 px (B4, CP6). */}
+            carries the still at 16 px. */}
         <g data-slot="squire-mark-base" className={cn(working && "opacity-25")}>
           <g strokeLinecap="round" strokeLinejoin="round" strokeWidth={waiting ? 1.6 : 1.25}>
             <path d={STRAND} className={strandStroke} />

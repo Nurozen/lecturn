@@ -766,7 +766,7 @@ export function HomeScreen(props: HomeScreenProps) {
     shelfPreferencesLoading: !shelfPreferencesLoaded,
   });
 
-  // Lecturn: the Squires section (P13.2) above the project tree.
+  // Lecturn: the Squires section above the project tree.
   const squireItems = useSquireHomeItems({
     environments: props.environments,
     selectedEnvironmentId: props.selectedEnvironmentId,

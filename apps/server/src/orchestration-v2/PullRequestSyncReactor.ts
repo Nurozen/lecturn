@@ -37,7 +37,7 @@ import * as ProjectionStore from "./ProjectionStore.ts";
 import { isTerminalRunStatus } from "./ThreadManagementService.ts";
 
 const SLOW_SYNC_INTERVAL_MS = 15 * 60 * 1_000;
-/** Lecturn: the host of PR links Squire dev fixtures commit (D44j); never read. */
+/** Lecturn: the host of PR links Squire dev fixtures commit; never read. */
 export const FIXTURE_PULL_REQUEST_HOST = "fixture.invalid";
 const PULL_REQUEST_CLOSE_COMMAND = /\b(?:gh\s+pr|glab\s+mr)\s+(?:merge|close)\b/u;
 
@@ -200,7 +200,7 @@ export const make = Effect.gen(function* () {
     const groups = new Map<string, Array<LinkEntry>>();
     for (const thread of threads) {
       for (const link of visibleThreadPullRequests(thread.pullRequests ?? [])) {
-        // Lecturn: a Squire fixture's snapshot is the fixture's own (R98); its host is not real.
+        // Lecturn: a Squire fixture's snapshot is the fixture's own; its host is not real.
         if (link.host.toLowerCase() === FIXTURE_PULL_REQUEST_HOST) continue;
         // Reads depend on the project's checkout and credentials, including their failures.
         const key = `${thread.projectId}\0${threadPullRequestKeyOf(link)}`;

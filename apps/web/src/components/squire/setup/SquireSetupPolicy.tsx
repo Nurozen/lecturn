@@ -135,7 +135,7 @@ export function SquirePermissionsSection(
   );
 }
 
-/** P2.4: one Squire holds steer Auto per thread; the earliest-created one keeps it. */
+/** One Squire holds steer Auto per thread; the earliest-created one keeps it. */
 function SteerConflicts(props: {
   readonly environmentId: EnvironmentId;
   readonly name: string;
@@ -301,7 +301,7 @@ const SWEEP_KINDS: ReadonlyArray<{ readonly value: SweepKind; readonly label: st
   { value: "interval", label: "Every few hours" },
 ];
 
-/** P17.10 find-work sweep. */
+/** The Lead's find-work sweep. */
 export function SquireSweepSection(
   props: SetupFieldsProps & { readonly environmentId: EnvironmentId; readonly leadId: SquireId },
 ) {

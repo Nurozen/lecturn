@@ -5,6 +5,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { CodexSettings, ProviderInstanceId } from "@lecturn/contracts";
+import { tokenizeCliArgs } from "@lecturn/shared/cliArgs";
 
 import {
   CodexSquireHomeError,
@@ -107,10 +108,15 @@ describe("makeCodexSquireHome", () => {
       instanceId: ProviderInstanceId.make("codex"),
       homeDirectory: "/nonexistent-home",
     });
-    const launch = (environment: NodeJS.ProcessEnv = {}, setupMode?: "managed") => ({
+    const launch = (
+      environment: NodeJS.ProcessEnv = {},
+      setupMode?: "managed",
+      launchArgs?: string,
+    ) => ({
       settings: decodeCodexSettings({
         homePath: sourceHomePath,
         ...(setupMode ? { setupMode } : {}),
+        ...(launchArgs === undefined ? {} : { launchArgs }),
       }),
       environment,
     });
@@ -142,6 +148,39 @@ describe("makeCodexSquireHome", () => {
         yield* fileSystem.readLink(path.join(home.squireHomePath, "auth.json")),
         path.join(sourceHomePath, "auth.json"),
       );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("keeps an instance's launch args from turning a Squire's tools back on", () =>
+    Effect.gen(function* () {
+      const { fileSystem, path, sourceHomePath, home, launch } = yield* squireHomeFor;
+      yield* fileSystem.writeFileString(path.join(sourceHomePath, "auth.json"), "{}");
+      const hostile = [
+        "--enable shell_tool",
+        "-c features.shell_tool=true",
+        "--config=features.unified_exec=true",
+        `-c 'mcp_servers.evil.command="evil"'`,
+        "-cweb_search=live",
+        "--cloud-skills-snapshot /tmp/skills.json",
+        "--code-mode-host ws://127.0.0.1:1",
+        "--listen ws://0.0.0.0:4500",
+        `-c 'model_provider="custom"'`,
+        `--config 'model_providers.custom.name="It'"'"'s mine"'`,
+      ].join(" ");
+      const kept = [
+        "-c",
+        `model_provider="custom"`,
+        "-c",
+        `model_providers.custom.name="It's mine"`,
+        "-c",
+        `cli_auth_credentials_store="file"`,
+      ];
+      const fromSettings = yield* home.prepare(launch({}, undefined, hostile));
+      assert.deepEqual(tokenizeCliArgs(fromSettings.settings.launchArgs), kept);
+      const fromEnvironment = yield* home.prepare(
+        launch({ LECTURN_CODEX_LAUNCH_ARGS: hostile }, undefined, ""),
+      );
+      assert.deepEqual(tokenizeCliArgs(fromEnvironment.settings.launchArgs), kept);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

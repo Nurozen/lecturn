@@ -1,7 +1,12 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Schema } from "effect";
+import { EnvironmentId, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { ExtensionHostFundingRequest } from "./contextualRpc.ts";
 import {
   ExtensionAllowance,
+  ExtensionFeatureId,
+  ExtensionFundingStatusResult,
+  extensionFundingFor,
   ExtensionFundingApprovalRequest,
   ExtensionFundingObserveResult,
   ExtensionFundingAccountListResult,
@@ -23,6 +28,63 @@ const allowance = {
     { featureId: "contextual", usedInputTokens: 100, reservedInputTokens: 0 },
   ],
 };
+/** The funding status released clients decode, copied verbatim from before Squires existed. */
+const LegacyFundingStatusResult = (() => {
+  const id = TrimmedNonEmptyString.check(Schema.isMaxLength(256));
+  const counter = NonNegativeInt.check(Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER));
+  const featureId = Schema.Literals(["decisions", "contextual"]);
+  const reason = Schema.Literals([
+    "eligible",
+    "disabled",
+    "not-paid",
+    "trial",
+    "stale-billing",
+    "cohort",
+    "unavailable",
+  ]);
+  const allowance = Schema.Struct({
+    poolId: id,
+    basis: Schema.Literals(["subscription", "grant"]),
+    windowStart: Schema.String,
+    windowEnd: Schema.String,
+    limitInputTokens: counter,
+    usedInputTokens: counter,
+    reservedInputTokens: counter,
+    remainingInputTokens: counter,
+    byFeature: Schema.Array(
+      Schema.Struct({ featureId, usedInputTokens: counter, reservedInputTokens: counter }),
+    ).check(Schema.isMaxLength(2)),
+  }).check(
+    Schema.makeFilter(
+      (v) =>
+        Date.parse(v.windowStart) < Date.parse(v.windowEnd) &&
+        new Set(v.byFeature.map((entry) => entry.featureId)).size === v.byFeature.length &&
+        v.byFeature.reduce((sum, entry) => sum + entry.usedInputTokens, 0) === v.usedInputTokens &&
+        v.byFeature.reduce((sum, entry) => sum + entry.reservedInputTokens, 0) ===
+          v.reservedInputTokens &&
+        Number.isSafeInteger(v.usedInputTokens + v.reservedInputTokens) &&
+        v.remainingInputTokens ===
+          Math.max(0, v.limitInputTokens - v.usedInputTokens - v.reservedInputTokens),
+    ),
+  );
+  return Schema.Struct({
+    featureId,
+    environmentId: EnvironmentId,
+    state: Schema.Literals(["unfunded", "pending", "active", "revoked", "unavailable"]),
+    generation: counter,
+    accountLabel: Schema.NullOr(Schema.String.check(Schema.isMaxLength(200))),
+    eligible: Schema.Boolean,
+    reason,
+    allowance: Schema.NullOr(allowance),
+    remoteRevocationPending: Schema.Boolean,
+  }).check(Schema.makeFilter((v) => v.eligible === (v.reason === "eligible")));
+})();
+const decodeLegacyFundingStatus = Schema.decodeUnknownSync(LegacyFundingStatusResult);
+const encodeFundingStatus = Schema.encodeSync(ExtensionFundingStatusResult);
+const decodeFundingStatus = Schema.decodeUnknownSync(ExtensionFundingStatusResult);
+const decodeHostFundingRequest = Schema.decodeUnknownSync(ExtensionHostFundingRequest, {
+  onExcessProperty: "error",
+});
 const isAllowance = Schema.is(ExtensionAllowance);
 const decodeAllowance = Schema.decodeUnknownSync(ExtensionAllowance);
 const encodeAllowance = Schema.encodeSync(ExtensionAllowance);
@@ -92,6 +154,88 @@ describe("extension paid contracts", () => {
     expect(strictApproval({ featureId: "squires", challengeId: "challenge" }).featureId).toBe(
       "squires",
     );
+  });
+  it("folds a feature this build does not know out of the pool instead of failing", () => {
+    const future = {
+      ...allowance,
+      usedInputTokens: 280,
+      reservedInputTokens: 210,
+      remainingInputTokens: 510,
+      byFeature: [
+        ...allowance.byFeature,
+        { featureId: "future-feature", usedInputTokens: 30, reservedInputTokens: 10 },
+      ],
+    };
+    const decoded = decodeAllowance(future);
+    expect(decoded).toEqual({ ...allowance, limitInputTokens: 960, remainingInputTokens: 510 });
+    expect(decodeAllowance(encodeAllowance(decoded))).toEqual(decoded);
+    // Unknown entries are still held to the wire totals, and known entries still fail loudly.
+    expect(() => decodeAllowance({ ...future, usedInputTokens: 300 })).toThrow();
+    expect(() =>
+      decodeAllowance({
+        ...future,
+        byFeature: [
+          { ...allowance.byFeature[0], usedInputTokens: -1 },
+          ...future.byFeature.slice(1),
+        ],
+      }),
+    ).toThrow();
+    const feature = (featureId: string) => ({
+      featureId,
+      available: true,
+      enabled: true,
+      eligible: true,
+      reason: "eligible",
+    });
+    expect(
+      decodeServiceStatus({
+        features: [feature("decisions"), feature("future-feature"), feature("squires")],
+        allowance: future,
+      }),
+    ).toEqual({
+      features: [feature("decisions"), feature("squires")],
+      allowance: decoded,
+    });
+  });
+  it("serves clients that predate Squires an allowance they can decode", () => {
+    const withSquires = decodeFundingStatus({
+      featureId: "contextual",
+      environmentId: "env-fixture",
+      state: "active",
+      generation: 1,
+      accountLabel: "Lecturn account",
+      eligible: true,
+      reason: "eligible",
+      remoteRevocationPending: false,
+      allowance: {
+        ...allowance,
+        usedInputTokens: 290,
+        reservedInputTokens: 220,
+        remainingInputTokens: 490,
+        byFeature: [
+          ...allowance.byFeature,
+          { featureId: "squires", usedInputTokens: 40, reservedInputTokens: 20 },
+        ],
+      },
+    });
+    expect(() => decodeLegacyFundingStatus(encodeFundingStatus(withSquires))).toThrow();
+    // A request without `features` came from an older client: Squires is folded out.
+    const legacy = decodeLegacyFundingStatus(
+      encodeFundingStatus(extensionFundingFor(withSquires, undefined)),
+    );
+    expect(legacy.allowance).toEqual({
+      ...allowance,
+      limitInputTokens: 940,
+      remainingInputTokens: 490,
+    });
+    const current = extensionFundingFor(withSquires, ExtensionFeatureId.literals);
+    expect(current).toEqual(withSquires);
+    // Old payloads still decode, and a newer client's unknown feature names are ignored.
+    const create = { featureId: "contextual", operation: "create", expectedGeneration: 0 };
+    expect(decodeHostFundingRequest(create)).toEqual(create);
+    expect(
+      decodeHostFundingRequest({ ...create, features: ["contextual", "future-feature"] }).features,
+    ).toEqual(["contextual", "future-feature"]);
   });
   it("does not accept wildcard consent, caller-selected payer or credentials", () => {
     expect(strictApproval({ featureId: "contextual", challengeId: "challenge" }).featureId).toBe(

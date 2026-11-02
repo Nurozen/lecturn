@@ -27,7 +27,7 @@ export const ExtensionEvaluatorPolicyVersion = Schema.Literals([
 ]);
 
 /**
- * Squire room routing (P19.4). Only names, briefs, scopes, recent activity
+ * Squire room routing. Only names, briefs, scopes, recent activity
  * titles and the post itself cross the wire. The hosted `squire-routing-v1`
  * policy asks Jev one `choice` over the member ids plus `lead` ("needs the
  * Lead"), at most 7 options, and one `noul` "does this post need no reply".

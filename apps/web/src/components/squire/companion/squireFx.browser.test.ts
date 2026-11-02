@@ -450,7 +450,7 @@ describe("squireFx", () => {
     }
   });
 
-  // CP8: a full eye-to-item sightline read as a laser or a stick at panel size, and crossed the
+  // A full eye-to-item sightline read as a laser or a stick at panel size, and crossed the
   // face. The glance now arrives at the item as a short flick ending at the landing glint.
   it("lands the glance as a short flick at the item's glint, clear of the eye", () => {
     for (const appearance of ["female", "male"] as const) {

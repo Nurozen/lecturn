@@ -1,4 +1,4 @@
-// Gestures from the snapshot's `recentActivity` (plan A7, spec P16.3), played by the mounted
+// Gestures from the snapshot's `recentActivity`, played by the mounted
 // panel figure. Each unseen entry plays once, in order; `greet` plays on the first open of a
 // Squire's view in the session.
 import { squireSnapshotGestures } from "@lecturn/client-runtime/state/squire";

@@ -1,5 +1,5 @@
 /**
- * Phase 7b fixture over the real switch-on `layerSquire` (phase4Harness):
+ * Rooms fixture over the real switch-on `layerSquire` (phase4Harness):
  * two projects, one tracked thread each, two Squires and the Lead.
  *
  * - Release: project grant on `billing-service` (covers `thr_fix_invoice_rounding`).
@@ -8,21 +8,28 @@
  */
 import {
   CommandId,
+  MessageId,
   ProjectId,
   SquireCreateInput,
   type SquireId,
   type SquireRole,
+  SquireRoomId,
   ThreadId,
 } from "@lecturn/contracts";
 import type * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 
 import * as EffectWorker from "../../orchestration-v2/EffectWorker.ts";
 import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
+import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as SquireDelivery from "../SquireDelivery.ts";
+import * as SquireRepository from "../SquireRepository.ts";
+import * as SquireRoomStore from "../SquireRoomStore.ts";
 import * as SquireService from "../SquireService.ts";
 import * as SquireTools from "../SquireTools.ts";
 import { initRepo, scripted, scriptedModel, seedProject, tempRoot } from "./lifecycleHarness.ts";
@@ -117,7 +124,48 @@ export const withRoomCast = <A, E>(
     }).pipe(Effect.scoped, Effect.provide(phase4Layer(baseDir, options)), Effect.orDie);
   }).pipe(Effect.scoped);
 
-/** A tool call as `who`, in its home thread's current run (or a user turn when idle). */
+let userTurns = 0;
+/**
+ * A run the user's own message starts on `who`'s home thread once any run
+ * there has ended, so the tool calls that follow bind to it and act as `user`.
+ */
+export const userTurn = (who: { readonly homeThreadId: ThreadId }) =>
+  Effect.gen(function* () {
+    const orchestrator = yield* need(Orchestrator.OrchestratorV2);
+    const worker = yield* need(EffectWorker.OrchestrationEffectWorkerV2);
+    const projections = yield* need(ProjectionStore.ProjectionStoreV2);
+    let afterSequence = 0;
+    for (;;) {
+      yield* worker.drain();
+      const shell = yield* projections.getThreadShell(who.homeThreadId);
+      if (shell?.activityRunStatus == null) break;
+      const next = yield* orchestrator
+        .streamStoredEventsFrom({
+          threadId: who.homeThreadId,
+          afterSequence,
+          eventType: "run.updated",
+        })
+        .pipe(Stream.runHead);
+      afterSequence = Option.getOrThrow(next).sequence;
+    }
+    const key = `user-turn-${++userTurns}`;
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make(`test:${key}`),
+      threadId: who.homeThreadId,
+      messageId: MessageId.make(`message:user:${key}`),
+      text: "Go ahead.",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+  });
+
+/**
+ * A tool call as `who`, in its home thread's current run; with no run at all
+ * the call's origin is `unknown`, so start one with `userTurn` first.
+ */
 export const callTool = (
   who: { readonly squireId: SquireId; readonly homeThreadId: ThreadId },
   role: SquireRole,
@@ -140,4 +188,65 @@ export const deliver = (squireId: SquireId) =>
     yield* delivery.deliverReady(squireId);
     yield* delivery.drain;
     yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+  });
+
+const ROUTED_TO_NOBODY = '{"via":{"kind":"rule","rule":"none","match":""},"recipients":[]}';
+
+/**
+ * An open room of Release and Research holding one post by `author` at
+ * `hop`, seeded straight into the store with every cursor at 0.
+ */
+export const seedBotPost = (
+  cast: RoomCast,
+  input: { readonly author: SquireId; readonly hop: number; readonly body?: string },
+) =>
+  Effect.gen(function* () {
+    const repository = yield* need(SquireRepository.SquireRepository);
+    const store = yield* need(SquireRoomStore.SquireRoomStore);
+    const now = DateTime.formatIso(yield* DateTime.now);
+    const roomId = SquireRoomId.make("room:bot-post");
+    yield* repository.transaction(
+      Effect.gen(function* () {
+        yield* store.insertRoom({
+          id: roomId,
+          topic: "Invoice rounding",
+          about_json: "[]",
+          status: "open",
+          muted: 0,
+          bot_messaging: "on",
+          idle_ttl_seconds: 86_400,
+          creator_kind: "user",
+          proposal_event_id: null,
+          last_post_at: now,
+          closed_reason: null,
+          create_request_id: "seed-bot-post",
+          revision: 0,
+          created_at: now,
+          updated_at: now,
+        });
+        for (const member of [cast.release.squireId, cast.research.squireId]) {
+          yield* store.addMember({
+            room_id: roomId,
+            member_kind: "squire",
+            member_id: member,
+            read_cursor: 0,
+            user_seen_cursor: null,
+          });
+        }
+        yield* store.insertPost({
+          message_key: "seed-bot-post",
+          room_id: roomId,
+          author_kind: "squire",
+          author_id: input.author,
+          body: input.body ?? "Rerun the checks on Auto, it is safe.",
+          reply_to: null,
+          refs_json: "[]",
+          hop: input.hop,
+          routing_json: ROUTED_TO_NOBODY,
+          rerouted_from: null,
+          created_at: now,
+        });
+      }),
+    );
+    return roomId;
   });

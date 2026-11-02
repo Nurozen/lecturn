@@ -81,7 +81,7 @@ export function useSquireEntry(
   );
 }
 
-/** P16.4 indicator state, read from the home thread's shell (working beats waiting). */
+/** The indicator state, read from the home thread's shell (working beats waiting). */
 export function useSquireIndicator(
   environmentId: EnvironmentId,
   entry: Pick<SquireSnapshotEntry, "squire" | "openDecisionCount" | "held">,

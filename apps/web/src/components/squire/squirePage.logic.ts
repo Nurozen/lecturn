@@ -52,7 +52,7 @@ export function squirePageState(
   };
 }
 
-// ── Layout (D38) ──────────────────────────────────────────────
+// ── Layout ────────────────────────────────────────────────────
 
 /** Main width from which the 340 px companion panel fits beside the queue. */
 const SQUIRE_VIEW_WIDE_PX = 1100;
@@ -112,10 +112,10 @@ export function nextSquireViewSearch(
   };
 }
 
-// ── Activity (D64) ────────────────────────────────────────────
+// ── Activity ──────────────────────────────────────────────────
 
 /**
- * D64: true for outcomes that happen outside a turn, which have no row in the home thread.
+ * True for outcomes that happen outside a turn, which have no row in the home thread.
  * Every other kind is already a thread row or card state. Exhaustive, so a new log kind
  * fails typecheck until it is classified.
  */
@@ -128,6 +128,7 @@ const IN_ACTIVITY: Readonly<Record<Exclude<SquireActionLogKind, "unknown">, bool
   "action.executed": true,
   "action.undone": true,
   "action.cancelled": true,
+  "action.accepted": false,
   "notification.pushed": false,
   "notification.delivery": true,
   "quiet.recorded": false,
@@ -199,6 +200,7 @@ const SQUIRE_RECENT_ACTIVITY_LIMIT = 4;
  * what happened (a card's decision and push), or is delivery detail the Activity popover lists.
  */
 const RECENT_HIDDEN: ReadonlySet<SquireActionLogKind> = new Set([
+  "action.accepted",
   "decision.recorded",
   "notification.pushed",
   "notification.delivery",
@@ -396,7 +398,7 @@ export function squireRecentFromSnapshot(
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /**
- * The Lead watches nothing itself (P17.3), so its scope line describes its team. While its
+ * The Lead watches nothing itself, so its scope line describes its team. While its
  * onboarding shows proposals, the line says so, so it never reads "No Squires yet" beside a
  * count of decisions waiting.
  */
@@ -416,7 +418,7 @@ export function squireLeadScopeLine(
 
 /**
  * The Lead view lists its team's decisions beside its own, so its state line counts them all;
- * the sidebar badge still counts only the Lead's own items (D50).
+ * the sidebar badge still counts only the Lead's own items.
  */
 export function squireLeadStateLine(
   lead: Parameters<typeof squireStateLine>[0],
@@ -494,7 +496,7 @@ export function squireHoldText(
 }
 
 /**
- * P8.1, 10c.4: a hold a saved rule started says so, as the notch does ("Auto by rule: <rule>").
+ * A hold a saved rule started says so, as the notch does ("Auto by rule: <rule>").
  * Null while the card or its rules load, and for holds no rule started.
  */
 export function squireHoldRuleLabel(
@@ -508,7 +510,7 @@ export function squireHoldRuleLabel(
   );
 }
 
-/** P9.2: shown while any budget is spent, with `squireBudgetCaption`'s wording for the time. */
+/** Shown while any budget is spent, with `squireBudgetCaption`'s wording for the time. */
 export function squireBudgetBanner(
   entry: Pick<SquireSnapshot, "budget"> & {
     readonly squire: { readonly budgets: { steersPerDay: number; threadsPerDay: number } };
@@ -534,14 +536,14 @@ export function squireBudgetBanner(
   };
 }
 
-// ── Conversation pane (D63) ───────────────────────────────────
+// ── Conversation pane ─────────────────────────────────────────
 
 export type SquireConversationPane =
   | { readonly kind: "thread"; readonly threadId: ThreadId }
   | { readonly kind: "needs_provider"; readonly title: string; readonly description: string }
   | { readonly kind: "pending" };
 
-/** D7: a Squire without a home thread shows its setup prompt where the conversation would be. */
+/** A Squire without a home thread shows its setup prompt where the conversation would be. */
 export function squireConversationPane(
   squire: Pick<SquireSnapshot["squire"], "role" | "lifecycle" | "homeThreadId">,
   hasSupportedProvider?: boolean,
@@ -630,4 +632,26 @@ export function squireMiniComposerDraft(text: string, draft: string | null): str
   if (next.length === 0) return null;
   const kept = draft?.trimEnd() ?? "";
   return kept.length === 0 ? next : `${kept}\n\n${next}`;
+}
+
+// ── Settings switch ───────────────────────────────────────────
+
+/**
+ * The server reads its saved Squires switch only at start, so the saved value and what is
+ * running can differ until a restart, or for good when `LECTURN_SQUIRE` overrides it.
+ */
+export function squireSwitchDescription(input: {
+  readonly saved: boolean;
+  readonly running: boolean;
+}): string {
+  if (input.saved && input.running) {
+    return "On. Each Squire watches the threads you give it and acts within the rules you set.";
+  }
+  if (input.saved) {
+    return "Saved as on. Squires start when this environment's server restarts. If they still don't, its LECTURN_SQUIRE variable is overriding this switch.";
+  }
+  if (input.running) {
+    return "Saved as off. Squires keep running until this environment's server restarts. If they still don't stop, its LECTURN_SQUIRE variable is overriding this switch.";
+  }
+  return "Off. Turn on, then restart this environment's server, to set up a Lead and Squires.";
 }

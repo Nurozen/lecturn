@@ -1,9 +1,9 @@
 /**
- * Turns a Squire's `pending` event rows into turns on its home thread (P3.3,
- * P3.4, A3). One batch at a time per Squire: its rows are marked `batched`
+ * Turns a Squire's `pending` event rows into turns on its home thread. One
+ * batch at a time per Squire: its rows are marked `batched`
  * before the dispatch and stay so until the run that consumed them ends, so
  * a restart re-dispatches the same command id and receipt replay keeps the
- * home thread at one message (A9).
+ * home thread at one message.
  */
 import {
   CommandId,
@@ -45,6 +45,7 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import type { PersistenceSqlError } from "../persistence/Errors.ts";
 import { isStaveSpaceBusy } from "../stave/StaveOrchestrationHooks.ts";
 import * as StaveSpaceLock from "../stave/StaveSpaceLock.ts";
+import * as SquireContainers from "./SquireContainers.ts";
 import { withSquireDispatchOrigin } from "./SquireDispatchOrigin.ts";
 import { SquireRepository, type SquireEventRow, type SquireRow } from "./SquireRepository.ts";
 import * as SquireRoomStore from "./SquireRoomStore.ts";
@@ -59,6 +60,7 @@ import {
   rewindRoomCursors,
   roomContextFromWindows,
 } from "./squireRoomContext.ts";
+import { userStartedLeadKeys } from "./squireMessageGuards.ts";
 import { SquireSummaries } from "./SquireSummaries.ts";
 import {
   type SquireEventPayload,
@@ -82,8 +84,8 @@ export class SquireDelivery extends Context.Service<
     readonly deliverReady: (squireId: SquireId) => Effect.Effect<void, SquireDeliveryError>;
     /**
      * A home-thread run ended: its batch (if it carried one) becomes
-     * `delivered`, FYI cards are written per D26, and the next batch is
-     * woken. Idempotent.
+     * `delivered`, an FYI card is written for each thread the turn raised no
+     * item on, and the next batch is woken. Idempotent.
      */
     readonly finalizeRun: (input: {
       readonly squireId: SquireId;
@@ -124,7 +126,7 @@ const isSpaceBusy = (error: Orchestrator.OrchestratorV2Error) =>
   isHookRejection(error.cause) &&
   isStaveSpaceBusy(error.cause);
 
-/** P3.1: the Lead hears only these, plus its own P17.5 kinds. */
+/** The Lead hears only these kinds. */
 const LEAD_KINDS: ReadonlySet<string> = new Set([
   "digest-due",
   "sweep-due",
@@ -170,15 +172,15 @@ export function parseSquireMessageId(
 
 const isTestRow = (row: SquireEventRow) => row.state_key.startsWith("test:");
 const VOICE_FAILING_CHECKS = 3;
-// P3.3: their origin downgrade must cover exactly that input. A routed task
-// too, so the cards and quiet row of its turn name only it (P17.9).
+// Their origin downgrade must cover exactly that input. A routed task
+// too, so the cards and quiet row of its turn name only it.
 const deliveredAlone = (row: SquireEventRow) =>
   row.kind === "voice-note" ||
   row.kind === "webhook-received" ||
   row.kind === "routed-task" ||
   isTestRow(row);
 
-/** The next batch from ready rows, oldest first (P3.3, P19.1). */
+/** The next batch from ready rows, oldest first. */
 function chooseBatch(ready: ReadonlyArray<SquireEventRow>): ReadonlyArray<SquireEventRow> {
   const first = ready[0];
   if (!first) return [];
@@ -216,7 +218,7 @@ function senderOf(row: SquireEventRow, leadId: SquireId | null): string | null {
     : event.from.kind;
 }
 
-/** D33: whether a voice batch's speaker was verified (every note's); undefined for other batches. */
+/** Whether a voice batch's speaker was verified (every note's); undefined for other batches. */
 export function batchSpeakerVerified(rows: ReadonlyArray<SquireEventRow>): boolean | undefined {
   if (batchOrigin(rows) !== "voice") return undefined;
   return rows.every((row) => {
@@ -230,28 +232,40 @@ export function batchSpeakerVerified(rows: ReadonlyArray<SquireEventRow>): boole
 const ACTING_ORIGINS: ReadonlySet<SquireTurnOrigin> = new Set(["event", "room", "lead"]);
 
 /**
- * A3, D56. With the room context the batch shows (P19.7): any post by
- * another Squire makes the batch `message`, as its message would, since
- * context reaches the model as input. User, Lead, and system posts do not.
+ * Text a Squire wrote never drives Auto or a rule, directly or through the
+ * Lead. A Lead message keeps `lead` only when its key is in
+ * `userStartedLeadKeys` (a user started the Lead turn that sent it);
+ * otherwise it counts as a Squire's. Room context reaches the model as input
+ * too, so a Squire-written post in it makes the batch `message`.
  */
 export function batchOrigin(
   rows: ReadonlyArray<SquireEventRow>,
   roomContext: ReadonlyArray<Pick<RoomContextBlock, "posts">> = [],
+  userStartedLeadKeys: ReadonlySet<string> = new Set(),
 ): SquireTurnOrigin {
-  const origin = rowsOrigin(rows);
+  const origin = rowsOrigin(rows, userStartedLeadKeys);
   return ACTING_ORIGINS.has(origin) && hasSquireAuthoredPost(roomContext) ? "message" : origin;
 }
 
-function rowsOrigin(rows: ReadonlyArray<SquireEventRow>): SquireTurnOrigin {
+// Lead events that carry a Squire's own words: its item's title and why, its room pitch.
+const SQUIRE_WRITTEN_KINDS: ReadonlySet<string> = new Set(["room-proposed", "item-raised"]);
+
+function rowsOrigin(
+  rows: ReadonlyArray<SquireEventRow>,
+  userStartedLeadKeys: ReadonlySet<string>,
+): SquireTurnOrigin {
   const first = rows[0];
   if (first && isTestRow(first)) return "test";
   if (first?.kind === "voice-note") return "voice";
   if (first?.kind === "webhook-received") return "webhook";
   if (rows.some((row) => row.kind === "sweep-due")) return "sweep";
+  if (rows.some((row) => SQUIRE_WRITTEN_KINDS.has(row.kind))) return "message";
   if (rows.length > 0 && rows.every((row) => row.kind === "message")) {
     const authors = rows.map((row) => {
       const event = Option.getOrNull(knownEvent(row));
-      return event?.type === "message" ? event.from.kind : "unknown";
+      if (event?.type !== "message") return "unknown";
+      if (event.from.kind === "lead" && !userStartedLeadKeys.has(event.messageKey)) return "squire";
+      return event.from.kind;
     });
     if (authors.every((kind) => kind === "user")) return "room";
     if (authors.every((kind) => kind === "lead" || kind === "user")) return "lead";
@@ -260,7 +274,7 @@ function rowsOrigin(rows: ReadonlyArray<SquireEventRow>): SquireTurnOrigin {
   return "event";
 }
 
-/** The PR overlay an event renders over its run summary (D18). */
+/** The PR overlay an event renders over its run summary. */
 export const toSummaryPullRequest = (
   pr: SquireEventPullRequest,
   summary: SquireTurnSummary | null,
@@ -296,6 +310,8 @@ const summaryStage = (row: SquireEventRow, payload: SquireEventPayload) => {
 };
 
 const HANDOFF_BODY_CHARS = 120;
+// A space's or saga's projects in the header; the rest are counted.
+const CONTAINER_MEMBERS_SHOWN = 6;
 const cutLine = (value: string, max: number) =>
   value.length <= max ? value : `${value.slice(0, max - 1).trimEnd()}…`;
 
@@ -308,6 +324,8 @@ const make = Effect.gen(function* () {
   const projects = yield* ProjectStore.ProjectStoreV2;
   const fibers = yield* FiberSet.make();
   const spaceLock = yield* Effect.serviceOption(StaveSpaceLock.StaveSpaceLock);
+  const containers = yield* Effect.serviceOption(SquireContainers.SquireContainers);
+  const fixtureStave = yield* Effect.serviceOption(SquireContainers.SquireFixtureStave);
 
   const locks = new Map<SquireId, Semaphore.Semaphore>();
   const lockFor = (squireId: SquireId) => {
@@ -327,23 +345,59 @@ const make = Effect.gen(function* () {
       .getThreadShell(threadId)
       .pipe(Effect.map((shell) => (shell ? shell.title : threadId)));
 
+  /**
+   * The header's scope line. A space or saga shows the name the Squire views
+   * show and the projects it holds; a project inside a saga names that saga,
+   * so the model can tie an event's project to the saga it was asked about.
+   */
   const trackedNames = Effect.fn("SquireDelivery.trackedNames")(function* (squireId: SquireId) {
     const grants = yield* repository.listGrants(squireId);
-    const needsSpaces = grants.some(
+    const needsShells = grants.some(
+      (grant) =>
+        grant.kind === "project" || grant.kind === "staveSpace" || grant.kind === "staveSaga",
+    );
+    const usesStave = grants.some(
       (grant) => grant.kind === "staveSpace" || grant.kind === "staveSaga",
     );
-    const shells = needsSpaces ? yield* projects.listShells() : [];
-    const spaceName = (spaceId: string) =>
-      shells.find((shell) => shell.stave?.spaceId === spaceId)?.title ?? spaceId;
+    const shells = needsShells ? yield* projects.listShells() : [];
+    const nameOf = (containerId: string) =>
+      SquireContainers.staveContainerName(shells, fixtureStave, containerId).pipe(
+        Effect.map(Option.getOrElse(() => containerId)),
+      );
+    // Every project for a space or saga grant (to list its projects), else only the granted ones.
+    const granted = new Set(
+      grants.filter((grant) => grant.kind === "project").map((g) => g.target_id),
+    );
+    const memberships = new Map<ProjectId, { spaceId: string | null; sagaId: string | null }>();
+    if (Option.isSome(containers)) {
+      for (const shell of shells) {
+        if (!usesStave && !granted.has(shell.id)) continue;
+        const membership = yield* containers.value.ofProject(shell.id);
+        if (membership.status === "known") memberships.set(shell.id, membership);
+      }
+    }
+    const membersOf = (containerId: string, kind: "staveSpace" | "staveSaga") =>
+      shells
+        .filter((shell) => {
+          const membership = memberships.get(shell.id);
+          return kind === "staveSaga"
+            ? membership?.sagaId === containerId
+            : membership?.spaceId === containerId;
+        })
+        .map((shell) => shell.title);
     const named: Array<{ readonly kind: SquireGrantKind; readonly name: string }> = [];
     for (const grant of grants) {
       switch (grant.kind) {
-        case "project":
+        case "project": {
+          const projectId = ProjectId.make(grant.target_id);
+          const title = (yield* projectTitle(projectId)) || grant.target_id;
+          const sagaId = memberships.get(projectId)?.sagaId ?? null;
           named.push({
             kind: grant.kind,
-            name: (yield* projectTitle(ProjectId.make(grant.target_id))) || grant.target_id,
+            name: sagaId === null ? title : `${title} (in saga ${yield* nameOf(sagaId)})`,
           });
           break;
+        }
         case "thread":
         case "exclusion":
           named.push({
@@ -352,9 +406,19 @@ const make = Effect.gen(function* () {
           });
           break;
         case "staveSpace":
-        case "staveSaga":
-          named.push({ kind: grant.kind, name: spaceName(grant.target_id) });
+        case "staveSaga": {
+          const members = membersOf(grant.target_id, grant.kind);
+          const shown = members.slice(0, CONTAINER_MEMBERS_SHOWN);
+          const more = members.length - shown.length;
+          named.push({
+            kind: grant.kind,
+            name:
+              members.length === 0
+                ? yield* nameOf(grant.target_id)
+                : `${yield* nameOf(grant.target_id)} (projects: ${shown.join(", ")}${more > 0 ? `, +${more} more` : ""})`,
+          });
           break;
+        }
       }
     }
     return named;
@@ -390,7 +454,7 @@ const make = Effect.gen(function* () {
         runId: payload.runId,
         ...(stage === undefined ? {} : { stage }),
       });
-      // A summary not settled by now delivers with its deterministic fields (P3.4).
+      // A summary not settled by now delivers with its deterministic fields.
       summary = Option.match(stored, {
         onNone: () => null,
         onSome: (value) =>
@@ -519,7 +583,7 @@ const make = Effect.gen(function* () {
     });
   });
 
-  /** P19.7: one bot-authored message reads as "<Sender> → <Recipient>: <first line>". */
+  /** One bot-authored message reads as "<Sender> → <Recipient>: <first line>". */
   const handoffSummary = Effect.fn("SquireDelivery.handoffSummary")(function* (
     squire: SquireRow,
     rows: ReadonlyArray<SquireEventRow>,
@@ -551,7 +615,7 @@ const make = Effect.gen(function* () {
         .filter((row) => row.kind === "message" || row.kind === "routed-task")
         .map((row) => senderOf(row, leadId)),
     );
-    // D62, R110: a multi-sender batch names each sender in its text and links none.
+    // A multi-sender batch names each sender in its text and links none.
     const [only] = senders;
     if (senders.size !== 1 || only === null || only === undefined) return null;
     if (only === "user" || only === "system") return null;
@@ -582,6 +646,14 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const originOf = (
+    rows: ReadonlyArray<SquireEventRow>,
+    roomContext: ReadonlyArray<RoomContextBlock>,
+  ) =>
+    userStartedLeadKeys(repository, rows).pipe(
+      Effect.map((keys) => batchOrigin(rows, roomContext, keys)),
+    );
+
   /** The room context a batched batch stored, rebuilt after its cursors moved. */
   const storedContext = (squire: SquireRow, batchId: string, rows: ReadonlyArray<SquireEventRow>) =>
     readRoomContextWindows(repository, { squireId: squire.id, batchId, batch: rows }).pipe(
@@ -600,7 +672,7 @@ const make = Effect.gen(function* () {
       shown ??
       (yield* Effect.gen(function* () {
         const context = yield* storedContext(squire, batchId, rows);
-        const stored = batchOrigin(rows, context);
+        const stored = yield* originOf(rows, context);
         return { origin: stored, text: (yield* renderBatch(squire, rows, stored, context)).text };
       }));
     const senderThreadId = yield* senderThreadOf(rows);
@@ -707,10 +779,10 @@ const make = Effect.gen(function* () {
       yield* repository.transaction(
         Effect.gen(function* () {
           const delivered = yield* repository.markBatchDelivered(batchId);
-          // The latest summary-bearing event per thread; P7.6 would replace earlier ones.
+          // The latest summary-bearing event per thread; a newer FYI would replace earlier ones.
           const latest = new Map<ThreadId, SquireEventRow>();
           for (const row of delivered) {
-            // A waiting-on-user event raises its own question card (4.9).
+            // A waiting-on-user event raises its own question card.
             if (!isSummaryBearing(row.kind) || row.kind === "waiting-on-user") continue;
             if (row.thread_id !== null) latest.set(row.thread_id, row);
           }
@@ -745,7 +817,7 @@ const make = Effect.gen(function* () {
       });
       if (rows.length === 0) return;
       const shell = yield* projections.getThreadShell(homeThreadId);
-      // R66: a `waiting` run is still active, so the busy check reads activityRunStatus.
+      // A `waiting` run is still active, so the busy check reads activityRunStatus.
       if (!shell || shell.archivedAt !== null || shell.activityRunStatus != null) return;
 
       // One batch in flight. Its run's end normally finalizes it; an idle
@@ -755,7 +827,7 @@ const make = Effect.gen(function* () {
       const outstandingId = outstanding[0]?.batch_id;
       if (outstandingId) {
         const context = yield* storedContext(squire, outstandingId, outstanding);
-        const origin = batchOrigin(outstanding, context);
+        const origin = yield* originOf(outstanding, context);
         const messageId = deliverMessageId(origin, outstandingId);
         const { messages } = yield* projections.getThreadRecords(homeThreadId, ["messages"], {
           messageIds: [messageId],
@@ -787,18 +859,19 @@ const make = Effect.gen(function* () {
       const batch = chooseBatch(ready);
       const batchId = batchIdFor(squire, batch);
       const now = yield* nowIso;
-      // P19.2: context rides a batch that exists anyway; it never wakes a member.
+      // Context rides a batch that exists anyway; it never wakes a member.
       const collected = yield* collectRoomContext({ repository, rooms }, { squire, batch });
       // Rendered first, so only rooms whose posts reached the text advance;
       // a cut room keeps its cursor and its posts ride the next batch.
-      let origin = batchOrigin(batch, collected);
+      const leadKeys = yield* userStartedLeadKeys(repository, batch);
+      let origin = batchOrigin(batch, collected, leadKeys);
       let rendered = yield* renderBatch(squire, batch, origin, collected);
       let context = collected.filter((block) => rendered.roomsShown.includes(block.roomId));
       // The origin follows what was shown, so a re-dispatch from the stored
       // windows names the same message id. A demotion only a cut room caused
       // is undone; the shorter header still fits every room shown.
-      if (batchOrigin(batch, context) !== origin) {
-        origin = batchOrigin(batch, context);
+      if (batchOrigin(batch, context, leadKeys) !== origin) {
+        origin = batchOrigin(batch, context, leadKeys);
         rendered = yield* renderBatch(squire, batch, origin, context);
         context = context.filter((block) => rendered.roomsShown.includes(block.roomId));
       }
@@ -867,7 +940,7 @@ const make = Effect.gen(function* () {
     const title = shell?.title ?? threadId;
     const outcome = payload?.outcome ?? row.kind;
     const text = `${title}: ${outcome}`;
-    // D66: the card keys the summary (thread, run, stage) instead of copying it.
+    // The card keys the summary (thread, run, stage) instead of copying it.
     const trigger = encodeCardTrigger({
       ...(payload?.runId ? { runId: payload.runId } : {}),
       ...(payload?.pendingRequest ? { requestId: payload.pendingRequest.requestId } : {}),
@@ -889,7 +962,7 @@ const make = Effect.gen(function* () {
     const existing = open[0];
     let cardId: SquireCardId;
     if (existing) {
-      // P7.6: one open item per (Squire, thread, type); the newer one replaces it.
+      // One open item per (Squire, thread, type); the newer one replaces it.
       yield* repository.updateCard({
         id: existing.id,
         fromStatuses: ["open"],
@@ -997,12 +1070,31 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const found = yield* repository.getSquire(squireId);
             if (Option.isNone(found) || found.value.home_thread_id === null) return;
-            const outcome = yield* dispatchBatch(
-              found.value,
-              found.value.home_thread_id,
-              batchId,
-              batch,
-            );
+            const squire = found.value;
+            const homeThreadId = found.value.home_thread_id;
+            // A committed dispatch is reconciled whatever the Squire's state:
+            // a run that ended while the server was down is finalized here,
+            // and a live one finalizes at its end.
+            const context = yield* storedContext(squire, batchId, batch);
+            const origin = yield* originOf(batch, context);
+            const { messages } = yield* projections.getThreadRecords(homeThreadId, ["messages"], {
+              messageIds: [deliverMessageId(origin, batchId)],
+            });
+            if (messages.length > 0) {
+              const runId = messages[0]?.runId ?? null;
+              if (runId === null) return;
+              const { runs } = yield* projections.getThreadRecords(homeThreadId, ["runs"], {
+                runIds: [runId],
+              });
+              if (!runs.some((run) => TERMINAL_RUN_STATUSES.has(run.status))) return;
+              yield* finalizeBatch(squire, batchId, runId);
+              yield* wake(squireId);
+              return;
+            }
+            // An uncommitted one is a new turn: it passes the same admission
+            // as any delivery, and waits batched for the resume's wake.
+            if (squire.status !== "active" || squire.lifecycle !== "ready") return;
+            const outcome = yield* dispatchBatch(squire, homeThreadId, batchId, batch);
             if (outcome === "refused") yield* wake(squireId);
           }),
         );

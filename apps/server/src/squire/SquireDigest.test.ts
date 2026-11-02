@@ -162,7 +162,7 @@ describe("SquireDigest", () => {
       assert.deepStrictEqual(yield* fyis, [
         SquireCardId.make(`card:fyi:${lead}:digest:2026-11-03`),
       ]);
-      // The mobile row is the relay's to write, after this transaction (D27).
+      // The mobile row is the relay's to write, after this transaction.
       const delivery = yield* repository.listActionLog({
         squireId: lead,
         kinds: ["notification.delivery"],

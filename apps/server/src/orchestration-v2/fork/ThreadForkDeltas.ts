@@ -167,7 +167,7 @@ export function validateForkWorkspace(command: ThreadForkCommand): string | unde
 }
 
 /**
- * Lecturn: a Squire "Ask about this" probe (A5.2, D25). The marker hides it
+ * Lecturn: a Squire "Ask about this" probe. The marker hides it
  * and puts it under the Squire guards (deny runtime, no MCP, the command
  * allowlist); the copied modes, PR links, and pins would otherwise let a
  * read-only question run with the source's full access or show as its PR.

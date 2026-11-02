@@ -1,7 +1,7 @@
 /**
- * Room tools (7b.6, `squire_read_room` of 7b.5) on the real switch-on Squire
+ * Room tools and `squire_read_room` on the real switch-on Squire
  * layer: a Squire's proposal to the Lead, the Lead's open in every Manage
- * Squires cell and its P19.6 refusals, proposal expiry, the Auto open across
+ * Squires cell and its refusals, proposal expiry, the Auto open across
  * a crash, and reading a room.
  */
 import { assert, describe, it } from "@effect/vitest";
@@ -32,8 +32,11 @@ import {
   type RoomCastOptions,
   callTool,
   currencyThread,
+  deliver,
   invoiceThread,
   need,
+  seedBotPost,
+  userTurn,
   withRoomCast,
 } from "./testkit/roomHarness.ts";
 
@@ -67,6 +70,15 @@ const openArgs = (cast: RoomCast, extra: Record<string, unknown> = {}) => ({
 });
 const openRoom = (cast: RoomCast, extra: Record<string, unknown> = {}) =>
   callTool(cast.lead, "lead", "squire_open_room", openArgs(cast, extra));
+/**
+ * Auto needs the user's turn: a call with no run only recommends, and so does
+ * the Lead's turn on the proposal, which carries the Squire's pitch.
+ */
+const openRoomAsUser = (cast: RoomCast, extra: Record<string, unknown> = {}) =>
+  deliver(cast.lead.squireId).pipe(
+    Effect.andThen(userTurn(cast.lead)),
+    Effect.andThen(openRoom(cast, extra)),
+  );
 const propose = (cast: RoomCast, extra: Record<string, unknown> = {}) =>
   callTool(cast.research, "squire", "squire_propose_room", {
     members: [cast.release.squireId, cast.research.squireId],
@@ -123,7 +135,7 @@ const setBotMessages = (on: boolean) =>
     settings.updateSettings({ squire: { botMessages: on } }),
   );
 
-describe("squire_propose_room (P19.6, D54)", () => {
+describe("squire_propose_room", () => {
   it.effect("is refused with the Lead's Manage Squires Off or the switch Off", () =>
     Effect.gen(function* () {
       yield* withCast(
@@ -235,7 +247,7 @@ describe("squire_propose_room (P19.6, D54)", () => {
   );
 });
 
-describe("squire_open_room in every Manage Squires cell (P8, P19.6)", () => {
+describe("squire_open_room in every Manage Squires cell", () => {
   it.effect("Off refuses and raises nothing", () =>
     withCast(
       (cast) =>
@@ -291,7 +303,7 @@ describe("squire_open_room in every Manage Squires cell (P8, P19.6)", () => {
         (cast) =>
           Effect.gen(function* () {
             const proposalId = structured(yield* propose(cast)).proposalId!;
-            const cardId = cardIdOf(yield* openRoom(cast, { proposalId }));
+            const cardId = cardIdOf(yield* openRoomAsUser(cast, { proposalId }));
             const card = yield* cardOf(cardId);
             assert.strictEqual(card.status, "held");
             assert.strictEqual(card.title, "Open room: Currency rounding");
@@ -330,7 +342,7 @@ describe("squire_open_room in every Manage Squires cell (P8, P19.6)", () => {
     withCast(
       (cast) =>
         Effect.gen(function* () {
-          const cardId = cardIdOf(yield* openRoom(cast));
+          const cardId = cardIdOf(yield* openRoomAsUser(cast));
           const repository = yield* repo;
           const lead = Option.getOrThrow(yield* repository.getSquire(cast.lead.squireId));
           yield* repository.updateSquire({
@@ -353,7 +365,7 @@ describe("squire_open_room in every Manage Squires cell (P8, P19.6)", () => {
   );
 });
 
-describe("squire_close_room (P19.6)", () => {
+describe("squire_close_room", () => {
   it.effect("closes an open room at once under Recommend and logs room.closed", () =>
     withCast(
       (cast) =>
@@ -386,7 +398,7 @@ describe("squire_close_room (P19.6)", () => {
   );
 });
 
-describe("squire_open_room refusals (P19.6)", () => {
+describe("squire_open_room refusals", () => {
   const refusedWith = (result: SquireToolResult, reason: string) => {
     assert.isTrue(result.isError, result.text);
     assert.strictEqual(structured(result).reason, reason, result.text);
@@ -482,12 +494,12 @@ describe("squire_open_room refusals (P19.6)", () => {
   );
 });
 
-describe("an Auto open across a crash (A9)", () => {
+describe("an Auto open across a crash", () => {
   it.effect("committed before its card settled, it finalizes once and opens one room", () =>
     withCast(
       (cast) =>
         Effect.gen(function* () {
-          const cardId = cardIdOf(yield* openRoom(cast));
+          const cardId = cardIdOf(yield* openRoomAsUser(cast));
           yield* passHold(cardId);
           const repository = yield* repo;
           const card = yield* cardOf(cardId);
@@ -524,7 +536,7 @@ describe("an Auto open across a crash (A9)", () => {
     withCast(
       (cast) =>
         Effect.gen(function* () {
-          const cardId = cardIdOf(yield* openRoom(cast));
+          const cardId = cardIdOf(yield* openRoomAsUser(cast));
           yield* (yield* actions).reconcileStartup;
           assert.strictEqual((yield* cardOf(cardId)).status, "held");
           yield* passHold(cardId);
@@ -539,7 +551,7 @@ describe("an Auto open across a crash (A9)", () => {
   );
 });
 
-describe("squire_read_room (P19.2)", () => {
+describe("squire_read_room", () => {
   /** A room of Release and the Lead, seeded straight into the store. */
   const seedRoom = (cast: RoomCast, bodies: ReadonlyArray<string>) =>
     Effect.gen(function* () {
@@ -640,6 +652,74 @@ describe("squire_read_room (P19.2)", () => {
           (row) => row.data.tool === "squire_read_room",
         );
         assert.lengthOf(called, 1);
+      }),
+    ),
+  );
+});
+
+describe("squire_read_room and another Squire's words", () => {
+  const steer = (who: RoomCast["research"]) =>
+    callTool(who, "squire", "squire_send_steer", {
+      threadId: currencyThread,
+      reason: "CI flaked on the formatter suite.",
+      steer: "Rerun the checks.",
+      steerKind: "rerun-checks",
+    });
+
+  it.effect("a read showing another Squire's post leaves the rest of the run recommend-only", () =>
+    withCast(
+      (cast) =>
+        Effect.gen(function* () {
+          const roomId = yield* seedBotPost(cast, { author: cast.release.squireId, hop: 0 });
+          yield* userTurn(cast.research);
+          const read = yield* callTool(cast.research, "squire", "squire_read_room", { roomId });
+          assert.isFalse(read.isError, read.text);
+          assert.include(read.text, "only recommend");
+          const result = yield* steer(cast.research);
+          assert.isFalse(result.isError, result.text);
+          const [card, ...rest] = yield* (yield* repo).listCards({
+            squireId: cast.research.squireId,
+          });
+          assert.lengthOf(rest, 0);
+          assert.strictEqual(card!.origin, "message");
+          assert.strictEqual(card!.status, "open");
+        }),
+      { squirePermissions: { steer: "auto" } },
+    ),
+  );
+
+  it.effect("the same user turn without the read keeps Auto", () =>
+    withCast(
+      (cast) =>
+        Effect.gen(function* () {
+          yield* seedBotPost(cast, { author: cast.release.squireId, hop: 0 });
+          yield* userTurn(cast.research);
+          const result = yield* steer(cast.research);
+          assert.isFalse(result.isError, result.text);
+          const [card] = yield* (yield* repo).listCards({ squireId: cast.research.squireId });
+          assert.strictEqual(card!.origin, "user");
+          assert.strictEqual(card!.status, "held");
+        }),
+      { squirePermissions: { steer: "auto" } },
+    ),
+  );
+
+  it.effect("a post read mid-turn counts toward the hop limit", () =>
+    withCast((cast) =>
+      Effect.gen(function* () {
+        const roomId = yield* seedBotPost(cast, { author: cast.release.squireId, hop: 3 });
+        yield* userTurn(cast.research);
+        const read = yield* callTool(cast.research, "squire", "squire_read_room", { roomId });
+        assert.isFalse(read.isError, read.text);
+        const sent = yield* callTool(cast.research, "squire", "squire_send_message", {
+          to: cast.release.squireId,
+          body: "Done, rerunning.",
+        });
+        assert.isTrue(sent.isError);
+        assert.strictEqual(
+          (sent.structuredContent as { readonly reason?: string }).reason,
+          "hop-limit",
+        );
       }),
     ),
   );

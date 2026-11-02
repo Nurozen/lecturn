@@ -1,5 +1,5 @@
 /**
- * Lecturn (A11): a Company Connect organization can restrict which providers
+ * Lecturn: a Company Connect organization can restrict which providers
  * its members use. Checked when a provider session opens and again before
  * every turn, because the policy can change while a session is live.
  *

@@ -69,7 +69,7 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
 
   const shellStatus = useEnvironmentShellStatus(serverThreadRef?.environmentId ?? null);
   const serverThreadShell = serverThread;
-  // Lecturn: a marked home thread opens as its Squire view instead (D63).
+  // Lecturn: a marked home thread opens as its Squire view instead.
   const squireView = useSquireViewForThread(
     target.kind === "server" ? target.threadRef : null,
     serverThreadShell,
@@ -169,7 +169,7 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
     }
   }, [bootstrapComplete, environmentHasAnyThreads, navigate, renderState, target]);
 
-  // Lecturn: replace, so Back skips the thread route that only redirects (D63).
+  // Lecturn: replace, so Back skips the thread route that only redirects.
   const squireViewEnvironmentId = squireView?.environmentId ?? null;
   const squireViewSquireId = squireView?.squireId ?? null;
   useEffect(() => {
@@ -217,7 +217,7 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
       );
     }
   } else if (
-    // Lecturn: a home thread redirecting to its Squire view never mounts ChatView here (D63).
+    // Lecturn: a home thread redirecting to its Squire view never mounts ChatView here.
     squireView === null &&
     (renderState === "ready" || (renderState === "loading" && serverThreadShell !== null))
   ) {

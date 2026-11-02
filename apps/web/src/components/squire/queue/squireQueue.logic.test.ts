@@ -224,7 +224,7 @@ describe("queue grouping and counts", () => {
     const rows = [
       row("steer", { status: "held" }),
       row("proposal"),
-      // Lead-raised on this Squire's thread: the sidebar badge leaves it to the Lead (D50).
+      // Lead-raised on this Squire's thread: the sidebar badge leaves it to the Lead.
       row("overlap", { squireId: LEAD, targetThreadId: null }),
       row("question", { status: "accepting" }),
       row("fyi"),
@@ -297,7 +297,7 @@ describe("row markers and actions", () => {
   });
 });
 
-describe("markOpened (D52)", () => {
+describe("markOpened", () => {
   const A = "card-a" as SquireCardId;
   const B = "card-b" as SquireCardId;
 
@@ -324,7 +324,7 @@ describe("markOpened (D52)", () => {
 });
 
 describe("evidence", () => {
-  it("deep-links to the triggering message by its quote, else opens the thread (D28)", () => {
+  it("deep-links to the triggering message by its quote, else opens the thread", () => {
     const base = { targetThreadId: THREAD, trigger: {} } satisfies Pick<
       SquireCard,
       "targetThreadId" | "trigger"
@@ -348,7 +348,7 @@ describe("evidence", () => {
   });
 });
 
-describe("question cards (P7.4)", () => {
+describe("question cards", () => {
   const questionPayload = (
     request: Extract<SquireCard["payload"], { readonly type: "question" }>["request"],
     requestKind: "runtime" | "secret" = "runtime",
@@ -371,7 +371,7 @@ describe("question cards (P7.4)", () => {
     ],
   };
 
-  it("shows the Squire's recommendation above the options only when it has one (P7.3)", () => {
+  it("shows the Squire's recommendation above the options only when it has one", () => {
     const base = questionPayload({ type: "approval", canRespond: true });
     const title = "Release approval";
     expect(
@@ -431,7 +431,7 @@ describe("question cards (P7.4)", () => {
   });
 });
 
-describe("routing receipts (D65)", () => {
+describe("routing receipts", () => {
   it("reads each receipt in place and settles once its items do", () => {
     const rows = squireReceiptRows(
       [

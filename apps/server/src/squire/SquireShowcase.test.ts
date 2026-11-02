@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - The drift checks read the shipped asset sources.
 /**
- * The showcase (7.6, D32): a versioned template with only a data block
+ * The showcase: a versioned template with only a data block
  * injected, built from stored state and captured as an MCP App card; its
  * buttons act as the user on items the page shows, from any copy of the
  * thread in this environment, and do nothing once an item has closed.
@@ -239,7 +239,7 @@ describe("showcase page", () => {
             kind: "proposal",
             payload_json: JSON.stringify({ type: "squire-proposal" }),
           }),
-          // Raised by the Lead for Release's threads (P17.3).
+          // Raised by the Lead for Release's threads.
           cardRow("card:o", "lead" as SquireId, {
             kind: "overlap",
             owner_squire_id: "squire-a" as SquireId,
@@ -348,7 +348,7 @@ describe("showcase page", () => {
   });
 
   it("orders the file column so no two thread-to-file edges cross", () => {
-    // CP9's shape: two threads, five files, one shared.
+    // The overlap stills' shape: two threads, five files, one shared.
     const data = SquireShowcase.buildShowcaseData(
       baseInput({
         threads: [
@@ -387,31 +387,38 @@ describe("showcase page", () => {
     assert.deepStrictEqual(inversions, []);
   });
 
-  it("ships the template and the still set as their sources say", () => {
-    const dir = NodePath.join(import.meta.dirname, "showcase");
-    assert.strictEqual(
-      SHOWCASE_TEMPLATE_HTML,
-      NodeFS.readFileSync(NodePath.join(dir, "template.html"), "utf8"),
-    );
-    const manifest = JSON.parse(
-      NodeFS.readFileSync(NodePath.join(dir, "stills/manifest.json"), "utf8"),
-    );
-    assert.lengthOf(manifest.stills, 24);
-    for (const still of manifest.stills) {
-      const bytes = NodeFS.readFileSync(NodePath.join(dir, "stills", still.file));
-      const sha = NodeCrypto.createHash("sha256").update(bytes).digest("hex");
-      assert.strictEqual(sha, still.sha256, still.file);
-      assert.strictEqual(SHOWCASE_STILLS[still.key]?.base64, bytes.toString("base64"));
-      // Recorded by decoding each still (squire-showcase-assets.ts).
-      assert.strictEqual(still.colouredUnderAlpha0, 0, still.file);
-    }
-    assert.match(
-      SquireShowcase.leadStill(
-        JSON.stringify({ appearance: "male", hood: "up", equipment: "lance" }),
-      )!,
-      /^data:image\/webp;base64,/,
-    );
-  });
+  it.effect("ships the template and the still set as their sources say", () =>
+    Effect.gen(function* () {
+      const dir = NodePath.join(import.meta.dirname, "showcase");
+      assert.strictEqual(
+        SHOWCASE_TEMPLATE_HTML,
+        NodeFS.readFileSync(NodePath.join(dir, "template.html"), "utf8"),
+      );
+      const manifest = JSON.parse(
+        NodeFS.readFileSync(NodePath.join(dir, "stills/manifest.json"), "utf8"),
+      );
+      assert.lengthOf(manifest.stills, 24);
+      assert.sameMembers(
+        Object.keys(SHOWCASE_STILLS),
+        manifest.stills.map((still: { readonly key: string }) => still.key),
+      );
+      for (const still of manifest.stills) {
+        const bytes = Buffer.from(SHOWCASE_STILLS[still.key]?.base64 ?? "", "base64");
+        assert.strictEqual(bytes.byteLength, still.bytes, still.key);
+        const sha = NodeCrypto.createHash("sha256").update(bytes).digest("hex");
+        assert.strictEqual(sha, still.sha256, still.key);
+        assert.strictEqual(SHOWCASE_STILLS[still.key]?.sha256, still.sha256, still.key);
+        // Recorded by decoding each still (squire-showcase-assets.ts).
+        assert.strictEqual(still.colouredUnderAlpha0, 0, still.key);
+      }
+      assert.match(
+        (yield* SquireShowcase.leadStill(
+          JSON.stringify({ appearance: "male", hood: "up", equipment: "lance" }),
+        ))!,
+        /^data:image\/webp;base64,/,
+      );
+    }),
+  );
 });
 
 type Services = Phase4Services | Scope.Scope;
@@ -513,7 +520,7 @@ describe("SquireShowcase", () => {
 
         const tools = yield* need(SquireTools.SquireTools);
         const listed = tools.definitions("lead").find((tool) => tool.name === SQUIRE_SHOWCASE_TOOL);
-        // R54: no declared resource for Codex to try to read.
+        // No declared resource for Codex to try to read.
         assert.isDefined(listed);
         assert.notProperty(listed, "_meta");
 
@@ -557,7 +564,7 @@ describe("SquireShowcase", () => {
         assert.strictEqual(recorded.attachmentId, reference.attachmentId);
         assert.deepStrictEqual(recorded.itemIds, ["card:steer:release:1"]);
 
-        // A retried call is the same page, not a second one (A9).
+        // A retried call is the same page, not a second one.
         const again = yield* publish(env);
         assert.deepStrictEqual(again.structuredContent, result.structuredContent);
       }),

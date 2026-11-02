@@ -8,13 +8,13 @@ import { squireRoomSidebarRows } from "./squireRooms.logic";
 import { SquireRoomPortraits } from "./SquireRoomPortraits";
 import { useSquireRoomSeen } from "./squireRoomSeen";
 
-// The smallest size SquireIndicator still draws a portrait at (P16.4), as on the Squire rows.
+// The smallest size at which SquireIndicator still draws a portrait, as on the Squire rows.
 const PORTRAIT_PX = 22;
 
 const selectRoomKey = (match: { params: { environmentId: string; roomId: string } }) =>
   `${match.params.environmentId}\n${match.params.roomId}`;
 
-/** P19.8 open rooms nested under the Lead, after its Squires. */
+/** Open rooms nested under the Lead, after its Squires. */
 export const SquireRoomRows = memo(function SquireRoomRows(props: {
   readonly environmentId: EnvironmentId;
   readonly rooms: ReadonlyArray<SquireRoomRow>;

@@ -23,7 +23,7 @@ import { readLocalApi } from "../../localApi";
 import { useEnvironmentIdentities } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentScope } from "../../state/session";
-import { squireEnvironment, useSquireEnvironments } from "../../state/squires";
+import { squireCapableAtom, squireEnvironment, useSquireEnvironments } from "../../state/squires";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { LazyExtensionsFunding } from "../DecisionsFunding";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "../settings/settingsLayout";
@@ -33,6 +33,7 @@ import { NumberField, NumberFieldGroup, NumberFieldInput } from "../ui/number-fi
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { SquirePortrait, useSquireIndicator } from "./SquireHeader";
+import { squireSwitchDescription } from "./squirePage.logic";
 import { openSquireSetup } from "./setup/squireSetupStore";
 import { SquireAutomationPausedNotice } from "./setup/SquireTriggersSection";
 
@@ -44,7 +45,10 @@ const PHONE_ALERT_LABELS: Record<SquireEnvironmentSettings["phoneAlertsWhileDesk
 
 const selectSquireSettings = (settings: UnifiedSettings) => settings.squire;
 
-/** Settings > Squires (plan 10b.2, 10b.6): one environment's Squires and its shared settings. */
+/**
+ * Settings > Squires: the switch that turns Squires on for an environment, then that
+ * environment's Squires and shared settings once its server runs them.
+ */
 export function SquiresSettings(props: {
   readonly squire?: SquireId | undefined;
   readonly environmentId?: EnvironmentId | undefined;
@@ -52,70 +56,104 @@ export function SquiresSettings(props: {
 }) {
   const environments = useSquireEnvironments();
   const identities = useEnvironmentIdentities();
-  const labelOf = (environmentId: EnvironmentId) =>
-    identities.find((identity) => identity.environmentId === environmentId)?.label ?? environmentId;
   // An explicit pick wins; a Squire link lands on its own environment.
-  const selected =
-    environments.find((environment) => environment.environmentId === props.environmentId) ??
+  const selectedId =
+    identities.find((identity) => identity.environmentId === props.environmentId)?.environmentId ??
     (props.squire === undefined
       ? undefined
       : environments.find((environment) =>
           environment.state.squires.some((entry) => entry.squire.id === props.squire),
-        )) ??
-    environments[0];
-  if (selected === undefined) {
+        )?.environmentId) ??
+    environments[0]?.environmentId ??
+    identities[0]?.environmentId;
+  if (selectedId === undefined) {
     return (
       <SettingsPageContainer>
         <SettingsSection title="Squires">
           <SettingsRow
-            title="No environment runs Squires"
-            description="Squires appear here once a connected environment supports them."
+            title="No environment connected"
+            description="Connect an environment to turn on Squires there."
           />
         </SettingsSection>
       </SettingsPageContainer>
     );
   }
+  const selected = environments.find((environment) => environment.environmentId === selectedId);
   return (
     <SettingsPageContainer>
-      {environments.length > 1 ? (
-        <SettingsSection title="Environment">
+      <SettingsSection title="Squires">
+        {identities.length > 1 ? (
           <SettingsRow
             title="Environment"
             description="Each environment has its own Lead, Squires, and settings."
             control={
               <Select
-                value={selected.environmentId}
+                value={selectedId}
                 onValueChange={(value) => {
-                  const next = environments.find(
-                    (environment) => environment.environmentId === value,
-                  );
+                  const next = identities.find((identity) => identity.environmentId === value);
                   if (next !== undefined) props.onEnvironmentChange?.(next.environmentId);
                 }}
               >
                 <SelectTrigger size="sm">
-                  <SelectValue>{labelOf(selected.environmentId)}</SelectValue>
+                  <SelectValue>
+                    {identities.find((identity) => identity.environmentId === selectedId)?.label ??
+                      selectedId}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectPopup>
-                  {environments.map(({ environmentId }) => (
+                  {identities.map(({ environmentId, label }) => (
                     <SelectItem key={environmentId} value={environmentId}>
-                      {labelOf(environmentId)}
+                      {label}
                     </SelectItem>
                   ))}
                 </SelectPopup>
               </Select>
             }
           />
-        </SettingsSection>
-      ) : null}
-      <SquireAutomationPausedNotice environmentId={selected.environmentId} />
-      <SquireEnvironmentSection
-        key={selected.environmentId}
-        environmentId={selected.environmentId}
-        state={selected.state}
-        highlighted={props.squire ?? null}
-      />
-      <SquireEnvironmentSettingsSection environmentId={selected.environmentId} />
+        ) : null}
+        <SquireEnabledRow environmentId={selectedId} />
+      </SettingsSection>
+      {selected === undefined ? null : (
+        <>
+          <SquireAutomationPausedNotice environmentId={selected.environmentId} />
+          <SquireEnvironmentSection
+            key={selected.environmentId}
+            environmentId={selected.environmentId}
+            state={selected.state}
+            highlighted={props.squire ?? null}
+          />
+          <SquireEnvironmentSettingsSection environmentId={selected.environmentId} />
+        </>
+      )}
     </SettingsPageContainer>
+  );
+}
+
+/** The saved `squire.enabled` switch; the server applies it on its next start. */
+function SquireEnabledRow(props: { readonly environmentId: EnvironmentId }) {
+  const { environmentId } = props;
+  const settings = useAtomValue(serverEnvironment.settingsValueAtom(environmentId));
+  const running = useAtomValue(squireCapableAtom(environmentId));
+  const canWrite = useEnvironmentScope(environmentId, AuthSettingsWriteScope);
+  const updateSettings = useUpdateEnvironmentSettings(environmentId);
+  const saved = settings?.squire.enabled;
+  return (
+    <SettingsRow
+      {...searchableSetting("squires-enabled")}
+      description={
+        saved === undefined
+          ? "Loading this environment's settings."
+          : squireSwitchDescription({ saved, running })
+      }
+      control={
+        <Switch
+          checked={saved ?? running}
+          disabled={!canWrite || saved === undefined}
+          aria-label="Enable Squires"
+          onCheckedChange={(checked) => updateSettings({ squire: { enabled: Boolean(checked) } })}
+        />
+      }
+    />
   );
 }
 
@@ -173,7 +211,7 @@ function SquireSettingsRow(props: {
   const config = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const canSetStatus = useAtomValue(squireEnvironment.setStatus.permissionAtom(environmentId));
   const canEdit = useAtomValue(squireEnvironment.update.permissionAtom(environmentId));
-  const canArchive = useAtomValue(squireEnvironment.delete.permissionAtom(environmentId));
+  const canDelete = useAtomValue(squireEnvironment.delete.permissionAtom(environmentId));
   const setStatus = useAtomCommand(squireEnvironment.setStatus);
   const deleteSquire = useAtomCommand(squireEnvironment.delete);
   const [pending, setPending] = useState(false);
@@ -200,9 +238,12 @@ function SquireSettingsRow(props: {
     });
     setPending(false);
   };
-  // P1.3: deleting archives the Squire's own thread and keeps every thread it tracked.
-  const archive = async () => {
-    const message = `Archive ${squire.name}?\nIts own thread is archived. The threads it watches are kept.`;
+  // No restore: the Squire's record, rules, and triggers are gone, and its home thread is archived.
+  const remove = async () => {
+    const message = [
+      `Delete ${squire.name}?`,
+      "This permanently deletes the Squire with its rules and triggers, and archives its home thread. The threads it watches are kept.",
+    ].join("\n");
     const localApi = readLocalApi();
     const confirmed =
       localApi === undefined
@@ -269,15 +310,15 @@ function SquireSettingsRow(props: {
           >
             {paused ? "Resume" : "Pause"}
           </Button>
-          {/* The Lead cannot be deleted (P1.3). */}
-          {isLead || !canArchive ? null : (
+          {/* The server refuses to delete the Lead. */}
+          {isLead || !canDelete ? null : (
             <Button
               size="xs"
               variant="ghost-destructive"
               disabled={pending}
-              onClick={() => void archive()}
+              onClick={() => void remove()}
             >
-              Archive
+              Delete
             </Button>
           )}
         </>
@@ -286,7 +327,7 @@ function SquireSettingsRow(props: {
   );
 }
 
-/** D51: environment-wide Squire settings, the `squire` block of the server settings. */
+/** Environment-wide Squire settings, the `squire` block of the server settings. */
 function SquireEnvironmentSettingsSection(props: { readonly environmentId: EnvironmentId }) {
   const { environmentId } = props;
   const settings = useEnvironmentSettings(environmentId, selectSquireSettings);

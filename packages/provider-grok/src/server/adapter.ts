@@ -257,7 +257,7 @@ export function makeGrokAcpAdapterFlavor(
     restartRuntimeAfterInterrupt: true,
     terminateRuntimeProcessGroupOnInterrupt: true,
     // Steering restarts on a settled turn additionally skip session/cancel so
-    // fire-and-forget subagents survive the steer (E1 harness confirmed the
+    // fire-and-forget subagents survive the steer (a harness run confirmed the
     // Grok CLI accepts a concurrent session/prompt in that state).
     preserveRuntimeOnSettledInterrupt: true,
     // Grok ACP initialize reports promptCapabilities.image:false but the agent
@@ -303,7 +303,7 @@ export function makeGrokAcpAdapterFlavor(
       (({ runtimePolicy, ...input }) =>
         Effect.gen(function* () {
           const environment = withAgentDeviceEnvironment(options.environment, input);
-          // Lecturn: a Squire never launches in the user's Grok home (A5.9).
+          // Lecturn: a Squire never launches in the user's Grok home.
           const spawnError = (cause: unknown) =>
             new EffectAcpErrors.AcpSpawnError({
               command: options.settings.binaryPath || "grok",

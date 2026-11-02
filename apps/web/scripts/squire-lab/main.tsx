@@ -4,7 +4,7 @@ import "~/index.css";
 
 import { createRoot } from "react-dom/client";
 
-import { parseSquireLabFixture, SquireLab } from "~/components/squire/companion/SquireLab";
+import { parseSquireLabFixture, SquireLab } from "./SquireLab";
 
 const root = document.getElementById("root");
 if (!import.meta.env.DEV) {

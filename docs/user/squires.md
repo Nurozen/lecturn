@@ -9,10 +9,24 @@ route your requests to the right Squire.
 
 ## Turn on Squires
 
-Squires are off by default. To try them, start the Lecturn server with `LECTURN_SQUIRE=1`. Once
-the environment has a project, a Lead appears in the sidebar's **Squires** group. Open it and it
+Squires are off by default, and you turn them on per environment:
+
+- **Desktop app or web:** go to **Settings → Squires**, pick the environment if you have more than
+  one, and turn on **Enable Squires**. The change applies when that environment's server restarts.
+  For the desktop app's own environment, quit and reopen Lecturn. The setting says when a change is
+  waiting for a restart.
+- **Mobile:** turn Squires on from the desktop app or web. Once the environment runs them, they
+  appear on mobile too.
+- **Server you start yourself (`npx lecturn`):** use the same setting, or start the server with
+  `LECTURN_SQUIRE=1`. The variable overrides the setting either way, so `LECTURN_SQUIRE=0` keeps
+  Squires off.
+
+Turning Squires off stops every Squire on that environment and keeps their setup for when you turn
+them back on. Once the environment has a project, a Lead appears in the sidebar's **Squires** group. Open it and it
 proposes two or three Squires based on your recent work. Accept the ones you want, edit them first,
-or create your own with **New Squire**.
+or create your own with **New Squire**. **Delete** in **Settings → Squires** removes a Squire for
+good, along with its rules and triggers, and archives its home thread. The threads it watched are
+kept.
 
 Each Squire watches the projects, Stave spaces, sagas, or single threads you pick. New threads in a
 watched project are picked up automatically. To add or remove a thread later, use **Track with**
@@ -47,7 +61,8 @@ a budget runs out, it goes back to recommending.
 After you accept a recommendation, in Lecturn or the notch, the Squire can offer **Always allow
 this**. That saves a rule that lets it act on its own next time, for that thread or its project.
 After you undo an action, it offers **Always ask first for this**. Rules are listed in the Squire's
-settings with how often they matched, and you can remove them there. A rule never widens what a
+settings with how often they matched, and you can remove them there. On mobile, they are at the
+bottom of the Squire's screen. A rule never widens what a
 Squire can see.
 
 ## Rooms
@@ -55,7 +70,8 @@ Squire can see.
 A room is a group conversation among Squires, the Lead, and you. Start one with **New room**. Your
 post goes to the Squire it mentions (`@Name`) or replies to, or else to the only Squire watching
 what it refers to, or else to the Lead. Other members see it next time they work. An idle room
-closes after the timeout in **Settings → Squires**, and you can reopen it.
+closes after the timeout in **Settings → Squires**, and you can reopen it. The Rooms menu lists
+rooms closed in the last week; a closed room's posts are removed 30 days after it closes.
 
 With **Room routing with Jev** funded in **Settings → Squires**, a post that matches none of those
 goes to the member Jev picks instead of the Lead. Without funding, rooms use the rules above.
@@ -77,8 +93,9 @@ Besides watching threads, a Squire can wake on a schedule or when another servic
 triggers in the Squire's settings. A scheduled run acts under the Squire's normal permissions. A
 webhook run only recommends, because its content comes from outside.
 
-For a custom webhook, open **Advanced: custom webhook** on the trigger. The secret is shown once,
-when you create the trigger. Send it as `Authorization: Bearer <secret>` or as an
+To add a custom webhook, open **Advanced: custom webhook** under the triggers and choose **Add
+custom webhook**. The secret is shown once, when you create it. Later, the trigger's own **Advanced:
+custom webhook** holds its URL, a test call, **Rotate**, and **Revoke**. Send it as `Authorization: Bearer <secret>` or as an
 `X-Hub-Signature-256` signature, as GitHub does. **Rotate** replaces the secret, and **Revoke**
 retires the URL for good. The URL works wherever this environment can be reached, such as over
 Tailscale or your own proxy. For a public URL, link the environment to Lecturn Connect. A paused

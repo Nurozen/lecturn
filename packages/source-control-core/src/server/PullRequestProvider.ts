@@ -255,7 +255,7 @@ export interface ProviderAcceptanceEvidence {
   readonly blockers: ReadonlyArray<string>;
 }
 
-/** Lecturn: one failing CI job of a head revision, as the host reported it (Squire D21). */
+/** Lecturn: one failing CI job of a head revision, as the host reported it, for the Squire CI excerpt. */
 export interface ProviderCiFailureJob {
   readonly name: string;
   readonly url: string | null;

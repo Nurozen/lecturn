@@ -184,7 +184,7 @@ interface ThreadRouteScreenProps extends ThreadRouteScreenRouteProps {
   readonly onReturnToThread?: () => void;
   readonly renderInspector?: (headerInset: number) => ReactNode;
   /**
-   * Lecturn: the D63 allowlist. Wins over the resolver, which already gives a Squire's home
+   * Lecturn: an allowlist of the controls to show. Wins over the resolver, which already gives a Squire's home
    * thread `SQUIRE_THREAD_CONTROLS` on every route; absent keeps today's screen.
    */
   readonly controls?: ThreadRouteControls;
@@ -497,7 +497,7 @@ function ThreadRouteContent(
     routeEnvironmentRuntime?.connectionState ?? (environmentId ? "available" : connectionState);
   const routeConnectionError = routeEnvironmentRuntime?.connectionError ?? null;
   const serverConfig = routeEnvironmentRuntime?.serverConfig ?? null;
-  // Lecturn: every control site below reads this beside its capability check (D63).
+  // Lecturn: every control site below reads this beside its capability check.
   const controls =
     props.controls ??
     resolveThreadRouteControls({

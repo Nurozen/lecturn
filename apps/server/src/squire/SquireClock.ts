@@ -1,5 +1,5 @@
 /**
- * Squire timers (A2, A9). One fiber sleeps until the earliest moment a row,
+ * Squire timers. One fiber sleeps until the earliest moment a row,
  * trigger, or hold comes due (a deferred row's `not_before`, a schedule slot,
  * a held action's `executes_at`, a held-back intent's `escalate_at`) and
  * re-arms on every repository change, so nothing polls. The 5 s scheduler
@@ -38,7 +38,7 @@ export type SquireClockError = PersistenceSqlError | SquireReactor.SquireReactor
 export class SquireClock extends Context.Service<
   SquireClock,
   {
-    /** The arming loop; never returns. Forked at startup, which re-arms from the table (A9). */
+    /** The arming loop; never returns. Forked at startup, which re-arms from the table. */
     readonly start: Effect.Effect<never>;
     /** Runs due holds, promotes due rows, fires due schedule slots, and wakes every Squire with pending rows. */
     readonly runDue: Effect.Effect<void, SquireClockError>;
@@ -47,12 +47,39 @@ export class SquireClock extends Context.Service<
   }
 >()("lecturn/squire/SquireClock") {}
 
-/** D47: finished rows keep their key, so a recurring absolute PR state stays deduped. */
+/** Finished rows keep their key, so a recurring absolute PR state stays deduped. */
 const SQUIRE_PAYLOAD_RETENTION = Duration.days(30);
+/**
+ * Delivered and dropped rows other than PR keys. Their keys are run, request,
+ * slot, delivery, or message ids that never recur once the reactor cursor and
+ * the trigger slots have moved past them, and the delivered home-thread
+ * message is the durable record. Unfinished rows are never pruned.
+ */
+const SQUIRE_EVENT_RETENTION = Duration.days(30);
+/**
+ * Settled cards, by when they settled. Nothing acts on them again; card ids
+ * that encode a generation skip ids still taken. Dismissals that stop an
+ * overlap or a finding being raised again are kept (SquireRepository).
+ */
+const SQUIRE_CARD_RETENTION = Duration.days(30);
+/**
+ * Longer than the cards, since the log is the exportable record. Replay keys
+ * (tool calls, executions) only matter within a turn; rows of a card that
+ * still exists stay with it.
+ */
+const SQUIRE_ACTION_LOG_RETENTION = Duration.days(90);
+/** Budgets count rolling windows of at most a day; a week past that is slack. */
+const SQUIRE_BUDGET_USAGE_RETENTION = Duration.days(1 + 7);
+/**
+ * A room closed this long ago left the snapshot weeks earlier (SquireReadModel)
+ * and takes no posts until reopened; read cursors stay valid because post ids
+ * are never reused.
+ */
+const SQUIRE_CLOSED_ROOM_POST_RETENTION = Duration.days(30);
 const PRUNE_EVERY = Duration.days(1);
 /** A row that stays due after `runDue` (it cannot move yet) is retried at the backstop's pace. */
 const STUCK_RETRY = Duration.seconds(5);
-/** R79: checkpoint refs kept per scratch repo; home threads offer no rollback, so older ones only cost space. */
+/** Checkpoint refs kept per scratch repo; home threads offer no rollback, so older ones only cost space. */
 export const SQUIRE_SCRATCH_REFS_KEPT = 200;
 
 const make = Effect.gen(function* () {
@@ -198,8 +225,15 @@ const make = Effect.gen(function* () {
       return;
     }
     yield* Ref.set(lastPrune, Option.some(now));
-    yield* repository.pruneEventPayloads({
-      before: DateTime.formatIso(DateTime.subtractDuration(now, SQUIRE_PAYLOAD_RETENTION)),
+    const before = (retention: Duration.Duration) =>
+      DateTime.formatIso(DateTime.subtractDuration(now, retention));
+    yield* repository.pruneEventPayloads({ before: before(SQUIRE_PAYLOAD_RETENTION) });
+    yield* repository.pruneHistory({
+      eventsBefore: before(SQUIRE_EVENT_RETENTION),
+      cardsBefore: before(SQUIRE_CARD_RETENTION),
+      actionLogBefore: before(SQUIRE_ACTION_LOG_RETENTION),
+      budgetUsageBefore: before(SQUIRE_BUDGET_USAGE_RETENTION),
+      closedRoomPostsBefore: before(SQUIRE_CLOSED_ROOM_POST_RETENTION),
     });
     yield* pruneScratchRefs;
   }).pipe(Effect.withSpan("SquireClock.sweep"));

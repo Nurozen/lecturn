@@ -628,7 +628,7 @@ function acpMcpActivation(context: AcpMcpContext) {
 
 /**
  * Lecturn: a Squire home reaches Lecturn's server alone, whose credential
- * lists only its Squire tools, and a probe reaches no server (A5.9). Neither
+ * lists only its Squire tools, and a probe reaches no server. Neither
  * gets the bridge credential or the device CLI in the agent's environment.
  */
 function acpSquireMcpContext(
@@ -1484,7 +1484,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             terminalEnvironmentBySessionId.set(sessionId, environment);
           }
         };
-        // Lecturn: a Squire reaches no client terminal or file system (D9).
+        // Lecturn: a Squire reaches no client terminal or file system.
         const clientTerminals: AcpClientTerminals | undefined =
           options.clientTerminals === undefined || squireIsolation !== undefined
             ? undefined
@@ -5400,7 +5400,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                     yield* mcpSessions.read(context.input.threadId),
                   );
                   // Lecturn: a Squire asks nobody; anything but its gated tools
-                  // is declined here (D9), and a probe reaches no tool at all.
+                  // is declined here, and a probe reaches no tool at all.
                   const lecturnAppDisposition =
                     squireIsolation === "probe"
                       ? undefined

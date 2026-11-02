@@ -110,7 +110,7 @@ const make = Effect.gen(function* () {
     );
 
   // Lecturn: the showcase is served from Squire state, like a connected app,
-  // so its buttons work on every provider and in copies (D32). Without the
+  // so its buttons work on every provider and in copies. Without the
   // switch the route is absent.
   const squireRoute = (threadId: ThreadId) =>
     Ref.get(squireMcpAppRoute).pipe(

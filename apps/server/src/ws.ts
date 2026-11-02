@@ -1,4 +1,4 @@
-import { OrchestrationDispatchCommandError } from "@lecturn/contracts";
+import { OrchestrationDispatchCommandError, extensionFundingFor } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -2057,8 +2057,15 @@ const makeWsRpcHandlers = (
       [WS_METHODS.contextualEvidence]: (input) => contextual.evidence(input),
       [WS_METHODS.contextualExport]: (input) => contextual.export(input),
       [WS_METHODS.contextualForget]: (input) => contextual.forget(input),
-      [WS_METHODS.extensionsFundingStatus]: (input) => contextual.fundingStatus(input),
-      [WS_METHODS.extensionsFunding]: (input) => contextual.funding(input),
+      // Clients that predate `features` decode feature ids as a closed list.
+      [WS_METHODS.extensionsFundingStatus]: ({ features, ...input }) =>
+        contextual
+          .fundingStatus(input)
+          .pipe(Effect.map((status) => extensionFundingFor(status, features))),
+      [WS_METHODS.extensionsFunding]: ({ features, ...input }) =>
+        contextual
+          .funding(input)
+          .pipe(Effect.map((result) => extensionFundingFor(result, features))),
       [WS_METHODS.contextualSubscribe]: (input) => contextual.subscribe(input),
       [WS_METHODS.threadDecisionsFundingStatus]: () => threadDecisions.fundingStatus,
       [WS_METHODS.threadDecisionsFunding]: (input) => threadDecisions.funding(input),

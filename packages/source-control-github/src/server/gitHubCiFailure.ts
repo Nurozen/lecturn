@@ -1,5 +1,5 @@
 /**
- * Lecturn (Squire D21): the failing GitHub Actions jobs of a head revision with their error
+ * Lecturn (Squire CI excerpt): the failing GitHub Actions jobs of a head revision with their error
  * sources, annotations first and the job log only when a job has none. A background read: it
  * spends no reserved quota, asks the user nothing, and makes at most `1 + 3 * maxJobs` requests.
  */

@@ -19,7 +19,7 @@ import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
 import { Spinner } from "../../ui/spinner";
 
-/** P8.1 rules in the setup sheet (plan 10b.6). Never rendered for the Lead. */
+/** Rules in the setup sheet. Never rendered for the Lead. */
 export function SquireRulesSection(props: {
   readonly environmentId: EnvironmentId;
   readonly squire: Pick<Squire, "id" | "name" | "role">;

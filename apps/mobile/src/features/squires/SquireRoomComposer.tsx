@@ -21,7 +21,7 @@ interface Named {
   readonly name: string;
 }
 
-/** P19.8 composer: `@` suggests the room's members and the Lead; the request id is the message key. */
+/** `@` suggests the room's members and the Lead; the request id is the message key. */
 export function SquireRoomComposer(props: {
   readonly environmentId: EnvironmentId;
   readonly roomId: SquireRoomId;

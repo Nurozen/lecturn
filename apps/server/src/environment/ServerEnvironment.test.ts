@@ -374,7 +374,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
     }),
   );
 
-  // OQ4: Squires stay opt-in, so an environment without LECTURN_SQUIRE never advertises them.
+  // Squires stay opt-in, so an environment without LECTURN_SQUIRE never advertises them.
   it.effect("does not advertise Squires when LECTURN_SQUIRE is unset", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

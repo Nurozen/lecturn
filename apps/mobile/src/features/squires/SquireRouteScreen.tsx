@@ -6,8 +6,14 @@ import {
 } from "@lecturn/client-runtime/state/squire";
 import { EnvironmentId, SquireCardId, SquireId } from "@lecturn/contracts";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { useLayoutEffect, useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { useLayoutEffect, useRef, useState } from "react";
+import {
+  Pressable,
+  ScrollView,
+  View,
+  type ScrollViewInstance,
+  type ViewInstance,
+} from "react-native";
 
 import { EmptyState } from "../../components/ui/EmptyState";
 import { AppText as Text } from "../../components/ui/AppText";
@@ -17,6 +23,13 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { RequestActionButton } from "../threads/RequestActionButton";
 import { SquireIndicator, SquireMotionClock } from "./SquireIndicator";
 import { SquireQueue } from "./SquireQueue";
+import { SquireRules } from "./SquireRules";
+import {
+  SquireViewportContext,
+  useSquireInView,
+  useSquireScrollViewport,
+  useSquireViewportScroll,
+} from "./SquireViewport";
 import {
   squireHeaderActions,
   squireHeldRows,
@@ -99,6 +112,8 @@ function SquireReady(props: {
   const { squire } = entry;
   const navigation = useNavigation();
   const [teamFilter, setTeamFilter] = useState<SquireId | null>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const scrollViewport = useSquireScrollViewport(scrollRef);
   useLayoutEffect(() => {
     navigation.setOptions({ title: squire.name });
   }, [navigation, squire.name]);
@@ -106,30 +121,37 @@ function SquireReady(props: {
     [entry, ...team].find((candidate) => candidate.squire.id === id)?.squire.name ?? "A Squire";
 
   return (
-    <ScrollView
-      className="flex-1 bg-screen"
-      contentInsetAdjustmentBehavior="automatic"
-      keyboardShouldPersistTaps="handled"
-      contentContainerStyle={{ padding: 16, gap: 18, paddingBottom: 48 }}
-    >
-      <SquireHeader environmentId={environmentId} entry={entry} isLead={isLead} />
-      {isLead && team.length > 0 ? (
-        <SquireTeamStrip
+    <SquireViewportContext.Provider value={scrollViewport.viewport}>
+      <ScrollView
+        ref={scrollRef}
+        className="flex-1 bg-screen"
+        contentInsetAdjustmentBehavior="automatic"
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ padding: 16, gap: 18, paddingBottom: 48 }}
+        scrollEventThrottle={100}
+        onScroll={scrollViewport.onScroll}
+        onLayout={scrollViewport.onLayout}
+      >
+        <SquireHeader environmentId={environmentId} entry={entry} isLead={isLead} />
+        {isLead && team.length > 0 ? (
+          <SquireTeamStrip
+            environmentId={environmentId}
+            team={team}
+            selected={teamFilter}
+            onSelect={(id) => setTeamFilter(squireTeamFilterToggle(teamFilter, id))}
+          />
+        ) : null}
+        <SquireQueue
+          held={squireHeldRows(entry, team, teamFilter)}
           environmentId={environmentId}
-          team={team}
-          selected={teamFilter}
-          onSelect={(id) => setTeamFilter(squireTeamFilterToggle(teamFilter, id))}
+          squireId={squire.id}
+          teamFilter={isLead ? teamFilter : null}
+          initialItemId={props.itemId}
+          raiserName={isLead ? nameOf : null}
         />
-      ) : null}
-      <SquireQueue
-        held={squireHeldRows(entry, team, teamFilter)}
-        environmentId={environmentId}
-        squireId={squire.id}
-        teamFilter={isLead ? teamFilter : null}
-        initialItemId={props.itemId}
-        raiserName={isLead ? nameOf : null}
-      />
-    </ScrollView>
+        {isLead ? null : <SquireRules environmentId={environmentId} squire={squire} />}
+      </ScrollView>
+    </SquireViewportContext.Provider>
   );
 }
 
@@ -142,6 +164,8 @@ function SquireHeader(props: {
   const { squire } = entry;
   const navigation = useNavigation();
   const indicator = useSquireIndicator(environmentId, entry);
+  const portraitRef = useRef<ViewInstance>(null);
+  const inView = useSquireInView(portraitRef, indicator.state === "working");
   const actions = squireHeaderActions(squire);
   const canSetStatus = useAtomValue(squireEnvironment.setStatus.permissionAtom(environmentId));
   const setStatus = useAtomCommand(squireEnvironment.setStatus, { reportFailure: false });
@@ -169,13 +193,16 @@ function SquireHeader(props: {
   return (
     <View className="gap-3">
       <View className="flex-row items-center gap-3.5">
-        <SquireIndicator
-          state={indicator.state}
-          companion={squire.companion}
-          isLead={props.isLead}
-          size={56}
-          label={`${squire.name}, ${stateLine}`}
-        />
+        <View ref={portraitRef} onLayout={inView.onLayout} collapsable={false}>
+          <SquireIndicator
+            state={indicator.state}
+            companion={squire.companion}
+            isLead={props.isLead}
+            size={56}
+            label={`${squire.name}, ${stateLine}`}
+            visible={inView.visible}
+          />
+        </View>
         <View className="min-w-0 flex-1 gap-0.5">
           <Text className="font-lecturn-bold text-xl text-foreground" numberOfLines={1}>
             {squire.name}
@@ -226,10 +253,13 @@ function SquireTeamStrip(props: {
   readonly selected: SquireId | null;
   readonly onSelect: (squireId: SquireId) => void;
 }) {
+  const onScroll = useSquireViewportScroll();
   return (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
+      scrollEventThrottle={100}
+      onScroll={onScroll}
       contentContainerStyle={{ gap: 14 }}
       accessibilityLabel="Filter by Squire"
     >
@@ -256,6 +286,8 @@ function TeamPortrait(props: {
 }) {
   const { squire } = props.entry;
   const indicator = useSquireIndicator(props.environmentId, props.entry);
+  const portraitRef = useRef<ViewInstance>(null);
+  const inView = useSquireInView(portraitRef, indicator.state === "working");
   return (
     <Pressable
       accessibilityRole="button"
@@ -264,12 +296,15 @@ function TeamPortrait(props: {
       onPress={props.onPress}
       className={props.dimmed ? "items-center gap-1 opacity-45" : "items-center gap-1"}
     >
-      <SquireIndicator
-        state={indicator.state}
-        companion={squire.companion}
-        size={40}
-        label={squire.name}
-      />
+      <View ref={portraitRef} onLayout={inView.onLayout} collapsable={false}>
+        <SquireIndicator
+          state={indicator.state}
+          companion={squire.companion}
+          size={40}
+          label={squire.name}
+          visible={inView.visible}
+        />
+      </View>
       <Text
         className={
           props.selected

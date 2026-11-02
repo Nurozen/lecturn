@@ -1,5 +1,5 @@
 /**
- * The Lead's first run and event set (7.1, 7.2): `open` queues onboarding
+ * The Lead's first run and event set: `open` queues onboarding
  * once with a bounded scan and the client's timezone; `squire_propose_squire`
  * raises proposals that only the user turns into Squires; the Lead wakes
  * only for decision items its Squires raise or resolve.
@@ -238,7 +238,7 @@ const userTurn = (threadId: ThreadId, reply: string) =>
     }
   });
 
-describe("SquireLeadOnboarding.open (7.1)", () => {
+describe("SquireLeadOnboarding.open", () => {
   it.effect("queues onboarding once across retries and reopens, and keeps the first timezone", () =>
     withLead((lead) =>
       Effect.gen(function* () {
@@ -256,7 +256,7 @@ describe("SquireLeadOnboarding.open (7.1)", () => {
         const row = yield* leadRow(lead.squireId);
         assert.strictEqual(row.timezone, "America/Los_Angeles");
         assert.isNotNull(row.onboarded_at);
-        // D31: capturing the zone never turns the digest on.
+        // Capturing the zone never turns the digest on.
         assert.isNull(row.digest_json);
         const service = yield* SquireService.SquireService;
         const view = Option.getOrThrow(yield* service.get(lead.squireId));
@@ -328,7 +328,7 @@ describe("SquireLeadOnboarding.open (7.1)", () => {
   );
 });
 
-describe("squire_propose_squire (7.1)", () => {
+describe("squire_propose_squire", () => {
   it.effect("raises recommend-only proposals by whole project that never wake the Lead", () =>
     withLead((lead) =>
       Effect.gen(function* () {
@@ -393,7 +393,7 @@ describe("squire_propose_squire (7.1)", () => {
           notify: "on",
         });
         assert.notStrictEqual(payload.companion.palette, "gold");
-        // D29: the Lead's own proposals never wake it.
+        // The Lead's own proposals never wake it.
         assert.lengthOf(yield* eventsOf(lead.squireId), 0);
       }),
     ),
@@ -506,7 +506,7 @@ describe("squire_propose_squire (7.1)", () => {
   );
 });
 
-describe("The Lead's event set (7.2, D29)", () => {
+describe("The Lead's event set", () => {
   it.effect("wakes for its Squires' decision items only, never FYIs or its own items", () =>
     withLead((lead) =>
       Effect.gen(function* () {
@@ -571,7 +571,7 @@ describe("The Lead's event set (7.2, D29)", () => {
 });
 
 /**
- * The scenario's effects from the action log (P14.2). Not `barObserve`, whose
+ * The scenario's effects from the action log. Not `barObserve`, whose
  * proposal targets are thread proposals.
  */
 const logEffects = (squireId: SquireId) =>
@@ -600,7 +600,7 @@ const logEffects = (squireId: SquireId) =>
     return effects;
   });
 
-describe("00-lead-onboarding on the fake (7.1)", () => {
+describe("00-lead-onboarding on the fake", () => {
   const scenario = decodeScenario(scenario00);
   const fake = decodeFake(fake00);
 

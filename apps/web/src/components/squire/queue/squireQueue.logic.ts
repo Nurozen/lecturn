@@ -172,7 +172,7 @@ function squireOnlyShownAbove(
 /**
  * The header's counts, over the loaded open rows with no chip or team filter: `decisions` is
  * exactly the "Needs a decision" group and `held` the "Held" group, Lead-raised items included.
- * The sidebar badge counts only a Squire's own items (D50), so it can be lower.
+ * The sidebar badge counts only a Squire's own items, so it can be lower.
  */
 export function squireHeaderCounts(rows: ReadonlyArray<Pick<SquireCardRow, "kind" | "status">>): {
   readonly decisions: number;
@@ -189,7 +189,7 @@ export function squireHeaderCounts(rows: ReadonlyArray<Pick<SquireCardRow, "kind
 }
 
 /**
- * P7.6: a hold is not an item, so it sits beside the open card of the same raiser, thread, and
+ * A hold is not an item, so it sits beside the open card of the same raiser, thread, and
  * kind (`heldOverCardId`) rather than replacing it. Each such hold shows under that card as one
  * block instead of as a second row with the same title. A hold whose card is not listed here
  * (filtered, acted on, settled) keeps its own row. Rows keep their order.
@@ -284,7 +284,7 @@ export function squireSteerKindLabel(kind: SquireSteerKind | null): string | nul
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-/** P7.8 and P7.6 markers, in the order the row shows them. */
+/** The row's status markers, in the order the row shows them. */
 export function squireCardMarkers(
   row: Pick<SquireCardRow, "status" | "replacedCount">,
 ): ReadonlyArray<"held" | "sending" | "outdated" | "resolved" | "updated"> {
@@ -355,7 +355,7 @@ export function squireReceiptRows(
 // ── Evidence ──────────────────────────────────────────────────
 
 /**
- * D28: "Open in thread" lands on the triggering message, highlighting its quote, when the
+ * "Open in thread" lands on the triggering message, highlighting its quote, when the
  * card has both; a PR-only trigger opens the thread.
  */
 export function squireOpenInThreadTarget(
@@ -387,7 +387,7 @@ export function squireOpenInThreadTarget(
   };
 }
 
-// ── Question answers (P7.4) ───────────────────────────────────
+// ── Question answers ──────────────────────────────────────────
 
 /** The thread's own answer shape, keyed by question id; null until every question has one. */
 export function squireUserInputAnswer(

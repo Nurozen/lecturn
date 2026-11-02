@@ -1,5 +1,5 @@
 /**
- * Room rows (P19.2, D62): `squire_room`, `squire_room_member`, and the room
+ * Room rows: `squire_room`, `squire_room_member`, and the room
  * log `squire_room_post`. Kept apart from `SquireRepository` so the room
  * builders never edit that shared file; it shares the same `SqlClient`, so
  * its statements join an enclosing `repository.transaction`.
@@ -170,7 +170,7 @@ export class SquireRoomStore extends Context.Service<
     }) => Result<number>;
     /**
      * Rewrites a post's routing. With `expectedRoutingJson`, only while the
-     * stored routing still equals it (D55's compare-and-set on `pending`).
+     * stored routing still equals it (Jev routing's compare-and-set on `pending`).
      */
     readonly setPostRouting: (input: {
       readonly id: SquireRoomPostId;

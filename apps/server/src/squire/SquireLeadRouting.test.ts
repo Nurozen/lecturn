@@ -1,8 +1,8 @@
 /**
- * Lead task routing (7.7, P17.9, D53, D65) on the switch-on Squire layer over
+ * Lead task routing on the switch-on Squire layer over
  * a real orchestrator: forwarding a typed task as an item, `squire_route_task`
  * through delivery into the target's turn, the derived receipts, and the
- * Lead's `squire_propose_thread` (P17.8).
+ * Lead's `squire_propose_thread`.
  */
 import { assert, describe, it } from "@effect/vitest";
 import {
@@ -233,7 +233,7 @@ const routeArgs = (team: Team) => ({
   reason: "Release owns billing-service.",
 });
 
-describe("Lead routing (7.7, P17.9)", () => {
+describe("Lead routing", () => {
   it.effect("a typed steer becomes one item owned by the thread's Squire, with a receipt", () =>
     withTeam((team) =>
       Effect.gen(function* () {
@@ -247,7 +247,7 @@ describe("Lead routing (7.7, P17.9)", () => {
         assert.lengthOf(cards, 1);
         assert.strictEqual(cards[0]!.squire_id, team.lead.squireId);
         assert.strictEqual(cards[0]!.owner_squire_id, team.release.squireId);
-        // D29: a Lead item never wakes the Lead.
+        // A Lead item never wakes the Lead.
         assert.lengthOf(
           yield* repository.listEventsByStatus({
             squireId: team.lead.squireId,

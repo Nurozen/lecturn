@@ -194,7 +194,7 @@ export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string
 }
 
 /**
- * Lecturn: a Squire home thread shows a delivered event batch as one compact row (D63). A
+ * Lecturn: a Squire home thread shows a delivered event batch as one compact row. A
  * single message from another Squire keeps its handoff line, which says more than its kind.
  */
 export function squireEventBatchLabel(
@@ -215,7 +215,7 @@ export function squireEventBatchLabel(
 
 /**
  * Lecturn: a Squire home thread's fold names what it holds instead of how long the turn took,
- * so the calls stay one quiet click away (D63).
+ * so the calls stay one quiet click away.
  */
 export function squireTurnFoldLabel(
   entries: ReadonlyArray<TimelineEntry>,

@@ -26,7 +26,7 @@ const disabled = new SquireError({
 });
 
 /**
- * Server-lifetime handlers for every Squire RPC (A6). The services exist only
+ * Server-lifetime handlers for every Squire RPC. The services exist only
  * while `LECTURN_SQUIRE` is on (layerSquire.ts), so each is resolved as an
  * option, and every method refuses `disabled_by_server` when the switch is off
  * or its service is absent: the switch is unbypassable, like Stave's.

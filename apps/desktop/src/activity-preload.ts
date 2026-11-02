@@ -397,7 +397,7 @@ window.addEventListener("DOMContentLoaded", () => {
     squireResultNodes.set(result.rowId, line);
     return line;
   };
-  /** D40: a plain card with no state classes, so the notch never animates for a Squire. */
+  /** A plain card with no state classes, so the notch never animates for a Squire. */
   const squireCard = (row: SquireActivityRow) => {
     const view = squireCardView(row, squireRequests.isPending(row.id), squireResults.get(row.id));
     const card = document.createElement("article");
@@ -438,7 +438,7 @@ window.addEventListener("DOMContentLoaded", () => {
       for (const action of view.buttons) actions.append(squireButton(action));
       card.append(actions);
     }
-    // P7.6: the newer hold beside this open card, as one line under it with its own Undo.
+    // The newer hold beside this open card, as one line under it with its own Undo.
     if (view.heldLine !== null) {
       const line = element("div", "", "squire-held-line");
       const countdown = element("span", "", "squire-countdown");

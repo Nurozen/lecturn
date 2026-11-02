@@ -13,7 +13,7 @@ import {
 } from "./squireLead.logic";
 
 /**
- * A proposed Squire as it would be created (P17.2): its figure as a still bust, name, scope by
+ * A proposed Squire as it would be created: its figure as a still bust, name, scope by
  * name, permissions, and brief. Shared by the onboarding cards and the queue's card.
  */
 export function SquireProposalSummary(props: {
@@ -65,7 +65,7 @@ export function SquireProposalSummary(props: {
 /**
  * The proposed companion as a still bust: head, hood, shoulders, and held equipment, cropped
  * as the sidebar hover bust is. Still companions paint one frame and never take the live lease,
- * so a batch of cards costs no animation (spec P16.5).
+ * so a batch of cards costs no animation.
  */
 export function SquireProposalBust(props: {
   readonly companion: SquireProposalPayload["companion"];

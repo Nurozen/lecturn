@@ -1,5 +1,5 @@
 /**
- * `POST /api/dev/squire/fixture` (8.2) served over the server's Squire wiring
+ * `POST /api/dev/squire/fixture` served over the server's Squire wiring
  * (`phase4Layer`: switch-on `layerSquire` with test providers on, a real
  * orchestrator, the scripted provider).
  */
@@ -162,7 +162,7 @@ describe("Squire dev fixture route", () => {
         assert.strictEqual(first.status, 200);
         const sequence = (first.json as { readonly sequence: number }).sequence;
         assert.isNumber(sequence);
-        // D45: a duplicate inject answers with the original row.
+        // A duplicate inject answers with the original row.
         assert.deepStrictEqual((yield* post("operate", voiceNote("voice-1"))).json, { sequence });
 
         const restart = yield* post(

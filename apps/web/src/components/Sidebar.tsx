@@ -4117,7 +4117,7 @@ export default function Sidebar() {
       const entry = readStaveSpaceLifecycleMenuEntry(member);
       return entry ? [{ member, entry }] : [];
     });
-    // D39: a plain project's header has no other menu, so Track alone opens one.
+    // A plain project's header has no other menu, so Track alone opens one.
     const squireMenus = project.memberProjects.flatMap((member) => {
       const menu = readSquireContainerTrackMenu(
         member.environmentId,

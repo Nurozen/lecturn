@@ -1,6 +1,8 @@
 import {
   ContextualError,
   DecisionFundingStatusResult,
+  EXTENSION_FEATURES_HEADER,
+  ExtensionFeatureId,
   ExtensionFundingStatusResult,
   ExtensionFundingChallengeResult,
   ExtensionFundingObserveResult,
@@ -10,7 +12,6 @@ import {
   SquireRoutingRequest,
   SquireRoutingResult,
   squireRoutingJudgmentMatches,
-  type ExtensionFeatureId,
   type ExtensionHostFundingRequest,
   type ExtensionHostFundingResult,
   type ContextualEvaluationRequest,
@@ -48,10 +49,15 @@ const evaluationBody = HttpClientResponse.schemaBodyJson(ContextualEvaluationRes
 const conflictBody = HttpClientResponse.schemaBodyJson(ContextualConflictCheckResult);
 const equivalenceBody = HttpClientResponse.schemaBodyJson(ContextualEquivalenceCheckResult);
 const routingBody = HttpClientResponse.schemaBodyJson(SquireRoutingResult);
-// Encoding strips anything outside the contract, so only P19.4 state leaves the host.
+// Encoding strips anything outside the contract, so only the routing fields leave the host.
 const encodeRoutingRequest = Schema.encodeEffect(SquireRoutingRequest);
-/** Room routing waits on this answer (D55), so it never gets the general 90 s. */
+/** Room routing waits on this answer, so it never gets the general 90 s. */
 const ROUTE_TIMEOUT = "5 seconds";
+// The relay folds any feature this build cannot decode out of the allowances it returns.
+const declareFeatures = HttpClientRequest.setHeader(
+  EXTENSION_FEATURES_HEADER,
+  ExtensionFeatureId.literals.join(","),
+);
 export class ExtensionsRouteError extends Data.TaggedError("ExtensionsRouteError")<{
   readonly reason: "rate-limited" | "allowance" | "invalid" | "error";
 }> {}
@@ -181,7 +187,7 @@ export const make = Effect.gen(function* () {
         ? Effect.succeed(HttpClientRequest.get(target))
         : HttpClientRequest.bodyJson(HttpClientRequest.post(target), body);
     return yield* req.pipe(
-      Effect.map(HttpClientRequest.bearerToken(credential)),
+      Effect.map((r) => r.pipe(HttpClientRequest.bearerToken(credential), declareFeatures)),
       Effect.flatMap(http.execute),
       Effect.timeout(timeout),
       Effect.mapError(unavailable),

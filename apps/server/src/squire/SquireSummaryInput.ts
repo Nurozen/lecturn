@@ -140,7 +140,7 @@ export function parseSquireNameStatus(text: string): ReadonlyArray<SquireFileEnt
 /**
  * Files from the run's checkpoint summary, whose kinds are always
  * `modified`, with kinds taken from the run's own file-change items. The
- * fallback when the checkpoint's name-status diff (D16) cannot be read.
+ * fallback when the checkpoint's name-status diff cannot be read.
  */
 export function squireFilesFromCheckpoint(
   checkpointFiles: ReadonlyArray<OrchestrationV2CheckpointFileSummary>,

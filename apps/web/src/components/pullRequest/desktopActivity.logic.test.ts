@@ -670,7 +670,7 @@ describe("Squire notch rows", () => {
   });
 });
 
-describe("Squire notch hold pairing (P7.6)", () => {
+describe("Squire notch hold pairing", () => {
   const items = [cardRow("card-1", "open"), cardRow("held-1", "held", "rule-1")];
   const rows = squireActivityRows([squireSource(items, "card-1")], [], 11_000);
 

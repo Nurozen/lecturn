@@ -29,7 +29,7 @@ const targetKey = (target: SquireSetupTarget) =>
       ? `proposal:${target.environmentId}:${target.cardId}`
       : `create:${target.environmentId}`;
 
-/** Mounted once in AppShell; every entry point opens it through `openSquireSetup` (P13.1). */
+/** Mounted once in AppShell; every entry point opens it through `openSquireSetup`. */
 export function SquireSetupHost() {
   const target = useSquireSetupTarget();
   if (target === null) return null;
@@ -110,7 +110,7 @@ function SquireEditSetup(props: {
   const { environmentId } = target;
   const context = useSetupContext(environmentId);
   const entry = useAtomValue(squireEnvironment.entry(environmentId, squireId));
-  // The snapshot leaves the brief out (R37), so the full record is read only while this is open.
+  // The snapshot leaves the brief out, so the full record is read only while this is open.
   const detail = useEnvironmentQuery(
     squireEnvironment.detail({ environmentId, input: { squireId } }),
   );

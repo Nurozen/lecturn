@@ -20,7 +20,7 @@ import { SQUIRE_ACTIVITY_KINDS, squireActivityLabel } from "./squirePage.logic";
 
 const ACTIVITY_PAGE = 50;
 
-/** D64: outcomes outside a turn, which the home thread cannot show. */
+/** Outcomes outside a turn, which the home thread cannot show. */
 export const SquireActivity = memo(function SquireActivity(props: {
   readonly environmentId: EnvironmentId;
   readonly squireId: SquireId;
@@ -83,7 +83,7 @@ function SquireActivityList(props: {
   );
 }
 
-/** P14.1: the full action log, every kind, as the server's NDJSON export. */
+/** The full action log, every kind, as the server's NDJSON export. */
 function SquireActionLogExportButton(props: {
   readonly environmentId: EnvironmentId;
   readonly squireId: SquireId;

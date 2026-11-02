@@ -12,7 +12,7 @@ import type {
 } from "./companion/types";
 
 /**
- * Where a full figure shows (spec P16.5). Every placement but the panel is an overlay for the
+ * Where a full figure shows. Every placement but the panel is an overlay for the
  * single live rig, so a hover card or setup preview stills the panel while it is mounted.
  */
 export type SquireCompanionPlacement = "panel" | "hover" | "setup" | "onboarding" | "overlay";
@@ -39,7 +39,7 @@ export interface SquireCompanionHandle {
 }
 
 // The runtime (about 80 KB gzipped) and the figure art stay out of the main bundle until a
-// full-figure placement first mounts (spec P16.5, P16.7).
+// full-figure placement first mounts.
 let runtime: Promise<void> | null = null;
 export function loadCompanionRuntime() {
   runtime ??= import("./companion/runtime").then((module) => module.defineCompanionElements());

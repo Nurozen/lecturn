@@ -1,5 +1,5 @@
 /**
- * Room context (P19.2, P19.5): a member that was not woken gets its unseen
+ * Room context: a member that was not woken gets its unseen
  * posts on its next delivered batch, at most 20 posts or 4,000 characters per
  * room (newest kept) plus a count of older ones, and its read cursor advances
  * in that batch's transaction; a batch the orchestrator refuses rewinds it in
@@ -21,6 +21,7 @@ import * as Schema from "effect/Schema";
 
 import type { PersistenceSqlError } from "../persistence/Errors.ts";
 import type * as SquireRepository from "./SquireRepository.ts";
+import { sentInUserStartedTurn } from "./squireMessageGuards.ts";
 import type * as SquireRoomStore from "./SquireRoomStore.ts";
 
 const ROOM_CONTEXT_MAX_POSTS = 20;
@@ -32,6 +33,8 @@ export interface RoomContextPost {
   readonly authorKind: SquireRepository.SquireRoomPostRow["author_kind"];
   readonly body: string;
   readonly createdAt: string;
+  /** A Squire's words: its post, or the Lead's from a turn no user started. */
+  readonly squireText: boolean;
 }
 
 export interface RoomContextBlock {
@@ -96,7 +99,7 @@ const windowsOf = (dataJson: string): ReadonlyArray<RoomContextWindow> => {
 };
 
 /**
- * A post the Jev router showed to the Lead without waking it (P19.4): the
+ * A post the Jev router showed to the Lead without waking it: the
  * routed post itself, or the room's "· shown to Lead" system row.
  */
 const isShownToLead = (post: Pick<Post, "author_kind" | "body" | "routing_json">) => {
@@ -148,22 +151,31 @@ const toPosts = Effect.fn("squireRoomContext.toPosts")(function* (
   posts: ReadonlyArray<Post>,
 ) {
   const author = yield* authorNames(repository, posts);
-  return posts.map((post): RoomContextPost => ({
-    postId: post.id,
-    author: author(post),
-    authorKind: post.author_kind,
-    body: post.body,
-    createdAt: post.created_at,
-  }));
+  const shown: Array<RoomContextPost> = [];
+  for (const post of posts) {
+    shown.push({
+      postId: post.id,
+      author: author(post),
+      authorKind: post.author_kind,
+      body: post.body,
+      createdAt: post.created_at,
+      squireText:
+        post.author_kind === "squire" ||
+        (post.author_kind === "lead" &&
+          !(yield* sentInUserStartedTurn(repository, post.message_key))),
+    });
+  }
+  return shown;
 });
 
 /**
- * P19.7: another Squire's words in the context make it model input, like a
+ * A Squire's words in the context make it model input, like a
  * Squire's message, so the batch acts with `message` origin (cards only, no
- * rules). The user's, the Lead's, and system posts do not.
+ * rules). The user's and system posts do not, nor the Lead's from a turn the
+ * user started.
  */
 export const hasSquireAuthoredPost = (blocks: ReadonlyArray<Pick<RoomContextBlock, "posts">>) =>
-  blocks.some((block) => block.posts.some((post) => post.authorKind === "squire"));
+  blocks.some((block) => block.posts.some((post) => post.squireText));
 
 /** Newest kept: the longest run of the newest posts within both bounds. */
 const bound = (posts: ReadonlyArray<Post>) => {
@@ -239,7 +251,7 @@ export const collectRoomContext = (
       );
       candidates.push({ room, after: row?.read_cursor ?? 0 });
     }
-    // P19.4: the Lead also hears rooms it is not in once Jev shows it a post there.
+    // The Lead also hears rooms it is not in once Jev shows it a post there.
     const shownOnly = new Set<string>();
     if (squire.role === "lead") {
       const joined = new Set<string>(memberRooms.map((room) => room.id));
@@ -347,6 +359,41 @@ export const readRoomContextWindows = (
     );
     return first === undefined ? [] : windowsOf(first.data_json);
   });
+
+/**
+ * The hops of the bot posts (a Squire's or the Lead's, never the reader's
+ * own) the batch's stored room context showed, so a message sent in its turn
+ * counts them toward the hop limit.
+ */
+export const shownBotPostHops = (
+  stores: Stores,
+  input: {
+    readonly squireId: SquireId;
+    readonly batchId: string;
+    readonly batch: ReadonlyArray<SquireRepository.SquireEventRow>;
+  },
+): Effect.Effect<ReadonlyArray<number>, PersistenceSqlError> =>
+  Effect.gen(function* () {
+    if (input.batch.length === 0) return [];
+    const windows = yield* readRoomContextWindows(stores.repository, input);
+    const hops: Array<number> = [];
+    for (const window of windows) {
+      const ids = new Set(window.postIds);
+      for (const post of yield* stores.rooms.listPostsAfter({
+        roomId: window.roomId,
+        after: window.after,
+        through: window.through,
+      })) {
+        if (!ids.has(post.id) || !isBotPost(post, input.squireId)) continue;
+        hops.push(post.hop);
+      }
+    }
+    return hops;
+  });
+
+/** A post by a Squire or the Lead other than `readerId`. */
+export const isBotPost = (post: Pick<Post, "author_kind" | "author_id">, readerId: SquireId) =>
+  (post.author_kind === "squire" || post.author_kind === "lead") && post.author_id !== readerId;
 
 /** Rebuilds the blocks a stored window showed, for a re-dispatch. */
 export const roomContextFromWindows = (

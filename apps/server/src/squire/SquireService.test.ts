@@ -544,7 +544,7 @@ describe("SquireService", () => {
     ),
   );
 
-  it.live("pause drops deferred event rows and turns held cards into open ones the Lead sees", () =>
+  it.live("pause drops queued event rows and turns held cards into open ones the Lead sees", () =>
     withServer(
       () =>
         Effect.gen(function* () {
@@ -611,6 +611,8 @@ describe("SquireService", () => {
           });
           assert.equal(paused.status, "paused");
           // Dropped rows keep their dedupe key, so the same event never re-queues.
+          // A pending row goes too: delivered on resume, it would be an event the
+          // paused Squire accepted.
           const rows = yield* sql<{ readonly state_key: string; readonly status: string }>`
           SELECT state_key, status FROM squire_event WHERE squire_id = ${squire.id}
           ORDER BY state_key`;
@@ -618,13 +620,13 @@ describe("SquireService", () => {
             rows.map((row) => [row.state_key, row.status]),
             [
               ["deferred", "dropped"],
-              ["pending", "pending"],
+              ["pending", "dropped"],
             ],
           );
           const card = Option.getOrThrow(yield* repository.getCard(SquireCardId.make("card-held")));
           assert.equal(card.status, "open");
           assert.isNull(card.executes_at);
-          // P17.5: the new recommendation is a decision item, so the Lead hears of it.
+          // The new recommendation is a decision item, so the Lead hears of it.
           assert.deepEqual(
             (yield* leadRows).map((row) => [row.kind, row.state_key]),
             [["item-raised", "card-held:raised"]],
@@ -817,6 +819,111 @@ describe("SquireService", () => {
         ],
       },
     ),
+  );
+
+  it.live(
+    "untracking drops the thread's queued events and outdates its cards; delete retires all",
+    () =>
+      withServer(
+        () =>
+          Effect.gen(function* () {
+            const service = yield* SquireService.SquireService;
+            const repository = yield* SquireRepository.SquireRepository;
+            const orchestrator = yield* Orchestrator.OrchestratorV2;
+            const sql = yield* SqlClient.SqlClient;
+            const dropped = ThreadId.make("thread-dropped");
+            const kept = ThreadId.make("thread-kept");
+            yield* orchestrator.dispatch(userThreadCreate(dropped));
+            yield* orchestrator.dispatch(userThreadCreate(kept));
+            const squire = yield* service.create(
+              createInput("scoped", {
+                grants: [
+                  { kind: "thread", targetId: dropped },
+                  { kind: "thread", targetId: kept },
+                ],
+              }),
+            );
+            const lead = Option.getOrThrow(yield* service.ensureLead({ requestId: "lead" }));
+            const now = squire.createdAt;
+            for (const threadId of [dropped, kept]) {
+              yield* repository.insertEvent({
+                squire_id: squire.id,
+                thread_id: threadId,
+                kind: "turn-finished",
+                state_key: `run-${threadId}`,
+                payload_json: null,
+                status: "pending",
+                defer_reason: null,
+                not_before: now,
+                batch_id: null,
+                created_at: now,
+              });
+              yield* repository.insertCard({
+                id: SquireCardId.make(`card-${threadId}`),
+                squire_id: squire.id,
+                owner_squire_id: squire.id,
+                kind: "steer",
+                status: "open",
+                target_thread_id: threadId,
+                project_id: homeProject,
+                title: "Rerun",
+                why: "CI failed",
+                payload_json: "{}",
+                evidence_json: "{}",
+                trigger_json: "{}",
+                intent_json: null,
+                origin: "event",
+                steer_kind: null,
+                routed_task_id: null,
+                rule_id: null,
+                finding_key: null,
+                escalate_at: null,
+                opened_at: now,
+                executes_at: null,
+                attempt: 0,
+                command_id: null,
+                execution_key: null,
+                dedupe_key: null,
+                replaced_count: 0,
+                ask_json: null,
+                resolution: null,
+                created_at: now,
+                updated_at: now,
+              });
+            }
+            const eventStatus = (threadId: ThreadId) =>
+              sql<{ readonly status: string }>`
+            SELECT status FROM squire_event WHERE squire_id = ${squire.id} AND thread_id = ${threadId}`.pipe(
+                Effect.map((rows) => rows.map((row) => row.status)),
+              );
+            const cardStatus = (threadId: ThreadId) =>
+              repository
+                .getCard(SquireCardId.make(`card-${threadId}`))
+                .pipe(Effect.map((card) => Option.getOrThrow(card).status));
+            const leadResolved = sql<{ readonly state_key: string }>`
+          SELECT state_key FROM squire_event WHERE squire_id = ${lead.id} AND kind = 'item-resolved'
+          ORDER BY id`.pipe(Effect.map((rows) => rows.map((row) => row.state_key)));
+
+            yield* service.untrack({
+              requestId: "untrack",
+              squireId: squire.id,
+              grant: { kind: "thread", targetId: dropped },
+            });
+            assert.deepEqual(yield* eventStatus(dropped), ["dropped"]);
+            assert.equal(yield* cardStatus(dropped), "outdated");
+            assert.deepEqual(yield* eventStatus(kept), ["pending"]);
+            assert.equal(yield* cardStatus(kept), "open");
+            assert.deepEqual(yield* leadResolved, [`card-${dropped}:resolved`]);
+
+            // A delete takes the rows away; the Lead still hears the open card resolved.
+            yield* service.delete({ requestId: "delete", squireId: squire.id });
+            assert.deepEqual(yield* leadResolved, [
+              `card-${dropped}:resolved`,
+              `card-${kept}:resolved`,
+            ]);
+          }),
+        { defaultModelSelection: scriptedModel },
+      ),
   );
 
   it.live("a grant change disables rules that leave scope and restores ones that return", () =>

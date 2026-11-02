@@ -14,7 +14,7 @@ import { useSquireShownHolds } from "./queue/squireQueueState";
 import { squireBudgetBanner, squireUnshownHolds } from "./squirePage.logic";
 
 /**
- * P10.1 holds and the P9.2 budget notice, in the Squire layer above the conversation pane. A
+ * Holds and the budget notice, in the Squire layer above the conversation pane. A
  * hold shows its countdown and Undo on its queue row; this banner keeps only the holds the
  * queue does not show.
  */

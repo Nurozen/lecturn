@@ -10,7 +10,11 @@ decisions; orchestration deltas are additive fields marked `Lecturn:`. Server co
 
 ## Kill switch
 
-`LECTURN_SQUIRE` is opt-in and off by default. Off means no `squire` capability, `squire.*` RPCs
+Squires are opt-in and off by default. The server decides once at start: `LECTURN_SQUIRE` when set,
+otherwise the saved `squire.enabled` setting, read from `settings.json` in
+[cli/config.ts][cli-config] like the OTLP endpoints. Desktop users cannot set environment
+variables, so the Settings switch is their only way in, and it takes effect on restart because the
+Squire layer is built at startup. Off means no `squire` capability, `squire.*` RPCs
 fail `disabled_by_server`, webhooks answer 404, and no reactor, timer, or Jev request runs. The
 guard rails for marked threads stay on in both states: the deny runtime, the narrowed MCP
 credential and its gate, provider-side MCP isolation, and the command allowlist.
@@ -59,6 +63,10 @@ isolation on start, resume, and fork.
   launch, so a Grok upgrade disables its Squires until the new version is checked live.
 - A Codex Squire home links only the login and the thread store. The user's `config.toml` stays
   behind, so a model provider or profile set there does not apply to Squires.
+- An instance's launch args reach a Squire only through an allowlist: Claude's
+  `CLAUDE_SQUIRE_LAUNCH_FLAGS`, and Codex `-c` keys for the model provider and sign-in. Both CLIs
+  stack tool, permission, MCP, and settings flags on top of Lecturn's, and Claude pre-approves
+  before the permission callback runs.
 - Codex summaries run in the Squire `CODEX_HOME`, because ordinary Codex text generation injects the
   user's global `AGENTS.md`. They also need a version in `CodexInferenceIsolation`'s verified list.
 
@@ -66,10 +74,14 @@ isolation on start, resume, and fork.
 
 [SquireReactor.ts][reactor] classifies each transition from its stored payload, never the current
 projection, and dedupes on (Squire, kind, thread, state key). PR keys are absolute states, because
-the sync reactor republishes unchanged snapshots, and pruning keeps keys. A PR snapshot without
-`headSha` yields no event, so Azure DevOps PRs never wake a Squire. Compaction would delete the PR
+the sync reactor republishes unchanged snapshots, so the daily prune keeps PR keys while their
+thread lives; other finished rows go after 30 days because their keys never recur. A PR's revision is its
+`headSha`, or `updated-<updatedAt digits>` for a provider that reports none (Azure DevOps), so
+`isHeadShaRevision` must gate anything that treats the revision as a commit. A snapshot with
+neither yields no event. Compaction would delete the PR
 events the reactor has not read; [SquireCompactionFloor.ts][floor] keeps them, `lecturn doctor`
-included. Turning the switch on fast-forwards the cursor, so the off period is never delivered.
+included. Turning the switch on fast-forwards the cursor, so the off period is never delivered;
+the skipped project and thread deletes still cascade, from current state, on that start.
 User stops are silent and are classified from `createdBy` on `run.interrupt` and `thread.stop`,
 because thread `actor_kind` never records a client.
 
@@ -84,12 +96,21 @@ rejected receipt forever, a deliberate retry needs a new attempt number.
 **Holds are not items.** A held Auto action is a `squire_card` in `held` status, outside the
 one-open-card index, so it never replaces an open card for the same thread and kind. The read model
 pairs them (`heldOverCardId`) so every surface shows the hold under the card it would supersede.
-Undo supersedes the older card first; pausing a Squire reopens holds with the older card winning.
+Undo supersedes the older card, then opens the hold in its place, so the newer intent wins. Pausing
+does not: `openHeldCards` opens each hold, newest first, only where no open card holds that slot,
+and marks the rest `outdated` (`superseded`). An open card therefore survives a pause and the
+holds under it are dropped.
 
-**Origins.** Voice, webhook, test, sweep, and Squire-authored message batches are recommend-only and
-ignore rules. A batch whose bot messages all come from the Lead keeps the recipient's Auto and
-rules, a user decision. Room context attached to a batch does not change its origin. The server
-returns rule offers with the accept or undo result, so every surface offers the same rule.
+**Origins.** Text a Squire wrote never drives an Auto action or a rule match, directly or laundered
+through the Lead. Voice, webhook, test, sweep, and unknown origins are recommend-only and ignore
+rules, and so is any turn whose input carries a Squire's words: its messages, its room posts shown
+as context or read mid-turn with `squire_read_room` (the run then stays recommend-only), and the
+Lead's `item-raised` and `room-proposed` events. The Lead's own messages and posts keep the
+recipient's Auto and rules only when a user started the Lead turn that wrote them (its plain
+message, or a user room post); a Lead turn woken by a Squire, an item, or a sweep counts as a
+Squire's. The sending turn's origin is recorded on its `tool.called` row, keyed by the message key,
+and a tool call binds to its home thread's run; with no readable run it is `unknown`, never `user`.
+The server returns rule offers with the accept or undo result, so every surface offers the same rule.
 
 **The `DispatchModeLimit` exception.** Held and Auto actions run server-side as the granting user,
 outside MCP `writesThreads` and `DispatchModeLimit`. In their place: re-validation under the owner,
@@ -134,6 +155,7 @@ intent is recorded as coalesced.
 
 [orchestrator]: ../../apps/server/src/orchestration-v2/Orchestrator.ts
 [squire]: ../../apps/server/src/squire/
+[cli-config]: ../../apps/server/src/cli/config.ts
 [squire-thread]: ../../apps/server/src/squire/squireThread.ts
 [command-hook]: ../../apps/server/src/squire/SquireCommandHook.ts
 [service]: ../../apps/server/src/squire/SquireService.ts

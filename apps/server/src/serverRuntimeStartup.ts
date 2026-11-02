@@ -477,7 +477,7 @@ export const startLecturnReactors = Effect.gen(function* () {
   // Present only with LECTURN_SQUIRE on: resumes setups and deletes a crash interrupted.
   const squireLifecycle = yield* Effect.serviceOption(SquireLifecycle);
   if (Option.isSome(squireLifecycle)) yield* forkParked(squireLifecycle.value.reconcileAll);
-  // A9: summaries a crash left `generating` settle to `partial` before the
+  // Summaries a crash left `generating` settle to `partial` before the
   // reactor could start new ones for the same run.
   const squireSummaries = yield* Effect.serviceOption(SquireSummaries);
   const settleSquireSummaries = Option.isSome(squireSummaries)
@@ -499,7 +499,7 @@ export const startLecturnReactors = Effect.gen(function* () {
         ),
       ),
     );
-  // Lecturn: D55, a Jev request in flight at a restart is asked again under its request id.
+  // Lecturn: a Jev request in flight at a restart is asked again under its request id.
   const squireJev = yield* Effect.serviceOption(SquireJevRouting);
   if (Option.isSome(squireJev))
     yield* forkParked(
@@ -510,7 +510,7 @@ export const startLecturnReactors = Effect.gen(function* () {
       ),
     );
   const squireClock = yield* Effect.serviceOption(SquireClock);
-  // A9: executions a crash left unfinished are settled from their receipts
+  // Executions a crash left unfinished are settled from their receipts
   // (charged once) before the clock can run a hold against the same budget.
   const squireActions = yield* Effect.serviceOption(SquireActions);
   const reconcileSquireActions = Option.isSome(squireActions)
@@ -522,10 +522,10 @@ export const startLecturnReactors = Effect.gen(function* () {
     : Effect.void;
   if (Option.isSome(squireClock))
     yield* forkParked(reconcileSquireActions.pipe(Effect.andThen(squireClock.value.start)));
-  // D21: excerpts CI-failure cards off committed rows; a restart re-reads its window.
+  // Excerpts CI-failure cards off committed rows; a restart re-reads its window.
   const squireCiExcerpt = yield* Effect.serviceOption(SquireCiExcerpt);
   if (Option.isSome(squireCiExcerpt)) yield* forkParked(squireCiExcerpt.value.start);
-  // A9: an ask a crash left running resumes or settles from its derived ids.
+  // An ask a crash left running resumes or settles from its derived ids.
   const squireProbe = yield* Effect.serviceOption(SquireProbe);
   if (Option.isSome(squireProbe))
     yield* forkParked(

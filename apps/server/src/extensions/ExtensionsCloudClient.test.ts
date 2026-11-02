@@ -1,6 +1,7 @@
 import { TestClock } from "effect/testing";
 import { assert, it } from "@effect/vitest";
 import {
+  EXTENSION_FEATURES_HEADER,
   EnvironmentId,
   ExtensionFundingStatusResult,
   type SquireRoutingRequest,
@@ -78,6 +79,9 @@ const setup = (handle: (url: string) => Response | "never") =>
             body: JSON.parse(new TextDecoder().decode(request.body.body)),
           });
         assert.equal(request.headers.authorization, "Bearer synthetic-credential");
+        // Without the declaration the relay would fold Squires out of every allowance.
+        if (request.url.includes("/v1/extensions/"))
+          assert.equal(request.headers[EXTENSION_FEATURES_HEADER], "decisions,contextual,squires");
         const response = handle(request.url);
         return response === "never"
           ? Effect.never

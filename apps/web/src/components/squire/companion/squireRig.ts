@@ -1384,7 +1384,7 @@ image, .fx { pointer-events: none; }
 // Every texture in use is held by a page-lifetime Image object. The browser then serves later
 // <image href> uses (swaps, transition copies, FX copies) from its in-memory image cache:
 // swaps never wait on the network or decode, and a quick re-swap cannot abort an in-flight
-// request. Only parts a rig actually shows are loaded (R41); others load when switched.
+// request. Only parts a rig actually shows are loaded; others load when switched.
 const preloaded = new Map<string, HTMLImageElement>();
 function preload(href: string) {
   const existing = preloaded.get(href);

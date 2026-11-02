@@ -351,7 +351,7 @@ export const layerWithOptions = (
       // Lecturn: optional until Squire wiring lands, as appCredentialFields reaches apps state.
       const squireRepository = yield* Effect.serviceOption(SquireRepository.SquireRepository);
       /**
-       * A Squire home thread's credential reaches only its role's tools (D8);
+       * A Squire home thread's credential reaches only its role's tools;
        * a probe gets no Lecturn MCP session. A missing record reads as the
        * narrower Squire role, and an unreadable thread gets no session, since
        * it could be a home.

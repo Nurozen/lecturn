@@ -80,7 +80,7 @@ export type HomeListItem =
   | HomeAccountHeaderListItem
   | HomeHeaderListItem
   | HomeAppWorkspaceHeaderListItem
-  // Lecturn: the Squires section (P13.2).
+  // Lecturn: the Squires section.
   | HomeSquireItem;
 
 export type HomeGroupDisplayAction = "toggle-collapsed" | "show-more" | "show-less";

@@ -29,7 +29,7 @@ import * as Schema from "effect/Schema";
 
 type SquireProposalPayload = Extract<SquireCardPayload, { readonly type: "squire-proposal" }>;
 
-/** P13.1 sections in render order. The Lead has no scope, events, rules, or triggers (P13.1). */
+/** Sections in render order. The Lead has no scope, events, rules, or triggers. */
 export type SquireSetupSectionId =
   | "identity"
   | "provider"
@@ -107,7 +107,7 @@ export function squireSetupSections(role: SquireRole): ReadonlyArray<SquireSetup
 
 // ── Companion ─────────────────────────────────────────────────
 
-/** Gold is the Lead's alone (P16.2); a Squire picks from these. */
+/** Gold is the Lead's alone; a Squire picks from these. */
 export const SQUIRE_PALETTE_CHOICES: ReadonlyArray<Exclude<SquirePalette, "gold">> = [
   "brass",
   "moonstone",
@@ -197,7 +197,7 @@ export function squireSetupDraftForCreate(input: {
   };
 }
 
-/** Edit on a Lead proposal (P17.2): the proposal's fields over the create defaults. */
+/** Edit on a Lead proposal: the proposal's fields over the create defaults. */
 export function squireSetupDraftFromProposal(
   proposal: SquireProposalPayload,
   fallback: {
@@ -250,7 +250,7 @@ export function squireDefaultProvider(
 
 export const SQUIRE_NO_SUPPORTED_PROVIDER = "No supported provider";
 
-/** "No supported provider" when support is known and none is supported (plan 10b.1). */
+/** "No supported provider" when support is known and none is supported. */
 export function squireSetupSaveState(
   draft: SquireSetupDraft,
   options: ReadonlyArray<SquireProviderOption>,
@@ -442,7 +442,7 @@ export function squireScopeCoveringContainer(
 
 /**
  * Watched through its own grant or any enclosing container's (project, space, saga), unless
- * excluded: an exclusion beats every grant (P2.1).
+ * excluded: an exclusion beats every grant.
  */
 export function squireScopeThreadChecked(
   grants: ReadonlyArray<SquireGrantInput>,
@@ -488,7 +488,7 @@ export function squireScopeToggleThread(
   return covered ? rest : [...rest, { kind: "thread", targetId: threadId }];
 }
 
-// ── Lead actions (P17.6) ──────────────────────────────────────
+// ── Lead actions ──────────────────────────────────────────────
 
 export type SquireLeadControl = "pause" | "resume" | "rescope" | "forward" | "merge";
 

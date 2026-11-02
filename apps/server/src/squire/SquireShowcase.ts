@@ -1,5 +1,5 @@
 /**
- * `squire_publish_showcase` (P18, D32): the Lead's snapshot page. Data comes
+ * `squire_publish_showcase`: the Lead's snapshot page. Data comes
  * from stored items, summaries, and PR snapshots at publish time and is
  * injected as one JSON block into the versioned template; the Lead never
  * writes markup and the page reads nothing afterwards. The result carries the
@@ -7,7 +7,7 @@
  * captured as an attachment, so the card survives restarts and copies.
  *
  * The tool declares no `_meta.ui.resourceUri` and /mcp never serves the
- * template: a declared resource makes Codex try to read it (R54).
+ * template: a declared resource makes Codex try to read it.
  */
 import {
   SQUIRE_LEAD_COMPANION,
@@ -38,7 +38,6 @@ import { squireFyiOutcome } from "./SquireItems.ts";
 import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireScope from "./SquireScope.ts";
 import { SQUIRE_SHOWCASE_RESOURCE_URI, SQUIRE_SHOWCASE_TOOL } from "./showcase/showcaseApp.ts";
-import { SHOWCASE_STILL_SET, SHOWCASE_STILLS } from "./showcase/stills/stills.generated.ts";
 import {
   SHOWCASE_TEMPLATE_HTML,
   SHOWCASE_TEMPLATE_VERSION,
@@ -118,7 +117,7 @@ const itemActions = (card: SquireRepository.SquireCardRow): ReadonlyArray<Showca
     // Answering needs the request's options, which only Lecturn shows.
     case "question":
       return [OPEN, DISMISS];
-    // P3.6: an inactivity check's dismiss pauses triggers, so it never gets a plain Dismiss.
+    // An inactivity check's dismiss pauses triggers, so it never gets a plain Dismiss.
     case "fyi":
       return payload?.source === "inactivity" ? [OPEN] : [DISMISS];
     default: {
@@ -177,7 +176,7 @@ export const buildShowcaseData = (input: ShowcaseInput) => {
   >();
   for (const thread of threads) {
     for (const path of [...new Set(thread.files)].slice(0, MAX_FILES_PER_THREAD)) {
-      // Path alone collides across repositories (D30).
+      // Path alone collides across repositories.
       const key = `${thread.projectId}:${path}`;
       const entry = fileMap.get(key) ?? { key, path, project: thread.project, threads: [] };
       entry.threads.push(thread.id);
@@ -236,7 +235,7 @@ export const buildShowcaseData = (input: ShowcaseInput) => {
         card.target_thread_id !== null && shown.has(card.target_thread_id)
           ? card.target_thread_id
           : null,
-      // The raiser, not the owner: the Lead raises overlaps for other Squires' threads (P17.3).
+      // The raiser, not the owner: the Lead raises overlaps for other Squires' threads.
       squire: nameOf(card.squire_id),
       owner: nameOf(card.owner_squire_id),
       link: itemLink(input.environmentId, card),
@@ -296,12 +295,25 @@ export const renderShowcase = (data: ShowcaseData) =>
 const decodeCompanion = Schema.decodeUnknownOption(Schema.fromJsonString(SquireCompanion));
 const decodeSummary = Schema.decodeUnknownOption(Schema.fromJsonString(SquireTurnSummary));
 
-/** The Lead's figure from the still set; the set, not code, decides tint and crest. */
-export const leadStill = (companionJson: string) => {
-  const companion = Option.getOrElse(decodeCompanion(companionJson), () => SQUIRE_LEAD_COMPANION);
-  const still = SHOWCASE_STILLS[`${companion.appearance}-${companion.hood}-${companion.equipment}`];
-  return still === undefined ? null : `data:${SHOWCASE_STILL_SET.mimeType};base64,${still.base64}`;
-};
+/**
+ * The Lead's figure from the still set; the set, not code, decides tint and
+ * crest. The set is about 2.4 MB of base64, so it loads on the first publish
+ * instead of with the server; the module cache keeps it after that.
+ */
+export const leadStill = (companionJson: string) =>
+  Effect.promise(() => import("./showcase/stills/stills.generated.ts")).pipe(
+    Effect.map(({ SHOWCASE_STILL_SET, SHOWCASE_STILLS }) => {
+      const companion = Option.getOrElse(
+        decodeCompanion(companionJson),
+        () => SQUIRE_LEAD_COMPANION,
+      );
+      const still =
+        SHOWCASE_STILLS[`${companion.appearance}-${companion.hood}-${companion.equipment}`];
+      return still === undefined
+        ? null
+        : `data:${SHOWCASE_STILL_SET.mimeType};base64,${still.base64}`;
+    }),
+  );
 
 const definition = {
   name: SQUIRE_SHOWCASE_TOOL,
@@ -406,7 +418,7 @@ const make = Effect.gen(function* () {
         lead: {
           id: ctx.squire.id,
           name: ctx.squire.name,
-          still: leadStill(ctx.squire.companion_json),
+          still: yield* leadStill(ctx.squire.companion_json),
         },
         threads,
         cards: yield* repository.listCards({ statuses: ["open"] }),

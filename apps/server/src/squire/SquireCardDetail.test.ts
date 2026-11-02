@@ -290,7 +290,7 @@ describe("SquireCardDetail", () => {
         parts.timeline.map((entry) => entry.text),
         ["PR #318 pushed 2222222", "PR #318 checks failed"],
       );
-      // A PR-only trigger has no message to deep-link (D28).
+      // A PR-only trigger has no message to deep-link.
       assert.isUndefined(parts.trigger.triggerMessageId);
     }).pipe(
       Effect.provide(

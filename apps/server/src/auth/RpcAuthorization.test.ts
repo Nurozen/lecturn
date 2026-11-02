@@ -585,7 +585,7 @@ it.effect("denies manual cleanup before the handler without settings permission"
   }).pipe(Effect.scoped),
 );
 
-// Lecturn: Squire reads are open to read-only clients; every mutation operates agents (A6).
+// Lecturn: Squire reads are open to read-only clients; every mutation operates agents.
 const SQUIRE_READS: ReadonlySet<string> = new Set([
   WS_METHODS.squireSubscribe,
   WS_METHODS.squireItemsList,

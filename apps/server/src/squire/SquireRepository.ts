@@ -216,7 +216,7 @@ export const SquireSummaryRow = Schema.Struct({
 export type SquireSummaryRow = typeof SquireSummaryRow.Type;
 export type SquireSummaryKey = Pick<SquireSummaryRow, "thread_id" | "run_id" | "stage">;
 
-/** `secret_ref` names a server secret store entry; the secret itself never lands here (D57). */
+/** `secret_ref` names a server secret store entry; the secret itself never lands here. */
 export const SquireTriggerRow = Schema.Struct({
   id: SquireTriggerId,
   squire_id: SquireId,
@@ -331,7 +331,7 @@ export class SquireRepository extends Context.Service<
       readonly staleBefore: string;
     }) => Result<boolean>;
     /**
-     * D31 compare-and-set of `digest_last_date` from `from` to `to`; false
+     * Compare-and-set of `digest_last_date` from `from` to `to`; false
      * when another claim moved it first. No revision bump, like
      * `touchUserActiveAt`, so a daily digest never fails the user's next edit.
      */
@@ -362,10 +362,17 @@ export class SquireRepository extends Context.Service<
     /** Clears the payload of finished rows created before `before`; their keys stay. */
     readonly pruneEventPayloads: (input: { readonly before: string }) => Result<number>;
     /**
-     * Drops the Squire's deferred rows (D34 pause), only those created at or
+     * The daily retention prune, one transaction; each cutoff is an ISO time
+     * and SquireClock says why each is safe. Returns the rows deleted per table.
+     */
+    readonly pruneHistory: (cutoffs: SquireRetentionCutoffs) => Result<SquireRetentionCounts>;
+    /**
+     * Drops the Squire's deferred rows on pause, only those created at or
      * before `at` when given.
      */
     readonly dropDeferredEvents: (squireId: SquireId, at?: string) => Result<number>;
+    /** Every row the Squire has not been sent yet (deferred or pending) is dropped: a pause. */
+    readonly dropQueuedEvents: (squireId: SquireId) => Result<number>;
     readonly insertCard: (row: SquireCardRow) => Result<void>;
     readonly getCard: (id: SquireCardId) => Result<Option.Option<SquireCardRow>>;
     /** Every given filter must match; an empty `statuses` or `kinds` matches nothing. Oldest first. */
@@ -386,15 +393,16 @@ export class SquireRepository extends Context.Service<
       readonly patch: SquireCardPatch;
       readonly updatedAt: string;
     }) => Result<Option.Option<SquireCardRow>>;
-    /** Open and held cards targeting the thread become `outdated` (P7.8). */
+    /** Open and held cards targeting the thread become `outdated`. */
     readonly outdateCardsForThread: (input: {
       readonly threadId: ThreadId;
       readonly resolution: string;
       readonly updatedAt: string;
     }) => Result<ReadonlyArray<SquireCardId>>;
     /**
-     * D34 pause: holds the Squire raised or owns become open recommendations
-     * without a timer. A hold whose open slot is already taken (P7.6) becomes
+     * Pause: holds the Squire raised or owns become open recommendations
+     * without a timer. A hold whose open slot (one per Squire, thread, and
+     * kind) is already taken becomes
      * `outdated` with resolution `superseded` instead, newest hold first, so
      * the newest wins. Returns the opened ids.
      */
@@ -414,9 +422,9 @@ export class SquireRepository extends Context.Service<
       readonly afterId?: number;
       readonly limit: number;
     }) => Result<ReadonlyArray<SquireActionLogRow>>;
-    /** The `tool.called` row for an invocation key (A9). */
+    /** The `tool.called` row for an invocation key. */
     readonly getToolCall: (invocationKey: string) => Result<Option.Option<SquireActionLogRow>>;
-    /** The `action.executed` row for an execution key (A9). */
+    /** The `action.executed` row for an execution key. */
     readonly getExecution: (executionKey: string) => Result<Option.Option<SquireActionLogRow>>;
     /** A card's log rows of the given kinds, oldest first. */
     readonly listCardLog: (input: {
@@ -431,7 +439,7 @@ export class SquireRepository extends Context.Service<
       readonly status?: SquireRuleRow["status"];
     }) => Result<ReadonlyArray<SquireRuleRow>>;
     /**
-     * Disabled rules count toward the P8.1 caps: they are still listed in
+     * Disabled rules count toward the rule caps: they are still listed in
      * setup and come back when their target returns to scope, so only Remove
      * frees a slot.
      */
@@ -447,7 +455,7 @@ export class SquireRepository extends Context.Service<
       readonly status: SquireRuleRow["status"];
     }) => Result<number>;
     /**
-     * P8.1 match count and last use. Callers run it in the transaction that
+     * The rule's match count and last use. Callers run it in the transaction that
      * writes the `rule.matched` row, so a replayed invocation bumps nothing.
      */
     readonly recordRuleMatch: (input: {
@@ -471,8 +479,16 @@ export class SquireRepository extends Context.Service<
       readonly threadId: ThreadId;
       readonly limit: number;
     }) => Result<ReadonlyArray<SquireSummaryRow>>;
-    /** Every thread with a settled summary, the overlap detector's candidates (D30). */
-    readonly listSummarizedThreadIds: Result<ReadonlyArray<ThreadId>>;
+    /**
+     * The overlap detector's candidates: threads with a settled summary
+     * updated at or after `since`, most recent first, at most `limit`.
+     */
+    readonly listRecentlySummarizedThreadIds: (input: {
+      readonly since: string;
+      readonly limit: number;
+    }) => Result<ReadonlyArray<ThreadId>>;
+    /** Thread deletion cascade: summaries are per thread, so they go with it. */
+    readonly deleteThreadSummaries: (threadId: ThreadId) => Result<number>;
     /** Settles a `generating` row; false when it was already settled, since settled rows are immutable. */
     readonly finishSummary: (
       row: SquireSummaryKey &
@@ -482,7 +498,6 @@ export class SquireRepository extends Context.Service<
     ) => Result<boolean>;
     /** Turns every `generating` row `partial`; their stored JSON already holds the deterministic fields. */
     readonly settleGeneratingSummaries: (updatedAt: string) => Result<number>;
-    // ── Triggers (P3.6) ──
     readonly insertTrigger: (row: SquireTriggerRow) => Result<void>;
     readonly getTrigger: (id: SquireTriggerId) => Result<Option.Option<SquireTriggerRow>>;
     /** Revoked rows included, oldest first. */
@@ -507,7 +522,7 @@ export class SquireRepository extends Context.Service<
       readonly kinds: ReadonlyArray<string>;
       readonly after: string;
     }) => Result<ReadonlyArray<SquireActionLogRow>>;
-    // ── Routing receipts (7.7, D53) ──
+    // ── Routing receipts ──
     /** The Squire's rows of `kinds` created before `before`, newest first. */
     readonly listActionLogBefore: (input: {
       readonly squireId: SquireId;
@@ -524,7 +539,7 @@ export class SquireRepository extends Context.Service<
     readonly listCardsForTasks: (
       taskIds: ReadonlyArray<string>,
     ) => Result<ReadonlyArray<SquireCardRow>>;
-    // ── Delivery and clock (4.5, 4.6) ──
+    // ── Delivery and clock ──
     /** The Squire's rows in `statuses`, oldest first. */
     readonly listEventsByStatus: (input: {
       readonly squireId: SquireId;
@@ -542,7 +557,7 @@ export class SquireRepository extends Context.Service<
     readonly markBatchDelivered: (batchId: string) => Result<ReadonlyArray<SquireEventRow>>;
     /** `pending` rows become `dropped`. */
     readonly dropPendingEvents: (ids: ReadonlyArray<number>) => Result<number>;
-    /** Whether the run's `card.created` rows name a non-FYI card for the thread (D26). */
+    /** Whether the run's `card.created` rows name a non-FYI card for the thread. */
     readonly runRaisedDecisionCard: (input: {
       readonly squireId: SquireId;
       readonly runId: string;
@@ -551,12 +566,12 @@ export class SquireRepository extends Context.Service<
     /** The earliest `not_before` of deferred rows waiting on a time (threshold, summary). */
     readonly earliestDeferredAt: Result<Option.Option<string>>;
     /**
-     * P7.10: decision cards held back by presence that are neither escalated
+     * Decision cards held back by presence that are neither escalated
      * nor opened, whatever their status, soonest `escalate_at` first.
      */
     readonly listPendingEscalations: Result<ReadonlyArray<SquireCardRow>>;
     /**
-     * D27: a Squire's intents whose card is open, plus any pushed since
+     * A Squire's intents whose card is open, plus any pushed since
      * `since` (a closed card's intent may still lack its mobile row), oldest first.
      */
     readonly listNotificationIntents: (input: {
@@ -565,7 +580,7 @@ export class SquireRepository extends Context.Service<
     }) => Result<ReadonlyArray<SquireNotificationIntentRow>>;
     /** Squires holding `pending` rows. */
     readonly listSquiresWithPendingEvents: Result<ReadonlyArray<SquireId>>;
-    // ── Integration (4.8) ──
+    // ── Integration ──
     /**
      * A re-home: the Squire's `batched` rows return to `pending` with no
      * batch, so they deliver to the new home under a new command id.
@@ -573,7 +588,7 @@ export class SquireRepository extends Context.Service<
     readonly resetBatchedEvents: (squireId: SquireId) => Result<number>;
     /** The batch's `batched` rows become `dropped` (a dispatch the orchestrator refused). */
     readonly dropBatch: (batchId: string) => Result<number>;
-    // ── Reactor (4.4) ──
+    // ── Reactor ──
     /** Rows matching every given filter, oldest first; an empty list filter matches nothing. */
     readonly listEvents: (filter: {
       readonly statuses: ReadonlyArray<SquireEventRow["status"]>;
@@ -595,7 +610,7 @@ export class SquireRepository extends Context.Service<
       readonly deferReason?: SquireEventRow["defer_reason"];
       readonly notBefore?: string;
     }) => Result<ReadonlyArray<SquireEventRow>>;
-    /** Thread deletion cascade: every row of the thread, key rows included (A4). */
+    /** Thread deletion cascade: every row of the thread, key rows included. */
     readonly deleteThreadEvents: (threadId: ThreadId) => Result<number>;
     readonly readCursor: Result<SquireReactorCursor>;
     readonly writeCursor: (cursor: SquireReactorCursor) => Result<void>;
@@ -606,8 +621,8 @@ export class SquireRepository extends Context.Service<
      * subscriber.
      */
     readonly changeGeneration: Effect.Effect<number>;
-    // ── Dev fixtures (4.7) ──
-    /** P3.5 budget seeding starts from none: every usage row of the Squire goes. */
+    // ── Dev fixtures ──
+    /** Fixture budget seeding starts from none: every usage row of the Squire goes. */
     readonly deleteBudgetUsage: (squireId: SquireId) => Result<number>;
     /** The row holding a dedupe key, pruned payload or not. */
     readonly getEventByKey: (key: {
@@ -616,7 +631,7 @@ export class SquireRepository extends Context.Service<
       readonly threadId: ThreadId | null;
       readonly stateKey: string;
     }) => Result<Option.Option<SquireEventRow>>;
-    // ── Read model (8.1) ──
+    // ── Read model ──
     /** Card counts and latest `updated_at` per (raiser, owner, kind, status). */
     readonly listCardStats: Result<ReadonlyArray<SquireCardStatRow>>;
     /**
@@ -650,10 +665,35 @@ export class SquireRepository extends Context.Service<
     readonly listLatestRunSummaries: (
       threadId: ThreadId,
     ) => Result<ReadonlyArray<SquireSummaryRow>>;
-    /** Compact room rows, oldest first. */
-    readonly listRoomRows: Result<ReadonlyArray<SquireRoomListRow>>;
+    /** Compact rows of open rooms and rooms closed at or after `closedSince`, oldest first. */
+    readonly listRoomRows: (input: {
+      readonly closedSince: string;
+    }) => Result<ReadonlyArray<SquireRoomListRow>>;
   }
 >()("lecturn/squire/SquireRepository") {}
+
+export interface SquireRetentionCutoffs {
+  readonly eventsBefore: string;
+  readonly cardsBefore: string;
+  readonly actionLogBefore: string;
+  readonly budgetUsageBefore: string;
+  readonly closedRoomPostsBefore: string;
+}
+
+export interface SquireRetentionCounts {
+  readonly events: number;
+  readonly cards: number;
+  readonly actionLog: number;
+  readonly budgetUsage: number;
+  readonly roomPosts: number;
+}
+
+/**
+ * Matches the `squire_card_live` partial index's WHERE exactly, so a query
+ * over open or held cards can use it (SQLite needs the literal term).
+ */
+const SQUIRE_CARD_LIVE = "status IN ('open', 'held')";
+const LIVE_CARD_STATUSES: ReadonlySet<string> = new Set(["open", "held"]);
 
 const decodeSquires = Schema.decodeUnknownEffect(Schema.Array(SquireRow));
 const decodeSummaries = Schema.decodeUnknownEffect(Schema.Array(SquireSummaryRow));
@@ -674,7 +714,7 @@ const decodeRoomIds = Schema.decodeUnknownEffect(
 const decodeCursor = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ sequence: Count, enabled: Count })),
 );
-// Delivery and clock (4.5, 4.6).
+// Delivery and clock.
 const decodeEventRows = Schema.decodeUnknownEffect(Schema.Array(SquireEventRow));
 const decodeCardStats = Schema.decodeUnknownEffect(Schema.Array(SquireCardStatRow));
 const decodeNotificationIntents = Schema.decodeUnknownEffect(
@@ -817,13 +857,64 @@ const make = Effect.gen(function* () {
       Effect.map(({ triggerSecretRefs }) => ({ triggerSecretRefs })),
     );
 
+  /** The `squire_card_live` term, when every requested status is open or held. */
+  const liveCardTerm = (statuses: ReadonlyArray<string> | undefined) =>
+    statuses !== undefined && statuses.every((status) => LIVE_CARD_STATUSES.has(status))
+      ? [sql.literal(SQUIRE_CARD_LIVE)]
+      : [];
+
+  const pruneHistory: SquireRepository["Service"]["pruneHistory"] = (cutoffs) =>
+    read(
+      "pruneHistory",
+      sql.withTransaction(
+        Effect.gen(function* () {
+          const deleted = (statement: Effect.Effect<unknown, StatementError>) =>
+            statement.pipe(Effect.andThen(changedRows));
+          // PR keys stay while their thread lives: the sync reactor republishes
+          // an unchanged snapshot, so a deleted key would fire again.
+          const events = yield* deleted(sql`DELETE FROM squire_event
+            WHERE status IN ('delivered', 'dropped') AND created_at < ${cutoffs.eventsBefore}
+              AND kind != 'pull-request-changed'`);
+          // Dismissed overlaps and findings, and resolved overlaps, are what
+          // stops them being raised again, so they stay.
+          const cards = yield* deleted(sql`DELETE FROM squire_card
+            WHERE status IN ('resolved', 'executed', 'dismissed', 'outdated')
+              AND updated_at < ${cutoffs.cardsBefore}
+              AND NOT (kind = 'overlap' AND status IN ('dismissed', 'resolved'))
+              AND NOT (status = 'dismissed' AND finding_key IS NOT NULL)`);
+          // After the cards: a live card keeps its log rows, and the newest two
+          // branch rows per thread still mark the overlap change boundary.
+          const actionLog = yield* deleted(sql`DELETE FROM squire_action_log AS log
+            WHERE log.created_at < ${cutoffs.actionLogBefore}
+              AND (log.card_id IS NULL
+                OR NOT EXISTS (SELECT 1 FROM squire_card AS card WHERE card.id = log.card_id))
+              AND (log.kind != 'overlap.branch' OR log.id NOT IN (
+                SELECT branch.id FROM squire_action_log AS branch
+                WHERE branch.squire_id = log.squire_id AND branch.kind = 'overlap.branch'
+                  AND branch.thread_id IS log.thread_id
+                ORDER BY branch.id DESC LIMIT 2))`);
+          const budgetUsage = yield* deleted(sql`DELETE FROM squire_budget_usage
+            WHERE executed_at < ${cutoffs.budgetUsageBefore}`);
+          const roomPosts = yield* deleted(sql`DELETE FROM squire_room_post
+            WHERE room_id IN (SELECT id FROM squire_room
+              WHERE status = 'closed' AND updated_at < ${cutoffs.closedRoomPostsBefore})`);
+          return { events, cards, actionLog, budgetUsage, roomPosts };
+        }),
+      ),
+    ).pipe(
+      Effect.tap((counts) =>
+        Object.values(counts).some((n) => n > 0) ? publishUnlessInTransaction : Effect.void,
+      ),
+    );
+
   const openHeldCards: SquireRepository["Service"]["openHeldCards"] = ({ squireId, updatedAt }) =>
     write(
       "openHeldCards",
       sql.withTransaction(
         Effect.gen(function* () {
           const held = yield* sql`SELECT id FROM squire_card
-            WHERE status = 'held' AND (squire_id = ${squireId} OR owner_squire_id = ${squireId})
+            WHERE ${sql.literal(SQUIRE_CARD_LIVE)} AND status = 'held'
+              AND (squire_id = ${squireId} OR owner_squire_id = ${squireId})
             ORDER BY created_at DESC, rowid DESC`.pipe(Effect.flatMap(decodeCardIds));
           const opened: Array<SquireCardId> = [];
           for (const { id } of held) {
@@ -955,6 +1046,7 @@ const make = Effect.gen(function* () {
           RETURNING id`.pipe(Effect.map((rows) => rows.length)),
         (pruned) => pruned > 0,
       ),
+    pruneHistory,
     dropDeferredEvents: (squireId, at) =>
       write(
         "dropDeferredEvents",
@@ -964,6 +1056,14 @@ const make = Effect.gen(function* () {
             sql`status = 'deferred'`,
             ...(at === undefined ? [] : [sql`created_at <= ${at}`]),
           ])}
+          RETURNING id`.pipe(Effect.map((rows) => rows.length)),
+        (dropped) => dropped > 0,
+      ),
+    dropQueuedEvents: (squireId) =>
+      write(
+        "dropQueuedEvents",
+        sql`UPDATE squire_event SET status = 'dropped'
+          WHERE squire_id = ${squireId} AND status IN ('deferred', 'pending')
           RETURNING id`.pipe(Effect.map((rows) => rows.length)),
         (dropped) => dropped > 0,
       ),
@@ -984,6 +1084,7 @@ const make = Effect.gen(function* () {
             sql`SELECT * FROM squire_card WHERE ${sql.and([
               ...(squireId === undefined ? [] : [sql`squire_id = ${squireId}`]),
               ...(ownerSquireId === undefined ? [] : [sql`owner_squire_id = ${ownerSquireId}`]),
+              ...liveCardTerm(statuses),
               ...(statuses === undefined ? [] : [sql`status IN ${sql.in(statuses)}`]),
               ...(targetThreadId === undefined ? [] : [sql`target_thread_id = ${targetThreadId}`]),
               ...(kinds === undefined ? [] : [sql`kind IN ${sql.in(kinds)}`]),
@@ -1133,14 +1234,26 @@ const make = Effect.gen(function* () {
           Effect.flatMap(decodeSummaries),
         ),
       ),
-    listSummarizedThreadIds: read(
-      "listSummarizedThreadIds",
-      sql`SELECT DISTINCT thread_id FROM squire_summary WHERE status != 'generating'
-        ORDER BY thread_id`.pipe(
-        Effect.flatMap(decodeSummaryThreadIds),
-        Effect.map((rows) => rows.map((row) => row.thread_id)),
+    // `+thread_id` keeps SQLite from walking the whole primary key to group;
+    // the window's range on squire_summary_recent is the small side.
+    listRecentlySummarizedThreadIds: ({ since, limit }) =>
+      read(
+        "listRecentlySummarizedThreadIds",
+        sql`SELECT thread_id FROM squire_summary
+          WHERE updated_at >= ${since} AND status != 'generating'
+          GROUP BY +thread_id ORDER BY max(updated_at) DESC, thread_id LIMIT ${limit}`.pipe(
+          Effect.flatMap(decodeSummaryThreadIds),
+          Effect.map((rows) => rows.map((row) => row.thread_id)),
+        ),
       ),
-    ),
+    deleteThreadSummaries: (threadId) =>
+      write(
+        "deleteThreadSummaries",
+        sql`DELETE FROM squire_summary WHERE thread_id = ${threadId} RETURNING thread_id`.pipe(
+          Effect.map((rows) => rows.length),
+        ),
+        (deleted) => deleted > 0,
+      ),
     finishSummary: ({
       thread_id,
       run_id,
@@ -1167,7 +1280,6 @@ const make = Effect.gen(function* () {
           WHERE status = 'generating' RETURNING thread_id`.pipe(Effect.map((rows) => rows.length)),
         (settled) => settled > 0,
       ),
-    // ── Triggers (P3.6) ──
     insertTrigger: (row) => insert("insertTrigger", "squire_trigger", row),
     getTrigger: (id) =>
       read(
@@ -1269,7 +1381,7 @@ const make = Effect.gen(function* () {
             sql`SELECT * FROM squire_card WHERE routed_task_id IN ${sql.in(taskIds)}
               ORDER BY created_at, rowid`.pipe(Effect.flatMap(decodeCards)),
           ),
-    // ── Delivery and clock (4.5, 4.6) ──
+    // ── Delivery and clock ──
     listEventsByStatus: ({ squireId, statuses }) =>
       statuses.length === 0
         ? Effect.succeed([])
@@ -1378,7 +1490,7 @@ const make = Effect.gen(function* () {
         Effect.map((rows) => rows.map((row) => row.squire_id)),
       ),
     ),
-    // ── Integration (4.8) ──
+    // ── Integration ──
     resetBatchedEvents: (squireId) =>
       write(
         "resetBatchedEvents",
@@ -1395,7 +1507,7 @@ const make = Effect.gen(function* () {
           RETURNING id`.pipe(Effect.map((rows) => rows.length)),
         (dropped) => dropped > 0,
       ),
-    // ── Reactor (4.4) ──
+    // ── Reactor ──
     listEvents: ({ statuses, deferReasons, threadId, kinds, ids, dueBy }) =>
       statuses.length === 0 ||
       deferReasons?.length === 0 ||
@@ -1440,7 +1552,7 @@ const make = Effect.gen(function* () {
       ),
     // The cursor is reactor bookkeeping that advances on every event, so its
     // writes publish nothing. A missing row (migrate-dev-db clears the table)
-    // reads as disabled, so the next enabling start fast-forwards it (D47).
+    // reads as disabled, so the next enabling start fast-forwards it.
     readCursor: read(
       "readCursor",
       sql`SELECT sequence, enabled FROM squire_reactor_cursor WHERE id = 1`.pipe(
@@ -1462,7 +1574,7 @@ const make = Effect.gen(function* () {
       ),
     subscribeChanges: PubSub.subscribe(changes).pipe(Effect.map(Stream.fromSubscription)),
     changeGeneration: Ref.get(generation),
-    // ── Dev fixtures (4.7) ──
+    // ── Dev fixtures ──
     deleteBudgetUsage: (squireId) =>
       write(
         "deleteBudgetUsage",
@@ -1481,7 +1593,7 @@ const make = Effect.gen(function* () {
           Effect.map((rows) => Option.fromUndefinedOr(rows[0])),
         ),
       ),
-    // ── Read model (8.1) ──
+    // ── Read model ──
     listCardStats: read(
       "listCardStats",
       sql`SELECT squire_id, owner_squire_id, kind, status, count(*) AS n,
@@ -1499,6 +1611,7 @@ const make = Effect.gen(function* () {
               ...(queueOf === undefined
                 ? []
                 : [sql`(squire_id = ${queueOf} OR owner_squire_id = ${queueOf})`]),
+              ...liveCardTerm(statuses),
               ...(statuses === undefined ? [] : [sql`status IN ${sql.in(statuses)}`]),
               ...(kinds === undefined ? [] : [sql`kind IN ${sql.in(kinds)}`]),
               ...(before === undefined ? [] : [sql`created_at < ${before}`]),
@@ -1537,9 +1650,10 @@ const make = Effect.gen(function* () {
           ORDER BY created_at, rowid`.pipe(Effect.flatMap(decodeSummaries)),
       ),
     // A user who posts has seen the room, so only others' posts make it unread.
-    listRoomRows: read(
-      "listRoomRows",
-      sql`SELECT room.id, room.topic, room.status, room.muted, room.last_post_at,
+    listRoomRows: ({ closedSince }) =>
+      read(
+        "listRoomRows",
+        sql`SELECT room.id, room.topic, room.status, room.muted, room.last_post_at,
           (SELECT json_group_array(member_id) FROM (
             SELECT member_id FROM squire_room_member AS member
             WHERE member.room_id = room.id AND member.member_kind = 'squire'
@@ -1550,10 +1664,10 @@ const make = Effect.gen(function* () {
             JOIN squire_room_post AS post ON post.room_id = member.room_id
               AND post.id > ifnull(member.user_seen_cursor, 0) AND post.author_kind != 'user'
             WHERE member.room_id = room.id AND member.member_kind = 'user') AS user_unseen
-        FROM squire_room AS room ORDER BY room.created_at, room.rowid`.pipe(
-        Effect.flatMap(decodeRoomRows),
+        FROM squire_room AS room
+        WHERE room.status = 'open' OR room.updated_at >= ${closedSince}
+        ORDER BY room.created_at, room.rowid`.pipe(Effect.flatMap(decodeRoomRows)),
       ),
-    ),
   });
 });
 

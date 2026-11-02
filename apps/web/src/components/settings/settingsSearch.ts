@@ -1115,6 +1115,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "squires-enabled",
+    title: "Enable Squires",
+    to: "/settings/squires",
+    searchTerms: ["squire lead turn on off enable disable experimental restart LECTURN_SQUIRE"],
+  },
+  {
     id: "squires-phone-alerts",
     title: "Phone alerts while I'm at my desktop",
     to: "/settings/squires",
@@ -1292,7 +1298,10 @@ export function filterAvailableSettingsSearchItems(
       (!item.requiresStaveGrace || availability.hasStaveGrace === true) &&
       (!item.requiresStaveDestroy || availability.hasStaveDestroy === true) &&
       (!item.managedTunnelOnly || availability.managedTunnelActive === true) &&
-      (item.to !== "/settings/squires" || availability.hasSquires === true),
+      // The switch that turns Squires on is reachable before any environment runs them.
+      (item.to !== "/settings/squires" ||
+        item.id === "squires-enabled" ||
+        availability.hasSquires === true),
   );
 }
 

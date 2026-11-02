@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // @effect-diagnostics nodeBuiltinImport:off
 /**
- * Builds the showcase's shipped assets (D32). The server ships as one bundle
+ * Builds the showcase's shipped assets. The server ships as one bundle
  * (and one executable), so the template and the Lead stills travel as TS
- * modules, like the skill text; the source files beside them stay the truth
- * and `SquireShowcase.test.ts` fails when a module drifts from them.
+ * modules, like the skill text. `template.html` stays the template's truth;
+ * the stills live only in their module, and `stills/manifest.json` records
+ * each one's hash, which `SquireShowcase.test.ts` checks the module against.
  *
  *   node apps/server/scripts/squire-showcase-assets.ts template
  *   node apps/server/scripts/squire-showcase-assets.ts stills <gold-stills-dir> [--tint gold] [--crest vector-overlay]
@@ -23,7 +24,7 @@ import * as NodePath from "node:path";
 
 const showcaseDir = NodePath.resolve(import.meta.dirname, "../src/squire/showcase");
 const stillsDir = NodePath.join(showcaseDir, "stills");
-// The header shows the figure 160 px tall (P16.5 readability floor), so 2x density.
+// The header shows the figure 160 px tall (the readability floor), so 2x density.
 const WIDTH = 218;
 const HEIGHT = 320;
 const STILL_NAME =
@@ -91,6 +92,7 @@ const buildStills = (source: string, tint: string, crest: string) => {
     throw new Error(`expected 24 Lead stills in ${source}, found ${names.length}`);
   const work = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "squire-stills-"));
   NodeFS.mkdirSync(stillsDir, { recursive: true });
+  // Older runs kept a .webp copy beside the module; nothing reads one.
   for (const stale of NodeFS.readdirSync(stillsDir).filter((name) => name.endsWith(".webp"))) {
     NodeFS.rmSync(NodePath.join(stillsDir, stale));
   }
@@ -98,7 +100,7 @@ const buildStills = (source: string, tint: string, crest: string) => {
     const [, appearance, hood, equipment] = STILL_NAME.exec(name)!;
     const resized = NodePath.join(work, "resized.webp");
     const pam = NodePath.join(work, "still.pam");
-    const out = NodePath.join(stillsDir, name);
+    const out = NodePath.join(work, name);
     run("cwebp", [
       "-quiet",
       "-lossless",

@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off - The sentinel homes and the recording proxy are plain files and processes the test owns.
 /**
- * S0a2 for OpenCode 1.x (OQ20): a Squire home and probe on the real
+ * S0a2 for OpenCode 1.x: a Squire home and probe on the real
  * `opencode` binary. Spends a few free OpenCode Zen requests (no login), so it
  * runs only with SQUIRE_S0A2_PROVIDER=opencode; SQUIRE_BAR_MODEL picks the
  * model (default opencode/big-pickle).

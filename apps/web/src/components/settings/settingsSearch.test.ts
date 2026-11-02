@@ -188,7 +188,7 @@ describe("searchSettings", () => {
       filterAvailableSettingsSearchItems({ ...base, hasSquires })
         .filter((item) => item.to === "/settings/squires")
         .map((item) => item.id);
-    expect(squireIds(false)).toEqual([]);
+    expect(squireIds(false)).toEqual(["squires-enabled"]);
     expect(squireIds(true)).toContain("squires-phone-alerts");
   });
 

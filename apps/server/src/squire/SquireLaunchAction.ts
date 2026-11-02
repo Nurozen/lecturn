@@ -1,5 +1,5 @@
 /**
- * Thread creation for held and accepted proposals (A9 "Thread create"). The
+ * Thread creation for held and accepted proposals. The
  * intent stores the whole launch input with deterministic ids, so a crash
  * between `thread.create` and the initial message is reconciled from the two
  * receipts and a re-launch replays the create and sends the message under its
@@ -50,7 +50,7 @@ export const SquireLaunchIntent = Schema.Struct({
   threadId: ThreadId,
   commandId: CommandId,
   messageId: MessageId,
-  /** `user` for an accept, `agent` for a held execution (D11). */
+  /** `user` for an accept, `agent` for a held execution. */
   createdBy: Schema.Literals(["user", "agent"]),
   senderThreadId: Schema.optionalKey(ThreadId),
 });
@@ -102,7 +102,7 @@ export interface SquireLaunchIntentInput {
     readonly interactionMode: ProviderInteractionMode;
   };
   /**
-   * D44j: the scripted instance's selection when the proposing Squire or its
+   * The scripted instance's selection when the proposing Squire or its
    * project is a fixture's; the thread then runs on it whatever was proposed.
    */
   readonly fixtureOwned: ModelSelection | null;
@@ -160,7 +160,7 @@ export interface SquireLaunchPrepareInput {
 export class SquireLaunchAction extends Context.Service<
   SquireLaunchAction,
   {
-    /** `launchIntentFor` with the project's default modes and the D44j fixture runner resolved. */
+    /** `launchIntentFor` with the project's default modes and the fixture runner resolved. */
     readonly intentFor: (
       input: SquireLaunchPrepareInput,
     ) => Effect.Effect<SquireLaunchIntent, SquireLaunchRefused | SquireLaunchFailed>;

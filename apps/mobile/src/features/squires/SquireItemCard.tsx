@@ -66,7 +66,7 @@ export type SquireActedHandler = (
   ruleOffer: SquireRuleOffer | undefined,
 ) => void;
 
-/** P7.3 evidence under the row it expands from; the detail loads only while expanded (R37). */
+/** Evidence under the row it expands from; the detail loads only while expanded. */
 export function SquireItemCard(props: {
   readonly environmentId: EnvironmentId;
   readonly row: SquireCardRow;
@@ -113,7 +113,7 @@ function SquireCardBody(props: {
   const question = payload === null ? null : squireQuestionMode(payload);
   const questionRecommendation =
     payload === null ? null : squireQuestionRecommendation(payload, card.title);
-  // Kept across server updates, so a newer recommendation never overwrites an edit (P7.6).
+  // Kept across server updates, so a newer recommendation never overwrites an edit.
   const [draft, setDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -290,7 +290,7 @@ function SquireCardBody(props: {
 
 type OverlapPayload = Extract<SquireCard["payload"], { readonly type: "overlap" }>;
 
-/** P17.3: the colliding threads with their providers, branches, and PRs, the shared files, and the order to land them. */
+/** The colliding threads with their providers, branches, and PRs, the shared files, and the order to land them. */
 function SquireOverlapEvidence(props: {
   readonly environmentId: EnvironmentId;
   readonly payload: OverlapPayload;
@@ -392,7 +392,7 @@ function CardLink(props: { readonly label: string; readonly onPress: () => void 
   );
 }
 
-/** P7.3 origin labels; the raiser's rules are read only for a card a rule changed. */
+/** Origin labels; the raiser's rules are read only for a card a rule changed. */
 function SquireOrigins(props: {
   readonly environmentId: EnvironmentId;
   readonly card: SquireCard;
@@ -433,7 +433,7 @@ function SquireOrigins(props: {
 function SquireWhy(props: {
   readonly environmentId: EnvironmentId;
   readonly card: SquireCard;
-  /** P7.3: a question always says why it is here, at least how long it has waited. */
+  /** A question always says why it is here, at least how long it has waited. */
   readonly fallbackNow: number | null;
 }) {
   const { environmentId, card } = props;

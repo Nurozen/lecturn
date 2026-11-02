@@ -313,7 +313,7 @@ export interface SquireRowCallbacks {
 }
 
 /**
- * P7.2 compact decision row. Expanded, it becomes the evidence card's header (P7.3): the row
+ * Compact decision row. Expanded, it becomes the evidence card's header: the row
  * stays the one place the title, thread, provider, and age show, and the card body follows.
  */
 export const SquireDecisionRow = memo(function SquireDecisionRow(props: {
@@ -330,7 +330,7 @@ export const SquireDecisionRow = memo(function SquireDecisionRow(props: {
   readonly body: ReactNode;
   /** A held row's countdown and Undo, right under the row. */
   readonly holdLine?: ReactNode;
-  /** P7.6: a newer hold of this kind sits under the row and replaces it when it runs. */
+  /** A newer hold of this kind sits under the row and replaces it when it runs. */
   readonly supersededNote?: string;
 }) {
   const { environmentId, row, callbacks } = props;
@@ -444,7 +444,7 @@ export const SquireDecisionRow = memo(function SquireDecisionRow(props: {
   );
 });
 
-/** P7.2 FYI row, never expanded: one line, or title over meta in the inbox's list. */
+/** FYI row, never expanded: one line, or title over meta in the inbox's list. */
 export const SquireFyiRow = memo(function SquireFyiRow(props: {
   readonly environmentId: EnvironmentId;
   readonly viewSquireId: SquireId;

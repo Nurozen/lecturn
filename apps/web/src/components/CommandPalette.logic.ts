@@ -279,7 +279,7 @@ export function buildSquirePaletteItems<TSquire extends CommandPaletteSquire>(in
 
 /**
  * "New Squire…" per environment that may create one, and "Edit Squire: <name>" per Squire,
- * the Lead included, both opening the one setup sheet (P13.1).
+ * the Lead included, both opening the one setup sheet.
  */
 export function buildSquireSetupPaletteItems<TSquire extends CommandPaletteSquire>(input: {
   readonly environments: ReadonlyArray<CommandPaletteSquireEnvironment<TSquire>>;
@@ -345,7 +345,7 @@ export function buildSquireSetupPaletteItems<TSquire extends CommandPaletteSquir
 }
 
 /**
- * P19.8: "Open room: <topic>" per open room and "New Squire room" per environment that may
+ * "Open room: <topic>" per open room and "New Squire room" per environment that may
  * create one. Closed rooms stay reachable from the Lead view's Rooms menu.
  */
 export function buildSquireRoomPaletteItems(input: {

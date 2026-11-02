@@ -24,7 +24,7 @@ export function parseSquireViewSearch(search: Record<string, unknown>): SquireVi
 }
 
 /**
- * D63: a marked home thread opens as its Squire view, so "Sent by another agent" links and old
+ * A marked home thread opens as its Squire view, so "Sent by another agent" links and old
  * thread links land there. Probes and ordinary threads stay on the thread route.
  */
 export function squireViewForThread(

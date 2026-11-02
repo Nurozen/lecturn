@@ -79,7 +79,7 @@ export class AppRuntimeState extends Context.Service<
      * is built below AppsLayer and reaches the route through here.
      */
     readonly mcpAppRoute: Ref.Ref<Option.Option<AppMcpAppRoute>>;
-    /** Lecturn: showcase cards' requests, set while the Squire layer is up (D32). */
+    /** Lecturn: showcase cards' requests, set while the Squire layer is up. */
     readonly squireMcpAppRoute: Ref.Ref<Option.Option<SquireMcpAppRoute>>;
     /**
      * A granted app's instructions for turns in its projects, set while

@@ -100,7 +100,7 @@ export interface ThreadActionMenuState {
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
   /** Null without a Squire-capable environment or any Squire this client may track with. */
   readonly squireTrack?: {
-    /** Squire home and probe threads are never trackable (P1.4). */
+    /** Squire home and probe threads are never trackable. */
     readonly isSquireThread: boolean;
     readonly menu: SquireTrackMenuState;
   } | null;

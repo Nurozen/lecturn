@@ -170,7 +170,7 @@ export async function playNotificationSound(
   }
 }
 
-// ── Squire notification intents (10c.3, D27) ──────────────────
+// ── Squire notification intents ───────────────────────────────
 
 export interface SquireNotificationIntent {
   readonly squireId: SquireId;
@@ -222,7 +222,7 @@ export function squireNotificationTag(environmentId: EnvironmentId, squireId: Sq
 }
 
 /**
- * D27: tells the server a shown intent was `alerted` on this desktop. The snapshot names an
+ * Tells the server a shown intent was `alerted` on this desktop. The snapshot names an
  * intent only by its log sequence, so its card comes from the `notification.pushed` log row.
  */
 export async function reportSquireAlert(

@@ -20,7 +20,7 @@ import {
 // Findings are capped per day (default 6), so 30 days fit in one page.
 const SWEEP_FINDING_PAGE = 200;
 
-/** P17.10 "Accepted 3 of 12 in the last 30 days", in the Lead's setup sheet. */
+/** "Accepted 3 of 12 in the last 30 days", in the Lead's setup sheet. */
 export function SquireSweepAcceptance(props: {
   readonly environmentId: EnvironmentId;
   readonly leadId: SquireId;
@@ -37,7 +37,7 @@ export function SquireSweepAcceptance(props: {
   return <p className="text-xs text-muted-foreground">{squireSweepAcceptanceText(rate)}</p>;
 }
 
-/** P17.10 on-request sweep, in the Lead's view header. */
+/** The on-request find-work sweep, in the Lead's view header. */
 export function SquireFindWorkButton(props: { readonly environmentId: EnvironmentId }) {
   const { environmentId } = props;
   const state = useSquireEnvironmentState(environmentId);

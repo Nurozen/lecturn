@@ -49,7 +49,7 @@ export const StaveManifestMemory = Schema.Struct({
 });
 export type StaveManifestMemory = typeof StaveManifestMemory.Type;
 
-// The saga block's members are not projected yet (Phase 5); only its presence
+// The saga block's members are not projected yet; only its presence
 // matters, so the payload stays unknown.
 export const StaveManifest = Schema.Struct({
   version: OptionalScalar,

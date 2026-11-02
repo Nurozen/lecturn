@@ -1,7 +1,7 @@
 import { environmentEndpointUrl } from "@lecturn/client-runtime/environment";
 import type { SquireId } from "@lecturn/contracts";
 
-/** P14.1: mirrors the server's read-scoped NDJSON export route. */
+/** Mirrors the server's read-scoped NDJSON export route. */
 export function squireActionLogPath(squireId: SquireId): string {
   return `/api/squire/${encodeURIComponent(squireId)}/action-log`;
 }

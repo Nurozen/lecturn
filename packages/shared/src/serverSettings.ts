@@ -217,6 +217,12 @@ export function parsePersistedServerObservabilitySettings(
   return { otlpTracesUrl: undefined, otlpMetricsUrl: undefined, otlpLogsUrl: undefined };
 }
 
+/** The saved Squires switch; a server reads it once at start. */
+export function parsePersistedServerSquireEnabled(raw: string): boolean {
+  const decoded = decodeServerSettingsJson(raw);
+  return Option.isSome(decoded) && decoded.value.squire.enabled;
+}
+
 function shouldReplaceTextGenerationModelSelection(
   patch: ServerSettingsPatch["textGenerationModelSelection"] | undefined,
 ): boolean {

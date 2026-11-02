@@ -108,7 +108,7 @@ export function SquirePage(props: {
   );
 }
 
-/** D52: opening the view counts as activity even with no item opened. */
+/** Opening the view counts as activity even with no item opened. */
 function useMarkViewOpened(environmentId: EnvironmentId, ready: boolean) {
   const allowed = useAtomValue(squireEnvironment.itemsMarkOpened.permissionAtom(environmentId));
   const markOpened = useAtomCommand(squireEnvironment.itemsMarkOpened, { reportFailure: false });
@@ -142,7 +142,7 @@ function SquireView(props: {
   const pane = squireConversationPane(entry.squire);
   const conversation = squireConversationLayout(pane, collapsed);
 
-  // Re-renders only when the width crosses a D38 breakpoint, not on every resize step.
+  // Re-renders only when the width crosses a layout breakpoint, not on every resize step.
   const observeWidth = (element: HTMLDivElement | null) => {
     if (element === null) return;
     return observeResize(element, (entries) => {
@@ -210,7 +210,7 @@ function SquireView(props: {
             layout={layout.queueLayout}
           />
         </div>
-        {/* P10.1: holds sit right above the conversation they would steer. */}
+        {/* Holds sit right above the conversation they would steer. */}
         <SquireBanners environmentId={environmentId} entry={entry} />
         <SquireConversation
           environmentId={environmentId}
@@ -220,7 +220,7 @@ function SquireView(props: {
           onCollapsedChange={setCollapsed}
         />
       </div>
-      {/* D38: below 1,100 px or with the inbox open, the 64 px header portrait stands in. */}
+      {/* Below 1,100 px or with the inbox open, the 64 px header portrait stands in. */}
       {layout.companionPanel === "shown" ? (
         <SquireCompanionPanel environmentId={environmentId} entry={entry} team={props.team} />
       ) : null}
@@ -228,7 +228,7 @@ function SquireView(props: {
   );
 }
 
-/** D63: the home thread's own view, secondary to the queue and collapsed until opened. */
+/** The home thread's own view, secondary to the queue and collapsed until opened. */
 function SquireConversation(props: {
   readonly environmentId: EnvironmentId;
   readonly entry: SquireSnapshotEntry;
@@ -373,7 +373,7 @@ function SquireConversation(props: {
             threadId={pane.threadId}
             routeKind="server"
             controls={SQUIRE_THREAD_CONTROLS}
-            // CP9: a tall showcase card opens at its top, not its tail above the composer.
+            // A tall showcase card opens at its top, not its tail above the composer.
             openAtNewestAppCard={!openedBySend}
           />
         </AppReferencesProvider>
@@ -383,8 +383,8 @@ function SquireConversation(props: {
 }
 
 /**
- * D63: a marked home thread opens as its Squire view. With the capability off the thread lists
- * as an ordinary one (A0), so it stays on the thread route.
+ * A marked home thread opens as its Squire view. With the capability off the thread lists
+ * as an ordinary one, so it stays on the thread route.
  */
 export function useSquireViewForThread(
   threadRef: ScopedThreadRef | null,

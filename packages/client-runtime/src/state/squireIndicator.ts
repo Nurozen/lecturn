@@ -33,7 +33,7 @@ export interface SquireIndicatorState {
 
 type HomeThreadShell = Parameters<typeof isThreadWorking>[0];
 
-// A Lead caller passes only the items and holds the Lead itself raised (plan D50).
+// A Lead caller passes only the items and holds the Lead itself raised.
 export function squireIndicatorState(
   homeShell: HomeThreadShell | null,
   openDecisionCount: number,

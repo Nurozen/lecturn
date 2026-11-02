@@ -1,8 +1,8 @@
 /**
- * Lecturn: the CODEX_HOME a Squire home or probe runs in (A5.9, D48, OQ24).
+ * Lecturn: the CODEX_HOME a Squire home or probe runs in.
  *
  * Codex always loads `CODEX_HOME/AGENTS.md` into a thread's prompt, and no
- * thread config suppresses it (S0a2), so a marked thread runs in its own
+ * thread config suppresses it, so a marked thread runs in its own
  * home, one per provider instance under Lecturn's state directory. That home
  * holds only what a thread needs from the instance's home, linked from an
  * allowlist: the login and the thread store. The user's AGENTS.md, skills,
@@ -16,6 +16,8 @@ import type * as FileSystem from "effect/FileSystem";
 import type * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+
+import { tokenizeCliArgs } from "@lecturn/shared/cliArgs";
 
 import { resolveCodexLaunchArgs } from "../codexLaunchArgs.ts";
 
@@ -62,6 +64,37 @@ const LINKED_FILE =
 export const CODEX_SQUIRE_HOME_LAUNCH_ARGS = `-c 'cli_auth_credentials_store="file"'`;
 
 const LAUNCH_ARGS_ENV = "LECTURN_CODEX_LAUNCH_ARGS";
+
+/**
+ * The `-c` keys a Squire keeps from the instance's launch args: which model
+ * provider to reach and how to sign in to it, as managed Codex sets them. A
+ * CLI override could turn a native tool, an MCP server, or a feature back on,
+ * point Codex at a skills snapshot or code-mode host, or move its transport,
+ * so every other flag stays behind, including any a later Codex adds.
+ */
+const SQUIRE_CONFIG_KEY =
+  /^(?:model_provider|model_providers\..+|openai_base_url|chatgpt_base_url|forced_login_method|forced_chatgpt_workspace_id|features\.api_key_model_discovery)$/u;
+
+const quoteArg = (arg: string) => `'${arg.replaceAll("'", `'\\''`)}'`;
+
+/** Lecturn: the instance launch args a Squire home or probe keeps (see SQUIRE_CONFIG_KEY). */
+const codexSquireLaunchArgs = (launchArgs: string): string => {
+  const args = tokenizeCliArgs(launchArgs);
+  const kept: Array<string> = [];
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]!;
+    const inline = arg.startsWith("--config=")
+      ? arg.slice("--config=".length)
+      : arg.startsWith("-c") && arg.length > 2 && !arg.startsWith("--")
+        ? arg.slice(2)
+        : undefined;
+    const override = inline ?? (arg === "-c" || arg === "--config" ? args[++index] : undefined);
+    if (override === undefined) continue;
+    const key = override.slice(0, Math.max(override.indexOf("="), 0)).trim();
+    if (SQUIRE_CONFIG_KEY.test(key)) kept.push("-c", quoteArg(override));
+  }
+  return kept.join(" ");
+};
 
 export class CodexSquireHomeError extends Schema.TaggedError<CodexSquireHomeError>()(
   "CodexSquireHomeError",
@@ -320,9 +353,8 @@ export const makeCodexSquireHome = (input: {
               CODEX_HOME: _home,
               ...environment
             } = launch.environment;
-            const launchArgs = resolveCodexLaunchArgs(
-              launch.settings.launchArgs,
-              launch.environment,
+            const launchArgs = codexSquireLaunchArgs(
+              resolveCodexLaunchArgs(launch.settings.launchArgs, launch.environment),
             );
             return {
               settings: {

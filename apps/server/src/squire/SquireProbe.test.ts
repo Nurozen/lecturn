@@ -1,5 +1,5 @@
 /**
- * "Ask about this" (6.5, D25) over the server's Squire stack: a real
+ * "Ask about this" over the server's Squire stack: a real
  * orchestrator with the scripted provider, the command allowlist, the real
  * provider session manager and `McpSessionRegistry`, and the gated `/mcp`.
  */
@@ -214,7 +214,7 @@ const withPhase4 = <A, E>(
 
 const refusalOf = <A, R>(effect: Effect.Effect<A, SquireError, R>) => Effect.flip(effect);
 
-describe("SquireProbe (6.5)", () => {
+describe("SquireProbe", () => {
   it.live(
     "answers from a marked read-only fork with no MCP, then deletes it; source and home untouched",
     () =>
@@ -249,7 +249,7 @@ describe("SquireProbe (6.5)", () => {
           assert.deepEqual(probe.pullRequests ?? [], []);
           assert.equal(probe.lineage.parentThreadId, source);
 
-          // A5.11a: outside Squire modules, the probe takes no lifecycle command.
+          // The marked-thread allowlist: outside Squire modules, the probe takes no lifecycle command.
           const orchestrator = yield* Orchestrator.OrchestratorV2;
           const archived = yield* Effect.exit(
             orchestrator.dispatch({

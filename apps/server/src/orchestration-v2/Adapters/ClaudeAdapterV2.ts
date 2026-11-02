@@ -1132,11 +1132,13 @@ export function makeClaudeQueryOptions(input: {
   readonly squireIsolation?: ProviderAdapter.ProviderAdapterV2RuntimePolicy["squireIsolation"];
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
+  const launchFlags =
+    input.settings === undefined ? {} : parseCliArgs(input.settings.launchArgs).flags;
   const {
     "permission-mode": launchArgPermissionMode,
     "dangerously-skip-permissions": launchArgSkipPermissions,
     ...extraArgs
-  } = input.settings === undefined ? {} : parseCliArgs(input.settings.launchArgs).flags;
+  } = input.squireIsolation === undefined ? launchFlags : claudeSquireLaunchFlags(launchFlags);
   const requestThinkingSummaries =
     compiledSelection.settings.alwaysThinkingEnabled !== false &&
     extraArgs["thinking-display"] !== "omitted";
@@ -1242,6 +1244,29 @@ export function makeClaudeQueryOptions(input: {
   const withDirectories =
     additionalDirectories.length === 0 ? options : { ...options, additionalDirectories };
   return input.cwd === null ? withDirectories : { ...withDirectories, cwd: input.cwd };
+}
+
+/**
+ * Lecturn: the instance launch flags a Squire home or probe keeps. The CLI
+ * accumulates `--tools`, `--allowedTools`, `--add-dir`, `--settings`,
+ * `--mcp-config`, `--plugin-dir`, `--agents`, and more on top of the SDK's own
+ * values, and pre-approves before the permission callback runs, so any of
+ * them could hand a Squire a native tool. An allowlist, so a flag a later
+ * Claude adds stays out until it is listed here.
+ */
+const CLAUDE_SQUIRE_LAUNCH_FLAGS: ReadonlySet<string> = new Set([
+  "betas",
+  "fallback-model",
+  "max-budget-usd",
+  "thinking-display",
+]);
+
+function claudeSquireLaunchFlags(
+  flags: Record<string, string | null>,
+): Record<string, string | null> {
+  return Object.fromEntries(
+    Object.entries(flags).filter(([name]) => CLAUDE_SQUIRE_LAUNCH_FLAGS.has(name)),
+  );
 }
 
 function claudeLecturnInstructions(
@@ -1907,7 +1932,7 @@ export interface ClaudeRuntimeQueryPolicy {
 }
 
 /**
- * Lecturn: the deny runtime for Squire homes and probes (D9, D48). `dontAsk`
+ * Lecturn: the deny runtime for Squire homes and probes. `dontAsk`
  * denies anything not pre-approved; the read-only sandbox with no readable
  * roots pre-approves no native read tool.
  */
@@ -1917,7 +1942,7 @@ const CLAUDE_SQUIRE_SANDBOX_POLICY = {
   networkAccess: false,
 } as const;
 
-/** Lecturn: a Squire acts through Lecturn's server alone, the only one a home attaches (D9). */
+/** Lecturn: a Squire acts through Lecturn's server alone, the only one a home attaches. */
 function claudeSquireToolPermission(
   toolName: string,
   toolInput: Record<string, unknown>,

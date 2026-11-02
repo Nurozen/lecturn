@@ -50,11 +50,6 @@ import {
   type SquireTriggerDraft,
 } from "./squireSetupAutomation.logic";
 
-// Labels for the trigger value too, or the closed Select shows the raw "webhook".
-const TRIGGER_KIND_ITEMS = [
-  { value: "schedule", label: "Schedule" },
-  { value: "webhook", label: "Custom webhook" },
-] as const;
 const SCHEDULE_KIND_ITEMS = [
   { value: "daily", label: "At a time of day" },
   { value: "interval", label: "Every few hours" },
@@ -70,7 +65,7 @@ function useTriggerTimeFormat() {
   };
 }
 
-/** P3.6 triggers as intent sentences (plan 10b.6). Never rendered for the Lead. */
+/** Triggers as intent sentences. Never rendered for the Lead. */
 export function SquireTriggersSection(props: {
   readonly environmentId: EnvironmentId;
   readonly squire: Pick<Squire, "id" | "name" | "role">;
@@ -81,7 +76,7 @@ export function SquireTriggersSection(props: {
     isLead ? null : squireEnvironment.triggers({ environmentId, input: { squireId: squire.id } }),
   );
   const canCreate = useAtomValue(squireEnvironment.triggerCreate.permissionAtom(environmentId));
-  // The secret exists only here, and only while its dialog is open (OQ27).
+  // The secret exists only here, and only while its dialog is open.
   const [reveal, dispatchReveal] = useReducer(squireSecretRevealReducer, null);
   if (isLead) return null;
   const list = triggers.data?.triggers ?? null;
@@ -126,7 +121,7 @@ export function SquireTriggersSection(props: {
   );
 }
 
-/** P3.6 inactivity pause: every trigger and the sweep stopped until the user resumes them. */
+/** The inactivity pause: every trigger and the sweep stopped until the user resumes them. */
 export function SquireAutomationPausedNotice(props: { readonly environmentId: EnvironmentId }) {
   const { environmentId } = props;
   const state = useSquireEnvironmentState(environmentId);
@@ -172,7 +167,7 @@ function SquireTriggerRow(props: {
   const canTest = useAtomValue(squireEnvironment.triggerTest.permissionAtom(environmentId));
   const update = useAtomCommand(squireEnvironment.triggerUpdate);
   const test = useAtomCommand(squireEnvironment.triggerTest);
-  // Collapsed on every mount, a just-created webhook included (OQ27).
+  // Collapsed on every mount, a just-created webhook included.
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [runsOpen, setRunsOpen] = useState(false);
   const [pending, setPending] = useState(false);
@@ -537,6 +532,7 @@ function SquireAddTrigger(props: {
   const { environmentId } = props;
   const create = useAtomCommand(squireEnvironment.triggerCreate);
   const [open, setOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [draft, setDraft] = useState<SquireTriggerDraft>(EMPTY_SQUIRE_TRIGGER_DRAFT);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -564,40 +560,43 @@ function SquireAddTrigger(props: {
     });
     setDraft(EMPTY_SQUIRE_TRIGGER_DRAFT);
     setOpen(false);
+    setAdvancedOpen(false);
+  };
+  const start = (kind: SquireTriggerDraft["kind"]) => {
+    setDraft({ ...EMPTY_SQUIRE_TRIGGER_DRAFT, kind });
+    setError(null);
+    setOpen(true);
   };
   if (!open) {
+    // A custom webhook needs a signed sender set up elsewhere, so it waits behind Advanced.
     return (
-      <div>
-        <Button size="xs" variant="outline" onClick={() => setOpen(true)}>
+      <div className="flex flex-col items-start gap-1">
+        <Button size="xs" variant="outline" onClick={() => start("schedule")}>
           <PlusIcon />
           Add trigger
         </Button>
+        <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+          <CollapsibleTrigger render={<Button size="xs" variant="ghost-muted" />}>
+            <ChevronRightIcon className={advancedOpen ? "rotate-90" : undefined} />
+            Advanced: custom webhook
+          </CollapsibleTrigger>
+          <CollapsiblePanel>
+            <div className="flex flex-col items-start gap-2 px-2 py-1">
+              <p className="text-xs text-muted-foreground">
+                Let another service wake this Squire with a signed HTTP request.
+              </p>
+              <Button size="xs" variant="outline" onClick={() => start("webhook")}>
+                <PlusIcon />
+                Add custom webhook
+              </Button>
+            </div>
+          </CollapsiblePanel>
+        </Collapsible>
       </div>
     );
   }
   return (
     <div className="flex flex-col gap-3 rounded-lg border p-3">
-      <div className="flex flex-col gap-1.5">
-        <Label size="sm">Kind</Label>
-        <Select
-          value={draft.kind}
-          items={TRIGGER_KIND_ITEMS}
-          onValueChange={(value) => {
-            if (value === "schedule" || value === "webhook") edit({ kind: value });
-          }}
-        >
-          <SelectTrigger size="sm" aria-label="Trigger kind">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectPopup>
-            {TRIGGER_KIND_ITEMS.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
-                {item.label}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      </div>
       {draft.kind === "webhook" ? (
         <div className="flex flex-col gap-1.5">
           <Label size="sm">When</Label>
@@ -694,7 +693,7 @@ function SquireAddTrigger(props: {
           Cancel
         </Button>
         <Button size="xs" disabled={saving} onClick={() => void save()}>
-          Add trigger
+          {draft.kind === "webhook" ? "Add webhook" : "Add trigger"}
         </Button>
       </div>
     </div>

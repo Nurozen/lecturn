@@ -159,7 +159,7 @@ const send = (
       messageId: MessageId.make(`message:${id}`),
       text: input.text,
       attachments: [],
-      // A delivery is a queued server message with a notification, as SquireDelivery sends it (A1a).
+      // A delivery is a queued server message with a notification, as SquireDelivery sends it.
       ...(input.notification === undefined
         ? {
             createdBy: "user" as const,
@@ -328,7 +328,10 @@ describe("SquireFakeScripts", () => {
         const fakes = yield* SquireFakeScripts.SquireFakeScripts;
         const orchestrator = yield* Orchestrator.OrchestratorV2;
         yield* fakes.set(lead, {
-          "*": [htmlRender, { toolCall: { name: "lecturn_thread_send", arguments: {} } }],
+          "*": [
+            { ...htmlRender, onError: "continue" },
+            { toolCall: { name: "lecturn_thread_send", arguments: {} } },
+          ],
         });
         yield* fakes.set(release, {
           "*": [{ ...htmlRender, onError: "continue" }, { assistantText: "Refused; moving on." }],
@@ -352,9 +355,9 @@ describe("SquireFakeScripts", () => {
                 ),
               ),
             );
-        // The Lead may render but not send; a plain Squire may do neither.
+        // Neither role may render or send.
         assert.deepEqual(yield* rows(lead), [
-          ["lecturn.html_render", "completed"],
+          ["lecturn.html_render", "failed"],
           ["lecturn.lecturn_thread_send", "failed"],
         ]);
         assert.deepEqual(yield* rows(release), [["lecturn.html_render", "failed"]]);
@@ -362,7 +365,7 @@ describe("SquireFakeScripts", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("exists only with the Squire switch and test providers both on (D44g)", () =>
+  it.effect("exists only with the Squire switch and test providers both on", () =>
     Effect.gen(function* () {
       const present = (squireEnabled: boolean, testProviders: string | undefined) =>
         Effect.serviceOption(SquireFakeScripts.SquireFakeScripts).pipe(

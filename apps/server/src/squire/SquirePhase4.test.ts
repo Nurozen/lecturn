@@ -1,5 +1,5 @@
 /**
- * Phase 4 across modules (4.8): the server's switch-on Squire layer over a
+ * The reactor, delivery, and timers across modules: the server's switch-on Squire layer over a
  * real orchestrator, with the scripted provider on the home thread and the
  * Squire command allowlist registered.
  */
@@ -326,7 +326,7 @@ const awaitMessageAfter = (threadId: ThreadId, afterSequence: number) =>
     ),
   );
 
-describe("Squire Phase 4 integration (4.8)", () => {
+describe("Squire reactor and delivery integration", () => {
   it.effect("the switch alone decides whether the reactor, delivery, and clock exist", () =>
     withHome(({ restart }) =>
       Effect.gen(function* () {

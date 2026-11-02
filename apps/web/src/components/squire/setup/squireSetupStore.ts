@@ -5,7 +5,7 @@ import { useSyncExternalStore } from "react";
 type SquireProposalPayload = Extract<SquireCardPayload, { readonly type: "squire-proposal" }>;
 
 /**
- * Every entry point opens the one setup sheet (P13.1): the view's gear, the "+" menu, the
+ * Every entry point opens the one setup sheet: the view's gear, the "+" menu, the
  * palette, Settings, and Edit on a Lead proposal, which saves as a new Squire and then
  * dismisses the proposal.
  */

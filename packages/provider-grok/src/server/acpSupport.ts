@@ -35,7 +35,7 @@ interface GrokAcpRuntimeInput extends Omit<
   readonly grokSettings: GrokAcpRuntimeGrokSettings | null | undefined;
   readonly environment?: NodeJS.ProcessEnv;
   readonly runtimeMode?: RuntimeMode;
-  /** Lecturn: a Squire home or probe launches in its own Grok home (A5.9). */
+  /** Lecturn: a Squire home or probe launches in its own Grok home. */
   readonly squireLaunch?: GrokSquireLaunch;
 }
 

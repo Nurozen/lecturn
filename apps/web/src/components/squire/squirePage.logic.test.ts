@@ -33,6 +33,7 @@ import {
   squireRecentRowText,
   squireRecentFromSnapshot,
   squireRecentLabel,
+  squireSwitchDescription,
   SQUIRE_INBOX_MIN_PX,
   squireViewBreakpoint,
   squireViewLayout,
@@ -112,7 +113,7 @@ describe("squirePageState", () => {
   });
 });
 
-describe("squireViewLayout (D38)", () => {
+describe("squireViewLayout", () => {
   it("offers the inbox at 1440x900, where the main width is about 1184 px", () => {
     expect(squireViewLayout(1184, false)).toEqual({
       inboxOffered: true,
@@ -183,7 +184,7 @@ describe("nextSquireViewSearch", () => {
   });
 });
 
-describe("Activity (D64)", () => {
+describe("Activity", () => {
   it("lists only outcomes without a home-thread row", () => {
     expect([...SQUIRE_ACTIVITY_KINDS].sort()).toEqual(
       [
@@ -448,7 +449,7 @@ describe("squireConversationPane", () => {
     });
   });
 
-  it("shows the Lead's provider prompt in needs_provider (D7)", () => {
+  it("shows the Lead's provider prompt in needs_provider", () => {
     const lead = entry("lead", { role: "lead", lifecycle: "needs_provider", homeThreadId: null });
     expect(squireConversationPane(lead.squire)).toMatchObject({
       kind: "needs_provider",
@@ -671,5 +672,18 @@ describe("squireHoldRuleLabel", () => {
     expect(squireHoldRuleLabel(card(null), [rule], names)).toBeNull();
     expect(squireHoldRuleLabel(null, [rule], names)).toBeNull();
     expect(squireHoldRuleLabel(card("rule-1"), [], names)).toBeNull();
+  });
+});
+
+describe("squireSwitchDescription", () => {
+  it("says when the saved switch has not reached the running server yet", () => {
+    expect(squireSwitchDescription({ saved: true, running: true })).toMatch(/^On\./);
+    expect(squireSwitchDescription({ saved: false, running: false })).toMatch(/^Off\./);
+    expect(squireSwitchDescription({ saved: true, running: false })).toMatch(
+      /^Saved as on\. Squires start when .* restarts/,
+    );
+    expect(squireSwitchDescription({ saved: false, running: true })).toMatch(
+      /^Saved as off\. Squires keep running until .* restarts/,
+    );
   });
 });

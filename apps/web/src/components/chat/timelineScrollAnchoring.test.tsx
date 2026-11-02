@@ -286,7 +286,7 @@ describe("remembered timeline positions", () => {
   });
 });
 
-describe("opening at the newest MCP App card (Lecturn D63)", () => {
+describe("opening at the newest MCP App card (Lecturn)", () => {
   it("finds the card only when it is the newest content row", () => {
     const card = { id: "item-1:app-card", kind: "mcp-app" };
     expect(timelineNewestAppCardRowId([{ id: "m1", kind: "message" }, card])).toBe(card.id);

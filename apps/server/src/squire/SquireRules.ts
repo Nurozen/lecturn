@@ -41,7 +41,7 @@ export class SquireRules extends Context.Service<
   SquireRules,
   {
     /**
-     * P8.1 save under the policy lock. A replay of the request id or of the
+     * Saves a rule under the policy lock. A replay of the request id or of the
      * rule's unique key returns the stored rule, even at the cap.
      */
     readonly create: (
@@ -54,7 +54,7 @@ export class SquireRules extends Context.Service<
     /** Every rule, disabled ones included, oldest first. */
     readonly list: (squireId: SquireId) => Effect.Effect<ReadonlyArray<SquireRule>, RuleError>;
     /**
-     * The A4 cascade after a grant change: active rules whose target left
+     * The cascade after a grant change: active rules whose target left
      * scope become `disabled`, and disabled rules whose target is back become
      * `active` again (they kept their cap slot). Callers already hold the
      * policy lock, so this does not take it.
@@ -67,7 +67,7 @@ export class SquireRules extends Context.Service<
       RuleError
     >;
     /**
-     * P8.1 "Always allow this" after the user accepted the card. None unless
+     * "Always allow this" after the user accepted the card. None unless
      * the card's class is at Recommend and no rule already decides it, and
      * never for recommend-only origins, the Lead, or steer kind `other`.
      * Never fails: an offer is optional and must not fail the accept.
@@ -75,12 +75,12 @@ export class SquireRules extends Context.Service<
     readonly offerFor: (
       card: SquireRepository.SquireCardRow,
     ) => Effect.Effect<Option.Option<SquireRuleOffer>>;
-    /** P8.1 "Always ask first for this" after the user undid the card's hold. */
+    /** "Always ask first for this" after the user undid the card's hold. */
     readonly askFirstOfferFor: (
       card: SquireRepository.SquireCardRow,
     ) => Effect.Effect<Option.Option<SquireRuleOffer>>;
     /**
-     * P8.1 match count and last use. Run it in the transaction that writes
+     * Bumps the match count and last use. Run it in the transaction that writes
      * the `rule.matched` log row, so a replayed invocation bumps nothing.
      */
     readonly recordMatch: (input: {
@@ -119,7 +119,7 @@ const decodeBudgets = Schema.decodeUnknownOption(Schema.fromJsonString(SquireBud
 const decodeSteerKind = Schema.decodeUnknownOption(SquireSteerKind);
 
 const offerClasses = { steer: "steer", proposal: "createThread" } as const;
-// P8.1 and P19.7: voice, webhook, test, sweep, message, and Lead cards get no allow offer.
+// Voice, webhook, test, sweep, message, and Lead cards get no allow offer.
 const allowOfferOrigins: ReadonlySet<SquireRepository.SquireCardRow["origin"]> = new Set([
   "event",
   "room",
@@ -145,7 +145,7 @@ const steerLabel = (kind: SquireSteerKind) => kind.replaceAll("-", " ");
 const where = (target: OfferTarget, prefix: string) =>
   target.targetKind === "thread" ? `on "${target.name}"` : `${prefix} ${target.name}`;
 
-/** The exact P8.1 rule text, shown before saving. */
+/** The exact rule text, shown before saving. */
 const ruleText = (input: {
   readonly squireName: string;
   readonly effect: SquireRuleEffect;
@@ -211,7 +211,7 @@ const make = Effect.gen(function* () {
         if (!inScope) {
           return yield* refuse("out_of_scope", "The rule's target is outside this Squire's scope.");
         }
-        // P8.1: at the cap nothing is saved and nothing is evicted.
+        // At the cap nothing is saved and nothing is evicted.
         const count = yield* repository.countRules({
           squireId: input.squireId,
           effect: input.effect,
@@ -493,7 +493,7 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  // P3.6: user RPCs only.
+  // The inactivity check counts user RPCs only.
   const touch = Effect.flatMap(nowIso, (now) => touchUserActivity(repository, now));
 
   return SquireRules.of({

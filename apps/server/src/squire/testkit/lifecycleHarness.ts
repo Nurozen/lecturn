@@ -87,7 +87,7 @@ export const ALL_INSTANCES: ReadonlyArray<ProviderInstance> = [
 export interface HarnessOptions {
   readonly instances?: ReadonlyArray<ProviderInstance>;
   readonly defaultModelSelection?: ModelSelection | null;
-  /** `LECTURN_TEST_PROVIDERS=1`, which makes the scripted driver a Squire provider (D44g). */
+  /** `LECTURN_TEST_PROVIDERS=1`, which makes the scripted driver a Squire provider. */
   readonly testProviders?: boolean;
   /** Pretends the host has Claude's managed-mcp.json. */
   readonly managedMcpConfig?: boolean;
@@ -119,7 +119,7 @@ export const serverLayer = (baseDir: string, options: HarnessOptions = {}) => {
   const repository = SquireRepository.layer.pipe(Layer.provide(database));
   const hooks = SquireCommandHook.layer.pipe(
     Layer.provideMerge(LecturnOrchestrationHooks.layer),
-    Layer.provide(Layer.merge(projections, repository)),
+    Layer.provide(Layer.mergeAll(projections, repository, database)),
   );
   const orchestration = ProviderReplayHarness.layerWithRegistry(
     { name: "squire-lifecycle" },

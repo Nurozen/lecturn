@@ -46,6 +46,7 @@ import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore
 import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
 import * as SquireCommandHook from "./SquireCommandHook.ts";
 import * as SquireContainers from "./SquireContainers.ts";
+import * as SquireCursorStartup from "./SquireCursorStartup.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
 import * as SquireFakeScripts from "./SquireFakeScripts.ts";
 import * as SquireItems from "./SquireItems.ts";
@@ -60,6 +61,7 @@ import { squireDeterministicSummary, squireSummaryInputFromRun } from "./SquireS
 import { writeLeadItemEvent } from "./squireLeadItems.ts";
 import { withSquireDispatchOrigin } from "./SquireDispatchOrigin.ts";
 import {
+  deleteProject,
   initRepo,
   scripted,
   scriptedModel,
@@ -97,6 +99,7 @@ interface Calls {
   readonly finalized: Array<{ readonly runId: RunId; readonly status: string }>;
   readonly ensured: Array<string>;
   readonly rehomed: Array<SquireId>;
+  readonly driven: Array<SquireId>;
   /** When set, summary generation waits on it. */
   gate: Deferred.Deferred<void> | undefined;
   /** Resolved when a summary generation starts. */
@@ -105,12 +108,13 @@ interface Calls {
   summary: typeof STUB_SUMMARY | undefined;
 }
 
-const makeHarness = () => {
+const makeHarness = (options: { readonly turnedOn?: boolean } = {}) => {
   const calls: Calls = {
     wakes: [],
     finalized: [],
     ensured: [],
     rehomed: [],
+    driven: [],
     gate: undefined,
     ensureStarted: undefined,
     summary: undefined,
@@ -146,6 +150,11 @@ const makeHarness = () => {
   );
   const lifecycle = Layer.mock(SquireLifecycle.SquireLifecycle)({
     rehome: (squireId) => Effect.sync(() => void calls.rehomed.push(squireId)),
+    drive: (squireId) =>
+      Effect.sync(() => {
+        calls.driven.push(squireId);
+        return Option.none();
+      }),
   });
   const services = Layer.mergeAll(
     SquireScope.layer.pipe(Layer.provide(SquireContainers.layerTest({ spaces: [] }))),
@@ -157,6 +166,10 @@ const makeHarness = () => {
     delivery,
     summaries,
     lifecycle,
+    Layer.succeed(
+      SquireCursorStartup.SquireSwitchTurnedOn,
+      SquireCursorStartup.SquireSwitchTurnedOn.of({ turnedOn: options.turnedOn === true }),
+    ),
   ).pipe(
     Layer.provideMerge(SquireRepository.layer),
     Layer.provideMerge(RuntimeLayer.layerEventInfrastructure),
@@ -405,7 +418,7 @@ const prEvent = (
 
 // ── Fixtures ──
 
-/** Only Squire modules may create marked threads (A5.11a). */
+/** Only Squire modules may create marked threads. */
 const createHome = withSquireDispatchOrigin(createThread(home, projectA, release));
 
 const seedSquires = (squires: ReadonlyArray<SquireRepository.SquireRow>) =>
@@ -495,14 +508,15 @@ type HarnessServices = Layer.Success<ReturnType<typeof makeHarness>["layer"]>;
 
 const runIn = <A, E>(
   effect: (calls: Calls) => Effect.Effect<A, E, HarnessServices | Scope.Scope>,
+  options: { readonly turnedOn?: boolean } = {},
 ) => {
-  const harness = makeHarness();
+  const harness = makeHarness(options);
   return effect(harness.calls).pipe(Effect.scoped, Effect.provide(harness.layer));
 };
 
 // ── Tests ──
 
-describe("SquireReactor triggers (P3.1, P3.2, D3)", () => {
+describe("SquireReactor triggers", () => {
   it.effect(
     "a finished run on a tracked thread is one turn-finished row; its summary promotes it",
     () =>
@@ -571,7 +585,7 @@ const finishRun = (
     yield* write([runEvent(threadId, runId, status, now)]);
   });
 
-describe("SquireReactor stops and scope (P3.1, D3, P3.1 Lead)", () => {
+describe("SquireReactor stops and scope", () => {
   it.effect(
     "user stops are silent; agent, system, crash, and failure stops are thread-stopped",
     () =>
@@ -635,7 +649,7 @@ describe("SquireReactor stops and scope (P3.1, D3, P3.1 Lead)", () => {
   );
 });
 
-describe("SquireReactor PR dedupe (P3.3, D20, D47)", () => {
+describe("SquireReactor PR dedupe", () => {
   it.effect("fail, pass, fail on three heads is three rows even when ingested late", () =>
     runIn(() =>
       Effect.gen(function* () {
@@ -688,7 +702,7 @@ describe("SquireReactor PR dedupe (P3.3, D20, D47)", () => {
   );
 });
 
-describe("SquireReactor PR without a head sha (P7.10)", () => {
+describe("SquireReactor PR without a head sha", () => {
   it.effect("an Azure DevOps snapshot still raises one row per state", () =>
     runIn(() =>
       Effect.gen(function* () {
@@ -715,7 +729,7 @@ describe("SquireReactor PR without a head sha (P7.10)", () => {
   );
 });
 
-describe("SquireReactor deferrals (A9, P3.4)", () => {
+describe("SquireReactor deferrals", () => {
   it.effect("background work defers turn-finished until it ends; a newer run drops it", () =>
     runIn(() =>
       Effect.gen(function* () {
@@ -813,7 +827,7 @@ describe("SquireReactor deferrals (A9, P3.4)", () => {
   );
 });
 
-describe("SquireReactor question cards (4.9, P7.6, D26, D66)", () => {
+describe("SquireReactor question cards", () => {
   it.effect(
     "a waiting request raises one card after the threshold; the item reads live options",
     () =>
@@ -854,7 +868,7 @@ describe("SquireReactor question cards (4.9, P7.6, D26, D66)", () => {
               [lead, "item-raised", "pending"],
             ],
           );
-          // D26: a question card never pushes.
+          // A question card never pushes.
           assert.deepStrictEqual(
             yield* repository.listActionLog({
               squireId: release,
@@ -875,7 +889,7 @@ describe("SquireReactor question cards (4.9, P7.6, D26, D66)", () => {
               { label: "Yes", description: "Ship it" },
               { label: "No", description: "Wait for review" },
             ],
-            // P7.4: the thread's own request shape, so the card answers by question id.
+            // The thread's own request shape, so the card answers by question id.
             request: {
               type: "user-input",
               questions: [
@@ -930,74 +944,72 @@ describe("SquireReactor question cards (4.9, P7.6, D26, D66)", () => {
       ),
   );
 
-  it.effect(
-    "a question's Why waits for the summary, then yields to the Squire's own note (P7.3)",
-    () =>
-      runIn((calls) =>
-        Effect.gen(function* () {
-          const repository = yield* SquireRepository.SquireRepository;
-          yield* setup();
-          const { reactor, drain } = yield* startReactor;
-          const runId = RunId.make("run:why");
-          const whyOf = Effect.map(repository.listCards({ kinds: ["question"] }), (cards) =>
-            cards.map((card) => card.why),
-          );
-          const gate = yield* Deferred.make<void>();
-          calls.gate = gate;
-          calls.summary = {
-            ...STUB_SUMMARY,
-            goal: "Ship the billing fix before the freeze",
-            suggestedNextStep: "Answer Yes: the migration is reversible.",
-          };
-          yield* write([runEvent(worker, runId, "running", yield* DateTime.now, "run.created")]);
-          yield* write(
-            requestEvents(worker, runId, "req-why-1", {
-              kind: "user_input",
-              now: yield* DateTime.now,
-            }),
-          );
-          yield* drain;
-          yield* TestClock.adjust("30 minutes");
-          yield* reactor.promoteDue(yield* DateTime.now);
-          // Raised before its provisional summary exists, the card quotes who asked what, and when.
-          assert.deepStrictEqual(yield* whyOf, ["Thread asked 30m ago: 'Deploy to staging now?'"]);
-          yield* Deferred.succeed(gate, undefined);
-          yield* drain;
-          assert.deepStrictEqual(yield* whyOf, ["Ship the billing fix before the freeze"]);
-          // The suggested step is the card's recommendation, not part of the Why.
-          const [raised] = yield* repository.listCards({ kinds: ["question"] });
-          assert.strictEqual(
-            (JSON.parse(raised!.payload_json) as { recommendation?: string }).recommendation,
-            "Answer Yes: the migration is reversible.",
-          );
+  it.effect("a question's Why waits for the summary, then yields to the Squire's own note", () =>
+    runIn((calls) =>
+      Effect.gen(function* () {
+        const repository = yield* SquireRepository.SquireRepository;
+        yield* setup();
+        const { reactor, drain } = yield* startReactor;
+        const runId = RunId.make("run:why");
+        const whyOf = Effect.map(repository.listCards({ kinds: ["question"] }), (cards) =>
+          cards.map((card) => card.why),
+        );
+        const gate = yield* Deferred.make<void>();
+        calls.gate = gate;
+        calls.summary = {
+          ...STUB_SUMMARY,
+          goal: "Ship the billing fix before the freeze",
+          suggestedNextStep: "Answer Yes: the migration is reversible.",
+        };
+        yield* write([runEvent(worker, runId, "running", yield* DateTime.now, "run.created")]);
+        yield* write(
+          requestEvents(worker, runId, "req-why-1", {
+            kind: "user_input",
+            now: yield* DateTime.now,
+          }),
+        );
+        yield* drain;
+        yield* TestClock.adjust("30 minutes");
+        yield* reactor.promoteDue(yield* DateTime.now);
+        // Raised before its provisional summary exists, the card quotes who asked what, and when.
+        assert.deepStrictEqual(yield* whyOf, ["Thread asked 30m ago: 'Deploy to staging now?'"]);
+        yield* Deferred.succeed(gate, undefined);
+        yield* drain;
+        assert.deepStrictEqual(yield* whyOf, ["Ship the billing fix before the freeze"]);
+        // The suggested step is the card's recommendation, not part of the Why.
+        const [raised] = yield* repository.listCards({ kinds: ["question"] });
+        assert.strictEqual(
+          (JSON.parse(raised!.payload_json) as { recommendation?: string }).recommendation,
+          "Answer Yes: the migration is reversible.",
+        );
 
-          yield* repository.insertCard(
-            openCard("card:note", {
-              kind: "fyi",
-              title: "Staging is frozen",
-              payload_json: JSON.stringify({
-                type: "fyi",
-                source: "notify",
-                text: "Staging is frozen until 5pm; answer No unless it is urgent.",
-                threadId: worker,
-              }),
+        yield* repository.insertCard(
+          openCard("card:note", {
+            kind: "fyi",
+            title: "Staging is frozen",
+            payload_json: JSON.stringify({
+              type: "fyi",
+              source: "notify",
+              text: "Staging is frozen until 5pm; answer No unless it is urgent.",
+              threadId: worker,
             }),
-          );
-          yield* write(
-            requestEvents(worker, runId, "req-why-2", {
-              kind: "user_input",
-              now: yield* DateTime.now,
-            }),
-          );
-          yield* drain;
-          yield* TestClock.adjust("30 minutes");
-          yield* reactor.promoteDue(yield* DateTime.now);
-          yield* drain;
-          assert.deepStrictEqual(yield* whyOf, [
-            "Staging is frozen until 5pm; answer No unless it is urgent.",
-          ]);
-        }),
-      ),
+          }),
+        );
+        yield* write(
+          requestEvents(worker, runId, "req-why-2", {
+            kind: "user_input",
+            now: yield* DateTime.now,
+          }),
+        );
+        yield* drain;
+        yield* TestClock.adjust("30 minutes");
+        yield* reactor.promoteDue(yield* DateTime.now);
+        yield* drain;
+        assert.deepStrictEqual(yield* whyOf, [
+          "Staging is frozen until 5pm; answer No unless it is urgent.",
+        ]);
+      }),
+    ),
   );
 
   it.effect(
@@ -1139,7 +1151,7 @@ describe("SquireReactor question cards (4.9, P7.6, D26, D66)", () => {
   );
 });
 
-describe("SquireReactor outdating (P7.8, P10.3)", () => {
+describe("SquireReactor outdating", () => {
   it.effect(
     "an agent turn outdates cards of earlier runs; a user turn outdates all and holds",
     () =>
@@ -1306,7 +1318,43 @@ describe("SquireReactor outdating (P7.8, P10.3)", () => {
   );
 });
 
-describe("SquireReactor Squire threads and cascades (D9, A4, D35, D44j)", () => {
+describe("SquireReactor rerun-checks hold", () => {
+  it.effect("a hold for a failing check is outdated when the check passes on the same head", () =>
+    runIn(() =>
+      Effect.gen(function* () {
+        const repository = yield* SquireRepository.SquireRepository;
+        yield* setup();
+        yield* repository.insertCard(
+          openCard("card:rerun", {
+            status: "held",
+            executes_at: "2999-01-01T00:00:00.000Z",
+            trigger_json: JSON.stringify({
+              prKey: "github.com/acme/billing-service#321",
+              headSha: "sha1",
+              transition: "checks:failed",
+            }),
+          }),
+        );
+        const { drain } = yield* startReactor;
+        const now = yield* DateTime.now;
+        yield* write([prEvent(worker, snapshot("sha1", { checksState: "passing" }), now)]);
+        yield* drain;
+        assert.deepStrictEqual(yield* cardStatus("card:rerun"), Option.some("outdated"));
+        const cancelled = yield* repository.listActionLog({
+          squireId: release,
+          kinds: ["action.cancelled"],
+          limit: 10,
+        });
+        assert.deepStrictEqual(
+          cancelled.map((row) => [row.card_id, JSON.parse(row.data_json)]),
+          [["card:rerun", { reason: "the pull request changed", to: "outdated" }]],
+        );
+      }),
+    ),
+  );
+});
+
+describe("SquireReactor Squire threads and cascades", () => {
   it.effect("an approval on a home thread is declined through the command hook and logged", () =>
     runIn(() =>
       Effect.gen(function* () {
@@ -1358,8 +1406,25 @@ describe("SquireReactor Squire threads and cascades (D9, A4, D35, D44j)", () => 
           yield* finishRun(RunId.make("run:doomed"), "completed", yield* DateTime.now);
           yield* drain;
           assert.lengthOf(yield* rows, 1);
+          yield* repository.insertSummary({
+            thread_id: worker,
+            run_id: RunId.make("run:doomed"),
+            stage: "terminal",
+            status: "complete",
+            summary_json: "{}",
+            payer_squire_id: null,
+            created_at: DateTime.formatIso(yield* DateTime.now),
+            updated_at: DateTime.formatIso(yield* DateTime.now),
+          });
           yield* dispatchThread("thread.delete", worker);
           yield* drain;
+          assert.deepStrictEqual(
+            yield* repository.listRunSummaries({
+              thread_id: worker,
+              run_id: RunId.make("run:doomed"),
+            }),
+            [],
+          );
           assert.deepStrictEqual(
             [
               ...(yield* repository.listGrantsForTarget({ kind: "thread", targetId: worker })),
@@ -1384,6 +1449,79 @@ describe("SquireReactor Squire threads and cascades (D9, A4, D35, D44j)", () => 
         yield* drain;
         assert.deepStrictEqual(calls.rehomed, [release]);
       }),
+    ),
+  );
+
+  it.effect("a new project moves on a Squire whose re-home was waiting for one", () =>
+    runIn((calls) =>
+      Effect.gen(function* () {
+        yield* setup([
+          squireRow(release, { lifecycle: "rehoming" }),
+          squireRow(billing, { lifecycle: "ready" }),
+        ]);
+        const { drain } = yield* startReactor;
+        yield* seedProject(ProjectId.make("project:new"), process.cwd());
+        yield* drain;
+        assert.deepStrictEqual(calls.driven, [release]);
+      }),
+    ),
+  );
+
+  it.effect("the start that turns the switch on applies the deletes its cursor jump skipped", () =>
+    runIn(
+      (calls) =>
+        Effect.gen(function* () {
+          const repository = yield* SquireRepository.SquireRepository;
+          const events = yield* OrchestrationEventStore.OrchestrationEventStore;
+          const gone = ThreadId.make("thread:gone");
+          const goneProject = ProjectId.make("project:gone");
+          yield* seedProject(projectA, process.cwd());
+          yield* seedProject(goneProject, process.cwd());
+          yield* setup([
+            squireRow(release, { home_project_id: projectA }),
+            squireRow(billing, { home_project_id: goneProject }),
+          ]);
+          yield* createThread(gone, projectA);
+          yield* repository.insertGrant(grantRow(release, "thread", gone));
+          yield* repository.insertGrant(grantRow(billing, "project", goneProject));
+          yield* repository.insertCard(openCard("card:gone", { target_thread_id: gone }));
+          yield* repository.insertCard(openCard("card:live"));
+          yield* repository.insertEvent({
+            squire_id: release,
+            thread_id: gone,
+            kind: "turn-finished",
+            state_key: "run:gone",
+            payload_json: null,
+            status: "pending",
+            defer_reason: null,
+            not_before: "2026-11-01T00:00:00.000Z",
+            batch_id: null,
+            created_at: "2026-11-01T00:00:00.000Z",
+          });
+          // The off period: both deletes commit, then the turn-on start jumps past them.
+          yield* dispatchThread("thread.delete", gone);
+          yield* deleteProject(goneProject);
+          yield* repository.writeCursor({
+            sequence: yield* events.latestApplicationSequence,
+            enabled: true,
+          });
+
+          const { drain } = yield* startReactor;
+          yield* drain;
+          assert.deepStrictEqual(
+            (yield* repository.listGrants(release)).map((grant) => grant.kind),
+            ["project"],
+          );
+          assert.deepStrictEqual(
+            (yield* repository.listGrants(billing)).map((grant) => grant.target_id),
+            [projectA],
+          );
+          assert.deepStrictEqual(yield* cardStatus("card:gone"), Option.some("outdated"));
+          assert.deepStrictEqual(yield* cardStatus("card:live"), Option.some("open"));
+          assert.deepStrictEqual(yield* rows, []);
+          assert.deepStrictEqual(calls.rehomed, [billing]);
+        }),
+      { turnedOn: true },
     ),
   );
 
@@ -1424,7 +1562,7 @@ describe("SquireReactor Squire threads and cascades (D9, A4, D35, D44j)", () => 
   );
 });
 
-describe("SquireReactor question resolution (6.3, P7.4, P7.8, A6)", () => {
+describe("SquireReactor question resolution", () => {
   const SECRET_VALUE = "sk_live_squire_never_stores_this";
 
   /** Every row of every Squire table, as JSON, so a value can be searched for anywhere. */
@@ -1491,7 +1629,7 @@ describe("SquireReactor question resolution (6.3, P7.4, P7.8, A6)", () => {
           requestId: RuntimeRequestId.make("req-thread"),
           decision: "decline",
         });
-        // P7.8: answered before the reactor caught up, the card dispatches nothing.
+        // Answered before the reactor caught up, the card dispatches nothing.
         const stale = yield* items.answer({
           cardId: question.id,
           requestId: "client-late",
@@ -1556,7 +1694,7 @@ describe("SquireReactor question resolution (6.3, P7.4, P7.8, A6)", () => {
             secretItem(worker, runId, itemId, "pending", now),
           ]);
 
-          // A6: the card never takes the secret; it points at the thread's own prompt.
+          // The card never takes the secret; it points at the thread's own prompt.
           const refused = yield* items.answer({
             cardId: question.id,
             requestId: "client-secret",
@@ -1591,7 +1729,7 @@ describe("SquireReactor question resolution (6.3, P7.4, P7.8, A6)", () => {
         yield* createThread(fixtureThread, fixtureProject);
         const runId = RunId.make("run:fixture-answer");
         const cardId = SquireCardId.make("card:fixture-answer");
-        // `inject` owns this card's row; only its resolution is live (D44j).
+        // `inject` owns this card's row; only its resolution is live.
         yield* repository.insertCard(
           openCard(cardId, {
             kind: "question",
@@ -1623,7 +1761,7 @@ describe("SquireReactor question resolution (6.3, P7.4, P7.8, A6)", () => {
 
 const decodeCreateInput = Schema.decodeSync(SquireCreateInput);
 
-describe("SquireReactor question answers with the scripted provider (6.3, P7.4)", () => {
+describe("SquireReactor question answers with the scripted provider", () => {
   const asksProject = ProjectId.make("project-asks");
   const asking = ThreadId.make("thread-asks");
   const need = <I, S>(tag: Context.Key<I, S>) =>

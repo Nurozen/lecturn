@@ -87,7 +87,7 @@ const CHIP_TEXT: Readonly<Record<SquireChipTone, string>> = {
   neutral: "text-foreground-secondary",
 };
 
-/** P7.3: branch and diff stats, then the PR's number and check, review, and merge chips. */
+/** Branch and diff stats, then the PR's number and check, review, and merge chips. */
 export function SquireEvidenceMeta(props: {
   readonly environmentId: EnvironmentId;
   readonly card: SquireCard;
@@ -144,7 +144,7 @@ export function SquireEvidenceMeta(props: {
   );
 }
 
-/** The failing job's first log lines, or where to look when they could not be read (D21). */
+/** The failing job's first log lines, or where to look when they could not be read. */
 export function SquireCiEvidence(props: { readonly card: SquireCard }) {
   const { evidence } = props.card;
   const errorLines = evidence.errorLines ?? [];
@@ -167,7 +167,7 @@ export function SquireCiEvidence(props: { readonly card: SquireCard }) {
   );
 }
 
-/** P9.3 budget line from the raiser's snapshot entry, then the card's timeline. */
+/** The budget line from the raiser's snapshot entry, then the card's timeline. */
 export function SquireCaptionAndTimeline(props: {
   readonly environmentId: EnvironmentId;
   readonly card: SquireCard;
@@ -205,7 +205,7 @@ export function SquireCaptionAndTimeline(props: {
 
 type ProposalPayload = Extract<SquireKnownPayload, { readonly type: "squire-proposal" }>;
 
-/** A proposed Squire as it would be created (P17.2): portrait, name, scope, palette, brief. */
+/** A proposed Squire as it would be created: portrait, name, scope, palette, brief. */
 export function SquireProposalEvidence(props: {
   readonly environmentId: EnvironmentId;
   readonly proposal: ProposalPayload;
@@ -256,7 +256,7 @@ export function SquireProposalEvidence(props: {
 
 type ControlPayload = Extract<SquireKnownPayload, { readonly type: "control" }>;
 
-/** P17.6: what the Lead would do and to whom, with its reason, as one line. */
+/** What the Lead would do and to whom, with its reason, as one line. */
 export function SquireControlEvidence(props: {
   readonly environmentId: EnvironmentId;
   readonly payload: ControlPayload;

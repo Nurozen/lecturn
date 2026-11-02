@@ -208,13 +208,16 @@ const squireRequest = (requestId: string) => ({
   members: [squireMember("squire-api", "API"), squireMember("squire-web", "Web")],
   post: { body: "Who can look at the relay endpoint?" },
 });
-const squiresConfig = parseExtensionsConfig({
+const squiresEnv = {
   EXTENSIONS_DECISIONS_ENABLED: "true",
   EXTENSIONS_DECISIONS_COHORT: "*",
   EXTENSIONS_CONTEXTUAL_ENABLED: "true",
   EXTENSIONS_CONTEXTUAL_COHORT: "*",
   EXTENSIONS_SQUIRES_ENABLED: "true",
   EXTENSIONS_SQUIRES_COHORT: "*",
+};
+const squiresConfig = parseExtensionsConfig({
+  ...squiresEnv,
   // Leave account headroom so each refusal below comes from an environment slot.
   EXTENSIONS_ACCOUNT_CONCURRENCY: "8",
 });
@@ -1112,6 +1115,41 @@ describe.skipIf(!url)("Extensions PostgreSQL consent and shared ledger", () => {
           );
         }),
       ),
+  );
+  it.live("keeps Squires admissible while Decisions scans hold every shared account limit", () =>
+    run(
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        for (const feature of ["decisions", "squires"] as const) yield* fund(f, feature);
+        const { usage } = yield* makeExtensionsService(
+          parseExtensionsConfig({
+            ...squiresEnv,
+            EXTENSIONS_ENVIRONMENT_CONCURRENCY: "2",
+            EXTENSIONS_ACCOUNT_CONCURRENCY: "2",
+            EXTENSIONS_REQUESTS_PER_MINUTE: "2",
+          }),
+          "https://fixture.invalid",
+          Effect.succeed(undefined),
+        );
+        const input = (requestId: string) => ({
+          principal: f.host,
+          payerId: f.payerId,
+          fundingGeneration: 1,
+          requestId,
+          runId: requestId,
+          fingerprint: requestId,
+          templateVersion: "fixture",
+          model: "extensions-v1",
+          backend: "private-evaluator" as const,
+        });
+        for (const scan of ["scan-a", "scan-b"])
+          expect((yield* usage.decisions.reserve(input(scan))).kind).toBe("admitted");
+        expect((yield* usage.decisions.reserve(input("scan-c")).pipe(Effect.flip)).code).toBe(
+          "rate-limited",
+        );
+        expect((yield* usage.squires.reserve(input("route"))).kind).toBe("admitted");
+      }),
+    ),
   );
   it.live(
     "routes a post through the private evaluator once and replays without a second charge",

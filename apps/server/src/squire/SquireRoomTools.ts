@@ -1,5 +1,5 @@
 /**
- * Room tools (P19.5, P19.6, D54): `squire_propose_room` (Squires),
+ * Room tools: `squire_propose_room` (Squires),
  * `squire_open_room` and `squire_close_room` (the Lead, Manage Squires), and
  * `squire_read_room` (members; the Lead any room). Proposals are
  * `room-proposed` event rows on the Lead, keyed by proposal id, and expire
@@ -7,7 +7,7 @@
  *
  * A Lead open is a Lead control action: at Recommend a proposal card, at
  * Auto a hold `SquireActions` runs through `SquireRooms.applyOpen` after the
- * undo window (A9 "Routed task, sweep, room open").
+ * undo window.
  */
 import {
   SquireCardId,
@@ -37,6 +37,8 @@ import {
 import * as squirePolicy from "./squirePolicy.ts";
 import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireRooms from "./SquireRooms.ts";
+import { roomReadMarks, sentInUserStartedTurn } from "./squireMessageGuards.ts";
+import { isBotPost } from "./squireRoomContext.ts";
 import * as SquireRoomStore from "./SquireRoomStore.ts";
 import {
   type SquireToolContext,
@@ -48,6 +50,8 @@ import {
 const ROOM_PROPOSAL_TTL_MS = 24 * 60 * 60 * 1000;
 /** `squire_read_room` returns at most this many characters, newest posts kept. */
 export const ROOM_READ_MAX_CHARS = 4000;
+const SQUIRE_TEXT_NOTE =
+  "This read showed another Squire's words, so your actions for the rest of this turn only recommend.";
 
 export class SquireRoomTools extends Context.Service<
   SquireRoomTools,
@@ -70,7 +74,7 @@ const decodeLogData = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
 );
 
-// ── Tool arguments (P17.7, P19.6) ──
+// ── Tool arguments ──
 
 const Reason = TrimmedNonEmptyString.check(Schema.isMaxLength(1000));
 const Topic = TrimmedNonEmptyString.check(Schema.isMaxLength(120));
@@ -187,7 +191,7 @@ const make = Effect.gen(function* () {
   const invalid = (ctx: SquireToolContext, kit: SquireToolKit, message: string) =>
     kit.refuse(ctx, "invalid-arguments", `Invalid arguments for ${ctx.tool}: ${message}`);
 
-  // ── Proposals (D54) ──
+  // ── Proposals ──
 
   const expiresAt = (row: SquireRepository.SquireEventRow) =>
     DateTime.add(DateTime.makeUnsafe(row.created_at), { milliseconds: ROOM_PROPOSAL_TTL_MS });
@@ -456,7 +460,7 @@ const make = Effect.gen(function* () {
               owner_squire_id: ctx.squire.id,
               kind: "proposal",
               status: held ? "held" : "open",
-              // No target: a room item never takes a thread's one open slot (P7.6).
+              // No target: a room item never takes a thread's one open slot.
               target_thread_id: null,
               project_id: null,
               title,
@@ -659,6 +663,7 @@ const make = Effect.gen(function* () {
         let budget =
           ROOM_READ_MAX_CHARS - header.length - olderNote(Number.MAX_SAFE_INTEGER).length - 2;
         let oldest: number | undefined;
+        const shownPosts: Array<(typeof page)[number]> = [];
         for (const post of page) {
           const author =
             post.author_kind === "user"
@@ -672,13 +677,30 @@ const make = Effect.gen(function* () {
             // A single post over the budget still shows, cut, so the reader is never stuck.
             if (lines.length === 0) {
               lines.push(line.slice(0, Math.max(budget - 1, 0)));
+              shownPosts.push(post);
               oldest = post.id;
             }
             break;
           }
           lines.push(line);
+          shownPosts.push(post);
           budget -= cost;
           oldest = post.id;
+        }
+        // Other bots' posts are model input like their messages: their hops
+        // count toward the limit, and a Squire's words leave the rest of the
+        // run recommend-only (`readSquireText` reads these marks back).
+        let squireText = false;
+        let botPostHop: number | null = null;
+        for (const post of shownPosts) {
+          if (!isBotPost(post, ctx.squire.id)) continue;
+          botPostHop = Math.max(botPostHop ?? 0, post.hop);
+          if (
+            post.author_kind === "squire" ||
+            !(yield* sentInUserStartedTurn(repository, post.message_key))
+          ) {
+            squireText = true;
+          }
         }
         const more = oldest !== undefined && page.some((post) => post.id < oldest!);
         const text = [
@@ -686,14 +708,16 @@ const make = Effect.gen(function* () {
           ...(lines.length === 0 ? ["No posts."] : lines.toReversed()),
           ...(more ? [olderNote(oldest!)] : []),
         ].join("\n");
+        const note = squireText ? `\n${SQUIRE_TEXT_NOTE}` : "";
         return yield* kit.commit(
           ctx,
           null,
           Effect.succeed({
-            result: kit.ok(text.slice(0, ROOM_READ_MAX_CHARS), {
+            result: kit.ok(`${text.slice(0, ROOM_READ_MAX_CHARS)}${note}`, {
               roomId,
               posts: lines.length,
               ...(more ? { before: oldest } : {}),
+              ...roomReadMarks({ squireText, botPostHop }),
             }),
           }),
         );

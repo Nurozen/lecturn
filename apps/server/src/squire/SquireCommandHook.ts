@@ -1,26 +1,28 @@
 /**
- * The command allowlist on Squire-marked threads (A5.11a), always on so a
+ * The command allowlist on Squire-marked threads, always on so a
  * home thread listed by a switch-off or pre-Squire client stays guarded.
  * Default deny: only Squire modules (inside `SquireDispatchOrigin`) run
  * arbitrary commands on a marked thread; anyone else may read, send with the
  * thread's own model, answer a request, and stop.
  *
  * Inside `SquireDispatchOrigin` it also re-checks a held execution's or an
- * accept's trigger under the target's command lock (A5.11b).
+ * accept's trigger under the target's command lock.
  */
 import {
   CommandId,
   ModelSelection,
   type OrchestrationV2ServerCommand,
   SquireCardId,
-  type SquireThreadMarker,
-  type ThreadId,
+  SquireId,
+  SquireThreadMarker,
+  ThreadId,
 } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import {
   LecturnHookRejectedError,
@@ -194,8 +196,20 @@ const reject = (reason: string, cause?: unknown) =>
     ...(cause === undefined ? {} : { cause }),
   });
 
+const MarkedThreadRows = Schema.Array(
+  Schema.Struct({ thread_id: ThreadId, marker: Schema.String }),
+);
+const decodeMarkedThreadRows = Schema.decodeUnknownEffect(MarkedThreadRows);
+const decodeMarker = Schema.decodeUnknownOption(Schema.fromJsonString(SquireThreadMarker));
+// A marker this build cannot read (a newer role) still guards its thread.
+const UNREADABLE_MARKER: SquireThreadMarker = {
+  squireId: SquireId.make("squire:unknown"),
+  role: "home",
+};
+
 const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
+  const sql = yield* SqlClient.SqlClient;
   const squires = yield* Effect.serviceOption(SquireRepository.SquireRepository);
   const receipts = yield* Effect.serviceOption(
     OrchestrationCommandReceipts.OrchestrationCommandReceiptRepository,
@@ -206,12 +220,22 @@ const make = Effect.gen(function* () {
   // map lookup per named thread.
   let marked: Map<ThreadId, SquireThreadMarker> | undefined;
 
+  // Reads only the marker column of live thread rows: the hook is installed
+  // with the switch off too, so building every thread shell here would tax the
+  // first command after each start for users who never made a Squire.
   const loadMarked = Effect.gen(function* () {
     if (marked !== undefined) return marked;
-    const snapshot = yield* projections.getShellSnapshot();
+    const rows = yield* sql`SELECT thread_id, json_extract(payload_json, '$.squire') AS marker
+      FROM orchestration_v2_projection_threads
+      WHERE deleted_at IS NULL AND json_extract(payload_json, '$.squire') IS NOT NULL`.pipe(
+      Effect.flatMap(decodeMarkedThreadRows),
+    );
     const loaded = new Map<ThreadId, SquireThreadMarker>();
-    for (const shell of [...snapshot.threads, ...snapshot.archivedThreads]) {
-      if (shell.squire !== undefined) loaded.set(shell.id, shell.squire);
+    for (const row of rows) {
+      loaded.set(
+        row.thread_id,
+        Option.getOrElse(decodeMarker(row.marker), () => UNREADABLE_MARKER),
+      );
     }
     marked = loaded;
     return loaded;
@@ -251,7 +275,7 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * A5.11b: a replay passes (its receipt decides); a first dispatch is refused
+   * A replay passes (its receipt decides); a first dispatch is refused
    * when the user wrote in the target, or a newer trigger arrived, since the
    * intent was written. Same shape as the orchestrator's under-lock
    * `DispatchModeLimit` recheck, without editing the orchestrator.

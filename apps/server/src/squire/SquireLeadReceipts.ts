@@ -1,5 +1,5 @@
 /**
- * The Lead's routing receipts (P17.9, D53, D65): derived on every read from
+ * The Lead's routing receipts: derived on every read from
  * the `task.routed` row, the target's routed-task event, the cards its turn
  * raised (`routed_task_id`), and its `quiet.recorded` row, so a receipt
  * follows each item's state without a Lead turn and never drifts.

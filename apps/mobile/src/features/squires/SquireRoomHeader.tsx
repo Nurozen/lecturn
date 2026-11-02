@@ -22,7 +22,7 @@ const PORTRAIT_SIZE = 36;
 
 type RoomPatch = Pick<typeof SquireRoomUpdateInput.Type, "muted" | "botMessaging">;
 
-/** P19.8 header: topic, members, status, then bot messaging, mute, and close or reopen. */
+/** A room's header: topic, members, status, then bot messaging, mute, and close or reopen. */
 export function SquireRoomHeader(props: {
   readonly environmentId: EnvironmentId;
   readonly row: SquireRoomRow;

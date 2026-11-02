@@ -663,7 +663,7 @@ export function buildCreateSagaOperation(state: StaveSagaWizardState): StaveCrea
   };
 }
 
-/** `createSaga` lands in Phase 5; until then the server answers `invalid_arguments`. */
+/** A server without `createSaga` yet answers `invalid_arguments`. */
 export function isOperationNotImplemented(error: StaveOperationError): boolean {
   return (
     error.code === "invalid_arguments" &&

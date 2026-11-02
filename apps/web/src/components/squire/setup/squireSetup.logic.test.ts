@@ -326,7 +326,7 @@ describe("create draft", () => {
 });
 
 describe("edit sheet record", () => {
-  // CP10: a sheet reopened after a fixture set the undo window to 60 s showed the persisted
+  // A sheet reopened after a fixture set the undo window to 60 s showed the persisted
   // detail copy (10 s) and froze it into the draft.
   it("waits for a copy at least as new as the snapshot before seeding the draft", () => {
     const cached = { revision: 4 };

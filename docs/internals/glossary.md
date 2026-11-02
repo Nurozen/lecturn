@@ -120,7 +120,7 @@ See [Squires][33].
 - **Lead**: the one Squire per environment that every other Squire nests under. It owns the combined queue, cross-Squire items, the digest, and the routing fallback.
 - **Home thread**: a Squire's own hidden thread, carrying the `squire` marker. Its conversation and every delivery happen there.
 - **Probe**: a hidden, read-only fork of a tracked thread that answers one "Ask about this" question and is then deleted.
-- **Item (card)**: a `squire_card` the user acts on: a steer, proposal, question, overlap, or FYI. A held Auto action is stored as a card but is not an item: it never replaces an open card, and Undo turns it into one.
+- **Item (card)**: a `squire_card` the user acts on. A held Auto action is stored as a card but is not an item: it never replaces an open card, and Undo turns it into one.
 - **Room**: a Squire-layer group conversation among Squires, the Lead, and the user. It is not a thread.
 
 ## Pull requests

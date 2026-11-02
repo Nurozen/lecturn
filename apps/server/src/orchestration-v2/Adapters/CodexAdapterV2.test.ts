@@ -10489,7 +10489,7 @@ describe("CodexAdapterV2 Squire isolation", () => {
           const environment = {
             PATH: "/usr/bin",
             CODEX_HOME: "/elsewhere",
-            LECTURN_CODEX_LAUNCH_ARGS: "--enable env-feature",
+            LECTURN_CODEX_LAUNCH_ARGS: `--enable env-feature -c 'model_provider="env"'`,
           };
           const squireHome = path.join(
             serverConfig.stateDir,
@@ -10509,7 +10509,8 @@ describe("CodexAdapterV2 Squire isolation", () => {
           assert.equal(marked.opened?.settings.homePath, squireHome);
           assert.equal(
             marked.opened?.settings.launchArgs,
-            `--enable env-feature -c 'cli_auth_credentials_store="file"'`,
+            // The env override is read, and only its provider choice survives.
+            `-c 'model_provider="env"' -c 'cli_auth_credentials_store="file"'`,
           );
           assert.notProperty(marked.opened?.environment ?? {}, "CODEX_HOME");
           assert.notProperty(marked.opened?.environment ?? {}, "LECTURN_CODEX_LAUNCH_ARGS");

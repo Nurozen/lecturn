@@ -1,5 +1,5 @@
 /**
- * The Lead's find-work sweep (P17.10, D59). The server, not the model, picks
+ * The Lead's find-work sweep. The server, not the model, picks
  * the candidates from tracked shells, PR link snapshots, and card state; an
  * empty sweep logs one `sweep.ran` row and runs no Lead turn, so it costs no
  * tokens. Findings the Lead raises in the sweep turn are admitted here
@@ -116,7 +116,7 @@ export class SquireSweep extends Context.Service<
   }
 >()("lecturn/squire/SquireSweep") {}
 
-// ── Local time (D31), shared with the digest ──
+// ── Local time, shared with the digest ──
 
 /** The Lead's zone; server local until a client reports one. */
 export const leadZoneOf = (lead: Pick<SquireRepository.SquireRow, "timezone">) =>
@@ -173,7 +173,7 @@ const DEFAULT_SWEEP_SETTINGS = Schema.decodeSync(SquireSweepSettings)({});
 const settingsOf = (lead: Pick<SquireRepository.SquireRow, "sweep_json">) =>
   Option.getOrElse(decodeSettings(lead.sweep_json ?? "{}"), () => DEFAULT_SWEEP_SETTINGS);
 
-/** Dismissal memory per (thread, candidate kind, PR head), D59. */
+/** Dismissal memory per (thread, candidate kind, PR head). */
 const findingKeyOf = (candidate: SquireSweepCandidate) =>
   `${candidate.threadId}:${candidate.kind}:${candidate.headSha ?? "none"}`;
 
@@ -194,7 +194,7 @@ const make = Effect.gen(function* () {
   // Orders the dedupe-and-count of a sweep with its insert.
   const runLock = (yield* Semaphore.make(1)).withPermits(1);
 
-  /** P17.10, P3.6: the sweep stops while the Lead is paused or under the inactivity pause. */
+  /** The sweep stops while the Lead is paused or under the inactivity pause. */
   const sweeping = (lead: SquireRepository.SquireRow) =>
     lead.status === "active" &&
     lead.automation_paused_at === null &&
@@ -335,7 +335,7 @@ const make = Effect.gen(function* () {
       return Option.none<SquireSweepCandidate & { at: number }>();
     });
 
-  /** D59: tracked threads of active Squires, failing heads first, then the longest idle. */
+  /** Tracked threads of active Squires, failing heads first, then the longest idle. */
   const candidates = (lead: SquireRepository.SquireRow, now: DateTime.Utc) =>
     Effect.gen(function* () {
       const active = new Set(
@@ -569,7 +569,7 @@ const make = Effect.gen(function* () {
             candidate.headSha === null ? trigger : { ...trigger, headSha: candidate.headSha },
         };
       }
-      // P7.8: the reactor outdates the finding when this PR leaves the failing state on this head.
+      // The reactor outdates the finding when this PR leaves the failing state on this head.
       const shell = yield* projections
         .getThreadShell(candidate.threadId)
         .pipe(Effect.catch(() => Effect.succeed(null)));

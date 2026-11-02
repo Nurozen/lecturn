@@ -23,7 +23,7 @@ export const squireEnvironment = createSquireEnvironmentAtoms(connectionAtomRunt
   hasProjectAtom,
 });
 
-/** R13: a server without the capability is never sent a Squire RPC. */
+/** A server without the capability is never sent a Squire RPC. */
 export const squireCapableAtom = Atom.family((environmentId: EnvironmentId) =>
   Atom.make(
     (get) =>
@@ -53,7 +53,7 @@ const mergedStatesAtom = Atom.family((idsKey: string) => {
   const states = squireStatesAtom(idsKey);
   const ensureLeads = ensureLeadsAtom(idsKey);
   return Atom.make((get) => {
-    // Reading keeps the D7 Lead ensure mounted wherever Squires are shown.
+    // Reading keeps the missing-Lead creation mounted wherever Squires are shown.
     get(ensureLeads);
     return get(states).flatMap((state, index) =>
       state === null ? [] : [{ environmentId: ids[index]!, state }],
@@ -74,7 +74,7 @@ function useReadableSquireEnvironmentsKey(): string {
 
 /**
  * Every environment's Squires, merged for the sidebar group, notch, and palette. Reading it
- * also lets an operate-scoped client create a missing Lead (D7).
+ * also lets an operate-scoped client create a missing Lead.
  */
 export function useSquireEnvironments(): ReadonlyArray<{
   readonly environmentId: EnvironmentId;

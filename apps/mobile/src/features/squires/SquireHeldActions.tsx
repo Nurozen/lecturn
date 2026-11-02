@@ -18,13 +18,13 @@ import {
 } from "./squireQueue.logic";
 import { useSquireItemsAct } from "./squireQueueState";
 
-/** P10.1: held actions count down once a second while the screen is visible, with Undo. */
+/** Held actions count down once a second while the screen is visible, with Undo. */
 export function SquireHeldActions(props: {
   readonly environmentId: EnvironmentId;
   readonly held: ReadonlyArray<SquireHeldRow>;
 }) {
   const now = useVisibleSecondClock(props.held.length > 0);
-  // P8.1: held here, since the undone hold leaves the list once the snapshot catches up.
+  // The rule offer after an Undo is held here, since the undone hold leaves the list once the snapshot catches up.
   const [undoOffer, setUndoOffer] = useState<{
     readonly hold: SquireHeldRow;
     readonly offer: SquireRuleOffer;
@@ -76,7 +76,7 @@ function useSquireHoldUndo(
 }
 
 /**
- * P7.6: the newer hold beside an open card, as one line under that card: "Newer steer held ·
+ * The newer hold beside an open card, as one line under that card: "Newer steer held ·
  * sending in 52s" with Undo. It ticks once a second only while the screen is visible.
  */
 export function SquirePairedHoldLine(props: {

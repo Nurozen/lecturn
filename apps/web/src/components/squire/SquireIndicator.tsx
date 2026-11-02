@@ -34,7 +34,7 @@ function portraitSource(appearance: RigAppearance, hood: RigHood, palette: Compa
 const SQUIRE_ARC_HEAD = 34;
 const SQUIRE_ARC_TAIL = 12;
 
-// Below this the portrait face is unreadable, so the indicator becomes the mark (spec P16.4).
+// Below this the portrait face is unreadable, so the indicator becomes the mark.
 const MIN_PORTRAIT_SIZE = 22;
 
 const observeWorkingArc = (element: HTMLElement | null) =>
@@ -53,7 +53,7 @@ export interface SquireIndicatorProps {
 }
 
 /**
- * D42 encoding, readable from one still: idle is partly desaturated and slightly dim with a faint
+ * The state encoding, readable from one still: idle is partly desaturated and slightly dim with a faint
  * ring (muted, not disabled: some cloth color stays); working is full color with a tapered arc,
  * under half the ring, travelling it; waiting is full color with a solid ring.
  */

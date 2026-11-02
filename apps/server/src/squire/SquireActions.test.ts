@@ -1,8 +1,8 @@
 /**
- * Held execution and accept under the durable action protocol (6.1, 6.2,
- * 6.9) on the server's switch-on Squire layer over a real orchestrator, with
- * the real `ThreadManagementService`, `ThreadLaunchService`, and the A5.11b
- * hook. A crash is the layer's scope closing; a restart builds it again over
+ * Held execution and accept under the durable action protocol on the
+ * server's switch-on Squire layer over a real orchestrator, with the real
+ * `ThreadManagementService`, `ThreadLaunchService`, and the command hook's
+ * trigger precondition. A crash is the layer's scope closing; a restart builds it again over
  * the same Lecturn home.
  */
 import { assert, describe, it } from "@effect/vitest";
@@ -37,11 +37,13 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as SquireActions from "./SquireActions.ts";
-import { decodeSquireActionIntent } from "./squireActionIntent.ts";
+import { decodeSquireActionIntent, isRoomOpenIntent } from "./squireActionIntent.ts";
 import { withSquireDispatchOrigin } from "./SquireDispatchOrigin.ts";
 import * as SquireLaunchAction from "./SquireLaunchAction.ts";
 import { isFixtureWorkspaceRoot } from "./SquireReactor.ts";
 import * as SquireRepository from "./SquireRepository.ts";
+import * as SquireRooms from "./SquireRooms.ts";
+import * as SquireRoomStore from "./SquireRoomStore.ts";
 import * as SquireRules from "./SquireRules.ts";
 import * as SquireService from "./SquireService.ts";
 import * as SquireTools from "./SquireTools.ts";
@@ -54,6 +56,14 @@ import {
 } from "./testkit/lifecycleHarness.ts";
 import { runBarScenario, withBarHarness } from "./testkit/barHarness.ts";
 import { type Phase4Options, type Phase4Services, phase4Layer } from "./testkit/phase4Harness.ts";
+import {
+  callTool as roomCallTool,
+  currencyThread,
+  deliver,
+  invoiceThread,
+  userTurn,
+  withRoomCast,
+} from "./testkit/roomHarness.ts";
 import fake05 from "./testdata/fake/05-merged-propose-thread.json" with { type: "json" };
 import scenario05 from "./testdata/scenarios/05-merged-propose-thread.json" with { type: "json" };
 
@@ -302,7 +312,7 @@ const crashMidExecution = (card: SquireRepository.SquireCardRow, dispatched: boo
     );
   });
 
-describe("SquireActions held execution (6.1)", () => {
+describe("SquireActions held execution", () => {
   it.effect("a hold executes once after the undo window, charged on execution only (08)", () =>
     withSquire((home) =>
       Effect.gen(function* () {
@@ -348,28 +358,26 @@ describe("SquireActions held execution (6.1)", () => {
     ),
   );
 
-  it.effect(
-    "no interrupt-restart on a provider without active steering: the steer queues (D12)",
-    () =>
-      withSquire((home) =>
-        Effect.gen(function* () {
-          yield* sendSteer(home);
-          const card = yield* onlyCard(home.squireId);
-          const intent = Option.getOrThrow(decodeSquireActionIntent(card.intent_json));
-          assert.strictEqual(intent.type === "steer" ? intent.dispatchMode : null, "queue");
-          yield* advance(11);
-          yield* executeDue;
-          const projections = yield* ProjectionStore.ProjectionStoreV2;
-          const { runs } = yield* projections.getThreadRecords(tracked, ["runs"]);
-          assert.isFalse(runs.some((run) => run.status === "interrupted"));
-          const [sent] = yield* actionMessages;
-          assert.isTrue(runs.some((run) => run.userMessageId === sent!.id));
-        }),
-      ),
+  it.effect("no interrupt-restart on a provider without active steering: the steer queues", () =>
+    withSquire((home) =>
+      Effect.gen(function* () {
+        yield* sendSteer(home);
+        const card = yield* onlyCard(home.squireId);
+        const intent = Option.getOrThrow(decodeSquireActionIntent(card.intent_json));
+        assert.strictEqual(intent.type === "steer" ? intent.dispatchMode : null, "queue");
+        yield* advance(11);
+        yield* executeDue;
+        const projections = yield* ProjectionStore.ProjectionStoreV2;
+        const { runs } = yield* projections.getThreadRecords(tracked, ["runs"]);
+        assert.isFalse(runs.some((run) => run.status === "interrupted"));
+        const [sent] = yield* actionMessages;
+        assert.isTrue(runs.some((run) => run.userMessageId === sent!.id));
+      }),
+    ),
   );
 
   it.effect(
-    "a hold more than 60 s overdue becomes an open card that pushes, never a steer (D13, 11)",
+    "a hold more than 60 s overdue becomes an open card that pushes, never a steer (11)",
     () =>
       withSquire((home) =>
         Effect.gen(function* () {
@@ -398,7 +406,7 @@ describe("SquireActions held execution (6.1)", () => {
         const undone = yield* act({ requestId: "undo-1", cardIds: [card.id], action: "undo" });
         assert.strictEqual(undone.results[0]!.status, "open");
         assert.isNull(undone.results[0]!.error);
-        // P8.1: the matching ask-first rule is offered after an Undo.
+        // The matching ask-first rule is offered after an Undo.
         assert.strictEqual(undone.results[0]!.ruleOffer?.effect, "ask-first");
         yield* advance(20);
         yield* executeDue;
@@ -427,7 +435,7 @@ describe("SquireActions held execution (6.1)", () => {
           yield* setPermissions(home.squireId, { steer: "auto" });
           yield* sendSteer(home, "Rerun api-e2e only.");
           const held = (yield* cardsOf(home.squireId)).find((card) => card.id !== older.id)!;
-          // P7.6: a hold is not an item, so it leaves the open card alone.
+          // A hold is not an item, so it leaves the open card alone.
           assert.strictEqual(held.status, "held");
           assert.strictEqual((yield* cardOf(older.id)).status, "open");
 
@@ -656,7 +664,73 @@ describe("SquireActions held execution (6.1)", () => {
       ),
   );
 
-  describe("the policy lock from re-validation through finalize (A9 step 2)", () => {
+  it.effect(
+    "a rerun-checks hold is outdated, not sent, once its check passes on the same head",
+    () =>
+      withSquire((home) =>
+        Effect.gen(function* () {
+          const threads = yield* ThreadManagement.ThreadManagementService;
+          const repository = yield* SquireRepository.SquireRepository;
+          const key = { host: "github.com", repository: "acme/billing-service", number: 321 };
+          const syncChecks = (checksState: "failing" | "passing") =>
+            Effect.gen(function* () {
+              yield* threads.dispatch({
+                type: "thread.pull-request-link.sync",
+                commandId: CommandId.make(`${tracked}:sync:${checksState}`),
+                threadId: tracked,
+                ...key,
+                snapshot: {
+                  state: "open",
+                  title: "Fix invoice rounding",
+                  headBranch: "fix/rounding",
+                  baseBranch: "main",
+                  isDraft: false,
+                  updatedAt: null,
+                  syncedAt: DateTime.formatIso(yield* DateTime.now),
+                  checksState,
+                  headSha: "sha1",
+                },
+                stack: null,
+              });
+            });
+          yield* threads.dispatch({
+            type: "thread.pull-request.link",
+            commandId: CommandId.make(`${tracked}:link`),
+            threadId: tracked,
+            ...key,
+            url: "https://github.com/acme/billing-service/pull/321",
+            source: "manual",
+          });
+          yield* syncChecks("failing");
+          yield* sendSteer(home, undefined, { steerKind: "rerun-checks" });
+          const card = yield* onlyCard(home.squireId);
+          assert.strictEqual(card.status, "held");
+          // What the tool stores from the batch that woke the Squire on the failing check.
+          yield* repository.updateCard({
+            id: card.id,
+            fromStatuses: ["held"],
+            patch: {
+              trigger_json: JSON.stringify({
+                prKey: "github.com/acme/billing-service#321",
+                headSha: "sha1",
+                transition: "checks:failed",
+              }),
+            },
+            updatedAt: DateTime.formatIso(yield* DateTime.now),
+          });
+
+          // The rerun went green on the same commit, so the head check alone still holds.
+          yield* syncChecks("passing");
+          yield* advance(11);
+          yield* executeDue;
+          assert.strictEqual((yield* cardOf(card.id)).status, "outdated");
+          assert.lengthOf(yield* actionMessages, 0);
+          assert.lengthOf(yield* budgetRows(home.squireId), 0);
+        }),
+      ),
+  );
+
+  describe("the policy lock from re-validation through finalize", () => {
     const changes = {
       pause: (home: Home) =>
         Effect.flatMap(need(SquireService.SquireService), (service) =>
@@ -713,7 +787,7 @@ describe("SquireActions held execution (6.1)", () => {
     );
 
     it.effect.each(Object.keys(changes) as Array<keyof typeof changes>)(
-      "a %s committed before re-validation refuses the execution; the card opens",
+      "a %s committed before re-validation refuses the execution",
       (name) =>
         withSquire((home) =>
           Effect.gen(function* () {
@@ -722,8 +796,9 @@ describe("SquireActions held execution (6.1)", () => {
             yield* advance(11);
             yield* executeDue;
             const card = yield* onlyCard(home.squireId);
-            // D34 opens a paused Squire's holds itself; the others reopen at execution.
-            assert.strictEqual(card.status, "open");
+            // Pausing opens a paused Squire's holds itself and an untrack outdates the
+            // thread's cards; a permission change reopens the hold at execution.
+            assert.strictEqual(card.status, name === "untrack" ? "outdated" : "open");
             assert.lengthOf(yield* actionMessages, 0);
             assert.lengthOf(yield* budgetRows(home.squireId), 0);
           }),
@@ -731,43 +806,69 @@ describe("SquireActions held execution (6.1)", () => {
     );
   });
 
-  it.effect(
-    "6.9: removing the allow rule during a hold turns it into a card at execution (D58)",
-    () =>
-      withSquire((home) =>
-        Effect.gen(function* () {
-          yield* setPermissions(home.squireId, { steer: "recommend" });
-          const repository = yield* SquireRepository.SquireRepository;
-          const ruleId = SquireRuleId.make("rule-rerun");
-          yield* repository.insertRule({
-            id: ruleId,
-            squire_id: home.squireId,
-            effect: "allow",
-            action_class: "steer",
-            target_kind: "thread",
-            target_id: tracked,
-            steer_kind: "rerun-checks",
-            status: "active",
-            match_count: 0,
-            last_matched_at: null,
-            created_at: DateTime.formatIso(yield* DateTime.now),
-          });
-          yield* sendSteer(home, undefined, { steerKind: "rerun-checks" });
-          const card = yield* onlyCard(home.squireId);
-          assert.strictEqual(card.status, "held");
-          assert.strictEqual(card.rule_id, ruleId);
-          yield* (yield* need(SquireRules.SquireRules)).remove({ requestId: "remove", ruleId });
-          yield* advance(11);
-          yield* executeDue;
-          assert.strictEqual((yield* cardOf(card.id)).status, "open");
-          assert.lengthOf(yield* actionMessages, 0);
-          assert.lengthOf(yield* budgetRows(home.squireId), 0);
-        }),
-      ),
+  it.effect("removing the allow rule during a hold turns it into a card at execution", () =>
+    withSquire((home) =>
+      Effect.gen(function* () {
+        yield* setPermissions(home.squireId, { steer: "recommend" });
+        const repository = yield* SquireRepository.SquireRepository;
+        const ruleId = SquireRuleId.make("rule-rerun");
+        yield* repository.insertRule({
+          id: ruleId,
+          squire_id: home.squireId,
+          effect: "allow",
+          action_class: "steer",
+          target_kind: "thread",
+          target_id: tracked,
+          steer_kind: "rerun-checks",
+          status: "active",
+          match_count: 0,
+          last_matched_at: null,
+          created_at: DateTime.formatIso(yield* DateTime.now),
+        });
+        yield* sendSteer(home, undefined, { steerKind: "rerun-checks" });
+        const card = yield* onlyCard(home.squireId);
+        assert.strictEqual(card.status, "held");
+        assert.strictEqual(card.rule_id, ruleId);
+        yield* (yield* need(SquireRules.SquireRules)).remove({ requestId: "remove", ruleId });
+        yield* advance(11);
+        yield* executeDue;
+        assert.strictEqual((yield* cardOf(card.id)).status, "open");
+        assert.lengthOf(yield* actionMessages, 0);
+        assert.lengthOf(yield* budgetRows(home.squireId), 0);
+      }),
+    ),
   );
 });
 
-describe("squire.items.act (6.2, D24)", () => {
+/**
+ * The first attempt's command is rejected by the orchestrator before the
+ * accept dispatches it, as a refusing target would.
+ */
+const rejectFirstAttempt = {
+  wrapThreadManagement: (real: ThreadManagement.ThreadManagementService["Service"]) =>
+    Effect.succeed({
+      ...real,
+      sendToThread: (input: ThreadManagement.ThreadManagementSendInput) =>
+        (input.commandId.endsWith(":1")
+          ? real
+              .dispatch({
+                type: "message.dispatch",
+                commandId: input.commandId,
+                threadId: input.threadId,
+                messageId: input.messageId,
+                text: input.text,
+                attachments: [],
+                dispatchMode: { type: "steer_active", targetRunId: RunId.make("run:gone") },
+                createdBy: "user",
+                creationSource: "server",
+              })
+              .pipe(Effect.ignore)
+          : Effect.void
+        ).pipe(Effect.andThen(real.sendToThread(input))),
+    }),
+} satisfies Phase4Options;
+
+describe("squire.items.act", () => {
   /** A Recommend steer card, opened by a send at Recommend. */
   const openCard = (home: Home, steer?: string) =>
     Effect.gen(function* () {
@@ -841,32 +942,43 @@ describe("squire.items.act (6.2, D24)", () => {
             assert.lengthOf(yield* actionMessages, 1);
             assert.lengthOf(yield* budgetRows(home.squireId), 1);
           }),
-        {
-          // The first attempt's command is rejected by the orchestrator before
-          // the accept dispatches it, as a refusing target would.
-          wrapThreadManagement: (real) =>
-            Effect.succeed({
-              ...real,
-              sendToThread: (input) =>
-                (input.commandId.endsWith(":1")
-                  ? real
-                      .dispatch({
-                        type: "message.dispatch",
-                        commandId: input.commandId,
-                        threadId: input.threadId,
-                        messageId: input.messageId,
-                        text: input.text,
-                        attachments: [],
-                        dispatchMode: { type: "steer_active", targetRunId: RunId.make("run:gone") },
-                        createdBy: "user",
-                        creationSource: "server",
-                      })
-                      .pipe(Effect.ignore)
-                  : Effect.void
-                ).pipe(Effect.andThen(real.sendToThread(input))),
-            }),
-        },
+        rejectFirstAttempt,
       ),
+  );
+
+  it.effect("the same requestId after a rejection replays it and never sends new content", () =>
+    withSquire(
+      (home) =>
+        Effect.gen(function* () {
+          const card = yield* openCard(home);
+          const input = { requestId: "a", cardIds: [card.id], action: "accept" } as const;
+          const rejected = yield* act(input);
+          assert.isNotNull(rejected.results[0]!.error);
+          assert.strictEqual((yield* cardOf(card.id)).status, "open");
+
+          const retried = yield* act({ ...input, text: "Something else entirely." });
+          assert.deepStrictEqual(retried.results, rejected.results);
+          assert.strictEqual((yield* cardOf(card.id)).attempt, 1);
+          assert.lengthOf(yield* actionMessages, 0);
+        }),
+      rejectFirstAttempt,
+    ),
+  );
+
+  it.effect("a paused Squire's accept still honors Steer Off", () =>
+    withSquire((home) =>
+      Effect.gen(function* () {
+        const card = yield* openCard(home);
+        const service = yield* need(SquireService.SquireService);
+        yield* service.setStatus({ requestId: "pause", squireId: home.squireId, status: "paused" });
+        yield* setPermissions(home.squireId, { steer: "off" });
+        const refused = yield* act({ requestId: "accept", cardIds: [card.id], action: "accept" });
+        assert.isNotNull(refused.results[0]!.error);
+        assert.strictEqual((yield* cardOf(card.id)).status, "open");
+        assert.lengthOf(yield* actionMessages, 0);
+        assert.lengthOf(yield* budgetRows(home.squireId), 0);
+      }),
+    ),
   );
 
   it.effect("the edited text survives a restart between accept and dispatch", () =>
@@ -921,7 +1033,7 @@ describe("squire.items.act (6.2, D24)", () => {
   );
 });
 
-describe("thread create (6.2, A9 Thread create)", () => {
+describe("thread create", () => {
   const propose = (home: Home) =>
     Effect.flatMap(need(SquireTools.SquireTools), (tools) =>
       tools.call(
@@ -1145,7 +1257,7 @@ const crashMidExecutionCreate = (card: SquireRepository.SquireCardRow) =>
 const scenario05Decoded = Schema.decodeUnknownSync(SquireFixtureScenario)(scenario05);
 const fake05Decoded = Schema.decodeUnknownSync(SquireFakeScript)(fake05);
 
-describe("fixture proposals (6.2, D44j)", () => {
+describe("fixture proposals", () => {
   it.effect("accepting fake 05's proposal launches a fixture thread on the scripted instance", () =>
     withBarHarness(
       Effect.gen(function* () {
@@ -1157,7 +1269,7 @@ describe("fixture proposals (6.2, D44j)", () => {
           (row) => row.kind === "proposal",
         );
         assert.lengthOf(more, 0);
-        // The card still shows the proposed provider (D44j).
+        // The card still shows the proposed provider.
         assert.include(card!.payload_json, '"provider":"claudeAgent"');
         const result = yield* act({
           requestId: "accept-05",
@@ -1181,6 +1293,61 @@ describe("fixture proposals (6.2, D44j)", () => {
         );
         assert.strictEqual(yield* threads.getMessageCount(intent.launch.threadId), 1);
       }),
+    ),
+  );
+});
+
+describe("Lead room open", () => {
+  it.effect("the locked open re-reads Manage Squires, so a hold stops once it is Off", () =>
+    withRoomCast(
+      (cast) =>
+        Effect.gen(function* () {
+          const repository = yield* SquireRepository.SquireRepository;
+          yield* deliver(cast.lead.squireId);
+          yield* userTurn(cast.lead);
+          const opened = yield* roomCallTool(cast.lead, "lead", "squire_open_room", {
+            members: [cast.release.squireId, cast.research.squireId],
+            topic: "Currency rounding",
+            about: [
+              { kind: "thread", threadId: invoiceThread },
+              { kind: "thread", threadId: currencyThread },
+            ],
+            reason: "Both threads touch rounding.",
+          });
+          assert.isFalse(opened.isError, opened.text);
+          const [held] = yield* repository.listCards({
+            squireId: cast.lead.squireId,
+            statuses: ["held"],
+          });
+          const intent = Option.getOrThrow(decodeSquireActionIntent(held!.intent_json));
+          if (!isRoomOpenIntent(intent)) return assert.fail("expected a room open");
+
+          const lead = Option.getOrThrow(yield* repository.getSquire(cast.lead.squireId));
+          yield* repository.updateSquire({
+            id: lead.id,
+            patch: {
+              permissions_json: JSON.stringify({
+                ...JSON.parse(lead.permissions_json),
+                manageSquires: "off",
+              }),
+            },
+            updatedAt: DateTime.formatIso(yield* DateTime.now),
+          });
+          const rooms = yield* need(SquireRooms.SquireRooms);
+          const applied = yield* rooms.applyOpen(intent, {
+            executionKey: held!.command_id!,
+            now: DateTime.formatIso(yield* DateTime.now),
+            verb: "execute",
+          });
+          assert.deepStrictEqual(applied, {
+            ok: false,
+            to: "open",
+            reason: "Manage Squires is no longer Auto",
+          });
+          const store = yield* need(SquireRoomStore.SquireRoomStore);
+          assert.lengthOf(yield* store.listRooms({ status: "open" }), 0);
+        }),
+      { scheduler: noTicks, leadManageSquires: "auto" },
     ),
   );
 });

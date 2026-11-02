@@ -31,7 +31,7 @@ const GLOW = setupOptions(EMBLEM_CHOICES.glow);
 const MOTION = setupOptions(RIG_CHOICES.motion);
 const PALETTE = setupOptions(SQUIRE_PALETTE_CHOICES);
 
-/** P16.2, with the P16.5(d) live preview, which outranks the view's panel for the one live rig. */
+/** The companion choice, with a live preview that outranks the view's panel for the one live rig. */
 export function SquireCompanionSection(
   props: SetupFieldsProps & {
     readonly isLead: boolean;

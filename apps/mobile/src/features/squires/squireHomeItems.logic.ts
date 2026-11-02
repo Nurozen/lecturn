@@ -14,7 +14,7 @@ export interface HomeSquireLeadListItem {
   readonly key: string;
   readonly environmentId: EnvironmentId;
   readonly squireId: SquireId;
-  /** Set only when more than one environment shows Squires (D4). */
+  /** Set only when more than one environment shows Squires. */
   readonly environmentLabel: string | null;
   /** Its Squires and rooms fold under it; with none there is nothing to fold. */
   readonly expandable: boolean;
@@ -136,9 +136,9 @@ const NO_SEEN: ReadonlyMap<string, string> = new Map();
 const NO_KEYS: ReadonlySet<string> = new Set();
 
 /**
- * The home list's Squires section (P13.2, D4): one Lead group per environment that has Squires,
+ * The home list's Squires section: one Lead group per environment that has Squires,
  * in the list's environment order. Environments without the capability have no state, so old
- * servers contribute nothing. Hidden during search, like the web group (D37).
+ * servers contribute nothing. Hidden during search, like the web group.
  */
 export function buildSquireHomeItems(input: {
   readonly environments: ReadonlyArray<{
@@ -241,7 +241,7 @@ export function squireHomeLeadTrailing(
   return squireHomeRowTrailing(indicator);
 }
 
-/** A not-ready Squire's line under its name, e.g. "Choose a provider for the Lead" (D7). */
+/** A not-ready Squire's line under its name, e.g. "Choose a provider for the Lead". */
 export function squireHomeRowStatusLine(
   entry: Pick<SquireSnapshotEntry, "squire" | "openDecisionCount" | "held">,
   indicator: SquireIndicatorState,

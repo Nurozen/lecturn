@@ -31,8 +31,8 @@ export type SquireAnswer =
   | { readonly answers: Record<string, unknown> };
 
 /**
- * P7.4: the thread's own pending-request controls, fed from the card's live copy of the
- * request (D66) instead of the thread's detail, and answered through `squire.items.act`.
+ * The thread's own pending-request controls, fed from the card's live copy of the
+ * request instead of the thread's detail, and answered through `squire.items.act`.
  */
 export function SquireQuestionAnswer(props: {
   readonly environmentId: EnvironmentId;

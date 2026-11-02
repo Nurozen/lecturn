@@ -1,5 +1,5 @@
 /**
- * Lecturn regression (review-a N2): a turn a fork hook withdraws (a held
+ * Lecturn regression: a turn a fork hook withdraws (a held
  * Contextual turn the user cancels) settles as cancelled and the thread's
  * queue moves on, while a refused turn (policy) still fails and holds it.
  */

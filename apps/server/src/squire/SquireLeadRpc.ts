@@ -42,9 +42,8 @@ type Method<I extends { readonly Type: unknown }, O extends { readonly Type: unk
 
 /**
  * The Lead, control, sweep, routing, and room methods the RPC layer serves.
- * Phase 7 (Lead, control, sweep, receipts, automation) and 7b (rooms) fill
- * these in; until then each refuses `not_available`, so the transport and its
- * scopes are already final.
+ * A method whose service is not built into the server refuses
+ * `not_available`, so the transport and its scopes stay the same either way.
  */
 export class SquireLeadRpc extends Context.Service<
   SquireLeadRpc,
@@ -76,7 +75,7 @@ const notAvailable = (what: string) => () =>
     }),
   );
 
-// Each Phase 7 service is read optionally, so a method stays `not_available`
+// Each service is read optionally, so a method stays `not_available`
 // until the service that owns it is built into the server.
 export const layer = Layer.effect(
   SquireLeadRpc,

@@ -146,10 +146,12 @@ export function parseExtensionsConfig(env: Readonly<Record<string, string | unde
         scope === "decisions" ? 100 : squires ? 1 : 6,
       ),
       maxAttemptsPerRequest: squires ? 1 : number(scope, `${prefix}MAX_ATTEMPTS_PER_REQUEST`, 2, 5),
-      // Interactive routing must never queue behind a Decisions scan on the shared slot.
+      // Interactive routing never queues behind a Decisions scan, so it has its own slots and rate.
       ...(squires
         ? {
+            accountConcurrency: number(scope, `${prefix}ACCOUNT_CONCURRENCY`, 2, 16),
             environmentConcurrency: number(scope, `${prefix}ENVIRONMENT_CONCURRENCY`, 1, 4),
+            requestsPerMinute: number(scope, `${prefix}REQUESTS_PER_MINUTE`, 60, 1000),
           }
         : {}),
     };
@@ -193,5 +195,7 @@ export const extensionEnvironmentKeys = [
   "EXTENSIONS_SQUIRES_ATTEMPT_HOLD_NANO_USD",
   "EXTENSIONS_SQUIRES_RUN_BUDGET_NANO_USD",
   "EXTENSIONS_SQUIRES_MAX_ATTEMPTS_PER_RUN",
+  "EXTENSIONS_SQUIRES_ACCOUNT_CONCURRENCY",
   "EXTENSIONS_SQUIRES_ENVIRONMENT_CONCURRENCY",
+  "EXTENSIONS_SQUIRES_REQUESTS_PER_MINUTE",
 ] as const;

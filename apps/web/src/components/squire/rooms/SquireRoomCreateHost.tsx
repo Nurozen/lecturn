@@ -37,7 +37,7 @@ import {
   type SquireRoomCreateTarget,
 } from "./squireRoomStore";
 
-// Below 22 px SquireIndicator draws the mark instead of the portrait (P16.4).
+// Below 22 px SquireIndicator draws the mark instead of the portrait.
 const PORTRAIT_PX = 24;
 
 /** Mounted once in AppShell; opens from `openSquireRoomCreate`. */

@@ -819,7 +819,7 @@ const layerStaveRuntimeServices = Layer.mergeAll(
   Layer.provideMerge(StaveOrchestrationLive.layer),
 );
 
-// Lecturn: the Squire CI excerpt reads GitHub through the shared provider registry (D21).
+// Lecturn: the Squire CI excerpt reads GitHub through the shared provider registry.
 // One object, so the relay and the runtime services share a single instance.
 const layerSquireRuntime = LayerSquire.layer.pipe(Layer.provide(PullRequestProviderRegistry.layer));
 

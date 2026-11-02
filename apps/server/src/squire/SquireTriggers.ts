@@ -57,7 +57,7 @@ const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const WEEKDAYS = [1, 2, 3, 4, 5];
 
-/** P3.6: how long the inactivity FYI waits for an answer before triggers and the sweep pause. */
+/** How long the inactivity FYI waits for an answer before triggers and the sweep pause. */
 const INACTIVITY_ANSWER_MS = 48 * HOUR_MS;
 const INACTIVITY_TITLE = "Keep Squire triggers running?";
 
@@ -109,7 +109,7 @@ export class SquireTriggers extends Context.Service<
     /** The earliest slot among triggers that can fire now, for SquireClock to arm on. */
     readonly earliestSlotAt: Effect.Effect<Option.Option<DateTime.Utc>, SquireError>;
     /**
-     * D57 webhook receipt. `body` is read only once the trigger is known to
+     * Webhook receipt. `body` is read only once the trigger is known to
      * accept requests; a failed read counts as too large, since the route caps
      * its reader.
      */
@@ -119,7 +119,7 @@ export class SquireTriggers extends Context.Service<
       body: Effect.Effect<Uint8Array, E>,
     ) => Effect.Effect<WebhookReceipt, SquireError>;
     /**
-     * P3.6, from the clock's sweep: after `squire.inactivityDays` without user
+     * From the clock's sweep: after `squire.inactivityDays` without user
      * activity, one FYI on the Lead; 48 h without an answer sets
      * `automation_paused_at` and tells the Lead's thread.
      */
@@ -220,7 +220,7 @@ const make = Effect.gen(function* () {
   const config = yield* Effect.serviceOption(ServerConfig.ServerConfig);
   // The service is only built with the switch on; a missing config reads as off.
   const enabled = Option.isSome(config) && config.value.squireEnabled;
-  // P3.6: the last `squire` settings block the sweep saw; a change is the user acting.
+  // The last `squire` settings block the sweep saw; a change is the user acting.
   const lastSquireSettings = yield* Ref.make(Option.none<string>());
   // Orders the count-then-insert of run admission, which the limits depend on.
   const runLock = (yield* Semaphore.make(1)).withPermits(1);
@@ -802,35 +802,51 @@ const make = Effect.gen(function* () {
       const deliveryId = deliveryIdOf(headers);
       const payloadExcerpt = excerptOf(new TextDecoder().decode(bytes.value));
       const now = yield* nowUtc;
-      return yield* runLock(
-        repository.transaction(
-          Effect.gen(function* () {
-            const admission = yield* admit({
-              row,
-              origin: "webhook",
-              stateKey: `${row.id}:${deliveryId}`,
-              event: {
-                type: "webhook-received",
-                triggerId: row.id,
-                deliveryId,
-                instruction: row.instruction,
-                payloadExcerpt,
-              },
-              now,
-            });
-            if (admission.outcome === "queued") {
-              yield* repository.updateTrigger({
-                id: row.id,
-                patch: { last_payload_excerpt: payloadExcerpt },
+      // The checks above ran before the body arrived. Re-read under the policy
+      // lock, so a pause, revoke, rotation, or Squire pause the user committed
+      // meanwhile wins over the admission.
+      const admitted = yield* withPolicyLock(
+        runLock(
+          repository.transaction(
+            Effect.gen(function* () {
+              const current = yield* repository.getTrigger(row.id);
+              if (
+                Option.isNone(current) ||
+                current.value.kind !== "webhook" ||
+                current.value.status !== "active" ||
+                Option.isNone(yield* firingSquire(current.value.squire_id))
+              ) {
+                return missing;
+              }
+              if (current.value.secret_ref !== ref) return { outcome: "rotated" } as const;
+              const admission = yield* admit({
+                row: current.value,
+                origin: "webhook",
+                stateKey: `${row.id}:${deliveryId}`,
+                event: {
+                  type: "webhook-received",
+                  triggerId: row.id,
+                  deliveryId,
+                  instruction: current.value.instruction,
+                  payloadExcerpt,
+                },
+                now,
               });
-            }
-            return admission;
-          }),
+              if (admission.outcome === "queued") {
+                yield* repository.updateTrigger({
+                  id: row.id,
+                  patch: { last_payload_excerpt: payloadExcerpt },
+                });
+              }
+              return admission;
+            }),
+          ),
         ),
       );
+      return admitted.outcome === "rotated" ? yield* reject("unauthorized") : admitted;
     }).pipe(orSquireError("receive the webhook"));
 
-  /** P3.6: user mutations only; the clock and webhooks are not the user acting. */
+  /** User mutations only; the clock and webhooks are not the user acting. */
   const touched = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
       Effect.tap(() =>
@@ -1035,7 +1051,7 @@ const make = Effect.gen(function* () {
               at,
               { cardId },
             );
-            // D27; SquireMobileAttention writes the mobile delivery row.
+            // The push intent row; SquireMobileAttention writes the mobile delivery row.
             if (notifyOn(lead)) {
               yield* leadLog(
                 lead,
@@ -1061,7 +1077,7 @@ const make = Effect.gen(function* () {
             updatedAt: at,
           });
           if (Option.isNone(paused)) return;
-          // The card stays open: Keep on it resumes everything (P3.6).
+          // The card stays open: Keep on it resumes everything.
           const text =
             "Triggers and the find-work sweep paused after 48 hours without an answer. Keep resumes them.";
           const open = yield* repository.listCards({

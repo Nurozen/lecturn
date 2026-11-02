@@ -1,4 +1,4 @@
-// Only one companion animates at a time (spec P16.5). Overlays (hover card, setup preview,
+// Only one companion animates at a time. Overlays (hover card, setup preview,
 // onboarding) outrank the panel; within a rank the most recent claimant wins. A companion
 // that does not hold the lease pauses with reason `yielded` and keeps its last frame.
 

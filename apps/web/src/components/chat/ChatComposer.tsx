@@ -1684,7 +1684,7 @@ export interface ChatComposerProps {
   setThreadError: (threadId: ThreadId | null, error: string | null) => void;
   onExpandImage: (preview: ExpandedImagePreview) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
-  /** Lecturn: ChatView's allowlist (D63); absent shows every composer control. */
+  /** Lecturn: ChatView's allowlist; absent shows every composer control. */
   controls?: ChatViewControls | undefined;
 }
 

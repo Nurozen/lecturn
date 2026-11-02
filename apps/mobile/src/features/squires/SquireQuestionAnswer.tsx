@@ -22,7 +22,7 @@ import {
 } from "./squireQueue.logic";
 
 /**
- * P7.4: the thread's own request controls, fed from the card's live copy of the request (D66)
+ * The thread's own request controls, fed from the card's live copy of the request
  * and answered through `squire.items.act`, so the thread need not be the selected one.
  */
 export function SquireQuestionAnswer(props: {

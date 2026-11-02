@@ -10,7 +10,7 @@ import {
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../ui/select";
 import { Toggle, ToggleGroup } from "../../ui/toggle-group";
 
-/** One P13.1 section of the setup sheet. */
+/** One section of the setup sheet. */
 export function SetupSection(props: {
   readonly title: string;
   readonly description?: ReactNode;

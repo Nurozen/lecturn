@@ -530,7 +530,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
   const runCodexJson = makeRunCodexJson(resolveLaunch);
 
   // Lecturn: Squire summaries run in the Squire CODEX_HOME, so the user's
-  // AGENTS.md, skills, and memories never reach a Squire's summary (OQ24).
+  // AGENTS.md, skills, and memories never reach a Squire's summary.
   // The home is prepared before the runner, whose errors are masked, so a
   // missing login reaches the caller in words.
   const generateSquireTurnSummary: NonNullable<

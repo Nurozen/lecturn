@@ -1,7 +1,7 @@
 /**
  * What a held or accepted card will do, stored immutably per attempt in
- * `squire_card.intent_json` (A9 step 1), and the command ids that name its
- * receipts, and the trigger precondition the A5.11b hook re-checks.
+ * `squire_card.intent_json`, and the command ids that name its
+ * receipts, and the trigger precondition the command hook re-checks.
  *
  * @module squire/squireActionIntent
  */
@@ -30,7 +30,7 @@ import type * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { SquireLaunchIntent } from "./SquireLaunchAction.ts";
 
 /**
- * What the target looked like when the intent was written. The A5.11b hook
+ * What the target looked like when the intent was written. The command hook
  * refuses the dispatch when a user message or a newer trigger appeared since.
  */
 export const SquireActionPrecondition = Schema.Struct({
@@ -47,7 +47,7 @@ export const SquireSteerIntent = Schema.Struct({
   threadId: ThreadId,
   text: TrimmedNonEmptyString.check(Schema.isMaxLength(8000)),
   steerKind: SquireSteerKind,
-  /** D12: `auto` only where the target's driver supports active steering. */
+  /** `auto` only where the target's driver supports active steering. */
   dispatchMode: Schema.Literals(["auto", "queue"]),
   precondition: SquireActionPrecondition,
 });
@@ -71,7 +71,7 @@ export const SquireControlAction = Schema.Literals([
 ]);
 export type SquireControlAction = typeof SquireControlAction.Type;
 
-/** What a Lead control action changes, as it was; `squire.control.revert` restores it (P17.6). */
+/** What a Lead control action changes, as it was; `squire.control.revert` restores it. */
 export const SquireControlBefore = Schema.Struct({
   status: Schema.optionalKey(SquireStatus),
   grants: Schema.optionalKey(
@@ -90,7 +90,7 @@ export const SquireControlBefore = Schema.Struct({
 export type SquireControlBefore = typeof SquireControlBefore.Type;
 
 /**
- * A Lead control action (P17.6). Squire-store executions have no orchestration
+ * A Lead control action. Squire-store executions have no orchestration
  * receipt: the `action.executed` row, unique on the execution key, is theirs.
  */
 export const SquireControlIntent = Schema.Struct({
@@ -110,7 +110,7 @@ export const SquireControlIntent = Schema.Struct({
 });
 export type SquireControlIntent = typeof SquireControlIntent.Type;
 
-/** Accepting a Lead Squire proposal (P17.2); `requestId` makes the create idempotent. */
+/** Accepting a Lead Squire proposal; `requestId` makes the create idempotent. */
 export const SquireCreateIntent = Schema.Struct({
   type: Schema.Literal("squire-create"),
   input: SquireCreateInput.mapFields(Struct.omit(["requestId"])),
@@ -122,7 +122,7 @@ export const squireProposalRequestId = (cardId: SquireCardId | string, attempt: 
   `squire-proposal:${cardId}:${attempt}`;
 
 /**
- * The Lead opening a room (P19.6, D54): a Squire-store execution like a
+ * The Lead opening a room: a Squire-store execution like a
  * control action, run by `SquireRooms.applyOpen`, whose receipt is its
  * `action.executed` row.
  */
@@ -187,7 +187,7 @@ export const parseSquireActionCommandId = (
   };
 };
 
-// ── Trigger precondition (A5.11b) ──────────────────────────────
+// ── Trigger precondition ──────────────────────────────
 
 type Projections = ProjectionStore.ProjectionStoreV2["Service"];
 
@@ -227,8 +227,8 @@ export const captureSquirePrecondition = (projections: Projections, threadId: Th
 
 /**
  * Why the intent's trigger no longer holds, or undefined while it does: the
- * user wrote in the thread, a newer turn started, or the PR head moved
- * (P7.8, P10.3). Read under the target's command lock by the hook.
+ * user wrote in the thread, a newer turn started, or the PR head moved.
+ * Read under the target's command lock by the hook.
  */
 export const squirePreconditionBroken = (
   projections: Projections,
@@ -267,7 +267,7 @@ export const squirePreconditionBroken = (
   });
 
 /**
- * D12: Squire steers never interrupt a running turn. `auto` (steer the active
+ * Squire steers never interrupt a running turn. `auto` (steer the active
  * run) only where the target's provider session steers natively without
  * interrupting tools; otherwise `queue` (after the current turn).
  */

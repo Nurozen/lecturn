@@ -1,5 +1,5 @@
 /**
- * The Lead's daily digest (P11, D31). Its own scheduler: the Lead's local
+ * The Lead's daily digest. Its own scheduler: the Lead's local
  * date comes from the pure `nextScheduledRunAt`, `digest_last_date` is a
  * compare-and-set, and a missed slot catches up once later the same local day.
  * The `digest-due` event carries a bounded input built from stored items,
@@ -197,7 +197,7 @@ const make = Effect.gen(function* () {
       } satisfies SquireDigestInput;
     });
 
-  /** D26, D27: a pushed digest is an FYI on the Lead with its intent row, inside the enqueue. */
+  /** A pushed digest is an FYI on the Lead with its intent row, inside the enqueue. */
   const pushDigest = (lead: SquireRepository.SquireRow, date: string, at: string) =>
     Effect.gen(function* () {
       const cardId = SquireCardId.make(`card:fyi:${lead.id}:digest:${date}`);

@@ -54,10 +54,11 @@ import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireRules from "./SquireRules.ts";
 import * as SquireScope from "./SquireScope.ts";
 import { writeLeadItemEvent } from "./squireLeadItems.ts";
+import { retireOutOfScope } from "./squireScopeCascade.ts";
 import { isSquireThread } from "./squireThread.ts";
 import { touchUserActivity } from "./squireUserActivity.ts";
 
-/** Whether an instance may run a Squire home thread or a probe (D10, D25, A5.9). */
+/** Whether an instance may run a Squire home thread or a probe. */
 export interface SquireSupport {
   readonly supported: boolean;
   /** User-facing; set when unsupported. */
@@ -79,36 +80,36 @@ export class SquireService extends Context.Service<
     ) => Effect.Effect<typeof SquireDeleteResult.Type, SquireError>;
     readonly track: (input: typeof SquireTrackInput.Type) => Effect.Effect<Squire, SquireError>;
     readonly untrack: (input: typeof SquireUntrackInput.Type) => Effect.Effect<Squire, SquireError>;
-    /** D7: creates the Lead when absent on an environment with a project; a no-op after. */
+    /** Creates the Lead when absent on an environment with a project; a no-op after. */
     readonly ensureLead: (
       input: typeof SquireLeadEnsureInput.Type,
     ) => Effect.Effect<Option.Option<Squire>, SquireError>;
     /**
-     * D33, P12: queues one voice-note event; a retry of the same request
+     * Queues one voice-note event; a retry of the same request
      * finds its row and returns the same id.
      */
     readonly voiceNote: (
       input: typeof SquireVoiceNoteInput.Type,
     ) => Effect.Effect<typeof SquireVoiceNoteResult.Type, SquireError>;
     readonly squireSupport: (instanceId: ProviderInstanceId) => Effect.Effect<SquireSupport>;
-    /** D25: whether "Ask about this" may fork a thread running on this instance. */
+    /** Whether "Ask about this" may fork a thread running on this instance. */
     readonly probeSupport: (instanceId: ProviderInstanceId) => Effect.Effect<SquireSupport>;
     /** `squire.providerSupport`: every instance, for the setup sheet's provider picker. */
     readonly providerSupport: Effect.Effect<typeof SquireProviderSupportResult.Type>;
   }
 >()("lecturn/squire/SquireService") {}
 
-// P16.2: so sidebar rows tell apart at a glance; see `squireDistinctCompanion`.
+// So sidebar rows tell apart at a glance; see `squireDistinctCompanion`.
 const nextDefaultCompanion = (taken: ReadonlyArray<SquireCompanion>): SquireCompanion =>
   squireDistinctCompanion(taken);
 
 // The client draws the Lead's crest from its role, so the record only keeps gold.
 /**
- * P4.2, D10, D25: the decision per driver. A driver is on only after its MCP
+ * The decision per driver. A driver is on only after its MCP
  * isolation and deny-runtime tests pass on start, resume, and fork and a live
- * smoke shows it (12.2); one that cannot drop its own tools stays off with a
+ * smoke shows it; one that cannot drop its own tools stays off with a
  * reason the picker shows. Pi, Muse, and the ACP registry are never on. The
- * scripted driver exists only for tests (D44g).
+ * scripted driver exists only for tests.
  */
 const DRIVER_SUPPORT: Readonly<
   Record<string, { readonly squire: boolean; readonly probe: boolean; readonly reason?: string }>
@@ -268,7 +269,7 @@ const make = Effect.gen(function* () {
         };
       }
       // A managed managed-mcp.json makes Claude refuse --strict-mcp-config and
-      // drop Lecturn's server while keeping the managed ones (A5.9).
+      // drop Lecturn's server while keeping the managed ones.
       if (
         driver === "claudeAgent" &&
         (yield* hasClaudeManagedMcpConfig().pipe(
@@ -315,7 +316,7 @@ const make = Effect.gen(function* () {
       return { instanceId, model: model.slug } satisfies ModelSelection;
     });
 
-  /** The provider and model a create or update asks for, checked against D10. */
+  /** The provider and model a create or update asks for, checked against the driver's Squire support. */
   const resolveModel = (
     instanceId: ProviderInstanceId,
     modelSelection: ModelSelection | undefined,
@@ -346,7 +347,7 @@ const make = Effect.gen(function* () {
   const threadShell = (targetId: string) =>
     projections.getThreadShell(ThreadId.make(targetId)).pipe(orSquireError("read the thread"));
 
-  // P1.4: a Squire never tracks a Squire thread.
+  // A Squire never tracks a Squire thread.
   const validateGrant = (grant: SquireGrantInput) =>
     Effect.gen(function* () {
       if (grant.kind === "thread") {
@@ -600,7 +601,7 @@ const make = Effect.gen(function* () {
         }
 
         const name = input.name ?? row.name;
-        // D7: choosing a supported provider gives a waiting Lead its one home thread.
+        // Choosing a supported provider gives a waiting Lead its one home thread.
         const leavesNeedsProvider = row.lifecycle === "needs_provider" && modelSelection !== null;
         const generation = leavesNeedsProvider ? row.home_generation + 1 : row.home_generation;
         if (row.lifecycle === "ready" && row.home_thread_id !== null && modelSelection !== null) {
@@ -701,6 +702,7 @@ const make = Effect.gen(function* () {
                 yield* repository.insertGrant(grantRow(row.id, grant, now));
               }
               yield* rules.disableOutOfScope(row.id);
+              yield* retireOutOfScope(repository, scope, { squireId: row.id, now });
               return next;
             }),
           )
@@ -721,15 +723,16 @@ const make = Effect.gen(function* () {
         const updated = yield* repository
           .transaction(
             Effect.gen(function* () {
-              // D34: a paused Squire accepts no events and its holds become
-              // recommendations it no longer executes.
+              // A paused Squire accepts no events, so nothing queued before the
+              // pause reaches it on resume, and its holds become recommendations
+              // it no longer executes.
               if (input.status === "paused") {
-                yield* repository.dropDeferredEvents(row.id);
+                yield* repository.dropQueuedEvents(row.id);
                 const opened = yield* repository.openHeldCards({
                   squireId: row.id,
                   updatedAt: now,
                 });
-                // P17.5: a hold turned recommendation is a decision item the Lead
+                // A hold turned recommendation is a decision item the Lead
                 // now has to see; the delivery clock wakes it on the new row.
                 for (const cardId of opened) {
                   const card = yield* repository.getCard(cardId);
@@ -775,12 +778,23 @@ const make = Effect.gen(function* () {
             });
           }
           if (row.value.lifecycle === "deleting") return;
+          const now = yield* nowIso;
           yield* repository
-            .updateSquire({
-              id: row.value.id,
-              patch: { lifecycle: "deleting" },
-              updatedAt: yield* nowIso,
-            })
+            .transaction(
+              Effect.gen(function* () {
+                yield* repository.updateSquire({
+                  id: row.value.id,
+                  patch: { lifecycle: "deleting" },
+                  updatedAt: now,
+                });
+                // Its cards go before its rows do, so the Lead hears they resolved.
+                yield* retireOutOfScope(repository, scope, {
+                  squireId: row.value.id,
+                  now,
+                  all: true,
+                });
+              }),
+            )
             .pipe(orSquireError("delete the Squire"));
         }),
       );
@@ -869,6 +883,7 @@ const make = Effect.gen(function* () {
                 );
               }
               yield* rules.disableOutOfScope(row.id);
+              yield* retireOutOfScope(repository, scope, { squireId: row.id, now });
               return yield* bumpRevision(row.id, now);
             }),
           )
@@ -891,7 +906,7 @@ const make = Effect.gen(function* () {
       const project = yield* lifecycle.homeProjectCandidate();
       if (Option.isNone(project)) return Option.none();
 
-      // P17.1: the user's default provider, as a new thread in that project picks it.
+      // The user's default provider, as a new thread in that project picks it.
       const settings = yield* serverSettings.getSettings.pipe(orSquireError("read settings"));
       const defaultModel = resolveProjectSettings(settings, project.value.projectId, project.value)
         .settings.defaultModelSelection;
@@ -949,7 +964,7 @@ const make = Effect.gen(function* () {
     });
 
   // Delivery sends a voice-note row alone with origin `voice`, so its turn only
-  // recommends (P12.2); the clock wakes the Squire on the new row.
+  // recommends; the clock wakes the Squire on the new row.
   const voiceNote: SquireService["Service"]["voiceNote"] = (input) =>
     Effect.gen(function* () {
       const voiceNoteId = voiceNoteIdFor(input.requestId);
@@ -994,7 +1009,7 @@ const make = Effect.gen(function* () {
       return { voiceNoteId };
     });
 
-  // P3.6: these are user RPCs; no server path calls them.
+  // The inactivity check counts these as the user acting; no server path calls them.
   const touched =
     <I, A, E, R>(method: (input: I) => Effect.Effect<A, E, R>) =>
     (input: I) =>
@@ -1033,7 +1048,7 @@ const make = Effect.gen(function* () {
 });
 
 /**
- * D7: why a `needs_provider` Lead waits, shown with the provider picker
+ * Why a `needs_provider` Lead waits, shown with the provider picker
  * filtered to supported instances.
  */
 export const needsProviderReason = Effect.gen(function* () {

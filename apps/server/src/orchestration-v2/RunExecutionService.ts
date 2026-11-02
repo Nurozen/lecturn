@@ -1432,7 +1432,7 @@ export const layer: Layer.Layer<
             runtimePolicy: input.runtimePolicy,
             ...(appContext.length === 0 ? {} : { appContext }),
             ...(yield* appInstructionsTurnInput(input.appThread.projectId)),
-            // Lecturn: a Squire home's skill (A5.7); every other thread is unchanged.
+            // Lecturn: a Squire home's skill; every other thread is unchanged.
             ...(yield* squireInstructionsTurnInput(input.appThread)),
           };
           // Check after the context read: ingestion can settle the run while

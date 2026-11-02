@@ -1,8 +1,8 @@
-// B3 (CP1): the summary gold. The stub half runs in CI: the model is replaced
+// The summary gold. The stub half runs in CI: the model is replaced
 // by the gold's own model-written fields, so everything else the pipeline
 // produces must match gold exactly. The live half runs only with
 // SQUIRE_BAR_PROVIDER set (claudeAgent or codex) and writes artifacts for
-// the critics; it spends provider tokens (OQ20).
+// the critics; it spends provider tokens.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {

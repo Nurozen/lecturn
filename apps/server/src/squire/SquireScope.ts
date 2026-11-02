@@ -43,7 +43,7 @@ const containerCovers = (grant: Grant, target: ContainerTarget): boolean => {
   }
 };
 
-/** P2.1: an exclusion on the thread beats every container grant. */
+/** An exclusion on the thread beats every container grant. */
 const grantsCover = (grants: ReadonlyArray<Grant>, target: ThreadTarget): boolean => {
   if (grants.some((grant) => grant.kind === "exclusion" && grant.targetId === target.threadId)) {
     return false;
@@ -62,14 +62,14 @@ interface IndexedSquire {
 
 interface GrantIndex {
   readonly generation: number;
-  /** Earliest-created first, the D15 tie-break order of `squirePolicy.autoHolder`. */
+  /** Earliest-created first, the tie-break order of `squirePolicy.autoHolder`. */
   readonly squires: ReadonlyArray<IndexedSquire>;
 }
 
 export class SquireScope extends Context.Service<
   SquireScope,
   {
-    /** Squires tracking the thread, earliest-created first so callers can apply D15. */
+    /** Squires tracking the thread, earliest-created first so callers can pick the Auto holder. */
     readonly trackersOf: (
       threadId: ThreadId,
     ) => Effect.Effect<ReadonlyArray<SquireId>, SquireScopeError>;
@@ -93,7 +93,7 @@ export class SquireScope extends Context.Service<
       threadId: ThreadId,
     ) => Effect.Effect<Option.Option<ThreadTarget>, SquireScopeError>;
     /**
-     * P8.1: a thread target must be tracked, a container target must be one
+     * A rule's thread target must be tracked, a container target must be one
      * of the Squire's own grants. Reads grants uncached, so a caller inside a
      * repository transaction sees its own uncommitted grant writes.
      */

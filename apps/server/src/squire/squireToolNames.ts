@@ -3,9 +3,9 @@ import type { SquireRole } from "@lecturn/contracts";
 const READ_TOOLS = ["squire_list_tracked", "squire_get_summary"] as const;
 
 /**
- * The Squire role tools each role may call (P6, P8, P17.7); `definitions` lists
+ * The Squire role tools each role may call; `definitions` lists
  * only the names that have a handler.
- * The Lead never reads raw thread history, so it has no `squire_get_detail` (P17.4).
+ * The Lead never reads raw thread history, so it has no `squire_get_detail`.
  */
 export const SQUIRE_TOOL_NAMES = {
   squire: [

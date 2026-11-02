@@ -25,7 +25,7 @@ import { useSquireGestureRequests } from "../lead/squireGestureRequests";
 import { useSquireGesturePlayer } from "./squireGesturePlayer";
 
 /**
- * Spec P16.5(a): the selected Squire's full figure (the Lead's in the Lead view), mounted only
+ * The selected Squire's full figure (the Lead's in the Lead view), mounted only
  * while the view is wide enough. Figure 300 px wide, so 375 px tall on the 1122 x 1402 stage.
  */
 export function SquireCompanionPanel(props: {
@@ -74,7 +74,7 @@ export function SquireCompanionPanel(props: {
 
 /**
  * The snapshot names only each entry's kind, so the list reads the action log for the detail
- * ("Sent a steer to <thread>"). The panel is mounted once (R37), and the log query refreshes only
+ * ("Sent a steer to <thread>"). The panel is mounted once, and the log query refreshes only
  * when the snapshot's newest activity moves.
  */
 function SquireRecentList(props: {

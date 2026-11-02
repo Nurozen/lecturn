@@ -428,7 +428,7 @@ const APPEARANCE_OPTIONS = [
   { mode: "dark", label: "Dark", icon: MoonIcon },
 ] as const;
 
-// The Squire's own still indicator, never the logo (P1.5): the palette does not subscribe to
+// The Squire's own still indicator, never the logo: the palette does not subscribe to
 // every home thread for live state, so it shows who at full color, as room member portraits do.
 // A face needs 22 px, so it overhangs the 16 px icon slot rather than heightening the row.
 function squirePaletteIcon(squire: Pick<Squire, "name" | "companion">, isLead: boolean) {
@@ -2490,7 +2490,7 @@ function OpenCommandPaletteDialog(props: {
       newRoom: (environmentId) => openSquireRoomCreate({ environmentId }),
     }),
   );
-  // The current thread, or the draft's project; Squire threads are never trackable (P1.4).
+  // The current thread, or the draft's project; Squire threads are never trackable.
   const squireTrackOwner = activeThread ?? activeDraftThread ?? null;
   const squireTrackState =
     squireTrackOwner === null || activeThread?.squire != null

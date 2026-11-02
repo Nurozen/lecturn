@@ -1,6 +1,6 @@
 /**
- * The Squire lifecycle state machine (A9): `creating` and `rehoming` build a
- * home thread in the scratch workspace (D5), `deleting` takes it all down.
+ * The Squire lifecycle state machine: `creating` and `rehoming` build a
+ * home thread in the scratch workspace, `deleting` takes it all down.
  * Orchestration commits apart from Squire SQL and the filesystem, so every
  * step is idempotent and resumable: the home thread id and its command ids
  * derive from (squireId, home_generation), a replayed command returns its
@@ -104,7 +104,7 @@ export class SquireLifecycle extends Context.Service<
       squireId: SquireId,
     ) => Effect.Effect<Option.Option<SquireRepository.SquireRow>, SquireError>;
     /**
-     * D35: a new home thread in the most recently active project, at the next
+     * A new home thread in the most recently active project, at the next
      * generation; the old home is archived. Called when the home project or
      * home thread is deleted. A Lead still waiting for a provider only moves.
      */
@@ -146,7 +146,7 @@ const make = Effect.gen(function* () {
   const driving = yield* Semaphore.make(1);
 
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
-  // The command allowlist on marked threads (A5.11a) passes only these.
+  // The command allowlist on marked threads passes only these.
   const dispatch = (command: OrchestrationV2ServerCommand) =>
     withSquireDispatchOrigin(orchestrator.dispatch(command)).pipe(Effect.asVoid);
 
@@ -188,7 +188,7 @@ const make = Effect.gen(function* () {
   const syncHome: SquireLifecycle["Service"]["syncHome"] = (target) =>
     Effect.gen(function* () {
       const shell = yield* projections.getThreadShell(target.threadId);
-      // A deleted home thread is the reactor's to re-home (D35).
+      // A deleted home thread is the reactor's to re-home.
       if (shell === null) return;
       const title = homeThreadTitle(target.name);
       if (shell.title !== title) {
@@ -372,7 +372,7 @@ const make = Effect.gen(function* () {
           return;
         }
         const project = yield* projects.get(row.home_project_id).pipe(orSquireError("re-home"));
-        // The home project may survive a lost home thread; D35 still picks
+        // The home project may survive a lost home thread; re-homing still picks
         // the most recently active one, which may be the same.
         const next = yield* homeProjectCandidate(
           Option.isNone(project) ? row.home_project_id : undefined,

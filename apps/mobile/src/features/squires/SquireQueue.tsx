@@ -50,7 +50,7 @@ export function SquireQueue(props: {
   readonly initialItemId: SquireCardId | null;
   /** Raiser names on the Lead's combined queue; null elsewhere. */
   readonly raiserName: ((squireId: SquireId) => string) | null;
-  /** The view's holds (P10.1): each shows under its open card, or as a banner above the queue. */
+  /** The view's holds: each shows under its open card, or as a banner above the queue. */
   readonly held: ReadonlyArray<SquireHeldRow>;
 }) {
   const { environmentId } = props;
@@ -104,7 +104,7 @@ export function SquireQueue(props: {
     onActed,
   });
 
-  // P7.6: a hold beside a listed open card of its kind shows under that card as one block; the
+  // A hold beside a listed open card of its kind shows under that card as one block; the
   // held card's own row and banner would repeat its title.
   const pairing = squireHoldPairing(view.decision?.items ?? [], props.held);
   const decisions = pairing.rows;
@@ -238,7 +238,7 @@ function SquireQueueRow(props: {
   readonly now: number;
   readonly onToggle: () => void;
   readonly onActed: SquireActedHandler;
-  /** P7.6: the newer hold of this card's kind, shown under it; it replaces the card when it runs. */
+  /** The newer hold of this card's kind, shown under it; it replaces the card when it runs. */
   readonly newerHold?: ReactNode;
 }) {
   const { environmentId, row } = props;

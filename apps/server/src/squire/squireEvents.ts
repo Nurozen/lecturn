@@ -31,14 +31,14 @@ import * as Schema from "effect/Schema";
 
 import type { SquireEventRow } from "./SquireRepository.ts";
 
-/** The P3.1 thread events the reactor turns into `squire_event` rows. */
+/** The thread events the reactor turns into `squire_event` rows. */
 export type SquireThreadEventKind =
   | "turn-finished"
   | "thread-stopped"
   | "waiting-on-user"
   | "pull-request-changed";
 
-/** Delivery waits this long for a summary-bearing event's summary, then sends `partial` (P3.4). */
+/** Delivery waits this long for a summary-bearing event's summary, then sends `partial`. */
 export const SQUIRE_SUMMARY_WAIT_MS = 20_000;
 
 export type SquirePullRequestState =
@@ -58,7 +58,7 @@ export const SquireEventPendingRequest = Schema.Struct({
 });
 export type SquireEventPendingRequest = typeof SquireEventPendingRequest.Type;
 
-/** The link snapshot as it was at this event's sequence (D20), not as the projection holds it now. */
+/** The link snapshot as it was at this event's sequence, not as the projection holds it now. */
 export const SquireEventPullRequest = Schema.Struct({
   host: Schema.String,
   repository: Schema.String,
@@ -79,7 +79,7 @@ export const SquireEventPullRequest = Schema.Struct({
 });
 export type SquireEventPullRequest = typeof SquireEventPullRequest.Type;
 
-/** `squire_event.payload_json`: the per-event overlay merged over the run-level summary (D18). */
+/** `squire_event.payload_json`: the per-event overlay merged over the run-level summary. */
 export const SquireEventPayload = Schema.Struct({
   /** Null for pull-request-changed: it renders the run summary's own outcome. */
   outcome: Schema.NullOr(SquireTurnOutcome),
@@ -119,7 +119,7 @@ export type SquireReactorEffect =
       readonly threadId: ThreadId;
       readonly requestId: string;
     }
-  /** Drops the thread's deferred turn-finished rows of other runs (A9). */
+  /** Drops the thread's deferred turn-finished rows of other runs. */
   | { readonly type: "run-started"; readonly threadId: ThreadId; readonly runId: RunId }
   /** Re-evaluate the thread's `background` deferred rows against its pending tasks now. */
   | { readonly type: "background-work-ended"; readonly threadId: ThreadId }
@@ -129,14 +129,14 @@ export type SquireReactorEffect =
       readonly projectId: ProjectId;
       readonly squire: SquireThreadMarker | null;
     }
-  /** Cascade: grants, exclusions, key rows, cards; a deleted home thread re-homes (D35). */
+  /** Cascade: grants, exclusions, key rows, cards; a deleted home thread re-homes. */
   | {
       readonly type: "thread-deleted";
       readonly threadId: ThreadId;
       readonly squire: SquireThreadMarker | null;
     }
   | { readonly type: "project-deleted"; readonly projectId: ProjectId }
-  /** An approval-kind request on a home or probe thread: respond decline and log (D9). */
+  /** An approval-kind request on a home or probe thread: respond decline and log. */
   | {
       readonly type: "auto-decline";
       readonly threadId: ThreadId;
@@ -232,7 +232,7 @@ const turnItemMayClassify = (event: OrchestrationV2DomainEvent) =>
 
 /**
  * The actor of the run's last interrupt request; one with no recorded
- * provenance (history before A5.3) counts as the user's (D3). Null when the
+ * provenance (history from before it was recorded) counts as the user's. Null when the
  * run has none, which is a crash or reconcile, not a user stop.
  */
 export function squireInterruptActor(
@@ -257,7 +257,7 @@ const THREAD_EVENT_KINDS = new Set<string>([
 /**
  * Takes any `squire_event.kind`. The thread events carry a turn summary
  * (contracts `threadEventFields`), so delivery waits for it and the FYI rule
- * applies (D26); voice notes, messages, triggers, and the Lead's kinds do not.
+ * applies; voice notes, messages, triggers, and the Lead's kinds do not.
  */
 export function isSummaryBearing(kind: string): kind is SquireThreadEventKind {
   return THREAD_EVENT_KINDS.has(kind);
@@ -288,7 +288,7 @@ export type SquireStateKeyInput =
       readonly state: SquirePullRequestState;
     };
 
-/** P3.3 with D20's PR key `<host>/<repo>#<number>:<fullHeadSha>:<state>`. */
+/** The event's dedupe key; a PR's is `<host>/<repo>#<number>:<fullHeadSha>:<state>`. */
 export function squireStateKey(input: SquireStateKeyInput): string {
   switch (input.kind) {
     case "turn-finished":
@@ -304,7 +304,7 @@ export function squireStateKey(input: SquireStateKeyInput): string {
 const UPDATED_REVISION_PREFIX = "updated-";
 
 /**
- * What a PR event is keyed per (D20): the head sha, or for a provider that
+ * What a PR event is keyed per: the head sha, or for a provider that
  * reports none (Azure DevOps) the PR's last-updated time, so each state still
  * fires once per revision. None when the snapshot has neither. Colon-free,
  * like a sha, so `<prKey>:<revision>:<state>` still parses.
@@ -322,7 +322,7 @@ export const isHeadShaRevision = (revision: string) =>
   !revision.startsWith(UPDATED_REVISION_PREFIX);
 
 /**
- * Every absolute state the snapshot is in (D20). `pending` and `unknown`
+ * Every absolute state the snapshot is in. `pending` and `unknown`
  * are never states; a closed or merged PR is only that.
  */
 export function squirePullRequestStates(
@@ -585,9 +585,9 @@ function classifyPullRequestLink(
 }
 
 /**
- * Classifies one committed application event from its own payload (A9), so
+ * Classifies one committed application event from its own payload, so
  * a lagging reactor still sees every transition. Squire actions on a thread
- * and user stops produce nothing (P3.2); scope, toggles, and fixture
+ * and user stops produce nothing; scope, toggles, and fixture
  * ownership are the reactor's to apply.
  */
 export function classifySquireEvent(

@@ -153,7 +153,7 @@ const expectedWithoutRules = (
   return "auto";
 };
 
-describe("decide: P8 cells x origin x budget x single-Auto", () => {
+describe("decide: permission cells x origin x budget x single-Auto", () => {
   const earlierAuto = squire("sq_earlier", {
     steer: "auto",
     createdAt: "2026-09-01T00:00:00.000Z",
@@ -189,7 +189,7 @@ describe("decide: P8 cells x origin x budget x single-Auto", () => {
             : [],
         }),
       );
-      // Single-Auto is a steer-only rule (P2.4).
+      // Single-Auto is a steer-only rule.
       const expected = expectedWithoutRules(level, origin, {
         singleAuto: singleAuto && actionClass === "steer",
         budget,
@@ -242,7 +242,7 @@ describe("decide: P8 cells x origin x budget x single-Auto", () => {
   });
 });
 
-describe("decide: Lead intersection (P17.8)", () => {
+describe("decide: Lead intersection", () => {
   const cases = (["steer", "createThread", "notify"] as const).flatMap((actionClass) =>
     levels.flatMap((leadLevel) =>
       levels.map((ownerLevel) => ({ actionClass, leadLevel, ownerLevel })),
@@ -333,7 +333,7 @@ describe("decide: Lead intersection (P17.8)", () => {
   });
 });
 
-describe("single-Auto per thread (P2.4, D15)", () => {
+describe("single-Auto per thread", () => {
   const first = squire("sq_first", { steer: "auto", createdAt: "2026-09-01T00:00:00Z" });
   const second = squire("sq_second", { steer: "recommend", createdAt: "2026-09-02T00:00:00Z" });
   const tracker = (squire: SquirePolicySquire, rules: ReadonlyArray<SquireRule> = []) => ({
@@ -460,7 +460,7 @@ describe("single-Auto per thread (P2.4, D15)", () => {
   });
 });
 
-describe("decide: rules (P8.1, D58) x origin x class", () => {
+describe("decide: rules x origin x class", () => {
   const ruleSets = ["none", "allow", "ask-first", "both"] as const;
   const cases = (["steer", "createThread"] as const).flatMap((actionClass) =>
     levels.flatMap((level) =>
@@ -570,7 +570,7 @@ describe("decide: rules (P8.1, D58) x origin x class", () => {
     });
   });
 
-  it("a removed rule turns a re-validated hold into a recommendation (D58)", () => {
+  it("a removed rule turns a re-validated hold into a recommendation", () => {
     const allow = rule("r", recommender);
     expect(decide(input({ squire: recommender, rules: [allow] })).level).toBe("auto");
     expect(decide(input({ squire: recommender, rules: [] }))).toEqual({
@@ -580,7 +580,7 @@ describe("decide: rules (P8.1, D58) x origin x class", () => {
   });
 });
 
-describe("budgets (P9.2)", () => {
+describe("budgets", () => {
   const budgetFor = (
     rows: ReadonlyArray<SquirePolicyBudgetRow>,
     budgets: Partial<SquirePolicySquire["budgets"]> = {},

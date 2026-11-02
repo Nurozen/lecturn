@@ -1213,6 +1213,7 @@ describe("ClaudeAdapterV2 Squire isolation", () => {
     readonly squireIsolation?: "home" | "probe";
     readonly managedMcpConfig?: boolean;
     readonly squireInstructions?: ReadonlyArray<string>;
+    readonly launchArgs?: string;
     /** Asked of the opened query's permission callback while the turn is live. */
     readonly toolCalls?: ReadonlyArray<string>;
   }) =>
@@ -1240,7 +1241,7 @@ describe("ClaudeAdapterV2 Squire isolation", () => {
         const opened: Array<ClaudeAdapterV2.ClaudeAgentSdkQueryOptions> = [];
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
           instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-          settings: DEFAULT_CLAUDE_SETTINGS,
+          settings: { ...DEFAULT_CLAUDE_SETTINGS, launchArgs: input.launchArgs ?? "" },
           environment: { PATH: "/usr/bin" },
           crypto: yield* Crypto.Crypto,
           attachmentsDir,
@@ -1395,6 +1396,52 @@ describe("ClaudeAdapterV2 Squire isolation", () => {
         "## Lecturn orchestration",
       );
     }),
+  );
+
+  const HOSTILE_LAUNCH_ARGS = [
+    "--tools Read",
+    "--allowedTools Read",
+    "--allowed-tools Bash",
+    "--disallowedTools mcp__lecturn__squire_send_steer",
+    "--permission-mode bypassPermissions",
+    "--dangerously-skip-permissions",
+    "--allow-dangerously-skip-permissions",
+    "--mcp-config /tmp/other.json",
+    "--add-dir /",
+    "--settings /tmp/settings.json",
+    "--setting-sources user,project",
+    "--plugin-dir /tmp/plugin",
+    "--agents {}",
+    "--append-system-prompt hostile",
+    "--betas example-beta",
+  ].join(" ");
+
+  it.effect.each(["home", "probe"] as const)(
+    "keeps an instance's launch args from widening a %s",
+    (role) =>
+      Effect.gen(function* () {
+        const { opened } = yield* openSquireQuery({
+          name: `hostile-${role}`,
+          path: "start",
+          squireIsolation: role,
+          launchArgs: HOSTILE_LAUNCH_ARGS,
+        });
+        const options = opened[0]!;
+        assert.equal(options.permissionMode, "dontAsk");
+        assert.deepEqual(options.tools, []);
+        assert.notProperty(options, "allowDangerouslySkipPermissions");
+        assert.deepEqual(Object.keys(options.extraArgs ?? {}).toSorted(), [
+          "betas",
+          "thinking-display",
+        ]);
+
+        const ordinary = yield* openSquireQuery({
+          name: `hostile-ordinary-${role}`,
+          path: "start",
+          launchArgs: HOSTILE_LAUNCH_ARGS,
+        });
+        assert.equal(ordinary.opened[0]!.extraArgs?.tools, "Read");
+      }),
   );
 
   it.effect("lets a home's permission callback allow Lecturn tools and nothing else", () =>

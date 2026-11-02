@@ -38,7 +38,7 @@ export interface McpAppCaller {
   readonly projectId: ProjectId;
 }
 
-/** The Squire whose home thread holds the credential (D8). */
+/** The Squire whose home thread holds the credential. */
 export interface McpSquireCaller {
   readonly squireId: SquireId;
   readonly role: SquireRole;

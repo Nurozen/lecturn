@@ -24,7 +24,7 @@ export function ThreadHeader(
     readonly threadActionsHeaderItem: NativeHeaderItem | null;
     /** Android in-flow fork action, appended after the git controls action. */
     readonly forkHeaderAction: AppBarAction | null;
-    /** Lecturn: the D63 allowlist; absent keeps every header control. */
+    /** Lecturn: the thread route's controls allowlist; absent keeps every header control. */
     readonly controls?: ThreadRouteControls;
     /** Lecturn: Android's Squire Track and Stop tracking menu; iOS has them in the thread menu. */
     readonly squireTrackingMenu?: AppBarMenu | null;

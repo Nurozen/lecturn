@@ -20,7 +20,7 @@ export interface SquireLeadBlock {
   /** Null until `squire.lead.ensure` creates the Lead ("No Lead yet"). */
   readonly lead: SquireSnapshotEntry | null;
   readonly squires: ReadonlyArray<SquireSnapshotEntry>;
-  /** P19.8: open rooms nest under the Lead after its Squires. */
+  /** Open rooms nest under the Lead after its Squires. */
   readonly rooms: SquireEnvironmentState["rooms"];
 }
 
@@ -55,7 +55,7 @@ export type SquireRowTrailing =
   | { readonly kind: "badge"; readonly count: number }
   | { readonly kind: "none" };
 
-/** P1.2: the count badge, or "working" in its place while the Squire works. */
+/** The count badge, or "working" in its place while the Squire works. */
 export function squireRowTrailing(indicator: SquireIndicatorState): SquireRowTrailing {
   if (indicator.workingLabel) return { kind: "working" };
   if (indicator.badge !== null && indicator.badge > 0) {
@@ -66,7 +66,7 @@ export function squireRowTrailing(indicator: SquireIndicatorState): SquireRowTra
 
 /**
  * The line a row shows under its name while the Squire is not ready, e.g. "Choose a provider
- * for the Lead" (D7). This client cannot tell when no provider supports Squires, so it never
+ * for the Lead". This client cannot tell when no provider supports Squires, so it never
  * says "No supported provider"; the view's picker does.
  */
 export function squireRowStatusLine(
@@ -113,7 +113,7 @@ const AWAITING_DECISION: ReadonlySet<SquireCardRow["status"]> = new Set([
 /**
  * The decision items a row's badge counts, which are its view's "Needs a decision" rows: not FYI,
  * not held, still queued. A Squire's list is what it raised or owns, Lead-raised items on its
- * threads included; the Lead's is its combined queue, so it keeps only what the Lead raised (D50).
+ * threads included; the Lead's is its combined queue, so it keeps only what the Lead raised.
  */
 export function squireChildRows<Row extends Pick<SquireCardRow, "kind" | "status" | "squireId">>(
   items: ReadonlyArray<Row>,
@@ -280,7 +280,7 @@ export function isSquireRowExpanded(
 
 // ── Visibility and selection ──────────────────────────────────
 
-/** D37: hidden during thread search, and absent where no environment offers Squires. */
+/** Hidden during thread search, and absent where no environment offers Squires. */
 export function isSquiresGroupVisible(input: {
   readonly isSearching: boolean;
   readonly environmentCount: number;
@@ -288,7 +288,7 @@ export function isSquiresGroupVisible(input: {
   return !input.isSearching && input.environmentCount > 0;
 }
 
-/** Environment labels only disambiguate, so one environment shows none (D37). */
+/** Environment labels only disambiguate, so one environment shows none. */
 export function showSquireEnvironmentLabels(environmentCount: number): boolean {
   return environmentCount > 1;
 }

@@ -207,7 +207,7 @@ export function buildCodexDeveloperInstructions(interactionMode: ProviderInterac
 export function buildCodexAdditionalContext(
   runtime: CodexRuntimeInfo,
   toolsAvailable: boolean | LecturnToolAvailability = true,
-  /** Lecturn: a Squire home's skill replaces the orchestration and tool sections (D22). */
+  /** Lecturn: a Squire home's skill replaces the orchestration and tool sections. */
   squireInstructions?: ReadonlyArray<string>,
 ): Record<string, V2TurnStartParams__AdditionalContextEntry> {
   const squire = squireInstructions !== undefined && squireInstructions.length > 0;

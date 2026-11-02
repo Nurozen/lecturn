@@ -1,5 +1,5 @@
 /**
- * D21: the first error lines of a CI-failure card's failing GitHub Actions jobs, fetched after
+ * The first error lines of a CI-failure card's failing GitHub Actions jobs, fetched after
  * the card exists and stored on its evidence. It follows committed `card.created` rows rather
  * than the tools, so raising a card never waits on GitHub. The excerpt lives only on the card
  * (`squire.item.get`); relay, push, and notch payloads carry rows, never evidence.
@@ -162,7 +162,7 @@ export interface SquireCiReadInput {
 export class SquireCiSource extends Context.Service<
   SquireCiSource,
   {
-    /** None when the forge has no excerpt read (only GitHub has one, D21). */
+    /** None when the forge has no excerpt read (only GitHub has one). */
     readonly read: (
       input: SquireCiReadInput,
     ) => Effect.Effect<Option.Option<ProviderCiFailure>, SquireCiReadError>;
@@ -287,7 +287,7 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * D44j: a fixture PR is never read. Its scenario's error lines, branch, and diff stats ride on
+   * A fixture PR is never read. Its scenario's error lines, branch, and diff stats ride on
    * the injected event's payload, newest event for this head first; the check counts come from
    * the run summary the fixture stored, as a real read's would come from GitHub.
    */

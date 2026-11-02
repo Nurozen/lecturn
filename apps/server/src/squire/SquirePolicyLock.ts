@@ -4,8 +4,8 @@ import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
 
 /**
- * One environment-wide lock that orders policy mutations against executions
- * (A9 step 2). Every policy mutation (update, setStatus, track, untrack,
+ * One environment-wide lock that orders policy mutations against executions.
+ * Every policy mutation (update, setStatus, track, untrack,
  * delete, rule saves and removals, the reactor's grant cascades, Lead control
  * actions) holds it through its commit; an execution holds it from
  * re-validation through finalize. Not reentrant: code already inside it

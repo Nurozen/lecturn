@@ -5,6 +5,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -160,7 +161,7 @@ describe("SquireClock", () => {
     }).pipe(Effect.provide(layerClock(probe)), Effect.scoped);
   });
 
-  it.effect("arms on a held action's executes_at and runs it then (P10)", () => {
+  it.effect("arms on a held action's executes_at and runs it then", () => {
     const probe = newProbe();
     return Effect.gen(function* () {
       yield* TestClock.setTime(START);
@@ -219,7 +220,7 @@ describe("SquireClock", () => {
           ["unfinished", false],
         ],
       );
-      // The key outlives its payload: the same absolute PR state is still a duplicate (D47).
+      // The key outlives its payload: the same absolute PR state is still a duplicate.
       assert.isFalse(yield* repository.insertEvent({ ...old, status: "pending" }));
 
       // Once a day: a second sweep the same day leaves a newly old payload alone.
@@ -237,6 +238,100 @@ describe("SquireClock", () => {
       yield* TestClock.adjust(DAY);
       yield* clock.sweep;
       assert.isNull(yield* later());
+    }).pipe(Effect.provide(layerClock(probe)), Effect.scoped);
+  });
+
+  it.effect("the daily prune keeps each table's history for its own window", () => {
+    const probe = newProbe();
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(START);
+      const sql = yield* SqlClient.SqlClient;
+      const clock = yield* SquireClock.SquireClock;
+      const repository = yield* SquireRepository.SquireRepository;
+      yield* repository.createSquire(squireRow(release));
+      const HOUR = 60 * MINUTE;
+      // One row just past each window and one just inside it.
+      const around = (days: number) => [
+        iso(START - days * DAY - HOUR),
+        iso(START - days * DAY + HOUR),
+      ];
+      for (const [index, at] of around(30).entries()) {
+        yield* repository.insertEvent(
+          eventRow({
+            state_key: `run-${index}`,
+            kind: "turn-finished",
+            status: "delivered",
+            created_at: at,
+          }),
+        );
+        yield* sql`INSERT INTO squire_card ${sql.insert({
+          id: `card-${index}`,
+          squire_id: release,
+          owner_squire_id: release,
+          kind: "fyi",
+          status: "outdated",
+          target_thread_id: `thread-${index}`,
+          title: "Old",
+          why: "Old",
+          payload_json: "{}",
+          evidence_json: "{}",
+          trigger_json: "{}",
+          origin: "event",
+          created_at: at,
+          updated_at: at,
+        })}`;
+        yield* sql`INSERT INTO squire_room ${sql.insert({
+          id: `room-${index}`,
+          topic: "Old",
+          about_json: "[]",
+          status: "closed",
+          bot_messaging: "on",
+          idle_ttl_seconds: 3600,
+          creator_kind: "user",
+          last_post_at: at,
+          created_at: at,
+          updated_at: at,
+        })}`;
+        yield* sql`INSERT INTO squire_room_post ${sql.insert({
+          message_key: `post-${index}`,
+          room_id: `room-${index}`,
+          author_kind: "user",
+          body: "Hi",
+          refs_json: "[]",
+          routing_json: "{}",
+          created_at: at,
+        })}`;
+      }
+      for (const at of around(90)) {
+        yield* sql`INSERT INTO squire_action_log ${sql.insert({
+          squire_id: release,
+          kind: "trigger.received",
+          data_json: "{}",
+          created_at: at,
+        })}`;
+      }
+      for (const at of around(8)) {
+        yield* sql`INSERT INTO squire_budget_usage ${sql.insert({
+          squire_id: release,
+          kind: "steer",
+          executed_at: at,
+        })}`;
+      }
+
+      yield* clock.sweep;
+      const count = (table: string) =>
+        sql<{ n: number }>`SELECT count(*) AS n FROM ${sql(table)}`.pipe(
+          Effect.map((rows) => rows[0]?.n),
+        );
+      for (const table of [
+        "squire_event",
+        "squire_card",
+        "squire_room_post",
+        "squire_action_log",
+        "squire_budget_usage",
+      ]) {
+        assert.equal(yield* count(table), 1, table);
+      }
     }).pipe(Effect.provide(layerClock(probe)), Effect.scoped);
   });
 

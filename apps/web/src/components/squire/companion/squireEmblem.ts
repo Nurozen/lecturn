@@ -48,7 +48,7 @@
  *             (frame orbit), motes drift round the star, slower deeper glow.
  *   Still     state pose at rest (halo, lifted star, a held glint for thinking).
  *
- * SCHEDULING (port, plan D43). Frames come from companionClock() and render at most
+ * SCHEDULING (port). Frames come from companionClock() and render at most
  * COMPANION_MAX_FPS. Only the lease holder animates (others are `yielded` and keep their last
  * frame). After COMPANION_SETTLE_MS without a state change, gesture, transition or pointer
  * interaction the emblem blends to rest and stops (`settled`) until woken.

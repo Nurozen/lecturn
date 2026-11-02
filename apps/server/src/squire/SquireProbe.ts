@@ -2,7 +2,7 @@
 import * as NodeCrypto from "node:crypto";
 
 /**
- * "Ask about this" (P7.5, D25): the user's question about a card goes to a
+ * "Ask about this": the user's question about a card goes to a
  * temporary fork of the card's target thread, marked as a probe, so it runs
  * the deny runtime with auto-decline, gets no MCP session, and is refused
  * every command from outside Squire modules. The answer lands in the card's
@@ -69,7 +69,7 @@ export class SquireProbe extends Context.Service<
 const probeKey = (cardId: SquireCardId, requestId: string) =>
   NodeCrypto.createHash("sha256").update(`${cardId}\0${requestId}`).digest("hex").slice(0, 32);
 
-/** Derived from the ask, so a retried RPC finds the same probe (A9). */
+/** Derived from the ask, so a retried RPC finds the same probe. */
 export const probeThreadIdFor = (cardId: SquireCardId, requestId: string) =>
   ThreadId.make(`thread:squire-probe:${probeKey(cardId, requestId)}`);
 

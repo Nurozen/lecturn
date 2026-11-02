@@ -24,10 +24,10 @@ interface Named {
   readonly name: string;
 }
 
-// The smallest size SquireIndicator still draws a face at (P16.4).
+// The smallest size at which SquireIndicator still draws a face.
 const MENTION_PORTRAIT_PX = 22;
 
-/** P19.8 composer: `@` completes the room's members and the Lead; the request id is the message key. */
+/** `@` completes the room's members and the Lead; the request id is the message key. */
 export function SquireRoomComposer(props: {
   readonly environmentId: EnvironmentId;
   readonly roomId: SquireRoomId;

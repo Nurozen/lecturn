@@ -435,7 +435,7 @@ export type SquireRule = typeof SquireRule.Type;
 export const SQUIRE_RULE_LIMIT_TEXT = "Rule limit reached; remove one in setup";
 
 /**
- * P8.1 "Always allow this" (after an accept) or "Always ask first for this"
+ * "Always allow this" (after an accept) or "Always ask first for this"
  * (after an Undo), prefilled from the card. Saving it is `squire.rule.create`
  * with these fields. At the cap `text` is the limit message and nothing can
  * be saved.
@@ -746,7 +746,7 @@ export const SquireEvidence = Schema.Struct({
   /** The exact text the "Why" quotes. */
   triggerText: Schema.optionalKey(Schema.String),
   pullRequest: Schema.optionalKey(SquirePullRequestSnapshot),
-  /** D21: where `errorLines` came from, or `unavailable` with the checks to link instead. */
+  /** Where `errorLines` came from, or `unavailable` with the checks to link instead. */
   ciLog: Schema.optionalKey(SquireCiLog),
 });
 export type SquireEvidence = typeof SquireEvidence.Type;
@@ -800,7 +800,7 @@ const digestLines = maxItems(SquireDigestLine, SQUIRE_DIGEST_MAX_LINES);
 const digestUsage = Schema.Struct({ used: NonNegativeInt, limit: NonNegativeInt });
 
 /**
- * P11: built by the server from stored items, summaries, and the action log
+ * Built by the server from stored items, summaries, and the action log
  * over the last 24 h, never from transcripts, and bounded so the digest turn
  * stays small.
  */
@@ -820,7 +820,7 @@ export const SquireDigestInput = Schema.Struct({
     }),
     SQUIRE_DIGEST_MAX_SQUIRES,
   ),
-  /** Sweep findings over the last 30 days (P17.10). */
+  /** Sweep findings over the last 30 days. */
   sweep: Schema.Struct({ accepted: NonNegativeInt, total: NonNegativeInt }),
 });
 export type SquireDigestInput = typeof SquireDigestInput.Type;
@@ -829,7 +829,7 @@ export const SQUIRE_ONBOARDING_MAX_PROJECTS = 20;
 export const SQUIRE_ONBOARDING_MAX_THREADS = 8;
 
 /**
- * The Lead's first-run scan (P17.2): metadata and stored summary headlines
+ * The Lead's first-run scan: metadata and stored summary headlines
  * only, never transcripts, bounded so one onboarding turn stays small.
  */
 export const SquireOnboardingContext = Schema.Struct({
@@ -1011,13 +1011,13 @@ const squireQuestionRequestMembers = [
 ] as const;
 
 /**
- * D66, P7.4: the target thread's pending request in its own shape, read live
+ * The target thread's pending request in its own shape, read live
  * when the card loads, so a card answers exactly as the thread would.
  */
 export const SquireQuestionRequest = ForwardCompatibleUnion(squireQuestionRequestMembers, "type");
 export type SquireQuestionRequest = typeof SquireQuestionRequest.Type;
 
-/** What raised an FYI; `inactivity` is the Lead's P3.6 check, answered with Keep or Pause. */
+/** What raised an FYI; `inactivity` is the Lead's inactivity check, answered with Keep or Pause. */
 export const SquireFyiSource = ForwardCompatibleLiteral(
   ["summary", "notify", "digest", "inactivity"],
   "unknown",
@@ -1041,7 +1041,7 @@ const squireCardPayloadMembers = [
     options: Schema.Array(SquireAnswerOption),
     /** Runtime requests only, while the request is pending; never for secrets. */
     request: Schema.optionalKey(SquireQuestionRequest),
-    /** The Squire's suggested answer or next step, shown above the options (P7.3). */
+    /** The Squire's suggested answer or next step, shown above the options. */
     recommendation: Schema.optionalKey(Schema.String),
     /** When the thread raised the request; absent from cards raised before it was recorded. */
     requestedAt: Schema.optionalKey(IsoDateTime),
@@ -1120,11 +1120,11 @@ export const SquireCardTrigger = Schema.Struct({
   triggerMessageId: Schema.optionalKey(MessageId),
   /**
    * A question card for a pending secret request: the `secret_request` item
-   * whose label and reason the card reads. Never the secret itself (A6).
+   * whose label and reason the card reads. Never the secret itself.
    */
   secretTurnItemId: Schema.optionalKey(TurnItemId),
   quote: Schema.optionalKey(Schema.String),
-  /** D33: a card a voice-note turn raised or last updated; whether its speaker was verified. */
+  /** A card a voice-note turn raised or last updated; whether its speaker was verified. */
   speakerVerified: Schema.optionalKey(Schema.Boolean),
 });
 export type SquireCardTrigger = typeof SquireCardTrigger.Type;
@@ -1197,7 +1197,7 @@ export const SquireCardRow = Schema.Struct({
    */
   requestedAt: Schema.optionalKey(IsoDateTime),
   /**
-   * D33: only on a card a voice-note turn raised or last updated, whether the
+   * Only on a card a voice-note turn raised or last updated, whether the
    * note's speaker was verified. Absent on every other card.
    */
   speakerVerified: Schema.optionalKey(Schema.Boolean),
@@ -1232,6 +1232,8 @@ export const SquireActionLogKind = ForwardCompatibleLiteral(
     "action.executed",
     "action.undone",
     "action.cancelled",
+    /** The user's accept request, its attempt, and once settled its result (replayed on retry). */
+    "action.accepted",
     "notification.pushed",
     "notification.delivery",
     "quiet.recorded",
@@ -1401,7 +1403,7 @@ export const SquireGesture = ForwardCompatibleLiteral(
 export type SquireGesture = typeof SquireGesture.Type;
 
 /**
- * The record as the always-on stream carries it (R37, about 0.5 KB per Squire): the brief, up to
+ * The record as the always-on stream carries it (about 0.5 KB per Squire): the brief, up to
  * 4,000 characters that only the setup sheet reads, is left out and fetched on demand.
  */
 export const SquireSnapshotRecord = Squire.mapFields(({ brief: _brief, ...fields }) => fields);
@@ -1412,7 +1414,7 @@ export const SquireSnapshot = Schema.Struct({
   /**
    * The badge: decision items waiting in this Squire's view, its "Needs a decision" group (open,
    * accepting, or executing; never FYI or held). A Squire's counts what it raised or owns,
-   * Lead-raised items on its threads included; the Lead's counts only what the Lead raised (D50).
+   * Lead-raised items on its threads included; the Lead's counts only what the Lead raised.
    */
   openDecisionCount: NonNegativeInt,
   /**
@@ -1433,7 +1435,7 @@ export const SquireSnapshot = Schema.Struct({
       kind: SquireCardKind,
       targetThreadId: Schema.NullOr(ThreadId),
       /**
-       * P7.6: the open card of the same raiser, target thread, and kind that this hold sits
+       * The open card of the same raiser, target thread, and kind that this hold sits
        * beside (a hold is not an item, so it does not replace it). Clients show the two as one
        * block. Absent when no such card is open.
        */
@@ -1447,7 +1449,7 @@ export const SquireSnapshot = Schema.Struct({
     threadsLeft: NonNegativeInt,
     recommendingUntil: Schema.optionalKey(IsoDateTime),
   }),
-  /** Threads where another Squire holds steer Auto (P2.4). */
+  /** Threads where another Squire holds steer Auto. */
   conflicts: Schema.Array(Schema.Struct({ threadId: ThreadId, autoHolderSquireId: SquireId })),
   trackedCount: NonNegativeInt,
   containerNames: Schema.Array(Schema.String),
@@ -1457,7 +1459,7 @@ export const SquireSnapshot = Schema.Struct({
       kind: SquireActionLogKind,
       at: IsoDateTime,
       /**
-       * The P16.3 gesture this entry plays, decided by the server from the log
+       * The gesture this entry plays, decided by the server from the log
        * row, since one log kind covers several gestures (a batch start and a
        * voice note are both `event.received`). Absent plays nothing.
        */
@@ -1577,10 +1579,10 @@ export const SquireRoomPostsResult = Schema.Struct({
   nextBefore: Schema.NullOr(SquireRoomPostId),
 });
 
-/** The full record, brief included, which the snapshot leaves out (R37). */
+/** The full record, brief included, which the snapshot leaves out. */
 export const SquireGetInput = Schema.Struct({ squireId: SquireId });
 
-/** Every provider instance on the server, with whether it can run a Squire (D10). */
+/** Every provider instance on the server, with whether it can run a Squire. */
 export const SquireProviderSupportInput = Schema.Struct({});
 export const SquireProviderSupportResult = Schema.Struct({
   instances: Schema.Array(
@@ -1737,7 +1739,7 @@ export const SquireVoiceNoteResult = Schema.Struct({ voiceNoteId: SquireVoiceNot
 export const SquireLeadEnsureInput = Schema.Struct({ requestId: RequestId });
 export const SquireLeadOpenInput = Schema.Struct({
   requestId: RequestId,
-  /** The client's IANA zone; stored on the Lead when it has none (D31). */
+  /** The client's IANA zone; stored on the Lead when it has none. */
   timezone: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export const SquireLeadOpenResult = Schema.Struct({
@@ -1760,8 +1762,8 @@ export const SquireItemsMarkOpenedInput = Schema.Struct({
 export const SquireItemsMarkOpenedResult = Schema.Struct({});
 
 /**
- * A desktop showed an OS or in-app alert for a card's notification intent
- * (D27): one `notification.delivery` row with outcome `alerted` per card and
+ * A desktop showed an OS or in-app alert for a card's notification intent:
+ * one `notification.delivery` row with outcome `alerted` per card and
  * surface, however often it is retried.
  */
 export const SquireNotificationAlertedInput = Schema.Struct({

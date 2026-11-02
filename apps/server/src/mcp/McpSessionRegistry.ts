@@ -27,7 +27,7 @@ export interface McpCredentialRequest {
   readonly app?: McpInvocationContext.McpAppCaller;
   /**
    * A Squire home thread's credential: overrides every other capability field,
-   * so it carries exactly `{"squire"}` plus this scope (D8).
+   * so it carries exactly `{"squire"}` plus this scope.
    */
   readonly squire?: McpInvocationContext.McpSquireCaller;
   /** Handed to adapters with the config, so they can keep their own prompt off app tools. */

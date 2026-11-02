@@ -1,5 +1,5 @@
 /**
- * The Squire event reactor (A3). A durable cursor over committed application
+ * The Squire event reactor. A durable cursor over committed application
  * events: each event is classified from its own stored payload
  * (`squireEvents.ts`), and every interested Squire gets an `INSERT OR IGNORE`
  * row, so the dedupe key makes ingestion idempotent across lag and restarts.
@@ -14,7 +14,7 @@ import {
   isUnknownUnionMember,
   ModelSelection,
   type OrchestrationV2ThreadShell,
-  type ProjectId,
+  ProjectId,
   type RunId,
   SquireCardId,
   SquireCardPayload,
@@ -22,7 +22,7 @@ import {
   SquireEventToggles,
   type SquireId,
   type SquireTurnSummary,
-  type ThreadId,
+  ThreadId,
   type ThreadPullRequestLink,
   TurnItemId,
 } from "@lecturn/contracts";
@@ -47,6 +47,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
+import * as SquireCursorStartup from "./SquireCursorStartup.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
 import { withSquireDispatchOrigin } from "./SquireDispatchOrigin.ts";
 import { questionCardTrigger, readSquireQuestion, squireQuestionTitle } from "./SquireItems.ts";
@@ -74,6 +75,7 @@ import {
   squirePullRequestStates,
 } from "./squireEvents.ts";
 import { writeLeadItemEvent, writeLeadItemsResolved } from "./squireLeadItems.ts";
+import { retireOutOfScope } from "./squireScopeCascade.ts";
 
 export type SquireReactorError = SquireScope.SquireScopeError;
 
@@ -100,7 +102,7 @@ const FIXTURE_DIR = "squire-fixtures";
 
 const slashed = (path: string) => path.replaceAll("\\", "/").replace(/\/+$/, "");
 
-/** D46/D44j: a fixture project lives in the sandbox dir `<lecturn home>/squire-fixtures/`. */
+/** A fixture project lives in the sandbox dir `<lecturn home>/squire-fixtures/`. */
 export const isFixtureWorkspaceRoot = (baseDir: string, workspaceRoot: string) =>
   slashed(workspaceRoot).startsWith(`${slashed(baseDir)}/${FIXTURE_DIR}/`);
 
@@ -146,7 +148,7 @@ const decodeCardPayload = Schema.decodeUnknownOption(Schema.fromJsonString(Squir
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
-/** Thread changes that can end an overlap item's change set (D30, P7.8). */
+/** Thread changes that can end an overlap item's change set. */
 const THREAD_CHANGE_EVENTS: ReadonlySet<string> = new Set([
   "thread.pull-request-link-updated",
   "thread.settled",
@@ -184,10 +186,11 @@ const make = Effect.gen(function* () {
   const rules = yield* Effect.serviceOption(SquireRules.SquireRules);
   const policyLock = yield* Effect.serviceOption(SquirePolicyLock.SquirePolicyLock);
   const probe = yield* Effect.serviceOption(SquireProbe.SquireProbe);
-  // 7.3: overlap expiry follows PR, settle, archive, delete, and branch changes.
+  // Overlap expiry follows PR, settle, archive, delete, and branch changes.
   const hooks = yield* Effect.serviceOption(SquireHooks.SquireHooks);
   const config = yield* ServerConfig.ServerConfig;
   const projects = yield* ProjectStore.ProjectStoreV2;
+  const switchTurnedOn = yield* Effect.serviceOption(SquireCursorStartup.SquireSwitchTurnedOn);
 
   const seen = yield* SubscriptionRef.make(0);
   const outstanding = yield* TxRef.make(0);
@@ -246,7 +249,7 @@ const make = Effect.gen(function* () {
       ),
     }));
 
-  // D18, D44j: a fixture thread's summary is the one `inject` stored, else
+  // A fixture thread's summary is the one `inject` stored, else
   // deterministic fields; it never reaches a provider.
   const fixtureSummary = (threadId: ThreadId) =>
     projections.getThreadShell(threadId).pipe(
@@ -314,7 +317,7 @@ const make = Effect.gen(function* () {
       const createdAt = yield* nowIso;
       const inserted: Array<InsertedRow> = [];
       for (const candidate of candidates) {
-        // PR rows name the run whose summary they render (D18).
+        // PR rows name the run whose summary they render.
         const payload: SquireEventPayload =
           candidate.kind === "pull-request-changed" && shell?.latestRunId
             ? { ...candidate.payload, runId: shell.latestRunId }
@@ -367,10 +370,10 @@ const make = Effect.gen(function* () {
       }
     });
 
-  // ── Question cards (4.9) ──
+  // ── Question cards ──
 
   /**
-   * P7.3: a question says why before it is answered: the Squire's own note on
+   * A question says why before it is answered: the Squire's own note on
    * the thread, else the request's provisional summary, else who asked what and
    * how long ago, else how long it waited.
    */
@@ -431,7 +434,7 @@ const make = Effect.gen(function* () {
       return `Waiting ${age} for your answer`;
     });
 
-  // D66: the question text and options stay on the thread; see SquireItems.
+  // The question text and options stay on the thread; see SquireItems.
   const questionPayloadJson = (
     threadId: ThreadId,
     request: SquireEventPendingRequest,
@@ -478,8 +481,8 @@ const make = Effect.gen(function* () {
       }).pipe(logged("Squire question why failed", { threadId: row.thread_id }));
 
   /**
-   * One open question card per (Squire, thread) (P7.6): a newer request
-   * replaces the open one in place, counted as "updated". Never pushed (D26).
+   * One open question card per (Squire, thread): a newer request
+   * replaces the open one in place, counted as "updated". Never pushed.
    */
   const raiseQuestionCard = (
     row: SquireRepository.SquireEventRow,
@@ -687,7 +690,7 @@ const make = Effect.gen(function* () {
     },
   );
 
-  // ── Card outdating (P7.8, P10.3) ──
+  // ── Card outdating ──
 
   const openCardsFor = (threadId: ThreadId) =>
     repository.listCards({ targetThreadId: threadId, statuses: ["open", "held"] });
@@ -695,11 +698,38 @@ const make = Effect.gen(function* () {
   const wakeLead = (lead: Option.Option<SquireId>) =>
     Option.isSome(lead) ? delivery.wake(lead.value) : Effect.void;
 
-  /** Each card that moves gets its Lead item-resolved row in the same transaction (P17.5). */
+  /**
+   * A hold the reactor takes down was an action under way, so it logs the
+   * cancellation as an execution-time refusal does (`SquireActions.outdate`).
+   */
+  const logHoldCancelled = (card: SquireRepository.SquireCardRow, reason: string, now: string) =>
+    card.status !== "held"
+      ? Effect.void
+      : repository
+          .insertActionLog({
+            squire_id: card.squire_id,
+            kind: "action.cancelled",
+            room_id: null,
+            post_id: null,
+            trigger_id: null,
+            task_id: null,
+            thread_id: card.target_thread_id,
+            card_id: card.id,
+            event_id: null,
+            run_id: null,
+            invocation_key: null,
+            execution_key: null,
+            data_json: encodeJson({ reason, to: "outdated" }),
+            created_at: now,
+          })
+          .pipe(Effect.asVoid);
+
+  /** Each card that moves gets its Lead item-resolved row in the same transaction. */
   const moveCards = (
     cards: ReadonlyArray<SquireRepository.SquireCardRow>,
     patchOf: (card: SquireRepository.SquireCardRow) => SquireRepository.SquireCardPatch,
     now: string,
+    reason: string,
   ) =>
     repository
       .transaction(
@@ -712,22 +742,29 @@ const make = Effect.gen(function* () {
               patch: patchOf(card),
               updatedAt: now,
             });
-            if (Option.isSome(updated)) moved.push(updated.value);
+            if (Option.isNone(updated)) continue;
+            moved.push(updated.value);
+            if (updated.value.status === "outdated") yield* logHoldCancelled(card, reason, now);
           }
           return yield* writeLeadItemsResolved(repository, moved, now);
         }),
       )
       .pipe(Effect.flatMap(wakeLead));
 
-  const outdate = (cards: ReadonlyArray<SquireRepository.SquireCardRow>, now: string) =>
+  const outdate = (
+    cards: ReadonlyArray<SquireRepository.SquireCardRow>,
+    now: string,
+    reason: string,
+  ) =>
     moveCards(
       cards,
       () => ({ status: "outdated", resolution: "outdated", executes_at: null }),
       now,
+      reason,
     );
 
   /** Run inside a transaction; wake the returned Lead after it commits. */
-  const outdateThreadCards = (threadId: ThreadId, now: string) =>
+  const outdateThreadCards = (threadId: ThreadId, now: string, reason: string) =>
     Effect.gen(function* () {
       const cards = yield* openCardsFor(threadId);
       const outdated = new Set(
@@ -737,11 +774,11 @@ const make = Effect.gen(function* () {
           updatedAt: now,
         }),
       );
+      const moved = cards.filter((card) => outdated.has(card.id));
+      for (const card of moved) yield* logHoldCancelled(card, reason, now);
       return yield* writeLeadItemsResolved(
         repository,
-        cards
-          .filter((card) => outdated.has(card.id))
-          .map((card) => ({ ...card, status: "outdated" as const, resolution: "outdated" })),
+        moved.map((card) => ({ ...card, status: "outdated" as const, resolution: "outdated" })),
         now,
       );
     });
@@ -751,7 +788,7 @@ const make = Effect.gen(function* () {
 
   const onRunStarted = (threadId: ThreadId, runId: RunId) =>
     Effect.gen(function* () {
-      // A9: a newer run drops turn-finished rows still held by background work.
+      // A newer run drops turn-finished rows still held by background work.
       const held = yield* repository.listEvents({
         statuses: ["deferred"],
         deferReasons: ["background"],
@@ -767,22 +804,27 @@ const make = Effect.gen(function* () {
       if (cards.length === 0) return;
       const now = yield* nowIso;
       const message = yield* projections.getRunMessage(threadId, runId);
-      // P10.3: a user turn outdates every open card and cancels every hold on the thread.
+      // A user turn outdates every open card and cancels every hold on the thread.
       if (message?.createdBy === "user") {
-        yield* wakeLead(yield* repository.transaction(outdateThreadCards(threadId, now)));
+        yield* wakeLead(
+          yield* repository.transaction(
+            outdateThreadCards(threadId, now, "the user wrote in the thread"),
+          ),
+        );
         return;
       }
-      // P7.8: any new turn makes a card raised for an earlier run obsolete.
+      // Any new turn makes a card raised for an earlier run obsolete.
       yield* outdate(
         cards.filter((card) => {
           const trigger = triggerOf(card);
           return trigger.runId !== undefined && trigger.runId !== runId;
         }),
         now,
+        "a newer turn started in the thread",
       );
     });
 
-  /** P7.8: a new state for the same PR obsoletes cards raised for one it no longer holds. */
+  /** A new state for the same PR obsoletes cards raised for one it no longer holds. */
   const onPullRequestLink = (threadId: ThreadId, link: ThreadPullRequestLink) =>
     Effect.gen(function* () {
       const snapshot = link.snapshot;
@@ -802,6 +844,7 @@ const make = Effect.gen(function* () {
           );
         }),
         yield* nowIso,
+        "the pull request changed",
       );
     });
 
@@ -832,6 +875,7 @@ const make = Effect.gen(function* () {
             ? settled
             : { status: "outdated", resolution: "outdated", executes_at: null },
         yield* nowIso,
+        "the request was answered",
       );
     });
 
@@ -871,7 +915,7 @@ const make = Effect.gen(function* () {
       }
     });
 
-  // ── Cascades (A4) ──
+  // ── Cascades ──
 
   const disableRules = (squireIds: Iterable<SquireId>) =>
     Option.isNone(rules)
@@ -880,7 +924,10 @@ const make = Effect.gen(function* () {
           discard: true,
         });
 
-  /** D35, serialized so a home lost twice (project then thread) re-homes once. */
+  /**
+   * Re-homes to the most recently active project, serialized so a home lost
+   * twice (project then thread) re-homes once.
+   */
   const rehome = (squireId: SquireId, stillLost: (row: SquireRepository.SquireRow) => boolean) =>
     Option.isNone(lifecycle)
       ? Effect.logWarning("Squire home lost with no lifecycle to re-home it", { squireId })
@@ -917,7 +964,12 @@ const make = Effect.gen(function* () {
             yield* repository.deleteGrantsForTarget({ kind: "thread", targetId: threadId });
             yield* repository.deleteGrantsForTarget({ kind: "exclusion", targetId: threadId });
             yield* repository.deleteThreadEvents(threadId);
-            const lead = yield* outdateThreadCards(threadId, yield* nowIso);
+            yield* repository.deleteThreadSummaries(threadId);
+            const lead = yield* outdateThreadCards(
+              threadId,
+              yield* nowIso,
+              "the thread no longer exists",
+            );
             return { affected: grants.map((grant) => grant.squire_id), lead };
           }),
         ),
@@ -928,7 +980,7 @@ const make = Effect.gen(function* () {
 
   const onProjectDeleted = (projectId: ProjectId) =>
     Effect.gen(function* () {
-      const affected = yield* withPolicyLock(
+      const { affected, lead } = yield* withPolicyLock(
         repository.transaction(
           Effect.gen(function* () {
             const grants = yield* repository.listGrantsForTarget({
@@ -936,10 +988,20 @@ const make = Effect.gen(function* () {
               targetId: projectId,
             });
             yield* repository.deleteGrantsForTarget({ kind: "project", targetId: projectId });
-            return grants.map((grant) => grant.squire_id);
+            const now = yield* nowIso;
+            let lead = Option.none<SquireId>();
+            for (const grant of grants) {
+              const woken = yield* retireOutOfScope(repository, scope, {
+                squireId: grant.squire_id,
+                now,
+              });
+              if (Option.isSome(woken)) lead = woken;
+            }
+            return { affected: grants.map((grant) => grant.squire_id), lead };
           }),
         ),
       );
+      yield* wakeLead(lead);
       yield* disableRules(affected);
       for (const row of yield* repository.listSquires) {
         if (row.home_project_id === projectId) {
@@ -948,7 +1010,71 @@ const make = Effect.gen(function* () {
       }
     });
 
-  // ── Squire threads (D9) ──
+  /** A home build that stopped for want of a project goes on once there is one. */
+  const onProjectCreated = Effect.gen(function* () {
+    if (Option.isNone(lifecycle)) return;
+    for (const row of yield* repository.listSquires) {
+      if (row.lifecycle !== "rehoming" && row.lifecycle !== "creating") continue;
+      yield* fork("Squire re-home failed", rehoming.withPermits(1)(lifecycle.value.drive(row.id)));
+    }
+  });
+
+  const threadGone = (threadId: ThreadId) =>
+    projections
+      .getThreadShell(threadId)
+      .pipe(Effect.map((shell) => shell === null || shell.deletedAt !== null));
+  const projectGone = (projectId: ProjectId) =>
+    projects.get(projectId).pipe(Effect.map(Option.isNone));
+
+  /**
+   * Turning the switch on skips the off period's events, its deletes too, so
+   * their cascades run here from current state: grants, cards, and queued
+   * events whose thread or project is gone, and homes that are gone.
+   */
+  const reconcileOffPeriod = Effect.gen(function* () {
+    const squires = (yield* repository.listSquires).filter((row) => row.lifecycle !== "deleting");
+    const goneProjects = new Set<ProjectId>();
+    const goneThreads = new Set<ThreadId>();
+    const checkThread = (threadId: ThreadId) =>
+      Effect.gen(function* () {
+        if (!goneThreads.has(threadId) && (yield* threadGone(threadId))) goneThreads.add(threadId);
+      });
+    for (const row of squires) {
+      for (const grant of yield* repository.listGrants(row.id)) {
+        if (grant.kind === "thread" || grant.kind === "exclusion") {
+          yield* checkThread(ThreadId.make(grant.target_id));
+        } else if (grant.kind === "project") {
+          const projectId = ProjectId.make(grant.target_id);
+          if (yield* projectGone(projectId)) goneProjects.add(projectId);
+        }
+      }
+    }
+    for (const card of yield* repository.listCards({ statuses: ["open", "held"] })) {
+      if (card.target_thread_id !== null) yield* checkThread(card.target_thread_id);
+    }
+    for (const row of yield* repository.listEvents({ statuses: ["deferred", "pending"] })) {
+      if (row.thread_id !== null) yield* checkThread(row.thread_id);
+    }
+    for (const projectId of goneProjects) yield* onProjectDeleted(projectId);
+    for (const threadId of goneThreads) {
+      yield* onThreadDeleted({ type: "thread-deleted", threadId, squire: null });
+    }
+    for (const row of squires) {
+      const projectId = row.home_project_id;
+      // A gone grant project re-homed its Squires above.
+      if (goneProjects.has(projectId)) continue;
+      if (yield* projectGone(projectId)) {
+        yield* rehome(row.id, (current) => current.home_project_id === projectId);
+        continue;
+      }
+      const threadId = row.home_thread_id;
+      if (row.lifecycle === "ready" && threadId !== null && (yield* threadGone(threadId))) {
+        yield* rehome(row.id, (current) => current.home_thread_id === threadId);
+      }
+    }
+  });
+
+  // ── Squire threads ──
 
   const autoDecline = (effect: Extract<SquireReactorEffect, { readonly type: "auto-decline" }>) =>
     Effect.gen(function* () {
@@ -1058,6 +1184,7 @@ const make = Effect.gen(function* () {
       });
       if (candidates.length > 0) yield* ingest(candidates, shell);
       for (const effect of effects) yield* apply(effect, stored);
+      if (!("event" in stored) && stored.type === "project.created") yield* onProjectCreated;
       if (event?.type === "thread.pull-request-link-updated" && shell?.squire === undefined) {
         yield* onPullRequestLink(event.threadId, event.payload);
       }
@@ -1067,7 +1194,13 @@ const make = Effect.gen(function* () {
       return candidates.length > 0 || effects.length > 0;
     }).pipe(Effect.withSpan("SquireReactor.handle"));
 
+  let offPeriodPending = Option.exists(switchTurnedOn, ({ turnedOn }) => turnedOn);
+
   const start: SquireReactor["Service"]["start"] = Effect.gen(function* () {
+    if (offPeriodPending) {
+      yield* reconcileOffPeriod.pipe(logged("Squire off-period reconcile failed"));
+      offPeriodPending = false;
+    }
     const cursor = yield* repository.readCursor;
     yield* SubscriptionRef.set(seen, cursor.sequence);
     let ignored = 0;
@@ -1118,7 +1251,7 @@ const make = Effect.gen(function* () {
 });
 
 /**
- * How a question card settles with its request (6.3): answered (however it
+ * How a question card settles with its request: answered (however it
  * was answered) or a declined secret resolves it; expiry and cancellation
  * outdate it. Only the status crosses over, never a secret's value.
  */

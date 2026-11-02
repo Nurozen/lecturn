@@ -133,7 +133,7 @@ export function ThreadNotificationCoordinator() {
   );
 }
 
-/** One alert per `notification.pushed` intent (D27); a question card writes none. */
+/** One alert per `notification.pushed` intent; a question card writes none. */
 function SquireNotifications({
   onNotification,
 }: {
@@ -152,7 +152,7 @@ function SquireNotifications({
   const registry = useContext(RegistryContext);
 
   useEffect(() => {
-    // D27: each shown alert is recorded once; the server ignores a repeat for the same card.
+    // Each shown alert is recorded once; the server ignores a repeat for the same card.
     const alerted = (environmentId: EnvironmentId, intent: SquireNotificationIntent) => {
       if (!registry.get(squireEnvironment.notificationAlerted.permissionAtom(environmentId)))
         return;

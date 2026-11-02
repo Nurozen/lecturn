@@ -519,7 +519,7 @@ export function withRateLimitBackoff(
     ...(api.listAcceptanceCandidates
       ? { listAcceptanceCandidates: wrap("listAcceptanceCandidates", api.listAcceptanceCandidates) }
       : {}),
-    // Lecturn: the Squire CI excerpt (D21).
+    // Lecturn: the Squire CI excerpt.
     ...(api.readCiFailure ? { readCiFailure: wrap("readCiFailure", api.readCiFailure) } : {}),
     getChangeRequest: wrap("getChangeRequest", api.getChangeRequest),
     ...(api.getChangeRequestPreview === undefined

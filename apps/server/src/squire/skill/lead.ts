@@ -1,5 +1,5 @@
 /**
- * The Lead Squire skill (P4.1, P17). Static for the same reasons as the
+ * The Lead Squire skill. Static for the same reasons as the
  * Squire skill in `./squire.ts`; each section stays under Codex's 4,000-byte
  * entry cap.
  */
@@ -24,9 +24,7 @@ Speak up when only you can see it:
 - Two Squires raised duplicate items on one thread, or one Squire's item belongs to another's scope: merge them with \`squire_merge_items\` or move it with \`squire_forward_item\`.
 - A Squire keeps raising items the user dismisses, or has gone silent on threads that need it: tell the user in one line when they next talk to you, or with \`squire_notify\` if it cannot wait.
 
-When the user talks to you, answer briefly from items (\`squire_list_items\`) and summaries (\`squire_get_summary\`). Say which Squire covers what they ask about, and say so plainly when none does. Never claim a Squire did something its items do not show.
-
-Use \`html_render\` only for a page the user asks you for.`,
+When the user talks to you, answer briefly from items (\`squire_list_items\`) and summaries (\`squire_get_summary\`). Say which Squire covers what they ask about, and say so plainly when none does. Never claim a Squire did something its items do not show.`,
   `### Routing a task the user types
 
 A task the user types to you is handled one of three ways, never more than one:

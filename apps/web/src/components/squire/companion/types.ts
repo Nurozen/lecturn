@@ -14,7 +14,7 @@ export const COMPANION_GESTURES = [
 ] as const;
 export type CompanionGesture = (typeof COMPANION_GESTURES)[number];
 
-// `gold` is the Lead's palette (OQ22-approved cloth tint and crest).
+// `gold` is the Lead's palette.
 export const COMPANION_PALETTES = ["brass", "moonstone", "sage", "rose", "gold"] as const;
 export type CompanionPalette = (typeof COMPANION_PALETTES)[number];
 
@@ -64,11 +64,11 @@ export type EmblemConfiguration = ChoiceValues<typeof EMBLEM_CHOICES> & {
   seed: number;
 };
 
-// The persisted choice (spec P16.2) as the server sends it.
+// The persisted choice as the server sends it.
 export type { SquireCompanion } from "@lecturn/contracts";
 
 /**
- * Why a companion is not animating. v5 reasons plus three added by the port (D43):
+ * Why a companion is not animating. v5 reasons plus three added by the port:
  * `unfocused` (window lost focus), `yielded` (another live companion holds the lease), and
  * `settled` (20 s without a state change, gesture, or pointer interaction).
  */

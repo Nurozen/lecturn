@@ -155,28 +155,42 @@ describe("Squires extension configuration", () => {
       "EXTENSIONS_SQUIRES_ATTEMPT_HOLD_NANO_USD",
       "EXTENSIONS_SQUIRES_RUN_BUDGET_NANO_USD",
       "EXTENSIONS_SQUIRES_MAX_ATTEMPTS_PER_RUN",
+      "EXTENSIONS_SQUIRES_ACCOUNT_CONCURRENCY",
       "EXTENSIONS_SQUIRES_ENVIRONMENT_CONCURRENCY",
+      "EXTENSIONS_SQUIRES_REQUESTS_PER_MINUTE",
     ])
       expect(extensionEnvironmentKeys).toContain(key);
   });
-  it("owns an environment slot without changing the slot Decisions and Contextual share", () => {
+  it("owns its slots and rate without changing the limits Decisions and Contextual share", () => {
     const config = parseExtensionsConfig({
       ...enabled,
       ...squires,
+      EXTENSIONS_ACCOUNT_CONCURRENCY: "5",
       EXTENSIONS_ENVIRONMENT_CONCURRENCY: "3",
+      EXTENSIONS_REQUESTS_PER_MINUTE: "90",
+      EXTENSIONS_SQUIRES_ACCOUNT_CONCURRENCY: "4",
       EXTENSIONS_SQUIRES_ENVIRONMENT_CONCURRENCY: "2",
+      EXTENSIONS_SQUIRES_REQUESTS_PER_MINUTE: "30",
     });
-    expect(config.shared.environmentConcurrency).toBe(3);
-    expect({ ...config.shared, ...config.squires }.environmentConcurrency).toBe(2);
-    expect({ ...config.shared, ...config.decisions }.environmentConcurrency).toBe(3);
-    expect({ ...config.shared, ...config.contextual }.environmentConcurrency).toBe(3);
-    expect(
-      { ...config.shared, ...parseExtensionsConfig(squires).squires }.environmentConcurrency,
-    ).toBe(1);
+    const limits = (feature: "decisions" | "contextual" | "squires") => {
+      const merged = { ...config.shared, ...config[feature] };
+      return [merged.accountConcurrency, merged.environmentConcurrency, merged.requestsPerMinute];
+    };
+    expect(limits("squires")).toEqual([4, 2, 30]);
+    expect(limits("decisions")).toEqual([5, 3, 90]);
+    expect(limits("contextual")).toEqual([5, 3, 90]);
+    const defaults = { ...config.shared, ...parseExtensionsConfig(squires).squires };
+    expect([
+      defaults.accountConcurrency,
+      defaults.environmentConcurrency,
+      defaults.requestsPerMinute,
+    ]).toEqual([2, 1, 60]);
   });
   it("fences only Squires on its invalid or unsafe values", () => {
     for (const invalid of [
       { EXTENSIONS_SQUIRES_ENVIRONMENT_CONCURRENCY: "5" },
+      { EXTENSIONS_SQUIRES_ACCOUNT_CONCURRENCY: "17" },
+      { EXTENSIONS_SQUIRES_REQUESTS_PER_MINUTE: "0" },
       { EXTENSIONS_SQUIRES_MAX_ATTEMPTS_PER_RUN: "2" },
       { EXTENSIONS_SQUIRES_ENABLED: "yes" },
       { EXTENSIONS_SQUIRES_ATTEMPT_HOLD_NANO_USD: "671999" },

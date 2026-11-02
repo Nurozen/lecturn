@@ -1,5 +1,5 @@
 /**
- * A5.12, D47: compaction deletes intermediate `thread.pull-request-link-updated`
+ * Compaction deletes intermediate `thread.pull-request-link-updated`
  * events, the one Squire input it removes, and the reactor classifies each PR
  * transition from its own event. While a Squire could still consume them, the
  * events above the reactor cursor stay. With the switch off or no active

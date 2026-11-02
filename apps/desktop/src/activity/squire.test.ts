@@ -97,7 +97,7 @@ describe("notch Squire rows", () => {
     );
   });
 
-  it("puts a paired hold's countdown and Undo on a line under its open card (P7.6)", () => {
+  it("puts a paired hold's countdown and Undo on a line under its open card", () => {
     const { holdRemainingMs: _hold, ...open } = held.squire;
     const paired: SquireActivityRow = {
       ...held,

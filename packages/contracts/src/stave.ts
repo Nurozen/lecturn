@@ -306,7 +306,7 @@ export class StaveCommandError extends Schema.TaggedError<StaveCommandError>()(
   },
 ) {}
 
-// ── Stave operations (Phase 3) ────────────────────────────────
+// ── Stave operations ───────────────────────────────────────────
 // `stave.runOperation` takes ONE discriminated payload instead of a verb per
 // RPC (deviation 1). Every variant is fully typed: ids are checked against the
 // Stave name charset, modes and memory fates are closed literal sets, and no

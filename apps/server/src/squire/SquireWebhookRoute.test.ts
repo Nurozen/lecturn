@@ -1,5 +1,5 @@
 /**
- * `POST /api/squire/hooks/:triggerId` (8.7, D57) over the real
+ * `POST /api/squire/hooks/:triggerId` over the real
  * SquireTriggers service and an in-memory database.
  */
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Tests sign bodies the way GitHub does.

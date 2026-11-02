@@ -25,7 +25,7 @@ import { serviceLauncherCommand } from "./cli/serviceLauncher.ts";
 import { claudeHistoryCommand } from "./cli/claudeHistory.ts";
 import { sshHelperCommand } from "./cli/sshHelper.ts";
 import { serviceCommand } from "./cli/service.ts";
-// Lecturn: the unlisted Squire dev tools (D44f).
+// Lecturn: the unlisted Squire dev tools.
 import { squireCommand } from "./cli/squire.ts";
 import { servicePreflightCommand } from "./cli/servicePreflight.ts";
 import { themeCommand } from "./cli/theme.ts";

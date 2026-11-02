@@ -119,7 +119,7 @@ export function squireRowMetaText(input: {
 
 // ── Evidence ──────────────────────────────────────────────────
 
-/** D21: the checks to look at when the failing job's log could not be read. */
+/** The checks to look at when the failing job's log could not be read. */
 export function squireCiUnavailableText(
   ciLog: NonNullable<SquireCard["evidence"]["ciLog"]>,
 ): string | null {
@@ -130,7 +130,7 @@ export function squireCiUnavailableText(
     : `The failing job's log could not be read; see ${jobs.join(", ")}.`;
 }
 
-// ── Lead items (P17.2) ────────────────────────────────────────
+// ── Lead items ────────────────────────────────────────────────
 
 type ProposalPayload = Extract<SquireKnownPayload, { readonly type: "squire-proposal" }>;
 
@@ -142,7 +142,7 @@ export function squireProposalScopeLabels(
   return squireScopeLabels(grants, { project: projectName, thread: () => null });
 }
 
-/** What a Squire proposal card reads (P17.2): name, scope, palette, permissions, and brief. */
+/** What a Squire proposal card reads: name, scope, palette, permissions, and brief. */
 export function squireProposalText(
   proposal: Pick<ProposalPayload, "name" | "brief" | "grants" | "permissions" | "companion">,
   projectName: (projectId: string) => string | null,

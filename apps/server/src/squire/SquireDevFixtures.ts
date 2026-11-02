@@ -1,14 +1,14 @@
 /**
- * The Squire test seam (P3.5) and fixture mode (D44j). `loadSetup` builds a
+ * The Squire test seam and fixture mode. `loadSetup` builds a
  * fixture's projects, threads, and Squires in the sandbox `<lecturn
  * home>/squire-fixtures/`; `inject` writes a fixture event's row after
  * establishing, through normal commands, the orchestration state the event
  * claims; `drainThrough` waits for that row and the Squire turn it caused.
  * Threads in the sandbox are fixture-owned: `inject` is their only row
  * source (`SquireReactor.isFixtureOwnedThread`) and they run on the scripted
- * provider, so nothing on them reaches a real provider (D18).
+ * provider, so nothing on them reaches a real provider.
  *
- * Provided only with the switch on and `LECTURN_TEST_PROVIDERS=1` (D44g).
+ * Provided only with the switch on and `LECTURN_TEST_PROVIDERS=1`.
  *
  * @module squire/SquireDevFixtures
  */
@@ -110,7 +110,7 @@ export type SquireDevFixturesFailure = SquireDevFixturesError | SquireFixtureAct
 export interface SquireFixtureLoadOptions {
   /** `--set` overrides: dot paths relative to `setup`, applied before it is decoded. */
   readonly set?: Readonly<Record<string, unknown>>;
-  /** The main Squire's `squireFake` script; its home thread then runs it (D44e). */
+  /** The main Squire's `squireFake` script; its home thread then runs it. */
   readonly fake?: SquireFakeScript;
   /** The instance an `under-test` Squire runs on; the scripted instance when absent. */
   readonly providerInstanceId?: ProviderInstanceId;
@@ -129,7 +129,7 @@ export interface SquireFixtureInjectOptions {
   readonly squire?: string;
 }
 
-/** A stored injected summary, for the post-store hooks 7.3 registers (overlap, D30). */
+/** A stored injected summary, for the post-store hooks such as overlap detection. */
 export interface SquireInjectedSummary {
   readonly threadId: ThreadId;
   readonly runId: RunId;
@@ -140,12 +140,12 @@ export interface SquireInjectedSummary {
 export class SquireDevFixtures extends Context.Service<
   SquireDevFixtures,
   {
-    /** Idempotent: a second load updates the same records (P3.5). Never pauses the Lead. */
+    /** Idempotent: a second load updates the same records. Never pauses the Lead. */
     readonly loadSetup: (
       setup: SquireFixtureSetup,
       options?: SquireFixtureLoadOptions,
     ) => Effect.Effect<SquireFixtureLoaded, SquireDevFixturesFailure>;
-    /** The event's row id, or the original's for a deduped event (D45). */
+    /** The event's row id, or the original's for a deduped event. */
     readonly inject: (
       event: SquireEvent,
       options?: SquireFixtureInjectOptions,
@@ -153,7 +153,7 @@ export class SquireDevFixtures extends Context.Service<
     /**
      * Resolves once the rows `inject` wrote for `sequence` settle (delivered
      * or dropped), which is after the home run that consumed their batch
-     * ended, and then the effect worker and the reactor are drained (D1).
+     * ended, and then the effect worker and the reactor are drained.
      */
     readonly drainThrough: (sequence: number) => Effect.Effect<void, SquireDevFixturesFailure>;
     readonly timeline: (
@@ -161,12 +161,12 @@ export class SquireDevFixtures extends Context.Service<
     ) => Effect.Effect<void, SquireDevFixturesFailure>;
     /** Deletes the fixture Squire with this name; a no-op when there is none. */
     readonly reset: (name: string) => Effect.Effect<void, SquireDevFixturesFailure>;
-    /** The B2 harness option (D44d). Nothing reachable from the dev route calls it. */
+    /** The bar harness option. Nothing reachable from the dev route calls it. */
     readonly pauseLeadForHarness: Effect.Effect<void, SquireDevFixturesFailure>;
   }
 >()("lecturn/squire/SquireDevFixtures") {}
 
-// ── Fake scripts (D44e) ──
+// ── Fake scripts ──
 
 const TEMPLATE = /\{\{\s*event((?:\.[A-Za-z0-9_]+)+)\s*\}\}/g;
 const WHOLE_TEMPLATE = /^\{\{\s*event((?:\.[A-Za-z0-9_]+)+)\s*\}\}$/;
@@ -307,7 +307,7 @@ const quotedEvidence = (evidence: ThreadEvent["evidence"]) => {
   return Object.keys(quoted).length === 0 ? undefined : quoted;
 };
 
-/** The dedupe key the reactor or the trigger service would give the event (P3.3). */
+/** The dedupe key the reactor or the trigger service would give the event. */
 const otherStateKey = (event: OtherEvent): string => {
   switch (event.type) {
     case "voice-note":
@@ -335,7 +335,7 @@ const otherStateKey = (event: OtherEvent): string => {
   }
 };
 
-/** The link snapshot an event's PR claims (D44j: head, checks, review, merge state). */
+/** The link snapshot an event's PR claims: head, checks, review, merge state. */
 function fixturePullRequestSnapshot(
   pr: SquirePullRequestSnapshot,
   input: { readonly title: string; readonly headBranch?: string; readonly at: string },
@@ -439,7 +439,7 @@ const make = Effect.gen(function* () {
   const worker = yield* Effect.serviceOption(EffectWorker.OrchestrationEffectWorkerV2);
   const fakes = yield* Effect.serviceOption(SquireFakeScripts.SquireFakeScripts);
   const fixtureStave = yield* Effect.serviceOption(SquireContainers.SquireFixtureStave);
-  // D44j: injected summaries run the same post-store hooks as live ones (7.3).
+  // Injected summaries run the same post-store hooks as live ones.
   const postStore = yield* Effect.serviceOption(SquireHooks);
 
   const mainSquire = yield* Ref.make(Option.none<SquireId>());
@@ -487,7 +487,7 @@ const make = Effect.gen(function* () {
     return { instanceId: instance.instanceId, model: model.slug } satisfies ModelSelection;
   });
 
-  // ── Projects and threads (D46) ──
+  // ── Projects and threads ──
 
   const isFixtureProjectId = (projectId: ProjectId) =>
     projects
@@ -673,7 +673,7 @@ const make = Effect.gen(function* () {
       return grants;
     });
 
-  /** Config, grants, and budget usage written straight to the record, Auto included (D44j). */
+  /** Config, grants, and budget usage written straight to the record, Auto included. */
   const writeConfig = (
     squireId: SquireId,
     input: SquirePlan & {
@@ -786,7 +786,7 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  /** P3.5: usage rows only, never log rows, so seeding is never a B2 effect. */
+  /** Usage rows only, never log rows, so seeding never counts as a scenario effect. */
   const seedBudget = (
     squireId: SquireId,
     usage: NonNullable<SquireFixtureSetup["budgetUsage"]>,
@@ -1081,7 +1081,7 @@ const make = Effect.gen(function* () {
       } satisfies SquireFixtureLoaded;
     }).pipe(asFixtureError("loadSetup"));
 
-  // ── Matching orchestration state (D44j) ──
+  // ── Matching orchestration state ──
 
   const fixtureMessageId = (threadId: ThreadId, turnId: string, generation = 0) =>
     MessageId.make(
@@ -1208,7 +1208,7 @@ const make = Effect.gen(function* () {
       return run.id;
     });
 
-  /** D44b: the waiting event's question is raised for real by a scripted `askUser` run. */
+  /** The waiting event's question is raised for real by a scripted `askUser` run. */
   const waitingTurn = (
     threadId: ThreadId,
     event: Extract<ThreadEvent, { type: "waiting-on-user" }>,
@@ -1325,7 +1325,7 @@ const make = Effect.gen(function* () {
       };
     });
 
-  /** D44j: stored `complete`, no payer, immutable once there. */
+  /** Stored `complete`, no payer, immutable once there. */
   const storeSummary = (stored: SquireInjectedSummary) =>
     Effect.gen(function* () {
       const now = yield* nowIso;
@@ -1538,7 +1538,7 @@ const make = Effect.gen(function* () {
       return sequence;
     }).pipe(asFixtureError("inject"));
 
-  // ── drainThrough (D1, D45) ──
+  // ── drainThrough ──
 
   const settleAll = (head: number) =>
     Effect.gen(function* () {

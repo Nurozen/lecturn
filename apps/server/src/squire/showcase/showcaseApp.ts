@@ -16,7 +16,7 @@ import { LECTURN_MCP_APP_SERVER } from "@lecturn/shared/toolOutput";
 import type * as Effect from "effect/Effect";
 
 export const SQUIRE_SHOWCASE_TOOL = "squire_publish_showcase";
-/** Names the captured document only: the tool declares no `resourceUri` and /mcp serves none (R54). */
+/** Names the captured document only: the tool declares no `resourceUri` and /mcp serves none. */
 export const SQUIRE_SHOWCASE_RESOURCE_URI = "ui://lecturn/squire/showcase";
 export const SQUIRE_CARD_ACCEPT_TOOL = "squire_card_accept";
 export const SQUIRE_CARD_DISMISS_TOOL = "squire_card_dismiss";

@@ -54,9 +54,9 @@ export type SquireMobileReport =
   | { readonly kind: "no_transport"; readonly reason: SquireMobileTransportGap };
 
 /**
- * D27: the mobile half of Notify. A Squire's attention set is its open cards
+ * The mobile half of Notify. A Squire's attention set is its open cards
  * that carry an intent (`notification.pushed`), minus those held back by
- * presence (D52) until they escalate. The relay publishes one row per Squire
+ * desktop presence until they escalate. The relay publishes one row per Squire
  * from it and reports back; the delivery rows are written here.
  */
 export class SquireMobileAttention extends Context.Service<
@@ -95,7 +95,7 @@ const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 const truncate = (text: string) =>
   text.length <= TITLE_MAX_LENGTH ? text : `${text.slice(0, TITLE_MAX_LENGTH - 3).trimEnd()}...`;
 
-/** D50: a decision item counts on one row, the Lead's when the Lead raised it. */
+/** A decision item counts on one row, the Lead's when the Lead raised it. */
 const openDecisionCount = (
   stats: ReadonlyArray<SquireCardStatRow>,
   squire: Pick<SquireRow, "id" | "role">,
@@ -266,7 +266,7 @@ const make = Effect.gen(function* () {
               headline: count,
               modelTitle: "Squire",
               updatedAt: DateTime.formatIso(now),
-              // Clients redirect a home thread to its Squire view (D63).
+              // Clients redirect a home thread to its Squire view.
               deepLink: `/threads/${encodeURIComponent(environmentId)}/${encodeURIComponent(threadId)}`,
             };
       return Option.some<SquireRelayRow>({ squireId, threadId, state, pending, alreadyAlerted });

@@ -73,7 +73,7 @@ export function useSquireLeadOnboardingCardIds(
 }
 
 /**
- * P17.2 onboarding in the Lead's view: the full figure playing `greet` and the proposal cards.
+ * Onboarding in the Lead's view: the full figure playing `greet` and the proposal cards.
  * Renders nothing once the Lead has no onboarding proposals open.
  */
 export function SquireLeadOnboarding(props: {
@@ -106,7 +106,7 @@ export function SquireLeadOnboarding(props: {
     run,
   });
   const shownKey = phase === "proposals" ? shown.map((proposal) => proposal.card.id).join() : "";
-  // P16.5: greet when the cards first appear, on whichever figure is mounted. Child effects run
+  // Greet when the cards first appear, on whichever figure is mounted. Child effects run
   // first, so the onboarding's own figure already listens.
   useEffect(() => {
     if (shownKey === "" || !squireLeadGreets.claim(leadId, shownKey.split(","))) return;
@@ -138,7 +138,7 @@ export function SquireLeadOnboarding(props: {
     >
       {props.showFigure !== false ? <LeadFigure lead={lead} looking={phase === "looking"} /> : null}
       <div className="flex min-w-0 flex-1 flex-col gap-3">
-        {/* P17.2: the Lead says hello in its own voice; a still figure cannot show the wave. */}
+        {/* The Lead says hello in its own voice; a still figure cannot show the wave. */}
         <div className="flex items-start gap-2">
           <SquirePortrait
             environmentId={environmentId}
@@ -266,7 +266,7 @@ function ProposalCard(props: {
 }
 
 /**
- * P17.2 "Ask for more proposals": a user message to the Lead's home thread, sent the way the
+ * "Ask for more proposals": a user message to the Lead's home thread, sent the way the
  * notch quick steer sends one, so the composer's draft is left alone.
  */
 export function SquireLeadAskMore(props: {

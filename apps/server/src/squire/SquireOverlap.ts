@@ -1,12 +1,12 @@
 /**
- * The Lead's overlap risk items (P17.3, D30): deterministic server logic run
+ * The Lead's overlap risk items: deterministic server logic run
  * when a summary is stored and when a thread's PR, settle, archive, delete,
  * or branch state changes. Two tracked threads, tracked by any Squires
  * (including the same one), overlap when their open change sets share a
  * (repository identity, repo-relative path). Items are raised under the
- * Lead's name and never wake it (D29).
+ * Lead's name and never wake it.
  *
- * Owner (P17.8): `owner_squire_id` is the owning Squire of the thread the
+ * Owner: `owner_squire_id` is the owning Squire of the thread the
  * recommendation lands first; every thread's own Squire is in the payload
  * (`threads[].squireId`), which is where the intersection is taken per thread.
  *
@@ -65,7 +65,7 @@ export class SquireOverlap extends Context.Service<
   }
 >()("lecturn/squire/SquireOverlap") {}
 
-/** D30: shared lockfiles say nothing about colliding work. */
+/** Shared lockfiles say nothing about colliding work. */
 const LOCKFILES: ReadonlySet<string> = new Set([
   "package-lock.json",
   "npm-shrinkwrap.json",
@@ -93,7 +93,7 @@ const LOCKFILES: ReadonlySet<string> = new Set([
 const normalizePath = (path: string) => path.replaceAll("\\", "/").replace(/^\.\//, "");
 const isLockfile = (path: string) => LOCKFILES.has(normalizePath(path).split("/").at(-1) ?? "");
 
-/** Repository identity plus the unordered thread set (A4). */
+/** Repository identity plus the unordered thread set. */
 export const overlapDedupeKey = (identity: string, threadIds: ReadonlyArray<ThreadId>) =>
   `overlap:${identity}:${[...new Set(threadIds)].toSorted().join("|")}`;
 
@@ -134,6 +134,13 @@ const isToolCard = (card: SquireRepository.SquireCardRow) =>
 
 const BRANCH_KIND = "overlap.branch";
 const SUMMARY_WINDOW = 200;
+/**
+ * A stored summary is compared only with threads summarized this recently,
+ * at most CANDIDATE_LIMIT of them, so its cost does not grow with history. A
+ * quiet thread is compared again when either side next stores a summary.
+ */
+export const OVERLAP_ACTIVE_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+const OVERLAP_CANDIDATE_LIMIT = 100;
 
 interface PullRequestRank {
   readonly number: number;
@@ -272,7 +279,7 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       if (Option.isNone(checkpoints) || runIds.size === 0) return Option.none<Set<string>>();
-      // D44j: a fixture thread's scripted turns change nothing on disk; its summaries stand alone.
+      // A fixture thread's scripted turns change nothing on disk; its summaries stand alone.
       if (projectId !== null && (yield* isFixtureProject(projectId))) {
         return Option.none<Set<string>>();
       }
@@ -424,7 +431,7 @@ const make = Effect.gen(function* () {
               boundary = Math.max(boundary, at);
             }
           } else {
-            // Fixture threads carry their PR only in the summary (D44j).
+            // Fixture threads carry their PR only in the summary.
             const withPr = summaries.find((entry) => entry.summary.pullRequest !== null);
             const pullRequest = withPr?.summary.pullRequest;
             if (withPr !== undefined && pullRequest) {
@@ -513,7 +520,7 @@ const make = Effect.gen(function* () {
       const identitiesOf = (state: ThreadState) =>
         new Set(state.inRange.map((entry) => entry.identity));
 
-      /** Paths of the pair's dismissed (or accepted) items never re-raise (D30). */
+      /** Paths of the pair's dismissed (or accepted) items never re-raise. */
       const remembered = (key: string) =>
         new Set(
           cards
@@ -663,7 +670,7 @@ const make = Effect.gen(function* () {
       return row;
     });
 
-  /** New paths mark the item "updated" (P7.6); a shrink only rewrites it. */
+  /** New paths mark the item "updated"; a shrink only rewrites it. */
   const rewriteCard = (
     s: Session,
     card: SquireRepository.SquireCardRow,
@@ -720,7 +727,7 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * P7.8 for one open item: outdated when a thread left (merged or closed PR,
+   * Obsolescence for one open item: outdated when a thread left (merged or closed PR,
    * settled, archived, deleted, untracked) or its change boundary moved past
    * the item; otherwise a detector item follows its current shared paths and
    * outdates when none remain. An ordinary new turn changes neither.
@@ -765,7 +772,7 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<A | undefined, E | SquireOverlapError, R> =>
     Effect.gen(function* () {
       const lead = yield* repository.getLead;
-      // Only the Lead raises overlap items (P7.1); without one there is no queue to hold them.
+      // Only the Lead raises overlap items; without one there is no queue to hold them.
       if (Option.isNone(lead) || lead.value.lifecycle === "deleting") return undefined;
       return yield* body(yield* session(lead.value, storedThreadId));
     });
@@ -779,7 +786,14 @@ const make = Effect.gen(function* () {
           if (self === null) return;
           const handled = new Set<string>();
           if (self.out === null) {
-            for (const otherId of yield* repository.listSummarizedThreadIds) {
+            // Open items with quieter threads are re-checked by the reconcile below.
+            const candidates = yield* repository.listRecentlySummarizedThreadIds({
+              since: DateTime.formatIso(
+                DateTime.makeUnsafe(Date.parse(now) - OVERLAP_ACTIVE_WINDOW_MS),
+              ),
+              limit: OVERLAP_CANDIDATE_LIMIT,
+            });
+            for (const otherId of candidates) {
               if (otherId === threadId) continue;
               const other = yield* s.load(otherId);
               if (other === null || other.out !== null) continue;
@@ -815,10 +829,14 @@ const make = Effect.gen(function* () {
                   continue;
                 }
                 if (shared.length === 0) continue;
-                const generation = s.cards.filter((card) => card.dedupe_key === key).length;
-                const id = SquireCardId.make(
-                  `card:overlap:${s.lead.id}:${shortHash(key)}:${generation}`,
-                );
+                // The retention prune deletes old settled items, so a count can
+                // land on an id a kept item still holds.
+                const taken = new Set<string>(s.cards.map((card) => card.id));
+                let generation = s.cards.filter((card) => card.dedupe_key === key).length;
+                const idFor = (n: number) =>
+                  SquireCardId.make(`card:overlap:${s.lead.id}:${shortHash(key)}:${n}`);
+                while (taken.has(idFor(generation))) generation++;
+                const id = idFor(generation);
                 yield* repository.transaction(
                   Effect.gen(function* () {
                     yield* insertCard(s, {
@@ -857,7 +875,7 @@ const make = Effect.gen(function* () {
       }),
     ).pipe(lock.withPermits(1), Effect.asVoid);
 
-  // ── squire_raise_overlap (P17.7) ──
+  // ── squire_raise_overlap ──
 
   const RaiseOverlapArgs = Schema.Struct({
     threadIds: Schema.Array(ThreadId).check(Schema.isMinLength(2), Schema.isMaxLength(6)),
@@ -946,7 +964,7 @@ const make = Effect.gen(function* () {
                 { kind: "overlap", origin: "lead", dedupeKey: key, paths },
                 { cardId: id },
               );
-              // D29: the Lead's own items never wake it.
+              // The Lead's own items never wake it.
               return {
                 result: kit.ok("Raised an overlap item.", { outcome: "raised", cardId: id }),
               };

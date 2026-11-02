@@ -2,7 +2,7 @@ import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell
 
 /**
  * Lecturn: every control the thread route renders or wires (ThreadRouteScreen, ThreadHeader,
- * ThreadDetailScreen, ThreadComposer, ThreadFeed), for its `controls` allowlist (D63). Absent
+ * ThreadDetailScreen, ThreadComposer, ThreadFeed), for its `controls` allowlist. Absent
  * `controls` keeps today's screen; a set shows only what it lists. A control those files gain
  * upstream must join this list and be read where it renders, or a Squire thread shows it.
  */
@@ -143,7 +143,7 @@ export function threadRouteHeaderActions(input: {
 }
 
 /**
- * Lecturn: a Squire's home thread prompts with what it is for (D63), as the web composer does.
+ * Lecturn: a Squire's home thread prompts with what it is for, as the web composer does.
  * Null is any other thread, or a Squire the snapshot does not list yet.
  */
 export function squireComposerPlaceholder(

@@ -28,13 +28,13 @@ import { orSquireError } from "./SquireLifecycle.ts";
 import { SquireCardRow, SquireRepository } from "./SquireRepository.ts";
 import { touchUserActivity } from "./squireUserActivity.ts";
 
-/** D52: a lease reports interaction over its last 45 s; a desktop stays active this long after it. */
+/** A lease reports interaction over its last 45 s; a desktop stays active this long after it. */
 const SQUIRE_DESKTOP_INTERACTION_WINDOW_MS = 2 * 60_000;
-/** P7.10: measured from the intent, server-side. */
+/** Measured from the intent, server-side. */
 export const SQUIRE_ESCALATION_DELAY_MS = 3 * 60_000;
 
 /**
- * Phase 12's attention set leaves these out (D52). A decision card keeps
+ * The phone's attention set leaves these out. A decision card keeps
  * `escalate_at` until it escalates; opening it first keeps the card held back
  * for good. An FYI's `escalate_at` only marks it held back: FYIs never come due.
  */
@@ -51,7 +51,7 @@ export interface SquireIntent {
 }
 
 /**
- * P7.10, D52: whether a desktop is in active use, from the existing client
+ * Whether a desktop is in active use, from the existing client
  * activity leases, and the escalation of intents held back while it is.
  */
 export class SquirePresence extends Context.Service<
@@ -66,14 +66,14 @@ export class SquirePresence extends Context.Service<
     readonly holdIntent: (intent: SquireIntent) => Effect.Effect<boolean, PersistenceSqlError>;
     /** Escalates due holds, and closes the ones opened or acted on first. */
     readonly escalateDue: Effect.Effect<void, PersistenceSqlError>;
-    /** For `SquireClock`, which re-arms from `escalate_at` at startup (A9). */
+    /** For `SquireClock`, which re-arms from `escalate_at` at startup. */
     readonly nextEscalationAt: Effect.Effect<Option.Option<DateTime.Utc>, PersistenceSqlError>;
-    /** No card ids means a Squire view opened, which still counts as activity (P3.6). */
+    /** No card ids means a Squire view opened, which still counts as activity for the inactivity check. */
     readonly markOpened: (
       input: typeof SquireItemsMarkOpenedInput.Type,
     ) => Effect.Effect<typeof SquireItemsMarkOpenedResult.Type, SquireError>;
     /**
-     * D27: a desktop alerted for a card's notification intent. Writes one
+     * A desktop alerted for a card's notification intent. Writes one
      * `notification.delivery` row (`alerted`, the surface) per card and
      * surface; refuses a card that is not this Squire's or never pushed.
      */
@@ -107,7 +107,7 @@ const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const repository = yield* SquireRepository;
   // In memory on purpose: after a restart no desktop is active until a report
-  // arrives, so the phone errs toward alerting (R105).
+  // arrives, so the phone errs toward alerting.
   const lastInteraction = yield* Ref.make(new Map<string, number>());
   const lock = yield* Semaphore.make(1);
 

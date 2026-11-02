@@ -1,5 +1,5 @@
 /**
- * Lecturn: the Grok launch a Squire home or probe runs in (A5.9, D9, D48).
+ * Lecturn: the Grok launch a Squire home or probe runs in.
  *
  * `grok agent stdio` loads the user's `GROK_HOME` (config MCP servers, hooks,
  * skills, AGENTS.md, rules, memory) and, through `HOME`, Claude's, Cursor's,
@@ -14,7 +14,7 @@
  * the servers the session attached: Lecturn's alone on a home, none on a
  * probe. Grok falls back to every tool when no allowlist entry resolves
  * (checked on 1.0.70), so the profile also names each native tool in
- * `disallowedTools`. Checked live against grok 1.0.70 (S0a2).
+ * `disallowedTools`. Checked live against grok 1.0.70.
  */
 import { expandHomePath } from "@lecturn/provider-core/server/pathExpansion";
 import type { ProviderInstanceId } from "@lecturn/contracts";

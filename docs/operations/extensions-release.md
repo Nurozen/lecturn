@@ -24,7 +24,9 @@ Squire room routing (`squires`) follows the same phase-1 gate as Contextual. It 
 5. Grant-funded test payers need their own `relay_extension_admission_grants` row with `feature_id='squires'`. A Decisions grant does not admit Squires.
 6. Run the gated live check `apps/server/src/squire/SquireJevRouter.integration.test.ts` against a funded test account and compare p95 latency with the 5 s routing deadline.
 
-Squires has its own per-environment concurrency slot (`EXTENSIONS_SQUIRES_ENVIRONMENT_CONCURRENCY`); account concurrency and the per-minute limit stay shared with the other features.
+Squires has its own account and per-environment concurrency slots and its own per-minute limit (`EXTENSIONS_SQUIRES_ACCOUNT_CONCURRENCY`, `EXTENSIONS_SQUIRES_ENVIRONMENT_CONCURRENCY`, `EXTENSIONS_SQUIRES_REQUESTS_PER_MINUTE`), so Decisions and Contextual work never blocks room routing. The monthly allowance pool, spending exposure caps and the global exposure cap stay shared.
+
+Hosts declare the features they can decode in the `x-lecturn-extension-features` header. For a host without it, which is every release before Squires, the relay leaves Squires out of feature lists and allowances. It also subtracts Squires usage from the reported limit, so the per-feature totals still add up and the remaining allowance stays exact.
 
 Funding cancellation, revocation, host unlinking and account deletion remain available when new paid admission is disabled. Monitor unresolved reservations, cleanup watermarks, grant generations, rejected old reservation epochs, helper capability failures and packet omission counts without logging source excerpts. Unresolved financial evidence can intentionally prevent cleanup watermark advancement; investigate rather than deleting it.
 

@@ -21,7 +21,7 @@ export function idleComposerPlaceholder(input: {
 }
 
 /**
- * Lecturn: a Squire's home thread prompts with what it is for (D63). Null is any other thread,
+ * Lecturn: a Squire's home thread prompts with what it is for. Null is any other thread,
  * or a Squire the snapshot does not list yet.
  */
 export function squireComposerPlaceholder(

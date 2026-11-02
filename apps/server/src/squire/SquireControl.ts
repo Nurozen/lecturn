@@ -1,7 +1,7 @@
 /**
- * Lead control (P17.6): pause, resume, rescope, forward, and merge under the
- * Manage Squires class (P8). At Recommend each becomes a proposal item; at
- * Auto a hold that `SquireActions` executes after the undo window (A9), except
+ * Lead control: pause, resume, rescope, forward, and merge under the
+ * Manage Squires class. At Recommend each becomes a proposal item; at
+ * Auto a hold that `SquireActions` executes after the undo window, except
  * a rescope that widens scope, which is always a proposal. Every action logs
  * the state it replaced, so `revert` can restore it from the setup sheet.
  *
@@ -48,6 +48,7 @@ import {
 } from "./squireActionIntent.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
 import { writeLeadItemEvent } from "./squireLeadItems.ts";
+import { retireOutOfScope } from "./squireScopeCascade.ts";
 import { orSquireError } from "./SquireLifecycle.ts";
 import * as squirePolicy from "./squirePolicy.ts";
 import * as SquirePolicyLock from "./SquirePolicyLock.ts";
@@ -81,7 +82,7 @@ export class SquireControl extends Context.Service<
   {
     /**
      * Executes a held or accepted Squire-store intent. The caller holds the
-     * card's A9 owner and target locks; this takes the policy lock itself
+     * card's owner and target locks; this takes the policy lock itself
      * (except for a Squire create, whose service call takes it). Idempotent
      * on `executionKey`.
      */
@@ -113,7 +114,7 @@ class CardMoved extends Data.TaggedError("CardMoved")<{ readonly reason: string 
 
 const grantKey = (grant: Grant) => `${grant.kind}\u0000${grant.targetId}`;
 
-/** P17.6: a rescope widens when it adds a grant or removes an exclusion. */
+/** A rescope widens when it adds a grant or removes an exclusion. */
 const rescopeWidens = (current: ReadonlyArray<Grant>, next: ReadonlyArray<Grant>) => {
   const before = new Set(current.map(grantKey));
   const after = new Set(next.map(grantKey));
@@ -162,7 +163,7 @@ const decodeExecuted = Schema.decodeUnknownOption(Schema.fromJsonString(Executed
 const Reverted = Schema.Struct({ logEntryId: Schema.Number, requestId: Schema.String });
 const decodeReverted = Schema.decodeUnknownOption(Schema.fromJsonString(Reverted));
 
-// ── Tool arguments (P17.7) ──
+// ── Tool arguments ──
 
 const Reason = TrimmedNonEmptyString.check(Schema.isMaxLength(1000));
 const StatusArgs = Schema.Struct({ squireId: SquireId, reason: Reason });
@@ -235,7 +236,7 @@ const make = Effect.gen(function* () {
         ),
       );
 
-  /** P7.6: one open card per (raiser, thread, kind). */
+  /** One open card per (raiser, thread, kind). */
   const openSlotTaken = (squireId: SquireId, card: CardRow) =>
     card.target_thread_id === null
       ? Effect.succeed(false)
@@ -319,7 +320,7 @@ const make = Effect.gen(function* () {
           if (!(yield* scope.isTracked(to.value.id, card.target_thread_id))) {
             return toOpen(`${to.value.name}'s scope does not cover that item's thread`);
           }
-          // The Lead's own items stay raised by it; only their owner changes (P17.8).
+          // The Lead's own items stay raised by it; only their owner changes.
           const squireId = card.squire_id === intent.leadId ? card.squire_id : to.value.id;
           if (squireId !== card.squire_id && (yield* openSlotTaken(squireId, card))) {
             return toOpen(
@@ -381,10 +382,10 @@ const make = Effect.gen(function* () {
 
   // ── Store mutations (inside a transaction, under the policy lock) ──
 
-  /** D34, as `SquireService.setStatus` pauses. Returns the Lead to wake. */
+  /** Pauses as `SquireService.setStatus` does. Returns the Lead to wake. */
   const pauseRows = (squireId: SquireId, now: string) =>
     Effect.gen(function* () {
-      yield* repository.dropDeferredEvents(squireId);
+      yield* repository.dropQueuedEvents(squireId);
       let lead = Option.none<SquireId>();
       for (const cardId of yield* repository.openHeldCards({ squireId, updatedAt: now })) {
         const card = yield* repository.getCard(cardId);
@@ -428,8 +429,9 @@ const make = Effect.gen(function* () {
         });
       }
       yield* rules.disableOutOfScope(squireId);
+      const lead = yield* retireOutOfScope(repository, scope, { squireId, now });
       yield* repository.updateSquire({ id: squireId, patch: {}, updatedAt: now });
-      return Option.none<SquireId>();
+      return lead;
     });
 
   const moveCard = (
@@ -486,7 +488,7 @@ const make = Effect.gen(function* () {
       }
     });
 
-  /** The Lead's own Manage Squires level; `paused` is checked apart (D34). */
+  /** The Lead's own Manage Squires level; `paused` is checked apart. */
   const manageLevel = (lead: SquireRepository.SquireRow) =>
     policySquireOf(lead).permissions.manageSquires ?? "off";
 
@@ -510,7 +512,7 @@ const make = Effect.gen(function* () {
           if (lead.value.status === "paused") return toOpen("the Lead is paused");
           if (level !== "auto") return toOpen("Manage Squires is no longer Auto");
         } else if (level === "off") {
-          // The user's own accept needs only a class that is not Off (P8).
+          // The user's own accept needs only a class that is not Off.
           return toOpen("Manage Squires is Off for the Lead");
         }
         const checked = yield* check(intent);
@@ -618,7 +620,7 @@ const make = Effect.gen(function* () {
       Effect.withSpan("SquireControl.apply", { attributes: { type: intent.type } }),
     );
 
-  // ── Revert (P17.6, the setup sheet) ──
+  // ── Revert (the setup sheet) ──
 
   const refuse = (message: string) => new SquireError({ code: "invalid_request", message });
 
@@ -870,7 +872,7 @@ const make = Effect.gen(function* () {
           return yield* kit.refuse(ctx, "invalid", `Not done: ${invalid}.`);
         }
       }
-      // P17.6: only narrowing runs at Auto.
+      // Only narrowing runs at Auto.
       const held = decision.level === "auto" && !checked.widens;
       const cardId = SquireCardId.make(`card:proposal:${ctx.squire.id}:${ctx.key.slice(0, 24)}`);
       const executesAt = held ? kit.holdUntil(ctx) : null;
@@ -902,7 +904,7 @@ const make = Effect.gen(function* () {
             owner_squire_id: ctx.squire.id,
             kind: "proposal",
             status: held ? "held" : "open",
-            // No target: a control item never takes a thread's one open slot (P7.6).
+            // No target: a control item never takes a thread's one open slot.
             target_thread_id: null,
             project_id: null,
             title: checked.title,

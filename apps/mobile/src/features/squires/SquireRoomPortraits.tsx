@@ -1,10 +1,12 @@
 import type { SquireSnapshotEntry } from "@lecturn/client-runtime/state/squire";
 import type { EnvironmentId, SquireId } from "@lecturn/contracts";
-import { View } from "react-native";
+import { useRef } from "react";
+import { View, type ViewInstance } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { useSquireEntry, useSquireIndicator } from "../../state/squire";
 import { SquireIndicator } from "./SquireIndicator";
+import { useSquireInView } from "./SquireViewport";
 
 /** Member portraits overlapped, then "+N". Callers mount this under one `SquireMotionClock`. */
 export function SquireRoomPortraits(props: {
@@ -58,14 +60,23 @@ function MemberPortraitBody(props: {
 }) {
   const { squire } = props.entry;
   const indicator = useSquireIndicator(props.environmentId, props.entry);
+  // A list row passes its viewability; inside a scroll view (the room header) it measures itself.
+  const portraitRef = useRef<ViewInstance>(null);
+  const inView = useSquireInView(
+    portraitRef,
+    indicator.state === "working" && props.visible === undefined,
+  );
+  const visible = props.visible ?? inView.visible;
   return (
-    <SquireIndicator
-      state={indicator.state}
-      companion={squire.companion}
-      isLead={squire.role === "lead"}
-      size={props.size}
-      label={squire.name}
-      {...(props.visible === undefined ? {} : { visible: props.visible })}
-    />
+    <View ref={portraitRef} onLayout={inView.onLayout} collapsable={false}>
+      <SquireIndicator
+        state={indicator.state}
+        companion={squire.companion}
+        isLead={squire.role === "lead"}
+        size={props.size}
+        label={squire.name}
+        {...(visible === undefined ? {} : { visible })}
+      />
+    </View>
   );
 }

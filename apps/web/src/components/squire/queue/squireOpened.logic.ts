@@ -1,7 +1,7 @@
 import type { EnvironmentId, SquireCardId } from "@lecturn/contracts";
 
 /**
- * D52: one `squire.items.markOpened` per card per session. Opening a card cancels its phone
+ * One `squire.items.markOpened` per card per session. Opening a card cancels its phone
  * escalation, which only the first open needs; a card some surface already opened needs none.
  * A failed send releases the card so the next open retries.
  */

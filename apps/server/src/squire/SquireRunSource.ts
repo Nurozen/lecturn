@@ -126,7 +126,7 @@ function pendingRequestOf(
 
 /**
  * The actor of the run's last interrupt request. One with no recorded
- * provenance (history before A5.3 reached the item) counts as the user's.
+ * provenance (history from before interrupts recorded their actor) counts as the user's.
  */
 function interruptActorOf(items: ReadonlyArray<OrchestrationV2TurnItem>) {
   const request = items.findLast(isType("run_interrupt_request"));
@@ -142,7 +142,7 @@ export const make = Effect.gen(function* () {
 
   /**
    * Exact added/deleted kinds from the checkpoint's `name-status` diff against
-   * its parent (D16), without the paths a pull or rebase brought in. Null
+   * its parent, without the paths a pull or rebase brought in. Null
    * when the diff cannot be read; the caller then keeps the hinted kinds.
    */
   const nameStatusFiles = (

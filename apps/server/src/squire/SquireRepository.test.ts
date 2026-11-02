@@ -514,7 +514,7 @@ it.layer(Layer.provideMerge(SquireRepository.layer, SqlitePersistence.layerMemor
           );
         }
         yield* repository.insertCard(card({ id: SquireCardId.make("raised") }));
-        // Raised by the other Squire but owned by this one (P17.8).
+        // Raised by the other Squire but owned by this one.
         yield* repository.insertCard(
           card({ id: SquireCardId.make("owned"), squire_id: otherId, kind: "question" }),
         );
@@ -752,7 +752,7 @@ it.layer(Layer.provideMerge(SquireRepository.layer, SqlitePersistence.layerMemor
             created_at: "2026-10-02T00:00:00.000Z",
           }),
         );
-        // Raised by the Lead for this Squire's thread (P17.8).
+        // Raised by the Lead for this Squire's thread.
         yield* repository.insertCard(
           card({
             id: SquireCardId.make("owned"),
@@ -914,6 +914,229 @@ it.layer(Layer.provideMerge(SquireRepository.layer, SqlitePersistence.layerMemor
         // A write that changes nothing publishes nothing.
         yield* repository.setRuleStatus({ ids: [rule().id], status: "disabled" });
         assert.equal(yield* repository.changeGeneration, before + 1);
+      }),
+    );
+
+    it.effect("prunes old finished history and keeps keys, memory, and live rows", () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const repository = yield* fixture;
+        const old = "2026-08-01T00:00:00.000Z";
+        const cutoff = "2026-09-01T00:00:00.000Z";
+        // Events: finished and old go, except PR keys; unfinished never go.
+        yield* repository.insertEvent(
+          event({ state_key: "old", status: "delivered", created_at: old }),
+        );
+        yield* repository.insertEvent(
+          event({ state_key: "dropped", status: "dropped", created_at: old }),
+        );
+        yield* repository.insertEvent(
+          event({ state_key: "deferred", status: "deferred", created_at: old }),
+        );
+        yield* repository.insertEvent(event({ state_key: "recent", status: "delivered" }));
+        yield* repository.insertEvent(
+          event({
+            kind: "pull-request-changed",
+            state_key: "pr:1:sha:failed",
+            status: "delivered",
+            created_at: old,
+          }),
+        );
+        // Cards: settled and old go, except dismissals that are memory; live cards stay.
+        const settled = (id: string, overrides: Partial<SquireRepository.SquireCardRow>) =>
+          repository.insertCard(
+            card({
+              id: SquireCardId.make(id),
+              target_thread_id: ThreadId.make(id),
+              updated_at: old,
+              ...overrides,
+            }),
+          );
+        yield* settled("outdated", { status: "outdated" });
+        yield* settled("executed", { status: "executed" });
+        yield* settled("dismissed-fyi", { status: "dismissed", kind: "fyi" });
+        yield* settled("dismissed-overlap", { status: "dismissed", kind: "overlap" });
+        yield* settled("resolved-overlap", { status: "resolved", kind: "overlap" });
+        yield* settled("dismissed-finding", { status: "dismissed", finding_key: "t:checks:sha" });
+        yield* settled("open-old", { status: "open" });
+        yield* settled("settled-recently", { status: "outdated", updated_at: now });
+        // Action log: old rows go unless their card survives or they mark a branch boundary.
+        yield* repository.insertActionLog(actionLog({ kind: "x", created_at: old }));
+        yield* repository.insertActionLog(
+          actionLog({
+            kind: "card.created",
+            card_id: SquireCardId.make("outdated"),
+            created_at: old,
+          }),
+        );
+        yield* repository.insertActionLog(
+          actionLog({
+            kind: "card.created",
+            card_id: SquireCardId.make("open-old"),
+            created_at: old,
+          }),
+        );
+        for (const branch of ["a", "b", "c"]) {
+          yield* repository.insertActionLog(
+            actionLog({
+              kind: "overlap.branch",
+              thread_id: threadId,
+              data_json: branch,
+              created_at: old,
+            }),
+          );
+        }
+        yield* repository.insertActionLog(actionLog({ kind: "y" }));
+        // Budget usage and closed rooms' posts.
+        yield* repository.insertBudgetUsage(usage({ executed_at: old }));
+        yield* repository.insertBudgetUsage(usage());
+        yield* seedRoom("room-closed", []);
+        yield* seedRoom("room-open", []);
+        yield* sql`UPDATE squire_room SET status = 'closed', updated_at = ${old} WHERE id = 'room-closed'`;
+        yield* repository.insertRoomPost(
+          roomPost({ room_id: SquireRoomId.make("room-closed"), message_key: "c" }),
+        );
+        yield* repository.insertRoomPost(
+          roomPost({ room_id: SquireRoomId.make("room-open"), message_key: "o", created_at: old }),
+        );
+
+        const counts = yield* repository.pruneHistory({
+          eventsBefore: cutoff,
+          cardsBefore: cutoff,
+          actionLogBefore: cutoff,
+          budgetUsageBefore: cutoff,
+          closedRoomPostsBefore: cutoff,
+        });
+        assert.deepStrictEqual(counts, {
+          events: 2,
+          cards: 3,
+          actionLog: 3,
+          budgetUsage: 1,
+          roomPosts: 1,
+        });
+
+        const keys = yield* sql<{
+          state_key: string;
+        }>`SELECT state_key FROM squire_event ORDER BY id`;
+        assert.deepStrictEqual(
+          keys.map((row) => row.state_key),
+          ["deferred", "recent", "pr:1:sha:failed"],
+        );
+        // The kept PR key still dedupes.
+        assert.isFalse(
+          yield* repository.insertEvent(
+            event({ kind: "pull-request-changed", state_key: "pr:1:sha:failed" }),
+          ),
+        );
+        const cards = yield* sql<{ id: string }>`SELECT id FROM squire_card ORDER BY id`;
+        assert.deepStrictEqual(
+          cards.map((row) => row.id),
+          [
+            "dismissed-finding",
+            "dismissed-overlap",
+            "open-old",
+            "resolved-overlap",
+            "settled-recently",
+          ],
+        );
+        const logs = yield* sql<{ kind: string; data_json: string }>`
+          SELECT kind, data_json FROM squire_action_log ORDER BY id`;
+        assert.deepStrictEqual(logs, [
+          { kind: "card.created", data_json: "{}" },
+          { kind: "overlap.branch", data_json: "b" },
+          { kind: "overlap.branch", data_json: "c" },
+          { kind: "y", data_json: "{}" },
+        ]);
+        const posts = yield* sql<{ room_id: string }>`SELECT room_id FROM squire_room_post`;
+        assert.deepStrictEqual(posts, [{ room_id: "room-open" }]);
+      }),
+    );
+
+    it.effect("lists recently summarized threads, newest first, within a limit", () =>
+      Effect.gen(function* () {
+        const repository = yield* fixture;
+        const summary = (
+          thread: string,
+          run: string,
+          at: string,
+          status: SquireRepository.SquireSummaryRow["status"] = "complete",
+        ) =>
+          repository.insertSummary({
+            thread_id: ThreadId.make(thread),
+            run_id: RunId.make(run),
+            stage: "terminal",
+            status,
+            summary_json: "{}",
+            payer_squire_id: null,
+            created_at: at,
+            updated_at: at,
+          });
+        yield* summary("quiet", "run-1", "2026-08-01T00:00:00.000Z");
+        yield* summary("busy", "run-1", "2026-09-20T00:00:00.000Z");
+        yield* summary("busy", "run-2", "2026-09-30T00:00:00.000Z");
+        yield* summary("newer", "run-1", "2026-09-25T00:00:00.000Z");
+        yield* summary("generating", "run-1", "2026-09-29T00:00:00.000Z", "generating");
+        const since = "2026-09-01T00:00:00.000Z";
+        assert.deepStrictEqual(
+          yield* repository.listRecentlySummarizedThreadIds({ since, limit: 10 }),
+          [ThreadId.make("busy"), ThreadId.make("newer")],
+        );
+        assert.deepStrictEqual(
+          yield* repository.listRecentlySummarizedThreadIds({ since, limit: 1 }),
+          [ThreadId.make("busy")],
+        );
+        assert.equal(yield* repository.deleteThreadSummaries(ThreadId.make("busy")), 2);
+        assert.deepStrictEqual(
+          yield* repository.listRecentlySummarizedThreadIds({ since, limit: 10 }),
+          [ThreadId.make("newer")],
+        );
+      }),
+    );
+
+    it.effect("lists open rooms and rooms closed since the cutoff", () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const repository = yield* fixture;
+        yield* seedRoom("room-open", []);
+        yield* seedRoom("room-closed-recently", []);
+        yield* seedRoom("room-closed-long-ago", []);
+        yield* sql`UPDATE squire_room SET status = 'closed', updated_at = '2026-09-30T00:00:00.000Z'
+          WHERE id = 'room-closed-recently'`;
+        yield* sql`UPDATE squire_room SET status = 'closed', updated_at = '2026-08-01T00:00:00.000Z'
+          WHERE id = 'room-closed-long-ago'`;
+        const rows = yield* repository.listRoomRows({ closedSince: "2026-09-24T00:00:00.000Z" });
+        assert.deepStrictEqual(rows.map((row) => row.id).toSorted(), [
+          "room-closed-recently",
+          "room-open",
+        ]);
+      }),
+    );
+
+    it.effect("plans queue and overlap reads on their indexes", () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* fixture;
+        const plan = (query: string) =>
+          sql
+            .unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${query}`)
+            .pipe(Effect.map((rows) => rows.map((row) => row.detail).join("; ")));
+        // The literal term the repository adds lets SQLite use the partial index.
+        // Bound like the repository's own query, so the plan sees parameters.
+        const bound = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+          SELECT * FROM squire_card WHERE status IN ('open', 'held')
+            AND status IN ${sql.in(["open"])} ORDER BY created_at`;
+        assert.include(bound.map((row) => row.detail).join("; "), "squire_card_live");
+        assert.include(
+          yield* plan(
+            "SELECT id FROM squire_card WHERE status IN ('open', 'held') AND status = 'held' AND (squire_id = 'a' OR owner_squire_id = 'a')",
+          ),
+          "squire_card_live",
+        );
+        const recent = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+          SELECT thread_id FROM squire_summary
+          WHERE updated_at >= ${now} AND status != 'generating'
+          GROUP BY +thread_id ORDER BY max(updated_at) DESC, thread_id LIMIT ${10}`;
+        assert.include(recent.map((row) => row.detail).join("; "), "squire_summary_recent");
       }),
     );
   },

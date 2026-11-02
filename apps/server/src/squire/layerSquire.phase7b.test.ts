@@ -1,5 +1,5 @@
 /**
- * Phase 7b assembly of the real switch-on `layerSquire`: the messaging and
+ * Rooms assembly of the real switch-on `layerSquire`: the messaging and
  * room tools are listed from the shared registry, the room RPC seam
  * delegates instead of refusing `not_available`, and a room post routes
  * through to the recipient's home thread.
@@ -15,7 +15,7 @@ import { SQUIRE_TOOL_NAMES } from "./squireToolNames.ts";
 import * as SquireTools from "./SquireTools.ts";
 import { deliver, invoiceThread, need, withRoomCast } from "./testkit/roomHarness.ts";
 
-describe("layerSquire with Phase 7b", () => {
+describe("layerSquire with rooms", () => {
   it.effect("serves the full record with its brief and every instance's support", () =>
     withRoomCast((cast) =>
       Effect.gen(function* () {

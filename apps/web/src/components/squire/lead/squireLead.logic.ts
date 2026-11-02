@@ -20,7 +20,7 @@ export type SquireProposalPayload = Extract<
   { readonly type: "squire-proposal" }
 >;
 
-/** The request the Lead view's "Ask for more proposals" sends to the Lead (P17.2). */
+/** The request the Lead view's "Ask for more proposals" sends to the Lead. */
 export const SQUIRE_LEAD_MORE_PROPOSALS_TEXT =
   "Propose more Squires for projects you have not covered yet.";
 
@@ -46,7 +46,7 @@ export function squireRowsOutsideOnboarding<Row extends Pick<SquireCardRow, "id"
 }
 
 /**
- * P16.5: the Lead greets when its proposal cards first appear, once per onboarding. An
+ * The Lead greets when its proposal cards first appear, once per onboarding. An
  * onboarding is known by its first proposal set: a set sharing a card with one already greeted
  * is the same onboarding after an accept or skip, while a set with no card in common (more
  * proposals after the first were all settled) is a new one. Per page session, like gestures.
@@ -122,7 +122,7 @@ export function createSquireLeadOnboardingRuns() {
 export type SquireLeadOnboardingPhase = "proposals" | "looking" | "hidden";
 
 /**
- * P17.2: proposal cards while the Lead has open Squire proposals; "looking" before the first
+ * Proposal cards while the Lead has open Squire proposals; "looking" before the first
  * open is recorded or while the queued onboarding turn has yet to end; otherwise nothing.
  * A Lead that cannot run (no provider, paused) never looks.
  */
@@ -141,7 +141,7 @@ export function squireLeadOnboardingPhase(input: {
 const SQUIRE_LEAD_DEFAULT_NAME = "Lead";
 
 /**
- * P17.2 "Lead greets": the line the Lead says at the top of its onboarding panel, in its own
+ * The line the Lead says at the top of its onboarding panel, in its own
  * voice and under its own name when the user renamed it.
  */
 export function squireLeadGreeting(
@@ -162,7 +162,7 @@ export function squireLeadGreeting(
 /**
  * What a proposal card's portrait draws: the proposed companion as one still bust (hood,
  * palette, and held equipment, or the emblem's frame), never its own motion level. Face crops
- * of one rig read alike at card size (CP10), and a live figure per card would contend for the
+ * of one rig read alike at card size, and a live figure per card would contend for the
  * single animation lease; a still companion neither animates nor claims it.
  */
 export function squireProposalPortrait(
@@ -177,7 +177,7 @@ type SquireCountEntry = {
 };
 
 /**
- * The Lead's sidebar badge counts only what the Lead raised (D50), while its header counts the
+ * The Lead's sidebar badge counts only what the Lead raised, while its header counts the
  * whole team, so the badge says where its items and the rest come from: "1 raised by Lead · 2
  * by your Squires", naming the Squire when only one has items.
  */

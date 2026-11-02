@@ -15,6 +15,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -27,6 +28,7 @@ import { createThread, grantRow, orchestratorLayer, squireRow } from "./testkit/
 
 const nowIso = "2026-11-01T12:00:00.000Z";
 const nowMs = Date.parse(nowIso);
+const DAY_MS = 24 * 60 * 60 * 1000;
 const at = (offsetMs: number) => DateTime.formatIso(DateTime.makeUnsafe(nowMs + offsetMs));
 
 type KnownEvent = Extract<SquireSubscribeEvent, { readonly type: string }>;
@@ -158,6 +160,35 @@ const revisionsOf = (id: SquireId) =>
   );
 
 describe("SquireReadModel", () => {
+  it.effect("carries open rooms and rooms closed in the last week, not older ones", () =>
+    withReadModel(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const room = (id: string, status: "open" | "closed", updatedAt: string) =>
+          sql`INSERT INTO squire_room ${sql.insert({
+            id,
+            topic: id,
+            about_json: "[]",
+            status,
+            bot_messaging: "on",
+            idle_ttl_seconds: 3600,
+            creator_kind: "user",
+            last_post_at: updatedAt,
+            created_at: at(-30 * DAY_MS),
+            updated_at: updatedAt,
+          })}`;
+        yield* room("room:open-quiet", "open", at(-30 * DAY_MS));
+        yield* room("room:closed-yesterday", "closed", at(-DAY_MS));
+        yield* room("room:closed-eight-days-ago", "closed", at(-8 * DAY_MS));
+        const env = yield* snapshot;
+        assert.deepStrictEqual(env.rooms.map((row) => row.id).toSorted(), [
+          "room:closed-yesterday",
+          "room:open-quiet",
+        ]);
+      }),
+    ),
+  );
+
   it.effect("reports a compact snapshot per Squire", () =>
     withReadModel(
       Effect.gen(function* () {
@@ -191,7 +222,7 @@ describe("SquireReadModel", () => {
         assert.deepStrictEqual(env.rooms, []);
         const entry = yield* entryOf(release);
         assert.strictEqual(entry.squire.name, "release");
-        // R37: the brief is fetched on demand, so a 4 KB brief adds nothing to the stream.
+        // The brief is fetched on demand, so a 4 KB brief adds nothing to the stream.
         assert.notProperty(entry.squire, "brief");
         const wire = JSON.stringify(yield* encodeSnapshot(entry));
         assert.isBelow(wire.length, 1_600);
@@ -344,7 +375,7 @@ describe("SquireReadModel", () => {
           // Holds are their own group in the view and never in the badge, but the view lists both.
           assert.strictEqual(releaseEntry.held.length, 2);
 
-          // D50: the Lead's badge keeps only what the Lead raised, holds apart.
+          // The Lead's badge keeps only what the Lead raised, holds apart.
           const leadEntry = yield* entryOf(lead);
           assert.strictEqual(leadEntry.openDecisionCount, 1);
           assert.strictEqual(leadEntry.held.length, 1);
@@ -402,7 +433,7 @@ describe("SquireReadModel", () => {
     ),
   );
 
-  it("maps log rows to P16.3 gestures", () => {
+  it("maps log rows to gestures", () => {
     const gesture = SquireReadModel.squireActivityGesture;
     const row = (kind: string, data: Record<string, unknown> = {}) => ({
       kind,
@@ -641,7 +672,7 @@ describe("SquireReadModel", () => {
           ],
         );
 
-        // D50: the Lead's badge counts only what the Lead raised. Release's view lists the
+        // The Lead's badge counts only what the Lead raised. Release's view lists the
         // Lead's overlap on its thread under "Needs a decision", so its badge counts it too and
         // says so, letting a team total count it once.
         assert.strictEqual((yield* entryOf(lead)).openDecisionCount, 1);

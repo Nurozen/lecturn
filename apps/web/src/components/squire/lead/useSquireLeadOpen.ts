@@ -18,8 +18,8 @@ export function useSquireLeadOnboardingRun(
 }
 
 /**
- * P17.2: `squire.lead.open` once per Lead view open. The server queues onboarding on the first
- * open and records the client's zone (D31); a queued onboarding shows the "looking" state.
+ * `squire.lead.open` once per Lead view open. The server queues onboarding on the first
+ * open and records the client's time zone for the digest; a queued onboarding shows the "looking" state.
  */
 export function useSquireLeadOpen(environmentId: EnvironmentId, enabled: boolean) {
   const allowed = useAtomValue(squireEnvironment.leadOpen.permissionAtom(environmentId));

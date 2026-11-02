@@ -1,6 +1,6 @@
 /**
  * Hooks that let feature layers follow stored summaries and thread changes
- * without the summary writers or the reactor depending on them (7.3). The
+ * without the summary writers or the reactor depending on them. The
  * writers read the registry with `Effect.serviceOption` when they are built,
  * and features register into it when they are built, so layer order does
  * not matter as long as one registry instance sits below both.
@@ -15,7 +15,7 @@ import * as Layer from "effect/Layer";
 
 import type { SquireSummaryStage } from "./SquireSummaries.ts";
 
-/** A summary just stored, live (`SquireSummaries`) or injected (`SquireDevFixtures`, D44j). */
+/** A summary just stored, live (`SquireSummaries`) or injected (`SquireDevFixtures`). */
 export interface SquireStoredSummaryHookInput {
   readonly threadId: ThreadId;
   readonly runId: RunId;

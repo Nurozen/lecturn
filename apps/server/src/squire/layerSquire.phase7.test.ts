@@ -1,5 +1,5 @@
 /**
- * Phase 7 assembly of the real switch-on `layerSquire` (through
+ * Lead assembly of the real switch-on `layerSquire` (through
  * phase4Harness): the feature layers register their Lead tools into the one
  * registry SquireTools reads, the sweep is visible to the tools, and the
  * Lead RPC seam delegates instead of refusing `not_available`.

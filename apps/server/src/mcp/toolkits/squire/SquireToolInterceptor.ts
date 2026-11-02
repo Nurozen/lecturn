@@ -106,7 +106,7 @@ export const make = Effect.gen(function* () {
         ...("structuredContent" in result && result.structuredContent !== undefined
           ? { structuredContent: result.structuredContent }
           : {}),
-        // Lecturn: MCP Apps result `_meta` (the showcase card, D32).
+        // Lecturn: MCP Apps result `_meta` (the showcase card).
         ...("_meta" in result && result._meta !== undefined ? { _meta: result._meta } : {}),
       });
     });

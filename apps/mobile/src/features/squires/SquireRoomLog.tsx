@@ -15,8 +15,8 @@ import type {
   SquireRoomPost,
   SquireRoomPostId,
 } from "@lecturn/contracts";
-import { useState } from "react";
-import { Pressable, View } from "react-native";
+import { useRef, useState } from "react";
+import { Pressable, View, type ViewInstance } from "react-native";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
@@ -26,6 +26,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { squireEnvironment, useSquireIndicator } from "../../state/squire";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { SquireIndicator } from "./SquireIndicator";
+import { useSquireInView } from "./SquireViewport";
 import { squireRoomPostTime } from "./squireRooms.logic";
 
 const AUTHOR_SIZE = 28;
@@ -189,18 +190,23 @@ function AuthorPortrait(props: {
   readonly label: string;
 }) {
   const indicator = useSquireIndicator(props.environmentId, props.entry);
+  const portraitRef = useRef<ViewInstance>(null);
+  const inView = useSquireInView(portraitRef, indicator.state === "working");
   return (
-    <SquireIndicator
-      state={indicator.state}
-      companion={props.entry.squire.companion}
-      isLead={props.entry.squire.role === "lead"}
-      size={AUTHOR_SIZE}
-      label={props.label}
-    />
+    <View ref={portraitRef} onLayout={inView.onLayout} collapsable={false}>
+      <SquireIndicator
+        state={indicator.state}
+        companion={props.entry.squire.companion}
+        isLead={props.entry.squire.role === "lead"}
+        size={AUTHOR_SIZE}
+        label={props.label}
+        visible={inView.visible}
+      />
+    </View>
   );
 }
 
-/** P19.7: one line, "Release → Research: ...", expandable. */
+/** A handoff as one line, "Release → Research: ...", expandable. */
 function HandoffRow(props: {
   readonly context: SquireRoomLogContext;
   readonly row: Extract<SquireRoomLogRow, { kind: "handoff" }>;

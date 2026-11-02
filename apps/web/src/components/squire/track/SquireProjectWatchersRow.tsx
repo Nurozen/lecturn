@@ -12,7 +12,7 @@ import { useSquireTrack } from "./useSquireTrack";
 
 /**
  * "Squires watching this project" in project settings, the project entry point in flat mode,
- * which has no project rows to open a menu on (D39).
+ * which has no project rows to open a menu on.
  */
 export function SquireProjectWatchersRow(props: {
   readonly environmentId: EnvironmentId;

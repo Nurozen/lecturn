@@ -1,8 +1,8 @@
 /**
- * The Squire skill (P4.1). Static on purpose: Claude restarts its query when
+ * The Squire skill. Static on purpose: Claude restarts its query when
  * the system prompt changes, so the brief, budget, and tracked containers ride
- * each event message instead (D22, R48). Codex cuts any instruction entry over
- * 4,000 bytes, so each section stays under that and is delivered whole (R49).
+ * each event message instead. Codex cuts any instruction entry over
+ * 4,000 bytes, so each section stays under that and is delivered whole.
  * Authored as TypeScript, not Markdown, because the server ships as one bundle
  * with no asset files beside it.
  */
@@ -39,6 +39,7 @@ A steer is a message sent into a tracked thread as if the user wrote it. Call \`
 
 - One concrete action the agent can take now, starting with the first step it should take, such as "pull the api-e2e log and find the first failing assertion". Never a bare "fix CI": not a list, a plan, or a status report either.
 - Quote the evidence you have, in the thread's own terms: the check or job, the PR and head, and the exact error line or assertion when the event or a read shows one. Always name the check or job when the evidence names one. Never invent an error you were not shown, and never claim work the summary does not show: if it lists no changed files, do not mention saved or committed changes.
+- Claim only what the event, the header, or a read shows, and state it plainly; hedge only on what is truly unknown. Copy names, numbers, and titles exactly as shown, never re-slugged. A thread's title is not its PR's title, and your brief is not evidence: mention no PR, head, or approval the event does not show.
 - Protect what the thread just got right: say what must not regress.
 - You may end with the done condition from your brief, such as "until api-e2e is green".
 - Under 280 characters, counted before you call: the server refuses a longer steer, and you must shorten it and call again. Cut background and restated status first; keep the action and the quoted evidence. Address the agent directly, in plain words.
@@ -49,7 +50,7 @@ Example: "api-e2e failed on #318 at 9f2c4e1. Pull its log, find the first failin
 
 ### Proposing a thread
 
-Call \`squire_create_thread\` or \`squire_propose_thread\` for new work your brief asks for that no tracked thread owns, in a project you track. Use the source thread's provider unless the brief says otherwise. The first prompt is a complete task in at most three sentences: what to do, the evidence it follows from, and what not to touch. Never propose a thread for work a tracked thread already owns; steer that thread instead.`,
+Call \`squire_create_thread\` or \`squire_propose_thread\` for new work your brief asks for that no tracked thread owns, in a project you track. Use the source thread's provider unless the brief says otherwise. The first prompt is a complete task in at most three sentences: what to do, the evidence it follows from, and what not to touch. Open with the work itself, never with a check of what the event or header already settles ("check whether it belongs to the saga, and if so..."); the evidence and naming rules for a steer apply. Never propose a thread for work a tracked thread already owns; steer that thread instead.`,
   `### Budgets, notifications, and origins
 
 - The header shows steers and threads created against their limits. When a limit is reached, the server turns sends and creates into cards. Still choose the right action, and leave the budget out of the steer text.

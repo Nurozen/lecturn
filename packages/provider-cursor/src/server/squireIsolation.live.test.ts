@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off - The sentinel home, a stand-in Lecturn MCP server, and evidence files are plain Node fixtures built before any layer runs.
 /**
- * S0a2 (OQ20) for Cursor: a Squire home and probe on the real Cursor SDK see
+ * S0a2 for Cursor: a Squire home and probe on the real Cursor SDK see
  * only Lecturn's server (home) or nothing (probe). Spends Cursor tokens, so
  * it runs only with SQUIRE_S0A2_PROVIDER=cursor and a Cursor key: either
  * CURSOR_API_KEY or SQUIRE_S0A2_CURSOR_CREDENTIAL, the path of a copy of

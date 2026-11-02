@@ -20,7 +20,7 @@ type PullRequest = NonNullable<SquireTurnSummary["pullRequest"]>;
 type Mergeable = PullRequest["mergeable"];
 
 /**
- * The D1 outcome map, first match wins. Null means the run produces no event:
+ * The run outcome map, first match wins. Null means the run produces no event:
  * it is still going, or the user stopped it. A null `interruptedBy` on an
  * interrupted run means no interrupt request (crash, reconcile), so it counts
  * as a non-user stop.
@@ -64,7 +64,7 @@ export function squireMergeableFromSnapshot(
   return null;
 }
 
-/** Per-event fields stored on the `squire_event` row, merged over the run-level summary (D18). */
+/** Per-event fields stored on the `squire_event` row, merged over the run-level summary. */
 export interface SquireSummaryOverlay {
   readonly outcome?: SquireTurnOutcome;
   readonly pendingQuestion?: string | null;
@@ -86,7 +86,7 @@ export function mergeSquireSummaryOverlay(
 
 export interface RenderSquireTurnSummaryOptions {
   readonly overlay?: SquireSummaryOverlay;
-  /** Set in multi-repo spaces: shown paths are prefixed with it; stored paths stay repo-relative (D19). */
+  /** Set in multi-repo spaces: shown paths are prefixed with it; stored paths stay repo-relative. */
   readonly repoLabel?: string;
   readonly maxChars?: number;
 }
@@ -196,7 +196,7 @@ function pullRequestLines(pr: PullRequest, failingJobs: number): Array<string> {
  * The one rendering of a turn summary, used for the event message and for
  * the cap. Length is the UTF-16 `.length` of the whole text, header included.
  * Over the cap it trims model text first, then elides trailing files,
- * commands, and failing jobs as "+N more" (D17). A shown path or command is
+ * commands, and failing jobs as "+N more". A shown path or command is
  * never edited; the stored summary is never changed.
  */
 export function renderSquireTurnSummary(
@@ -296,7 +296,7 @@ export interface SquireBatchThreadEvent {
   readonly evidence?: SquireBatchEvidence;
   readonly repoLabel?: string;
   readonly waitingMinutes?: number;
-  /** The thread watches its own PR, so it reacts to checks and conflicts itself (R56). */
+  /** The thread watches its own PR, so it reacts to checks and conflicts itself. */
   readonly threadSelfWatching?: boolean;
 }
 
@@ -329,19 +329,19 @@ export interface SquireBudgetLine {
 export interface SquireEventBatchInput {
   readonly brief: string;
   readonly origin: SquireTurnOrigin;
-  /** Rolling 24 h usage against the daily budgets (P9). */
+  /** Rolling 24 h usage against the daily budgets. */
   readonly budget: {
     readonly steers: SquireBudgetLine;
     readonly threads: SquireBudgetLine;
     readonly messages: SquireBudgetLine;
   };
-  /** Scope grants with display names: project, Stave space, saga, thread, exclusion (D23). */
+  /** Scope grants with display names: project, Stave space, saga, thread, exclusion. */
   readonly tracked: ReadonlyArray<{ readonly kind: SquireGrantKind; readonly name: string }>;
   /** Delivery order. */
   readonly events: ReadonlyArray<SquireBatchEvent>;
   /** Squire id to name, for message senders and proposers. */
   readonly squireNames?: Readonly<Record<string, string>>;
-  /** Unseen posts of the Squire's rooms that did not wake it (P19.2). */
+  /** Unseen posts of the Squire's rooms that did not wake it. */
   readonly roomContext?: ReadonlyArray<SquireBatchRoomContext>;
   readonly maxChars?: number;
 }
@@ -525,7 +525,7 @@ const digestSection = (label: string, lines: ReadonlyArray<SquireDigestLine>) =>
         ),
       ];
 
-/** P11: the digest input per Squire, then the sweep's acceptance rate. */
+/** The digest input per Squire, then the sweep's acceptance rate. */
 function renderDigestDue(event: { readonly date: string; readonly digest?: SquireDigestInput }) {
   const digest = event.digest;
   if (!digest) return `Digest due for ${event.date}`;
@@ -608,7 +608,7 @@ function renderOtherEvent(
           ...(event.postId === undefined ? [] : [`post #${event.postId}`]),
           `hop ${event.hop}`,
           ...(event.replyTo ? [`reply to ${event.replyTo}`] : []),
-          // The key the recipient passes as `replyTo` (P19.1).
+          // The key the recipient passes as `replyTo`.
           `key ${event.messageKey}`,
         ].join(" · ") + ":",
         event.body,
@@ -644,10 +644,9 @@ function failingCheckLines(checks: ReadonlyArray<SquireBatchFailingCheck> | unde
 }
 
 /**
- * The one structured message a delivered batch becomes (P3.4, P5.4): the
- * Squire's brief, budget state, and tracked containers ride every batch
- * (D22, D23), then each event. Events for one thread collapse to the latest
- * with a count (P3.3).
+ * The one structured message a delivered batch becomes: the Squire's brief,
+ * budget state, and tracked containers ride every batch, then each event.
+ * Events for one thread collapse to the latest with a count.
  */
 export function renderSquireEventBatch(input: SquireEventBatchInput): string {
   return renderSquireEventBatchShown(input).text;

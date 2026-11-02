@@ -1,6 +1,6 @@
 /**
- * Squire raw HTTP routes: the dev fixture route (8.2, D44f/g), the action-log
- * export (P14), and the webhook trigger route (8.7, D57). Each resolves its
+ * Squire raw HTTP routes: the dev fixture route, the action-log export, and
+ * the webhook trigger route. Each resolves its
  * service once at build time, because the Squire services exist only with
  * the switch on (and the fixture seam only with test providers on).
  */
@@ -98,7 +98,7 @@ const fixtureFailure = (
 ): HttpServerResponse.HttpServerResponse =>
   json(422, { error: error._tag, message: error.message });
 
-// Absent, so a 404, unless SquireDevFixtures is provided (switch on and LECTURN_TEST_PROVIDERS=1, D44g).
+// Absent, so a 404, unless SquireDevFixtures is provided (switch on and LECTURN_TEST_PROVIDERS=1).
 const layerDevFixtureRoute = Layer.unwrap(
   Effect.map(Effect.serviceOption(SquireDevFixtures.SquireDevFixtures), (fixtures) =>
     Option.match(fixtures, {
@@ -194,7 +194,7 @@ class SquireWebhookBodyTooLarge extends Schema.TaggedError<SquireWebhookBodyTooL
 
 /**
  * Outside session auth, like the scheduled-task webhook: the per-trigger
- * secret is the only gate (D57). Always registered, so with the switch off
+ * secret is the only gate. Always registered, so with the switch off
  * it answers 404 instead of falling through to the static route.
  */
 const layerWebhookRoute = Layer.unwrap(

@@ -98,7 +98,7 @@ export const SquireTopbar = memo(function SquireTopbar(props: {
   readonly environmentId: EnvironmentId;
   readonly squireId: SquireId;
   readonly name: string;
-  /** Offered only at widths where the inbox fits (D38); otherwise shown disabled, never hidden. */
+  /** Offered only at widths where the inbox fits; otherwise shown disabled, never hidden. */
   readonly inbox: {
     readonly offered: boolean;
     readonly open: boolean;
@@ -150,7 +150,7 @@ export const SquireTopbar = memo(function SquireTopbar(props: {
   );
 });
 
-/** P1.2 header: portrait, name, state line, watch scope; the Lead adds its team strip. */
+/** Portrait, name, state line, watch scope; the Lead adds its team strip. */
 export const SquireHeader = memo(function SquireHeader(props: {
   readonly environmentId: EnvironmentId;
   readonly entry: SquireSnapshotEntry;

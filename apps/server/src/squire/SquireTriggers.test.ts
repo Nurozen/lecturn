@@ -543,6 +543,31 @@ describe("SquireTriggers webhooks", () => {
       ),
   );
 
+  it.effect("a pause committed while the body uploads wins over the admission", () =>
+    withTriggers(
+      Effect.gen(function* () {
+        yield* seed();
+        const triggers = yield* SquireTriggers.SquireTriggers;
+        const repository = yield* SquireRepository.SquireRepository;
+        const { trigger, secret } = yield* webhook();
+        const pausedWhileUploading = triggers
+          .update({ requestId: "pause", triggerId: trigger.id, status: "paused" })
+          .pipe(Effect.as(body()), Effect.orDie);
+        assert.equal(yield* receive(trigger.id, bearer(secret), pausedWhileUploading), "not_found");
+
+        yield* triggers.update({ requestId: "resume", triggerId: trigger.id, status: "active" });
+        const squirePausedWhileUploading = repository
+          .updateSquire({ id: release, patch: { status: "paused" }, updatedAt: START })
+          .pipe(Effect.as(body()), Effect.orDie);
+        assert.equal(
+          yield* receive(trigger.id, bearer(secret), squirePausedWhileUploading),
+          "not_found",
+        );
+        assert.lengthOf(yield* events, 0);
+      }),
+    ),
+  );
+
   it.effect("rotate invalidates the old secret, and no secret reaches a Squire table", () =>
     withTriggers(
       Effect.gen(function* () {
@@ -745,7 +770,7 @@ describe("SquireTriggers inactivity pause", () => {
         yield* advance(2 * DAY);
         yield* checkInactivity;
         assert.lengthOf(yield* inactivityCards, 1);
-        // Notify Off: the item is there, nothing is pushed (D27).
+        // Notify Off: the item is there, nothing is pushed.
         assert.lengthOf(yield* logKinds("notification.pushed"), 0);
 
         yield* advance(HOUR);

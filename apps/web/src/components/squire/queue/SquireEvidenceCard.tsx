@@ -114,7 +114,7 @@ interface SquireEvidenceProps {
 }
 
 /**
- * P7.3 evidence, below the row it expands from. Its detail loads only while it is shown (R37);
+ * The evidence, below the row it expands from. Its detail loads only while it is shown;
  * a question card reads the thread's request from the card payload and never subscribes to the
  * thread's detail.
  */
@@ -193,7 +193,7 @@ function SquireCardBody(props: {
   const question = payload === null ? null : squireQuestionMode(payload);
   const questionRecommendation =
     payload === null ? null : squireQuestionRecommendation(payload, card.title);
-  // Kept across server updates, so a newer recommendation never overwrites an edit (P7.6).
+  // Kept across server updates, so a newer recommendation never overwrites an edit.
   const [draft, setDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -631,7 +631,7 @@ function SquireCardEvidence(props: { readonly card: SquireCard }) {
 function SquireWhy(props: {
   readonly environmentId: EnvironmentId;
   readonly card: SquireCard;
-  /** P7.3: a question always says why it is here, at least how long it has waited. */
+  /** A question always says why it is here, at least how long it has waited. */
   readonly waitingFallback: boolean;
 }) {
   const { card } = props;
@@ -671,7 +671,7 @@ function SquireWaitingWhy(props: {
 
 type OverlapPayload = Extract<SquireKnownPayload, { readonly type: "overlap" }>;
 
-/** P17.3: both threads with their owners, the shared files, and the order to land them. */
+/** Both threads with their owners, the shared files, and the order to land them. */
 function SquireOverlapEvidence(props: {
   readonly environmentId: EnvironmentId;
   readonly payload: OverlapPayload;
@@ -781,7 +781,7 @@ function SquireOverlapThread(props: {
   );
 }
 
-/** P7.5's entry, in the card's action row beside its other ways into the thread. */
+/** "Ask about this", in the card's action row beside its other ways into the thread. */
 function SquireAskButton(props: {
   readonly environmentId: EnvironmentId;
   readonly card: SquireCard;
@@ -802,7 +802,7 @@ function SquireAskButton(props: {
   );
 }
 
-/** P7.5: the last answer, and while open the question form, below the action row. */
+/** "Ask about this": the last answer, and while open the question form, below the action row. */
 function SquireAsk(props: {
   readonly environmentId: EnvironmentId;
   readonly card: SquireCard;

@@ -55,6 +55,8 @@ export default Effect.gen(function* () {
     created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
     PRIMARY KEY(thread_id, run_id, stage)
   )`;
+  // The overlap detector compares only recently summarized threads.
+  yield* sql`CREATE INDEX IF NOT EXISTS squire_summary_recent ON squire_summary(updated_at)`;
 
   yield* sql`CREATE TABLE IF NOT EXISTS squire_card (
     id TEXT PRIMARY KEY, squire_id TEXT NOT NULL, owner_squire_id TEXT NOT NULL,
@@ -67,12 +69,17 @@ export default Effect.gen(function* () {
     replaced_count INTEGER NOT NULL DEFAULT 0, ask_json TEXT, resolution TEXT,
     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
   )`;
-  // Holds are not open, so they never block a card (P7.6).
+  // Holds are not open, so they never block a card.
   yield* sql`CREATE UNIQUE INDEX IF NOT EXISTS squire_card_one_open
     ON squire_card(squire_id, target_thread_id, kind) WHERE status = 'open'`;
   yield* sql`CREATE UNIQUE INDEX IF NOT EXISTS squire_card_open_dedupe
     ON squire_card(kind, dedupe_key) WHERE status = 'open'`;
   yield* sql`CREATE INDEX IF NOT EXISTS squire_card_target ON squire_card(target_thread_id)`;
+  // Queue scans read open and held cards, a small slice once settled cards pile up.
+  // SQLite uses a partial index only when the query repeats this WHERE term
+  // literally, so SquireRepository adds it (SQUIRE_CARD_LIVE).
+  yield* sql`CREATE INDEX IF NOT EXISTS squire_card_live
+    ON squire_card(status, created_at) WHERE status IN ('open', 'held')`;
 
   yield* sql`CREATE TABLE IF NOT EXISTS squire_budget_usage (
     id INTEGER PRIMARY KEY, squire_id TEXT NOT NULL, thread_id TEXT, kind TEXT NOT NULL,

@@ -352,7 +352,7 @@ import {
   ServerSettingsError,
   ServerSettingsPatch,
 } from "./settings.ts";
-// Lecturn: Squire RPCs (A6).
+// Lecturn: Squire RPCs.
 import {
   SquireActionLogListInput,
   SquireActionLogListResult,
@@ -661,7 +661,7 @@ export const WS_METHODS = {
   staveRunOperation: "stave.runOperation",
   staveObserveOperation: "stave.observeOperation",
 
-  // Lecturn: Squire methods (A6)
+  // Lecturn: Squire methods
   squireSubscribe: "squire.subscribe",
   squireItemsList: "squire.items.list",
   squireItemGet: "squire.item.get",
@@ -1252,7 +1252,7 @@ const WsStaveObserveOperationRpc = Rpc.make(WS_METHODS.staveObserveOperation, {
   stream: true,
 });
 
-// Lecturn: Squire RPCs (A6). Every method fails `disabled_by_server` while
+// Lecturn: Squire RPCs. Every method fails `disabled_by_server` while
 // `LECTURN_SQUIRE` is off.
 const SquireRpcError = Schema.Union([SquireError, EnvironmentAuthorizationError]);
 

@@ -1,5 +1,5 @@
 /**
- * Squire role tools (5.2, 5.9) on the server's switch-on Squire layer over a
+ * Squire role tools on the server's switch-on Squire layer over a
  * real orchestrator. A tool call's run is the home thread's active run, so
  * each test starts one with the origin it needs.
  */
@@ -28,6 +28,7 @@ import * as TestClock from "effect/testing/TestClock";
 import * as EffectWorker from "../orchestration-v2/EffectWorker.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { withSquireDispatchOrigin } from "./SquireDispatchOrigin.ts";
+import { SquireEventPayloadJson } from "./squireEvents.ts";
 import { squireCardRowFields } from "./SquireItems.ts";
 import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireService from "./SquireService.ts";
@@ -133,7 +134,7 @@ const homeRun = (homeThreadId: ThreadId, origin: string, batchId?: string) =>
     );
   });
 
-/** Loads permissions straight to the record, as `loadSetup` does (D44j). */
+/** Loads permissions straight to the record, as `loadSetup` does. */
 const setPermissions = (
   squireId: SquireId,
   permissions: { steer?: string; createThread?: string; notify?: string },
@@ -187,6 +188,7 @@ const decisionOf = (log: ReadonlyArray<{ readonly kind: string; readonly data: a
   log.findLast((row) => row.kind === "decision.recorded")?.data;
 
 const encodeEvent = Schema.encodeSync(Schema.fromJsonString(SquireEvent));
+const encodeEventPayload = Schema.encodeSync(SquireEventPayloadJson);
 
 const cardsOf = (squireId: SquireId) =>
   Effect.flatMap(SquireRepository.SquireRepository, (repository) =>
@@ -199,7 +201,7 @@ const steerArgs = {
   steer: "Start from the remaining two formatters and keep each change small.",
 };
 
-describe("SquireTools (5.2, 5.9)", () => {
+describe("SquireTools", () => {
   it("decodes a steer without steerKind as other", () => {
     const decoded = decodeSteerArgs(steerArgs);
     assert.strictEqual(decoded.steerKind, "other");
@@ -271,7 +273,7 @@ describe("SquireTools (5.2, 5.9)", () => {
     ),
   );
 
-  it.effect("B2: a steer over 280 characters is refused with a reason and makes no card", () =>
+  it.effect("a steer of 280 characters or more is refused with a reason and makes no card", () =>
     withSquire((home) =>
       Effect.gen(function* () {
         yield* homeRun(home.homeThreadId, "event");
@@ -283,11 +285,19 @@ describe("SquireTools (5.2, 5.9)", () => {
         }
         assert.lengthOf(yield* cardsOf(home.squireId), 0);
 
+        // "Under 280": exactly 280 is refused, 279 is the longest accepted.
         const exact = yield* callTool(home, "squire_recommend_steer", {
           ...steerArgs,
           steer: "y".repeat(SquireTools.SQUIRE_STEER_MAX_CHARS),
         });
-        assert.isFalse(exact.isError);
+        assert.isTrue(exact.isError);
+        assert.include(exact.text, "the steer is 280 characters");
+        assert.lengthOf(yield* cardsOf(home.squireId), 0);
+        const longest = yield* callTool(home, "squire_recommend_steer", {
+          ...steerArgs,
+          steer: "y".repeat(SquireTools.SQUIRE_STEER_MAX_CHARS - 1),
+        });
+        assert.isFalse(longest.isError);
         assert.lengthOf(yield* cardsOf(home.squireId), 1);
       }),
     ),
@@ -316,7 +326,7 @@ describe("SquireTools (5.2, 5.9)", () => {
         assert.strictEqual(created.data.kind, "steer");
         assert.match(created.data.caption, /^budget reached, recommending only until \d{4}-/);
         assert.strictEqual(count(log, "notification.pushed"), 1);
-        // The mobile row is the relay's to write, after this transaction (D27).
+        // The mobile row is the relay's to write, after this transaction.
         assert.strictEqual(count(log, "notification.delivery"), 0);
         assert.strictEqual(count(log, "action.held"), 0);
         assert.strictEqual(count(log, "action.executed"), 0);
@@ -362,7 +372,7 @@ describe("SquireTools (5.2, 5.9)", () => {
     ),
   );
 
-  it.effect("a voice turn's card says whether the note's speaker was verified (D33)", () =>
+  it.effect("a voice turn's card says whether the note's speaker was verified", () =>
     withSquire((home) =>
       Effect.gen(function* () {
         const repository = yield* SquireRepository.SquireRepository;
@@ -393,6 +403,62 @@ describe("SquireTools (5.2, 5.9)", () => {
     ),
   );
 
+  it.effect("a steer answering a PR transition in its batch keeps that transition", () =>
+    withSquire((home) =>
+      Effect.gen(function* () {
+        const repository = yield* SquireRepository.SquireRepository;
+        const change = (transition: string, id: number) =>
+          repository.insertEvent({
+            squire_id: home.squireId,
+            thread_id: tracked,
+            kind: "pull-request-changed",
+            state_key: `github.com/acme/billing-service#321:sha1:${transition}`,
+            payload_json: encodeEventPayload({
+              outcome: null,
+              runId: null,
+              pendingRequest: null,
+              pullRequest: {
+                host: "github.com",
+                repository: "acme/billing-service",
+                number: 321,
+                url: "https://github.com/acme/billing-service/pull/321",
+                headSha: "sha1",
+                transition,
+                state: "open",
+                title: "Fix invoice rounding",
+                headBranch: "fix/rounding",
+                baseBranch: "main",
+                checksState: "failing",
+                reviewDecision: null,
+                mergeability: "mergeable",
+                threadSelfWatching: false,
+              },
+            }),
+            status: "batched",
+            defer_reason: null,
+            not_before: "2026-11-01T10:00:00.000Z",
+            batch_id: "pr-batch-1",
+            created_at: `2026-11-01T10:00:0${id}.000Z`,
+          });
+        yield* change("checks:failed", 1);
+        yield* change("mergeable:mergeable", 2);
+        yield* homeRun(home.homeThreadId, "event", "pr-batch-1");
+        const sent = yield* callTool(home, "squire_send_steer", {
+          ...steerArgs,
+          steerKind: "rerun-checks",
+        });
+        assert.isFalse(sent.isError, sent.text);
+        const [card] = yield* cardsOf(home.squireId);
+        // The newest change is mergeability; a rerun-checks steer answers the checks.
+        assert.deepInclude(JSON.parse(card!.trigger_json), {
+          prKey: "github.com/acme/billing-service#321",
+          headSha: "sha1",
+          transition: "checks:failed",
+        });
+      }),
+    ),
+  );
+
   it.effect("webhook- and message-origin sends are cards labeled by origin", () =>
     withSquire((home) =>
       Effect.gen(function* () {
@@ -403,6 +469,36 @@ describe("SquireTools (5.2, 5.9)", () => {
         assert.strictEqual(card!.origin, "webhook");
         assert.notProperty(squireCardRowFields(card!), "speakerVerified");
         assert.strictEqual(decisionOf(yield* logOf(home.squireId)).reason, "origin");
+      }),
+    ),
+  );
+
+  it.effect("a call with no run to bind to only recommends, never as the user", () =>
+    withSquire((home) =>
+      Effect.gen(function* () {
+        yield* setPermissions(home.squireId, { steer: "auto" });
+        assert.isFalse((yield* callTool(home, "squire_send_steer", steerArgs)).isError);
+        const [card] = yield* cardsOf(home.squireId);
+        assert.strictEqual(card!.status, "open");
+        assert.notStrictEqual(card!.origin, "user");
+        const log = yield* logOf(home.squireId);
+        assert.strictEqual(decisionOf(log).reason, "origin");
+        assert.strictEqual(count(log, "action.held"), 0);
+        const called = log.find((row) => row.kind === "tool.called");
+        assert.strictEqual(called!.data.origin, "unknown");
+      }),
+    ),
+  );
+
+  it.effect("a run the user's own message started acts as the user", () =>
+    withSquire((home) =>
+      Effect.gen(function* () {
+        yield* setPermissions(home.squireId, { steer: "auto" });
+        yield* homeRun(home.homeThreadId, "user");
+        assert.isFalse((yield* callTool(home, "squire_send_steer", steerArgs)).isError);
+        const [card] = yield* cardsOf(home.squireId);
+        assert.strictEqual(card!.origin, "user");
+        assert.strictEqual(card!.status, "held");
       }),
     ),
   );
@@ -453,13 +549,13 @@ describe("SquireTools (5.2, 5.9)", () => {
         const log = yield* logOf(home.squireId);
         assert.strictEqual(count(log, "action.held"), origin === "voice" ? 0 : 1);
         if (origin === "voice") {
-          // P8.1: a rule never applies during a voice turn.
+          // A rule never applies during a voice turn.
           assert.strictEqual(decisionOf(log).reason, "voice");
           assert.isNull(card!.rule_id);
           assert.strictEqual(count(log, "rule.matched"), 0);
           return;
         }
-        // The Auto it raises is a hold (6.1), not a card.
+        // The Auto it raises is a hold, not a card.
         assert.deepStrictEqual(
           [decisionOf(log).level, decisionOf(log).reason, decisionOf(log).ruleId],
           ["auto", "rule", ruleId],
@@ -489,7 +585,7 @@ describe("SquireTools (5.2, 5.9)", () => {
     ),
   );
 
-  it.effect("P7.6: a newer steer for the thread updates the open card", () =>
+  it.effect("a newer steer for the thread updates the open card", () =>
     withSquire((home) =>
       Effect.gen(function* () {
         yield* homeRun(home.homeThreadId, "event");
@@ -525,7 +621,7 @@ describe("SquireTools (5.2, 5.9)", () => {
           ["lecturn_pull_request_merge"],
         );
 
-        // P17.4: the Lead never reads raw thread history.
+        // The Lead never reads raw thread history.
         const service = yield* need(SquireService.SquireService);
         const leadSquire = Option.getOrThrow(yield* service.ensureLead({ requestId: "lead" }));
         const leadHome = { squireId: leadSquire.id, homeThreadId: leadSquire.homeThreadId! };
@@ -549,55 +645,53 @@ describe("SquireTools (5.2, 5.9)", () => {
     ),
   );
 
-  it.effect(
-    "D44j: a fixture proposal binds the scripted instance; the card shows the proposed one",
-    () =>
-      withSquire((home) =>
-        Effect.gen(function* () {
-          yield* homeRun(home.homeThreadId, "event");
-          const proposal = {
-            provider: "claudeAgent",
-            firstPrompt: "Add a CHANGELOG entry for #318.",
-            reason: "PR #318 merged.",
-          };
-          // A held create stores its launch intent (A9 "Thread create").
-          yield* setPermissions(home.squireId, { createThread: "auto" });
-          // Into a fixture-owned project.
-          yield* callTool(home, "squire_create_thread", { ...proposal, project: fixtureProject });
-          // From a normal project: the real provider.
-          yield* callTool(home, "squire_create_thread", {
-            ...proposal,
-            project: "Billing-Service",
-            firstPrompt: "Tag the release.",
-          });
-          const [fixture, live] = yield* cardsOf(home.squireId);
-          assert.strictEqual(fixture!.status, "held");
-          assert.strictEqual(fixture!.project_id, fixtureProject);
-          assert.include(fixture!.payload_json, `"providerInstanceId":"${claude}"`);
-          assert.include(fixture!.payload_json, `"provider":"claudeAgent"`);
-          assert.include(fixture!.intent_json!, `"instanceId":"${scripted}"`);
-          assert.include(live!.intent_json!, `"instanceId":"${claude}"`);
-          assert.strictEqual(decisionOf(yield* logOf(home.squireId)).reason, "permission");
+  it.effect("a fixture proposal binds the scripted instance; the card shows the proposed one", () =>
+    withSquire((home) =>
+      Effect.gen(function* () {
+        yield* homeRun(home.homeThreadId, "event");
+        const proposal = {
+          provider: "claudeAgent",
+          firstPrompt: "Add a CHANGELOG entry for #318.",
+          reason: "PR #318 merged.",
+        };
+        // A held create stores its launch intent.
+        yield* setPermissions(home.squireId, { createThread: "auto" });
+        // Into a fixture-owned project.
+        yield* callTool(home, "squire_create_thread", { ...proposal, project: fixtureProject });
+        // From a normal project: the real provider.
+        yield* callTool(home, "squire_create_thread", {
+          ...proposal,
+          project: "Billing-Service",
+          firstPrompt: "Tag the release.",
+        });
+        const [fixture, live] = yield* cardsOf(home.squireId);
+        assert.strictEqual(fixture!.status, "held");
+        assert.strictEqual(fixture!.project_id, fixtureProject);
+        assert.include(fixture!.payload_json, `"providerInstanceId":"${claude}"`);
+        assert.include(fixture!.payload_json, `"provider":"claudeAgent"`);
+        assert.include(fixture!.intent_json!, `"instanceId":"${scripted}"`);
+        assert.include(live!.intent_json!, `"instanceId":"${claude}"`);
+        assert.strictEqual(decisionOf(yield* logOf(home.squireId)).reason, "permission");
 
-          // From a fixture-owned Squire, any project.
-          const repository = yield* SquireRepository.SquireRepository;
-          yield* repository.updateSquire({
-            id: home.squireId,
-            patch: { create_request_id: "fixture:Release" },
-            updatedAt: DateTime.formatIso(yield* DateTime.now),
-          });
-          yield* callTool(home, "squire_create_thread", {
-            ...proposal,
-            project: homeProject,
-            firstPrompt: "Bump the version.",
-          });
-          const cards = yield* cardsOf(home.squireId);
-          assert.include(cards.at(-1)!.intent_json!, `"instanceId":"${scripted}"`);
-        }),
-      ),
+        // From a fixture-owned Squire, any project.
+        const repository = yield* SquireRepository.SquireRepository;
+        yield* repository.updateSquire({
+          id: home.squireId,
+          patch: { create_request_id: "fixture:Release" },
+          updatedAt: DateTime.formatIso(yield* DateTime.now),
+        });
+        yield* callTool(home, "squire_create_thread", {
+          ...proposal,
+          project: homeProject,
+          firstPrompt: "Bump the version.",
+        });
+        const cards = yield* cardsOf(home.squireId);
+        assert.include(cards.at(-1)!.intent_json!, `"instanceId":"${scripted}"`);
+      }),
+    ),
   );
 
-  it.effect("P17.5: a steer card wakes the Lead with an item-raised row", () =>
+  it.effect("a steer card wakes the Lead with an item-raised row", () =>
     withSquire((home) =>
       Effect.gen(function* () {
         const service = yield* need(SquireService.SquireService);
@@ -651,7 +745,7 @@ describe("SquireTools (5.2, 5.9)", () => {
     ),
   );
 
-  it.effect("squire.update saves steer Auto (6.1); Manage Squires Auto stays refused", () =>
+  it.effect("squire.update saves steer Auto; Manage Squires Auto stays refused", () =>
     withSquire((home) =>
       Effect.gen(function* () {
         const service = yield* need(SquireService.SquireService);
@@ -704,7 +798,7 @@ const trackedTurn = (reply: string) =>
     }
   });
 
-/** The Lead over the Release Squire of `withSquire`, for P17.8. */
+/** The Lead over the Release Squire of `withSquire`, whose permissions bound the Lead's. */
 const leadOver = Effect.gen(function* () {
   const service = yield* need(SquireService.SquireService);
   const lead = Option.getOrThrow(yield* service.ensureLead({ requestId: "lead" }));
@@ -732,7 +826,7 @@ const createBilling = Effect.flatMap(need(SquireService.SquireService), (service
   ),
 );
 
-describe("SquireTools for the Lead (P17.8)", () => {
+describe("SquireTools for the Lead", () => {
   it.effect(
     "a Lead steer acts at the lower permission, on the owner's budget, never counted for Auto",
     () =>
@@ -749,7 +843,7 @@ describe("SquireTools for the Lead (P17.8)", () => {
           assert.strictEqual((lowered.structuredContent as any).reason, "intersection");
           assert.strictEqual((lowered.structuredContent as any).ownerSquireId, home.squireId);
 
-          // Both Auto: held, and the Lead's own Auto never makes it a second holder (P2.4).
+          // Both Auto: held, and the Lead's own Auto never makes it a second holder.
           yield* setPermissions(home.squireId, { steer: "auto" });
           const held = yield* leadSteer(lead, "squire_send_steer", "Rebase onto main.");
           assert.strictEqual((held.structuredContent as any).outcome, "held", held.text);
@@ -856,7 +950,7 @@ describe("SquireTools for the Lead (P17.8)", () => {
           );
           assert.isFalse(made.isError, made.text);
           assert.include(made.text, "for Release");
-          // The Lead never creates threads (P17.7).
+          // The Lead never creates threads.
           const create = yield* callTool(
             lead,
             "squire_create_thread",

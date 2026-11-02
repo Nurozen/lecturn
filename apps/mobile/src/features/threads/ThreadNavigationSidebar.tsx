@@ -499,7 +499,7 @@ function ThreadNavigationSidebarPane(
     // unchanged: after a clamped fire (wake beyond the 32-bit setTimeout
     // range) the boundary string is identical and the chain would die.
   }, [nextSnoozeWakeAt, snoozeWakeTick]);
-  // Lecturn: the Squires section (P13.2) above the project tree, as on Home.
+  // Lecturn: the Squires section above the project tree, as on Home.
   const squireItems = useSquireHomeItems({
     environments,
     selectedEnvironmentId: options.selectedEnvironmentId,

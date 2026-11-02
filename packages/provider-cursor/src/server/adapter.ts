@@ -314,16 +314,16 @@ const CURSOR_AGENT_SETTING_SOURCES = [
 ] as const satisfies ReadonlyArray<SettingSource>;
 
 /**
- * Lecturn: a Squire home or probe (A5.9, D9). `tools` limits the model to MCP
+ * Lecturn: a Squire home or probe. `tools` limits the model to MCP
  * (home) or nothing (probe), and without `settingSources` the SDK loads no
  * project or user MCP server, rule, skill, hook, or AGENTS.md. Cursor's
  * servers enforce `tools`; the local shell, read, and write executors stay
- * wired (D48 residual).
+ * wired, a known gap in the read restriction.
  *
  * The home runs unsandboxed with autoReview off because both put the SDK in
  * allowlist mode, where every MCP call needs an approval its headless
  * decider always refuses. The probe keeps the sandbox on: it has no tools, so
- * that refusal is the auto-decline (D25).
+ * that refusal is the auto-decline.
  */
 function cursorSquireAgentOptions(input: {
   readonly squireIsolation: "home" | "probe";
@@ -984,7 +984,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
         const sessionScope = yield* Effect.scope;
         // Lecturn: a session opened for a Squire serves only Squire threads of
         // the same role, and the reverse, so one agent never carries the
-        // other's tools or settings. It never wires Stave memory (A5.9).
+        // other's tools or settings. It never wires Stave memory.
         const squireIsolation = input.runtimePolicy.squireIsolation;
         const memoryMcpServers =
           squireIsolation !== undefined ||

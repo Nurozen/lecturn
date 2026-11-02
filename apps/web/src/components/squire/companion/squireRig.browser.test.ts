@@ -1,5 +1,5 @@
-// The v5 contract checks (artifacts/squire-concepts/v5/validation/validate.cjs) ported per the
-// plan's D43 map, on an injected clock. Comments name the validate.cjs line each block ports.
+// The v5 contract checks (artifacts/squire-concepts/v5/validation/validate.cjs) ported
+// check by check, on an injected clock. Comments name the validate.cjs line each block ports.
 // Per-frame step bounds are scaled by the frame interval (30 fps renders half as many frames as
 // v5's 60 Hz runs, so each frame carries twice the motion); amplitude and seam bounds are v5's.
 import {
@@ -46,12 +46,12 @@ const GESTURE_FLOORS: Readonly<
   nod: { subtle: { deviation: 3.2, px: 15.7 }, lively: { deviation: 3.9, px: 18.5 } },
   greet: { subtle: { deviation: 2.25, px: 8.6 }, lively: { deviation: 2.8, px: 11.5 } },
   flourish: { subtle: { deviation: 1.9, px: 6.2 }, lively: { deviation: 2.5, px: 7.3 } },
-  // CP8 r2: glance now looks down at the item and back instead of v5's turn away.
+  // Glance looks down at the item and back instead of v5's turn away.
   glance: { subtle: { deviation: 2.8, px: 18.7 }, lively: { deviation: 3.3, px: 21.2 } },
   listen: { subtle: { deviation: 2.95, px: 8.8 }, lively: { deviation: 3.3, px: 10.7 } },
   ponder: { subtle: { deviation: 2.9, px: 8.2 }, lively: { deviation: 3.1, px: 9.2 } },
 };
-// CP8: at panel size the nod's dip and greet's lift must read from the body, not only the
+// At panel size the nod's dip and greet's lift must read from the body, not only the
 // motifs. The nod's peak drops the face (the lower head point) and greet's peak raises the
 // item at least this far at the 340 px panel (minimum over seeds 8.4 / 8.6 px, less ~10%).
 const NOD_DIP_PX = 7.5;
@@ -714,7 +714,7 @@ describe("<squire-rig> v5 contract", () => {
             expect(warmDifference / warm).toBeLessThan(4);
           }
           // Gold must read as warm cloth, clearly apart from brass's untinted navy, and as gold
-          // rather than olive: red leads green by a clear margin (OQ22).
+          // rather than olive: red leads green by a clear margin.
           if (palette === "gold") {
             expect((clothR - clothB) / cloth, `${label}: gold cloth is warm`).toBeGreaterThan(40);
             expect((clothR - clothG) / cloth, `${label}: gold cloth is not olive`).toBeGreaterThan(

@@ -18,7 +18,7 @@ const postedAt = (row: Pick<SquireRoomRow, "lastPostAt">) =>
   row.lastPostAt === null ? Number.NEGATIVE_INFINITY : Date.parse(row.lastPostAt);
 
 /**
- * P19.8 rows under the Lead after its Squires: open rooms only, most recent post first (a room
+ * Rows under the Lead after its Squires: open rooms only, most recent post first (a room
  * with no posts sorts by nothing newer, so it comes last), unread only for a member who has not
  * muted the room (`squireRoomUnread`). `seen` is this client's last shown `lastPostAt` per room.
  */

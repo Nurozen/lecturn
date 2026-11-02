@@ -1,5 +1,5 @@
 /**
- * Live Jev routing against a funded test environment (13.5, R100). Never runs
+ * Live Jev routing against a funded test environment. Never runs
  * in CI: it spends allowance and needs a relay credential. Run with
  *
  *   LECTURN_SQUIRE_JEV_LIVE=1 LECTURN_SQUIRE_JEV_RELAY_URL=... \

@@ -104,13 +104,12 @@ describe("SquireToolInterceptor on the bound /mcp", () => {
           const registered = yield* listRegistered(yield* bound.issueNormal(normalThreadId));
           assert.isAbove(registered.length, 20);
           const roleTools: ReadonlyArray<string> = SQUIRE_TOOL_NAMES[role];
-          const expected = role === "lead" ? ["html_render", ...roleTools] : roleTools;
 
           const config = yield* bound.issueSquire({ threadId: homeThreadId, squireId, role });
           const client = yield* promise(() => connectMcp(config));
           assert.deepEqual(
             [...(yield* promise(() => client.listToolNames()))].sort(),
-            [...expected].sort(),
+            [...roleTools].sort(),
           );
 
           for (const name of roleTools) {
@@ -137,7 +136,7 @@ describe("SquireToolInterceptor on the bound /mcp", () => {
 
           const callsBefore = stub.calls.length;
           const outside = [
-            ...registered.filter((name) => !expected.includes(name)),
+            ...registered.filter((name) => !roleTools.includes(name)),
             ...ALL_SQUIRE_TOOLS.filter((name) => !roleTools.includes(name)),
           ];
           for (const name of outside) {

@@ -1,5 +1,5 @@
 /**
- * `squire_send_message` (P19.1, P19.7, D62, A9) for Squires and the Lead: a
+ * `squire_send_message` for Squires and the Lead: a
  * direct message is one `squire_event` of kind `message` on the recipient,
  * its body in the payload, committed with `tool.called`, the `message` usage
  * row, and `message.sent` in one transaction; delivery makes it an ordinary
@@ -32,9 +32,11 @@ import {
   checkMessageBudget,
   nextHop,
   overHopLimit,
+  readSquireText,
 } from "./squireMessageGuards.ts";
 import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireRooms from "./SquireRooms.ts";
+import { shownBotPostHops } from "./squireRoomContext.ts";
 import * as SquireRoomStore from "./SquireRoomStore.ts";
 import * as SquireScope from "./SquireScope.ts";
 import {
@@ -158,7 +160,7 @@ const make = Effect.gen(function* () {
       execution_key: `message:${ctx.key}`,
     });
 
-  // ── Checks (P19.1, P19.7) ──
+  // ── Checks ──
 
   const resolveRecipient = (ctx: SquireToolContext, to: SquireId | "lead") =>
     Effect.gen(function* () {
@@ -290,7 +292,21 @@ const make = Effect.gen(function* () {
           },
         } as const;
       }
-      const hop = nextHop(yield* kit.batchEvents(ctx));
+      const batch = yield* kit.batchEvents(ctx);
+      // Every bot-written input the turn saw counts: the batch's messages,
+      // the posts in its room context, and the posts it read mid-turn.
+      const contextHops =
+        ctx.run.batchId === null
+          ? []
+          : yield* shownBotPostHops(
+              { repository, rooms: roomStore },
+              { squireId: ctx.squire.id, batchId: ctx.run.batchId, batch },
+            );
+      const readHops = (yield* readSquireText(repository, {
+        squireId: ctx.squire.id,
+        runId: ctx.run.runId,
+      })).hops;
+      const hop = nextHop(batch, [...contextHops, ...readHops]);
       if (overHopLimit(hop)) {
         return { ok: false, rejection: { reason: "hop-limit", text: HOP_LIMIT_TEXT } } as const;
       }
@@ -314,7 +330,7 @@ const make = Effect.gen(function* () {
     to: SquireId | "lead",
   ) =>
     Effect.gen(function* () {
-      // D51: the switch stops bot-to-bot direct messages; rooms route to nobody instead.
+      // The Squire-to-Squire messages setting stops bot-to-bot direct messages; rooms route to nobody instead.
       const botMessages = (yield* settings.getSettings).squire.botMessages;
       if (!botMessages) {
         return yield* reject(

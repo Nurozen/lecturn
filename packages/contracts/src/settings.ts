@@ -969,6 +969,8 @@ export const SquireRoomIdleTtlHours = Schema.Int.check(
 // Environment-wide, so per-Squire records stay free of settings every Squire
 // shares. Defaulted as a whole, like `stave`.
 export const SquireEnvironmentSettings = Schema.Struct({
+  // Read once at server start (`LECTURN_SQUIRE` overrides it), so a change applies on restart.
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   phoneAlertsWhileDesktop: SquirePhoneAlertsWhileDesktop.pipe(
     Schema.withDecodingDefault(Effect.succeed("after-3-min" as const)),
   ),
@@ -1618,6 +1620,7 @@ export const ServerSettingsPatch = Schema.Struct({
   // Deep-merged into the current `squire` block, like `stave`.
   squire: Schema.optionalKey(
     Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
       phoneAlertsWhileDesktop: Schema.optionalKey(SquirePhoneAlertsWhileDesktop),
       inactivityDays: Schema.optionalKey(SquireInactivityDays),
       botMessages: Schema.optionalKey(Schema.Boolean),

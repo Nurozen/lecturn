@@ -50,7 +50,7 @@ export function SquireMark({ state, palette, isLead, size, label, visible }: Squ
       style={{ width: size, height: size, opacity: dimmed ? 0.5 : 1 }}
     >
       <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-        {/* While working the base recedes so the travelling segment reads in a still (B4). */}
+        {/* While working the base recedes so the travelling segment reads in a still. */}
         <G opacity={working ? 0.35 : 1}>
           <G strokeLinecap="round" strokeLinejoin="round" strokeWidth={waiting ? 1.6 : 1.25}>
             <Path d={SQUIRE_MARK_STRAND_PATH} stroke={strand} />

@@ -11,7 +11,7 @@ import { SquireMark } from "../SquireMark";
 import { squireThreadScope, squireTrackers, squireTracksTarget } from "./squireTrack.logic";
 
 /**
- * "Tracked by Release" in the thread's details, the place to see tracking (D39). Each row
+ * "Tracked by Release" in the thread's details, the place to see tracking. Each row
  * opens that Squire's view. Squire threads and untracked threads show nothing.
  */
 export const SquireTrackedByChip = memo(function SquireTrackedByChip(props: {

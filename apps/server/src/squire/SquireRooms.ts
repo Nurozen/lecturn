@@ -1,5 +1,5 @@
 /**
- * Squire rooms (P19.2, P19.3, P19.6, D62): the room record, its members and
+ * Squire rooms: the room record, its members and
  * cursors, and its log. A room is not a thread: posting appends a
  * `squire_room_post` and, in the same transaction, one `squire_event` of kind
  * `message` per member to wake (keyed by the post's message key), which
@@ -35,6 +35,8 @@ import {
   SQUIRE_MAX_OPEN_ROOMS_PER_SQUIRE,
   SquireRouting,
   SquireCardId,
+  DEFAULT_SQUIRE_PERMISSIONS,
+  SquirePermissions,
 } from "@lecturn/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -78,7 +80,7 @@ export interface RoomPostWrite {
   readonly body: string;
   readonly refs: ReadonlyArray<SquireRef>;
   readonly replyTo: SquireRoomPostId | null;
-  /** 0 for a user post (P19.7); the sender's hop for a bot post (`squireMessageGuards.nextHop`). */
+  /** 0 for a user post; the sender's hop for a bot post (`squireMessageGuards.nextHop`). */
   readonly hop: number;
   /** The tool invocation key, the RPC `requestId`, or `reroute:<postId>:<requestId>`. */
   readonly messageKey: string;
@@ -90,13 +92,13 @@ export interface RoomPostWritten {
   readonly post: SquireRoomPost;
   /** Squires and the Lead whose `message` rows this post wrote as `pending`. */
   readonly wake: ReadonlyArray<SquireId>;
-  /** Run after the enclosing transaction commits (the Jev request, D55); a no-op otherwise. */
+  /** Run after the enclosing transaction commits (the Jev request); a no-op otherwise. */
   readonly afterCommit: Effect.Effect<void>;
   /** True when the message key already had a post: nothing was written. */
   readonly replayed: boolean;
 }
 
-/** The P19.6 open checks for a Lead open; the user's open checks members and caps only. */
+/** A Lead open runs every open check; the user's open checks members and caps only. */
 export interface RoomOpenRequest {
   readonly by: "user" | "lead";
   readonly members: ReadonlyArray<SquireId>;
@@ -112,7 +114,7 @@ export type RoomOpenOutcome =
 export class SquireRooms extends Context.Service<
   SquireRooms,
   {
-    // ── User RPCs (7b.7); each touches the inactivity clock (P3.6) ──
+    // ── User RPCs; each touches the inactivity clock ──
     readonly create: (
       input: typeof SquireRoomCreateInput.Type,
     ) => Effect.Effect<typeof SquireRoomResult.Type, SquireError>;
@@ -153,7 +155,7 @@ export class SquireRooms extends Context.Service<
     readonly postInTransaction: (
       input: RoomPostWrite,
     ) => Effect.Effect<RoomPostWritten | RoomRefusal, PersistenceSqlError | SquireScopeError>;
-    /** P19.6 checks (members, scope cover of an `about` ref, caps, switch, members' budgets). */
+    /** The open checks (members, scope cover of an `about` ref, caps, switch, members' budgets). */
     readonly checkOpen: (
       request: RoomOpenRequest,
     ) => Effect.Effect<{ readonly ok: true } | RoomRefusal, PersistenceSqlError | SquireScopeError>;
@@ -178,7 +180,7 @@ export class SquireRooms extends Context.Service<
       readonly now: string;
     }) => Effect.Effect<boolean, PersistenceSqlError>;
 
-    // ── Clock (A9) ──
+    // ── Clock ──
     /** Closes rooms idle past their TTL (system row "Closed after <ttl> idle"). */
     readonly due: (now: DateTime.Utc) => Effect.Effect<void, PersistenceSqlError>;
     readonly nextDueAt: Effect.Effect<Option.Option<DateTime.Utc>, PersistenceSqlError>;
@@ -188,6 +190,7 @@ export class SquireRooms extends Context.Service<
 const encodeEvent = Schema.encodeSync(Schema.fromJsonString(SquireEvent));
 const encodeRouting = Schema.encodeSync(Schema.fromJsonString(SquireRouting));
 const decodeRouting = Schema.decodeUnknownOption(Schema.fromJsonString(SquireRouting));
+const decodePermissions = Schema.decodeUnknownOption(Schema.fromJsonString(SquirePermissions));
 const RefsJson = Schema.fromJsonString(Schema.Array(SquireRef));
 const encodeRefs = Schema.encodeSync(RefsJson);
 const decodeRefs = Schema.decodeUnknownOption(RefsJson);
@@ -519,7 +522,7 @@ const make = Effect.gen(function* () {
       return ok;
     });
 
-  /** Of `candidates`, the Squires whose scope covers the ref (P2). */
+  /** Of `candidates`, the Squires whose scope covers the ref. */
   const coverAmong = (ref: RoutingRef, candidates: ReadonlyArray<SquireId>) =>
     Effect.gen(function* () {
       if (candidates.length === 0) return [];
@@ -663,7 +666,7 @@ const make = Effect.gen(function* () {
         now: input.now,
       });
 
-      // D55: only rule (e) delivering to the Lead may go to Jev first.
+      // Only rule (e) delivering to the Lead may go to Jev first.
       const toLead =
         decision.jevEligible && lead !== null && decision.recipients.includes(lead.squireId);
       const availability = toLead ? yield* jev.availability : null;
@@ -1225,6 +1228,26 @@ const make = Effect.gen(function* () {
             to: "outdated",
             reason: "the Lead no longer exists",
           } satisfies RoomOpenOutcome;
+        }
+        // Manage Squires gates it as it gates a control action, read under the lock
+        // so a permission change or pause either commits first or waits for the open.
+        const level =
+          Option.getOrElse(
+            decodePermissions(lead.value.permissions_json),
+            () => DEFAULT_SQUIRE_PERMISSIONS,
+          ).manageSquires ?? "off";
+        const refused =
+          options.verb === "execute"
+            ? lead.value.status === "paused"
+              ? "the Lead is paused"
+              : level !== "auto"
+                ? "Manage Squires is no longer Auto"
+                : undefined
+            : level === "off"
+              ? "Manage Squires is Off for the Lead"
+              : undefined;
+        if (refused !== undefined) {
+          return { ok: false, to: "open", reason: refused } satisfies RoomOpenOutcome;
         }
         const checked = yield* checkOpen({
           by: "lead",

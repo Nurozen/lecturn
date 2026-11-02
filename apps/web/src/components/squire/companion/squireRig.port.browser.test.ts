@@ -1,4 +1,4 @@
-// Behavior the port adds to v5 (plan D43 "Added" row, spec P16.3 and P16.6), on an injected
+// Behavior the port adds to v5, on an injected
 // clock. The ported v5 contract checks live in squireRig.browser.test.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -195,7 +195,7 @@ describe("<squire-rig> port behavior", () => {
     ).toHaveLength(0);
   });
 
-  // CP8: at panel size attentive read as idle and thinking's grey oval read as the attentive
+  // At panel size attentive read as idle and thinking's grey oval read as the attentive
   // halo. Each state now has its own cue in the settled frame the panel shows after 20 s.
   it("settles each state on its own cue: attentive turns to the viewer under a gold halo, thinking holds a cool light", async () => {
     const settled = async (state: string) => {

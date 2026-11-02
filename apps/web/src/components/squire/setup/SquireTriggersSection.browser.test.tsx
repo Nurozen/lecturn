@@ -154,13 +154,24 @@ const inputValues = () =>
     (element) => (element as HTMLInputElement).value,
   );
 
-it("reveals a webhook secret once and keeps its controls behind the disclosure", async () => {
+it("offers only a schedule from Add trigger; a custom webhook waits behind Advanced", async () => {
   await userEvent.click(page.getByRole("button", { name: "Add trigger" }));
-  await userEvent.click(page.getByRole("combobox", { name: "Trigger kind" }));
-  await userEvent.click(page.getByRole("option", { name: "Custom webhook" }));
+  await expect.element(page.getByLabelText("Time of day")).toBeVisible();
+  expect(page.getByRole("textbox", { name: "When this webhook fires" }).elements()).toHaveLength(0);
+  expect(page.getByText("Custom webhook", { exact: true }).elements()).toHaveLength(0);
+  await userEvent.click(page.getByRole("button", { name: "Cancel" }));
+
+  expect(page.getByRole("button", { name: "Add custom webhook" }).elements()).toHaveLength(0);
+  await userEvent.click(page.getByRole("button", { name: "Advanced: custom webhook" }));
+  await userEvent.click(page.getByRole("button", { name: "Add custom webhook" }));
   await expect
-    .element(page.getByRole("combobox", { name: "Trigger kind" }))
-    .toHaveTextContent("Custom webhook");
+    .element(page.getByRole("textbox", { name: "When this webhook fires" }))
+    .toBeVisible();
+});
+
+it("reveals a webhook secret once and keeps its controls behind the disclosure", async () => {
+  await userEvent.click(page.getByRole("button", { name: "Advanced: custom webhook" }));
+  await userEvent.click(page.getByRole("button", { name: "Add custom webhook" }));
   await userEvent.fill(
     page.getByRole("textbox", { name: "When this webhook fires" }),
     "When Sentry reports a new error in billing-service",
@@ -169,7 +180,7 @@ it("reveals a webhook secret once and keeps its controls behind the disclosure",
     page.getByRole("textbox", { name: "Instruction" }),
     "Triage the error and raise a decision",
   );
-  await userEvent.click(page.getByRole("button", { name: "Add trigger" }).last());
+  await userEvent.click(page.getByRole("button", { name: "Add webhook" }));
 
   const dialog = page.getByRole("dialog");
   await expect.element(dialog).toBeVisible();
@@ -194,7 +205,10 @@ it("reveals a webhook secret once and keeps its controls behind the disclosure",
   }
   expect(inputValues().some((value) => value.includes("/api/squire/hooks/"))).toBe(false);
 
-  await userEvent.click(page.getByRole("button", { name: "Advanced: custom webhook" }));
+  // The row's own disclosure, not the Add trigger one below the list.
+  await userEvent.click(
+    page.getByRole("listitem").getByRole("button", { name: "Advanced: custom webhook" }),
+  );
   await expect
     .element(page.getByRole("textbox", { name: "Webhook URL" }))
     .toHaveValue(`https://box.example.ts.net/api/squire/hooks/${hookId}`);
@@ -236,7 +250,7 @@ it("starts a just-listed webhook collapsed and shows a schedule's Test now by de
   // The schedule's Test now is the only one; the webhook's sits behind its disclosure.
   expect(page.getByRole("button", { name: "Test now", exact: true }).elements()).toHaveLength(1);
   await expect
-    .element(page.getByRole("button", { name: "Advanced: custom webhook" }))
+    .element(page.getByRole("listitem").getByRole("button", { name: "Advanced: custom webhook" }))
     .toHaveAttribute("aria-expanded", "false");
   await userEvent.click(page.getByRole("button", { name: "Test now" }));
   expect(commands.test).toHaveBeenCalledWith({

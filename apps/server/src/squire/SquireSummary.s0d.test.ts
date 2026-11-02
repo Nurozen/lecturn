@@ -1,4 +1,4 @@
-// S0d (OQ20): live summary latency and isolation. Runs only with
+// Live summary latency and isolation. Runs only with
 // SQUIRE_S0D_PROVIDER set (claudeAgent or codex) and spends provider tokens.
 // Each of SQUIRE_S0D_TURNS (default 20) gold fixture turns carries a fresh
 // nonce in its conversation text, so a leak into spans, logs, or provider
@@ -60,7 +60,7 @@ const isolationArgs: Record<string, ReadonlyArray<string>> = {
   ],
 };
 
-describe.runIf(provider)("S0d summary latency and isolation (live)", () => {
+describe.runIf(provider)("summary latency and isolation (live)", () => {
   const driverKind = ProviderDriverKind.make(provider ?? "claudeAgent");
   const preferred = driverKind === "codex" ? "gpt-5.6-luna" : "claude-sonnet-5";
   const modelSelection = resolveInferenceModel(

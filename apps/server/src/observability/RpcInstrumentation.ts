@@ -286,7 +286,7 @@ const RPC_AGGREGATES = {
   ...(Object.fromEntries(Object.values(APPS_WS_METHODS).map((method) => [method, "apps"])) as {
     readonly [Method in (typeof APPS_WS_METHODS)[keyof typeof APPS_WS_METHODS]]: "apps";
   }),
-  // Lecturn: Squire RPCs (A6).
+  // Lecturn: Squire RPCs.
   ...(Object.fromEntries(SquireRpcs.map((rpc) => [rpc._tag, "squire"])) as {
     readonly [Method in (typeof SquireRpcs)[number]["_tag"]]: "squire";
   }),

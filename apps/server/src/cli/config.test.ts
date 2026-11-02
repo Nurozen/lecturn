@@ -456,41 +456,47 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
   );
 
   it.effect.each([
-    { env: {}, expected: false },
-    { env: { LECTURN_SQUIRE: "1" }, expected: true },
-  ])("reads the Squire kill switch from LECTURN_SQUIRE ($expected)", ({ env, expected }) =>
-    Effect.gen(function* () {
-      const { join } = yield* Path.Path;
-      const baseDir = join(NodeOS.tmpdir(), "lecturn-cli-config-squire-base");
-      const resolved = yield* resolveServerConfig(
-        {
-          mode: Option.none(),
-          port: Option.none(),
-          host: Option.none(),
-          baseDir: Option.none(),
-          cwd: Option.none(),
-          devUrl: Option.none(),
-          noBrowser: Option.none(),
-          bootstrapFd: Option.none(),
-          autoBootstrapProjectFromCwd: Option.none(),
-          logWebSocketEvents: Option.none(),
-          tailscaleServeEnabled: Option.none(),
-          tailscaleServePort: Option.none(),
-        },
-        Option.none(),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            ConfigProvider.layer(
-              ConfigProvider.fromEnv({ env: { LECTURN_HOME: baseDir, ...env } }),
-            ),
-            NetService.layer,
+    { saved: undefined, env: {}, expected: false },
+    { saved: false, env: {}, expected: false },
+    { saved: true, env: {}, expected: true },
+    { saved: undefined, env: { LECTURN_SQUIRE: "1" }, expected: true },
+    { saved: true, env: { LECTURN_SQUIRE: "0" }, expected: false },
+  ])(
+    "resolves Squires from LECTURN_SQUIRE over the saved switch (saved $saved, env $env)",
+    ({ saved, env, expected }) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-cli-config-squire-" });
+        if (saved !== undefined) {
+          const { settingsPath } = yield* deriveExplicitServerPaths(baseDir, undefined);
+          yield* fs.makeDirectory(path.dirname(settingsPath), { recursive: true });
+          yield* fs.writeFileString(settingsPath, JSON.stringify({ squire: { enabled: saved } }));
+        }
+        const resolved = yield* resolveServerConfig(
+          {
+            mode: Option.none(),
+            port: Option.none(),
+            host: Option.none(),
+            baseDir: Option.some(baseDir),
+            cwd: Option.none(),
+            devUrl: Option.none(),
+            noBrowser: Option.none(),
+            bootstrapFd: Option.none(),
+            autoBootstrapProjectFromCwd: Option.none(),
+            logWebSocketEvents: Option.none(),
+            tailscaleServeEnabled: Option.none(),
+            tailscaleServePort: Option.none(),
+          },
+          Option.none(),
+        ).pipe(
+          Effect.provide(
+            Layer.mergeAll(ConfigProvider.layer(ConfigProvider.fromEnv({ env })), NetService.layer),
           ),
-        ),
-      );
+        );
 
-      expect(resolved.squireEnabled).toBe(expected);
-    }),
+        expect(resolved.squireEnabled).toBe(expected);
+      }),
   );
 
   it.effect("uses CLI flags when provided", () =>

@@ -93,7 +93,7 @@ export interface Phase4Options {
   readonly scheduler?: Layer.Layer<Scheduler.Scheduler>;
   /** A real MCP session registry, so home turns reach the `/mcp` route a harness serves. */
   readonly mcpSessionRegistry?: Layer.Layer<McpSessionRegistry.McpSessionRegistry>;
-  /** Adapters beside the scripted one, such as a live provider a Squire home runs on (B2-live). */
+  /** Adapters beside the scripted one, such as a live provider a Squire home runs on. */
   readonly extraAdapters?: Effect.Effect<
     ReadonlyArray<ProviderAdapter.ProviderAdapterV2["Service"]>,
     never,
@@ -361,7 +361,7 @@ export const phase4Layer = (baseDir: string, options: Phase4Options = {}) => {
       ...(options.mcpSessionRegistry === undefined
         ? {}
         : { mcpSessionRegistry: options.mcpSessionRegistry }),
-      // A live provider reads the Squire deny runtime (A5.8) from the server's policy.
+      // A live provider reads the Squire deny runtime from the server's policy.
       ...(options.extraAdapters === undefined
         ? {}
         : {
@@ -401,7 +401,7 @@ export const phase4Layer = (baseDir: string, options: Phase4Options = {}) => {
     Layer.succeed(HostProcess.Environment, { LECTURN_TEST_PROVIDERS: "1" }),
     options.scheduler ?? Scheduler.layer,
   );
-  // Held actions and accepts dispatch through the real thread services (6.1, 6.2).
+  // Held actions and accepts dispatch through the real thread services.
   const receipts = CommandReceiptStore.layerFromApplicationReceipts;
   const realThreads = ThreadManagement.layer.pipe(Layer.provide(receipts));
   const wrap = options.wrapThreadManagement;
@@ -438,7 +438,7 @@ export const phase4Layer = (baseDir: string, options: Phase4Options = {}) => {
     Layer.provideMerge(projectService),
     Layer.provideMerge(Layer.mergeAll(orchestration, runtime, SquireFakeScripts.layer)),
     Layer.provideMerge(background),
-    // The server's runtime layer provides it; the showcase route publishes into it (D32).
+    // The server's runtime layer provides it; the showcase route publishes into it.
     Layer.provideMerge(AppRuntimeState.layer),
     Layer.provideMerge(settings),
     Layer.provideMerge(stores),

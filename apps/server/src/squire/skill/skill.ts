@@ -10,7 +10,7 @@ export const squireSkillSections = (role: SquireRole): ReadonlyArray<string> =>
   role === "lead" ? LEAD_SKILL_SECTIONS : SQUIRE_SKILL_SECTIONS;
 
 /**
- * RunExecutionService's one read of the Squire skill (A5.7). Only a home
+ * RunExecutionService's one read of the Squire skill. Only a home
  * thread gets it; a probe answers as the forked thread's own agent. The
  * repository is reached optionally, as ProviderSessionManager does, and a
  * missing or unreadable record reads as the narrower Squire role.

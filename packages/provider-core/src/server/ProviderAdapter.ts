@@ -452,7 +452,7 @@ export interface ProviderAdapterV2TurnInput {
   /**
    * Lecturn: the Squire skill on a Squire home thread, in sections of at most
    * 4,000 bytes. It replaces the orchestration, browser, and device sections,
-   * which steer to tools a Squire's credential never lists (D22).
+   * which steer to tools a Squire's credential never lists.
    */
   readonly squireInstructions?: ReadonlyArray<string>;
 }

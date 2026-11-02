@@ -9,7 +9,7 @@ import * as Schema from "effect/Schema";
 import * as ServerConfig from "../config.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 
-// A Squire's home thread runs in its own Git repository (D5). Checkpoint
+// A Squire's home thread runs in its own Git repository. Checkpoint
 // capture finds the repository by walking up from the cwd, so a plain folder
 // under a Lecturn home that sits inside a Git checkout (a dev home in a
 // worktree, a $HOME kept in Git) would write hidden refs into that checkout.

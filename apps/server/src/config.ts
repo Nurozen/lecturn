@@ -115,7 +115,8 @@ export class ServerConfig extends Context.Service<
      */
     readonly staveEnabled: boolean;
     /**
-     * Kill switch for Squires (`LECTURN_SQUIRE`, default off): drives the
+     * Kill switch for Squires (`LECTURN_SQUIRE`, else the saved
+     * `squire.enabled` setting; default off), fixed for the process: drives the
      * advertised `squire` capability and gates every Squire RPC, reactor,
      * and timer. Guard rails for Squire-marked threads stay on regardless.
      */

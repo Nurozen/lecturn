@@ -122,7 +122,7 @@ export function applySquireSubscribeEvent(
   }
 }
 
-/** D7: only a client that may operate calls ensure, and only once there is a project to home it. */
+/** Only a client that may operate calls ensure, and only once there is a project to home it. */
 function shouldEnsureSquireLead(
   state: SquireEnvironmentState | null,
   canEnsure: boolean,
@@ -148,7 +148,7 @@ function clientTimezone(): string | undefined {
 export function createSquireEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
   options: {
-    /** Whether the environment has a project to home the Lead in (D7). */
+    /** Whether the environment has a project to home the Lead in. */
     readonly hasProjectAtom: (environmentId: EnvironmentId) => Atom.Atom<boolean>;
   },
 ) {
@@ -458,7 +458,7 @@ export type SquireEnvironmentAtoms = ReturnType<typeof createSquireEnvironmentAt
 
 type HomeThreadShell = Parameters<typeof squireIndicatorState>[0];
 
-/** The read model already counts only what the Lead raised (D50), so the Lead needs no special case. */
+/** The read model already counts only what the Lead raised, so the Lead needs no special case. */
 export function squireEntryIndicator(
   entry: Pick<SquireSnapshot, "squire" | "openDecisionCount" | "held">,
   homeShell: HomeThreadShell,
@@ -487,7 +487,7 @@ const TRIGGER_BY_LOG_KIND: Readonly<Record<string, SquireGestureTrigger>> = {
   "action.held": "hold_started",
 };
 
-/** P16.3 gestures for a mounted full figure from the snapshot's recent activity. */
+/** Gestures for a mounted full figure from the snapshot's recent activity. */
 export function squireSnapshotGestures(
   lastSeenSequence: number | null,
   recentActivity: SquireSnapshot["recentActivity"],
@@ -515,7 +515,7 @@ export function squireStateLine(input: {
   readonly indicator: SquireIndicatorState;
   readonly openDecisionCount: number;
   readonly heldCount: number;
-  /** D7: false when no provider instance supports Squires at all. */
+  /** False when no provider instance supports Squires at all. */
   readonly hasSupportedProvider?: boolean;
 }): string {
   const { squire, indicator } = input;
@@ -543,7 +543,7 @@ export function squireWatchScopeLine(trackedCount: number): string {
     : `Watching ${plural(trackedCount, "thread", "threads")}`;
 }
 
-/** P9.3: the card caption, or "3 of 10 steers left today" for the budget the card spends. */
+/** The card caption, or "3 of 10 steers left today" for the budget the card spends. */
 export function squireBudgetCaption(
   card: Pick<SquireCardRow, "kind" | "caption">,
   entry: Pick<SquireSnapshot, "budget"> & {
@@ -585,7 +585,7 @@ const HELD_WORDS: Partial<
 };
 const heldWords = (kind: SquireCardKind) => HELD_WORDS[kind] ?? ["action", "run", "acting"];
 
-/** P7.6: the open card's mark while a newer action of its kind waits out its hold. */
+/** The open card's mark while a newer action of its kind waits out its hold. */
 export function squireSupersededNote(kind: SquireCardKind): string {
   const [noun, verb] = heldWords(kind);
   return `A newer ${noun} is about to ${verb}`;
@@ -603,7 +603,7 @@ export function squirePairedHoldText(kind: SquireCardKind, seconds: number): str
 }
 
 /**
- * P7.3: a question's suggested answer or next step, shown above its options. One that only
+ * A question's suggested answer or next step, shown above its options. One that only
  * repeats the question or the title adds nothing.
  */
 export function squireQuestionRecommendation(
@@ -618,7 +618,7 @@ export function squireQuestionRecommendation(
 
 const MAX_VOCABULARY_HINTS = 100;
 
-/** P12.4 transcription hints: "Squire" first, then the server's terms, each once. */
+/** Transcription hints: "Squire" first, then the server's terms, each once. */
 export function squireVocabularyHints(
   serverTerms: ReadonlyArray<string>,
   squireNames: ReadonlyArray<string> = [],
@@ -636,14 +636,14 @@ export function squireVocabularyHints(
   return hints;
 }
 
-// ── Overlaps (P17.3) ──────────────────────────────────────────
+// ── Overlaps ──────────────────────────────────────────────────
 
 type SquireOverlapPayload = Extract<SquireCardPayload, { readonly type: "overlap" }>;
 
 /** Shared files an overlap card lists before folding the rest into "+N more". */
 const SQUIRE_OVERLAP_PATHS_SHOWN = 5;
 
-/** P17.3 overlap card: the shared files capped with "+N more", and the recommended order. */
+/** Overlap card: the shared files capped with "+N more", and the recommended order. */
 export function squireOverlapView(
   payload: Pick<SquireOverlapPayload, "paths" | "recommendation">,
   options: { readonly showAllPaths?: boolean } = {},
@@ -699,7 +699,7 @@ export const SQUIRE_QUEUE_CHIPS: ReadonlyArray<{
 ];
 
 /**
- * P7.2: chips count after the team-strip filter and before the chip filter, so every chip
+ * Chips count after the team-strip filter and before the chip filter, so every chip
  * shows what selecting it would list. Decision items come first, FYI apart.
  */
 export function squireQueue<
@@ -736,7 +736,7 @@ export function squireQueue<
 
 // ── Rules and origin labels ───────────────────────────────────
 
-/** Mirrors the server's P8.1 rule text so a saved rule reads exactly as its offer did. */
+/** Mirrors the server's rule text so a saved rule reads exactly as its offer did. */
 export function squireRuleText(
   rule: Pick<SquireRule, "effect" | "steerKind" | "targetKind">,
   names: { readonly squireName: string; readonly targetName: string },
@@ -756,9 +756,9 @@ export function squireRuleText(
 
 const steerKindLabel = (kind: SquireSteerKind) => kind.replaceAll("-", " ");
 
-/** P7.3 origin labels, in the order the card shows them. */
+/** Origin labels, in the order the card shows them. */
 /**
- * D33 / P12.3: the voice note's speaker flag is client-asserted, so a card a voice turn raised
+ * The voice note's speaker flag is client-asserted, so a card a voice turn raised
  * says so; "speaker not verified" only on an explicit `false`, since older rows omit the flag.
  */
 type SquireOriginCard = Pick<SquireCardRow, "origin" | "routedTaskId" | "ruleId"> & {
@@ -790,7 +790,7 @@ export function squireCardOriginLabels(
   return labels;
 }
 
-/** P8.1 offer after an accept or an Undo; at the cap it reads the limit and cannot be saved. */
+/** The rule offer after an accept or an Undo; at the cap it reads the limit and cannot be saved. */
 export function squireRuleOfferPrompt(offer: SquireRuleOffer) {
   return {
     action: offer.effect === "allow" ? "Always allow this" : "Always ask first for this",
@@ -891,7 +891,7 @@ export function squireRowAction(
     case "overlap":
       return { type: "expand", label: "Review" };
     case "fyi":
-      // P3.6: the inactivity check's accept is Keep and its dismiss pauses triggers, so it gets
+      // The inactivity check's accept is Keep and its dismiss pauses triggers, so it gets
       // both by name and never a plain Dismiss.
       return row.fyiSource === "inactivity"
         ? { type: "inactivity" }
@@ -899,7 +899,7 @@ export function squireRowAction(
   }
 }
 
-/** The card's primary for its payload (P7.1); questions answer through the thread's options. */
+/** The card's primary for its payload; questions answer through the thread's options. */
 export function squireCardPrimaryLabel(payload: SquireKnownPayload): string | null {
   switch (payload.type) {
     case "steer":
@@ -926,7 +926,7 @@ export function squireEditedText(original: string, draft: string | null): string
   return trimmed === "" || trimmed === original.trim() ? undefined : trimmed;
 }
 
-/** P7.4 "Follow up in thread": a draft that quotes the question above what was already typed. */
+/** "Follow up in thread": a draft that quotes the question above what was already typed. */
 export function squireFollowUpDraft(question: string, existing: string): string {
   const quoted = question
     .trim()
@@ -940,7 +940,7 @@ export function squireFollowUpDraft(question: string, existing: string): string 
 }
 
 /**
- * P7.5 cost copy before sending. The client knows only whether the thread's provider forks
+ * The ask's cost copy before sending. The client knows only whether the thread's provider forks
  * natively (`conversationFork`); whether it may probe at all is the server's `probeSupport`,
  * so a refusal comes back as the ask's error.
  */
@@ -957,7 +957,7 @@ export interface SquireRuleNames {
   readonly targetName: (rule: Pick<SquireRule, "targetKind" | "targetId">) => string;
 }
 
-/** P7.3 origin labels, with a rule's exact text read from the raiser's rules once they load. */
+/** Origin labels, with a rule's exact text read from the raiser's rules once they load. */
 export function squireCardOrigins(
   card: SquireOriginCard,
   rules: ReadonlyArray<SquireRule>,
@@ -985,7 +985,7 @@ const OFFER_EXCLUDED_ORIGINS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * P8.1: "Always allow this" after accepting a steer or proposal, never for voice, webhook,
+ * "Always allow this" after accepting a steer or proposal, never for voice, webhook,
  * test, sweep, or message cards or an `other` steer. The server decides; this keeps a stray
  * offer off a card no rule could match.
  */
@@ -1003,7 +1003,7 @@ export function squireAcceptOffer(
 }
 
 /**
- * P8.1: "Always ask first for this" after an Undo. The hold carries no origin, so this trusts
+ * "Always ask first for this" after an Undo. The hold carries no origin, so this trusts
  * the server, which attaches the offer only to a card a rule could match.
  */
 export function squireUndoOffer(offer: SquireRuleOffer | undefined) {
@@ -1082,7 +1082,7 @@ function squireRuleReason(rule: string, match: string): string {
   }
 }
 
-/** P19.8 chip under a delivered post, e.g. "Routed to Research · Jev 0.72 · shown to Lead". */
+/** The chip under a delivered post, e.g. "Routed to Research · Jev 0.72 · shown to Lead". */
 export function squireRoutingChip(
   routing: SquireRouting,
   nameOf: (squireId: SquireId) => string,
@@ -1142,7 +1142,7 @@ export function squireMentionQuery(
   return /\s/.test(query) ? null : { start: at, query };
 }
 
-/** P19.8 composer completion over the room's members and the Lead. */
+/** Composer completion over the room's members and the Lead. */
 export function squireMentionCompletions(
   query: string,
   members: ReadonlyArray<{ readonly squireId: SquireId; readonly name: string }>,
@@ -1222,7 +1222,7 @@ export function squireRoomAuthorLabel(
 
 export type SquireRoomLogRow =
   | { readonly kind: "system"; readonly post: SquireRoomPost }
-  /** P19.7: a bot post that woke another bot, shown as "Release → Research: ...". */
+  /** A bot post that woke another bot, shown as "Release → Research: ...". */
   | {
       readonly kind: "handoff";
       readonly post: SquireRoomPost;
@@ -1324,7 +1324,7 @@ const KIND_ARTICLE: Readonly<Record<SquireCardKind, string>> = {
   fyi: "an FYI",
 };
 
-/** P17.9 receipt row: "Sent to Release", then what its turn raised, then those items' states. */
+/** Routing receipt row: "Sent to Release", then what its turn raised, then those items' states. */
 export function squireReceiptState(
   receipt: SquireRoutingReceipt,
   nameOf: (squireId: SquireId) => string,
@@ -1446,7 +1446,7 @@ export function squireRowProviderName(input: {
   return overlap.length === 0 ? null : overlap.join(" + ");
 }
 
-/** P9.3: the budget a card would spend; only an open card is still deciding. */
+/** The budget a card would spend; only an open card is still deciding. */
 export function squireCardCaption(
   card: Pick<SquireCardRow, "kind" | "caption" | "status">,
   entry: Parameters<typeof squireBudgetCaption>[1] | null,
@@ -1464,7 +1464,7 @@ export interface SquireChip {
   readonly tone: SquireChipTone;
 }
 
-/** P7.3 PR chips: "2/14 failing", "review approved", "mergeable". */
+/** PR chips: "2/14 failing", "review approved", "mergeable". */
 export function squirePullRequestChips(pr: SquirePullRequestSnapshot): ReadonlyArray<SquireChip> {
   const chips: SquireChip[] = [];
   const total = pr.checks.passed + pr.checks.failed;
@@ -1505,7 +1505,7 @@ export function squireDiffStatsLabel(stats: { readonly files: number }): string 
 }
 
 /**
- * P7.3 "waiting <age>": a question waits from when its thread asked, which can be long before
+ * "waiting <age>": a question waits from when its thread asked, which can be long before
  * the card was raised; every other item, and a question raised before the ask was recorded,
  * from the card itself.
  */
@@ -1514,7 +1514,7 @@ export function squireWaitingSince(row: Pick<SquireCardRow, "createdAt" | "reque
 }
 
 /**
- * P7.3 Why on a question card, when the Squire left no note and the trigger no quote:
+ * Why on a question card, when the Squire left no note and the trigger no quote:
  * how long the thread has been waiting, from the row's own age text.
  */
 export function squireQuestionWhyFallback(threadTitle: string | null, ageText: string): string {
@@ -1526,7 +1526,7 @@ export function squireQuestionWhyFallback(threadTitle: string | null, ageText: s
 }
 
 /**
- * P7.3 Why text, or "" when it only repeats the card's title or its thread's title: a Why that
+ * Why text, or "" when it only repeats the card's title or its thread's title: a Why that
  * names the thread says nothing, so the card falls back to how long it has waited.
  */
 export function squireWhyText(
@@ -1587,7 +1587,7 @@ export function squireTimelineRows(
 
 type SquireControlPayload = Extract<SquireKnownPayload, { readonly type: "control" }>;
 
-/** P17.6 control proposal as one readable line: "Pause Research: <reason>". */
+/** A control proposal as one readable line: "Pause Research: <reason>". */
 export function squireControlText(
   payload: Pick<SquireControlPayload, "action" | "squireId" | "cardIds" | "toSquireId">,
   nameOf: (squireId: SquireId) => string,
@@ -1622,7 +1622,7 @@ export function squireControlText(
 
 type SquireProposalCardPayload = Extract<SquireKnownPayload, { readonly type: "squire-proposal" }>;
 
-/** P2.1 scope as names: whole projects, Stave spaces and sagas, threads; exclusions counted. */
+/** Scope as names: whole projects, Stave spaces and sagas, threads; exclusions counted. */
 export function squireProposalScopeLabels(
   grants: ReadonlyArray<SquireGrantInput>,
   names: {
@@ -1656,7 +1656,7 @@ export function squireProposalScopeLabels(
 }
 
 /**
- * What a proposal card reads (P17.2): the name and scope in full, each on its own line, and
+ * What a proposal card reads: the name and scope in full, each on its own line, and
  * the permissions apart from them, so a long scope never squeezes the name.
  */
 export function squireProposalCardText(
@@ -1684,7 +1684,7 @@ const PALETTE_LABEL: Readonly<Record<SquireProposalCardPayload["companion"]["pal
 /**
  * The palette's name beside its swatch on a proposal card: the still bust's cloth tint is
  * subtle at card size and its halo stays warm on every palette, so the name tells proposals
- * apart (CP10).
+ * apart.
  */
 export function squireProposalPaletteLabel(
   palette: SquireProposalCardPayload["companion"]["palette"],
@@ -1694,7 +1694,7 @@ export function squireProposalPaletteLabel(
 
 const LEVEL_LABEL = { off: "Off", recommend: "Recommend", auto: "Auto" } as const;
 
-/** "Recommend only" for the P17.2 default; otherwise each class that differs from it. */
+/** "Recommend only" for a Lead-proposed Squire's default; otherwise each class that differs from it. */
 export function squireProposalPermissionsLabel(permissions: SquirePermissions): string {
   const parts: string[] = [];
   if (permissions.steer !== "recommend") parts.push(`Steer ${LEVEL_LABEL[permissions.steer]}`);

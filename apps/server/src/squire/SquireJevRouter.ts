@@ -1,5 +1,5 @@
 /**
- * Jev room routing (P19.4, P19.5, D55). A rule (e) post on the funded tier
+ * Jev room routing. A rule (e) post on the funded tier
  * commits with routing `pending` and the Lead's `message` row `deferred`
  * (`defer_reason` routing, `not_before` +5 s); `SquireJevRouting.begin` then
  * asks the relay. A valid answer before the deadline retargets in one
@@ -43,7 +43,7 @@ import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireRoomStore from "./SquireRoomStore.ts";
 import * as SquireScope from "./SquireScope.ts";
 
-/** Server settings, tuned on `room.routed` and `room.rerouted` rows (P19.4). */
+/** Server settings, tuned on `room.routed` and `room.rerouted` rows. */
 const JEV_FLOOR = 0.6;
 const JEV_HIGH = 0.85;
 /** Routing's own deadline; the general extension timeout is 90 s. */
@@ -57,7 +57,7 @@ export type JevAvailability =
   | { readonly available: false; readonly reason: JevUnavailableReason };
 
 /**
- * Names, briefs, scopes, recent activity titles, and the post only (P19.4).
+ * Names, briefs, scopes, recent activity titles, and the post only.
  * `requestId` and `runId` are both `squire-route:<messageKey>`, so a retry
  * replays on the relay without a second charge.
  */
@@ -309,7 +309,7 @@ const make = Effect.gen(function* () {
       .getSquire(squireId)
       .pipe(Effect.map(Option.match({ onNone: () => "a member", onSome: (row) => row.name })));
 
-  /** Applies a valid answer while the post is still `pending` (D55); false when the CAS lost. */
+  /** Applies a valid answer while the post is still `pending`; false when the CAS lost. */
   const retarget = (pending: PendingPost, answer: JevAnswer) =>
     Effect.gen(function* () {
       const now = yield* nowIso;
@@ -359,7 +359,7 @@ const make = Effect.gen(function* () {
             });
           }
           if (shownToLead) {
-            // The Lead reads this row as room context instead of being woken (P19.4).
+            // The Lead reads this row as room context instead of being woken.
             yield* rooms.insertPost({
               message_key: `jev-shown:${post.message_key}`,
               room_id: post.room_id,
@@ -420,7 +420,7 @@ const make = Effect.gen(function* () {
       return [...new Set(names)];
     });
 
-  /** P19.4 state only: names, briefs, scopes, activity titles, and the post's own text. */
+  /** Only names, briefs, scopes, activity titles, and the post's own text. */
   const buildRequest = (pending: PendingPost, fundingGeneration: number) =>
     Effect.gen(function* () {
       const { post } = pending;
@@ -495,7 +495,7 @@ const make = Effect.gen(function* () {
               .map((thread) => thread.title.slice(0, THREAD_TITLE_MAX_CHARS)),
             pullRequests: pullRequests.slice(0, PULL_REQUESTS_MAX),
           },
-          // A count of its posts, never their bodies (P19.4).
+          // A count of its posts, never their bodies.
           recentActivity: [
             ...(postCount > 0 ? [`${postCount} posts in this room in the last 24 h`] : []),
             ...itemTitles,

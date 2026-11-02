@@ -22,7 +22,7 @@ import { SetupSection } from "./SquireSetupLayout";
 const CONTROL_KINDS: ReadonlyArray<SquireActionLogKind> = ["action.executed", "control.reverted"];
 const PAGE = 50;
 
-/** P17.6: what the Lead did to its Squires, each with Revert. */
+/** What the Lead did to its Squires, each with Revert. */
 export function SquireLeadActions(props: {
   readonly environmentId: EnvironmentId;
   readonly leadId: SquireId;

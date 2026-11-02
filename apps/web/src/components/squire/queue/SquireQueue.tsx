@@ -57,7 +57,7 @@ export interface SquireQueueProps {
   /** The expanded (list) or selected (inbox) item, from the route's `item` param. */
   readonly selectedItemId: SquireCardId | null;
   readonly onSelectItem: (cardId: SquireCardId | null) => void;
-  /** The page offers the inbox layout only at widths where it fits (D38). */
+  /** The page offers the inbox layout only at widths where it fits. */
   readonly layout: "list" | "inbox";
 }
 
@@ -116,7 +116,7 @@ export function SquireQueue(props: SquireQueueProps) {
     return null;
   };
   const heldShown = (view.held?.items ?? []).filter((row) => holdOf(row.id) !== null);
-  // P7.6: a hold beside an open card of its kind shows under that card, not as a second row.
+  // A hold beside an open card of its kind shows under that card, not as a second row.
   // A selected hold keeps its own row so it stays the one highlighted.
   const holdPairing = squireHoldPairing(heldShown, view.decision?.items ?? [], (cardId) =>
     cardId === selectedItemId ? undefined : holdOf(cardId)?.hold.heldOverCardId,
@@ -157,7 +157,7 @@ export function SquireQueue(props: SquireQueueProps) {
     },
     onAccept: (row) => void act(row, "accept"),
     onDismiss: (row) => void act(row, "dismiss"),
-    // P3.6: the inactivity check's accept keeps triggers running and its dismiss pauses them.
+    // The inactivity check's accept keeps triggers running and its dismiss pauses them.
     onInactivity: (row, keep) => void act(row, keep ? "accept" : "dismiss"),
   };
   const onActed = (
@@ -416,7 +416,7 @@ function QueueGroup(props: {
 
 const ROUTED_SHOWN = 5;
 
-/** D65: the Lead's routing receipts, updated in place as the routed turns and items move. */
+/** The Lead's routing receipts, updated in place as the routed turns and items move. */
 function SquireRoutedGroup(props: {
   readonly environmentId: EnvironmentId;
   readonly squireName: (squireId: SquireId) => string;

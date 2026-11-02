@@ -51,7 +51,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.appsRevoke]: AuthAccessWriteScope,
   [WS_METHODS.appsSetRuntimeCeiling]: AuthAccessWriteScope,
   [WS_METHODS.appsDelete]: AuthAccessWriteScope,
-  // Lecturn: every Squire mutation operates this environment's agents (A6).
+  // Lecturn: every Squire mutation operates this environment's agents.
   [WS_METHODS.squireCreate]: AuthOrchestrationOperateScope,
   [WS_METHODS.squireUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.squireSetStatus]: AuthOrchestrationOperateScope,

@@ -1,5 +1,5 @@
 /**
- * The inactivity window's clock (P3.6). User Squire actions stamp the Lead's
+ * The inactivity window's clock. User Squire actions stamp the Lead's
  * `user_active_at`; SquireTriggers.checkInactivity reads it.
  */
 import * as DateTime from "effect/DateTime";

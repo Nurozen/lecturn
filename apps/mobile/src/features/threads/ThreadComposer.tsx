@@ -181,7 +181,7 @@ export interface ThreadComposerProps {
   readonly onUpdateInteractionMode: (interactionMode: ProviderInteractionMode) => void;
   readonly onExpandedChange?: (expanded: boolean) => void;
   readonly onEditorFocusChange?: (focused: boolean) => void;
-  /** Lecturn: the thread route's D63 allowlist; absent keeps every composer control. */
+  /** Lecturn: the thread route's controls allowlist; absent keeps every composer control. */
   readonly controls?: ThreadRouteControls;
 }
 
@@ -437,7 +437,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     });
   };
   const { onSendMessage, onChangeDraftMessage, onShowUsageLimits } = props;
-  // Lecturn: each gated composer control reads the D63 allowlist through this.
+  // Lecturn: each gated composer control reads the controls allowlist through this.
   const allows = (control: ThreadRouteControl) => allowsThreadRouteControl(props.controls, control);
   const usageLimitsOffered =
     allows("usage-limits") &&

@@ -1,5 +1,5 @@
 /**
- * The Lead's item-raised and item-resolved rows (P17.5, D29). A decision item
+ * The Lead's item-raised and item-resolved rows. A decision item
  * a Squire raises wakes the Lead when it is raised and when it leaves
  * open/held; FYI items and the Lead's own items never do.
  */

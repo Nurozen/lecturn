@@ -527,7 +527,7 @@ interface MessagesTimelineProps {
   routeThreadKey: string;
   displayThreadKey?: string;
   paintOnly?: boolean;
-  /** Lecturn: absent hides every diff action (ChatView `controls`, D63). */
+  /** Lecturn: absent hides every diff action (ChatView `controls`). */
   onOpenTurnDiff?: ((runId: RunId, filePath?: string) => void) | undefined;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
   parentThreadLink?: {
@@ -540,7 +540,7 @@ interface MessagesTimelineProps {
     readonly sourceThreadId: ThreadId;
     readonly runId: RunId;
   }) => Promise<void>;
-  /** Lecturn: absent hides the inspector's "Roll back" (ChatView `controls`, D63). */
+  /** Lecturn: absent hides the inspector's "Roll back" (ChatView `controls`). */
   onRollbackCheckpoint?:
     | ((input: { readonly checkpointId: string; readonly scopeId: string }) => void)
     | undefined;
@@ -598,16 +598,16 @@ interface MessagesTimelineProps {
   cancelPositionRestoreRef?: React.RefObject<(() => void) | null> | undefined;
   hideEmptyPlaceholder?: boolean;
   topFadeEnabled?: boolean;
-  /** Lecturn: false hides saving thread notes (ChatView `controls`, D63). */
+  /** Lecturn: false hides saving thread notes (ChatView `controls`). */
   notesAllowed?: boolean;
   /**
-   * Lecturn (D63): open at the newest row's top, not the end, when it is an MCP App card and no
+   * Lecturn: open at the newest row's top, not the end, when it is an MCP App card and no
    * reading position is remembered, as a user-scrolled position so live follow leaves it there.
    */
   openAtNewestAppCard?: boolean;
-  /** Lecturn: a Squire home thread's compact event rows (ChatView `controls`, D63). */
+  /** Lecturn: a Squire home thread's compact event rows (ChatView `controls`). */
   compactSquireEvents?: boolean;
-  /** Lecturn: false hides the turn minimap (ChatView `controls`, D63). */
+  /** Lecturn: false hides the turn minimap (ChatView `controls`). */
   minimapEnabled?: boolean;
   historyControls?: MessagesTimelineHistoryControls | undefined;
   loadEarlier?: CitationHistoryPage | null;
@@ -1144,7 +1144,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       opened.identity = null;
     }
   });
-  // Lecturn (D63): the newest MCP App card opens at its top (see `openAtNewestAppCard`).
+  // Lecturn: the newest MCP App card opens at its top (see `openAtNewestAppCard`).
   const openingPosition = resolveTimelineOpeningPosition(
     rememberedPosition,
     restoringThreadPosition && openAtNewestAppCard ? timelineNewestAppCardRowId(rows) : null,

@@ -9,7 +9,6 @@ import {
   OrchestrationV2Command,
   OrchestrationV2InternalCommand,
   type OrchestrationV2ServerCommand,
-  type OrchestrationV2ThreadShellSnapshot,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -28,6 +27,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
@@ -71,7 +71,7 @@ const instanceId = ProviderInstanceId.make("codex");
 const threadModel = { instanceId, model: "gpt-5.4" } satisfies ModelSelection;
 const otherModel = { instanceId, model: "gpt-5.5" } satisfies ModelSelection;
 
-// Written from A5.11a, not from the rule table, so a reclassification shows here.
+// Written out by hand, not from the rule table, so a reclassification shows here.
 const ALLOWED_FROM_ANY_CALLER: ReadonlySet<string> = new Set([
   "message.dispatch",
   "run.interrupt",
@@ -129,17 +129,43 @@ const userMessage = (
   ...overrides,
 });
 
-// Registry-level: the real registry and hook over a projection holding one
-// home thread (active) and one probe (archived).
-const shells = {
-  schemaVersion: 2,
-  snapshotSequence: 0,
-  threads: [{ id: homeThread, squire: { squireId, role: "home" } }, { id: userThread }],
-  archivedThreads: [{ id: probeThread, squire: { squireId, role: "probe" } }],
-} as unknown as OrchestrationV2ThreadShellSnapshot;
+// Registry-level: the real registry and hook over thread rows holding one home
+// thread (active), one probe (archived), a deleted marked thread, and a plain
+// thread. Shells are never built: the hook reads only the marker column.
+const deletedHome = ThreadId.make("thread:squire-deleted-home");
+const threadRow = (
+  threadId: ThreadId,
+  payload: object,
+  times: { readonly archivedAt?: string; readonly deletedAt?: string } = {},
+) =>
+  Effect.flatMap(
+    SqlClient.SqlClient,
+    (sql) => sql`INSERT INTO orchestration_v2_projection_threads (
+        thread_id, project_id, title, default_provider, runtime_mode, interaction_mode,
+        created_at, updated_at, archived_at, deleted_at, payload_json)
+      VALUES (${threadId}, 'project', 'Thread', 'codex', 'approval-required', 'default',
+        '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z',
+        ${times.archivedAt ?? null}, ${times.deletedAt ?? null}, ${JSON.stringify(payload)})`,
+  );
+const seededThreads = Layer.effectDiscard(
+  Effect.all([
+    threadRow(homeThread, { squire: { squireId, role: "home" } }),
+    threadRow(userThread, { title: "Plain" }),
+    threadRow(
+      probeThread,
+      { squire: { squireId, role: "probe" } },
+      { archivedAt: "2026-11-01T00:00:00.000Z" },
+    ),
+    threadRow(
+      deletedHome,
+      { squire: { squireId, role: "home" } },
+      { deletedAt: "2026-11-01T00:00:00.000Z" },
+    ),
+  ]),
+).pipe(Layer.provideMerge(SqlitePersistence.layerMemory));
 
 const projectionMock = Layer.mock(ProjectionStore.ProjectionStoreV2)({
-  getShellSnapshot: () => Effect.succeed(shells),
+  getShellSnapshot: () => Effect.die("the hook must not build thread shells"),
   getThread: () => Effect.succeed({ modelSelection: threadModel } as OrchestrationV2AppThread),
 });
 
@@ -149,6 +175,7 @@ const registryLayer = (
   SquireCommandHook.layer.pipe(
     Layer.provideMerge(LecturnOrchestrationHooks.layer),
     Layer.provide(projectionMock),
+    Layer.provide(seededThreads),
     Layer.provide(squires),
   );
 
@@ -361,6 +388,29 @@ describe("SquireCommandHook allowlist", () => {
         assert.equal(yield* outcome(commandOf("provider.switch", homeThread)), "Managed by Squire");
       }),
     );
+
+    it.effect("forgets a deleted thread's marker", () =>
+      Effect.gen(function* () {
+        assert.equal(yield* outcome(commandOf("provider.switch", deletedHome)), "passed");
+      }),
+    );
+  });
+
+  // Switch off, no Squire ever made: the first ordinary command reads no
+  // thread shell (the projection mock dies if asked) and passes.
+  it.layer(
+    SquireCommandHook.layer.pipe(
+      Layer.provideMerge(LecturnOrchestrationHooks.layer),
+      Layer.provide(projectionMock),
+      Layer.provide(SqlitePersistence.layerMemory),
+    ),
+  )("with no Squire threads", (it) => {
+    it.effect("passes ordinary commands without building thread shells", () =>
+      Effect.gen(function* () {
+        assert.equal(yield* outcome(commandOf("provider.switch", userThread)), "passed");
+        assert.equal(yield* outcome(userMessage(userThread)), "passed");
+      }),
+    );
   });
 });
 
@@ -503,13 +553,13 @@ for (const squireEnabled of [true, false]) {
     `SquireCommandHook on the orchestrator (switch ${squireEnabled ? "on" : "off"})`,
     (it) => {
       it.effect(
-        "loads marked threads from shells and sees SquireDispatchOrigin through dispatch",
+        "loads marked threads from thread rows and sees SquireDispatchOrigin through dispatch",
         () =>
           Effect.gen(function* () {
             const home = ThreadId.make(`thread:home:${squireEnabled}`);
             const user = ThreadId.make(`thread:plain:${squireEnabled}`);
             const orchestrator = yield* Orchestrator.OrchestratorV2;
-            // Created before the hook registers, so only the shell load can know it.
+            // Created before the hook registers, so only the startup load can know it.
             yield* orchestrator.dispatch(createCommand(home, { role: "home" }));
             yield* orchestrator.dispatch(createCommand(user));
             yield* Layer.build(SquireCommandHook.layer);

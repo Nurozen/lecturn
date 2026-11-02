@@ -1107,6 +1107,7 @@ describe("ServerSettings.squire", () => {
     const settings = decodeServerSettings({ stave: { enabled: true } });
 
     expect(settings.squire).toEqual({
+      enabled: false,
       phoneAlertsWhileDesktop: "after-3-min",
       inactivityDays: 7,
       botMessages: true,

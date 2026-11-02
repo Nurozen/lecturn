@@ -1,7 +1,7 @@
 import type { SquireIndicatorStateName } from "@lecturn/client-runtime/state/squire";
 import type { SquireCompanion, SquirePalette } from "@lecturn/contracts";
 
-// Below this the portrait face is unreadable, so the indicator becomes the mark (spec P16.4).
+// Below this the portrait face is unreadable, so the indicator becomes the mark.
 export const SQUIRE_MIN_PORTRAIT_SIZE = 22;
 
 export function squireIndicatorForm(size: number, presence: SquireCompanion["presence"]) {
@@ -24,7 +24,7 @@ export type SquirePortraitKey =
   `${SquireCompanion["appearance"]}-${SquireCompanion["hood"]}-${SquirePalette}${"" | "-idle"}`;
 
 /**
- * Each Squire's face wears its palette's cloth; gold belongs to the Lead (OQ22). Dimmed states
+ * Each Squire's face wears its palette's cloth; gold belongs to the Lead. Dimmed states
  * use the pre-desaturated file (CSS `grayscale(0.6)`, as web's idle filter), so no runtime filter
  * runs.
  */

@@ -10,7 +10,7 @@
  * palette tint integrate dt while live. Bursts from trigger() run on the companion clock and
  * are dropped on any non-live frame.
  *
- * Attentive is steady (spec P16.3): the head halo and chest aura hold constant values once the
+ * Attentive is steady: the head halo and chest aura hold constant values once the
  * attentive blend is full, and v5's attentive beacon ring and lift sparkles are gone.
  *
  * Cost: transforms / opacity on small vector shapes, blend modes on small clipped shapes, and

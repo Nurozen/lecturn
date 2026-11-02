@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 /**
  * Set only by Squire modules around their own orchestration dispatches
  * (lifecycle, delivery, auto-decline, probe, provider change). The command
- * allowlist on marked threads (A5.11a) passes such commands. Command ids
+ * allowlist on marked threads passes such commands. Command ids
  * cannot carry this authority: clients choose their own (`server:squire:`
  * names receipts only). The orchestrator runs `aroundCommand` in the
  * dispatching fiber, so the reference reaches the hook.

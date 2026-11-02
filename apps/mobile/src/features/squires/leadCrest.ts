@@ -1,4 +1,4 @@
-// Mirrors apps/web/src/components/squire/companion/leadCrest.ts: the Lead's crest (OQ22), a
+// Mirrors apps/web/src/components/squire/companion/leadCrest.ts: the Lead's crest, a
 // guiding star over a gathered thread, in a 24 x 24 box.
 export const LEAD_CREST_VIEWBOX = 24;
 export const LEAD_CREST_PATHS = [

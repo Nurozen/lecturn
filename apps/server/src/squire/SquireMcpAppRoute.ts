@@ -1,5 +1,5 @@
 /**
- * Showcase cards' requests (D32). Lecturn serves them from Squire state, so a
+ * Showcase cards' requests. Lecturn serves them from Squire state, so a
  * card's buttons work on every provider, with the thread stopped, and in a copy
  * of the thread in the same environment: the card is authorized by the item
  * ids its own publish call recorded, never by the thread it is shown in.
@@ -102,7 +102,7 @@ const make = Effect.gen(function* () {
     );
   };
 
-  // The document is the captured attachment; the page reads nothing else (P18.4).
+  // The document is the captured attachment; the page reads nothing else.
   const readResource: SquireMcpAppRoute["readResource"] = (input) =>
     Effect.fail(fail(input.threadId, "not-an-app"));
 

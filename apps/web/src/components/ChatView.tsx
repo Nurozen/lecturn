@@ -945,10 +945,10 @@ type ChatViewProps =
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
-      /** Lecturn: an allowlist of the controls to show (D63); absent shows every control. */
+      /** Lecturn: an allowlist of the controls to show; absent shows every control. */
       controls?: ChatViewControls;
       /**
-       * Lecturn (D63): open at the newest MCP App card's top, not the end, when it is the newest
+       * Lecturn: open at the newest MCP App card's top, not the end, when it is the newest
        * row; reading from there counts as user-scrolled, so new output does not snap to the end.
        */
       openAtNewestAppCard?: boolean;
@@ -1128,7 +1128,7 @@ export default function ChatView(props: ChatViewProps) {
     reserveTitleBarControlInset = true,
     forceExpandedMobileComposer = false,
   } = props;
-  // Lecturn: absent `controls` allows every control (D63).
+  // Lecturn: absent `controls` allows every control.
   const controls = routeKind === "server" ? props.controls : undefined;
   const openAtNewestAppCard = routeKind === "server" && props.openAtNewestAppCard === true;
   const allows = (control: ChatViewControl) => allowsChatViewControl(controls, control);

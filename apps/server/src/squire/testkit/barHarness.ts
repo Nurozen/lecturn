@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off - Run files go to the repo-root artifacts folder; action-log data is stored JSON.
 /**
- * The B2 bar harness (5.7, D44d, D45): the Squire stack as the server builds
+ * The gold-scenario bar harness: the Squire stack as the server builds
  * it (`phase4Layer`: real orchestrator, switch-on `layerSquire`, the fixture
  * seam) plus the production `/mcp` route on a test HTTP port, with the real
  * `McpSessionRegistry` the provider session manager issues home-thread
@@ -9,9 +9,9 @@
  * provider's do. Each run gets a fresh layer in a fresh temp Lecturn home.
  *
  * The Squire's provider is an option: `scripted` (`squireFake`) or, for
- * B2-live and S0a2 (CP2L), a real `claudeAgent` or `codex` adapter launched
- * from a temp provider home (`barProviders.ts`). Only the Squire's home
- * thread runs the live provider; fixture worker threads stay scripted (D44j).
+ * live runs, a real `claudeAgent` or `codex` adapter launched from a temp
+ * provider home (`barProviders.ts`). Only the Squire's home thread runs the
+ * live provider; fixture worker threads stay scripted.
  */
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -235,7 +235,7 @@ export const withBarHarness = <A, E>(
 export interface BarRunOptions {
   /** The main Squire's script; the scripted provider runs it. */
   readonly fake?: SquireFakeScript;
-  /** D44d: pauses the Lead after setup, so a decision card does not wake it. */
+  /** Pauses the Lead after setup, so a decision card does not wake it. */
   readonly pauseLead?: boolean;
   /** The Squire's provider; `scripted` when absent. */
   readonly provider?: BarProvider;
@@ -252,7 +252,7 @@ const fixturesService = Effect.map(
   Option.getOrThrow,
 );
 
-/** Spec B2: start the server's reactors, `loadSetup`, `inject` each event, then `drainThrough` each. */
+/** One gold scenario: start the server's reactors, `loadSetup`, `inject` each event, then `drainThrough` each. */
 export const runBarScenario = (scenario: SquireFixtureScenario, options: BarRunOptions = {}) =>
   Effect.gen(function* () {
     yield* ServerRuntimeStartup.startLecturnReactors;
@@ -274,7 +274,7 @@ export const runBarScenario = (scenario: SquireFixtureScenario, options: BarRunO
     } satisfies BarLoaded;
   });
 
-// ── Timeline (6.8, CP7) ──
+// ── Timeline ──
 
 /** A hold as it stood at a mark; `executes_at` is cleared once it runs. */
 export interface BarHeld {
@@ -416,7 +416,7 @@ export const applyBarTimelineStep = (
     yield* barSettle(loaded.squireId);
   });
 
-/** What the server does at startup for held actions: reconcile, then arm the clock (A9). */
+/** What the server does at startup for held actions: reconcile, then arm the clock. */
 const barRestart = (loaded: BarLoaded) =>
   Effect.gen(function* () {
     // Forks reconcile-then-clock as the server does; the explicit calls make it deterministic.
@@ -426,14 +426,14 @@ const barRestart = (loaded: BarLoaded) =>
   });
 
 /**
- * Spec B2 with a timeline: `runBarScenario`, then each timeline step on the
+ * A gold scenario with a timeline: `runBarScenario`, then each timeline step on the
  * test clock, with a mark after the events and after every step. A
  * `restart` closes the server lifetime (every Squire fiber and the `/mcp`
  * route), moves the test clock by the downtime, and builds a fresh bar layer
  * over the same Lecturn home and database, which reconciles and re-arms as
  * the server does. `observe` runs in the last lifetime. Holds that come due
  * run through the server's clock, `executeDue`, the real thread services,
- * and the A5.11b command hook.
+ * and the command hook.
  *
  * After a restart the in-memory fake script and the fixture's main-Squire
  * pointer are gone, so a step after a restart cannot deliver a scripted turn
@@ -482,7 +482,7 @@ export const withBarTimeline = <A, E>(
     }
   }).pipe(Effect.scoped, Effect.orDie);
 
-// ── Effects (P14.2, D45) ──
+// ── Effects ──
 
 const BAR_EFFECTS = [
   "card_created",
@@ -516,7 +516,7 @@ export interface BarObserved {
   readonly homeThreadId: string | null;
   /** Titles of the threads held actions targeted; an Auto steer that runs leaves no card. */
   readonly heldTargets: ReadonlyArray<string>;
-  /** `action.executed` rows: what ran, how it was dispatched (D12), and its key. */
+  /** `action.executed` rows: what ran, how it was dispatched, and its key. */
   readonly executions: ReadonlyArray<BarExecution>;
   /** Budget rows an execution wrote; seeded usage carries no execution key. */
   readonly executionBudgetRows: ReadonlyArray<{
@@ -532,7 +532,7 @@ export interface BarObserved {
     readonly senderThreadId: string | undefined;
     readonly createdAt: string;
   }>;
-  /** Per target thread: the mode D12 allows its provider session, and its interrupted runs. */
+  /** Per target thread: the steer mode its provider session allows, and its interrupted runs. */
   readonly targets: ReadonlyArray<{
     readonly threadId: string;
     readonly d12Mode: "auto" | "queue";
@@ -560,10 +560,10 @@ const stringOr = (value: unknown, fallback: string) =>
   typeof value === "string" ? value : fallback;
 
 /**
- * Effect counts from the action log of the Squire under test only (D45).
+ * Effect counts from the action log of the Squire under test only.
  * `card.created` counts toward `card_created` or `proposal_created` only for
  * card kinds `steer` and `proposal`; question, overlap, and fyi rows count
- * toward nothing. A P7.6 replacement updates the open card in place and logs
+ * toward nothing. A newer card of the same kind updates the open card in place and logs
  * another `card.created` row with the same `card_id`, so cards are counted
  * as distinct `card_id`s, never as rows.
  */
@@ -669,7 +669,7 @@ export const barObserve = (squireId: SquireId) =>
         "providerSessions",
         "runs",
       ]);
-      // D12: `auto` only where the session steers natively without cancelling tools.
+      // `auto` only where the session steers natively without cancelling tools.
       const steers = providerSessions.some(
         (session) =>
           session.capabilities.turns.supportsActiveSteering &&
@@ -742,7 +742,7 @@ export const barToolCalls = (homeThreadId: ThreadId) =>
     });
   });
 
-// ── Judging against gold (spec B2) ──
+// ── Judging against gold ──
 
 const captionPattern = (gold: string) =>
   new RegExp(

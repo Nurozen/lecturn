@@ -304,7 +304,7 @@ const load = (
 
 const interruptRequest = (createdBy?: "user" | "agent" | "system"): OrchestrationV2TurnItem => {
   const item = turnItem("run_interrupt_request", { message: "Interrupt requested" });
-  // Provenance on the item is the A5.3 follow-up; old history has none.
+  // Old history carries no `createdBy` on the item.
   return createdBy === undefined ? item : Object.assign(item, { createdBy });
 };
 

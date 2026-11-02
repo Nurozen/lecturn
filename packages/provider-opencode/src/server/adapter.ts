@@ -627,7 +627,7 @@ type OpenCodeSquireIsolation = NonNullable<
 >;
 
 /**
- * Lecturn: a Squire's whole ruleset (A5.9, D9, D25). OpenCode drops a tool
+ * Lecturn: a Squire's whole ruleset. OpenCode drops a tool
  * whose last matching rule denies every pattern, so a native tool or another
  * MCP server's tool is never offered, and nothing is left to ask about. A
  * home's credential lists only its role's tools (SquireMcpGate), so every

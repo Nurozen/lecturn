@@ -900,7 +900,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     readonly threadId: ThreadId;
     /**
      * Lecturn: a marked thread never shares the instance's session; its
-     * provider process runs with an isolated provider home (A5.9).
+     * provider process runs with an isolated provider home.
      */
     readonly marked: boolean;
   }) =>
