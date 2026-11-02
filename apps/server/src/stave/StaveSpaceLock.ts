@@ -2,45 +2,170 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 /** Shared process-lifetime fence for Stave admission and filesystem mutations. */
-import { Context, Deferred, Effect, FileSystem, Layer, Option, Path, Semaphore } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, Path } from "effect";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 
 export class StaveSpaceLock extends Context.Service<
   StaveSpaceLock,
   {
+    /** Exclusive, waiting as long as it takes: Stave operations that change a space. */
     readonly withSpaceLock: <A, E, R>(
       root: string,
       effect: Effect.Effect<A, E, R>,
     ) => Effect.Effect<A, E, R>;
-    /** Fence project root changes against registered ancestor operations. */
+    /**
+     * Shared: admission that only has to exclude Stave operations, so any
+     * number run together. Waits up to `wait` (unbounded when omitted;
+     * `Duration.zero` never queues) and returns `None` when that runs out.
+     * Reentrant while a shared hold the fiber inherited is live, so a nested
+     * admission runs at once instead of queueing behind a writer that is
+     * waiting for this very holder.
+     */
+    readonly withSharedSpaceLock: <A, E, R>(
+      root: string,
+      effect: Effect.Effect<A, E, R>,
+      wait?: Duration.Input,
+    ) => Effect.Effect<Option.Option<A>, E, R>;
+    /**
+     * Fence project root changes against registered ancestor operations.
+     * Exclusive: a project create or move changes which project owns a tree,
+     * so it must exclude in-flight thread admissions that resolved the old
+     * owner as well as Stave operations. It never waits, because it runs
+     * under the project command lock.
+     */
     readonly tryWithWorkspaceLocks: <A, E, R>(
       roots: ReadonlyArray<string>,
       effect: Effect.Effect<A, E, R>,
     ) => Effect.Effect<Option.Option<A>, E, R>;
-    /** Refuse contention without parking a worker needed by the lock holder. */
-    readonly tryWithSpaceLock: <A, E, R>(
-      root: string,
-      effect: Effect.Effect<A, E, R>,
-    ) => Effect.Effect<Option.Option<A>, E, R>;
-    /**
-     * Lecturn: returns once the space lock is free, without taking it, so a
-     * background retry never turns away a command arriving as it frees.
-     */
-    readonly awaitFree: (root: string) => Effect.Effect<void>;
   }
 >()("lecturn/stave/StaveSpaceLock") {}
+
+/** A shared hold, live until the admission that took it returns. */
+interface SharedHold {
+  live: boolean;
+}
+
+/**
+ * Shared holds by canonical root. Forked children inherit this, so a child
+ * that outlives its parent's admission sees the hold go dead instead of
+ * reentering a lock nobody holds.
+ */
+class HeldSharedSpaces extends Context.Reference<ReadonlyMap<string, SharedHold>>(
+  "lecturn/stave/StaveSpaceLock/HeldSharedSpaces",
+  { defaultValue: () => new Map() },
+) {}
+
+interface Waiter {
+  readonly exclusive: boolean;
+  readonly granted: Deferred.Deferred<void>;
+  done: boolean;
+}
+
+/**
+ * Read/write lock with FIFO hand-off: a reader queues whenever anyone is
+ * already queued, so once a writer waits, later readers line up behind it and
+ * a stream of turn starts cannot starve a Stave operation. Effect's Semaphore
+ * cannot express this with "readers take one permit, writers take all": it
+ * serves any request that fits, so a later one-permit request overtakes a
+ * waiting all-permit one.
+ */
+class SpaceRwLock {
+  private readers = 0;
+  private writer = false;
+  private readonly queue: Array<Waiter> = [];
+
+  private admits(exclusive: boolean) {
+    return exclusive ? !this.writer && this.readers === 0 : !this.writer;
+  }
+
+  private take(exclusive: boolean) {
+    if (exclusive) this.writer = true;
+    else this.readers += 1;
+  }
+
+  private wake() {
+    while (this.queue.length > 0 && this.admits(this.queue[0]!.exclusive)) {
+      const next = this.queue.shift()!;
+      next.done = true;
+      this.take(next.exclusive);
+      Deferred.doneUnsafe(next.granted, Effect.void);
+    }
+  }
+
+  tryAcquire(exclusive: boolean) {
+    if (this.queue.length > 0 || !this.admits(exclusive)) return false;
+    this.take(exclusive);
+    return true;
+  }
+
+  acquire(exclusive: boolean): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      if (this.tryAcquire(exclusive)) return Effect.void;
+      const waiter: Waiter = { exclusive, granted: Deferred.makeUnsafe(), done: false };
+      this.queue.push(waiter);
+      return Deferred.await(waiter.granted).pipe(
+        Effect.onInterrupt(() =>
+          Effect.sync(() => {
+            if (waiter.done) return this.releaseUnsafe(exclusive);
+            this.queue.splice(this.queue.indexOf(waiter), 1);
+            // A writer leaving the head may let the readers behind it in.
+            this.wake();
+          }),
+        ),
+      );
+    });
+  }
+
+  releaseUnsafe(exclusive: boolean) {
+    if (exclusive) this.writer = false;
+    else this.readers -= 1;
+    this.wake();
+  }
+
+  /**
+   * `wait` undefined waits as long as it takes; zero only tries. `"join"`
+   * takes another read beside a live shared hold, skipping the queue: that
+   * hold already keeps writers out, and the joining read keeps them out even
+   * if the hold ends first.
+   */
+  with<A, E, R>(
+    exclusive: boolean,
+    effect: Effect.Effect<A, E, R>,
+    wait?: Duration.Duration | "join",
+  ): Effect.Effect<Option.Option<A>, E, R> {
+    const acquire =
+      wait === "join"
+        ? Effect.sync(() => {
+            this.readers += 1;
+            return true;
+          })
+        : wait === undefined
+          ? Effect.as(this.acquire(exclusive), true)
+          : Duration.isZero(wait)
+            ? Effect.sync(() => this.tryAcquire(exclusive))
+            : Effect.map(Effect.timeoutOption(this.acquire(exclusive), wait), Option.isSome);
+    return Effect.uninterruptibleMask((restore) =>
+      restore(acquire).pipe(
+        Effect.flatMap((held) =>
+          held
+            ? restore(effect).pipe(
+                Effect.asSome,
+                Effect.ensuring(Effect.sync(() => this.releaseUnsafe(exclusive))),
+              )
+            : Effect.succeedNone,
+        ),
+      ),
+    );
+  }
+}
 
 export const layer = Layer.effect(
   StaveSpaceLock,
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    interface Space {
-      readonly mutex: Semaphore.Semaphore;
-      held: boolean;
-      /** Completed, then replaced, each time a holder lets go. */
-      freed: Deferred.Deferred<void>;
-    }
-    const locks = new Map<string, Space>();
+    const locks = new Map<string, SpaceRwLock>();
     const canonical = Effect.fn("StaveSpaceLock.canonical")(function* (root: string) {
       let candidate = path.resolve(root);
       const missing: string[] = [];
@@ -53,58 +178,47 @@ export const layer = Layer.effect(
         candidate = parent;
       }
     });
-    const getLock = Effect.fn("StaveSpaceLock.getLock")(function* (root: string) {
-      const key = yield* canonical(root);
+    const lockFor = (key: string) => {
       let lock = locks.get(key);
       if (lock === undefined) {
-        lock = { mutex: Semaphore.makeUnsafe(1), held: false, freed: Deferred.makeUnsafe() };
+        lock = new SpaceRwLock();
         locks.set(key, lock);
       }
       return lock;
-    });
-    // Signalled after the permit is back, so a woken waiter finds the lock takeable.
-    const holding = <A, E, R, B>(
-      space: Space,
-      acquire: (inner: Effect.Effect<A, E, R>) => Effect.Effect<B, E, R>,
+    };
+    const withSpaceLock = <A, E, R>(root: string, effect: Effect.Effect<A, E, R>) =>
+      Effect.gen(function* () {
+        const key = yield* canonical(root);
+        // Waiting would never end: the writer would wait on this fiber's own read.
+        if ((yield* HeldSharedSpaces).get(key)?.live)
+          return yield* Effect.die(new Error(`Stave space ${key} is already held shared.`));
+        return Option.getOrThrow(yield* lockFor(key).with(true, effect));
+      });
+    const withSharedSpaceLock = <A, E, R>(
+      root: string,
       effect: Effect.Effect<A, E, R>,
+      wait?: Duration.Input,
     ) =>
-      Effect.suspend(() => {
-        let mine = false;
-        const inner = Effect.suspend(() => {
-          mine = true;
-          space.held = true;
-          return effect;
-        });
-        return acquire(inner).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              if (!mine) return;
-              space.held = false;
-              const freed = space.freed;
-              space.freed = Deferred.makeUnsafe();
-              Deferred.doneUnsafe(freed, Effect.void);
-            }),
+      Effect.gen(function* () {
+        const key = yield* canonical(root);
+        const held = yield* HeldSharedSpaces;
+        const hold: SharedHold = { live: true };
+        return yield* lockFor(key).with(
+          false,
+          Effect.provideService(effect, HeldSharedSpaces, new Map([...held, [key, hold]])).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                hold.live = false;
+              }),
+            ),
           ),
+          held.get(key)?.live
+            ? "join"
+            : wait === undefined
+              ? undefined
+              : Duration.fromInputUnsafe(wait),
         );
       });
-    const withSpaceLock = <A, E, R>(root: string, effect: Effect.Effect<A, E, R>) =>
-      getLock(root).pipe(
-        Effect.flatMap((space) => holding(space, space.mutex.withPermits(1), effect)),
-      );
-    const tryWithSpaceLock = <A, E, R>(root: string, effect: Effect.Effect<A, E, R>) =>
-      getLock(root).pipe(
-        Effect.flatMap((space) => holding(space, space.mutex.withPermitsIfAvailable(1), effect)),
-      );
-    const awaitFree = (root: string) =>
-      getLock(root).pipe(
-        Effect.flatMap((space) =>
-          Effect.suspend(() => {
-            // The signal is read before the state, so a release between them still wakes us.
-            const freed = space.freed;
-            return space.held ? Deferred.await(freed) : Effect.void;
-          }),
-        ),
-      );
     const tryWithWorkspaceLocks = <A, E, R>(
       roots: ReadonlyArray<string>,
       effect: Effect.Effect<A, E, R>,
@@ -113,7 +227,7 @@ export const layer = Layer.effect(
         const targets = yield* Effect.forEach(roots, canonical);
         const keys = new Set(targets);
         // Registered roots survive the filesystem move until their operation
-        // releases the mutex, even when the manifest is already gone.
+        // releases the lock, even when the manifest is already gone.
         for (const root of locks.keys()) {
           if (
             targets.some((target) => {
@@ -128,22 +242,15 @@ export const layer = Layer.effect(
           )
             keys.add(root);
         }
-        let guarded = Effect.map(effect, Option.some);
+        let guarded = Effect.asSome(effect);
         for (const root of [...keys].sort().toReversed()) {
-          const space = yield* getLock(root);
-          const inner = guarded;
-          guarded = holding(space, space.mutex.withPermitsIfAvailable(1), inner).pipe(
-            Effect.map(Option.flatten),
-          );
+          guarded = lockFor(root)
+            .with(true, guarded, Duration.zero)
+            .pipe(Effect.map(Option.flatten));
         }
         return yield* guarded;
       });
-    return StaveSpaceLock.of({
-      withSpaceLock,
-      tryWithSpaceLock,
-      tryWithWorkspaceLocks,
-      awaitFree,
-    });
+    return StaveSpaceLock.of({ withSpaceLock, withSharedSpaceLock, tryWithWorkspaceLocks });
   }),
 );
 

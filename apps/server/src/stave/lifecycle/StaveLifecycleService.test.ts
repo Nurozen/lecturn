@@ -264,9 +264,8 @@ const harness = Effect.fn(function* (
     }),
     Layer.succeed(StaveSpaceLock, {
       withSpaceLock: (_root, effect) => effect,
-      tryWithSpaceLock: (_root, effect) => Effect.map(effect, Option.some),
-      tryWithWorkspaceLocks: (_roots, effect) => Effect.map(effect, Option.some),
-      awaitFree: () => Effect.void,
+      withSharedSpaceLock: (_root, effect) => Effect.asSome(effect),
+      tryWithWorkspaceLocks: (_roots, effect) => Effect.asSome(effect),
     }),
     FileSystem.layerNoop({ exists: () => Effect.succeed(true) }),
     Layer.succeed(ServerActivation, Deferred.await(activation)),

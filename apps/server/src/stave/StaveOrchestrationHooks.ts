@@ -11,7 +11,8 @@
  *   the commit, so a Stave operation never races a project claiming its tree;
  * - thread intents in a space (create, worktree binding, turn start, fork,
  *   import, delegated task, merge-back, unsettle, pin, unarchive):
- *   `StaveAdmission` decides under the space lock;
+ *   `StaveAdmission` decides under the space lock, held shared so these
+ *   commands only exclude Stave operations, never each other;
  * - provider session open: `StaveRuntimeFence.withStart` keeps new runtimes
  *   out of a space while a teardown holds its fence, and teardown waits for
  *   starts already in flight.
@@ -21,6 +22,7 @@
  * @module StaveOrchestrationHooks
  */
 import type { OrchestrationV2ServerCommand, ProjectId, ThreadId } from "@lecturn/contracts";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -45,6 +47,18 @@ import { isPathUnder, StaveSpaceLock } from "./StaveSpaceLock.ts";
 import { STAVE_MANIFEST_FILE_NAME } from "./staveManifest.ts";
 
 const CONTRIBUTION = "stave";
+
+/**
+ * How long a thread command waits for a Stave operation to release its space
+ * before it is refused. Retargets, refreshes and memory edits finish well
+ * inside this, so ordinary contention never reaches the sender; creating,
+ * archiving or restoring a space can take minutes, and a send should be told
+ * to retry rather than hang that long. It also bounds how long an automatic
+ * sender (and its effect worker slot) can sit waiting.
+ */
+export const STAVE_ADMISSION_WAIT = Duration.seconds(5);
+
+const SPACE_BUSY_REASON = "A Stave operation is changing this space. Retry when it finishes.";
 
 /** What a thread command asks of a space, and where to find its project. */
 export interface StaveThreadIntent {
@@ -122,12 +136,10 @@ const reject = (reason: string, cause?: unknown, hook = "aroundCommand") =>
     ...(cause === undefined ? {} : { cause }),
   });
 
-const SPACE_BUSY_REASON = "A Stave operation is changing this space. Retry when it finishes.";
-
 /**
- * Lecturn: Stave refuses a thread command, rather than waits, while another
- * command holds the space lock. That refusal alone is transient: the same
- * command passes once the holder lets go.
+ * Lecturn: a thread command still refused after `STAVE_ADMISSION_WAIT`, because
+ * a long Stave operation holds the space. That refusal alone is transient: the
+ * same command passes once the operation lets go.
  */
 export const isStaveSpaceBusy = (error: LecturnHookRejectedError) =>
   error.contribution === CONTRIBUTION && error.reason === SPACE_BUSY_REASON;
@@ -233,6 +245,35 @@ const make = Effect.gen(function* () {
       return input;
     });
 
+  /**
+   * Waits for the space here, before the orchestrator takes the thread lock,
+   * and holds it shared through `aroundThreadCommand` and commit. Waiting under
+   * the thread lock instead would deadlock (until the timeout) with an
+   * operation that holds the space and dispatches a reconciliation command to
+   * the same thread. The project read here is only a hint for which space to
+   * wait on; `aroundThreadCommand` resolves again under the thread lock.
+   */
+  const aroundThreadLock = <A, E, R>(
+    command: OrchestrationV2ServerCommand,
+    dispatch: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E | LecturnHookRejectedError, R> => {
+    const intent = describeStaveThreadIntent(command);
+    if (intent === null) return dispatch;
+    return Effect.gen(function* () {
+      if (yield* StaveReconciliation) return yield* dispatch;
+      const input = yield* resolveIntent(intent).pipe(Effect.orElseSucceed(() => null));
+      if (input === null) return yield* dispatch;
+      const result = yield* locks.withSharedSpaceLock(
+        input.projectRoot,
+        dispatch,
+        STAVE_ADMISSION_WAIT,
+      );
+      if (Option.isNone(result))
+        return yield* reject(SPACE_BUSY_REASON, undefined, "aroundThreadLock");
+      return result.value;
+    });
+  };
+
   const aroundThreadCommand = <A, E, R>(
     command: OrchestrationV2ServerCommand,
     commit: Effect.Effect<A, E, R>,
@@ -251,7 +292,10 @@ const make = Effect.gen(function* () {
         Effect.mapError((error) => reject(error.message, error)),
         Effect.andThen(commit),
       );
-      const result = yield* locks.tryWithSpaceLock(input.projectRoot, checked);
+      // Usually already held by aroundThreadLock. Otherwise (the project moved
+      // in between, or a caller without that hook) it must not wait here,
+      // under the thread lock.
+      const result = yield* locks.withSharedSpaceLock(input.projectRoot, checked, Duration.zero);
       if (Option.isNone(result)) return yield* reject(SPACE_BUSY_REASON);
       return result.value;
     });
@@ -271,6 +315,7 @@ const make = Effect.gen(function* () {
   const contribution: LecturnOrchestrationHooksContribution = {
     name: CONTRIBUTION,
     aroundCommand,
+    aroundThreadLock,
     aroundProviderSessionOpen: (input, open) =>
       input.cwd === null
         ? open

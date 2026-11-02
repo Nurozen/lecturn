@@ -222,11 +222,21 @@ export interface LecturnOrchestrationHooksContribution {
   /**
    * Wraps a command's plan-and-commit. Runs inside the thread (or project)
    * lock. Reject with LecturnHookRejectedError, or wrap `commit` in fork
-   * locks (Stave space/workspace locks).
+   * locks (Stave space/workspace locks). Must not wait for a fork lock: the
+   * lock's holder may need this thread's lock to finish.
    */
   readonly aroundCommand?: <A, E, R>(
     input: LecturnCommandAdmissionInput,
     commit: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | LecturnHookRejectedError, R>;
+  /**
+   * Wraps a thread command's dispatch before it takes any thread lock: the
+   * place to wait (bounded) for a fork lock and keep it through
+   * `aroundCommand` and commit.
+   */
+  readonly aroundThreadLock?: <A, E, R>(
+    command: OrchestrationV2ServerCommand,
+    dispatch: Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, E | LecturnHookRejectedError, R>;
   /**
    * Called once per run start attempt, before the provider session opens and
@@ -273,6 +283,10 @@ export interface LecturnOrchestrationHooksShape {
   readonly aroundCommand: <A, E, R>(
     input: LecturnCommandAdmissionInput,
     commit: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | LecturnHookRejectedError, R>;
+  readonly aroundThreadLock: <A, E, R>(
+    command: OrchestrationV2ServerCommand,
+    dispatch: Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, E | LecturnHookRejectedError, R>;
   readonly beforeTurnStart: (
     input: LecturnTurnStartInput,
@@ -419,6 +433,19 @@ const makeShape = (
           commit,
         ),
       ),
+    aroundThreadLock: <A, E, R>(
+      command: OrchestrationV2ServerCommand,
+      dispatch: Effect.Effect<A, E, R>,
+    ) =>
+      Effect.flatMap(current, (all) =>
+        all.reduceRight<Effect.Effect<A, E | LecturnHookRejectedError, R>>(
+          (inner, contribution) =>
+            contribution.aroundThreadLock === undefined
+              ? inner
+              : contribution.aroundThreadLock(command, inner),
+          dispatch,
+        ),
+      ),
     // Sequential in contribution order; the first deferral ends the attempt.
     beforeTurnStart: (input) =>
       Effect.flatMap(current, (all) =>
@@ -502,6 +529,7 @@ export const layer: Layer.Layer<LecturnOrchestrationHooks> = Layer.effect(
 export const noop: LecturnOrchestrationHooksShape = {
   register: () => Effect.void,
   aroundCommand: (_input, commit) => commit,
+  aroundThreadLock: (_command, dispatch) => dispatch,
   beforeTurnStart: () => Effect.succeed({}),
   aroundProviderSessionOpen: (_input, open) => open,
   beforeWorktreeProvision: () => Effect.void,

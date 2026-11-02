@@ -11904,6 +11904,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ? dispatch
         : threadDispatch.withLock(parentThreadId, dispatch);
     }).pipe(
+      // Lecturn: outside every thread lock, so a contribution that waits for a
+      // fork lock never holds a thread lock that lock's holder needs.
+      (dispatch) => lecturnHooks.aroundThreadLock(command, dispatch),
       Effect.catchTags({
         LecturnHookRejectedError: (rejected) =>
           Effect.fail(

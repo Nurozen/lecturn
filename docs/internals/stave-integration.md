@@ -145,7 +145,7 @@ Details per path:
 - **Orchestrator hooks.** Stave contributes an `aroundCommand` hook to the V2 hook registry
   (`orchestration-v2/fork/LecturnOrchestrationHooks.ts`). `describeStaveThreadIntent` maps a
   command to its intent and owning project or thread, and `StaveAdmission` decides under the
-  space lock, immediately before commit, for every transport (WS, HTTP, mobile). Unknown
+  shared space lock, immediately before commit, for every transport (WS, HTTP, mobile). Unknown
   projects/threads are left to the orchestrator. The same registry carries the project
   create/move workspace locks and the runtime fence around provider session open. Commands a
   Stave operation issues while it already holds the locks carry `StaveReconciliation` and pass
@@ -374,11 +374,11 @@ operation is owned by the service's scope and outlives the WebSocket that starte
 socket-bound fiber would die with the tab). Its public shape provides `run`, `observe`,
 `dryRun`, `summary`, and the internal automatic `executeLifecycle` bridge.
 
-- **Keyed mutex.** `StaveSpaceLock.withSpaceLock(root, effect)` canonicalizes an existing
-  root, or its existing parent for a new space, and shares one semaphore across operations and
-  admission. Saga operations acquire all participant roots in deterministic order. Repository
-  registration and setup serialize on the config path. The runtime shares this lock service with
-  the lifecycle sweep, closing preflight-to-commit races.
+- **Keyed read/write lock.** `StaveSpaceLock` canonicalizes an existing root, or its existing
+  parent for a new space, to one lock per space. Operations hold it exclusively
+  (`withSpaceLock`); admission holds it shared. Saga operations acquire all participant roots in
+  deterministic order. Repository registration and setup serialize on the config path. The
+  runtime shares this lock service with the lifecycle sweep, closing preflight-to-commit races.
 - **Registry.** A `Map` keyed by the client-supplied `operationId`. An entry holds `kind`,
   `fingerprint` (sha256 of `stableStringify(operation)`), `state` (`running | finished | failed`),
   the event ring buffer with its byte count, `nextSequence` (1-based), `terminalAtMs`,
@@ -656,8 +656,8 @@ Rules built on them:
 - **Admission test layer** (`apps/server/src/stave/StaveAdmission.test.ts`): `StaveAdmission.layer`
   over a `Layer.mock` reader that knows one space root and records every `load` call, so tests
   assert both the refusal shape and that non-worktree intents never read the manifest.
-  `StaveOrchestrationHooks.test.ts` covers the V2 hook: commit-time admission, refusals while an
-  operation holds the space, the runtime fence, and new-worktree launches.
+  `StaveOrchestrationHooks.test.ts` covers the V2 hook: commit-time admission, waits and
+  refusals while an operation holds the space, the runtime fence, and new-worktree launches.
 - Tests whose roots are never spaces provide `StaveWorkspaceReader.layerNoop` and
   `StaveAdmission.layerNoop`.
 - **Binary candidates** (`apps/server/src/stave/StaveBinary.test.ts`): executables are written
@@ -710,10 +710,20 @@ renewal, terminal writes, and release compare the epoch and owner. Ordinary leas
 not slide `scheduled_at`. An explicit lease-checked schedule reset starts or cancels an inactive
 episode. The recurring lifecycle sweep consumes persisted deletion intents.
 
-`StaveSpaceLock` supplies the canonical-root mutex shared by operations and admission.
-The engine tries to acquire that lock without waiting, rejects contention, and rechecks relevant
-thread commands while holding it through commit. A blocked command cannot stall the single
-worker that an operation needs for refresh and quiescence. This closes the normalization-to-dispatch race. Archived roots reject thread starts; leased roots
+`StaveSpaceLock` supplies the canonical-root read/write lock shared by operations and admission.
+Thread commands take it shared, so turn starts in one space never exclude each other; operations
+take it exclusively. Hand-off is FIFO: once an operation waits, later commands queue behind it.
+Effect's `Semaphore` cannot do this with "readers take one permit, writers take all", because it
+serves any request that fits and so starves the writer. Project create and move take the
+workspace locks exclusively and never wait, since they run under the project command lock.
+
+A thread command waits for its space in the `aroundThreadLock` hook, before the orchestrator
+takes any thread lock, for at most `STAVE_ADMISSION_WAIT` (5 s), and is then refused with "Retry
+when it finishes". It must not wait under the thread lock: an operation holding the space
+dispatches reconciliation commands (refresh, interrupt, delete) that need those thread locks, and
+the two would deadlock until the timeout. `aroundCommand` then rechecks admission under the
+thread lock while the shared hold lasts through commit. Shared holds are reentrant per fiber, so
+the recheck never queues behind a waiting operation. This closes the normalization-to-dispatch race. Archived roots reject thread starts; leased roots
 reject new work. Internal lifecycle refresh/meta/delete and turn-interrupt commands can complete
 while an operation owns the lock. Generic PR preparation is refused for Stave-owned repos in
 both modes; PR resolution enumerates editable repos and selects by repository plus host. Checkpoint diff

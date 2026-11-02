@@ -1815,7 +1815,7 @@ describe("UsageService", () => {
 
   it.live("reports saved usage of a removed directory only for windows it reaches", () =>
     Effect.gen(function* () {
-      // Pin "now" so the 2026-08-01 transcript stays inside the scan retention window.
+      // Pin "now" near the fixture, which ages out of scan retention otherwise.
       yield* TestClock.setTime(Date.parse("2026-08-15T00:00:00Z"));
       const { transcript, settings, home } = yield* setup;
       yield* Effect.promise(async () => {
