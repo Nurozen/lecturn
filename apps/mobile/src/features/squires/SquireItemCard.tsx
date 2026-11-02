@@ -54,6 +54,7 @@ import {
   squireCardRecommendation,
   squireEditedText,
   squireFollowUpDraft,
+  squireOffersFollowUp,
   squireQuestionMode,
   squireQuestionRepeatsTitle,
   type SquireAnswer,
@@ -276,7 +277,7 @@ function SquireCardBody(props: {
       {threadId === null ? null : (
         <View className="flex-row flex-wrap gap-x-4 gap-y-1">
           <CardLink label="Open thread" onPress={openThread} />
-          {payload?.type === "question" ? (
+          {payload !== null && squireOffersFollowUp(payload) ? (
             <CardLink label="Follow up in thread" onPress={followUp} />
           ) : null}
         </View>

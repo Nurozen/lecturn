@@ -340,7 +340,8 @@ export function PendingUserInputQuestionList(props: {
             <Text className="font-lecturn-bold text-xs uppercase tracking-[1px] text-foreground-muted">
               {question.header}
             </Text>
-            <QuestionText markdown={question.question} />
+            {/* A Squire card blanks a question that repeats its own title. */}
+            {question.question.trim() === "" ? null : <QuestionText markdown={question.question} />}
             <View className="gap-2">
               {question.options.map((option) => {
                 const optionValue = option.value ?? option.label.trim();

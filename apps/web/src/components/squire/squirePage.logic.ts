@@ -395,27 +395,6 @@ export function squireRecentFromSnapshot(
 
 // ── Header lines ──────────────────────────────────────────────
 
-const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-
-/**
- * The Lead watches nothing itself, so its scope line describes its team. While its
- * onboarding shows proposals, the line says so, so it never reads "No Squires yet" beside a
- * count of decisions waiting.
- */
-export function squireLeadScopeLine(
-  team: ReadonlyArray<{ readonly trackedCount: number }>,
-  onboardingProposals = 0,
-): string {
-  const proposals =
-    onboardingProposals > 0 ? count(onboardingProposals, "proposal", "proposals") : null;
-  if (team.length === 0) {
-    return proposals === null ? "No Squires yet" : `Setting up your Squires · ${proposals}`;
-  }
-  const watched = team.reduce((sum, member) => sum + member.trackedCount, 0);
-  const line = `Leading ${count(team.length, "Squire", "Squires")} · ${count(watched, "thread", "threads")} watched`;
-  return proposals === null ? line : `${line} · ${proposals}`;
-}
-
 /**
  * The Lead view lists its team's decisions beside its own, so its state line counts them all;
  * the sidebar badge still counts only the Lead's own items.

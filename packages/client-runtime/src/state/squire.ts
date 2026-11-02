@@ -537,10 +537,37 @@ export function squireStateLine(input: {
   return waiting ?? "Idle";
 }
 
-export function squireWatchScopeLine(trackedCount: number): string {
-  return trackedCount === 0
-    ? "Watching no threads yet"
-    : `Watching ${plural(trackedCount, "thread", "threads")}`;
+/**
+ * The header's scope line. A Squire's is the threads it watches and its containers. The Lead
+ * watches nothing itself, so its line describes its team; while its onboarding shows proposals
+ * it says so, so it never reads "No Squires yet" beside a count of decisions waiting.
+ */
+export function squireScopeLine(
+  entry: {
+    readonly squire: Pick<SquireSnapshot["squire"], "role">;
+    readonly trackedCount: number;
+    readonly containerNames: ReadonlyArray<string>;
+  },
+  team: ReadonlyArray<{ readonly trackedCount: number }>,
+  onboardingProposals = 0,
+): string {
+  if (entry.squire.role === "lead") {
+    const proposals =
+      onboardingProposals > 0 ? plural(onboardingProposals, "proposal", "proposals") : null;
+    if (team.length === 0) {
+      return proposals === null ? "No Squires yet" : `Setting up your Squires · ${proposals}`;
+    }
+    const watched = team.reduce((sum, member) => sum + member.trackedCount, 0);
+    const line = `Leading ${plural(team.length, "Squire", "Squires")} · ${plural(watched, "thread", "threads")} watched`;
+    return proposals === null ? line : `${line} · ${proposals}`;
+  }
+  const watching =
+    entry.trackedCount === 0
+      ? "Watching no threads yet"
+      : `Watching ${plural(entry.trackedCount, "thread", "threads")}`;
+  return entry.containerNames.length === 0
+    ? watching
+    : `${watching} · ${entry.containerNames.join(", ")}`;
 }
 
 /** The card caption, or "3 of 10 steers left today" for the budget the card spends. */
@@ -924,6 +951,15 @@ export function squireEditedText(original: string, draft: string | null): string
   if (draft === null) return undefined;
   const trimmed = draft.trim();
   return trimmed === "" || trimmed === original.trim() ? undefined : trimmed;
+}
+
+/**
+ * Whether a card offers "Follow up in thread". A question whose runtime request is still pending
+ * (the card carries its live `request` copy) owns the thread's composer, so a follow-up draft
+ * would stay hidden behind it; Answer is the action there.
+ */
+export function squireOffersFollowUp(payload: SquireKnownPayload): boolean {
+  return payload.type === "question" && payload.request === undefined;
 }
 
 /** "Follow up in thread": a draft that quotes the question above what was already typed. */

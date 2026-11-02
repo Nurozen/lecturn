@@ -106,9 +106,8 @@ export function SquireEvidenceMeta(props: {
       {branch === null && stats === undefined ? null : (
         <View className="flex-row flex-wrap items-center gap-x-2 gap-y-1">
           {branch === null ? null : (
-            <Text className="shrink font-mono text-xs text-foreground-muted" numberOfLines={1}>
-              {branch}
-            </Text>
+            // Wraps rather than truncates: a phone-width card would otherwise hide the branch.
+            <Text className="shrink font-mono text-xs text-foreground-muted">{branch}</Text>
           )}
           {stats === undefined ? null : (
             <View

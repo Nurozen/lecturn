@@ -59,6 +59,7 @@ import {
   squireDiffStatsLabel,
   squireEditedText,
   squireFollowUpDraft,
+  squireOffersFollowUp,
   squireOpenInThreadTarget,
   squirePullRequestChips,
   squireQuestionMode,
@@ -434,7 +435,7 @@ function SquireCardBody(props: {
             onOpen={() => setAsking(true)}
           />
         )}
-        {payload?.type === "question" ? (
+        {payload !== null && squireOffersFollowUp(payload) ? (
           <Button size="xs" variant="ghost" onClick={followUp}>
             Follow up in thread
             <ArrowUpRightIcon />

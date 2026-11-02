@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   squireStateLine,
-  squireWatchScopeLine,
+  squireScopeLine,
   type SquireSnapshotEntry,
 } from "@lecturn/client-runtime/state/squire";
 import { EnvironmentId, SquireCardId, SquireId } from "@lecturn/contracts";
@@ -132,7 +132,7 @@ function SquireReady(props: {
         onScroll={scrollViewport.onScroll}
         onLayout={scrollViewport.onLayout}
       >
-        <SquireHeader environmentId={environmentId} entry={entry} isLead={isLead} />
+        <SquireHeader environmentId={environmentId} entry={entry} isLead={isLead} team={team} />
         {isLead && team.length > 0 ? (
           <SquireTeamStrip
             environmentId={environmentId}
@@ -159,6 +159,7 @@ function SquireHeader(props: {
   readonly environmentId: EnvironmentId;
   readonly entry: SquireSnapshotEntry;
   readonly isLead: boolean;
+  readonly team: ReadonlyArray<SquireSnapshotEntry>;
 }) {
   const { environmentId, entry } = props;
   const { squire } = entry;
@@ -177,7 +178,7 @@ function SquireHeader(props: {
     openDecisionCount: entry.openDecisionCount,
     heldCount: entry.held.length,
   });
-  const scopeLine = [squireWatchScopeLine(entry.trackedCount), ...entry.containerNames].join(" · ");
+  const scopeLine = squireScopeLine(entry, props.team);
 
   const togglePause = async () => {
     setStatusBusy(true);

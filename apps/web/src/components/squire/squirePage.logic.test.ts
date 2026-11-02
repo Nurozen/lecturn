@@ -20,7 +20,6 @@ import {
   squireConversationLayout,
   squireConversationPane,
   squireExpandedConversationPx,
-  squireLeadScopeLine,
   squireLeadStateLine,
   squireHeaderStateLine,
   squireUnshownHolds,
@@ -515,25 +514,6 @@ describe("squireConversationLayout", () => {
     expect(squireConversationHint({ visibleItemCount: 12 }, false)).toBe("12 entries");
     expect(squireConversationHint(null, false)).toBe("No messages yet");
     expect(squireConversationHint({ visibleItemCount: 12 }, true)).toBe("Working…");
-  });
-});
-
-describe("squireLeadScopeLine", () => {
-  it("describes the Lead by its team and the threads they watch", () => {
-    expect(squireLeadScopeLine([{ trackedCount: 3 }, { trackedCount: 1 }])).toBe(
-      "Leading 2 Squires · 4 threads watched",
-    );
-    expect(squireLeadScopeLine([{ trackedCount: 1 }])).toBe("Leading 1 Squire · 1 thread watched");
-    expect(squireLeadScopeLine([])).toBe("No Squires yet");
-  });
-
-  it("reads as setting up while onboarding proposals show, never beside No Squires yet", () => {
-    expect(squireLeadScopeLine([], 3)).toBe("Setting up your Squires · 3 proposals");
-    expect(squireLeadScopeLine([], 1)).toBe("Setting up your Squires · 1 proposal");
-    expect(squireLeadScopeLine([{ trackedCount: 2 }], 2)).toBe(
-      "Leading 1 Squire · 2 threads watched · 2 proposals",
-    );
-    expect(squireLeadScopeLine([], 0)).toBe("No Squires yet");
   });
 });
 

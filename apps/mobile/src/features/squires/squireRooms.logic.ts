@@ -61,12 +61,31 @@ export function squireRoomStatusLine(input: {
   if (row.includesLead && input.leadName !== null) names.push(input.leadName);
   const parts = [names.join(", ")];
   if (row.status === "closed") {
-    parts.push(room?.closedReason ? `Closed: ${room.closedReason}` : "Closed");
+    parts.push(squireRoomClosedLabel(room, input.leadName));
   } else if (room !== null) {
     parts.push(`Closes after ${squireRoomTtlLabel(squireRoomTtlHours(room))} idle`);
   }
   if (row.muted) parts.push("Muted");
   return parts.join(" · ");
+}
+
+/** The server stores a reason code; the words match its "Closed …" log row. */
+function squireRoomClosedLabel(
+  room: Pick<SquireRoom, "idleTtlSeconds" | "closedReason"> | null,
+  leadName: string | null,
+): string {
+  switch (room?.closedReason) {
+    case "idle":
+      return `Closed after ${squireRoomTtlLabel(squireRoomTtlHours(room))} idle`;
+    case "members":
+      return "Closed: fewer than 2 Squires";
+    case "user":
+      return "Closed by you";
+    case "lead":
+      return `Closed by ${leadName ?? "the Lead"}`;
+    default:
+      return "Closed";
+  }
 }
 
 export function squireRoomComposerPlaceholder(closed: boolean, canPost: boolean): string {
@@ -96,6 +115,13 @@ export function squireRoomCompletion(
   };
 }
 
+/**
+ * `maintainVisibleContentPosition` anchors on the first visible child at or after this index. The
+ * room header (0) sits right above "Load earlier" (1), so anchoring on either lets an earlier page
+ * push the post being read down by a whole page; start at the first post instead.
+ */
+export const SQUIRE_ROOM_LOG_ANCHOR_INDEX = 2;
+
 /** Within this many points of the end, the log counts as showing its newest post. */
 export const SQUIRE_ROOM_PINNED_SLACK = 80;
 
@@ -107,6 +133,15 @@ export function squireRoomPinned(metrics: {
   return (
     metrics.contentHeight - metrics.offsetY - metrics.viewportHeight < SQUIRE_ROOM_PINNED_SLACK
   );
+}
+
+/** A handoff reads in full up to this many lines; a longer one shows them and offers "more". */
+export const SQUIRE_HANDOFF_COLLAPSED_LINES = 4;
+
+/** The handoff's toggle, from its measured full line count; none when it already fits. */
+export function squireHandoffToggle(fullLineCount: number, expanded: boolean): string | null {
+  if (fullLineCount <= SQUIRE_HANDOFF_COLLAPSED_LINES) return null;
+  return expanded ? "less" : "more";
 }
 
 const TIME = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });

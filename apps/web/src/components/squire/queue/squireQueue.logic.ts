@@ -46,6 +46,7 @@ export {
   squireDiffStatsLabel,
   squireEditedText,
   squireFollowUpDraft,
+  squireOffersFollowUp,
   squireOfferRuleInput,
   squireOverlapProviderNames,
   squireProposalProviderName,

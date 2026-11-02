@@ -3,6 +3,9 @@ import type { EnvironmentId, SquireId, SquireRoomId, SquireRoomRow } from "@lect
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  SQUIRE_HANDOFF_COLLAPSED_LINES,
+  SQUIRE_ROOM_LOG_ANCHOR_INDEX,
+  squireHandoffToggle,
   squireRoomCompletion,
   squireRoomComposerPlaceholder,
   squireRoomPinned,
@@ -93,11 +96,22 @@ describe("room screen", () => {
     expect(
       squireRoomStatusLine({
         row: row({ status: "closed", includesLead: false, muted: true }),
-        room: { ...room, closedReason: "idle for 1 day" },
+        room: { ...room, closedReason: "user" },
         nameOf,
         leadName: "Lead",
       }),
-    ).toBe("Research, Release · Closed: idle for 1 day · Muted");
+    ).toBe("Research, Release · Closed by you · Muted");
+    const closed = (closedReason: string | null) =>
+      squireRoomStatusLine({
+        row: row({ status: "closed", includesLead: false }),
+        room: { ...room, closedReason },
+        nameOf,
+        leadName: "Lead",
+      });
+    expect(closed("idle")).toBe("Research, Release · Closed after 1 day idle");
+    expect(closed("members")).toBe("Research, Release · Closed: fewer than 2 Squires");
+    expect(closed("lead")).toBe("Research, Release · Closed by Lead");
+    expect(closed(null)).toBe("Research, Release · Closed");
     expect(squireRoomStatusLine({ row: row(), room: null, nameOf, leadName: null })).toBe(
       "Research, Release",
     );
@@ -119,6 +133,36 @@ describe("room screen", () => {
     expect(squireRoomPinned({ contentHeight: 300, offsetY: 0, viewportHeight: 650 })).toBe(true);
   });
 
+  it("keeps the post being read in place when an earlier page loads above it", () => {
+    // React Native's rule: the anchor is the first child at or after minIndexForVisible whose
+    // bottom is past the scroll offset; after the mount the offset moves by the anchor's shift.
+    type Child = { readonly key: string; readonly height: number };
+    const tops = (children: ReadonlyArray<Child>) => {
+      let y = 0;
+      return new Map(children.map((child) => [child.key, (y += child.height) - child.height]));
+    };
+    const keepPosition = (before: ReadonlyArray<Child>, after: ReadonlyArray<Child>) => {
+      const was = tops(before);
+      const anchor = before
+        .slice(SQUIRE_ROOM_LOG_ANCHOR_INDEX)
+        .find((child) => was.get(child.key)! + child.height > 0);
+      const now = tops(after).get(anchor?.key ?? "");
+      return anchor === undefined || now === undefined ? 0 : now - was.get(anchor.key)!;
+    };
+    const posts = (from: number, to: number) =>
+      Array.from({ length: to - from + 1 }, (_, i) => ({ key: `post ${from + i}`, height: 90 }));
+    const header = { key: "header", height: 220 };
+    const loadEarlier = { key: "load earlier", height: 47 };
+    const reading = [header, loadEarlier, ...posts(11, 60)];
+    // Tapping removes the button, then the page arrives: post 11 must stay where it was.
+    const loading = [header, ...posts(11, 60)];
+    const loaded = [header, ...posts(1, 60)];
+    const shift = keepPosition(reading, loading);
+    const pageShift = keepPosition(loading, loaded);
+    expect(tops(loading).get("post 11")! - shift).toBe(tops(reading).get("post 11"));
+    expect(tops(loaded).get("post 11")! - shift - pageShift).toBe(tops(reading).get("post 11"));
+  });
+
   it("dates posts from another day", () => {
     const now = Date.parse("2026-11-01T15:00:00");
     expect(squireRoomPostTime("2026-11-01T10:05:00", now)).not.toMatch(/Nov/);
@@ -136,5 +180,14 @@ describe("seen cursor", () => {
     expect(squireRoomSeenAt(seen, "other" as EnvironmentId, ROOM)).toBeNull();
     expect(withSquireRoomSeen(seen, ENV, ROOM, at)).toBe(seen);
     expect(withSquireRoomSeen(seen, ENV, ROOM, null)).toBe(seen);
+  });
+});
+
+describe("handoff toggle", () => {
+  it("offers more only when the handoff runs past its collapsed lines, and less once expanded", () => {
+    expect(squireHandoffToggle(1, false)).toBeNull();
+    expect(squireHandoffToggle(SQUIRE_HANDOFF_COLLAPSED_LINES, false)).toBeNull();
+    expect(squireHandoffToggle(SQUIRE_HANDOFF_COLLAPSED_LINES + 1, false)).toBe("more");
+    expect(squireHandoffToggle(SQUIRE_HANDOFF_COLLAPSED_LINES + 1, true)).toBe("less");
   });
 });

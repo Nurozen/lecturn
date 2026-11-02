@@ -1,7 +1,7 @@
 import { scopeThreadRef } from "@lecturn/client-runtime/environment";
 import {
   squireEntryIndicator,
-  squireWatchScopeLine,
+  squireScopeLine,
   type SquireSnapshotEntry,
 } from "@lecturn/client-runtime/state/squire";
 import type { EnvironmentId, SquireId } from "@lecturn/contracts";
@@ -27,11 +27,7 @@ import { squireHeaderCounts } from "./queue/squireQueue.logic";
 import { useSquireQueuePages } from "./queue/squireQueueState";
 import { SquireRoomsMenu } from "./rooms/SquireRoomsMenu";
 import { SquireFindWorkButton } from "./setup/SquireLeadSweep";
-import {
-  SQUIRE_INBOX_NARROW_HINT,
-  squireHeaderStateLine,
-  squireLeadScopeLine,
-} from "./squirePage.logic";
+import { SQUIRE_INBOX_NARROW_HINT, squireHeaderStateLine } from "./squirePage.logic";
 
 const TEAM_PORTRAIT_PX = 24;
 
@@ -168,11 +164,7 @@ export const SquireHeader = memo(function SquireHeader(props: {
     environmentId,
     isLead ? entry.squire.id : null,
   ).size;
-  const scope = isLead
-    ? squireLeadScopeLine(team, onboardingProposals)
-    : `${squireWatchScopeLine(entry.trackedCount)}${
-        entry.containerNames.length === 0 ? "" : ` · ${entry.containerNames.join(", ")}`
-      }`;
+  const scope = squireScopeLine(entry, team, onboardingProposals);
   return (
     <div className="flex flex-col gap-3 px-6 pt-2 pb-3">
       <div className="flex min-w-0 items-center gap-4">

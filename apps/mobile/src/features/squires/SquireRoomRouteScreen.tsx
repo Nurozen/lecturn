@@ -27,7 +27,12 @@ import { SquireRoomComposer } from "./SquireRoomComposer";
 import { SquireRoomHeader } from "./SquireRoomHeader";
 import { SquireRoomLog } from "./SquireRoomLog";
 import { SquireViewportContext, useSquireScrollViewport } from "./SquireViewport";
-import { squireRoomPinned, squireRoomScreenState, withSquireRoomSeen } from "./squireRooms.logic";
+import {
+  SQUIRE_ROOM_LOG_ANCHOR_INDEX,
+  squireRoomPinned,
+  squireRoomScreenState,
+  withSquireRoomSeen,
+} from "./squireRooms.logic";
 import { squireRoomSeenAtom } from "./squireRoomSeen";
 
 export type SquireRoomRouteParams = { environmentId: string; roomId: string };
@@ -173,7 +178,7 @@ function SquireRoomView(props: {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
           // Earlier pages insert above what the user is reading; keep it in place.
-          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          maintainVisibleContentPosition={{ minIndexForVisible: SQUIRE_ROOM_LOG_ANCHOR_INDEX }}
           contentContainerStyle={{ padding: 16, gap: 14 }}
           scrollEventThrottle={100}
           onScroll={({ nativeEvent }) => {

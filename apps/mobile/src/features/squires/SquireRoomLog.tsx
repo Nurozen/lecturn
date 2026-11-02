@@ -27,7 +27,11 @@ import { squireEnvironment, useSquireIndicator } from "../../state/squire";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { SquireIndicator } from "./SquireIndicator";
 import { useSquireInView } from "./SquireViewport";
-import { squireRoomPostTime } from "./squireRooms.logic";
+import {
+  SQUIRE_HANDOFF_COLLAPSED_LINES,
+  squireHandoffToggle,
+  squireRoomPostTime,
+} from "./squireRooms.logic";
 
 const AUTHOR_SIZE = 28;
 
@@ -206,7 +210,10 @@ function AuthorPortrait(props: {
   );
 }
 
-/** A handoff as one line, "Release → Research: ...", expandable. */
+/**
+ * A handoff, "Release → Research: ...", in full up to a few lines. A longer one offers "more";
+ * an invisible copy without a line limit measures how many lines the full text needs.
+ */
 function HandoffRow(props: {
   readonly context: SquireRoomLogContext;
   readonly row: Extract<SquireRoomLogRow, { kind: "handoff" }>;
@@ -214,26 +221,47 @@ function HandoffRow(props: {
 }) {
   const { context, row } = props;
   const [expanded, setExpanded] = useState(false);
+  const [fullLineCount, setFullLineCount] = useState(0);
   const from = context.nameOf(row.from);
   const to = row.to.map(context.nameOf).join(", ");
+  const toggle = squireHandoffToggle(fullLineCount, expanded);
+  const text = (
+    <>
+      <Text className="font-lecturn-bold text-foreground">
+        {from} → {to}:
+      </Text>{" "}
+      {row.post.body}
+    </>
+  );
   return (
     <View className="gap-0.5 pl-9">
       <Pressable
-        accessibilityRole="button"
+        accessibilityRole={toggle === null ? undefined : "button"}
         accessibilityLabel={`${from} to ${to}: ${row.post.body}`}
-        accessibilityState={{ expanded }}
+        accessibilityState={toggle === null ? undefined : { expanded }}
+        disabled={toggle === null}
         onPress={() => setExpanded(!expanded)}
         className="flex-row items-start gap-2 active:opacity-70"
       >
-        <Text
-          className="min-w-0 flex-1 font-sans text-sm text-foreground-secondary"
-          numberOfLines={expanded ? undefined : 1}
-        >
-          <Text className="font-lecturn-bold text-foreground">
-            {from} → {to}:
-          </Text>{" "}
-          {row.post.body}
-        </Text>
+        <View className="min-w-0 flex-1">
+          <Text
+            className="font-sans text-sm leading-5 text-foreground-secondary"
+            numberOfLines={expanded ? undefined : SQUIRE_HANDOFF_COLLAPSED_LINES}
+          >
+            {text}
+          </Text>
+          <View aria-hidden pointerEvents="none" className="absolute inset-x-0 top-0 opacity-0">
+            <Text
+              onTextLayout={(event) => setFullLineCount(event.nativeEvent.lines.length)}
+              className="font-sans text-sm leading-5"
+            >
+              {text}
+            </Text>
+          </View>
+          {toggle === null ? null : (
+            <Text className="font-lecturn-medium text-xs text-foreground-secondary">{toggle}</Text>
+          )}
+        </View>
         <Text className="font-sans text-xs text-foreground-muted tabular-nums">{props.time}</Text>
       </Pressable>
       <RoutingChip context={context} post={row.post} />

@@ -53,6 +53,7 @@ import {
   squireCardOrigins,
   squireEditedText,
   squireFollowUpDraft,
+  squireOffersFollowUp,
   squireOfferRuleInput,
   squireQuestionPanelQuestions,
   squireQuestionRepeatsTitle,
@@ -76,6 +77,7 @@ import {
   squireRowAction,
   squireRuleOfferPrompt,
   squireRuleText,
+  squireScopeLine,
   squireSettledLabel,
   squireSnapshotGestures,
   squireStateLine,
@@ -994,6 +996,67 @@ describe("queue cards", () => {
     const draft = squireFollowUpDraft("Run it?\nNow?", "I think so");
     expect(draft).toBe("> Run it?\n> Now?\n\nI think so");
     expect(squireFollowUpDraft("Run it?\nNow?", draft)).toBe(draft);
+  });
+
+  describe("squireScopeLine", () => {
+    const squire = (trackedCount: number, containerNames: ReadonlyArray<string> = []) => ({
+      squire: { role: "squire" as const },
+      trackedCount,
+      containerNames,
+    });
+    const lead = { squire: { role: "lead" as const }, trackedCount: 0, containerNames: [] };
+
+    it("describes a Squire by the threads it watches and its containers", () => {
+      expect(squireScopeLine(squire(0), [])).toBe("Watching no threads yet");
+      expect(squireScopeLine(squire(1), [])).toBe("Watching 1 thread");
+      expect(squireScopeLine(squire(3, ["Release", "Docs"]), [])).toBe(
+        "Watching 3 threads · Release, Docs",
+      );
+    });
+
+    it("describes the Lead by its team, never by threads it watches itself", () => {
+      expect(squireScopeLine(lead, [squire(3), squire(1)])).toBe(
+        "Leading 2 Squires · 4 threads watched",
+      );
+      expect(squireScopeLine(lead, [squire(1)])).toBe("Leading 1 Squire · 1 thread watched");
+      expect(squireScopeLine(lead, [])).toBe("No Squires yet");
+    });
+
+    it("reads as setting up while onboarding proposals show, never beside No Squires yet", () => {
+      expect(squireScopeLine(lead, [], 3)).toBe("Setting up your Squires · 3 proposals");
+      expect(squireScopeLine(lead, [], 1)).toBe("Setting up your Squires · 1 proposal");
+      expect(squireScopeLine(lead, [squire(2)], 2)).toBe(
+        "Leading 1 Squire · 2 threads watched · 2 proposals",
+      );
+    });
+  });
+
+  it("offers a follow-up only on a question whose request no longer owns the composer", () => {
+    const question = {
+      type: "question",
+      threadId: "thread-1" as ThreadId,
+      requestKind: "runtime",
+      requestId: "req-1",
+      question: "Deploy now?",
+      options: [],
+    } as const;
+    expect(squireOffersFollowUp(question)).toBe(true);
+    expect(
+      squireOffersFollowUp({ ...question, request: { type: "approval", canRespond: true } }),
+    ).toBe(false);
+    // A pending request stays pending even when this client cannot answer it.
+    expect(
+      squireOffersFollowUp({ ...question, request: { type: "approval", canRespond: false } }),
+    ).toBe(false);
+    expect(squireOffersFollowUp({ ...question, requestKind: "secret" })).toBe(true);
+    expect(
+      squireOffersFollowUp({
+        type: "steer",
+        threadId: "thread-1" as ThreadId,
+        steer: "Rebase first",
+        steerKind: "rebase",
+      }),
+    ).toBe(false);
   });
 
   it("warns that a provider without a native fork replays context first", () => {
