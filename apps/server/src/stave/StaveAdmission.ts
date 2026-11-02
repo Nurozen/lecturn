@@ -296,7 +296,9 @@ export const make = Effect.fn("StaveAdmission.make")(function* () {
   const check = (input: StaveAdmissionInput) =>
     input.lockHeld || Option.isNone(lock)
       ? checkUnderLock(input)
-      : lock.value.withSpaceLock(input.projectRoot, checkUnderLock(input));
+      : lock.value
+          .withSharedSpaceLock(input.projectRoot, checkUnderLock(input))
+          .pipe(Effect.asVoid);
 
   return StaveAdmission.of({ check });
 });

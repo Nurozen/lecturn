@@ -1,7 +1,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import * as KeyedLock from "@lecturn/shared/KeyedLock";
 import {
   CommandId,
+  MessageId,
   NodeId,
   type OrchestrationV2ServerCommand,
   ProjectId,
@@ -11,6 +13,9 @@ import {
   ThreadId,
 } from "@lecturn/contracts";
 import { Effect, FileSystem, Layer, Option, Path, Ref, Result } from "effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import { TestClock } from "effect/testing";
 
 import {
   LecturnOrchestrationHooks,
@@ -24,7 +29,11 @@ import {
   type StaveAdmissionInput,
   StaveSpaceTransitioningError,
 } from "./StaveAdmission.ts";
-import { describeStaveThreadIntent, layer as staveHooksLayer } from "./StaveOrchestrationHooks.ts";
+import {
+  describeStaveThreadIntent,
+  layer as staveHooksLayer,
+  STAVE_ADMISSION_WAIT,
+} from "./StaveOrchestrationHooks.ts";
 import { StaveReconciliation } from "./StaveOrchestration.ts";
 import * as RuntimeFence from "./StaveRuntimeFence.ts";
 import * as StaveSpaceLock from "./StaveSpaceLock.ts";
@@ -33,6 +42,14 @@ import { StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
 const NOW = "2026-09-01T00:00:00.000Z";
 const PROJECT = ProjectId.make("space-project");
 const THREAD = ThreadId.make("space-thread");
+const SIBLING = ThreadId.make("sibling-thread");
+const OTHER_PROJECT = ProjectId.make("other-space-project");
+const ELSEWHERE = ThreadId.make("elsewhere-thread");
+const THREAD_PROJECTS: ReadonlyMap<ThreadId, ProjectId> = new Map([
+  [THREAD, PROJECT],
+  [SIBLING, PROJECT],
+  [ELSEWHERE, OTHER_PROJECT],
+]);
 const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" };
 
 const projectRow = (projectId: ProjectId, workspaceRoot: string): ProjectRow => ({
@@ -148,10 +165,10 @@ const makeLayer = (
         Layer.mock(ProjectionStoreV2)({
           getThreadShell: (threadId) =>
             Effect.succeed(
-              threadId === THREAD
+              THREAD_PROJECTS.has(threadId)
                 ? ({
-                    id: THREAD,
-                    projectId: PROJECT,
+                    id: threadId,
+                    projectId: THREAD_PROJECTS.get(threadId),
                     worktreePath: null,
                   } as unknown as NonNullable<
                     Effect.Success<ReturnType<ProjectionStoreV2["Service"]["getThreadShell"]>>
@@ -526,5 +543,231 @@ it("maps V2 thread commands to the V1 admission intents", () => {
       threadId: THREAD,
     }),
     null,
+  );
+});
+
+const turnStart = (threadId: ThreadId, id: string): OrchestrationV2ServerCommand => ({
+  type: "message.dispatch",
+  createdBy: "user",
+  creationSource: "web",
+  commandId: CommandId.make(`turn-${id}`),
+  threadId,
+  messageId: MessageId.make(`message-${id}`),
+  text: id,
+  attachments: [],
+  dispatchMode: { type: "start_immediately" },
+});
+
+/** A gate a test opens to let a held commit or operation finish. */
+const gate = (log: Array<string>, name: string) =>
+  Effect.gen(function* () {
+    const entered = yield* Deferred.make<void>();
+    const open = yield* Deferred.make<void>();
+    return {
+      entered,
+      open: Deferred.succeed(open, undefined),
+      body: Effect.sync(() => log.push(name)).pipe(
+        Effect.andThen(Deferred.succeed(entered, undefined)),
+        Effect.andThen(Deferred.await(open)),
+      ),
+    };
+  });
+
+// The orchestrator's composition: aroundThreadLock, the thread lock, then
+// aroundCommand around commit. Paths resolve synchronously (no real files), so
+// a fiber forked with `startImmediately` is parked on the space when the fork returns.
+const withDispatch = <A, E>(
+  rows: ReadonlyArray<ProjectRow>,
+  body: (
+    dispatch: <B, EB>(
+      command: OrchestrationV2ServerCommand,
+      threadId: ThreadId,
+      commit: Effect.Effect<B, EB>,
+    ) => Effect.Effect<B, EB | Error>,
+    harness: Harness,
+  ) => Effect.Effect<A, E, StaveSpaceLock.StaveSpaceLock>,
+) =>
+  withHarness(rows, (harness, hooks) =>
+    Effect.gen(function* () {
+      const threadLocks = yield* KeyedLock.make<ThreadId>();
+      return yield* body(
+        (command, threadId, commit) =>
+          hooks.aroundThreadLock(
+            command,
+            threadLocks.withLock(
+              threadId,
+              hooks.aroundCommand({ scope: "thread", command }, commit),
+            ),
+          ),
+        harness,
+      );
+    }),
+  ).pipe(
+    Effect.provideService(
+      FileSystem.FileSystem,
+      FileSystem.makeNoop({ realPath: (path) => Effect.succeed(path) }),
+    ),
+  );
+
+const fork = Effect.forkChild({ startImmediately: true });
+
+it.layer(NodeServices.layer)("StaveOrchestrationHooks space waits", (it) => {
+  it.effect("admits two turn starts in one space together", () =>
+    withDispatch([projectRow(PROJECT, "/spaces/shared")], (dispatch, harness) =>
+      Effect.gen(function* () {
+        const log: Array<string> = [];
+        const first = yield* gate(log, "first");
+        const second = yield* gate(log, "second");
+        const a = yield* dispatch(turnStart(THREAD, "a"), THREAD, first.body).pipe(fork);
+        const b = yield* dispatch(turnStart(SIBLING, "b"), SIBLING, second.body).pipe(fork);
+        yield* Deferred.await(first.entered);
+        yield* Deferred.await(second.entered);
+        yield* first.open;
+        yield* second.open;
+        yield* Fiber.join(a);
+        yield* Fiber.join(b);
+        assert.deepEqual(log, ["first", "second"]);
+        assert.lengthOf(yield* Ref.get(harness.calls), 2);
+      }),
+    ),
+  );
+
+  it.effect("holds a turn start while a Stave operation runs, then admits it", () =>
+    withDispatch([projectRow(PROJECT, "/spaces/busy")], (dispatch, harness) =>
+      Effect.gen(function* () {
+        const lock = yield* StaveSpaceLock.StaveSpaceLock;
+        const log: Array<string> = [];
+        const operation = yield* gate(log, "operation");
+        const running = yield* lock.withSpaceLock("/spaces/busy", operation.body).pipe(fork);
+        const turn = yield* dispatch(
+          turnStart(THREAD, "held"),
+          THREAD,
+          Effect.sync(() => log.push("turn")),
+        ).pipe(fork);
+        yield* TestClock.adjust("4 seconds");
+        assert.deepEqual(log, ["operation"]);
+        assert.lengthOf(yield* Ref.get(harness.calls), 0);
+        yield* operation.open;
+        yield* Fiber.join(running);
+        yield* Fiber.join(turn);
+        assert.deepEqual(log, ["operation", "turn"]);
+        assert.lengthOf(yield* Ref.get(harness.calls), 1);
+      }),
+    ),
+  );
+
+  it.effect(
+    "refuses a turn start with the retry message when the operation outlasts the wait",
+    () =>
+      withDispatch([projectRow(PROJECT, "/spaces/slow")], (dispatch, harness) =>
+        Effect.gen(function* () {
+          const lock = yield* StaveSpaceLock.StaveSpaceLock;
+          const log: Array<string> = [];
+          const operation = yield* gate(log, "operation");
+          const running = yield* lock.withSpaceLock("/spaces/slow", operation.body).pipe(fork);
+          const turn = yield* dispatch(
+            turnStart(THREAD, "refused"),
+            THREAD,
+            Effect.sync(() => log.push("refused turn")),
+          ).pipe(Effect.flip, fork);
+          yield* TestClock.adjust(STAVE_ADMISSION_WAIT);
+          const refused = yield* Fiber.join(turn);
+          assert.equal(
+            refused.message,
+            "A Stave operation is changing this space. Retry when it finishes.",
+          );
+          assert.lengthOf(yield* Ref.get(harness.calls), 0);
+          yield* operation.open;
+          yield* Fiber.join(running);
+          yield* dispatch(
+            turnStart(THREAD, "retried"),
+            THREAD,
+            Effect.sync(() => log.push("retried turn")),
+          );
+          assert.deepEqual(log, ["operation", "retried turn"]);
+        }),
+      ),
+  );
+
+  it.effect("does not let later turn starts starve a waiting Stave operation", () =>
+    withDispatch([projectRow(PROJECT, "/spaces/fair")], (dispatch) =>
+      Effect.gen(function* () {
+        const lock = yield* StaveSpaceLock.StaveSpaceLock;
+        const log: Array<string> = [];
+        const first = yield* gate(log, "first turn");
+        const operation = yield* gate(log, "operation");
+        const a = yield* dispatch(turnStart(THREAD, "a"), THREAD, first.body).pipe(fork);
+        yield* Deferred.await(first.entered);
+        const running = yield* lock.withSpaceLock("/spaces/fair", operation.body).pipe(fork);
+        const b = yield* dispatch(
+          turnStart(SIBLING, "b"),
+          SIBLING,
+          Effect.sync(() => log.push("later turn")),
+        ).pipe(fork);
+        yield* first.open;
+        yield* Deferred.await(operation.entered);
+        assert.deepEqual(log, ["first turn", "operation"]);
+        yield* operation.open;
+        yield* Fiber.join(b);
+        yield* Fiber.join(a);
+        yield* Fiber.join(running);
+        assert.deepEqual(log, ["first turn", "operation", "later turn"]);
+      }),
+    ),
+  );
+
+  it.effect("does not hold a turn start in one space for an operation in another", () =>
+    withDispatch(
+      [projectRow(PROJECT, "/spaces/a"), projectRow(OTHER_PROJECT, "/spaces/b")],
+      (dispatch) =>
+        Effect.gen(function* () {
+          const lock = yield* StaveSpaceLock.StaveSpaceLock;
+          const log: Array<string> = [];
+          const operation = yield* gate(log, "operation");
+          const running = yield* lock.withSpaceLock("/spaces/a", operation.body).pipe(fork);
+          yield* dispatch(
+            turnStart(ELSEWHERE, "elsewhere"),
+            ELSEWHERE,
+            Effect.sync(() => log.push("other space turn")),
+          );
+          assert.deepEqual(log, ["operation", "other space turn"]);
+          yield* operation.open;
+          yield* Fiber.join(running);
+        }),
+    ),
+  );
+
+  it.effect(
+    "waits outside the thread lock, so the operation's own command on that thread runs",
+    () =>
+      withDispatch([projectRow(PROJECT, "/spaces/reconcile")], (dispatch) =>
+        Effect.gen(function* () {
+          const lock = yield* StaveSpaceLock.StaveSpaceLock;
+          const log: Array<string> = [];
+          const reconciled = yield* Deferred.make<void>();
+          const running = yield* lock
+            .withSpaceLock(
+              "/spaces/reconcile",
+              Effect.gen(function* () {
+                yield* Deferred.await(reconciled);
+                yield* dispatch(
+                  { type: "thread.pin", commandId: CommandId.make("reconcile"), threadId: THREAD },
+                  THREAD,
+                  Effect.sync(() => log.push("reconciliation")),
+                ).pipe(Effect.provideService(StaveReconciliation, true));
+              }),
+            )
+            .pipe(fork);
+          const turn = yield* dispatch(
+            turnStart(THREAD, "waiting"),
+            THREAD,
+            Effect.sync(() => log.push("turn")),
+          ).pipe(fork);
+          yield* Deferred.succeed(reconciled, undefined);
+          yield* Fiber.join(running);
+          yield* Fiber.join(turn);
+          assert.deepEqual(log, ["reconciliation", "turn"]);
+        }),
+      ),
   );
 });
