@@ -275,6 +275,7 @@ describe("Lecturn fork ledger upgrade to orchestration V2", () => {
           [79, "AppRegistrations"],
           [80, "ProjectionProjectsAppBinding"],
           [81, "CanonicalizeThreadPullRequestLinks"],
+          [82, "Squire"],
         ]);
         for (const table of [
           "orchestration_v2_events",

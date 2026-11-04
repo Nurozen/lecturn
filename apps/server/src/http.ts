@@ -293,7 +293,8 @@ export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
   return redirectUrl.toString();
 }
 
-const authenticateRawRouteWithScope = (
+// Lecturn: exported for the Squire raw routes (squire/http.ts).
+export const authenticateRawRouteWithScope = (
   scope:
     | typeof AuthOrchestrationReadScope
     | typeof AuthOrchestrationOperateScope

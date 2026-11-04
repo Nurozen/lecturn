@@ -409,6 +409,7 @@ export function notificationChildThreadId(
     case "command":
     case "monitor":
     case "background_task":
+    case "squire":
     case "system":
       return undefined;
     default:

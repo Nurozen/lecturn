@@ -46,6 +46,7 @@ import {
   type PullRequestPreview,
 } from "@lecturn/contracts";
 
+import * as GitHubCiFailure from "./gitHubCiFailure.ts";
 import * as GitHubRest from "./GitHubRest.ts";
 import * as GitHubRequestPolicy from "./GitHubRequestPolicy.ts";
 import * as GitHubGraphQlClient from "./gitHubGraphQlClient.ts";
@@ -110,6 +111,7 @@ import {
 import type {
   ProviderAcceptanceEvidence,
   ProviderChangeRequestSummary,
+  ProviderCiFailure,
   ProviderListCursor,
   ProviderRepositoryRef,
 } from "@lecturn/source-control-core/server/PullRequestProvider";
@@ -429,6 +431,14 @@ export class GitHubPullRequestApi extends Context.Service<
     readonly readAcceptanceEvidence?: (
       input: ProviderRepositoryRef & { readonly number: number },
     ) => Effect.Effect<ProviderAcceptanceEvidence, GitHubPullRequestApiError>;
+    /** Lecturn: optional so a stand-in service need not answer it. */
+    readonly readCiFailure?: (
+      input: ProviderRepositoryRef & {
+        readonly headRevision: string;
+        readonly maxJobs: number;
+        readonly maxLogBytes: number;
+      },
+    ) => Effect.Effect<ProviderCiFailure, GitHubPullRequestApiError>;
     readonly withVerifiedCredential: <A, E, R>(
       input: { readonly cwd: string; readonly host: string },
       use: (identity: {
@@ -1765,6 +1775,15 @@ export const make = Effect.gen(function* () {
   });
 
   return GitHubPullRequestApi.of({
+    readCiFailure: (input) =>
+      GitHubCiFailure.readGitHubCiFailure(input).pipe(
+        Effect.catchTags({
+          GitHubCiFailureDecodeError: (error) =>
+            Effect.fail(readError(input.cwd, error.operation, error.cause)),
+        }),
+        Effect.provideService(GitHubRest.GitHubRest, api),
+        Effect.provideService(HttpClient.HttpClient, httpClient),
+      ),
     listAcceptanceCandidates: (input) =>
       listGitHubAcceptanceCandidates(
         (variables) =>

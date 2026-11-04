@@ -19,6 +19,7 @@ query PullRequestSummary($owner: String!, $name: String!, $number: Int!, $stacks
       mergedAt
       closedAt
       headRefName
+      headRefOid
       baseRefName
       author {
         login

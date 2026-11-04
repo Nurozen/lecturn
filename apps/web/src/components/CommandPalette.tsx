@@ -60,6 +60,7 @@ import {
   type ProjectId,
   type ScopedProjectRef,
   type SourceControlDiscoveryResult,
+  type Squire,
   SourceControlProviderKind,
   type SourceControlRepositoryInfo,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
@@ -89,9 +90,13 @@ import {
   PaletteIcon,
   RotateCcwIcon,
   SettingsIcon,
+  EyeIcon,
+  EyeOffIcon,
+  UserPlusIcon,
   SquarePenIcon,
   SunIcon,
   TextSearchIcon,
+  MessagesSquareIcon,
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
 import {
@@ -158,7 +163,7 @@ import {
   readEnvironmentSupportsForking,
   useProjects,
   useServerConfigs,
-  useThreadShells,
+  useVisibleThreadShells,
   waitForProject,
 } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
@@ -200,6 +205,10 @@ import {
   buildProjectActionItems,
   buildRootGroups,
   buildStaveAddProjectItems,
+  buildSquirePaletteItems,
+  buildSquireRoomPaletteItems,
+  buildSquireSetupPaletteItems,
+  buildSquireTrackPaletteItems,
   buildThreadActionItems,
   buildLinkedThreadActionItems,
   buildCommandPaletteRows,
@@ -228,6 +237,21 @@ import { withoutArchivedStaveProjectThreads } from "./stave/listedProjects.logic
 import { useListedProjects } from "./stave/useListedProjects";
 import { AppThreadBadge } from "./apps/AppThreadBadge";
 import { useAppsPaletteItems } from "./apps/useAppsPaletteItems";
+import { SquireIndicator } from "./squire/SquireIndicator";
+import { SQUIRE_MEMBER_FULL_COLOR } from "./squire/rooms/SquireRoomPortraits";
+import { useSquireEnvironments } from "../state/squires";
+import { openSquireRoomCreate } from "./squire/rooms/squireRoomStore";
+import { openSquireSetup } from "./squire/setup/squireSetupStore";
+import { squireContainerTarget } from "./squire/track/readSquireTrack";
+import {
+  squireThreadScope,
+  squireTrackers,
+  squireTrackGrant,
+  squireTrackMenuState,
+  type SquireTrackTarget,
+} from "./squire/track/squireTrack.logic";
+import { useSquireCommandAccess } from "./squire/track/useSquireCommandAccess";
+import { useSquireTrack } from "./squire/track/useSquireTrack";
 import { namedSnapshotsPerAccount, useSidebarSegmentation } from "./sidebar/accountProjectGroups";
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { CommandPaletteContent } from "./CommandPaletteContent";
@@ -404,6 +428,26 @@ const APPEARANCE_OPTIONS = [
   { mode: "dark", label: "Dark", icon: MoonIcon },
 ] as const;
 
+// The Squire's own still indicator, never the logo: the palette does not subscribe to
+// every home thread for live state, so it shows who at full color, as room member portraits do.
+// A face needs 22 px, so it overhangs the 16 px icon slot rather than heightening the row.
+function squirePaletteIcon(squire: Pick<Squire, "name" | "companion">, isLead: boolean) {
+  return (
+    <span aria-hidden className={cn("-m-[3px] flex shrink-0", SQUIRE_MEMBER_FULL_COLOR)}>
+      <SquireIndicator
+        state="idle"
+        palette={squire.companion.palette}
+        presence={squire.companion.presence}
+        appearance={squire.companion.appearance}
+        hood={squire.companion.hood}
+        isLead={isLead}
+        size={22}
+        label={squire.name}
+      />
+    </span>
+  );
+}
+
 function notifyThemeSaveFailure(): void {
   toastManager.add(
     stackedThreadToast({
@@ -495,7 +539,7 @@ function useSortedProjectGroups(environmentLabelById: ReadonlyMap<EnvironmentId,
   // Pickers leave out archived Stave spaces; they come back through New project → Stave.
   const { projects } = useListedProjects();
   const sidebarSegmentation = useSidebarSegmentation();
-  const threads = useThreadShells();
+  const threads = useVisibleThreadShells();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const clientSettings = useClientSettings(selectCommandPaletteClientSettings);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -826,6 +870,9 @@ function OpenCommandPaletteDialog(props: {
   // through New project → Stave. Path lookups (add, import) keep every project.
   const { projects: listedProjects, archivedProjectKeys } = useListedProjects();
   const appsPalette = useAppsPaletteItems();
+  const squireEnvironments = useSquireEnvironments();
+  const squireAccess = useSquireCommandAccess();
+  const squireTrack = useSquireTrack();
   const decisionConfigs = useServerConfigs();
   const contextualTargetEnvironment =
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
@@ -916,7 +963,7 @@ function OpenCommandPaletteDialog(props: {
       );
     }
   };
-  const threads = useThreadShells();
+  const threads = useVisibleThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const {
     theme,
@@ -2398,6 +2445,88 @@ function OpenCommandPaletteDialog(props: {
   });
 
   actionItems.push(...appsPalette.actions);
+  actionItems.push(
+    ...buildSquirePaletteItems({
+      environments: squireEnvironments,
+      environmentLabel: (environmentId) =>
+        projectEnvironmentLocationById.get(environmentId)?.label ?? null,
+      icon: squirePaletteIcon,
+      openSquire: async ({ environmentId, squireId }) => {
+        await navigate({
+          to: "/squires/$environmentId/$squireId",
+          params: { environmentId, squireId },
+          search: {},
+        });
+      },
+    }),
+  );
+  actionItems.push(
+    ...buildSquireSetupPaletteItems({
+      environments: squireEnvironments,
+      access: squireAccess,
+      environmentLabel: (environmentId) =>
+        projectEnvironmentLocationById.get(environmentId)?.label ?? null,
+      icon: squirePaletteIcon,
+      newIcon: <UserPlusIcon className={ITEM_ICON_CLASS} />,
+      openSetup: openSquireSetup,
+    }),
+  );
+  actionItems.push(
+    ...buildSquireRoomPaletteItems({
+      environments: squireEnvironments.map(({ environmentId, state }) => ({
+        environmentId,
+        rooms: state.rooms,
+      })),
+      canCreateRoom: (environmentId) => squireAccess(environmentId).canCreateRoom,
+      environmentLabel: (environmentId) =>
+        projectEnvironmentLocationById.get(environmentId)?.label ?? null,
+      icon: <MessagesSquareIcon className={ITEM_ICON_CLASS} />,
+      openRoom: async ({ environmentId, roomId }) => {
+        await navigate({
+          to: "/squires/$environmentId/rooms/$roomId",
+          params: { environmentId, roomId },
+        });
+      },
+      newRoom: (environmentId) => openSquireRoomCreate({ environmentId }),
+    }),
+  );
+  // The current thread, or the draft's project; Squire threads are never trackable.
+  const squireTrackOwner = activeThread ?? activeDraftThread ?? null;
+  const squireTrackState =
+    squireTrackOwner === null || activeThread?.squire != null
+      ? null
+      : (squireEnvironments.find(
+          ({ environmentId }) => environmentId === squireTrackOwner.environmentId,
+        )?.state ?? null);
+  if (squireTrackOwner !== null && squireTrackState !== null) {
+    const environmentId = squireTrackOwner.environmentId;
+    const trackProject =
+      projects.find(
+        (project) =>
+          project.environmentId === environmentId && project.id === squireTrackOwner.projectId,
+      ) ?? null;
+    const trackTarget: SquireTrackTarget = activeThread
+      ? { kind: "thread", ...squireThreadScope(activeThread, trackProject) }
+      : squireContainerTarget(trackProject ?? { id: squireTrackOwner.projectId });
+    actionItems.push(
+      ...buildSquireTrackPaletteItems({
+        environmentId,
+        subject: activeThread ? activeThread.title : (trackProject?.title ?? "This project"),
+        menu: squireTrackMenuState(
+          squireTrackers(squireTrackState.squires),
+          trackTarget,
+          squireAccess(environmentId),
+        ),
+        icons: {
+          track: <EyeIcon className={ITEM_ICON_CLASS} />,
+          untrack: <EyeOffIcon className={ITEM_ICON_CLASS} />,
+        },
+        run: async (choice) => {
+          await squireTrack.run(environmentId, choice, [squireTrackGrant(trackTarget)]);
+        },
+      }),
+    );
+  }
 
   if (
     environments.some(

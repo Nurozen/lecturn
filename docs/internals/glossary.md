@@ -112,6 +112,17 @@ An opt-in, project-scoped note derived from conversation evidence. Review state 
 
 **Extensions** is the optional private implementation boundary for desktop capture and fixed-policy evaluation; public contracts, consent, accounting and clients stay in Lecturn. **Contextual** selects relevant source evidence for a thread at submission. A **preparation** is its durable pending assessment, a **packet** is the bounded selected evidence, and a **delivery receipt** records the provider's proven or unknown acceptance. The **supply ledger** prevents repeatedly attaching unchanged guidance. A **context epoch** changes only with proven continuity loss such as native compaction or an explicit refresh. See [Extensions architecture](extensions.md).
 
+### Squires
+
+See [Squires][33].
+
+- **Squire**: an agent that watches the threads in its scope and answers events through its own tools, by staying quiet, raising an item, or running an allowed action.
+- **Lead**: the one Squire per environment that every other Squire nests under. It owns the combined queue, cross-Squire items, the digest, and the routing fallback.
+- **Home thread**: a Squire's own hidden thread, carrying the `squire` marker. Its conversation and every delivery happen there.
+- **Probe**: a hidden, read-only fork of a tracked thread that answers one "Ask about this" question and is then deleted.
+- **Item (card)**: a `squire_card` the user acts on. A held Auto action is stored as a card but is not an item: it never replaces an open card, and Undo turns it into one.
+- **Room**: a Squire-layer group conversation among Squires, the Lead, and the user. It is not a thread.
+
 ## Pull requests
 
 | Term                 | Meaning                                                                                                                                                                                  |
@@ -167,3 +178,4 @@ See [composer context references](./composer-context-references.md) for the cont
 [30]: ./thread-forking.md#importing-external-sessions
 [31]: ./pull-request-watches.md#notification-rings
 [32]: ./thread-forking.md
+[33]: ./squire.md

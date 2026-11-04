@@ -96,6 +96,28 @@ export const OmittedWhenNull = <Value extends Schema.Top>(value: Value) => {
   );
 };
 
+/** A closed string set that reads any member this build does not know as `fallback`. */
+export const ForwardCompatibleLiteral = <
+  const Literals extends ReadonlyArray<string>,
+  const Fallback extends string,
+>(
+  literals: Literals,
+  fallback: Fallback,
+) => {
+  const known: ReadonlySet<string> = new Set(literals);
+  const target = Schema.Union([Schema.Literals(literals), Schema.Literal(fallback)]);
+  type Target = Literals[number] | Fallback;
+  return Schema.String.pipe(
+    Schema.decodeTo(
+      target,
+      SchemaTransformation.transform<Target, string>({
+        decode: (raw) => (known.has(raw) ? (raw as Literals[number]) : fallback),
+        encode: (value) => value,
+      }),
+    ),
+  );
+};
+
 /**
  * For a tagged union, prefer {@link ForwardCompatibleUnion}: it drops only values whose tag this
  * build does not know, so a known member with a broken payload still fails loudly.
@@ -283,6 +305,23 @@ export const NodeId = makeEntityId("NodeId");
 export type NodeId = typeof NodeId.Type;
 export const AuthSessionId = makeEntityId("AuthSessionId");
 export type AuthSessionId = typeof AuthSessionId.Type;
+export const SquireId = makeEntityId("SquireId");
+export type SquireId = typeof SquireId.Type;
+export const SquireCardId = makeEntityId("SquireCardId");
+export type SquireCardId = typeof SquireCardId.Type;
+export const SquireVoiceNoteId = makeEntityId("SquireVoiceNoteId");
+export type SquireVoiceNoteId = typeof SquireVoiceNoteId.Type;
+export const SquireRuleId = makeEntityId("SquireRuleId");
+export type SquireRuleId = typeof SquireRuleId.Type;
+export const SquireTriggerId = makeEntityId("SquireTriggerId");
+export type SquireTriggerId = typeof SquireTriggerId.Type;
+export const SquireRoomId = makeEntityId("SquireRoomId");
+export type SquireRoomId = typeof SquireRoomId.Type;
+/** The room post's SQLite rowid: room read cursors compare post ids in order. */
+export const SquireRoomPostId = NonNegativeInt.pipe(Schema.brand("SquireRoomPostId"));
+export type SquireRoomPostId = typeof SquireRoomPostId.Type;
+export const SquireTaskId = makeEntityId("SquireTaskId");
+export type SquireTaskId = typeof SquireTaskId.Type;
 export const RpcClientId = NonNegativeInt.pipe(Schema.brand("RpcClientId"));
 export type RpcClientId = typeof RpcClientId.Type;
 

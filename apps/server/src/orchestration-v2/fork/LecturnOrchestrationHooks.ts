@@ -121,8 +121,11 @@ export interface LecturnTurnStartDecision {
  * foreground last, right before the provider turn (V1 claimed it in
  * sendTurn), so a held turn never keeps the background decision writer
  * paused. Unknown names run after these, in registration order.
+ * Lecturn: the Squire allowlist is outermost, so nothing runs for a command it
+ * refuses on a Squire thread.
  */
 export const LECTURN_HOOK_ORDER: ReadonlyArray<string> = [
+  "squire",
   "team-provider-policy",
   "stave",
   "contextual",

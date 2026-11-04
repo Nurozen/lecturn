@@ -22,6 +22,7 @@ const OpenCodeTextGenerationOperation = Schema.Literals([
   "generateThreadTitle",
   "generateWorkflowSummary",
   "generateContextualSummary",
+  "generateSquireTurnSummary",
   "generateDecisionNotes",
   "checkDecisionWriter",
   "generateReviewGuide",

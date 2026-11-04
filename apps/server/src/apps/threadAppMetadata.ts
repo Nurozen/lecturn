@@ -1,11 +1,12 @@
 /**
- * The one owner of a thread's connected-app fields (`copiedFrom`, `appData`,
- * `appSubtitle`, `appOrigin`, `continuedIn`). Orchestration decides them,
+ * The one owner of a thread's server-set thread metadata: the connected-app
+ * fields (`copiedFrom`, `appData`, `appSubtitle`, `appOrigin`, `continuedIn`)
+ * and the Squire marker (`squire`). Orchestration decides them,
  * events carry them inside the thread payload, the projection stores that
  * payload, and both shell builders copy them through this module, so a field
  * added here reaches every reader at once.
  *
- * A thread without app metadata has none of the keys, so non-app payloads and
+ * A thread without this metadata has none of the keys, so non-app payloads and
  * shells stay byte-for-byte what they were.
  */
 import {
@@ -18,6 +19,7 @@ import {
   type OrchestrationV2AppThread,
   type OrchestrationV2Command,
   type OrchestrationV2InternalCommand,
+  SquireThreadMarker,
 } from "@lecturn/contracts";
 import type * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -29,6 +31,7 @@ export const ThreadAppMetadata = Schema.Struct({
   appSubtitle: Schema.optionalKey(ConnectedAppThreadSubtitle),
   appOrigin: Schema.optionalKey(AppOrigin),
   continuedIn: Schema.optionalKey(ConnectedAppThreadContinuedIn),
+  squire: Schema.optionalKey(SquireThreadMarker),
 });
 export type ThreadAppMetadata = typeof ThreadAppMetadata.Type;
 
@@ -50,7 +53,8 @@ const hasAny = (source: ThreadAppMetadata) =>
   source.appData !== undefined ||
   source.appSubtitle !== undefined ||
   source.appOrigin !== undefined ||
-  source.continuedIn !== undefined;
+  source.continuedIn !== undefined ||
+  source.squire !== undefined;
 
 /**
  * The present fields only. Every shell build calls this, so the common
@@ -64,12 +68,15 @@ export function threadAppMetadataOf(source: ThreadAppMetadata): ThreadAppMetadat
     ...(source.appSubtitle === undefined ? {} : { appSubtitle: source.appSubtitle }),
     ...(source.appOrigin === undefined ? {} : { appOrigin: source.appOrigin }),
     ...(source.continuedIn === undefined ? {} : { continuedIn: source.continuedIn }),
+    ...(source.squire === undefined ? {} : { squire: source.squire }),
   };
 }
 
 /**
  * A fork child stays in the app's project but is a new conversation: the
  * app's data, subtitle and copy links describe the source thread, not it.
+ * The Squire marker goes too, so a fork of a home thread is an ordinary
+ * thread unless the server marks it as a probe itself.
  */
 export function withoutThreadAppMetadata<T extends ThreadAppMetadata>(
   thread: T,
@@ -80,6 +87,7 @@ export function withoutThreadAppMetadata<T extends ThreadAppMetadata>(
     appSubtitle: _appSubtitle,
     appOrigin: _appOrigin,
     continuedIn: _continuedIn,
+    squire: _squire,
     ...rest
   } = thread;
   return rest;
@@ -119,13 +127,14 @@ export class ThreadAppMetadataRefusedError extends Schema.TaggedError<ThreadAppM
   { commandId: CommandId, commandType: Schema.String },
 ) {
   override get message(): string {
-    return "Only a connected app can set app thread fields; create the thread without them.";
+    return "Only the server can set app thread fields or the Squire marker; create the thread without them.";
   }
 }
 
 /**
- * Lecturn's own clients never send app fields: the apps service sets
- * them on the server for the owning app. This runs on the client dispatch
+ * Lecturn's own clients never send this metadata: the apps service sets the
+ * app fields for the owning app and the Squire service sets the marker, both
+ * on the server. This runs on the client dispatch
  * path only, so server-built commands are unaffected.
  */
 export const refuseClientThreadAppMetadata = (command: OrchestrationV2Command) =>

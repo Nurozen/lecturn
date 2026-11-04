@@ -1,6 +1,11 @@
 import { deviceRelayPublicationBlocked } from "../cloud/DeviceRelayReservation.ts";
 import { ThreadId as ThreadIdSchema, type PullRequestWatch } from "@lecturn/contracts";
 import { PullRequestWatchService } from "../pullRequest/PullRequestWatchService.ts";
+import { isSquireThread } from "../squire/squireThread.ts";
+import {
+  SquireMobileAttention,
+  type SquireMobileTransportGap,
+} from "../squire/SquireMobileAttention.ts";
 import { TeamPolicy, TeamPolicyLive } from "../cloud/TeamPolicy.ts";
 import type {
   EnvironmentId,
@@ -458,6 +463,9 @@ const RING_ELIGIBLE_PHASES: ReadonlySet<RelayAgentActivityState["phase"]> = new 
 // dedupe. Unlike deleting the entry, the thread still counts as published, so
 // a completed state skips the first-state confirmation delay.
 const REDELIVER_PUBLISH_IDENTITY = "redeliver";
+// A Squire row the relay may still hold from before this process: its next
+// publish goes out even when it is the tombstone.
+const UNKNOWN_SQUIRE_PUBLISH_IDENTITY = "unknown";
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
@@ -470,6 +478,8 @@ export const make = Effect.gen(function* () {
   const projectStore = yield* ProjectStore.ProjectStoreV2;
   const appRegistrations = yield* AppRegistrationRepository;
   const watches = yield* Effect.serviceOption(PullRequestWatchService);
+  // Present only with LECTURN_SQUIRE on.
+  const squireAttention = yield* Effect.serviceOption(SquireMobileAttention);
   const crypto = yield* Crypto.Crypto;
   const scope = yield* Effect.scope;
   const cloudLinkKeyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(secrets);
@@ -560,6 +570,40 @@ export const make = Effect.gen(function* () {
     Effect.forEach([...publishRetries.keys()], cancelPublishRetry, { discard: true }),
   );
   let schedulePublishRetry: (threadId: ThreadId) => Effect.Effect<void> = () => Effect.void;
+  // Until the retries give up, a Squire's intents stay owed: a later success records them.
+  const settleSquireIntentsUndelivered = (threadId: ThreadId) =>
+    Effect.gen(function* () {
+      if (Option.isNone(squireAttention)) return;
+      const attention = squireAttention.value;
+      if (!(yield* attention.isHomeThread(threadId))) return;
+      const environmentId = yield* serverEnvironment.getEnvironmentId;
+      const row = yield* attention.row({ environmentId, threadId });
+      if (Option.isSome(row)) {
+        yield* attention.record(row.value, { kind: "no_transport", reason: "failed" });
+      }
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Squire intents could not be marked undelivered", {
+          threadId,
+          cause: Cause.pretty(cause),
+        }),
+      ),
+    );
+  /** Startup and link catch-up: every Squire row, tombstones included, and owed intents. */
+  const enqueueSquireRows = Effect.gen(function* () {
+    if (Option.isNone(squireAttention)) return;
+    const threadIds = yield* squireAttention.value.homeThreadIds;
+    yield* Ref.update(publishedStateByThreadRef, (entries) => {
+      const next = new Map(entries);
+      for (const threadId of threadIds) {
+        if (!next.has(threadId)) next.set(threadId, UNKNOWN_SQUIRE_PUBLISH_IDENTITY);
+      }
+      return next;
+    });
+    yield* Effect.forEach(threadIds, (threadId) => enqueueThreadPublish(threadId), {
+      discard: true,
+    });
+  });
   const resetPublishedConnection = Effect.gen(function* () {
     publishedRelayConfig = undefined;
     cachedRelayClient = undefined;
@@ -567,7 +611,7 @@ export const make = Effect.gen(function* () {
     yield* Ref.set(publishedStateByThreadRef, new Map());
   });
 
-  const publishThreadUnsafe = Effect.fn("publishThreadUnsafe")(function* (threadId: ThreadId) {
+  const transportGate = Effect.fnUntraced(function* (threadId: ThreadId) {
     const publishAgentActivity = yield* readPublishAgentActivityEnabled;
     if (!publishAgentActivity) {
       yield* cancelPublishRetries;
@@ -576,7 +620,7 @@ export const make = Effect.gen(function* () {
         threadId,
       });
       suppressedRingThreadIds.delete(threadId);
-      return;
+      return "disabled" satisfies SquireMobileTransportGap;
     }
     const relayConfig = yield* readRelayConfig;
     if (!relayConfig) {
@@ -586,14 +630,14 @@ export const make = Effect.gen(function* () {
         threadId,
       });
       suppressedRingThreadIds.delete(threadId);
-      return;
+      return "unlinked" satisfies SquireMobileTransportGap;
     }
     if (!(yield* teamPolicy.canPublishActivity.pipe(Effect.orElseSucceed(() => false)))) {
       yield* Effect.logDebug(
         "agent activity publish skipped; organization policy unavailable or disabled",
       );
       suppressedRingThreadIds.delete(threadId);
-      return;
+      return "policy" satisfies SquireMobileTransportGap;
     }
     if (
       publishedRelayConfig?.url !== relayConfig.url ||
@@ -603,19 +647,28 @@ export const make = Effect.gen(function* () {
       yield* resetPublishedConnection;
       publishedRelayConfig = relayConfig;
     }
-    const environmentId = yield* serverEnvironment.getEnvironmentId;
+    return relayConfig;
+  });
 
-    const publishState = (input: {
+  const makePublishState = (
+    relayConfig: NonNullable<Effect.Success<typeof readRelayConfig>>,
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+  ) =>
+    function publishState(input: {
       readonly projectId: string | null;
       readonly state: RelayAgentActivityState | null;
       readonly reason: string;
-    }) =>
-      Effect.gen(function* () {
+      /** Squire rows: presence hold-back is SquirePresence's, so the relay always rings. */
+      readonly ringWhilePresent?: boolean;
+    }) {
+      return Effect.gen(function* () {
         if (cachedRelayClient === undefined) {
           cachedRelayClient = yield* makeRelayClient(relayConfig);
         }
         const relayClient = cachedRelayClient;
-        const userPresent = yield* backgroundPolicy.isUserPresent;
+        const userPresent =
+          input.ringWhilePresent === true ? false : yield* backgroundPolicy.isUserPresent;
         const proof = yield* makePublishProof({
           privateKey: cloudLinkKeyPair.privateKey,
           relayIssuer: relayConfig.issuer,
@@ -662,6 +715,60 @@ export const make = Effect.gen(function* () {
           suppressedRingThreadIds.delete(threadId);
         }
       }).pipe(Effect.withSpan("relay.agent_activity.publish"), withRelayClientTracing);
+    };
+
+  // One row per Squire, keyed by its home thread. SquireMobileAttention
+  // owns the attention set and the delivery rows; this publishes and reports.
+  const publishSquireRow = Effect.fnUntraced(function* (
+    attention: SquireMobileAttention["Service"],
+    threadId: ThreadId,
+    gate: Effect.Success<ReturnType<typeof transportGate>>,
+  ) {
+    const environmentId = yield* serverEnvironment.getEnvironmentId;
+    const row = yield* attention.row({ environmentId, threadId });
+    if (Option.isNone(row)) return false;
+    if (typeof gate === "string") {
+      yield* attention.record(row.value, { kind: "no_transport", reason: gate });
+      return true;
+    }
+    const { state } = row.value;
+    const previous = (yield* Ref.get(publishedStateByThreadRef)).get(threadId);
+    const identity = agentAwarenessPublishIdentity(state);
+    // A never-published row's tombstone would only re-deliver the aggregate.
+    if (previous !== identity && !(state === null && previous === undefined)) {
+      yield* makePublishState(
+        gate,
+        environmentId,
+        threadId,
+      )({ projectId: null, state, reason: "squire", ringWhilePresent: true });
+      // The tombstone's identity stays recorded: a later entry is known to ring.
+      yield* Ref.update(publishedStateByThreadRef, (entries) =>
+        new Map(entries).set(threadId, identity),
+      );
+    }
+    yield* attention.record(row.value, {
+      kind: "published",
+      wasInAttention:
+        previous === undefined || previous === UNKNOWN_SQUIRE_PUBLISH_IDENTITY
+          ? undefined
+          : previous !== agentAwarenessPublishIdentity(null),
+    });
+    return true;
+  });
+
+  const publishThreadUnsafe = Effect.fn("publishThreadUnsafe")(function* (threadId: ThreadId) {
+    const gate = yield* transportGate(threadId);
+    if (
+      Option.isSome(squireAttention) &&
+      (yield* squireAttention.value.isHomeThread(threadId)) &&
+      (yield* publishSquireRow(squireAttention.value, threadId, gate))
+    ) {
+      return;
+    }
+    if (typeof gate === "string") return;
+    const relayConfig = gate;
+    const environmentId = yield* serverEnvironment.getEnvironmentId;
+    const publishState = makePublishState(relayConfig, environmentId, threadId);
 
     const watchId = threadId.startsWith("pr-watch:") ? threadId.slice("pr-watch:".length) : null;
     if (watchId !== null && Option.isSome(watches)) {
@@ -696,12 +803,13 @@ export const make = Effect.gen(function* () {
     // of one thread's activity proportional to how many threads exist.
     const threadShell = yield* threads.getThreadShell(threadId);
     if (
-      threadShell?.lineage.relationshipToParent === "subagent" &&
+      threadShell !== null &&
+      (threadShell.lineage.relationshipToParent === "subagent" || isSquireThread(threadShell)) &&
       !(yield* Ref.get(publishedStateByThreadRef)).has(threadId)
     ) {
-      // Subagents never project activity, so the relay holds no row to clear.
-      // Their events would otherwise publish a tombstone each, and every
-      // publish re-delivers the user's aggregate.
+      // Subagents and Squire threads never project activity, so the relay
+      // holds no row to clear. Their events would otherwise publish a
+      // tombstone each, and every publish re-delivers the user's aggregate.
       return;
     }
     const thread =
@@ -840,6 +948,7 @@ export const make = Effect.gen(function* () {
       // Keep the exhausted budget until fresh activity or a successful publish
       // clears it; an old confirmation timer must not start another retry series.
       yield* Effect.logWarning("agent activity publish retry budget exhausted", { threadId });
+      yield* settleSquireIntentsUndelivered(threadId);
       return;
     }
     const retry = {
@@ -895,6 +1004,7 @@ export const make = Effect.gen(function* () {
       projects: projectSnapshot.projects,
       threads: shellSnapshot.threads,
     });
+    yield* enqueueSquireRows;
     if (activeThreadIds.length === 0) {
       yield* Effect.logDebug("agent activity snapshot has no publishable threads");
       return "published" as const;
@@ -994,6 +1104,13 @@ export const make = Effect.gen(function* () {
           Effect.andThen(publishActiveThreadsOnceWhenConfigured(startupState !== "enabled")),
         ),
       );
+      if (Option.isSome(squireAttention)) {
+        const squireChanges = yield* squireAttention.value.subscribe;
+        // Unlinked too: an intent a crash left without its mobile row records
+        // `no_transport` instead of waiting for a link that may never come.
+        yield* forkParked(Effect.sleep("1 second").pipe(Effect.andThen(enqueueSquireRows)));
+        yield* forkParked(Stream.runForEach(squireChanges, enqueueThreadPublish));
+      }
       if (Option.isSome(watches)) {
         yield* forkParked(
           Effect.gen(function* () {

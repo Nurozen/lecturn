@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
 import "~/index.css";
+import showcaseTemplate from "../../../../server/src/squire/showcase/template.html?raw";
 
 // The app asks for full screen from its button. It also focuses its own frame
 // and asks on load, right after it is told it left full screen, and whenever
@@ -54,11 +55,58 @@ void request("ui/initialize", { protocolVersion: "2026-01-26", appCapabilities: 
 });
 </script>`;
 
+// The Squire showcase as published: the shipped template with one data block filled.
+const SHOWCASE_HTML = showcaseTemplate.replace(
+  "{{SQUIRE_SHOWCASE_DATA}}",
+  JSON.stringify({
+    templateVersion: 7,
+    generatedAt: "2026-11-01T12:00:00.000Z",
+    lead: { name: "Mira", still: null },
+    counts: {
+      needsDecision: 1,
+      steers: 0,
+      openQuestions: 0,
+      overlaps: 1,
+      proposals: 0,
+      threadsWatched: 2,
+    },
+    threads: [
+      { id: "t1", title: "Billing retries", project: "api", pr: null },
+      { id: "t2", title: "Ledger export", project: "api", pr: null },
+    ],
+    files: [
+      {
+        key: "p:src/ledger.ts",
+        path: "src/ledger.ts",
+        project: "api",
+        threads: ["t1", "t2"],
+        shared: true,
+      },
+    ],
+    edges: [],
+    items: [
+      {
+        id: "card:1",
+        kind: "overlap",
+        title: "Both threads edit src/ledger.ts",
+        outcome: null,
+        why: null,
+        thread: null,
+        squire: "Lead",
+        owner: "Lead",
+        link: null,
+        actions: [],
+      },
+    ],
+  }),
+);
+let appHtml = APP_HTML;
+
 vi.mock(import("../../assets/assetUrls"), async (original) => ({
   ...(await original()),
   useAssetUrlState: (() => ({
     _tag: "Success",
-    url: `data:text/html,${encodeURIComponent(APP_HTML)}`,
+    url: `data:text/html,${encodeURIComponent(appHtml)}`,
     expiresAt: Date.now() + 60 * 60_000,
   })) as never,
   useAssetUrlRefresh: (() => async () => null) as never,
@@ -103,6 +151,7 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   answers = [];
   answered = undefined;
+  appHtml = APP_HTML;
   skew = 0;
   // Advance the host cooldown without manufacturing browser user activation.
   const now = performance.now.bind(performance);
@@ -120,7 +169,7 @@ afterEach(async () => {
 
 const isFullscreen = () => document.querySelector("[data-mcp-app-fullscreen]") !== null;
 
-const renderApp = async (server = "srv") => {
+const renderApp = async (server = "srv", tool = "show") => {
   const container = document.body.appendChild(document.createElement("div"));
   root = createRoot(container);
   await act(async () =>
@@ -131,7 +180,7 @@ const renderApp = async (server = "srv") => {
         conversationThreadId={ThreadId.make("thread")}
         itemId={TurnItemId.make("item")}
         revision="1"
-        app={{ attachmentId: "app", server, tool: "show", resourceUri: `ui://${server}/app` }}
+        app={{ attachmentId: "app", server, tool, resourceUri: `ui://${server}/app` }}
         onSendMessage={undefined}
       />,
     ),
@@ -212,4 +261,27 @@ it("holds a connected app's card to the same tap-only full screen", async () => 
     .getByRole("button", { name: "Open full screen" });
   expect(await nextAnswer(() => userEvent.click(appButton))).toBe("tap:fullscreen");
   expect(isFullscreen()).toBe(true);
+});
+
+it("opens the Squire showcase full size from its Expand button, and back to its summary", async () => {
+  appHtml = SHOWCASE_HTML;
+  await renderApp(LECTURN_MCP_APP_SERVER, "squire_publish_showcase");
+  const app = page.frameLocator(page.getByTitle(`${LECTURN_MCP_APP_SERVER} app`));
+  const cardHeight = () =>
+    document.querySelector<HTMLElement>("[data-testid=mcp-app-card]")!.offsetHeight;
+  // Inline, the card is its header, counts, and Expand: the map and items wait for full size.
+  await vi.waitFor(() => expect(cardHeight()).not.toBe(320));
+  const compact = cardHeight();
+  expect(compact).toBeLessThan(400);
+
+  // Past the cooldown on activation an earlier test left on the page.
+  skew += 5_000;
+  await userEvent.click(app.getByRole("button", { name: "Expand" }));
+  await vi.waitFor(() => expect(isFullscreen()).toBe(true));
+  // Clicking waits for the item to be visible, which it is only at full size.
+  await userEvent.click(app.getByText("Both threads edit src/ledger.ts"));
+
+  await userEvent.click(page.getByRole("button", { name: "Exit full screen" }));
+  expect(isFullscreen()).toBe(false);
+  await vi.waitFor(() => expect(cardHeight()).toBe(compact));
 });

@@ -10,7 +10,7 @@ import { buildProjectThreadStartTurnInput } from "../../lib/projectThreadStartTu
 import { useWorktreeSetup } from "./use-worktree-setup";
 import { worktreeSetupAgentStarted } from "@lecturn/client-runtime/worktree-setup";
 import { accountOwnerTarget } from "@lecturn/client-runtime/connection";
-import type { AppBarAction } from "../../components/ui/AppBar.types";
+import type { AppBarAction, AppBarMenu } from "../../components/ui/AppBar.types";
 import { AppBar } from "../../components/ui/AppBar";
 import {
   StackActions,
@@ -107,6 +107,17 @@ import {
   useWorkspaceListNavigation,
 } from "../workspace/useAndroidWorkspaceNavigation";
 import { useThreadWorkspaceTab } from "../apps/useThreadWorkspaceTab";
+import { useSquireEntry } from "../../state/squire";
+import { useSquireThreadTracking } from "../squires/useSquireThreadTracking";
+import {
+  allowsThreadRouteControl,
+  homeSquireRef,
+  resolveThreadRouteControls,
+  squireComposerPlaceholder,
+  threadRouteHeaderActions,
+  type ThreadRouteControl,
+  type ThreadRouteControls,
+} from "./threadRouteControls";
 
 interface ThreadInspectorSelection {
   readonly routeThreadIdentity: string | null;
@@ -172,6 +183,11 @@ type ThreadRouteScreenRouteProps = StaticScreenProps<{
 interface ThreadRouteScreenProps extends ThreadRouteScreenRouteProps {
   readonly onReturnToThread?: () => void;
   readonly renderInspector?: (headerInset: number) => ReactNode;
+  /**
+   * Lecturn: an allowlist of the controls to show. Wins over the resolver, which already gives a Squire's home
+   * thread `SQUIRE_THREAD_CONTROLS` on every route; absent keeps today's screen.
+   */
+  readonly controls?: ThreadRouteControls;
 }
 
 function ThreadUnavailableScreen(props: {
@@ -481,6 +497,21 @@ function ThreadRouteContent(
     routeEnvironmentRuntime?.connectionState ?? (environmentId ? "available" : connectionState);
   const routeConnectionError = routeEnvironmentRuntime?.connectionError ?? null;
   const serverConfig = routeEnvironmentRuntime?.serverConfig ?? null;
+  // Lecturn: every control site below reads this beside its capability check.
+  const controls =
+    props.controls ??
+    resolveThreadRouteControls({
+      squire: selectedThread?.squire,
+      squireSupported: serverConfig?.environment.capabilities.squire === true,
+    });
+  const allows = (control: ThreadRouteControl) => allowsThreadRouteControl(controls, control);
+  const homeSquireTarget = homeSquireRef(selectedThread);
+  const homeSquireEntry = useSquireEntry(homeSquireTarget.environmentId, homeSquireTarget.squireId);
+  const homeSquire = homeSquireEntry === null ? null : homeSquireEntry.squire;
+  const squireTracking = useSquireThreadTracking(
+    selectedThread?.environmentId ?? null,
+    selectedThread,
+  );
   const selectedThreadWithDraftSettings = selectedThread
     ? {
         ...selectedThread,
@@ -789,32 +820,41 @@ function ThreadRouteContent(
     environmentId: environmentIdRaw ?? "",
     threadId: threadId ?? "",
     auxiliaryPaneControl:
-      !layout.usesSplitView && fileInspector.supported && selectedThreadCwd !== null
+      !layout.usesSplitView &&
+      fileInspector.supported &&
+      selectedThreadCwd !== null &&
+      allows("files")
         ? {
             accessibilityLabel: "Toggle inspector",
             onPress: handleToggleInspector,
           }
         : undefined,
     onOpenFilesInspector:
-      fileInspector.supported && selectedThreadCwd !== null ? handleOpenFilesInspector : undefined,
-    onOpenGitInspector: fileInspector.supported ? handleOpenGitInspector : undefined,
+      fileInspector.supported && selectedThreadCwd !== null && allows("files")
+        ? handleOpenFilesInspector
+        : undefined,
+    onOpenGitInspector:
+      fileInspector.supported && allows("git") ? handleOpenGitInspector : undefined,
     onMergeBack:
-      mergeBackTargetThreadId !== null && mergeBackRun !== null
+      mergeBackTargetThreadId !== null && mergeBackRun !== null && allows("merge-back")
         ? () => void handleMergeBack()
         : undefined,
     currentBranch: selectedThread?.branch ?? null,
     gitStatus: gitStatus.data,
     gitOperationLabel: gitState.gitOperationLabel,
     canOpenTerminal:
-      Boolean(selectedThreadProject?.workspaceRoot) && (canReadTerminal || canOperateTerminal),
-    canOperateTerminal,
-    canOpenFiles: Boolean(selectedThreadProject?.workspaceRoot),
-    projectScripts: selectedThreadProject
-      ? resolveProjectScripts(
-          routeEnvironmentRuntime?.serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
-          selectedThreadProject,
-        )
-      : [],
+      Boolean(selectedThreadProject?.workspaceRoot) &&
+      (canReadTerminal || canOperateTerminal) &&
+      allows("terminal"),
+    canOperateTerminal: canOperateTerminal && allows("terminal"),
+    canOpenFiles: Boolean(selectedThreadProject?.workspaceRoot) && allows("files"),
+    projectScripts:
+      selectedThreadProject && allows("project-scripts")
+        ? resolveProjectScripts(
+            routeEnvironmentRuntime?.serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
+            selectedThreadProject,
+          )
+        : [],
     terminalSessions: terminalMenuSessions,
     showDirectFileControl: layout.usesSplitView,
     onOpenTerminal: handleOpenTerminal,
@@ -856,42 +896,57 @@ function ThreadRouteContent(
       );
     });
   };
+  // Lecturn: one list for both platforms, so the allowlist and Squire tracking gate each once.
+  const headerActions = threadRouteHeaderActions({
+    controls,
+    decisionsSupported:
+      serverConfig?.environment.capabilities.threadDecisions === true && selectedThread !== null,
+    forkSupported,
+    tracking: squireTracking.actions,
+  });
+  const runHeaderAction = (action: (typeof headerActions)[number]) => {
+    if (action.kind === "fork") {
+      void handleForkCurrentThread();
+      return;
+    }
+    if (action.kind === "decisions") {
+      if (selectedThread === null) return;
+      navigation.navigate("Decisions", {
+        environmentId: selectedThread.environmentId,
+        projectId: selectedThread.projectId,
+        threadId: selectedThread.id,
+      });
+      return;
+    }
+    const tracking = squireTracking.actions.find(
+      (candidate) => candidate.kind === action.kind && candidate.squireId === action.squireId,
+    );
+    if (tracking) squireTracking.run(tracking);
+  };
   const threadActionsHeaderItem: NativeHeaderItem | null =
-    forkSupported || serverConfig?.environment.capabilities.threadDecisions === true
+    headerActions.length > 0
       ? {
           accessibilityLabel: "Thread actions",
           icon: { name: "ellipsis.circle", type: "sfSymbol" as const },
           identifier: "thread-right-thread-actions",
           label: "Thread",
           menu: {
-            items: [
-              ...(serverConfig?.environment.capabilities.threadDecisions === true && selectedThread
-                ? [
-                    {
-                      label: "Decisions",
-                      type: "action" as const,
-                      onPress: () =>
-                        navigation.navigate("Decisions", {
-                          environmentId: selectedThread.environmentId,
-                          projectId: selectedThread.projectId,
-                          threadId: selectedThread.id,
-                        }),
-                    },
-                  ]
-                : []),
-              ...(forkSupported
-                ? [
-                    {
-                      description: "Start a new thread with this history",
-                      disabled: !forkAvailable,
-                      icon: { name: "arrow.triangle.branch", type: "sfSymbol" as const },
-                      label: "Fork thread",
-                      onPress: () => void handleForkCurrentThread(),
-                      type: "action" as const,
-                    },
-                  ]
-                : []),
-            ],
+            items: headerActions.map((action) =>
+              action.kind === "fork"
+                ? {
+                    description: "Start a new thread with this history",
+                    disabled: !forkAvailable,
+                    icon: { name: "arrow.triangle.branch", type: "sfSymbol" as const },
+                    label: action.label,
+                    onPress: () => runHeaderAction(action),
+                    type: "action" as const,
+                  }
+                : {
+                    label: action.label,
+                    type: "action" as const,
+                    onPress: () => runHeaderAction(action),
+                  },
+            ),
             title: "Thread",
           },
           sharesBackground: true,
@@ -899,9 +954,11 @@ function ThreadRouteContent(
           variant: "plain" as const,
         }
       : null;
-  // Android surfaces fork as an in-flow header action; iOS gets it inside the
-  // thread actions menu appended to the shared header's right items.
-  const forkHeaderAction: AppBarAction | null = forkSupported
+  // Android surfaces fork as an in-flow header action and Squire tracking as a header menu;
+  // iOS gets both inside the thread actions menu appended to the shared header's right items.
+  const forkHeaderAction: AppBarAction | null = headerActions.some(
+    (action) => action.kind === "fork",
+  )
     ? {
         accessibilityLabel: "Fork thread",
         icon: "arrow.triangle.branch",
@@ -909,6 +966,21 @@ function ThreadRouteContent(
         onPress: () => void handleForkCurrentThread(),
       }
     : null;
+  const trackingActions = headerActions.flatMap((action) =>
+    action.kind === "track" || action.kind === "untrack" ? [action] : [],
+  );
+  const squireTrackingHeaderMenu: AppBarMenu | null =
+    trackingActions.length > 0
+      ? {
+          title: "Squire tracking",
+          icon: "person.2",
+          items: trackingActions.map((action) => ({
+            id: `${action.kind}:${action.squireId}`,
+            title: action.label,
+            onPress: () => runHeaderAction(action),
+          })),
+        }
+      : null;
 
   const handleEditFailedCreation = async () => {
     const creation = selectedThreadCreation?.message;
@@ -1066,6 +1138,8 @@ function ThreadRouteContent(
 
       <ThreadPane>
         <ThreadDetailScreen
+          controls={controls}
+          composerPlaceholder={squireComposerPlaceholder(homeSquire) ?? undefined}
           canOperateThread={canOperateThread}
           selectedThread={selectedThreadWithDraftSettings ?? selectedThread}
           selectedThreadDetailRef={selectedThreadDetailRef}
@@ -1144,7 +1218,7 @@ function ThreadRouteContent(
           onRemoveDraftImage={composer.onRemoveDraftImage}
           serverConfig={serverConfig}
           onStopThread={awaitingBootstrapTurn ? handleCancelWorktreeSetup : handleStopThread}
-          onResumeQueue={composer.queueHeld ? handleResumeQueue : null}
+          onResumeQueue={composer.queueHeld && allows("queued-runs") ? handleResumeQueue : null}
           onSendMessage={composer.onSendMessage}
           onReconnectEnvironment={handleReconnectEnvironment}
           canSwitchThreadProvider={composer.canSwitchThreadProvider}
@@ -1165,7 +1239,10 @@ function ThreadRouteContent(
     <>
       {activeInspectorRenderer ? <InspectorPaneRoleActivation /> : null}
       <ThreadHeader
-        title={selectedThread.title}
+        // Lecturn: a home thread is titled by its Squire, as the Squire screen is.
+        title={homeSquire?.name ?? selectedThread.title}
+        controls={controls}
+        squireTrackingMenu={Platform.OS === "android" ? squireTrackingHeaderMenu : null}
         subtitle={headerSubtitle}
         headerColor={headerColor}
         usesNativeHeaderGlass={usesNativeHeaderGlass}

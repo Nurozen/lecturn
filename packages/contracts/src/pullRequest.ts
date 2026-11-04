@@ -485,6 +485,8 @@ export const PullRequestSummary = Schema.Struct({
   mergeability: Schema.optional(PullRequestMergeability),
   /** Null when the host says the pull request is in no stack; absent when the read did not ask. */
   stack: Schema.optional(Schema.NullOr(PullRequestStackMembership)),
+  /** Lecturn: head commit, so a new push is a change; absent where the host read omits it. */
+  headSha: Schema.optional(TrimmedNonEmptyString),
 });
 export type PullRequestSummary = typeof PullRequestSummary.Type;
 

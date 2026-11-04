@@ -37,6 +37,8 @@ import {
 } from "../telemetry/ProviderDimensions.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as AppToolInterceptor from "./toolkits/app/AppToolInterceptor.ts";
+import * as SquireMcpGate from "./toolkits/squire/SquireMcpGate.ts";
+import * as SquireToolInterceptor from "./toolkits/squire/SquireToolInterceptor.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import { PreviewControlsToolkit } from "./toolkits/previewControls/tools.ts";
@@ -160,6 +162,8 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
   const registry = yield* McpSessionRegistry.McpSessionRegistry;
   const clients = yield* Effect.serviceOption(McpClientAuthenticator);
   const interceptAppTools = yield* AppToolInterceptor.make;
+  const interceptSquireTools = yield* SquireToolInterceptor.make;
+  const gateSquireTools = yield* SquireMcpGate.make;
   return Effect.fn("McpHttpServer.authenticateRequest")(function* (httpEffect) {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const authorization = request.headers.authorization;
@@ -182,7 +186,11 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
         offerOAuth: Option.isSome(clients) && !looksLikeProviderToken(token),
       });
     }
-    return yield* interceptAppTools(invocation, httpEffect).pipe(
+    // The gate runs first, so nothing it refuses reaches an interceptor or a tool.
+    return yield* gateSquireTools(
+      invocation,
+      interceptSquireTools(invocation, interceptAppTools(invocation, httpEffect)),
+    ).pipe(
       Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
       Effect.map(normalizeMcpHttpResponse),
     );

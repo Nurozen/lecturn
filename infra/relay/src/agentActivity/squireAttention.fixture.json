@@ -1,0 +1,247 @@
+{
+  "environmentId": "relay-environment",
+  "scenarios": {
+    "cards": [
+      {
+        "step": "first card",
+        "publishes": [
+          {
+            "threadId": "squire-home:release",
+            "state": {
+              "environmentId": "relay-environment",
+              "threadId": "squire-home:release",
+              "projectTitle": "1 open decision",
+              "threadTitle": "Release",
+              "phase": "waiting_for_input",
+              "headline": "1 open decision",
+              "modelTitle": "Squire",
+              "updatedAt": "2026-11-02T08:00:00.000Z",
+              "deepLink": "/threads/relay-environment/squire-home%3Arelease"
+            },
+            "userPresent": false
+          }
+        ],
+        "mobile": ["alerted"]
+      },
+      {
+        "step": "second card",
+        "publishes": [
+          {
+            "threadId": "squire-home:release",
+            "state": {
+              "environmentId": "relay-environment",
+              "threadId": "squire-home:release",
+              "projectTitle": "2 open decisions",
+              "threadTitle": "Release",
+              "phase": "waiting_for_input",
+              "headline": "2 open decisions",
+              "modelTitle": "Squire",
+              "updatedAt": "2026-11-02T08:00:00.000Z",
+              "deepLink": "/threads/relay-environment/squire-home%3Arelease"
+            },
+            "userPresent": false
+          }
+        ],
+        "mobile": ["coalesced"]
+      },
+      {
+        "step": "queue cleared",
+        "publishes": [
+          {
+            "threadId": "squire-home:release",
+            "state": null,
+            "userPresent": false
+          }
+        ],
+        "mobile": []
+      },
+      {
+        "step": "next card",
+        "publishes": [
+          {
+            "threadId": "squire-home:release",
+            "state": {
+              "environmentId": "relay-environment",
+              "threadId": "squire-home:release",
+              "projectTitle": "1 open decision",
+              "threadTitle": "Release",
+              "phase": "waiting_for_input",
+              "headline": "1 open decision",
+              "modelTitle": "Squire",
+              "updatedAt": "2026-11-02T08:00:00.000Z",
+              "deepLink": "/threads/relay-environment/squire-home%3Arelease"
+            },
+            "userPresent": false
+          }
+        ],
+        "mobile": ["alerted"]
+      }
+    ],
+    "notify": [
+      {
+        "step": "notify-only push",
+        "publishes": [
+          {
+            "threadId": "squire-home:release",
+            "state": {
+              "environmentId": "relay-environment",
+              "threadId": "squire-home:release",
+              "projectTitle": "1 update",
+              "threadTitle": "Release",
+              "phase": "waiting_for_input",
+              "headline": "1 update",
+              "modelTitle": "Squire",
+              "updatedAt": "2026-11-02T08:00:00.000Z",
+              "deepLink": "/threads/relay-environment/squire-home%3Arelease"
+            },
+            "userPresent": false
+          }
+        ],
+        "mobile": ["alerted"]
+      },
+      {
+        "step": "its FYI dismissed",
+        "publishes": [
+          {
+            "threadId": "squire-home:release",
+            "state": null,
+            "userPresent": false
+          }
+        ],
+        "mobile": []
+      },
+      {
+        "step": "second notify-only push",
+        "publishes": [
+          {
+            "threadId": "squire-home:release",
+            "state": {
+              "environmentId": "relay-environment",
+              "threadId": "squire-home:release",
+              "projectTitle": "1 update",
+              "threadTitle": "Release",
+              "phase": "waiting_for_input",
+              "headline": "1 update",
+              "modelTitle": "Squire",
+              "updatedAt": "2026-11-02T08:00:00.000Z",
+              "deepLink": "/threads/relay-environment/squire-home%3Arelease"
+            },
+            "userPresent": false
+          }
+        ],
+        "mobile": ["alerted"]
+      }
+    ],
+    "digests": [
+      {
+        "step": "pushed digest",
+        "publishes": [
+          {
+            "threadId": "squire-home:lead",
+            "state": {
+              "environmentId": "relay-environment",
+              "threadId": "squire-home:lead",
+              "projectTitle": "1 update",
+              "threadTitle": "Lead",
+              "phase": "waiting_for_input",
+              "headline": "1 update",
+              "modelTitle": "Squire",
+              "updatedAt": "2026-11-02T08:00:00.000Z",
+              "deepLink": "/threads/relay-environment/squire-home%3Alead"
+            },
+            "userPresent": false
+          }
+        ],
+        "mobile": ["alerted"]
+      }
+    ],
+    "digest push off": [
+      {
+        "step": "digest with push off",
+        "publishes": [],
+        "mobile": []
+      }
+    ],
+    "question alone": [
+      {
+        "step": "question card",
+        "publishes": [],
+        "mobile": []
+      }
+    ],
+    "notify off": [
+      {
+        "step": "steer card",
+        "publishes": [],
+        "mobile": []
+      },
+      {
+        "step": "proposal card",
+        "publishes": [],
+        "mobile": []
+      },
+      {
+        "step": "notify FYI",
+        "publishes": [],
+        "mobile": []
+      }
+    ],
+    "held then escalated": [
+      {
+        "step": "card while a desktop is active",
+        "publishes": [],
+        "mobile": []
+      },
+      {
+        "step": "escalated at 3 min",
+        "publishes": [
+          {
+            "threadId": "squire-home:release",
+            "state": {
+              "environmentId": "relay-environment",
+              "threadId": "squire-home:release",
+              "projectTitle": "1 open decision",
+              "threadTitle": "Release",
+              "phase": "waiting_for_input",
+              "headline": "1 open decision",
+              "modelTitle": "Squire",
+              "updatedAt": "2026-11-02T08:03:00.000Z",
+              "deepLink": "/threads/relay-environment/squire-home%3Arelease"
+            },
+            "userPresent": false
+          }
+        ],
+        "mobile": ["alerted"]
+      }
+    ],
+    "opened before escalation": [
+      {
+        "step": "card while a desktop is active",
+        "publishes": [],
+        "mobile": []
+      },
+      {
+        "step": "opened at 1 min",
+        "publishes": [],
+        "mobile": []
+      },
+      {
+        "step": "3 min pass",
+        "publishes": [],
+        "mobile": []
+      }
+    ],
+    "held FYI": [
+      {
+        "step": "notify FYI while a desktop is active",
+        "publishes": [],
+        "mobile": []
+      },
+      {
+        "step": "3 min pass",
+        "publishes": [],
+        "mobile": []
+      }
+    ]
+  }
+}

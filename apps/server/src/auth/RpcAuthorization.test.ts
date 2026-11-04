@@ -18,6 +18,8 @@ import {
   RpcScopeAuthorization,
   AuthTerminalReadScope,
   AuthTerminalOperateScope,
+  CLIENT_GUARDED_RPC_SCOPES,
+  SquireRpcs,
   WS_METHODS,
   WsRpcGroup,
 } from "@lecturn/contracts";
@@ -582,3 +584,72 @@ it.effect("denies manual cleanup before the handler without settings permission"
     expect(handled).toBe(false);
   }).pipe(Effect.scoped),
 );
+
+// Lecturn: Squire reads are open to read-only clients; every mutation operates agents.
+const SQUIRE_READS: ReadonlySet<string> = new Set([
+  WS_METHODS.squireSubscribe,
+  WS_METHODS.squireItemsList,
+  WS_METHODS.squireItemGet,
+  WS_METHODS.squireSummaryGet,
+  WS_METHODS.squireActionLogList,
+  WS_METHODS.squireVocabulary,
+  WS_METHODS.squireRoomPosts,
+  WS_METHODS.squireRuleList,
+  WS_METHODS.squireTriggerList,
+  WS_METHODS.squireTriggerRuns,
+  WS_METHODS.squireLeadReceipts,
+  WS_METHODS.squireGet,
+  WS_METHODS.squireProviderSupport,
+]);
+
+describe("Squire RPC scopes", () => {
+  const guarded: Readonly<Record<string, string>> = CLIENT_GUARDED_RPC_SCOPES;
+  const tags = SquireRpcs.map((rpc) => rpc._tag);
+
+  it("serves reads under orchestration:read without a client guard", () => {
+    for (const method of tags.filter((tag) => SQUIRE_READS.has(tag))) {
+      expect(requiredScopeForRpcMethod(method), method).toBe(AuthOrchestrationReadScope);
+      expect(guarded[method], method).toBeUndefined();
+    }
+  });
+
+  it("requires operate for every mutation and guards it on the client", () => {
+    const mutations = tags.filter((tag) => !SQUIRE_READS.has(tag));
+    expect(mutations).toContain(WS_METHODS.squireLeadEnsure);
+    expect(mutations).toContain(WS_METHODS.squireControlRevert);
+    for (const method of mutations) {
+      expect(requiredScopeForRpcMethod(method), method).toBe(AuthOrchestrationOperateScope);
+      expect(guarded[method], method).toBe(AuthOrchestrationOperateScope);
+    }
+  });
+
+  it.effect("refuses Lead creation to a read-scoped token before the handler runs", () =>
+    Effect.gen(function* () {
+      const group = WsRpcGroup.omit(
+        ...[...WsRpcGroup.requests.keys()].filter(
+          (
+            tag,
+          ): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, typeof WS_METHODS.squireLeadEnsure> =>
+            tag !== WS_METHODS.squireLeadEnsure,
+        ),
+      );
+      let handled = false;
+      const client = yield* RpcTest.makeClient(group).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            group.toLayerHandler(WS_METHODS.squireLeadEnsure, () =>
+              Effect.sync(() => {
+                handled = true;
+              }).pipe(Effect.andThen(Effect.never)),
+            ),
+            RpcAuthorization.layer([AuthOrchestrationReadScope]),
+          ),
+        ),
+      );
+      expect(
+        yield* client[WS_METHODS.squireLeadEnsure]({ requestId: "ensure-1" }).pipe(Effect.flip),
+      ).toMatchObject({ requiredScope: AuthOrchestrationOperateScope });
+      expect(handled).toBe(false);
+    }).pipe(Effect.scoped),
+  );
+});

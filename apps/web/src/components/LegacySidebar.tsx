@@ -120,8 +120,8 @@ import {
   readThreadShell,
   useProject,
   useProjects,
-  useThreadShells,
   useThreadShellsForProjectRefs,
+  useVisibleThreadShells,
   waitForProjectRemoval,
 } from "../state/entities";
 import { readForkAtLatestTurn, useForkThread } from "../hooks/useForkThread";
@@ -3414,7 +3414,7 @@ function useSortedLegacySidebarProjects(input: {
     projectPhysicalKeyByScopedRef,
     sidebarProjectSortOrder,
   } = input;
-  const sidebarThreads = useThreadShells();
+  const sidebarThreads = useVisibleThreadShells();
   const sidebarProjectByKey = new Map(
     sidebarProjects.map((project) => [project.projectKey, project] as const),
   );
@@ -3507,7 +3507,7 @@ function useLegacySidebarThreads(input: {
     sidebarThreadPreviewCount,
     expandedThreadListsByProject,
   } = input;
-  const sidebarThreads = useThreadShells();
+  const sidebarThreads = useVisibleThreadShells();
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const sidebarThreadByKey = new Map(
     sidebarThreads.map(

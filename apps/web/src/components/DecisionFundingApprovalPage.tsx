@@ -9,7 +9,10 @@ import { resolveClerkSignInProps } from "./clerk/authRedirect";
 import { useConnectAccountPicker } from "./clerk/ConnectAccountPicker";
 import { AuthSurfaceShell } from "./auth/AuthSurfaceShell";
 import { Button } from "./ui/button";
-import { decisionFundingDenial } from "./DecisionFundingApprovalPage.logic";
+import {
+  decisionFundingDenial,
+  EXTENSION_FEATURE_LABELS,
+} from "./DecisionFundingApprovalPage.logic";
 
 type ApprovalInfo = Pick<
   ExtensionFundingApprovalInfo,
@@ -41,7 +44,7 @@ export function ExtensionsFundingApprovalPage({
   const userId = account.accountId === undefined ? activeAccountId : account.accountId;
   const { user } = useUser();
   const clerk = useClerk();
-  const featureName = featureId === "contextual" ? "Contextual" : "Decisions";
+  const featureName = EXTENSION_FEATURE_LABELS[featureId];
   const [revision, setRevision] = useState(0);
   const key = `${userId ?? ""}:${featureId}:${challengeId}:${legacy}:${revision}`;
   const currentKey = useRef(key);
@@ -218,13 +221,15 @@ export function ExtensionsFundingApprovalPage({
               <div className="space-y-2 text-sm leading-relaxed text-muted-foreground">
                 <p>
                   <span className="font-medium text-foreground">One shared allowance.</span>{" "}
-                  Decisions and Contextual draw from the same monthly Extensions token pool. Usage
-                  is tracked by feature.
+                  Decisions, Contextual, and Room routing with Jev draw from the same monthly
+                  Extensions token pool. Usage is tracked by feature.
                 </p>
                 <p>
                   {featureId === "contextual"
                     ? "Selected conversation excerpts and decision evidence are sent to Lecturn’s evaluation service to assess relevance and conflicts."
-                    : "Chat excerpts are sent to Lecturn’s evaluation service to find decisions. Your thread’s signed-in agent writes the notes."}
+                    : featureId === "squires"
+                      ? "Each new room post, with the room’s Squire names, briefs, scopes, and recent activity, is sent to Lecturn’s evaluation service to choose who replies. Without funding, rooms route by mentions and rules."
+                      : "Chat excerpts are sent to Lecturn’s evaluation service to find decisions. Your thread’s signed-in agent writes the notes."}
                 </p>
                 <p className="text-xs">
                   People who can operate this host can use the allowance for {featureName}. This

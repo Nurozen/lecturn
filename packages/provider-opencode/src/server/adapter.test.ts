@@ -2680,6 +2680,22 @@ describe("OpenCodeAdapterV2", () => {
     assert.equal(openCodeToolProjectionKind("custom_tool"), "dynamic_tool");
   });
 
+  it("allows the tools Lecturn's server gates itself and asks about the rest", () => {
+    // OpenCode matches permission names as wildcards and applies the last match.
+    const action = (rules: ReturnType<typeof openCodePermissionRules>, permission: string) =>
+      rules.findLast((rule) =>
+        new RegExp(`^${rule.permission.replaceAll("*", ".*")}$`).test(permission),
+      )?.action;
+    const rules = openCodePermissionRules(runtimePolicy("approval-required"), "squire");
+    assert.equal(action(rules, "lecturn_squire_notify"), "allow");
+    assert.equal(action(rules, "lecturn_lecturn_thread_send"), "ask");
+    assert.equal(action(rules, "bash"), "ask");
+    assert.equal(
+      action(openCodePermissionRules(runtimePolicy("approval-required")), "lecturn_squire_notify"),
+      "ask",
+    );
+  });
+
   it("maps runtime modes to safe OpenCode permission rules", () => {
     const approvalRequired = openCodePermissionRules(runtimePolicy("approval-required"));
     assert.equal(permissionAction(approvalRequired, "read"), "allow");

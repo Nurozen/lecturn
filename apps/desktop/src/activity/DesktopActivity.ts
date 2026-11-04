@@ -16,6 +16,7 @@ import {
   ActivityVisualState,
   DesktopActivityActionSchema,
   DesktopActivitySnapshotSchema,
+  DesktopActivitySquireResultSchema,
   type DesktopActivitySnapshot,
 } from "@lecturn/contracts";
 import * as Channels from "./channels.ts";
@@ -38,6 +39,7 @@ import {
 
 const decodeSnapshot = Schema.decodeUnknownSync(DesktopActivitySnapshotSchema);
 const decodeAction = Schema.decodeUnknownSync(DesktopActivityActionSchema);
+const decodeSquireResult = Schema.decodeUnknownSync(DesktopActivitySquireResultSchema);
 const decodeInteraction = Schema.decodeUnknownSync(
   Schema.Literals([
     "hover-enter",
@@ -62,6 +64,8 @@ const decodeChange = Schema.decodeUnknownSync(
   }),
 );
 const PRESENCE_POLL_MS = 5_000;
+/** Bounds forwarded requests whose result never comes. */
+const SQUIRE_REQUEST_CAP = 100;
 
 /** A Mac-owned display surface. Only the existing authenticated renderer can publish work
  * or receive commands. The isolated panel has no general DesktopBridge or network access. */
@@ -97,6 +101,8 @@ export function installDesktopActivity(
     readyEnvironmentIds: [],
   };
   const panelUrl = `data:text/html;charset=utf-8,${encodeURIComponent(activityDocument)}`;
+  // Only results for requests the panel actually sent are relayed back to it.
+  const squireRequests = new Set<string>();
   const trayImage = nativeImage.createFromBuffer(Buffer.from(activityTrayMark, "base64"), {
     scaleFactor: 2,
   });
@@ -348,11 +354,30 @@ export function installDesktopActivity(
         if (main.isDestroyed() || main.webContents.isLoadingMainFrame())
           throw new Error("Lecturn is reconnecting. Try again shortly.");
         main.webContents.send(Channels.ACTIVITY_ACTION, action);
-        if (action.kind === "open" || (action.kind === "merge" && !action.threadId)) {
+        if ("requestId" in action) {
+          squireRequests.add(action.requestId);
+          const [oldest] = squireRequests;
+          if (squireRequests.size > SQUIRE_REQUEST_CAP && oldest) squireRequests.delete(oldest);
+        }
+        if (
+          action.kind === "open" ||
+          action.kind === "squire-open" ||
+          (action.kind === "merge" && !action.threadId)
+        ) {
           changeMode("collapsed");
           main.show();
           main.focus();
         }
+      },
+    ],
+    [
+      Channels.ACTIVITY_SQUIRE_RESULT,
+      (event, value) => {
+        trusted(event, main, options.applicationUrl);
+        const result = decodeSquireResult(value);
+        if (!squireRequests.delete(result.requestId)) return;
+        if (ready && panel && !panel.isDestroyed())
+          panel.webContents.send(Channels.ACTIVITY_SQUIRE_RESULT, result);
       },
     ],
     [
@@ -438,6 +463,7 @@ export function installDesktopActivity(
     if (disposed) return;
     attention.clear();
     syncPresencePoll();
+    squireRequests.clear();
     snapshot = { summary: "Lecturn is reconnecting…", rows: [], readyEnvironmentIds: [] };
     sendSnapshot();
   };

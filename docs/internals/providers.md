@@ -241,6 +241,16 @@ handoff instead of a native fork. Clients show the fork action from the environm
 `threadForking` capability and a completed source run, not from this flag. See
 [thread-forking.md](./thread-forking.md) and [context-handoffs.md](./context-handoffs.md).
 
+## Squire support
+
+A driver hosts [Squires](./squire.md) only once it is decided in `DRIVER_SUPPORT`
+([SquireService.ts](../../apps/server/src/squire/SquireService.ts)), which records whether each
+driver can host Squires and probes and why not. The isolation itself lives in each adapter's
+Squire launch path, and version or policy refusals are checked at readiness. Enablement
+requires provider-side MCP isolation on start, resume, and fork. A home thread attaches
+Lecturn's MCP server and nothing else. A probe attaches none. The scratch cwd is not a read
+boundary, so read restriction is decided per adapter.
+
 ## External sessions
 
 An external session is a provider session created outside Lecturn: Claude Code CLI or Claude

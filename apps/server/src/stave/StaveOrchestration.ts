@@ -22,6 +22,7 @@ import type {
   ProjectId,
   ProviderSessionId,
   RunId,
+  SquireThreadMarker,
   ThreadId,
 } from "@lecturn/contracts";
 import * as Context from "effect/Context";
@@ -79,6 +80,7 @@ export interface StaveThreadView {
   readonly updatedAt: string;
   /** The running root run, if any (V1 `session.activeTurnId`). */
   readonly activeRunId: RunId | null;
+  readonly squire?: SquireThreadMarker;
 }
 
 export interface StaveShellSnapshot {

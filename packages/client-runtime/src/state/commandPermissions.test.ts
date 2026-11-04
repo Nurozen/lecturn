@@ -139,6 +139,28 @@ describe("command permissions", () => {
     ),
   );
 
+  it.effect.each([
+    WS_METHODS.squireLeadEnsure,
+    WS_METHODS.squireItemsAct,
+    WS_METHODS.squireControlRevert,
+    WS_METHODS.squireTriggerCreate,
+  ])("denies %s without the destination operate grant", (method) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const command = createCommandPermissions(runtime, method);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        expect(registry.get(command.permissionAtom(env))).toBe(false);
+        expect((yield* command.authorize(registry, env).pipe(Effect.flip)).requiredPermission).toBe(
+          AuthOrchestrationOperateScope,
+        );
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(command.permissionAtom(env))).toBe(true);
+        yield* command.authorize(registry, env);
+      }),
+    ),
+  );
+
   it.effect("uses the target grant for both availability and execution", () =>
     Effect.scoped(
       Effect.gen(function* () {

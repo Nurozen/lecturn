@@ -13,8 +13,10 @@ import {
   type OrchestrationV2ProviderTurn,
   type OrchestrationV2TurnItem,
   type OrchestrationV2TurnItemStatus,
+  type OrchestrationV2UserInputQuestion,
   ProviderDriverKind,
   type ProviderInstanceId,
+  type ProviderUserInputAnswers,
 } from "@lecturn/contracts";
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
@@ -26,10 +28,13 @@ import { mcpToolPresentation } from "@lecturn/provider-core/server/mcpToolPresen
 import { turnScopedSelectionTransition } from "@lecturn/provider-core/server/selectionTransition";
 import { responsePayloads } from "@lecturn/shared/mcpResponsePayloads";
 import * as Cause from "effect/Cause";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Schedule from "effect/Schedule";
@@ -42,11 +47,13 @@ import {
   savedToolValue,
   type ScriptedScript,
   ScriptedScriptError,
+  type ScriptedStep,
   type ScriptedToolCall,
   type ScriptedToolResult,
   scriptFromFile,
   scriptFromMessage,
   substitute,
+  toolErrorResult,
   toolResultText,
 } from "./scriptedScript.ts";
 
@@ -291,6 +298,22 @@ export const waitForFile = (file: string) =>
     yield* Effect.raceFirst(watched, polled);
   });
 
+/**
+ * Lecturn: picks a turn's script per thread (Squire fixtures, `SquireFakeScripts`).
+ * Consulted before the fenced block and the scripts file; undefined falls through to them.
+ */
+export class ScriptedScriptSource extends Context.Service<
+  ScriptedScriptSource,
+  {
+    readonly scriptFor: (
+      input: ProviderAdapter.ProviderAdapterV2TurnInput,
+    ) => Effect.Effect<ScriptedScript | undefined>;
+  }
+>()("lecturn/orchestration-v2/Adapters/ScriptedAdapterV2/ScriptedScriptSource") {}
+
+/** The one question an `askUser` step raises; its answer is `answers[ASK_USER_QUESTION_ID]`. */
+export const ASK_USER_QUESTION_ID = "answer";
+
 export interface ScriptedAdapterV2Options {
   readonly instanceId: ProviderInstanceId;
   readonly environment: NodeJS.ProcessEnv;
@@ -321,11 +344,16 @@ export const makeScriptedAdapterV2 = Effect.fn("makeScriptedAdapterV2")(function
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const providerHost = yield* ProviderHost.ProviderHost;
+  const scriptSource = yield* Effect.serviceOption(ScriptedScriptSource);
   const protocolError = (detail: string) =>
     new ProviderAdapter.ProviderAdapterProtocolError({ driver: SCRIPTED_PROVIDER, detail });
 
   const loadScript = (input: ProviderAdapter.ProviderAdapterV2TurnInput) =>
     Effect.gen(function* () {
+      if (Option.isSome(scriptSource)) {
+        const fromSource = yield* scriptSource.value.scriptFor(input);
+        if (fromSource !== undefined) return fromSource;
+      }
       const fromMessage = yield* Effect.try({
         try: () => scriptFromMessage(input.message.text),
         catch: scriptError,
@@ -380,6 +408,7 @@ export const makeScriptedAdapterV2 = Effect.fn("makeScriptedAdapterV2")(function
         Queue.offer(events, event).pipe(Effect.asVoid);
       let thread: OrchestrationV2ProviderThread | undefined;
       let active: ActiveTurn | undefined;
+      const pendingRequests = new Map<string, Deferred.Deferred<ProviderUserInputAnswers>>();
 
       const updateSession = Effect.fnUntraced(function* (
         status: OrchestrationV2ProviderSession["status"],
@@ -512,9 +541,9 @@ export const makeScriptedAdapterV2 = Effect.fn("makeScriptedAdapterV2")(function
       });
 
       /** One real `tools/call`, shown as a `lecturn.<tool>` row. */
-      const callTool = Effect.fnUntraced(function* (
+      const callTool = Effect.fnUntraced(function* <R>(
         turn: ActiveTurn,
-        mcp: McpConnection,
+        mcp: Effect.Effect<McpConnection, ScriptedMcpError, R>,
         call: ScriptedToolCall,
         saved: ReadonlyMap<string, unknown>,
       ) {
@@ -537,13 +566,105 @@ export const makeScriptedAdapterV2 = Effect.fn("makeScriptedAdapterV2")(function
         turn.openTool = item;
         yield* emitNode(turn, item, "tool_call");
         yield* emit({ type: "turn_item.updated", driver: SCRIPTED_PROVIDER, turnItem: item });
-        const result = yield* mcp
-          .callTool(call.name, args)
-          .pipe(
-            Effect.tapError((error) => settleTool(turn, item, "failed", { error: error.detail })),
-          );
+        const result = yield* mcp.pipe(
+          Effect.flatMap((connection) => connection.callTool(call.name, args)),
+          Effect.tapError((error) => settleTool(turn, item, "failed", { error: error.detail })),
+        );
         yield* settleTool(turn, item, result.isError === true ? "failed" : "completed", result);
         return result;
+      });
+
+      /**
+       * Raises a `live` user_input request the way a provider question does; the orchestrator
+       * resolves the projection on `runtime-request.respond` and hands the answers to
+       * `respondToRuntimeRequest`, which releases the wait.
+       */
+      const askUser = Effect.fnUntraced(function* (
+        turn: ActiveTurn,
+        ask: Extract<ScriptedStep, { readonly askUser: unknown }>["askUser"],
+      ) {
+        const time = yield* DateTime.now;
+        const { identity, ordinal } = baseItem(turn, time);
+        const requestId = yield* idAllocator.allocate.runtimeRequest({
+          driver: SCRIPTED_PROVIDER,
+          providerTurnId: turn.providerTurn.id,
+          nativeRequestId: identity,
+        });
+        const nodeId = idAllocator.derive.approvalNode({ requestId });
+        const ref = nativeRef(identity);
+        const question: OrchestrationV2UserInputQuestion = {
+          id: ASK_USER_QUESTION_ID,
+          header: ask.header ?? "Question",
+          question: ask.question,
+          options: (ask.options ?? []).map((label) => ({ label, description: label })),
+          allowCustomAnswer: true,
+        };
+        const answers = yield* Deferred.make<ProviderUserInputAnswers>();
+        pendingRequests.set(String(requestId), answers);
+        const scope = {
+          threadId: turn.input.threadId,
+          runId: turn.input.runId,
+          providerThreadId: turn.input.providerThread.id,
+          providerTurnId: turn.providerTurn.id,
+        };
+        yield* emit({
+          type: "node.updated",
+          driver: SCRIPTED_PROVIDER,
+          node: {
+            ...scope,
+            id: nodeId,
+            parentNodeId: turn.input.rootNodeId,
+            rootNodeId: turn.input.rootNodeId,
+            kind: "user_input_request",
+            status: "waiting",
+            countsForRun: false,
+            nativeItemRef: ref,
+            runtimeRequestId: requestId,
+            checkpointScopeId: null,
+            startedAt: time,
+            completedAt: null,
+          },
+        });
+        yield* emit({
+          type: "runtime_request.updated",
+          driver: SCRIPTED_PROVIDER,
+          threadId: turn.input.threadId,
+          runtimeRequest: {
+            id: requestId,
+            nodeId,
+            providerTurnId: turn.providerTurn.id,
+            nativeRequestRef: ref,
+            kind: "user_input",
+            status: "pending",
+            responseCapability: { type: "live", providerSessionId: input.providerSessionId },
+            createdAt: time,
+            resolvedAt: null,
+          },
+        });
+        yield* emit({
+          type: "turn_item.updated",
+          driver: SCRIPTED_PROVIDER,
+          turnItem: {
+            ...scope,
+            id: idAllocator.derive.approvalTurnItem({ requestId }),
+            nodeId,
+            nativeItemRef: ref,
+            parentItemId: null,
+            ordinal,
+            type: "user_input_request",
+            status: "waiting",
+            title: null,
+            requestId,
+            questions: [question],
+            startedAt: time,
+            completedAt: null,
+            updatedAt: time,
+          },
+        });
+        const answered = yield* Deferred.await(answers).pipe(
+          Effect.ensuring(Effect.sync(() => pendingRequests.delete(String(requestId)))),
+        );
+        return answered[ASK_USER_QUESTION_ID];
       });
 
       const runScript = (turn: ActiveTurn, script: ScriptedScript) =>
@@ -590,8 +711,22 @@ export const makeScriptedAdapterV2 = Effect.fn("makeScriptedAdapterV2")(function
                   Effect.provideService(FileSystem.FileSystem, fileSystem),
                   Effect.provideService(Path.Path, path),
                 );
+              } else if ("askUser" in step) {
+                const ask = yield* Effect.try({
+                  try: () => substitute(step.askUser, saved) as typeof step.askUser,
+                  catch: scriptError,
+                });
+                const answer = yield* askUser(turn, ask);
+                if (step.saveAs !== undefined) saved.set(step.saveAs, answer);
               } else if ("toolCall" in step) {
-                const result = yield* callTool(turn, yield* mcp, step.toolCall, saved);
+                const call = callTool(turn, mcp, step.toolCall, saved);
+                const result = yield* step.onError === "continue"
+                  ? call.pipe(
+                      Effect.catchTags({
+                        ScriptedMcpError: (error) => Effect.succeed(toolErrorResult(error.detail)),
+                      }),
+                    )
+                  : call;
                 yield* checkApproval(step.toolCall, result);
                 if (step.saveAs !== undefined) saved.set(step.saveAs, savedToolValue(result));
               } else {
@@ -600,7 +735,7 @@ export const makeScriptedAdapterV2 = Effect.fn("makeScriptedAdapterV2")(function
                 const intervalMs = step.poll.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
                 let value: unknown;
                 for (let attempt = 1; ; attempt++) {
-                  const result = yield* callTool(turn, yield* mcp, toolCall, saved);
+                  const result = yield* callTool(turn, mcp, toolCall, saved);
                   yield* checkApproval(toolCall, result);
                   value = savedToolValue(result);
                   const found = readPath(value, until.path);
@@ -870,14 +1005,18 @@ export const makeScriptedAdapterV2 = Effect.fn("makeScriptedAdapterV2")(function
             if (turn.fiber !== undefined) yield* Fiber.interrupt(turn.fiber);
             yield* finish(turn, "interrupted");
           }),
-        respondToRuntimeRequest: (args) =>
-          Effect.fail(
-            new ProviderAdapter.ProviderAdapterRuntimeRequestResponseError({
-              driver: SCRIPTED_PROVIDER,
-              requestId: args.requestId,
-              cause: "The scripted provider raises no runtime requests.",
-            }),
-          ),
+        respondToRuntimeRequest: (args) => {
+          const pending = pendingRequests.get(String(args.requestId));
+          return pending === undefined
+            ? Effect.fail(
+                new ProviderAdapter.ProviderAdapterRuntimeRequestResponseError({
+                  driver: SCRIPTED_PROVIDER,
+                  requestId: args.requestId,
+                  cause: `No pending scripted request ${args.requestId}.`,
+                }),
+              )
+            : Deferred.succeed(pending, args.answers ?? {}).pipe(Effect.asVoid);
+        },
         readThreadSnapshot: (args) =>
           Effect.succeed({
             providerThread: args.providerThread,

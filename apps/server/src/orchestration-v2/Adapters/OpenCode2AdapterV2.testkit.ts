@@ -278,6 +278,19 @@ function layerRegistry(
   ).pipe(Layer.provide(Layer.mergeAll(layerReplayHost, IdAllocator.layer, NodeServices.layer)));
 }
 
+/** Lecturn: the adapter alone, for instance-level checks such as Squire readiness. */
+export const openCode2ReplayAdapter = (options?: { readonly borrowers?: { current: number } }) =>
+  makeReplayAdapter(
+    {
+      provider: OPENCODE_PROVIDER,
+      protocol: OPENCODE2_HTTP_PROTOCOL,
+      version: "2.0.18",
+      scenario: "opencode2_adapter",
+      entries: [],
+    },
+    options,
+  ).pipe(Effect.provide(Layer.mergeAll(layerReplayHost, IdAllocator.layer, NodeServices.layer)));
+
 export const openCode2ReplayRuntime = (
   entries: ReadonlyArray<ProviderReplayEntry>,
   options?: {

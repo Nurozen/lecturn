@@ -156,6 +156,11 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       Absent on pre-Stave servers (and builds started with LECTURN_STAVE=false),
       so clients hide every Stave control instead of probing the RPCs. */
   stave: Schema.optionalKey(Schema.Struct({ protocolVersion: Schema.Number })),
+  /** Squires are enabled on this server (`LECTURN_SQUIRE` or the saved setting). Absent when the
+      kill switch is off or on pre-Squire servers: clients then show no Squire
+      UI, list Squire home threads as ordinary threads, and never call
+      `squire.*` RPCs. */
+  squire: Schema.optionalKey(Schema.Boolean),
   /** Server answers orchestration.subscribeCommandOutput. Absent on older servers,
       which never send command output, so clients must not subscribe. */
   commandOutputStreaming: Schema.optionalKey(Schema.Boolean),

@@ -19,6 +19,11 @@ import {
   decisionWriterInputFixture,
   decisionWriterOutputFixture,
 } from "./decisionWriterTestFixtures.ts";
+import {
+  squireSummaryExpectedFixture,
+  squireSummaryInputFixture,
+  squireSummaryReplyFixture,
+} from "./squireSummaryTestFixtures.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
 import { writeFakeCli } from "@lecturn/provider-testing/fakeCli";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
@@ -46,6 +51,7 @@ interface FakeCodexInput {
   stdinMustContain?: string;
   stdinMustNotContain?: string;
   requireAccountRouting?: boolean;
+  requireSquireHome?: boolean;
   configSnapshot?: object;
   codexVersion?: string;
   mcpServers?: ReadonlyArray<{ name: string; enabled: boolean }> | number;
@@ -66,6 +72,7 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
     output: input.output,
     exitCode: input.exitCode ?? 0,
     requireAccountRouting: input.requireAccountRouting ?? false,
+    requireSquireHome: input.requireSquireHome ?? false,
     initialize: {
       userAgent: `lecturn-inference-config/${input.codexVersion ?? "0.155.1"} (test)`,
       codexHome: "/test",
@@ -168,6 +175,15 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
         '    fail("account provider missing", 22);',
         "  }",
         "}",
+        "if (check.requireSquireHome) {",
+        '  const home = process.env.CODEX_HOME ?? "";',
+        '  if (!home.endsWith("/squire-home")) fail("not the Squire home: " + home, 24);',
+        '  if (!NodeFS.existsSync(home + "/auth.json")) fail("Squire home has no login", 25);',
+        '  if (NodeFS.existsSync(home + "/AGENTS.md")) fail("user AGENTS.md reached", 26);',
+        '  if (!originalArgs.includes(` cli_auth_credentials_store="file" `)) {',
+        '    fail("file credential store not pinned", 27);',
+        "  }",
+        "}",
         "const chunks = [];",
         "for await (const chunk of process.stdin) chunks.push(chunk);",
         'const stdinContent = Buffer.concat(chunks).toString("utf8");',
@@ -217,6 +233,8 @@ function withFakeCodexEnv<A, E, R>(
   input: FakeCodexInput & {
     launchArgs?: string;
     homePath?: string;
+    /** A temp source CODEX_HOME holding a user AGENTS.md, with or without a file login. */
+    squireSource?: { readonly fileLogin: boolean };
     environment?: NodeJS.ProcessEnv;
     models?: ReadonlyArray<string>;
     managedRuntime?: boolean;
@@ -227,10 +245,17 @@ function withFakeCodexEnv<A, E, R>(
     const fs = yield* FileSystem.FileSystem;
     const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-codex-text-" });
     const codexPath = yield* makeFakeCodexBinary(tempDir, input);
+    let homePath = input.homePath;
+    if (input.squireSource) {
+      homePath = `${tempDir}/source-home`;
+      yield* fs.makeDirectory(homePath);
+      yield* fs.writeFileString(`${homePath}/AGENTS.md`, "USER_AGENTS_SENTINEL");
+      if (input.squireSource.fileLogin) yield* fs.writeFileString(`${homePath}/auth.json`, "{}");
+    }
     const config = decodeCodexSettings({
       binaryPath: codexPath,
       launchArgs: input.launchArgs,
-      homePath: input.homePath,
+      homePath,
     });
     const textGeneration = yield* makeCodexTextGeneration(
       config,
@@ -250,6 +275,7 @@ function withFakeCodexEnv<A, E, R>(
             revision: "test",
           })
         : undefined,
+      input.squireSource ? ProviderInstanceId.make("codex") : undefined,
     );
     return yield* effectFn(textGeneration);
   }).pipe(Effect.scoped);
@@ -259,6 +285,8 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
   it.effect.each([
     { version: "0.156.1", supported: true },
     { version: "0.157.0", supported: false },
+    { version: "0.165.0", supported: true },
+    { version: "0.165.1", supported: false },
   ] as const)("isolated writer capability for Codex $version", ({ version, supported }) =>
     withFakeCodexEnv({ output: "must not be parsed", codexVersion: version }, (service) =>
       Effect.gen(function* () {
@@ -487,6 +515,80 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
             modelSelection: DEFAULT_TEST_MODEL_SELECTION,
           });
           expect(result).toEqual({ text: "SQLite supports the local cache." });
+        }),
+    ),
+  );
+  it.effect("generates Squire turn summaries through isolated tool-free Codex inference", () =>
+    withFakeCodexEnv(
+      {
+        squireSource: { fileLogin: true },
+        requireSquireHome: true,
+        requireArg: "--ignore-rules",
+        forbidArg: "--ignore-user-config",
+        stdinMustContain: "BEGIN RUN EVIDENCE",
+        output: JSON.stringify(squireSummaryReplyFixture),
+      },
+      (generation) =>
+        Effect.gen(function* () {
+          const result = yield* generation.generateSquireTurnSummary!({
+            cwd: process.cwd(),
+            summaryInput: squireSummaryInputFixture,
+            outcome: "finished",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+          expect(result).toEqual(squireSummaryExpectedFixture);
+        }),
+    ),
+  );
+  it.effect("names a keyring-only login instead of running Codex outside the Squire home", () =>
+    withFakeCodexEnv(
+      { squireSource: { fileLogin: false }, output: JSON.stringify(squireSummaryReplyFixture) },
+      (generation) =>
+        Effect.gen(function* () {
+          const error = yield* generation.generateSquireTurnSummary!({
+            cwd: process.cwd(),
+            summaryInput: squireSummaryInputFixture,
+            outcome: "finished",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          }).pipe(Effect.flip);
+          expect(error.detail).toContain("keyring");
+          expect(error.detail).toContain("codex login");
+        }),
+    ),
+  );
+  it.effect("refuses Squire summaries when no Squire home is named", () =>
+    withFakeCodexEnv({ output: JSON.stringify(squireSummaryReplyFixture) }, (generation) =>
+      Effect.gen(function* () {
+        const error = yield* generation.generateSquireTurnSummary!({
+          cwd: process.cwd(),
+          summaryInput: squireSummaryInputFixture,
+          outcome: "finished",
+          modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+        }).pipe(Effect.flip);
+        expect(error.detail).toContain("Squire Codex home");
+      }),
+    ),
+  );
+  it.effect("hides Codex failures behind the stable Squire summary error", () =>
+    withFakeCodexEnv(
+      {
+        squireSource: { fileLogin: true },
+        requireArg: "--ignore-rules",
+        output: "",
+        stderr: "PRIVATE_CONVERSATION_SENTINEL",
+        exitCode: 1,
+      },
+      (generation) =>
+        Effect.gen(function* () {
+          const error = yield* generation.generateSquireTurnSummary!({
+            cwd: process.cwd(),
+            summaryInput: squireSummaryInputFixture,
+            outcome: "finished",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          }).pipe(Effect.flip);
+          expect(error.detail).toBe("Squire turn summary generation is unavailable.");
+          expect(error.cause).toBeUndefined();
+          expect(JSON.stringify(error)).not.toContain("PRIVATE_CONVERSATION_SENTINEL");
         }),
     ),
   );

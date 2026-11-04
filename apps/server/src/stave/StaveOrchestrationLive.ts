@@ -96,6 +96,7 @@ const make = Effect.gen(function* () {
     archivedAt: iso(thread.archivedAt),
     updatedAt: DateTime.formatIso(thread.updatedAt),
     activeRunId: thread.activeRunId,
+    ...(thread.squire === undefined ? {} : { squire: thread.squire }),
   });
 
   const getShellSnapshot: StaveOrchestrationShape["getShellSnapshot"] = () =>
@@ -149,6 +150,8 @@ const make = Effect.gen(function* () {
         FROM orchestration_v2_projection_threads
         WHERE project_id = ${projectId}
           AND COALESCE(json_extract(payload_json, '$.lineage.relationshipToParent'), '') <> 'subagent'
+          -- A Squire thread is never settled, so it would hold the space open forever.
+          AND json_extract(payload_json, '$.squire') IS NULL
         ORDER BY thread_id
       `.pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(AnchorRow))),
@@ -217,6 +220,7 @@ const make = Effect.gen(function* () {
         threadId,
         runId: thread.activeRunId,
         reason: "Stave space operation",
+        createdBy: "system",
       });
       return { sequence: result.sequence };
     });

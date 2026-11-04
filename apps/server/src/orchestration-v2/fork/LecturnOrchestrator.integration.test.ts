@@ -1,8 +1,8 @@
 /**
  * Lecturn fork behavior on the production V2 orchestrator composition
- * (RuntimeLayer.layer): thread.import (A1), thread.fork deltas (A12),
- * a settled thread holding its queue (A13), the fork hook call sites, the
- * checkpoint revert preview (A2) and the worktree removal guard (A3).
+ * (RuntimeLayer.layer): thread.import, thread.fork deltas, a settled
+ * thread holding its queue, the fork hook call sites, the checkpoint revert
+ * preview and the worktree removal guard.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";

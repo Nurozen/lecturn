@@ -6,6 +6,9 @@ import type {
   ModelSelection,
   SagaWorkbenchInferenceResult,
   PullRequestReviewGuide,
+  SquireSummaryInput,
+  SquireSummaryModelOutput,
+  SquireTurnOutcome,
   TextGenerationError,
 } from "@lecturn/contracts";
 import type * as Effect from "effect/Effect";
@@ -75,6 +78,15 @@ export interface ContextualSummaryGenerationInput {
   cwd: string;
   message: string;
   modelSelection: ModelSelection;
+}
+
+export interface SquireTurnSummaryGenerationInput {
+  /** Isolated runners ignore this and use their own temp directory. */
+  readonly cwd: string;
+  readonly summaryInput: SquireSummaryInput;
+  /** Computed by the caller; the model sees it only as context. */
+  readonly outcome: SquireTurnOutcome;
+  readonly modelSelection: ModelSelection;
 }
 
 export interface WorkflowSummaryGenerationInput {
@@ -156,6 +168,11 @@ export interface ProviderTextGeneration {
   readonly generateContextualSummary?: (
     input: ContextualSummaryGenerationInput,
   ) => Effect.Effect<{ text: string }, TextGenerationError>;
+
+  /** Optional: only providers that guarantee isolated, tool-free generation support this. */
+  readonly generateSquireTurnSummary?: (
+    input: SquireTurnSummaryGenerationInput,
+  ) => Effect.Effect<SquireSummaryModelOutput, TextGenerationError>;
 
   /** Explain supplied workflow evidence without changing workflow facts. */
   readonly generateWorkflowSummary: (

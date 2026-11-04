@@ -27,6 +27,7 @@ import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as StaveSettlement from "../stave/StaveSettlement.ts";
+import { isSquireThread } from "../squire/squireThread.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as Orchestrator from "./Orchestrator.ts";
@@ -172,6 +173,8 @@ export function isAutoSettlementCandidate(
   nowMs: number,
 ): boolean {
   if (thread.archivedAt !== null || thread.settledOverride !== null) return false;
+  // Lecturn: a settled Squire thread holds its queue and the Squire goes silent.
+  if (isSquireThread(thread)) return false;
   if (thread.pinnedAt != null || thread.autoSettleDisabledAt != null) return false;
   if (thread.pendingRuntimeRequest !== null) return false;
   if (thread.activityRunStatus != null) return false;

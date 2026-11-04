@@ -60,11 +60,16 @@ import {
 } from "../../state/use-composer-drafts";
 import { appAtomRegistry } from "../../state/atom-registry";
 import type { ComposerDocumentAttachment } from "../../lib/composerContext";
-import { useProject, useThreadShells } from "../../state/entities";
+import { useProject, useThreadListingCapabilities, useThreadShells } from "../../state/entities";
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { ComposerAttachmentButton } from "./ComposerAttachmentButton";
+import {
+  allowsThreadRouteControl,
+  type ThreadRouteControl,
+  type ThreadRouteControls,
+} from "./threadRouteControls";
 import {
   ComposerAttachmentStrip,
   ComposerAttachmentThumbnail,
@@ -176,6 +181,8 @@ export interface ThreadComposerProps {
   readonly onUpdateInteractionMode: (interactionMode: ProviderInteractionMode) => void;
   readonly onExpandedChange?: (expanded: boolean) => void;
   readonly onEditorFocusChange?: (focused: boolean) => void;
+  /** Lecturn: the thread route's controls allowlist; absent keeps every composer control. */
+  readonly controls?: ThreadRouteControls;
 }
 
 // Android gets NO layout transition: the composer rides the keyboard via KeyboardStickyView
@@ -430,7 +437,10 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     });
   };
   const { onSendMessage, onChangeDraftMessage, onShowUsageLimits } = props;
+  // Lecturn: each gated composer control reads the controls allowlist through this.
+  const allows = (control: ThreadRouteControl) => allowsThreadRouteControl(props.controls, control);
   const usageLimitsOffered =
+    allows("usage-limits") &&
     selectedProviderStatus !== null &&
     hasProviderUsageLimits(
       selectedProviderStatus.driver,
@@ -456,6 +466,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     ownerKey: composerDraftKey,
     environmentId: props.environmentId,
     threadShells: useThreadShells(),
+    threadListing: useThreadListingCapabilities(),
     currentThreadId: props.selectedThread.id,
     projectCwd: props.projectCwd,
     pullRequestProjectId: props.serverConfig?.environment.capabilities.pullRequests
@@ -465,10 +476,10 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     threadPullRequests: props.selectedThread.pullRequests,
     selectedProviderStatus,
     hasThread: true,
-    hasCompactableConversation: props.hasCompactableConversation,
+    hasCompactableConversation: props.hasCompactableConversation && allows("compact"),
     onChangeDraftMessage: props.onChangeDraftMessage,
     onUpdateInteractionMode:
-      selectedProviderStatus?.showInteractionModeToggle === false
+      selectedProviderStatus?.showInteractionModeToggle === false || !allows("interaction-mode")
         ? undefined
         : props.onUpdateInteractionMode,
     offersUsageLimits: usageLimitsOffered,
@@ -736,7 +747,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
             {selectedProviderStatus.compatibilityAdvisory.message}
           </Text>
         ) : null}
-        {modelUnavailable ? (
+        {modelUnavailable && allows("model-picker") ? (
           <Pressable accessibilityRole="button" className="px-3 py-2" onPress={openSettings}>
             <Text className="text-xs text-foreground">Model unavailable. Open model settings.</Text>
           </Pressable>
@@ -764,7 +775,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
             compact={!isExpanded}
             hidden={showsCompactDictation}
           >
-            {!isExpanded ? (
+            {!isExpanded && allows("attachments") ? (
               <ComposerAttachmentButton
                 supportsFiles={Boolean(
                   props.serverConfig?.environment.capabilities.fileAttachments,
@@ -839,7 +850,9 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                 selection={composerMenu.selection}
                 onChangeText={props.onChangeDraftMessage}
                 onSelectionChange={composerMenu.onSelectionChange}
-                onPasteImages={(uris) => void props.onNativePasteImages(uris)}
+                onPasteImages={(uris) => {
+                  if (allows("attachments")) void props.onNativePasteImages(uris);
+                }}
                 onPasteText={(paste) => {
                   const insertPaste = () => {
                     const insertion = replaceTextSelection({
@@ -866,6 +879,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                       paste.text.length >
                     PROVIDER_SEND_TURN_MAX_INPUT_CHARS;
                   const canAttach =
+                    allows("attachments") &&
                     maxBytes !== null &&
                     countComposerDraftAttachmentsAfterSelection(composerDraftKey, {
                       text: paste.value,
@@ -1045,18 +1059,22 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                   />
                 ) : (
                   <View className="min-w-0 flex-1 flex-row items-center justify-between">
-                    <ContextualThreadControl
-                      compact
-                      environmentId={props.environmentId}
-                      threadId={props.selectedThread.id}
-                    />
-                    <ComposerAttachmentButton
-                      supportsFiles={Boolean(
-                        props.serverConfig?.environment.capabilities.fileAttachments,
-                      )}
-                      onPickMedia={props.onPickDraftMedia}
-                      onPickFiles={props.onPickDraftFiles}
-                    />
+                    {allows("contextual") ? (
+                      <ContextualThreadControl
+                        compact
+                        environmentId={props.environmentId}
+                        threadId={props.selectedThread.id}
+                      />
+                    ) : null}
+                    {allows("attachments") ? (
+                      <ComposerAttachmentButton
+                        supportsFiles={Boolean(
+                          props.serverConfig?.environment.capabilities.fileAttachments,
+                        )}
+                        onPickMedia={props.onPickDraftMedia}
+                        onPickFiles={props.onPickDraftFiles}
+                      />
+                    ) : null}
                   </View>
                 )}
                 <View className="shrink-0 flex-row items-center">
@@ -1096,56 +1114,58 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
             </ComposerDictationToolbar>
           </Animated.View>
         </ComposerSurface>
-        <GlassCard
-          radius={19}
-          style={{
-            marginHorizontal: 18,
-            marginTop: -2,
-            borderTopLeftRadius: 0,
-            borderTopRightRadius: 0,
-            borderTopWidth: 0,
-          }}
-        >
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={[
-              "Model and reasoning settings",
-              currentModelOption?.label ?? currentModelSelection.model,
-              ...providerOptionValueLabels(providerOptionDescriptors),
-              RUNTIME_MODE_CHOICES.find((choice) => choice.mode === currentRuntimeMode)?.label ??
-                currentRuntimeMode,
-              props.selectedThread.interactionMode === "plan" ? "Plan mode" : "Chat mode",
-            ].join(", ")}
-            onPress={openSettings}
-            disabled={voiceInput.isBusy}
-            accessibilityState={{ disabled: voiceInput.isBusy }}
-            style={{ minHeight: 44, opacity: voiceInput.isBusy ? 0.6 : 1 }}
-            className="flex-row items-center gap-2 px-3 active:opacity-70"
+        {allows("model-picker") ? (
+          <GlassCard
+            radius={19}
+            style={{
+              marginHorizontal: 18,
+              marginTop: -2,
+              borderTopLeftRadius: 0,
+              borderTopRightRadius: 0,
+              borderTopWidth: 0,
+            }}
           >
-            <ProviderIcon
-              iconUrl={currentModelOption?.providerIconUrl}
-              provider={currentModelOption?.providerDriver}
-              size={17}
-            />
-            <Text
-              className="shrink text-xs font-lecturn-medium text-foreground"
-              numberOfLines={1}
-              style={{ maxWidth: "38%" }}
-            >
-              {currentModelOption?.label ?? currentModelSelection.model}
-            </Text>
-            <View className="h-3.5 w-px bg-border" />
-            <Text className="min-w-0 flex-1 text-xs text-foreground-muted" numberOfLines={1}>
-              {[
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={[
+                "Model and reasoning settings",
+                currentModelOption?.label ?? currentModelSelection.model,
                 ...providerOptionValueLabels(providerOptionDescriptors),
                 RUNTIME_MODE_CHOICES.find((choice) => choice.mode === currentRuntimeMode)?.label ??
                   currentRuntimeMode,
-                ...(props.selectedThread.interactionMode === "plan" ? ["Plan"] : []),
-              ].join(" · ")}
-            </Text>
-            <SymbolView name="chevron.right" size={11} tintColorClassName="accent-icon-muted" />
-          </Pressable>
-        </GlassCard>
+                props.selectedThread.interactionMode === "plan" ? "Plan mode" : "Chat mode",
+              ].join(", ")}
+              onPress={openSettings}
+              disabled={voiceInput.isBusy}
+              accessibilityState={{ disabled: voiceInput.isBusy }}
+              style={{ minHeight: 44, opacity: voiceInput.isBusy ? 0.6 : 1 }}
+              className="flex-row items-center gap-2 px-3 active:opacity-70"
+            >
+              <ProviderIcon
+                iconUrl={currentModelOption?.providerIconUrl}
+                provider={currentModelOption?.providerDriver}
+                size={17}
+              />
+              <Text
+                className="shrink text-xs font-lecturn-medium text-foreground"
+                numberOfLines={1}
+                style={{ maxWidth: "38%" }}
+              >
+                {currentModelOption?.label ?? currentModelSelection.model}
+              </Text>
+              <View className="h-3.5 w-px bg-border" />
+              <Text className="min-w-0 flex-1 text-xs text-foreground-muted" numberOfLines={1}>
+                {[
+                  ...providerOptionValueLabels(providerOptionDescriptors),
+                  RUNTIME_MODE_CHOICES.find((choice) => choice.mode === currentRuntimeMode)
+                    ?.label ?? currentRuntimeMode,
+                  ...(props.selectedThread.interactionMode === "plan" ? ["Plan"] : []),
+                ].join(" · ")}
+              </Text>
+              <SymbolView name="chevron.right" size={11} tintColorClassName="accent-icon-muted" />
+            </Pressable>
+          </GlassCard>
+        ) : null}
 
         {props.connectionState === "connected" && !props.canOperateThread ? (
           <Text className="pt-2 text-xs text-foreground-muted">

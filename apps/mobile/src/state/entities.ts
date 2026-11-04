@@ -15,6 +15,7 @@ import type {
   ThreadId,
 } from "@lecturn/contracts";
 import { environmentSupportsStave } from "@lecturn/client-runtime/state/stave";
+import type { ThreadListingCapabilitiesByEnvironment } from "@lecturn/client-runtime/state/threads";
 import { hasThreadLinks, relabelThreadLinks } from "@lecturn/shared/threadLinks";
 import { Atom } from "effect/reactivity";
 import { useMemo } from "react";
@@ -142,6 +143,16 @@ export function useAppProjects(): ReadonlyArray<EnvironmentProject> {
 
 export function useAppThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
   return useAtomValue(APP_THREAD_SHELLS_ATOM);
+}
+
+/** Per-environment input to `isListedThread` for pure list builders. */
+export function useThreadListingCapabilities(): ThreadListingCapabilitiesByEnvironment {
+  return useAtomValue(environmentThreadShells.listingCapabilitiesAtom);
+}
+
+/** Shells offered to the user: Squire threads their environment hides are left out. */
+export function useVisibleThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
+  return useAtomValue(environmentThreadShells.visibleThreadShellsAtom);
 }
 
 export function useNavigationThreadShells(): ReadonlyArray<EnvironmentThreadShell> {

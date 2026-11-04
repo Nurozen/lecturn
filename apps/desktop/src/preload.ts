@@ -84,6 +84,8 @@ const activityBridge: NonNullable<DesktopBridge["activity"]> = {
     return () => ipcRenderer.removeListener(ActivityChannels.ACTIVITY_ENABLED_CHANGED, wrapped);
   },
   setEnabled: (enabled) => ipcRenderer.invoke(ActivityChannels.ACTIVITY_SET_ENABLED, enabled),
+  reportSquireResult: (result) =>
+    ipcRenderer.invoke(ActivityChannels.ACTIVITY_SQUIRE_RESULT, result),
   onAction: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, action: Parameters<typeof listener>[0]) =>
       listener(action);

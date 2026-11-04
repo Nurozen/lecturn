@@ -122,6 +122,7 @@ export interface CursorAgentSdkLoggedAgentOptions {
     readonly hasCustomTools?: boolean;
   };
   readonly agents?: ReadonlyArray<string>;
+  readonly tools?: AgentOptions["tools"];
 }
 
 export interface CursorAgentSdkLoggedSendOptions {
@@ -277,6 +278,7 @@ export function loggedCursorAgentOptions(options: AgentOptions): CursorAgentSdkL
           },
         }),
     ...(options.agents === undefined ? {} : { agents: Object.keys(options.agents).toSorted() }),
+    ...(options.tools === undefined ? {} : { tools: options.tools }),
   };
 }
 

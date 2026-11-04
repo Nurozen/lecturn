@@ -14,6 +14,7 @@ import {
   setDefaultAdvertisedEndpointKey,
   setProjectExpanded,
   setSidebarAppCollapsed,
+  setSidebarSquireCollapsed,
   setSidebarAppScopeKey,
   setSidebarMode,
   setSidebarProjectScopeKey,
@@ -29,6 +30,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     sidebarMode: "projects",
     sidebarAppScopeKey: null,
     sidebarAppCollapsedByKey: {},
+    sidebarSquireCollapsedByKey: {},
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
@@ -185,6 +187,14 @@ describe("uiStateStore pure functions", () => {
     expect(setSidebarAppCollapsed(folded, "settled:env:project", false)).toBe(folded);
     expect(setSidebarAppCollapsed(folded, "", true)).toBe(folded);
   });
+
+  it("records Squires-group fold choices by key", () => {
+    const folded = setSidebarSquireCollapsed(makeUiState(), "squire:env:release", false);
+
+    expect(folded.sidebarSquireCollapsedByKey).toEqual({ "squire:env:release": false });
+    expect(setSidebarSquireCollapsed(folded, "squire:env:release", false)).toBe(folded);
+    expect(setSidebarSquireCollapsed(folded, "", true)).toBe(folded);
+  });
 });
 
 describe("parsePersistedState", () => {
@@ -234,6 +244,7 @@ describe("parsePersistedState", () => {
       sidebarMode: "projects",
       sidebarAppScopeKey: null,
       sidebarAppCollapsedByKey: {},
+      sidebarSquireCollapsedByKey: {},
       pullRequestMergeMethod: "merge",
       threadChangedFilesExpandedById: {
         "environment:thread-1": {
@@ -359,6 +370,7 @@ describe("uiStateStore persistence", () => {
       sidebarMode: "projects",
       sidebarAppScopeKey: null,
       sidebarAppCollapsedByKey: {},
+      sidebarSquireCollapsedByKey: {},
       threadChangedFilesExpansionVersion: 2,
       threadChangedFilesExpandedById: {
         "environment:thread-1": {
@@ -391,6 +403,7 @@ describe("uiStateStore persistence", () => {
         sidebarMode: "apps",
         sidebarAppScopeKey: "dev.lecturn.example",
         sidebarAppCollapsedByKey: { "app:dev.lecturn.example": true },
+        sidebarSquireCollapsedByKey: { "environment:env-1": true },
       }),
     );
     const persisted = JSON.parse(
@@ -401,6 +414,7 @@ describe("uiStateStore persistence", () => {
       sidebarMode: "apps",
       sidebarAppScopeKey: "dev.lecturn.example",
       sidebarAppCollapsedByKey: { "app:dev.lecturn.example": true },
+      sidebarSquireCollapsedByKey: { "environment:env-1": true },
     });
     expect(parsePersistedState({ ...persisted, sidebarMode: "widgets" }).sidebarMode).toBe(
       "projects",

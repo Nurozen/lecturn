@@ -626,6 +626,25 @@ function acpMcpActivation(context: AcpMcpContext) {
   return { mcpServers: context.servers, acpMcpServers: context.acpServers };
 }
 
+/**
+ * Lecturn: a Squire home reaches Lecturn's server alone, whose credential
+ * lists only its Squire tools, and a probe reaches no server. Neither
+ * gets the bridge credential or the device CLI in the agent's environment.
+ */
+function acpSquireMcpContext(
+  context: AcpMcpContext,
+  squireIsolation: ProviderAdapter.ProviderAdapterV2RuntimePolicy["squireIsolation"],
+): AcpMcpContext {
+  if (squireIsolation === undefined) return context;
+  if (squireIsolation === "probe") return { servers: [], acpServers: [] };
+  return {
+    servers: context.servers.filter((server) => server.name === "lecturn"),
+    acpServers: context.acpServers,
+    ...(context.endpoint === undefined ? {} : { endpoint: context.endpoint }),
+    ...(context.authorization === undefined ? {} : { authorization: context.authorization }),
+  };
+}
+
 function nativeThreadId(
   driver: ProviderDriverKind,
   thread: OrchestrationV2ProviderThread,
@@ -1378,14 +1397,21 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
     openSession: Effect.fn("AcpAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
         const sessionScope = yield* Effect.scope;
+        // Lecturn: a Squire session keeps this policy on start, resume, and
+        // fork; ACP opens one session per thread, so it never serves another.
+        const squireIsolation = input.runtimePolicy.squireIsolation;
+        const clientFileSystem =
+          squireIsolation === undefined ? flavor.clientFileSystem : undefined;
         // Lecturn: flavor-independent MCP servers (Stave memory) resolved once
         // for the session cwd and registered next to the lecturn server.
         const sessionExtraMcpServers =
-          options.extraMcpServers === undefined
+          options.extraMcpServers === undefined || squireIsolation !== undefined
             ? []
             : yield* options.extraMcpServers(input.runtimePolicy.cwd ?? process.cwd());
         const readMcpContext = (threadId: ThreadId | null) =>
-          readAdapterMcpContext(threadId, sessionExtraMcpServers);
+          readAdapterMcpContext(threadId, sessionExtraMcpServers).pipe(
+            Effect.map((context) => acpSquireMcpContext(context, squireIsolation)),
+          );
         let itemIdentityVersion: 2 | undefined =
           input.initialProviderItemIdentityVersion ??
           (input.initialNativeThreadId === undefined ? 2 : undefined);
@@ -1458,8 +1484,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             terminalEnvironmentBySessionId.set(sessionId, environment);
           }
         };
+        // Lecturn: a Squire reaches no client terminal or file system.
         const clientTerminals: AcpClientTerminals | undefined =
-          options.clientTerminals === undefined
+          options.clientTerminals === undefined || squireIsolation !== undefined
             ? undefined
             : yield* makeAcpClientTerminals({
                 defaultCwd: input.runtimePolicy.cwd ?? process.cwd(),
@@ -1968,8 +1995,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             interruptPromptOnCancel: flavor.interruptPromptOnCancel ?? false,
             clientCapabilities: {
               fs: {
-                readTextFile: flavor.clientFileSystem !== undefined,
-                writeTextFile: flavor.clientFileSystem !== undefined,
+                readTextFile: clientFileSystem !== undefined,
+                writeTextFile: clientFileSystem !== undefined,
               },
               terminal: clientTerminals !== undefined,
               elicitation: { form: {}, ...(flavor.onUrlElicitation ? { url: {} } : {}) },
@@ -5316,7 +5343,6 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               Effect.succeed(request),
               requestContext.requestId,
             );
-          const clientFileSystem = flavor.clientFileSystem;
           if (clientFileSystem !== undefined) {
             yield* targetRuntime.handleReadTextFile((request) =>
               clientPolicyContext.pipe(
@@ -5343,7 +5369,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           yield* targetRuntime.handleRequestPermission((params, requestContext) =>
             Effect.gen(function* () {
               const transportRequestId = requestContext.requestId;
-              const permissionQuestion = flavor.extractPermissionQuestion?.(params);
+              const permissionQuestion =
+                squireIsolation === undefined
+                  ? flavor.extractPermissionQuestion?.(params)
+                  : undefined;
               if (permissionQuestion !== undefined) {
                 const userInput = yield* requestUserInputWithAdmission(
                   handlerGeneration,
@@ -5367,13 +5396,28 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 handlerGeneration,
                 Effect.gen(function* () {
                   const context = yield* activeContext;
-                  const appTools = (yield* mcpSessions.read(context.input.threadId))?.app;
+                  const gatedToolPrefix = McpProviderSession.lecturnGatedToolPrefix(
+                    yield* mcpSessions.read(context.input.threadId),
+                  );
+                  // Lecturn: a Squire asks nobody; anything but its gated tools
+                  // is declined here, and a probe reaches no tool at all.
+                  const lecturnAppDisposition =
+                    squireIsolation === "probe"
+                      ? undefined
+                      : acpLecturnAppToolDisposition(
+                          params,
+                          gatedToolPrefix === undefined
+                            ? undefined
+                            : { toolPrefix: gatedToolPrefix },
+                        );
                   const disposition =
-                    acpLecturnAppToolDisposition(params, appTools) ??
-                    (flavor.permissionDisposition ?? acpPermissionDisposition)(
-                      context.input.runtimePolicy,
-                      params,
-                    );
+                    lecturnAppDisposition ??
+                    (squireIsolation !== undefined
+                      ? "deny"
+                      : (flavor.permissionDisposition ?? acpPermissionDisposition)(
+                          context.input.runtimePolicy,
+                          params,
+                        ));
                   if (disposition === "allow") {
                     const optionId = selectAutoApprovedPermissionOption(params);
                     return {
@@ -6461,8 +6505,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           });
           const instructionState = lecturnAcpInstructionState({
             interactionMode: turnInput.runtimePolicy.interactionMode,
-            hasLecturnMcp: (yield* readAdapterMcpContext(turnInput.threadId)).servers.length > 0,
+            hasLecturnMcp:
+              squireIsolation !== "probe" &&
+              (yield* readAdapterMcpContext(turnInput.threadId)).servers.length > 0,
             ...(appInstructions === undefined ? {} : { appInstructions }),
+            ...(turnInput.squireInstructions === undefined
+              ? {}
+              : { squireInstructions: turnInput.squireInstructions }),
           });
           const previousInstructionState = (yield* Ref.get(promptInstructionStates)).get(sessionId);
           const messageText = providerMessageTextWithAttachmentPaths({
@@ -6475,6 +6524,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             prompt: messageText,
             state: instructionState,
             ...(appInstructions === undefined ? {} : { appInstructions }),
+            ...(turnInput.squireInstructions === undefined
+              ? {}
+              : { squireInstructions: turnInput.squireInstructions }),
             ...(previousInstructionState === undefined
               ? {}
               : { previousState: previousInstructionState }),

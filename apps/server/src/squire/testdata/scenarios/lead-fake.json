@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 2,
+  "id": "lead-fake",
+  "fake": "00-lead-onboarding",
+  "setup": {
+    "role": "lead",
+    "squire": {
+      "name": "Lead",
+      "brief": "Coordinate the Squires. Propose Squires for active projects, raise overlaps, and keep the user's queue short.",
+      "provider": "under-test",
+      "createdAt": "2026-10-01T08:00:00Z",
+      "timezone": "America/Los_Angeles"
+    }
+  },
+  "events": []
+}

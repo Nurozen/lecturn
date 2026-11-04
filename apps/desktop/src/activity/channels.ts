@@ -16,3 +16,6 @@ export const ACTIVITY_OPEN_APP = "activity:open-app";
 
 /** Panel asks whether a change may alert now; main later pushes the alerts it held back. */
 export const ACTIVITY_ANNOUNCE = "activity:announce";
+
+/** Renderer reports a Squire action's RPC outcome; the notch matches it by requestId. */
+export const ACTIVITY_SQUIRE_RESULT = "activity:squire-result";

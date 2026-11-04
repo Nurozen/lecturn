@@ -28,9 +28,6 @@ const DEFAULT_APPROVAL_OPTIONS: ReadonlyArray<ProviderApprovalOption> = [
 ];
 
 export function PendingApprovalCard(props: PendingApprovalCardProps) {
-  const options: ReadonlyArray<ProviderApprovalOption> =
-    props.approval.options ?? DEFAULT_APPROVAL_OPTIONS;
-  const warning = options.find((option) => option.warning)?.warning;
   const canRespond = props.approval.responseCapability === "live";
   const disabled = !canRespond || props.respondingApprovalId === props.approval.requestId;
   const { eyebrow, title, detail, detailMaxLines } = pendingApprovalCardText(props.approval);
@@ -52,6 +49,30 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
           to continue.
         </Text>
       ) : null}
+      <PendingApprovalOptions
+        options={props.approval.options}
+        disabled={disabled || !props.canOperateThread}
+        onRespond={(decision) => void props.onRespond(props.approval.requestId, decision)}
+      />
+      {!props.canOperateThread ? (
+        <Text className="font-sans text-xs text-foreground-muted">
+          This connection cannot respond to approvals.
+        </Text>
+      ) : null}
+    </GlassCard>
+  );
+}
+
+// Lecturn: prop-driven so a Squire question card answers with exactly the thread's options.
+export function PendingApprovalOptions(props: {
+  readonly options: ReadonlyArray<ProviderApprovalOption> | undefined;
+  readonly disabled: boolean;
+  readonly onRespond: (decision: ProviderApprovalDecision) => void;
+}) {
+  const options = props.options ?? DEFAULT_APPROVAL_OPTIONS;
+  const warning = options.find((option) => option.warning)?.warning;
+  return (
+    <>
       {warning ? (
         <Text className="font-sans text-xs leading-normal text-warning-foreground">{warning}</Text>
       ) : null}
@@ -67,16 +88,11 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
                   ? "danger"
                   : "secondary"
             }
-            disabled={disabled || !props.canOperateThread}
-            onPress={() => void props.onRespond(props.approval.requestId, option.decision)}
+            disabled={props.disabled}
+            onPress={() => props.onRespond(option.decision)}
           />
         ))}
       </View>
-      {!props.canOperateThread ? (
-        <Text className="font-sans text-xs text-foreground-muted">
-          This connection cannot respond to approvals.
-        </Text>
-      ) : null}
-    </GlassCard>
+    </>
   );
 }

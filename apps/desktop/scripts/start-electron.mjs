@@ -11,8 +11,10 @@ NodeChildProcess.execFileSync(
 
 const childEnv = { ...process.env };
 delete childEnv.ELECTRON_RUN_AS_NODE;
+const remoteDebuggingPort = process.env.LECTURN_DESKTOP_REMOTE_DEBUGGING_PORT?.trim();
+const electronArgs = remoteDebuggingPort ? [`--remote-debugging-port=${remoteDebuggingPort}`] : [];
 
-const electronCommand = resolveElectronLaunchCommand(["dist-electron/main.cjs"]);
+const electronCommand = resolveElectronLaunchCommand([...electronArgs, "dist-electron/main.cjs"]);
 const child = NodeChildProcess.spawn(electronCommand.electronPath, electronCommand.args, {
   stdio: "inherit",
   cwd: desktopDir,

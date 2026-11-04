@@ -19,7 +19,9 @@ import {
   mcpAppFileName,
   type McpAppReference,
 } from "@lecturn/shared/mcpApp";
+import { squireLinkAppPath } from "@lecturn/shared/promptLinks";
 import { LECTURN_MCP_APP_SERVER } from "@lecturn/shared/toolOutput";
+import { useRouter } from "@tanstack/react-router";
 import { Minimize2Icon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -153,6 +155,7 @@ export function McpAppFrame(props: {
   });
   const [toolDefinition, setToolDefinition] = useState<unknown>(undefined);
   const appReferences = useAppReferences();
+  const router = useRouter();
 
   // Read by the host on every message, so it always sees current values
   // without being rebuilt (which would drop the app's session).
@@ -167,6 +170,7 @@ export function McpAppFrame(props: {
     displayMode,
     toolDefinition,
     appReferences,
+    router,
   };
   const hostRef = useRef<McpAppHost | null>(null);
   const latest = useRef(live);
@@ -359,6 +363,23 @@ export function McpAppFrame(props: {
                 }
                 activate(ref);
               },
+            },
+          }
+        : {}),
+      // A Squire or room link from a card Lecturn serves opens that page here. The embed
+      // has no Squire pages, so there the host refuses it like any other non-web link.
+      ...(app.server === LECTURN_MCP_APP_SERVER && !isEmbedLocation()
+        ? {
+            openSquireLink: async (link) => {
+              if (
+                document.activeElement !== frameRef.current ||
+                !navigator.userActivation?.isActive
+              ) {
+                throw new McpAppHostRefusal("Links open only from a click in the app.");
+              }
+              // Lecturn: a full-size card would cover the page the link opens.
+              setDisplayMode("inline");
+              await latest.current.router.navigate({ href: squireLinkAppPath(link) });
             },
           }
         : {}),

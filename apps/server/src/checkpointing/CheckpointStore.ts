@@ -24,7 +24,8 @@ export interface DiffCheckpointsInput {
   readonly toCheckpointRef: CheckpointRef;
   readonly fallbackFromToHead?: boolean;
   readonly ignoreWhitespace: boolean;
-  readonly format?: "patch" | "numstat";
+  /** `name-status` is NUL-separated with renames split into delete plus add. */
+  readonly format?: "patch" | "numstat" | "name-status";
   /** Limits the diff to these exact paths. An empty list yields an empty diff. */
   readonly filePaths?: ReadonlyArray<string>;
 }

@@ -1,0 +1,7 @@
+-- Squires (room routing) joins the shared Extensions ledger with its own consent and usage rows.
+ALTER TABLE relay_decision_funding DROP CONSTRAINT relay_decision_funding_feature_id_check, ADD CONSTRAINT relay_decision_funding_feature_id_check CHECK (feature_id IN ('decisions','contextual','squires'));--> statement-breakpoint
+ALTER TABLE relay_decision_funding_challenges DROP CONSTRAINT relay_decision_funding_challenges_feature_id_check, ADD CONSTRAINT relay_decision_funding_challenges_feature_id_check CHECK (feature_id IN ('decisions','contextual','squires'));--> statement-breakpoint
+ALTER TABLE relay_decision_usage_requests DROP CONSTRAINT relay_decision_usage_requests_feature_id_check, ADD CONSTRAINT relay_decision_usage_requests_feature_id_check CHECK (feature_id IN ('decisions','contextual','squires'));--> statement-breakpoint
+ALTER TABLE relay_decision_usage_runs DROP CONSTRAINT relay_decision_usage_runs_feature_id_check, ADD CONSTRAINT relay_decision_usage_runs_feature_id_check CHECK (feature_id IN ('decisions','contextual','squires'));--> statement-breakpoint
+ALTER TABLE relay_decision_usage_attempts DROP CONSTRAINT relay_decision_usage_attempts_feature_id_check, ADD CONSTRAINT relay_decision_usage_attempts_feature_id_check CHECK (feature_id IN ('decisions','contextual','squires'));--> statement-breakpoint
+ALTER TABLE relay_extension_admission_grants DROP CONSTRAINT relay_extension_admission_grants_feature_id_check, ADD CONSTRAINT relay_extension_admission_grants_feature_id_check CHECK (feature_id IN ('decisions','contextual','squires'));

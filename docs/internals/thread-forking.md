@@ -93,6 +93,16 @@ capability advertised by [`ServerEnvironment.ts`][env]. `forkKillSwitchRejection
 the external session) before either reaches the orchestrator. Disabling it hides the action on
 clients and hard-stops forks from older or misbehaving ones.
 
+## Squire probes
+
+A Squire's "Ask about this" is a `thread.fork` with the server-only `squireProbe` field, refused
+from clients. [ThreadForkDeltas.ts][deltas] marks the child as a hidden probe and resets what the
+fork would otherwise copy: runtime mode, PR links, and pins. Otherwise a read-only question would
+run with the source's full access or show up as its PR. The probe also honors this kill switch, and
+it is deleted once answered, because an archived shell still streams. Forking a Squire's own home
+thread or probe is refused, and a fork never inherits the Squire marker. See
+[Squires](./squire.md).
+
 ## Importing external sessions
 
 An imported thread is a new thread created from an

@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 2,
+  "id": "02-routine-progress-quiet",
+  "setup": {
+    "squire": {
+      "name": "Release",
+      "brief": "Done means CI green and PR approved. Stay quiet on routine progress. Prefer small, specific steers.",
+      "provider": "under-test",
+      "createdAt": "2026-10-01T09:00:00Z",
+      "timezone": "America/Los_Angeles"
+    },
+    "scope": [
+      {
+        "kind": "project",
+        "name": "billing-service"
+      },
+      {
+        "kind": "project",
+        "name": "Observatory"
+      }
+    ],
+    "threads": [
+      {
+        "threadId": "thr_build_star_catalog",
+        "title": "Build the star catalog",
+        "project": "Observatory",
+        "provider": "codex"
+      }
+    ],
+    "permissions": {
+      "steer": "recommend",
+      "createThread": "recommend",
+      "notify": "on"
+    },
+    "undoWindowSeconds": 10,
+    "budgetUsage": {
+      "steersPerDay": {
+        "used": 0,
+        "limit": 10
+      },
+      "threadsPerDay": {
+        "used": 0,
+        "limit": 3
+      },
+      "steersPerThreadPerHour": {
+        "limit": 2,
+        "usedByThread": {}
+      }
+    }
+  },
+  "events": [
+    {
+      "type": "turn-finished",
+      "summary": {
+        "threadId": "thr_build_star_catalog",
+        "threadTitle": "Build the star catalog",
+        "project": "Observatory",
+        "provider": "codex",
+        "turnId": "t_7",
+        "outcome": "finished",
+        "summaryStatus": "complete",
+        "goal": "Searchable star catalog",
+        "completed": ["Added catalog loader", "Added search index", "2 tests"],
+        "remaining": ["Wire search to sky canvas"],
+        "blocked": [],
+        "files": {
+          "entries": [
+            {
+              "path": "src/catalog/loader.ts",
+              "change": "added"
+            },
+            {
+              "path": "src/catalog/searchIndex.ts",
+              "change": "added"
+            },
+            {
+              "path": "src/catalog/catalog.test.ts",
+              "change": "added"
+            }
+          ],
+          "counts": {
+            "added": 3,
+            "modified": 0,
+            "deleted": 0
+          }
+        },
+        "commands": [
+          {
+            "command": "vp test run catalog.test.ts",
+            "exitCode": 0,
+            "pass": true
+          }
+        ],
+        "pullRequest": null,
+        "pendingQuestion": null,
+        "suggestedNextStep": null
+      }
+    }
+  ],
+  "expected": {
+    "toolCalls": ["squire_stay_quiet"],
+    "cardTarget": null,
+    "effects": {
+      "quiet_recorded": 1
+    },
+    "mustNotHappen": [
+      "card_created",
+      "proposal_created",
+      "action_held",
+      "steer_sent",
+      "thread_created",
+      "notification_pushed"
+    ],
+    "ignore": ["squire_list_tracked", "squire_get_summary", "squire_get_detail"]
+  }
+}

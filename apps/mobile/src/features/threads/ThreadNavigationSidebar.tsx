@@ -107,6 +107,9 @@ import {
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
   type ThreadListV2ListItem,
 } from "./threadListV2";
+import { SquireHomeListRow, useSquireHomeItems } from "../squires/SquireHomeRows";
+import { SquireMotionClock } from "../squires/SquireIndicator";
+import { isHomeSquireItem } from "../squires/squireHomeItems.logic";
 
 type SidebarListItem = (
   | HomeHierarchyV2Item
@@ -144,10 +147,16 @@ interface ThreadNavigationSidebarProps {
 }
 
 export function ThreadNavigationSidebar(props: ThreadNavigationSidebarProps) {
-  if (Platform.OS !== "ios") {
-    return <ThreadNavigationSidebarPane {...props} nativeChrome={false} />;
-  }
-  return <NativeSidebarContainer {...props} />;
+  // Lecturn: one motion clock for every Squire indicator in the sidebar list.
+  return (
+    <SquireMotionClock>
+      {Platform.OS !== "ios" ? (
+        <ThreadNavigationSidebarPane {...props} nativeChrome={false} />
+      ) : (
+        <NativeSidebarContainer {...props} />
+      )}
+    </SquireMotionClock>
+  );
 }
 
 function NativeSidebarContainer(props: ThreadNavigationSidebarProps) {
@@ -490,6 +499,12 @@ function ThreadNavigationSidebarPane(
     // unchanged: after a clamped fire (wake beyond the 32-bit setTimeout
     // range) the boundary string is identical and the chain would die.
   }, [nextSnoozeWakeAt, snoozeWakeTick]);
+  // Lecturn: the Squires section above the project tree, as on Home.
+  const squireItems = useSquireHomeItems({
+    environments,
+    selectedEnvironmentId: options.selectedEnvironmentId,
+    searching: hasSearchQuery,
+  });
   const listItems = ((): readonly SidebarListItem[] => {
     const v2SearchQuery = props.searchQuery.trim().toLocaleLowerCase();
     const v2PendingTasks = pendingTasks.filter(
@@ -529,6 +544,7 @@ function ThreadNavigationSidebarPane(
       displayStates: accountDisplayStates,
       searching: hasSearchQuery,
       selectedThreadKey: props.selectedThreadKey,
+      squires: squireItems,
     });
     if (settledShelfExpanded && threadListV2Layout.hiddenSettledCount > 0) {
       items.push({
@@ -726,6 +742,9 @@ function ThreadNavigationSidebarPane(
     if (previous.type === "v2-show-more" && item.type === "v2-show-more") {
       return previous.hiddenCount === item.hiddenCount;
     }
+    if (isHomeSquireItem(previous) && isHomeSquireItem(item)) {
+      return homeListItemsAreEqual(previous, item);
+    }
     return false;
   };
   const focusSearch = () => {
@@ -747,6 +766,7 @@ function ThreadNavigationSidebarPane(
   };
   useHardwareKeyboardCommand("focusSearch", focusSearch);
   const renderListRow = ({ item }: { readonly item: SidebarListItem }) => {
+    if (isHomeSquireItem(item)) return <SquireHomeListRow item={item} pane={SIDEBAR_ROW_PANE} />;
     switch (item.type) {
       case "account-header":
         return (

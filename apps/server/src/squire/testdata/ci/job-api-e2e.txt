@@ -1,0 +1,18 @@
+2026-10-31T14:10:58.1234567Z ##[group]Run actions/checkout@v4
+2026-10-31T14:10:58.1234568Z with:
+2026-10-31T14:10:58.1234569Z   token: ***
+2026-10-31T14:10:58.1234570Z ##[endgroup]
+2026-10-31T14:10:59.0000001Z ##[command]/usr/bin/git -c http.extraheader="AUTHORIZATION: bearer {{GHS_TOKEN}}" fetch
+2026-10-31T14:11:02.0000001Z ##[group]Run pnpm test:e2e
+2026-10-31T14:11:02.0000002Z [36;1mpnpm test:e2e[0m
+2026-10-31T14:11:02.0000003Z ##[endgroup]
+2026-10-31T14:11:05.0000001Z  [32m✓[39m tests/e2e/customers.e2e.test.ts (12 tests) 2104ms
+2026-10-31T14:11:09.0000001Z  [31m❯[39m tests/e2e/invoices.e2e.test.ts (48 tests | 1 failed) 3311ms
+2026-10-31T14:11:09.0000002Z [31m[1mFAIL[22m[39m tests/e2e/invoices.e2e.test.ts > POST /invoices/:id/finalize > EUR totals match the ledger
+2026-10-31T14:11:09.0000003Z [31mAssertionError: expected '€1,234.57' to equal '€1,234.56'[39m
+2026-10-31T14:11:09.0000004Z     at tests/e2e/invoices.e2e.test.ts:88:31
+2026-10-31T14:11:09.0000005Z Ledger client error: request rejected for API_KEY={{STRIPE_KEY}} with Authorization: Bearer {{GHP_TOKEN}}
+2026-10-31T14:11:09.0000006Z error: upstream refused lecturn-seeded-7f3c9a1e ({{GITHUB_PAT}})
+2026-10-31T14:11:09.0000007Z  Tests  1 failed | 47 passed (48)
+2026-10-31T14:11:09.0000008Z ##[error]Process completed with exit code 1.
+2026-10-31T14:11:10.0000001Z Post job cleanup.

@@ -41,6 +41,7 @@ describe("Codex structured output dialect", () => {
       "generateWorkflowSummary",
       "generateDecisionNotes",
       "generateContextualSummary",
+      "generateSquireTurnSummary",
     ]) {
       for (const source of [
         new Error(`spawn codex ${sentinel}`),

@@ -51,6 +51,8 @@ type RpcMethod<TTag extends EnvironmentRpcTag> = WsRpcProtocolClient[TTag];
 export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.contextualSubscribe
   | typeof WS_METHODS.threadDecisionsSubscribe
+  // Lecturn: Squire snapshot stream.
+  | typeof WS_METHODS.squireSubscribe
   | typeof WS_METHODS.codexAuthCallbackSubscribe
   | typeof WS_METHODS.providerAuthSubscribe
   | typeof WS_METHODS.providerInstallSubscribe

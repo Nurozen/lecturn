@@ -352,6 +352,84 @@ import {
   ServerSettingsError,
   ServerSettingsPatch,
 } from "./settings.ts";
+// Lecturn: Squire RPCs.
+import {
+  SquireActionLogListInput,
+  SquireActionLogListResult,
+  SquireAutomationResumeInput,
+  SquireAutomationResumeResult,
+  SquireControlRevertInput,
+  SquireCreateInput,
+  SquireDeleteInput,
+  SquireDeleteResult,
+  SquireError,
+  SquireGetInput,
+  SquireItemAskInput,
+  SquireItemAskResult,
+  SquireItemGetInput,
+  SquireItemGetResult,
+  SquireItemsActInput,
+  SquireItemsActResult,
+  SquireItemsListInput,
+  SquireItemsListResult,
+  SquireItemsMarkOpenedInput,
+  SquireItemsMarkOpenedResult,
+  SquireLeadEnsureInput,
+  SquireLeadOpenInput,
+  SquireLeadOpenResult,
+  SquireLeadReceiptsInput,
+  SquireLeadReceiptsResult,
+  SquireLeadSweepInput,
+  SquireLeadSweepResult,
+  SquireNotificationAlertedInput,
+  SquireNotificationAlertedResult,
+  SquireProviderSupportInput,
+  SquireProviderSupportResult,
+  SquireResult,
+  SquireRoomCloseInput,
+  SquireRoomCreateInput,
+  SquireRoomMarkReadInput,
+  SquireRoomMarkReadResult,
+  SquireRoomPostInput,
+  SquireRoomPostResult,
+  SquireRoomPostsInput,
+  SquireRoomPostsResult,
+  SquireRoomReopenInput,
+  SquireRoomRerouteInput,
+  SquireRoomResult,
+  SquireRoomUpdateInput,
+  SquireRuleCreateInput,
+  SquireRuleListInput,
+  SquireRuleListResult,
+  SquireRuleRemoveInput,
+  SquireRuleRemoveResult,
+  SquireRuleResult,
+  SquireSetStatusInput,
+  SquireSubscribeEvent,
+  SquireSubscribeInput,
+  SquireSummaryGetInput,
+  SquireSummaryGetResult,
+  SquireTrackInput,
+  SquireTriggerCreateInput,
+  SquireTriggerCreateResult,
+  SquireTriggerListInput,
+  SquireTriggerListResult,
+  SquireTriggerResult,
+  SquireTriggerRevokeInput,
+  SquireTriggerRotateInput,
+  SquireTriggerRotateResult,
+  SquireTriggerRunsInput,
+  SquireTriggerRunsResult,
+  SquireTriggerTestInput,
+  SquireTriggerTestResult,
+  SquireTriggerUpdateInput,
+  SquireUntrackInput,
+  SquireUpdateInput,
+  SquireVocabularyInput,
+  SquireVocabularyResult,
+  SquireVoiceNoteInput,
+  SquireVoiceNoteResult,
+} from "./squire.ts";
 import {
   StaveCommandError,
   StaveDryRunInput,
@@ -582,6 +660,51 @@ export const WS_METHODS = {
   staveDryRun: "stave.dryRun",
   staveRunOperation: "stave.runOperation",
   staveObserveOperation: "stave.observeOperation",
+
+  // Lecturn: Squire methods
+  squireSubscribe: "squire.subscribe",
+  squireItemsList: "squire.items.list",
+  squireItemGet: "squire.item.get",
+  squireSummaryGet: "squire.summary.get",
+  squireActionLogList: "squire.actionLog.list",
+  squireVocabulary: "squire.vocabulary",
+  squireRoomPosts: "squire.room.posts",
+  squireRuleList: "squire.rule.list",
+  squireTriggerList: "squire.trigger.list",
+  squireTriggerRuns: "squire.trigger.runs",
+  squireLeadReceipts: "squire.lead.receipts",
+  squireGet: "squire.get",
+  squireProviderSupport: "squire.providerSupport",
+  squireCreate: "squire.create",
+  squireUpdate: "squire.update",
+  squireSetStatus: "squire.setStatus",
+  squireDelete: "squire.delete",
+  squireTrack: "squire.track",
+  squireUntrack: "squire.untrack",
+  squireItemsAct: "squire.items.act",
+  squireItemAsk: "squire.item.ask",
+  squireVoiceNote: "squire.voiceNote",
+  squireLeadEnsure: "squire.lead.ensure",
+  squireLeadOpen: "squire.lead.open",
+  squireControlRevert: "squire.control.revert",
+  squireItemsMarkOpened: "squire.items.markOpened",
+  squireRuleCreate: "squire.rule.create",
+  squireRuleRemove: "squire.rule.remove",
+  squireTriggerCreate: "squire.trigger.create",
+  squireTriggerUpdate: "squire.trigger.update",
+  squireTriggerRotate: "squire.trigger.rotate",
+  squireTriggerRevoke: "squire.trigger.revoke",
+  squireTriggerTest: "squire.trigger.test",
+  squireAutomationResume: "squire.automation.resume",
+  squireLeadSweep: "squire.lead.sweep",
+  squireRoomCreate: "squire.room.create",
+  squireRoomUpdate: "squire.room.update",
+  squireRoomClose: "squire.room.close",
+  squireRoomReopen: "squire.room.reopen",
+  squireRoomPost: "squire.room.post",
+  squireRoomReroute: "squire.room.reroute",
+  squireRoomMarkRead: "squire.room.markRead",
+  squireNotificationAlerted: "squire.notification.alerted",
 
   threadDecisionsFunding: "threadDecisions.funding",
   threadDecisionsFundingStatus: "threadDecisions.fundingStatus",
@@ -1128,6 +1251,316 @@ const WsStaveObserveOperationRpc = Rpc.make(WS_METHODS.staveObserveOperation, {
   error: StaveOperationStreamError,
   stream: true,
 });
+
+// Lecturn: Squire RPCs. Every method fails `disabled_by_server` while
+// `LECTURN_SQUIRE` is off.
+const SquireRpcError = Schema.Union([SquireError, EnvironmentAuthorizationError]);
+
+const WsSquireSubscribeRpc = Rpc.make(WS_METHODS.squireSubscribe, {
+  payload: SquireSubscribeInput,
+  success: SquireSubscribeEvent,
+  error: SquireRpcError,
+  stream: true,
+});
+
+const WsSquireItemsListRpc = Rpc.make(WS_METHODS.squireItemsList, {
+  payload: SquireItemsListInput,
+  success: SquireItemsListResult,
+  error: SquireRpcError,
+});
+
+const WsSquireItemGetRpc = Rpc.make(WS_METHODS.squireItemGet, {
+  payload: SquireItemGetInput,
+  success: SquireItemGetResult,
+  error: SquireRpcError,
+});
+
+const WsSquireSummaryGetRpc = Rpc.make(WS_METHODS.squireSummaryGet, {
+  payload: SquireSummaryGetInput,
+  success: SquireSummaryGetResult,
+  error: SquireRpcError,
+});
+
+const WsSquireActionLogListRpc = Rpc.make(WS_METHODS.squireActionLogList, {
+  payload: SquireActionLogListInput,
+  success: SquireActionLogListResult,
+  error: SquireRpcError,
+});
+
+const WsSquireVocabularyRpc = Rpc.make(WS_METHODS.squireVocabulary, {
+  payload: SquireVocabularyInput,
+  success: SquireVocabularyResult,
+  error: SquireRpcError,
+});
+
+const WsSquireRoomPostsRpc = Rpc.make(WS_METHODS.squireRoomPosts, {
+  payload: SquireRoomPostsInput,
+  success: SquireRoomPostsResult,
+  error: SquireRpcError,
+});
+
+const WsSquireRuleListRpc = Rpc.make(WS_METHODS.squireRuleList, {
+  payload: SquireRuleListInput,
+  success: SquireRuleListResult,
+  error: SquireRpcError,
+});
+
+const WsSquireTriggerListRpc = Rpc.make(WS_METHODS.squireTriggerList, {
+  payload: SquireTriggerListInput,
+  success: SquireTriggerListResult,
+  error: SquireRpcError,
+});
+
+const WsSquireTriggerRunsRpc = Rpc.make(WS_METHODS.squireTriggerRuns, {
+  payload: SquireTriggerRunsInput,
+  success: SquireTriggerRunsResult,
+  error: SquireRpcError,
+});
+
+const WsSquireLeadReceiptsRpc = Rpc.make(WS_METHODS.squireLeadReceipts, {
+  payload: SquireLeadReceiptsInput,
+  success: SquireLeadReceiptsResult,
+  error: SquireRpcError,
+});
+
+const WsSquireCreateRpc = Rpc.make(WS_METHODS.squireCreate, {
+  payload: SquireCreateInput,
+  success: SquireResult,
+  error: SquireRpcError,
+});
+
+const WsSquireUpdateRpc = Rpc.make(WS_METHODS.squireUpdate, {
+  payload: SquireUpdateInput,
+  success: SquireResult,
+  error: SquireRpcError,
+});
+
+const WsSquireSetStatusRpc = Rpc.make(WS_METHODS.squireSetStatus, {
+  payload: SquireSetStatusInput,
+  success: SquireResult,
+  error: SquireRpcError,
+});
+
+const WsSquireDeleteRpc = Rpc.make(WS_METHODS.squireDelete, {
+  payload: SquireDeleteInput,
+  success: SquireDeleteResult,
+  error: SquireRpcError,
+});
+
+const WsSquireTrackRpc = Rpc.make(WS_METHODS.squireTrack, {
+  payload: SquireTrackInput,
+  success: SquireResult,
+  error: SquireRpcError,
+});
+
+const WsSquireUntrackRpc = Rpc.make(WS_METHODS.squireUntrack, {
+  payload: SquireUntrackInput,
+  success: SquireResult,
+  error: SquireRpcError,
+});
+
+const WsSquireItemsActRpc = Rpc.make(WS_METHODS.squireItemsAct, {
+  payload: SquireItemsActInput,
+  success: SquireItemsActResult,
+  error: SquireRpcError,
+});
+
+const WsSquireItemAskRpc = Rpc.make(WS_METHODS.squireItemAsk, {
+  payload: SquireItemAskInput,
+  success: SquireItemAskResult,
+  error: SquireRpcError,
+});
+
+const WsSquireVoiceNoteRpc = Rpc.make(WS_METHODS.squireVoiceNote, {
+  payload: SquireVoiceNoteInput,
+  success: SquireVoiceNoteResult,
+  error: SquireRpcError,
+});
+
+const WsSquireLeadEnsureRpc = Rpc.make(WS_METHODS.squireLeadEnsure, {
+  payload: SquireLeadEnsureInput,
+  success: SquireResult,
+  error: SquireRpcError,
+});
+
+const WsSquireLeadOpenRpc = Rpc.make(WS_METHODS.squireLeadOpen, {
+  payload: SquireLeadOpenInput,
+  success: SquireLeadOpenResult,
+  error: SquireRpcError,
+});
+
+const WsSquireControlRevertRpc = Rpc.make(WS_METHODS.squireControlRevert, {
+  payload: SquireControlRevertInput,
+  success: SquireResult,
+  error: SquireRpcError,
+});
+
+const WsSquireItemsMarkOpenedRpc = Rpc.make(WS_METHODS.squireItemsMarkOpened, {
+  payload: SquireItemsMarkOpenedInput,
+  success: SquireItemsMarkOpenedResult,
+  error: SquireRpcError,
+});
+
+const WsSquireRuleCreateRpc = Rpc.make(WS_METHODS.squireRuleCreate, {
+  payload: SquireRuleCreateInput,
+  success: SquireRuleResult,
+  error: SquireRpcError,
+});
+
+const WsSquireRuleRemoveRpc = Rpc.make(WS_METHODS.squireRuleRemove, {
+  payload: SquireRuleRemoveInput,
+  success: SquireRuleRemoveResult,
+  error: SquireRpcError,
+});
+
+const WsSquireTriggerCreateRpc = Rpc.make(WS_METHODS.squireTriggerCreate, {
+  payload: SquireTriggerCreateInput,
+  success: SquireTriggerCreateResult,
+  error: SquireRpcError,
+});
+
+const WsSquireTriggerUpdateRpc = Rpc.make(WS_METHODS.squireTriggerUpdate, {
+  payload: SquireTriggerUpdateInput,
+  success: SquireTriggerResult,
+  error: SquireRpcError,
+});
+
+const WsSquireTriggerRotateRpc = Rpc.make(WS_METHODS.squireTriggerRotate, {
+  payload: SquireTriggerRotateInput,
+  success: SquireTriggerRotateResult,
+  error: SquireRpcError,
+});
+
+const WsSquireTriggerRevokeRpc = Rpc.make(WS_METHODS.squireTriggerRevoke, {
+  payload: SquireTriggerRevokeInput,
+  success: SquireTriggerResult,
+  error: SquireRpcError,
+});
+
+const WsSquireTriggerTestRpc = Rpc.make(WS_METHODS.squireTriggerTest, {
+  payload: SquireTriggerTestInput,
+  success: SquireTriggerTestResult,
+  error: SquireRpcError,
+});
+
+const WsSquireAutomationResumeRpc = Rpc.make(WS_METHODS.squireAutomationResume, {
+  payload: SquireAutomationResumeInput,
+  success: SquireAutomationResumeResult,
+  error: SquireRpcError,
+});
+
+const WsSquireLeadSweepRpc = Rpc.make(WS_METHODS.squireLeadSweep, {
+  payload: SquireLeadSweepInput,
+  success: SquireLeadSweepResult,
+  error: SquireRpcError,
+});
+
+const WsSquireRoomCreateRpc = Rpc.make(WS_METHODS.squireRoomCreate, {
+  payload: SquireRoomCreateInput,
+  success: SquireRoomResult,
+  error: SquireRpcError,
+});
+
+const WsSquireRoomUpdateRpc = Rpc.make(WS_METHODS.squireRoomUpdate, {
+  payload: SquireRoomUpdateInput,
+  success: SquireRoomResult,
+  error: SquireRpcError,
+});
+
+const WsSquireRoomCloseRpc = Rpc.make(WS_METHODS.squireRoomClose, {
+  payload: SquireRoomCloseInput,
+  success: SquireRoomResult,
+  error: SquireRpcError,
+});
+
+const WsSquireRoomReopenRpc = Rpc.make(WS_METHODS.squireRoomReopen, {
+  payload: SquireRoomReopenInput,
+  success: SquireRoomResult,
+  error: SquireRpcError,
+});
+
+const WsSquireRoomPostRpc = Rpc.make(WS_METHODS.squireRoomPost, {
+  payload: SquireRoomPostInput,
+  success: SquireRoomPostResult,
+  error: SquireRpcError,
+});
+
+const WsSquireRoomRerouteRpc = Rpc.make(WS_METHODS.squireRoomReroute, {
+  payload: SquireRoomRerouteInput,
+  success: SquireRoomPostResult,
+  error: SquireRpcError,
+});
+
+const WsSquireGetRpc = Rpc.make(WS_METHODS.squireGet, {
+  payload: SquireGetInput,
+  success: SquireResult,
+  error: SquireRpcError,
+});
+
+const WsSquireProviderSupportRpc = Rpc.make(WS_METHODS.squireProviderSupport, {
+  payload: SquireProviderSupportInput,
+  success: SquireProviderSupportResult,
+  error: SquireRpcError,
+});
+
+const WsSquireRoomMarkReadRpc = Rpc.make(WS_METHODS.squireRoomMarkRead, {
+  payload: SquireRoomMarkReadInput,
+  success: SquireRoomMarkReadResult,
+  error: SquireRpcError,
+});
+
+const WsSquireNotificationAlertedRpc = Rpc.make(WS_METHODS.squireNotificationAlerted, {
+  payload: SquireNotificationAlertedInput,
+  success: SquireNotificationAlertedResult,
+  error: SquireRpcError,
+});
+
+/** The server serves these through their own handler group (`squire/SquireRpcHandlers.ts`). */
+export const SquireRpcs = [
+  WsSquireSubscribeRpc,
+  WsSquireItemsListRpc,
+  WsSquireItemGetRpc,
+  WsSquireSummaryGetRpc,
+  WsSquireActionLogListRpc,
+  WsSquireVocabularyRpc,
+  WsSquireRoomPostsRpc,
+  WsSquireRuleListRpc,
+  WsSquireTriggerListRpc,
+  WsSquireTriggerRunsRpc,
+  WsSquireLeadReceiptsRpc,
+  WsSquireCreateRpc,
+  WsSquireUpdateRpc,
+  WsSquireSetStatusRpc,
+  WsSquireDeleteRpc,
+  WsSquireTrackRpc,
+  WsSquireUntrackRpc,
+  WsSquireItemsActRpc,
+  WsSquireItemAskRpc,
+  WsSquireVoiceNoteRpc,
+  WsSquireLeadEnsureRpc,
+  WsSquireLeadOpenRpc,
+  WsSquireControlRevertRpc,
+  WsSquireItemsMarkOpenedRpc,
+  WsSquireRuleCreateRpc,
+  WsSquireRuleRemoveRpc,
+  WsSquireTriggerCreateRpc,
+  WsSquireTriggerUpdateRpc,
+  WsSquireTriggerRotateRpc,
+  WsSquireTriggerRevokeRpc,
+  WsSquireTriggerTestRpc,
+  WsSquireAutomationResumeRpc,
+  WsSquireLeadSweepRpc,
+  WsSquireRoomCreateRpc,
+  WsSquireRoomUpdateRpc,
+  WsSquireRoomCloseRpc,
+  WsSquireRoomReopenRpc,
+  WsSquireRoomPostRpc,
+  WsSquireRoomRerouteRpc,
+  WsSquireGetRpc,
+  WsSquireProviderSupportRpc,
+  WsSquireRoomMarkReadRpc,
+  WsSquireNotificationAlertedRpc,
+] as const;
 
 const PullRequestRpcError = Schema.Union([
   PullRequestUnavailableError,
@@ -2210,6 +2643,7 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 ) {}
 
 export const WsRpcGroup = RpcGroup.make(
+  ...SquireRpcs,
   ...ContextualRpcs,
   ...AppsRpcs,
   WsSagaWorkbenchGetSnapshotRpc,

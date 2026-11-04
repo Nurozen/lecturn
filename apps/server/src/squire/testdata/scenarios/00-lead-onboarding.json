@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "id": "00-lead-onboarding",
+  "setup": {
+    "role": "lead",
+    "squire": {
+      "name": "Lead",
+      "brief": "Coordinate the Squires. Propose Squires for active projects, raise overlaps, and keep the user's queue short.",
+      "provider": "under-test",
+      "createdAt": "2026-10-01T08:00:00Z",
+      "timezone": "America/Los_Angeles"
+    },
+    "threads": [
+      {
+        "threadId": "thr_fix_invoice_rounding",
+        "title": "Fix invoice rounding",
+        "project": "billing-service",
+        "provider": "claudeAgent",
+        "branch": "fix/invoice-rounding"
+      },
+      {
+        "threadId": "thr_currency_display_cleanup",
+        "title": "Currency display cleanup",
+        "project": "billing-service",
+        "provider": "codex",
+        "branch": "chore/currency-display"
+      },
+      {
+        "threadId": "thr_build_star_catalog",
+        "title": "Build the star catalog",
+        "project": "Observatory",
+        "provider": "codex",
+        "branch": "feat/star-catalog"
+      },
+      {
+        "threadId": "thr_plan_constellation_explorer",
+        "title": "Plan the constellation explorer",
+        "project": "Observatory",
+        "provider": "claudeAgent",
+        "branch": "plan/constellation-explorer"
+      }
+    ],
+    "permissions": {
+      "steer": "recommend",
+      "createThread": "recommend",
+      "notify": "on",
+      "manageSquires": "recommend"
+    },
+    "undoWindowSeconds": 10
+  },
+  "events": [
+    {
+      "type": "onboarding"
+    }
+  ],
+  "expected": {
+    "deliveredEvents": 1,
+    "toolCalls": ["squire_propose_squire", "squire_propose_squire", "squire_propose_squire"],
+    "cardTarget": null,
+    "effects": {
+      "proposal_created": 3
+    },
+    "mustNotHappen": ["card_created", "action_held", "steer_sent", "thread_created"],
+    "ignore": ["squire_list_items", "squire_get_summary"],
+    "note": "Fake gold for B1 step 0. A live Lead may propose 2 or 3 Squires (P17.2); each proposal grants whole projects with recommend-only permissions."
+  }
+}

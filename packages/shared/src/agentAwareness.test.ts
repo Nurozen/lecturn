@@ -6,7 +6,7 @@ import type {
   Project,
   ThreadId,
 } from "@lecturn/contracts";
-import { ProviderInstanceId, RuntimeRequestId } from "@lecturn/contracts";
+import { ProviderInstanceId, RuntimeRequestId, SquireId } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
 
 import { projectThreadAwarenessV2 } from "./agentAwareness.ts";
@@ -29,6 +29,7 @@ describe("projectThreadAwarenessV2", () => {
         | "pendingRuntimeRequest"
         | "lineage"
         | "settledOverride"
+        | "squire"
       >
     > = {},
   ) => ({
@@ -55,6 +56,16 @@ describe("projectThreadAwarenessV2", () => {
         thread: v2Thread(),
       }),
     ).toMatchObject({ phase: "running", headline: "Agent is working" });
+  });
+
+  it.each(["home", "probe"] as const)("never projects a Squire %s thread", (role) => {
+    expect(
+      projectThreadAwarenessV2({
+        environmentId: "env-1" as EnvironmentId,
+        project,
+        thread: v2Thread({ squire: { squireId: SquireId.make("squire-1"), role } }),
+      }),
+    ).toBeNull();
   });
 
   it("removes settled conversation activity and restores it on unsettle without hiding ordinary completion", () => {

@@ -5,7 +5,10 @@ import {
   type SignalExport,
 } from "@lecturn/shared/observability";
 import * as OtelEnvironment from "@lecturn/shared/otelEnvironment";
-import { parsePersistedServerObservabilitySettings } from "@lecturn/shared/serverSettings";
+import {
+  parsePersistedServerObservabilitySettings,
+  parsePersistedServerSquireEnabled,
+} from "@lecturn/shared/serverSettings";
 import { PortSchema, ServerBootstrapEnvelope } from "@lecturn/contracts";
 import * as Config from "effect/Config";
 import * as Duration from "effect/Duration";
@@ -168,6 +171,11 @@ const EnvServerConfig = Config.all({
   // action, not a per-invocation option.
   threadForkingEnabled: Config.Boolean("LECTURN_THREAD_FORKING").pipe(Config.withDefault(true)),
   staveEnabled: Config.Boolean("LECTURN_STAVE").pipe(Config.withDefault(true)),
+  // Unset defers to the saved Settings > Squires switch.
+  squireEnabled: Config.Boolean("LECTURN_SQUIRE").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
 });
 
 const DevAuthTokenConfig = Config.Redacted("LECTURN_DEV_AUTH_TOKEN").pipe(
@@ -252,6 +260,12 @@ const loadPersistedObservabilitySettings = Effect.fn(function* (settingsPath: st
 
   const raw = yield* fs.readFileString(settingsPath).pipe(Effect.orElseSucceed(() => ""));
   return parsePersistedServerObservabilitySettings(raw);
+});
+
+const loadPersistedSquireEnabled = Effect.fn(function* (settingsPath: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const raw = yield* fs.readFileString(settingsPath).pipe(Effect.orElseSucceed(() => ""));
+  return raw.length > 0 && parsePersistedServerSquireEnabled(raw);
 });
 
 export const resolveServerConfig = (
@@ -493,6 +507,8 @@ export const resolveServerConfig = (
       tailscaleServePort,
       threadForkingEnabled: env.threadForkingEnabled,
       staveEnabled: env.staveEnabled,
+      squireEnabled:
+        env.squireEnabled ?? (yield* loadPersistedSquireEnabled(derivedPaths.settingsPath)),
     };
 
     return config;

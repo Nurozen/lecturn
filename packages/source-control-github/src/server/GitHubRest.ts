@@ -5,7 +5,12 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http";
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientRequest,
+  type HttpClientResponse,
+} from "effect/http";
 
 import { collectUint8StreamText } from "@lecturn/provider-core/server/collectStreamText";
 import * as GitHubCredentials from "./GitHubCredentials.ts";
@@ -14,6 +19,7 @@ import * as GitHubRequestPolicy from "./GitHubRequestPolicy.ts";
 import * as SourceControlRateLimit from "@lecturn/source-control-core/server/SourceControlRateLimit";
 
 const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+const MANUAL_REDIRECT: RequestInit = { redirect: "manual" };
 const { gitHubApiUrls, normalizeHost } = GitHubRequestPolicy;
 type GitHubApiError = GitHubRequestPolicy.GitHubApiError;
 
@@ -42,6 +48,11 @@ export interface GitHubRestInput {
   readonly timeout?: Duration.Input;
   /** Overrides `SourceControlRateLimit.Interactive` for this one request. */
   readonly allowReserve?: boolean;
+  /**
+   * Lecturn: a redirect is returned as the answer rather than followed, so the caller decides
+   * what the next hop carries: a presigned log URL must not receive the token.
+   */
+  readonly manualRedirect?: boolean;
 }
 
 export class GitHubRest extends Context.Service<
@@ -102,6 +113,7 @@ function restErrorMessages(body: string): ReadonlyArray<string> | undefined {
 function classify(input: {
   readonly answer: GitHubRestResponse;
   readonly acceptNotModified: boolean;
+  readonly manualRedirect?: boolean;
 }): GitHubRequestPolicy.GitHubAnswer<GitHubRestResponse> {
   const { status, headers, body } = input.answer;
   const meta = { status, headers };
@@ -110,7 +122,11 @@ function classify(input: {
   }
   if (status === 401) return { _tag: "Unauthorized", ...meta };
   if (status === 404) return { _tag: "NotFound", ...meta };
-  if ((status >= 200 && status < 300) || (status === 304 && input.acceptNotModified)) {
+  if (
+    (status >= 200 && status < 300) ||
+    (status === 304 && input.acceptNotModified) ||
+    (input.manualRedirect === true && status >= 300 && status < 400 && status !== 304)
+  ) {
     return { _tag: "Ok", value: input.answer, ...meta };
   }
   return { _tag: "Failed", messages: restErrorMessages(body), ...meta };
@@ -133,6 +149,7 @@ export const make = Effect.gen(function* () {
     readonly timeout?: Duration.Input | undefined;
     readonly allowReserve: boolean;
     readonly acceptNotModified: boolean;
+    readonly manualRedirect: boolean;
   }) {
     const host = normalizeHost(input.host);
     // Only the path: a query string can carry a SHA or a branch, and never needs to be in a trace.
@@ -159,6 +176,9 @@ export const make = Effect.gen(function* () {
               // `GitHubRest.send` is the request's span. The client's own span would add
               // `url.full` and `url.query`, which can carry SHAs and branch names, so it is off.
               Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
+              input.manualRedirect
+                ? Effect.provideService(FetchHttpClient.RequestInit, MANUAL_REDIRECT)
+                : (effect) => effect,
             );
           const collected = yield* collectUint8StreamText({
             stream: response.stream,
@@ -178,7 +198,11 @@ export const make = Effect.gen(function* () {
             truncated: collected.truncated,
             invalidUtf8: collected.invalidUtf8,
           };
-          return classify({ answer, acceptNotModified: input.acceptNotModified });
+          return classify({
+            answer,
+            acceptNotModified: input.acceptNotModified,
+            manualRedirect: input.manualRedirect,
+          });
         }).pipe(
           Effect.mapError(
             (cause) =>
@@ -215,6 +239,7 @@ export const make = Effect.gen(function* () {
           timeout: input.timeout,
           allowReserve: input.allowReserve ?? interactive,
           acceptNotModified: input.ifNoneMatch !== undefined,
+          manualRedirect: input.manualRedirect === true,
         }),
       ),
     );

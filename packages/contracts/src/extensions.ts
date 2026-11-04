@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import {
   EnvironmentId,
   IsoDateTime,
@@ -9,7 +10,7 @@ import {
 const id = TrimmedNonEmptyString.check(Schema.isMaxLength(256));
 const text = (max: number) => Schema.String.check(Schema.isMaxLength(max));
 const counter = NonNegativeInt.check(Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER));
-export const ExtensionFeatureId = Schema.Literals(["decisions", "contextual"]);
+export const ExtensionFeatureId = Schema.Literals(["decisions", "contextual", "squires"]);
 export type ExtensionFeatureId = typeof ExtensionFeatureId.Type;
 export const ExtensionEligibilityReason = Schema.Literals([
   "eligible",
@@ -20,13 +21,83 @@ export const ExtensionEligibilityReason = Schema.Literals([
   "cohort",
   "unavailable",
 ]);
-export const ExtensionFeatureUsage = Schema.Struct({
-  featureId: ExtensionFeatureId,
-  usedInputTokens: counter,
-  reservedInputTokens: counter,
-});
-/** Both features report against this one payer/window descriptor, never separate balances. */
-export const ExtensionAllowance = Schema.Struct({
+/**
+ * Hosts send this header listing the features they can decode. The relay folds every other
+ * feature out of allowances it returns, so a host released before a feature existed keeps working.
+ */
+export const EXTENSION_FEATURES_HEADER = "x-lecturn-extension-features";
+const isKnownFeature = Schema.is(ExtensionFeatureId);
+const MAX_WIRE_FEATURES = 16;
+const featureUsage = <F extends Schema.Top>(featureId: F) =>
+  Schema.Struct({ featureId, usedInputTokens: counter, reservedInputTokens: counter });
+export const ExtensionFeatureUsage = featureUsage(ExtensionFeatureId);
+type FeatureUsage<F extends string> = {
+  readonly featureId: F;
+  readonly usedInputTokens: number;
+  readonly reservedInputTokens: number;
+};
+type FoldableAllowance<F extends string> = {
+  readonly limitInputTokens: number;
+  readonly usedInputTokens: number;
+  readonly reservedInputTokens: number;
+  readonly remainingInputTokens: number;
+  readonly byFeature: ReadonlyArray<FeatureUsage<F>>;
+};
+/**
+ * Drops features the reader cannot name and takes their usage out of the totals and the limit
+ * alike, so the per-feature sums still match and `remainingInputTokens` stays exact.
+ */
+const foldExtensionAllowance = <A extends FoldableAllowance<F>, F extends string, K extends F>(
+  allowance: A & FoldableAllowance<F>,
+  keep: (featureId: F) => featureId is K,
+): Omit<A, "byFeature"> & { readonly byFeature: ReadonlyArray<FeatureUsage<K>> } => {
+  const byFeature: FeatureUsage<K>[] = [];
+  let hiddenUsed = 0;
+  let hiddenReserved = 0;
+  for (const entry of allowance.byFeature) {
+    const featureId = entry.featureId;
+    if (keep(featureId)) byFeature.push({ ...entry, featureId });
+    else {
+      hiddenUsed += entry.usedInputTokens;
+      hiddenReserved += entry.reservedInputTokens;
+    }
+  }
+  return {
+    ...allowance,
+    limitInputTokens: Math.max(0, allowance.limitInputTokens - hiddenUsed - hiddenReserved),
+    usedInputTokens: allowance.usedInputTokens - hiddenUsed,
+    reservedInputTokens: allowance.reservedInputTokens - hiddenReserved,
+    byFeature,
+  };
+};
+/** Every host and client released before features were declared understood exactly these. */
+export const LEGACY_EXTENSION_FEATURES: ReadonlyArray<string> = ["decisions", "contextual"];
+/** The allowance as a reader that declared `features` can decode; undeclared means legacy. */
+const extensionAllowanceFor = <A extends FoldableAllowance<ExtensionFeatureId>>(
+  allowance: A,
+  features: ReadonlyArray<string> | undefined,
+) => {
+  const readable = features ?? LEGACY_EXTENSION_FEATURES;
+  return foldExtensionAllowance(allowance, (featureId): featureId is ExtensionFeatureId =>
+    readable.includes(featureId),
+  );
+};
+/** A funding response with its allowance, if any, reduced to what the reader can decode. */
+export const extensionFundingFor = <A extends object>(
+  value: A,
+  features: ReadonlyArray<string> | undefined,
+): A =>
+  "allowance" in value && value.allowance
+    ? {
+        ...value,
+        allowance: extensionAllowanceFor(value.allowance as ExtensionAllowance, features),
+      }
+    : value;
+/** Optional request field: the features a client can decode. Unknown names are ignored. */
+export const ExtensionReaderFeatures = Schema.optionalKey(
+  Schema.Array(id).check(Schema.isMaxLength(MAX_WIRE_FEATURES)),
+);
+const allowanceFields = <F extends Schema.Top>(featureId: F, maxFeatures: number) => ({
   poolId: id,
   basis: Schema.Literals(["subscription", "grant"]),
   windowStart: IsoDateTime,
@@ -35,37 +106,92 @@ export const ExtensionAllowance = Schema.Struct({
   usedInputTokens: counter,
   reservedInputTokens: counter,
   remainingInputTokens: counter,
-  byFeature: Schema.Array(ExtensionFeatureUsage).check(Schema.isMaxLength(2)),
-}).check(
-  Schema.makeFilter(
-    (v) =>
-      Date.parse(v.windowStart) < Date.parse(v.windowEnd) &&
-      new Set(v.byFeature.map((entry) => entry.featureId)).size === v.byFeature.length &&
-      v.byFeature.reduce((sum, entry) => sum + entry.usedInputTokens, 0) === v.usedInputTokens &&
-      v.byFeature.reduce((sum, entry) => sum + entry.reservedInputTokens, 0) ===
-        v.reservedInputTokens &&
-      Number.isSafeInteger(v.usedInputTokens + v.reservedInputTokens) &&
-      v.remainingInputTokens ===
-        Math.max(0, v.limitInputTokens - v.usedInputTokens - v.reservedInputTokens),
-  ),
+  byFeature: Schema.Array(featureUsage(featureId)).check(Schema.isMaxLength(maxFeatures)),
+});
+const consistentAllowance = Schema.makeFilter(
+  (v: {
+    readonly windowStart: string;
+    readonly windowEnd: string;
+    readonly limitInputTokens: number;
+    readonly usedInputTokens: number;
+    readonly reservedInputTokens: number;
+    readonly remainingInputTokens: number;
+    readonly byFeature: ReadonlyArray<FeatureUsage<string>>;
+  }) =>
+    Date.parse(v.windowStart) < Date.parse(v.windowEnd) &&
+    new Set(v.byFeature.map((entry) => entry.featureId)).size === v.byFeature.length &&
+    v.byFeature.reduce((sum, entry) => sum + entry.usedInputTokens, 0) === v.usedInputTokens &&
+    v.byFeature.reduce((sum, entry) => sum + entry.reservedInputTokens, 0) ===
+      v.reservedInputTokens &&
+    Number.isSafeInteger(v.usedInputTokens + v.reservedInputTokens) &&
+    v.remainingInputTokens ===
+      Math.max(0, v.limitInputTokens - v.usedInputTokens - v.reservedInputTokens),
 );
+/**
+ * Every feature reports against this one payer/window descriptor, never separate balances.
+ * A feature this build does not know decodes as folded-out usage instead of failing the payload.
+ */
+export const ExtensionAllowance = Schema.Struct(allowanceFields(id, MAX_WIRE_FEATURES))
+  .check(consistentAllowance)
+  .pipe(
+    Schema.decodeTo(
+      Schema.toType(
+        Schema.Struct(
+          allowanceFields(ExtensionFeatureId, ExtensionFeatureId.literals.length),
+        ).check(consistentAllowance),
+      ),
+      SchemaTransformation.transform({
+        decode: (wire) => foldExtensionAllowance(wire, isKnownFeature),
+        encode: (allowance) => allowance,
+      }),
+    ),
+  );
 export type ExtensionAllowance = typeof ExtensionAllowance.Type;
-export const ExtensionFeatureAvailability = Schema.Struct({
-  featureId: ExtensionFeatureId,
-  available: Schema.Boolean,
-  enabled: Schema.Boolean,
-  eligible: Schema.Boolean,
-  reason: ExtensionEligibilityReason,
-}).check(
-  Schema.makeFilter((v) =>
+const consistentAvailability = Schema.makeFilter(
+  (v: { readonly eligible: boolean; readonly enabled: boolean; readonly reason: string }) =>
     v.eligible ? v.enabled && v.reason === "eligible" : v.reason !== "eligible",
-  ),
 );
+const featureAvailability = <F extends Schema.Top>(featureId: F) =>
+  Schema.Struct({
+    featureId,
+    available: Schema.Boolean,
+    enabled: Schema.Boolean,
+    eligible: Schema.Boolean,
+    reason: ExtensionEligibilityReason,
+  });
+export const ExtensionFeatureAvailability =
+  featureAvailability(ExtensionFeatureId).check(consistentAvailability);
+type ExtensionFeatureAvailability = typeof ExtensionFeatureAvailability.Type;
+const uniqueFeatures = Schema.makeFilter(
+  (v: ReadonlyArray<{ readonly featureId: string }>) =>
+    new Set(v.map((f) => f.featureId)).size === v.length,
+);
+const WireFeatureAvailability = featureAvailability(id).check(consistentAvailability);
 export const ExtensionServiceStatus = Schema.Struct({
-  features: Schema.Array(ExtensionFeatureAvailability).check(
-    Schema.isMaxLength(2),
-    Schema.makeFilter((v) => new Set(v.map((f) => f.featureId)).size === v.length),
-  ),
+  // Unknown features are dropped: a newer relay never breaks this build's status view.
+  features: Schema.Array(WireFeatureAvailability)
+    .check(Schema.isMaxLength(MAX_WIRE_FEATURES), uniqueFeatures)
+    .pipe(
+      Schema.decodeTo(
+        Schema.toType(
+          Schema.Array(ExtensionFeatureAvailability).check(
+            Schema.isMaxLength(ExtensionFeatureId.literals.length),
+            uniqueFeatures,
+          ),
+        ),
+        SchemaTransformation.transform<
+          ReadonlyArray<ExtensionFeatureAvailability>,
+          ReadonlyArray<typeof WireFeatureAvailability.Type>
+        >({
+          decode: (features) =>
+            features.flatMap((feature) => {
+              const featureId = feature.featureId;
+              return isKnownFeature(featureId) ? [{ ...feature, featureId }] : [];
+            }),
+          encode: (features) => features,
+        }),
+      ),
+    ),
   allowance: Schema.NullOr(ExtensionAllowance),
 });
 export type ExtensionServiceStatus = typeof ExtensionServiceStatus.Type;

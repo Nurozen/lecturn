@@ -74,7 +74,7 @@ const isRecord = (value: unknown): value is JsonRpcMessage =>
  * The effect MCP transport answers in one JSON message, or frames every
  * message as an SSE `data:` event when notifications precede the result.
  */
-const readMessages = (response: HttpServerResponse.HttpServerResponse) => {
+export const readMessages = (response: HttpServerResponse.HttpServerResponse) => {
   if (response.status !== 200 || response.body._tag !== "Uint8Array") return Option.none();
   const text = new TextDecoder().decode(response.body.body);
   const sse = (response.body.contentType ?? "").includes("text/event-stream");
@@ -90,7 +90,7 @@ const readMessages = (response: HttpServerResponse.HttpServerResponse) => {
     : Option.none();
 };
 
-const writeMessages = (
+export const writeMessages = (
   response: HttpServerResponse.HttpServerResponse,
   sse: boolean,
   messages: ReadonlyArray<unknown>,

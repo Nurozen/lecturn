@@ -50,6 +50,7 @@ import {
   threadWokeAt,
 } from "@lecturn/client-runtime/state/thread-settled";
 import { createInboxReturnTracker } from "@lecturn/client-runtime/state/thread-inbox";
+import type { ThreadListingCapabilitiesByEnvironment } from "@lecturn/client-runtime/state/thread-shell";
 import { formatDiffCount } from "@lecturn/client-runtime/diff-count";
 import {
   resolveSettledThreadTimestamp,
@@ -178,6 +179,7 @@ import {
   readThreadShell,
   useProjects,
   useServerConfigs,
+  useThreadListingCapabilities,
   useThreadShells,
 } from "../state/entities";
 import { resolveThreadGitTarget } from "../lib/threadGitTarget";
@@ -290,6 +292,16 @@ import { JumpHintBadge } from "./sidebar/JumpHintBadge";
 import { SidebarRowStatusLine } from "./sidebar/SidebarRowStatusLine";
 import { AppsModeSwitch } from "./apps/AppsModeSwitch";
 import { AppsSidebar } from "./apps/AppsSidebar";
+import { SquiresSidebarGroup } from "./squire/sidebar/SquiresSidebarGroup";
+import {
+  readSquireContainerTrackMenu,
+  readSquireSelectionTrackMenu,
+  readSquireThreadTrackMenu,
+  squireContainerTarget,
+  type SquireContainerTrackMenu,
+} from "./squire/track/readSquireTrack";
+import { buildSquireTrackMenuItems } from "./squire/track/squireTrack.logic";
+import { useSquireTrack } from "./squire/track/useSquireTrack";
 import { sagaSidebarThreadOrder } from "./stave/staveSaga.logic";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { snapshotsPerAccount, useSidebarSegmentation } from "./sidebar/accountProjectGroups";
@@ -2362,6 +2374,7 @@ function partitionForkSidebarThreads(input: {
   readonly archivedProjectKeys: ReadonlySet<string>;
   readonly appProjectKeys: ReadonlySet<string>;
   readonly serverConfigs: ReadonlyMap<EnvironmentId, EnvironmentServerConfig>;
+  readonly listing: ThreadListingCapabilitiesByEnvironment;
   readonly workingShelfEnabled: boolean;
   readonly clockKey: string;
 }) {
@@ -2372,7 +2385,7 @@ function partitionForkSidebarThreads(input: {
   // App threads leave the Projects-mode list but stay findable through search.
   const { outside: visible, inside: appSearchThreads } = partitionThreadsByProjectKeys(
     withoutArchivedStaveProjectThreads(
-      filterSidebarV2VisibleThreads(threads, scopedProjectKeys),
+      filterSidebarV2VisibleThreads(threads, scopedProjectKeys, input.listing),
       archivedProjectKeys,
     ),
     appProjectKeys,
@@ -2434,6 +2447,7 @@ export default function Sidebar() {
   const sidebarMode = useUiStateStore((store) => store.sidebarMode);
   const appsNewThreadTarget = useAppsNewThreadTarget((state) => state.target);
   const threads = useThreadShells();
+  const threadListing = useThreadListingCapabilities();
   const reservedThreadOrderKeys = {
     pinned: new Map(
       threads.map((thread) => [
@@ -2590,6 +2604,7 @@ export default function Sidebar() {
     unsortedProjectGroups,
     threads,
     sidebarProjectSortOrder,
+    threadListing,
   );
   const {
     tree: sagaTree,
@@ -2785,6 +2800,7 @@ export default function Sidebar() {
     archivedProjectKeys,
     appProjectKeys,
     serverConfigs,
+    listing: threadListing,
     workingShelfEnabled,
     clockKey: `${nowMinute}:${snoozeWakeTick}`,
   });
@@ -3499,6 +3515,7 @@ export default function Sidebar() {
   };
 
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
+  const squireTrack = useSquireTrack();
   const handleMultiSelectContextMenu = useStableCallback(
     async (position: { x: number; y: number }) => {
       const api = readLocalApi();
@@ -3543,6 +3560,7 @@ export default function Sidebar() {
         pinnedCount: pinnedSelectedThreads.length,
       });
       const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
+      const squireTrackMenu = readSquireSelectionTrackMenu(selectedThreads);
       const clicked = await settlePromise(() =>
         api.contextMenu.show(
           [
@@ -3586,6 +3604,7 @@ export default function Sidebar() {
                   },
                 ]
               : []),
+            ...(squireTrackMenu ? buildSquireTrackMenuItems(squireTrackMenu.state) : []),
             { id: "mark-unread", label: `Mark unread (${count})` },
             {
               id: "delete",
@@ -3613,6 +3632,10 @@ export default function Sidebar() {
               : selectedThreads;
       if (clicked.value === "settle" && actionTargets.length === 0) return;
       if (clicked.value !== "mark-unread" && !checkThreadOperations(actionTargets)) return;
+      if (squireTrack.handleThreadMenu(squireTrackMenu, clicked.value)) {
+        clearSelection();
+        return;
+      }
       if (clicked.value?.startsWith("snooze:")) {
         const preset =
           clicked.value === "snooze:custom"
@@ -3844,6 +3867,7 @@ export default function Sidebar() {
                 projectRef.projectId === thread.projectId,
             ),
           ) ?? null;
+        const squireTrackMenu = readSquireThreadTrackMenu(thread);
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             buildThreadActionMenuItems({
@@ -3875,12 +3899,16 @@ export default function Sidebar() {
                 fork: readEnvironmentSupportsForking(thread.environmentId),
               },
               snoozePresets,
+              squireTrack: squireTrackMenu
+                ? { isSquireThread: thread.squire != null, menu: squireTrackMenu.state }
+                : null,
             }),
             position,
           ),
         );
         if (clicked._tag === "Failure" || clicked.value === null) return;
         if (threadActionRequiresOperate(clicked.value) && !checkThreadOperations([thread])) return;
+        if (squireTrack.handleThreadMenu(squireTrackMenu, clicked.value)) return;
         if (clicked.value?.startsWith("snooze:")) {
           const preset =
             clicked.value === "snooze:custom"
@@ -4089,14 +4117,46 @@ export default function Sidebar() {
       const entry = readStaveSpaceLifecycleMenuEntry(member);
       return entry ? [{ member, entry }] : [];
     });
-    if (entries.length === 0) return;
+    // A plain project's header has no other menu, so Track alone opens one.
+    const squireMenus = project.memberProjects.flatMap((member) => {
+      const menu = readSquireContainerTrackMenu(
+        member.environmentId,
+        squireContainerTarget(member),
+      );
+      const items = menu ? buildSquireTrackMenuItems(menu.state) : [];
+      return menu && items.length > 0 ? [{ member, menu, items }] : [];
+    });
+    if (entries.length === 0 && squireMenus.length === 0) return;
     event.preventDefault();
     const position = { x: event.clientX, y: event.clientY };
     void (async () => {
       const api = readLocalApi();
       if (!api) return;
+      // Several checkouts each track separately, in their own environment's Squires.
+      const squireItems: ContextMenuItem[] =
+        squireMenus.length === 1
+          ? squireMenus[0]!.items.map((item) => ({ ...item, id: `squire:0|${item.id}` }))
+          : squireMenus.map(({ member, items }, index) => ({
+              id: `squire:${index}`,
+              label: member.environmentLabel ?? member.workspaceRoot,
+              icon: "eye",
+              children: items.map((item) => ({
+                ...item,
+                id: `squire:${index}|${item.id}`,
+                ...(item.children
+                  ? {
+                      children: item.children.map((child) => ({
+                        ...child,
+                        id: `squire:${index}|${child.id}`,
+                      })),
+                    }
+                  : {}),
+              })),
+            }));
       const items: ContextMenuItem[] = [
-        { id: "settings", label: "Space settings", icon: "settings" },
+        ...(entries.length > 0
+          ? [{ id: "settings", label: "Space settings", icon: "settings" }]
+          : []),
         ...entries.map(({ member, entry }, index) => ({
           id: `lifecycle:${index}`,
           label:
@@ -4107,9 +4167,19 @@ export default function Sidebar() {
           disabled: entry.disabled,
           ...(index === 0 ? { separatorBefore: true } : {}),
         })),
+        ...squireItems.map((item, index) =>
+          index === 0 && entries.length > 0 ? { ...item, separatorBefore: true } : item,
+        ),
       ];
       const clicked = await settlePromise(() => api.contextMenu.show(items, position));
       if (clicked._tag === "Failure" || !clicked.value) return;
+      const squireClick = /^squire:(\d+)\|(.+)$/.exec(clicked.value);
+      if (squireClick) {
+        const chosen: SquireContainerTrackMenu | null =
+          squireMenus[Number(squireClick[1])]?.menu ?? null;
+        squireTrack.handleContainerMenu(chosen, squireClick[2]!);
+        return;
+      }
       if (clicked.value === "settings") {
         openProjectSettings(project);
         return;
@@ -4475,6 +4545,7 @@ export default function Sidebar() {
               </p>
             )
           ) : null}
+          <SquiresSidebarGroup isSearching={isSearchingThreads} />
           {!isSearchingThreads && sidebarMode === "apps" ? <AppsSidebar /> : null}
           {!isSearchingThreads && sidebarMode === "projects" ? (
             <TooltipProvider

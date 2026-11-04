@@ -12,6 +12,7 @@ import {
   buildContextualSummaryPrompt,
   buildPrContentPrompt,
   buildReviewGuidePrompt,
+  buildSquireTurnSummaryPrompt,
   buildThreadTitlePrompt,
   buildWorkflowSummaryPrompt,
   normalizeWorkflowSummary,
@@ -248,6 +249,69 @@ export function contextualSummaryFromRunner(
         new TextGenerationError({
           operation: "generateContextualSummary",
           detail: "Contextual summary generation is unavailable.",
+        }),
+    ),
+  );
+}
+
+const oneLine = (value: string) => value.replace(/\s+/g, " ").trim();
+const bullets = (values: ReadonlyArray<string>, max: number) =>
+  values.map(oneLine).filter(Boolean).slice(0, max);
+const optionalLine = (value: string | null) => (value === null ? null : oneLine(value) || null);
+
+/**
+ * Squire turn summaries over `run`. Only providers whose runner isolates the
+ * request from the checkout, tools, and session history may offer this.
+ */
+export function squireTurnSummaryFromRunner(
+  name: string,
+  run: Runner,
+): NonNullable<ProviderTextGeneration["generateSquireTurnSummary"]> {
+  return Effect.fn(`${name}.generateSquireTurnSummary`)(
+    function* (input) {
+      const request = yield* Effect.try({
+        try: () =>
+          buildSquireTurnSummaryPrompt({
+            summaryInput: input.summaryInput,
+            outcome: input.outcome,
+          }),
+        catch: () =>
+          new TextGenerationError({
+            operation: "generateSquireTurnSummary",
+            detail: "Squire turn summary requires bounded run evidence.",
+          }),
+      });
+      const generated = yield* run({
+        operation: "generateSquireTurnSummary",
+        cwd: input.cwd,
+        modelSelection: input.modelSelection,
+        ...request,
+      });
+      const summary = {
+        goal: oneLine(generated.goal),
+        completed: bullets(generated.completed, 5),
+        remaining: bullets(generated.remaining, 3),
+        blocked: generated.blocked
+          .map((entry) => ({ item: oneLine(entry.item), reason: oneLine(entry.reason) }))
+          .filter((entry) => entry.item && entry.reason)
+          .slice(0, 3),
+        pendingQuestion: optionalLine(generated.pendingQuestion),
+        suggestedNextStep: optionalLine(generated.suggestedNextStep),
+      };
+      if (!summary.goal && summary.completed.length === 0) {
+        return yield* new TextGenerationError({
+          operation: "generateSquireTurnSummary",
+          detail: "The provider returned an empty Squire turn summary.",
+        });
+      }
+      return summary;
+    },
+    // Squire callers surface one stable message; provider detail stays in traces.
+    Effect.mapError(
+      () =>
+        new TextGenerationError({
+          operation: "generateSquireTurnSummary",
+          detail: "Squire turn summary generation is unavailable.",
         }),
     ),
   );

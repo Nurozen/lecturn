@@ -260,6 +260,7 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
     undefined,
     snapshot.getSnapshot.pipe(Effect.map((value) => value.models)),
     resolveRuntime,
+    instanceId,
   );
   const protect = <A>(operation: string, effect: Effect.Effect<A, TextGenerationError>) =>
     runtime.auth.controller.withAccess!(effect).pipe(
@@ -289,6 +290,15 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
             protect(
               "generateContextualSummary",
               nativeGeneration.generateContextualSummary!(value),
+            ),
+        }
+      : {}),
+    ...(nativeGeneration.generateSquireTurnSummary
+      ? {
+          generateSquireTurnSummary: (value) =>
+            protect(
+              "generateSquireTurnSummary",
+              nativeGeneration.generateSquireTurnSummary!(value),
             ),
         }
       : {}),

@@ -30,6 +30,7 @@ export interface PersistedUiState {
   sidebarMode?: string;
   sidebarAppScopeKey?: string | null;
   sidebarAppCollapsedByKey?: Record<string, boolean>;
+  sidebarSquireCollapsedByKey?: Record<string, boolean>;
   threadChangedFilesExpansionVersion?: number;
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
   pullRequestMergeMethod?: string;
@@ -46,6 +47,8 @@ export interface UiProjectState {
   sidebarAppScopeKey: string | null;
   /** Only explicit fold choices of Apps-mode groups; each kind of group has its own default. */
   sidebarAppCollapsedByKey: Record<string, boolean>;
+  /** Only explicit fold choices in the Squires group, keyed per environment and Squire. */
+  sidebarSquireCollapsedByKey: Record<string, boolean>;
 }
 
 export interface UiThreadState {
@@ -71,6 +74,7 @@ const initialState: UiState = {
   sidebarMode: "projects",
   sidebarAppScopeKey: null,
   sidebarAppCollapsedByKey: {},
+  sidebarSquireCollapsedByKey: {},
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
@@ -171,6 +175,7 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
     sidebarMode: sanitizeSidebarMode(parsed.sidebarMode),
     sidebarAppScopeKey: sanitizeOptionalKey(parsed.sidebarAppScopeKey),
     sidebarAppCollapsedByKey: sanitizeBooleanRecord(parsed.sidebarAppCollapsedByKey),
+    sidebarSquireCollapsedByKey: sanitizeBooleanRecord(parsed.sidebarSquireCollapsedByKey),
     pullRequestMergeMethod: isPullRequestMergeMethod(parsed.pullRequestMergeMethod)
       ? parsed.pullRequestMergeMethod
       : initialState.pullRequestMergeMethod,
@@ -248,6 +253,7 @@ export function persistState(state: UiState): void {
         sidebarMode: state.sidebarMode,
         sidebarAppScopeKey: state.sidebarAppScopeKey,
         sidebarAppCollapsedByKey: state.sidebarAppCollapsedByKey,
+        sidebarSquireCollapsedByKey: state.sidebarSquireCollapsedByKey,
         threadChangedFilesExpansionVersion: THREAD_CHANGED_FILES_EXPANSION_VERSION,
         threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
         pullRequestMergeMethod: state.pullRequestMergeMethod,
@@ -374,6 +380,18 @@ export function setSidebarAppCollapsed(state: UiState, key: string, collapsed: b
   };
 }
 
+export function setSidebarSquireCollapsed(
+  state: UiState,
+  key: string,
+  collapsed: boolean,
+): UiState {
+  if (key.length === 0 || state.sidebarSquireCollapsedByKey[key] === collapsed) return state;
+  return {
+    ...state,
+    sidebarSquireCollapsedByKey: { ...state.sidebarSquireCollapsedByKey, [key]: collapsed },
+  };
+}
+
 function setPullRequestMergeMethod(state: UiState, method: PullRequestMergeMethod): UiState {
   return state.pullRequestMergeMethod === method
     ? state
@@ -466,6 +484,7 @@ interface UiStateStore extends UiState {
   setSidebarMode: (mode: SidebarMode) => void;
   setSidebarAppScopeKey: (appKey: string | null) => void;
   setSidebarAppCollapsed: (key: string, collapsed: boolean) => void;
+  setSidebarSquireCollapsed: (key: string, collapsed: boolean) => void;
   setPullRequestMergeMethod: (method: PullRequestMergeMethod) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
   reorderProjects: (
@@ -491,6 +510,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   setSidebarAppScopeKey: (appKey) => set((state) => setSidebarAppScopeKey(state, appKey)),
   setSidebarAppCollapsed: (key, collapsed) =>
     set((state) => setSidebarAppCollapsed(state, key, collapsed)),
+  setSidebarSquireCollapsed: (key, collapsed) =>
+    set((state) => setSidebarSquireCollapsed(state, key, collapsed)),
   setPullRequestMergeMethod: (method) => set((state) => setPullRequestMergeMethod(state, method)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),

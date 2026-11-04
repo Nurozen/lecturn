@@ -1,5 +1,6 @@
 import {
   APPS_WS_METHODS,
+  SquireRpcs,
   ORCHESTRATION_V2_WS_METHODS,
   WS_METHODS,
   type WsRpcGroup,
@@ -284,6 +285,10 @@ const RPC_AGGREGATES = {
   [WS_METHODS.pullRequestWatchConfigure]: "pullRequestWatch",
   ...(Object.fromEntries(Object.values(APPS_WS_METHODS).map((method) => [method, "apps"])) as {
     readonly [Method in (typeof APPS_WS_METHODS)[keyof typeof APPS_WS_METHODS]]: "apps";
+  }),
+  // Lecturn: Squire RPCs.
+  ...(Object.fromEntries(SquireRpcs.map((rpc) => [rpc._tag, "squire"])) as {
+    readonly [Method in (typeof SquireRpcs)[number]["_tag"]]: "squire";
   }),
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 

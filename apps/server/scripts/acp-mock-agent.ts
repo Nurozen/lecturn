@@ -144,6 +144,15 @@ const permissionRequestCount = Math.max(
   1,
   Number(process.env.LECTURN_ACP_PERMISSION_REQUEST_COUNT ?? "1") || 1,
 );
+// Lecturn: per-request `kind|title` pairs, comma separated, for policy tests
+// that mix an app tool call with a native one in one turn.
+const permissionToolCalls = (process.env.LECTURN_ACP_PERMISSION_TOOL_CALLS ?? "")
+  .split(",")
+  .filter((entry) => entry.length > 0)
+  .map((entry) => {
+    const [kind, title] = entry.split("|");
+    return { kind: kind as AcpSchema.ToolKind, title: title ?? kind };
+  });
 const sessionId = "mock-session-1";
 
 let currentModeId = antigravityProfile
@@ -2022,20 +2031,31 @@ const program = Effect.gen(function* () {
         ];
 
         let cancelled = cancelledSessions.delete(requestedSessionId);
-        for (let index = 0; index < permissionRequestCount; index++) {
+        for (
+          let index = 0;
+          index < Math.max(permissionRequestCount, permissionToolCalls.length);
+          index++
+        ) {
+          const toolCallOverride = permissionToolCalls[index];
           const command =
             index > 0
               ? (process.env.LECTURN_ACP_SECOND_PERMISSION_COMMAND ?? "cat server/package.json")
               : "cat server/package.json";
           const permission = yield* agent.client.requestPermission({
             sessionId: requestedSessionId,
-            title: process.env.LECTURN_ACP_PERMISSION_TITLE ?? `\`${command}\``,
+            title:
+              toolCallOverride?.title ??
+              process.env.LECTURN_ACP_PERMISSION_TITLE ??
+              `\`${command}\``,
             subject: {
               type: "tool_call",
               toolCall: {
                 toolCallId: index === 0 ? toolCallId : `${toolCallId}-${index + 1}`,
-                title: process.env.LECTURN_ACP_PERMISSION_TITLE ?? `\`${command}\``,
-                kind: "execute",
+                title:
+                  toolCallOverride?.title ??
+                  process.env.LECTURN_ACP_PERMISSION_TITLE ??
+                  `\`${command}\``,
+                kind: toolCallOverride?.kind ?? "execute",
                 status: "pending",
                 rawInput: {
                   variant: "Bash",

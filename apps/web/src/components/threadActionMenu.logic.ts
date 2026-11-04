@@ -1,6 +1,12 @@
 import type { ContextMenuItem } from "@lecturn/contracts";
 import type { SnoozePreset } from "@lecturn/client-runtime/state/thread-settled";
 
+import {
+  buildSquireTrackMenuItems,
+  type SquireTrackMenuId,
+  type SquireTrackMenuState,
+} from "./squire/track/squireTrack.logic";
+
 export type ThreadActionMenuId =
   | "new-thread-on-branch"
   | "filter-by-project"
@@ -24,7 +30,8 @@ export type ThreadActionMenuId =
   | "copy-branch"
   | "copy-thread-id"
   | "archive"
-  | "delete";
+  | "delete"
+  | SquireTrackMenuId;
 
 export type DraftActionMenuId =
   | "copy"
@@ -91,6 +98,12 @@ export interface ThreadActionMenuState {
     readonly fork: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
+  /** Null without a Squire-capable environment or any Squire this client may track with. */
+  readonly squireTrack?: {
+    /** Squire home and probe threads are never trackable. */
+    readonly isSquireThread: boolean;
+    readonly menu: SquireTrackMenuState;
+  } | null;
 }
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
@@ -205,6 +218,9 @@ export function buildThreadActionMenuItems(
             ],
           },
         ]
+      : []),
+    ...(state.squireTrack && !state.squireTrack.isSquireThread
+      ? buildSquireTrackMenuItems(state.squireTrack.menu)
       : []),
     {
       id: "copy",

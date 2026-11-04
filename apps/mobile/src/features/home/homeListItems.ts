@@ -19,6 +19,11 @@ import type {
 } from "@lecturn/client-runtime/state/shell";
 
 import type { HomeThreadGroup } from "./homeThreadList";
+import {
+  homeSquireItemsAreEqual,
+  isHomeSquireItem,
+  type HomeSquireItem,
+} from "../squires/squireHomeItems.logic";
 
 /** Threads shown per project before the "Show more" affordance appears. */
 export const HOME_INITIAL_VISIBLE_THREADS = 6;
@@ -74,7 +79,9 @@ export interface HomeAppWorkspaceHeaderListItem {
 export type HomeListItem =
   | HomeAccountHeaderListItem
   | HomeHeaderListItem
-  | HomeAppWorkspaceHeaderListItem;
+  | HomeAppWorkspaceHeaderListItem
+  // Lecturn: the Squires section.
+  | HomeSquireItem;
 
 export type HomeGroupDisplayAction = "toggle-collapsed" | "show-more" | "show-less";
 
@@ -101,6 +108,8 @@ export function nextGroupDisplayState(
  */
 export function homeListItemsAreEqual(previous: HomeListItem, item: HomeListItem): boolean {
   if (previous.depth !== item.depth) return false;
+  if (isHomeSquireItem(item))
+    return isHomeSquireItem(previous) && homeSquireItemsAreEqual(previous, item);
   switch (item.type) {
     case "account-header":
       return (
@@ -223,6 +232,7 @@ export type HomeHierarchyV2Item = (
   | ThreadListV2ListItem
   | HomeHeaderListItem
   | HomeAccountHeaderListItem
+  | HomeSquireItem
 ) & {
   readonly depth?: number;
   readonly settledBranch?: boolean;
@@ -237,6 +247,8 @@ export function buildHomeHierarchyV2Items(input: {
   readonly displayStates: ReadonlyMap<string, HomeGroupDisplayState>;
   readonly searching?: boolean;
   readonly selectedThreadKey?: string | null;
+  /** Lecturn: the Squires section, placed above the project tree in each account section. */
+  readonly squires?: ReadonlyArray<HomeSquireItem>;
 }): HomeHierarchyV2Item[] {
   if (input.accountSections) {
     const context = input.accountSections;
@@ -256,13 +268,22 @@ export function buildHomeHierarchyV2Items(input: {
           environmentId !== undefined && accountForEnvironment(context, environmentId) === accountId
         );
       });
-      if (!account && groups.length === 0 && items.length === 0) return [];
+      const squires = (input.squires ?? []).filter(
+        (item) => accountForEnvironment(context, item.environmentId) === accountId,
+      );
+      if (!account && groups.length === 0 && items.length === 0 && squires.length === 0) return [];
       const header = makeAccountHeader(account, groups, input.displayStates, input.searching);
       return [
         header,
         ...(header.collapsed
           ? []
-          : buildHomeHierarchyV2Items({ ...input, accountSections: undefined, groups, items })),
+          : buildHomeHierarchyV2Items({
+              ...input,
+              accountSections: undefined,
+              groups,
+              items,
+              squires,
+            })),
       ];
     });
     // Shelf expansion is a device preference; retain its control while rows remain account-scoped.
@@ -280,9 +301,10 @@ export function buildHomeHierarchyV2Items(input: {
       ).map((ref) => [JSON.stringify([ref.environmentId, ref.projectId]), group.key] as const),
     ),
   );
-  const result: HomeHierarchyV2Item[] = input.items.filter(
-    (row) => row.type === "v2-snoozed-shelf",
-  );
+  const result: HomeHierarchyV2Item[] = [
+    ...input.items.filter((row) => row.type === "v2-snoozed-shelf"),
+    ...(input.squires ?? []),
+  ];
   const rows = input.items.filter(
     (row) => row.type !== "v2-settled-shelf" && row.type !== "v2-snoozed-shelf",
   );

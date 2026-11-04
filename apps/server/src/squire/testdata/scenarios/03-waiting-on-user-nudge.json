@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 2,
+  "id": "03-waiting-on-user-nudge",
+  "setup": {
+    "squire": {
+      "name": "Release",
+      "brief": "Done means CI green and PR approved. Stay quiet on routine progress. Prefer small, specific steers.",
+      "provider": "under-test",
+      "createdAt": "2026-10-01T09:00:00Z",
+      "timezone": "America/Los_Angeles"
+    },
+    "scope": [
+      {
+        "kind": "project",
+        "name": "billing-service"
+      },
+      {
+        "kind": "project",
+        "name": "Observatory"
+      }
+    ],
+    "threads": [
+      {
+        "threadId": "thr_plan_constellation_explorer",
+        "title": "Plan the constellation explorer",
+        "project": "Observatory",
+        "provider": "claudeAgent"
+      }
+    ],
+    "permissions": {
+      "steer": "recommend",
+      "createThread": "recommend",
+      "notify": "on"
+    },
+    "undoWindowSeconds": 10,
+    "budgetUsage": {
+      "steersPerDay": {
+        "used": 0,
+        "limit": 10
+      },
+      "threadsPerDay": {
+        "used": 0,
+        "limit": 3
+      },
+      "steersPerThreadPerHour": {
+        "limit": 2,
+        "usedByThread": {}
+      }
+    }
+  },
+  "events": [
+    {
+      "type": "waiting-on-user",
+      "pendingItemId": "req_offline_or_api",
+      "waitingMinutes": 45,
+      "thresholdMinutes": 30,
+      "summary": {
+        "threadId": "thr_plan_constellation_explorer",
+        "threadTitle": "Plan the constellation explorer",
+        "project": "Observatory",
+        "provider": "claudeAgent",
+        "turnId": "t_3",
+        "outcome": "waiting-on-input",
+        "summaryStatus": "complete",
+        "goal": "Plan the constellation explorer",
+        "completed": [],
+        "remaining": [],
+        "blocked": [],
+        "files": {
+          "entries": [],
+          "counts": {
+            "added": 0,
+            "modified": 0,
+            "deleted": 0
+          }
+        },
+        "commands": [],
+        "pullRequest": null,
+        "pendingQuestion": "Should the catalog ship offline-only, or fetch updates from the Yale Bright Star API?",
+        "suggestedNextStep": "Answer Offline-only: bundling the catalog keeps the explorer working with no network calls"
+      },
+      "evidence": {
+        "pendingRequest": {
+          "question": "Should the catalog ship offline-only, or fetch updates from the Yale Bright Star API?",
+          "options": [
+            {
+              "label": "Offline-only",
+              "description": "Bundle the catalog with the app; no network calls."
+            },
+            {
+              "label": "Fetch from the API",
+              "description": "Pull catalog updates from the Yale Bright Star API."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "waiting-on-user",
+      "pendingItemId": "req_offline_or_api",
+      "waitingMinutes": 45,
+      "thresholdMinutes": 30,
+      "summary": {
+        "threadId": "thr_plan_constellation_explorer",
+        "threadTitle": "Plan the constellation explorer",
+        "project": "Observatory",
+        "provider": "claudeAgent",
+        "turnId": "t_3",
+        "outcome": "waiting-on-input",
+        "summaryStatus": "complete",
+        "goal": "Plan the constellation explorer",
+        "completed": [],
+        "remaining": [],
+        "blocked": [],
+        "files": {
+          "entries": [],
+          "counts": {
+            "added": 0,
+            "modified": 0,
+            "deleted": 0
+          }
+        },
+        "commands": [],
+        "pullRequest": null,
+        "pendingQuestion": "Should the catalog ship offline-only, or fetch updates from the Yale Bright Star API?",
+        "suggestedNextStep": "Answer Offline-only: bundling the catalog keeps the explorer working with no network calls"
+      },
+      "evidence": {
+        "pendingRequest": {
+          "question": "Should the catalog ship offline-only, or fetch updates from the Yale Bright Star API?",
+          "options": [
+            {
+              "label": "Offline-only",
+              "description": "Bundle the catalog with the app; no network calls."
+            },
+            {
+              "label": "Fetch from the API",
+              "description": "Pull catalog updates from the Yale Bright Star API."
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "expected": {
+    "deliveredEvents": 1,
+    "toolCalls": ["squire_notify"],
+    "cardTarget": null,
+    "effects": {
+      "notification_pushed": 1
+    },
+    "mustNotHappen": [
+      "card_created",
+      "proposal_created",
+      "action_held",
+      "steer_sent",
+      "thread_created"
+    ],
+    "ignore": ["squire_list_tracked", "squire_get_summary", "squire_get_detail"],
+    "note": "The second event has the same (squireId, threadId, eventKind, pendingItemId) key and is dropped by the Squire event queue, so Squire receives one event."
+  }
+}

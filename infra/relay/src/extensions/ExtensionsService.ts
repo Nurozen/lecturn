@@ -11,6 +11,9 @@ import {
   DecisionEvaluationRequest,
   DecisionEvaluationJudgment,
   ExtensionEvaluatorResult,
+  SquireRoutingJudgment,
+  SquireRoutingRequest,
+  squireRoutingJudgmentMatches,
   type ExtensionFeatureId,
   type ExtensionServiceStatus,
   type ExtensionEvaluationStatusRequest,
@@ -31,6 +34,7 @@ const requestSchema = Schema.Union([
   ContextualConflictCheckRequest,
   ContextualEquivalenceCheckRequest,
   DecisionEvaluationRequest,
+  SquireRoutingRequest,
 ]);
 const decodeEvaluatorResult = Schema.decodeUnknownEffect(ExtensionEvaluatorResult);
 const decodeRequest = Schema.decodeUnknownEffect(requestSchema);
@@ -38,6 +42,8 @@ const decodeContextual = Schema.decodeUnknownEffect(Schema.Array(ContextualJudgm
 const decodeConflicts = Schema.decodeUnknownEffect(Schema.Array(ContextualConflictJudgment));
 const decodeEquivalence = Schema.decodeUnknownEffect(Schema.Array(ContextualEquivalenceJudgment));
 const decodeDecisions = Schema.decodeUnknownEffect(Schema.Array(DecisionEvaluationJudgment));
+const decodeSquireRouting = Schema.decodeUnknownEffect(Schema.Array(SquireRoutingJudgment));
+const extensionFeatures = ["decisions", "contextual", "squires"] as const;
 const invalid = () => decisionError("invalid", "Invalid extension evaluation");
 /** Canonical JSON makes identity independent of request object insertion order. */
 export function extensionCanonicalJson(value: unknown): string {
@@ -54,6 +60,13 @@ export function extensionJudgmentsMatch(
   request: typeof requestSchema.Type,
   result: ExtensionEvaluatorResult,
 ): boolean {
+  if (result.policyVersion === "squire-routing-v1")
+    return (
+      "members" in request &&
+      result.judgments.length === 1 &&
+      squireRoutingJudgmentMatches(request, result.judgments[0]!)
+    );
+  if ("members" in request) return false;
   const targets = "pairs" in request ? request.pairs : request.targets;
   const ids = result.judgments.map((j) => ("pairId" in j ? j.pairId : j.targetId));
   if (
@@ -115,6 +128,11 @@ export const makeExtensionsService = (
         ...config.contextual,
         featureId: "contextual",
       }),
+      squires: yield* makeExtensionsUsageStore<unknown>({
+        ...config.shared,
+        ...config.squires,
+        featureId: "squires",
+      }),
     };
     const fingerprint = Effect.fn("Extensions.fingerprint")(function* (request: unknown) {
       return yield* crypto
@@ -130,7 +148,7 @@ export const makeExtensionsService = (
       const available = yield* evaluator.available;
       const features = [];
       let allowance: ExtensionServiceStatus["allowance"] = null;
-      for (const featureId of ["decisions", "contextual"] as const) {
+      for (const featureId of extensionFeatures) {
         const access = yield* funding[featureId].access.status(payerId);
         features.push({
           featureId,
@@ -147,7 +165,7 @@ export const makeExtensionsService = (
     const evaluate = Effect.fn("Extensions.evaluate")(function* (
       host: EnvironmentCredentialPrincipal,
       raw: unknown,
-      operation: "relevance" | "conflicts" | "equivalence" | "decisions",
+      operation: "relevance" | "conflicts" | "equivalence" | "decisions" | "squire-routing",
     ) {
       const decoded = yield* decodeRequest(raw, { onExcessProperty: "error" }).pipe(
         Effect.mapError(invalid),
@@ -173,13 +191,16 @@ export const makeExtensionsService = (
             ? "contextual-conflict-v1"
             : operation === "equivalence"
               ? "decisions-equivalence-v1"
-              : "contextual-v1";
+              : operation === "squire-routing"
+                ? "squire-routing-v1"
+                : "contextual-v1";
       if (
         (operation === "conflicts") !== "pairs" in request ||
         (operation === "decisions") !== !("featureId" in request) ||
         (operation === "equivalence") !==
           (request.templateVersion === "decisions-equivalence-v1") ||
-        (operation === "relevance" && featureId !== "contextual")
+        (operation === "relevance" && featureId !== "contextual") ||
+        (operation === "squire-routing") !== (featureId === "squires")
       )
         return yield* invalid();
       const { payerId } = yield* funding[featureId].requireFunding(host, request.fundingGeneration);
@@ -341,6 +362,13 @@ export const makeExtensionsService = (
                 unexaminedCount: 0,
               },
             };
+          if (operation === "squire-routing")
+            return {
+              ...common,
+              judgments: yield* decodeSquireRouting(result.judgments).pipe(
+                Effect.mapError(invalid),
+              ),
+            };
           if (operation === "equivalence")
             return {
               ...common,
@@ -417,7 +445,7 @@ export const makeExtensionsService = (
     });
     const reconcilePrivate = Effect.fn("Extensions.reconcilePrivate")(function* () {
       if (!(yield* evaluator.available)) return;
-      for (const featureId of ["decisions", "contextual"] as const) {
+      for (const featureId of extensionFeatures) {
         const store = usage[featureId];
         for (const attempt of yield* store.recoveryAttempts())
           yield* Effect.gen(function* () {

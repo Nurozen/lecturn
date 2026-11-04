@@ -77,6 +77,9 @@ those nudges share one worker with its minute sweep. It reuses the operation reg
 locks and leased cleanup helpers.
 See [Stave integration](./stave-integration.md) for lifecycle persistence and recovery.
 
+Squires follow the same pattern: they react to committed events beside the orchestrator and
+write only through ordinary commands. See [Squires](./squire.md).
+
 ## Turn completion and checkpoints
 
 A provider turn ending and its follow-up work settling are separate milestones. Orchestration

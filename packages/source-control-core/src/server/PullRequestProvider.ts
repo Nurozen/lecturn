@@ -117,6 +117,8 @@ export interface ProviderChangeRequestSummary {
    * Null when the host says it is in none; absent when the read did not ask.
    */
   readonly stack?: PullRequestStackMembership | null | undefined;
+  /** Lecturn: see PullRequestSummary.headSha in contracts; null matches the detail read. */
+  readonly headSha?: string | null | undefined;
 }
 
 export interface ProviderChangeRequestStackLayer {
@@ -253,6 +255,31 @@ export interface ProviderAcceptanceEvidence {
   readonly blockers: ReadonlyArray<string>;
 }
 
+/** Lecturn: one failing CI job of a head revision, as the host reported it, for the Squire CI excerpt. */
+export interface ProviderCiFailureJob {
+  readonly name: string;
+  readonly url: string | null;
+  /** The host's failure annotations, in its order; empty when it had none to give. */
+  readonly annotations: ReadonlyArray<string>;
+  /**
+   * The start of the job's log, at most the asked byte bound. Null when the annotations were
+   * enough, or when the host refused or had no log (`logUnavailable`).
+   */
+  readonly log: { readonly text: string; readonly truncated: boolean } | null;
+  readonly logUnavailable: boolean;
+}
+
+/** Lecturn: the failing checks of a head revision with the excerpt sources of the first few. */
+export interface ProviderCiFailure {
+  readonly checks: {
+    readonly passed: number;
+    readonly failed: number;
+    readonly failingJobs: ReadonlyArray<string>;
+  };
+  /** Only the jobs whose log the host can serve, at most the asked count. */
+  readonly jobs: ReadonlyArray<ProviderCiFailureJob>;
+}
+
 export interface PullRequestProviderApi {
   readonly withVerifiedCredential?: <A, E, R>(
     input: { readonly cwd: string; readonly host: string },
@@ -288,6 +315,18 @@ export interface PullRequestProviderApi {
   readonly readAcceptanceEvidence?: (
     input: ProviderRepositoryRef & { readonly number: number },
   ) => Effect.Effect<ProviderAcceptanceEvidence, PullRequestProviderError>;
+  /**
+   * Lecturn: a background read, so it spends no reserved quota and asks nothing of the user. A
+   * bounded number of requests: one listing, then at most three per job.
+   */
+  readonly readCiFailure?: (
+    input: ProviderRepositoryRef & {
+      readonly number: number;
+      readonly headRevision: string;
+      readonly maxJobs: number;
+      readonly maxLogBytes: number;
+    },
+  ) => Effect.Effect<ProviderCiFailure, PullRequestProviderError>;
   readonly mergeMessageRewrite?: (message: string) => string;
   /**
    * Absent means `owner/name` on the host identifies it, and any checkout on the host can serve a

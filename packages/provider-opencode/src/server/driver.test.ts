@@ -88,6 +88,16 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("reports the installed OpenCode's Squire gap on the instance", () =>
+    Effect.gen(function* () {
+      serverStarts.length = 0;
+      const instance = yield* create({}, noHttp);
+      const gap = yield* instance.orchestrationAdapter?.squireReadiness ?? Effect.succeed(null);
+      assert.include(gap ?? "", "OpenCode 2");
+      assert.deepStrictEqual(serverStarts, []);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("lists an OpenCode 2 workspace's own skills and commands from its server", () =>
     Effect.gen(function* () {
       serverStarts.length = 0;

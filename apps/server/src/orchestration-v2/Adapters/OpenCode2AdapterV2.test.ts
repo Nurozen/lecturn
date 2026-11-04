@@ -52,7 +52,7 @@ import {
 } from "@lecturn/provider-opencode/testing";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { makeAppToolsUnavailableNotices } from "../../apps/appToolsUnavailableNotice.ts";
-import { openCode2ReplayRuntime } from "./OpenCode2AdapterV2.testkit.ts";
+import { openCode2ReplayAdapter, openCode2ReplayRuntime } from "./OpenCode2AdapterV2.testkit.ts";
 import {
   makeProviderReplayGate,
   type ProviderReplayGate,
@@ -5530,5 +5530,36 @@ it.layer(McpProviderSessions.layer)("OpenCode reported model variants", (it) => 
           ["default", "thinking", "none", "none"],
         );
       }).pipe(Effect.scoped),
+  );
+});
+
+describe("OpenCode2 adapter and Squires", () => {
+  it.effect("says why it cannot host a Squire and opens no shared session for one", () =>
+    Effect.gen(function* () {
+      const borrowers = { current: 0 };
+      const adapter = yield* openCode2ReplayAdapter({ borrowers });
+      const reason = yield* adapter.squireReadiness ?? Effect.succeed(null);
+      assert.isString(reason);
+      for (const squireIsolation of ["home", "probe"] as const) {
+        const opened = yield* adapter
+          .openSession({
+            threadId: ThreadId.make("thread:opencode2-squire"),
+            providerSessionId: ProviderSessionId.make("provider-session:opencode2-squire"),
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("opencode"),
+              model: "opencode/big-pickle",
+            },
+            runtimePolicy: {
+              runtimeMode: "approval-required",
+              interactionMode: "default",
+              cwd: "/work/opencode2",
+              squireIsolation,
+            },
+          })
+          .pipe(Effect.exit);
+        assert.isTrue(Exit.isFailure(opened));
+      }
+      assert.equal(borrowers.current, 0);
+    }).pipe(Effect.scoped, Effect.provide(McpProviderSessions.layer)),
   );
 });

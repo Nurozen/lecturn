@@ -28,6 +28,11 @@ import {
   isAntigravityTextGenerationAvailable,
   makeAntigravityTextGeneration,
 } from "./AntigravityTextGeneration.ts";
+import {
+  squireSummaryExpectedFixture,
+  squireSummaryInputFixture,
+  squireSummaryReplyFixture,
+} from "./squireSummaryTestFixtures.ts";
 
 type TextRuntime = Effect.Success<ReturnType<AntigravityTextGenerationOptions["makeRuntime"]>>;
 
@@ -376,6 +381,43 @@ it.layer(NodeServices.layer)("AntigravityTextGeneration", (it) => {
       expect(result).toEqual({ text: "SQLite supports the local cache." });
       expect(fixture.state.workspaces).not.toContain(fixture.projectDirectory);
       expect(fixture.state.selectedModels).toEqual([modelSelection.model]);
+      yield* fixture.assertCleaned;
+    }).pipe(Effect.scoped),
+  );
+  it.effect("uses isolated subscription generation for Squire turn summaries", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({
+        outputs: [JSON.stringify(squireSummaryReplyFixture)],
+      });
+      const result = yield* fixture.textGeneration.generateSquireTurnSummary!({
+        cwd: fixture.projectDirectory,
+        modelSelection,
+        summaryInput: squireSummaryInputFixture,
+        outcome: "finished",
+      });
+      expect(result).toEqual(squireSummaryExpectedFixture);
+      expect(fixture.state.workspaces).not.toContain(fixture.projectDirectory);
+      expect(fixture.state.selectedModels).toEqual([modelSelection.model]);
+      yield* fixture.assertCleaned;
+    }).pipe(Effect.scoped),
+  );
+  it.effect("hides an attempted tool call behind the stable Squire summary error", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({
+        prompt: ({ emit }) =>
+          emit({ sessionUpdate: "tool_call", toolCallId: "tool-1", title: "Read files" }).pipe(
+            Effect.andThen(Effect.never),
+          ),
+      });
+      const error = yield* fixture.textGeneration.generateSquireTurnSummary!({
+        cwd: fixture.projectDirectory,
+        modelSelection,
+        summaryInput: squireSummaryInputFixture,
+        outcome: "finished",
+      }).pipe(Effect.flip);
+      expect(error.detail).toBe("Squire turn summary generation is unavailable.");
+      expect(error.cause).toBeUndefined();
+      expect(fixture.state.cancellations).toBe(1);
       yield* fixture.assertCleaned;
     }).pipe(Effect.scoped),
   );

@@ -23,7 +23,7 @@ import {
 import { makeStreamingTimelineFixture } from "../../test-fixtures";
 import type { TurnDiffSummary } from "../../types";
 import { describe, expect, it } from "vite-plus/test";
-import { EnvironmentId, MessageId, RunId } from "@lecturn/contracts";
+import { EnvironmentId, MessageId, RunId, SquireId } from "@lecturn/contracts";
 import { serializeAssistantCitation } from "@lecturn/shared/assistantCitations";
 import {
   computeStableMessagesTimelineRows,
@@ -46,6 +46,8 @@ import {
   resolveTimelineMinimapTopPercent,
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
+  squireEventBatchLabel,
+  squireTurnFoldLabel,
   threadReadLabelPrefix,
   threadReadTargetId,
   threadReadTargetTitle,
@@ -5149,6 +5151,154 @@ it.each([true, false])(
     if (isWorking) expect(rows.find((row) => row.id === boundary)?.createdAt).toBe(time(40));
   },
 );
+
+describe("Squire home thread event rows", () => {
+  const time = (second: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, second)).toISOString();
+  const batch = (eventKinds: ReadonlyArray<string> | undefined, summary: string) => ({
+    source: {
+      kind: "squire" as const,
+      squireId: SquireId.make("lead"),
+      eventCount: eventKinds?.length ?? 2,
+      ...(eventKinds === undefined ? {} : { eventKinds }),
+    },
+    summary,
+  });
+
+  it("labels a batch by its distinct event kinds", () => {
+    expect(squireEventBatchLabel(batch(["item-raised"], "1 Squire event: item-raised"))).toBe(
+      "Squire update · item raised",
+    );
+    expect(
+      squireEventBatchLabel(
+        batch(["item-raised", "item-resolved", "item-raised"], "3 Squire events: …"),
+      ),
+    ).toBe("Squire update · 3 events: item raised, item resolved");
+    expect(squireEventBatchLabel(batch(undefined, "2 Squire events"))).toBe(
+      "Squire update · 2 events",
+    );
+  });
+
+  it("keeps a Squire's handoff line, which says more than its kind", () => {
+    expect(squireEventBatchLabel(batch(["message"], "Release → Lead: PR #12 is green"))).toBe(
+      "Squire update · Release → Lead: PR #12 is green",
+    );
+    expect(squireEventBatchLabel(batch(["message"], "1 Squire event: message"))).toBe(
+      "Squire update · message",
+    );
+  });
+
+  it("leaves other notifications alone", () => {
+    expect(
+      squireEventBatchLabel({
+        source: { kind: "background_task" },
+        summary: "Delegated task finished",
+      }),
+    ).toBeNull();
+  });
+
+  const rows = (compactSquireEvents: boolean) =>
+    deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          kind: "work" as const,
+          id: "batch",
+          createdAt: time(1),
+          entry: {
+            id: "batch",
+            runId: RunId.make("wake"),
+            createdAt: time(1),
+            label: "1 Squire event: item-raised",
+            tone: "info" as const,
+            itemType: "notification" as const,
+            // Only the notification fields matter here; the turn item's ids do not.
+            structuredPayload: {
+              type: "notification",
+              outcome: "updated",
+              ...batch(["item-raised"], "1 Squire event: item-raised"),
+            } as never,
+          },
+        },
+        {
+          kind: "work" as const,
+          id: "tool",
+          createdAt: time(2),
+          entry: {
+            id: "tool",
+            runId: RunId.make("wake"),
+            createdAt: time(2),
+            label: "Ran command",
+            tone: "tool" as const,
+          },
+        },
+        {
+          kind: "message" as const,
+          id: "reply",
+          createdAt: time(3),
+          message: {
+            id: MessageId.make("reply"),
+            role: "assistant" as const,
+            text: "Noted.",
+            runId: RunId.make("wake"),
+            createdAt: time(3),
+            updatedAt: time(3),
+            streaming: false,
+          },
+        },
+      ],
+      latestRun: {
+        runId: RunId.make("wake"),
+        status: "completed",
+        startedAt: time(1),
+        completedAt: time(3),
+      },
+      isWorking: false,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+      compactSquireEvents,
+    });
+  const batchLabel = (list: ReadonlyArray<MessagesTimelineRow>) => {
+    const row = list.find((candidate) => candidate.id === "batch");
+    return row?.kind === "work" ? row.displayLabel : undefined;
+  };
+
+  const foldLabel = (list: ReadonlyArray<MessagesTimelineRow>) => {
+    const row = list.find((candidate) => candidate.kind === "turn-fold");
+    return row?.kind === "turn-fold" ? row.label : undefined;
+  };
+
+  it("on a Squire thread, shows one compact row per batch and folds the calls as Tool calls", () => {
+    const compact = rows(true);
+    expect(batchLabel(compact)).toBe("Squire update · item raised");
+    expect(compact.map((row) => row.id)).toEqual(["batch", "turn-fold:wake", "reply"]);
+    expect(foldLabel(compact)).toBe("Tool calls (1)");
+  });
+
+  it("leaves an ordinary thread's rows as they were", () => {
+    const ordinary = rows(false);
+    expect(batchLabel(ordinary)).toBeUndefined();
+    expect(ordinary.map((row) => row.id)).toEqual(["batch", "turn-fold:wake", "reply"]);
+    expect(foldLabel(ordinary)).toMatch(/^Worked for /);
+  });
+
+  it("counts only the folded tool calls, not thoughts or replies", () => {
+    const work = (id: string, tone: "tool" | "thinking" | "info") => ({
+      kind: "work" as const,
+      id,
+      createdAt: time(1),
+      entry: { id, createdAt: time(1), label: id, tone },
+    });
+    const entries = [
+      work("a", "tool"),
+      work("b", "tool"),
+      work("t", "thinking"),
+      work("n", "info"),
+    ];
+    expect(squireTurnFoldLabel(entries, new Set(["a", "b", "t", "n"]))).toBe("Tool calls (2)");
+    // A call outside this fold is not counted.
+    expect(squireTurnFoldLabel(entries, new Set(["a", "t"]))).toBe("Tool calls (1)");
+    expect(squireTurnFoldLabel(entries, new Set(["t", "n"]))).toBe("Details");
+  });
+});
 
 it("keeps the working header in place across worktree setup handoff", () => {
   const snapshot: WorktreeSetupSnapshot = {

@@ -157,6 +157,7 @@ export function normalizeCliError(
   if (
     operation === "generateWorkflowSummary" ||
     operation === "generateContextualSummary" ||
+    operation === "generateSquireTurnSummary" ||
     operation === "generateDecisionNotes"
   ) {
     return privateTextGenerationError(operation, fallback);

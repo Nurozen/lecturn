@@ -15,6 +15,7 @@ import {
   ProviderInstanceId,
   ProviderThreadId,
   RunId,
+  SquireId,
   ThreadId,
 } from "@lecturn/contracts";
 import type { ProviderInstance } from "@lecturn/provider-core/server/driver";
@@ -167,6 +168,8 @@ const appFieldsOf = (value: object | null | undefined) =>
     ),
   );
 
+const squire = { squireId: SquireId.make("squire:lead"), role: "home" } as const;
+
 const continuedIn = {
   environmentId: EnvironmentId.make("environment:user"),
   threadId: ThreadId.make("thread:user-copy"),
@@ -281,6 +284,13 @@ describe("thread app metadata helpers", () => {
       appData: "x",
       appOrigin: "embed",
     });
+    assert.deepEqual(threadAppMetadataOf({ squire }), { squire });
+  });
+
+  it("keeps the Squire marker when app data changes", () => {
+    const marked = { ...thread, squire } as never;
+    const set = applyThreadAppMetadataCommand(marked, appDataSet({ appData: "a" }), later);
+    assert.deepEqual(appFieldsOf(set), { appData: "a", squire });
   });
 
   it("sets, keeps and clears data and subtitle, moving updatedAt only on change", () => {
@@ -317,13 +327,14 @@ describe("thread app metadata helpers", () => {
     assert.notProperty(cleared, "appSubtitle");
   });
 
-  it("strips every app field from a fork child", () => {
+  it("strips every app field and the Squire marker from a fork child", () => {
     const child = withoutThreadAppMetadata({
       title: "child",
       appData: "a",
       appSubtitle: "s",
       appOrigin: "embed",
       continuedIn,
+      squire,
     });
     assert.deepEqual(child, { title: "child" });
   });
@@ -581,6 +592,33 @@ it.layer(TestLayer)("thread app metadata through orchestration", (it) => {
         appData: "forged",
       }).pipe(Effect.flip);
       assert.strictEqual(error._tag, "ThreadAppMetadataRefusedError");
+      assert.isNull(yield* orchestrator.getThreadShell(threadId));
+    }),
+  );
+
+  it.effect("a normal client's create with a Squire marker is refused before commit", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projectId = ProjectId.make("project:client-squire");
+      yield* seedProject(projectId, null);
+      const threadId = ThreadId.make("thread:client-squire");
+      const error = yield* ThreadMessageIntake.dispatchCommand({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("client:create-squire"),
+        threadId,
+        projectId,
+        title: "Forged Squire",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        squire,
+      }).pipe(Effect.flip);
+      assert.strictEqual(error._tag, "ThreadAppMetadataRefusedError");
+      assert.include(error.message, "Squire marker");
       assert.isNull(yield* orchestrator.getThreadShell(threadId));
     }),
   );

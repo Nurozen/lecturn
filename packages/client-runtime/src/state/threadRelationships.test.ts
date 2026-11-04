@@ -47,6 +47,29 @@ describe("thread relationships", () => {
     ).toBe(childStatus);
   });
 
+  it("leaves out Squire probes only where the environment hides them", () => {
+    const parent = ThreadId.make("parent");
+    const probe = ThreadId.make("probe");
+    const threads = [
+      { id: parent, status: "completed", lineage: { parentThreadId: null } },
+      {
+        id: probe,
+        status: "completed",
+        lineage: { parentThreadId: parent, relationshipToParent: "fork" },
+        squire: { squireId: "squire", role: "probe" },
+      },
+    ] as never;
+    const hidden = deriveThreadRelationshipGraph({
+      threads,
+      projection: null,
+      capabilities: { squire: true },
+    });
+    expect(relatedThreadIds(hidden, parent)).toEqual([]);
+    expect(hidden.nodes.has(probe)).toBe(false);
+    const listed = deriveThreadRelationshipGraph({ threads, projection: null });
+    expect(relatedThreadIds(listed, parent)).toEqual([probe]);
+  });
+
   it("does not label a missing parent with its child's running status", () => {
     const parent = ThreadId.make("missing-parent");
     const child = ThreadId.make("child");

@@ -63,6 +63,7 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scheduler from "effect/Scheduler";
 import * as Scope from "effect/Scope";
+import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { Tool } from "effect/ai";
@@ -1184,6 +1185,336 @@ describe("ClaudeAdapterV2 Auto-accept edits", () => {
         ),
       ),
     ),
+  );
+});
+
+describe("ClaudeAdapterV2 Squire isolation", () => {
+  const causeChainText = (error: unknown): string => {
+    const parts: Array<string> = [];
+    for (let current = error; typeof current === "object" && current !== null;) {
+      parts.push(String(Reflect.get(current, "detail") ?? Reflect.get(current, "message") ?? ""));
+      current = Reflect.get(current, "cause");
+    }
+    return parts.join("\n");
+  };
+  const LECTURN_SERVER = {
+    lecturn: {
+      type: "http" as const,
+      url: "http://127.0.0.1:43123/mcp",
+      headers: { Authorization: "Bearer squire-credential" },
+      timeout: ClaudeAdapterV2.CLAUDE_LECTURN_MCP_TOOL_TIMEOUT_MS,
+    },
+  };
+  // One process launch per path: a first turn (start), a turn on a thread
+  // that already has turns (resume), and the first turn of a native fork.
+  const openSquireQuery = (input: {
+    readonly name: string;
+    readonly path: "start" | "resume" | "fork";
+    readonly squireIsolation?: "home" | "probe";
+    readonly managedMcpConfig?: boolean;
+    readonly squireInstructions?: ReadonlyArray<string>;
+    readonly launchArgs?: string;
+    /** Asked of the opened query's permission callback while the turn is live. */
+    readonly toolCalls?: ReadonlyArray<string>;
+  }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "lecturn-claude-squire-",
+        });
+        const threadId = ThreadId.make(`thread-claude-squire-${input.name}`);
+        const forkTargetId = ThreadId.make(`thread-claude-squire-fork-${input.name}`);
+        const sessions = yield* McpProviderSessions.McpProviderSessions;
+        // A session exists even for probes, so the adapter's own drop is what is tested.
+        for (const id of [threadId, forkTargetId]) {
+          yield* sessions.set({
+            environmentId: EnvironmentId.make(`environment-claude-squire-${input.name}`),
+            threadId: id,
+            providerSessionId: `mcp-session-${id}`,
+            providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+            endpoint: "http://127.0.0.1:43123/mcp",
+            authorizationHeader: "Bearer squire-credential",
+            browserToolsAvailable: false,
+          });
+        }
+        const opened: Array<ClaudeAdapterV2.ClaudeAgentSdkQueryOptions> = [];
+        const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
+          instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+          settings: { ...DEFAULT_CLAUDE_SETTINGS, launchArgs: input.launchArgs ?? "" },
+          environment: { PATH: "/usr/bin" },
+          crypto: yield* Crypto.Crypto,
+          attachmentsDir,
+          fileSystem,
+          path: yield* Path.Path,
+          idAllocator: yield* IdAllocator.IdAllocatorV2,
+          hasManagedMcpConfig: Effect.succeed(input.managedMcpConfig ?? false),
+          queryRunner: {
+            allocateSessionId: Effect.succeed(`native-claude-squire-${input.name}`),
+            open: (queryInput) =>
+              Effect.sync(() => {
+                opened.push(queryInput.options);
+                return {
+                  messages: Stream.never,
+                  offer: () => Effect.void,
+                  setModel: () => Effect.void,
+                  applyFlagSettings: () => Effect.void,
+                  setPermissionMode: () => Effect.void,
+                  backgroundTasks: () => Effect.succeed(false),
+                  stopTask: () => Effect.void,
+                  interrupt: Effect.void,
+                  close: Effect.void,
+                };
+              }),
+            forkSession: () =>
+              Effect.succeed({ sessionId: `native-claude-squire-fork-${input.name}` }),
+            subagentLaunchToolUseId: () => Effect.succeed(null),
+            assertComplete: Effect.void,
+          },
+        });
+        const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          cwd: "/squire-scratch",
+          ...(input.squireIsolation === undefined
+            ? {}
+            : { squireIsolation: input.squireIsolation }),
+        });
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make(`provider-session-claude-squire-${input.name}`),
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy,
+        });
+        const sourceThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy,
+        });
+        const providerThread =
+          input.path === "fork"
+            ? yield* runtime.forkThread({
+                sourceProviderThread: sourceThread,
+                targetThreadId: forkTargetId,
+                modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+                runtimePolicy,
+              })
+            : sourceThread;
+        const turnInput = makeClaudeTestTurnInput({
+          threadId: input.path === "fork" ? forkTargetId : threadId,
+          providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make(`attempt-claude-squire-${input.name}`),
+          text: "Report.",
+          attachments: [],
+          ...(input.path === "resume" ? { nativeThreadHasTurns: true } : {}),
+          runtimePolicy,
+        });
+        const started = yield* Effect.result(
+          runtime.startTurn(
+            input.squireInstructions === undefined
+              ? turnInput
+              : { ...turnInput, squireInstructions: input.squireInstructions },
+          ),
+        );
+        const decisions: Array<string> = [];
+        for (const toolName of input.toolCalls ?? []) {
+          const canUseTool = opened[0]?.canUseTool;
+          assert.isFunction(canUseTool);
+          const decision = yield* Effect.promise(() =>
+            canUseTool!(
+              toolName,
+              {},
+              {
+                signal: new AbortController().signal,
+                toolUseID: `tool-${toolName}`,
+                requestId: `request-${toolName}`,
+              },
+            ),
+          );
+          decisions.push(decision?.behavior ?? "none");
+        }
+        return { opened, started, decisions };
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    );
+
+  const paths = ["start", "resume", "fork"] as const;
+
+  it.effect.each(paths)("runs a home thread on %s with Lecturn's server alone, denied", (path) =>
+    Effect.gen(function* () {
+      const { opened } = yield* openSquireQuery({
+        name: `home-${path}`,
+        path,
+        squireIsolation: "home",
+      });
+      assert.lengthOf(opened, 1);
+      const options = opened[0]!;
+      if (path === "start") assert.equal(options.sessionId, "native-claude-squire-home-start");
+      else
+        assert.equal(
+          options.resume,
+          path === "fork"
+            ? "native-claude-squire-fork-home-fork"
+            : "native-claude-squire-home-resume",
+        );
+      assert.equal(options.permissionMode, "dontAsk");
+      // No native tool exists, so none (a read included) can be pre-approved.
+      assert.deepEqual(options.tools, []);
+      assert.deepEqual(options.allowedTools, [ClaudeAdapterV2.CLAUDE_LECTURN_MCP_TOOL_WILDCARD]);
+      assert.deepEqual(options.mcpServers, LECTURN_SERVER);
+      assert.isTrue(options.strictMcpConfig);
+      assert.equal(options.env?.ENABLE_CLAUDEAI_MCP_SERVERS, "false");
+      // S0a2: strict MCP config alone leaves the user's CLAUDE.md, hooks, and plugin skills loaded.
+      assert.equal(options.env?.CLAUDE_CODE_SAFE_MODE, "1");
+      assert.equal(options.env?.PATH, "/usr/bin");
+      assert.notProperty(options, "allowDangerouslySkipPermissions");
+    }),
+  );
+
+  it.effect.each(paths)("runs a probe on %s with no MCP server at all", (path) =>
+    Effect.gen(function* () {
+      const { opened } = yield* openSquireQuery({
+        name: `probe-${path}`,
+        path,
+        squireIsolation: "probe",
+      });
+      assert.lengthOf(opened, 1);
+      const options = opened[0]!;
+      assert.equal(options.permissionMode, "dontAsk");
+      assert.deepEqual(options.tools, []);
+      assert.isUndefined(options.allowedTools);
+      assert.deepEqual(options.mcpServers, {});
+      assert.isTrue(options.strictMcpConfig);
+      assert.equal(options.env?.ENABLE_CLAUDEAI_MCP_SERVERS, "false");
+      assert.equal(options.env?.CLAUDE_CODE_SAFE_MODE, "1");
+      assert.notInclude(
+        (options.systemPrompt as { readonly append: string }).append,
+        "## Lecturn orchestration",
+      );
+    }),
+  );
+
+  const HOSTILE_LAUNCH_ARGS = [
+    "--tools Read",
+    "--allowedTools Read",
+    "--allowed-tools Bash",
+    "--disallowedTools mcp__lecturn__squire_send_steer",
+    "--permission-mode bypassPermissions",
+    "--dangerously-skip-permissions",
+    "--allow-dangerously-skip-permissions",
+    "--mcp-config /tmp/other.json",
+    "--add-dir /",
+    "--settings /tmp/settings.json",
+    "--setting-sources user,project",
+    "--plugin-dir /tmp/plugin",
+    "--agents {}",
+    "--append-system-prompt hostile",
+    "--betas example-beta",
+  ].join(" ");
+
+  it.effect.each(["home", "probe"] as const)(
+    "keeps an instance's launch args from widening a %s",
+    (role) =>
+      Effect.gen(function* () {
+        const { opened } = yield* openSquireQuery({
+          name: `hostile-${role}`,
+          path: "start",
+          squireIsolation: role,
+          launchArgs: HOSTILE_LAUNCH_ARGS,
+        });
+        const options = opened[0]!;
+        assert.equal(options.permissionMode, "dontAsk");
+        assert.deepEqual(options.tools, []);
+        assert.notProperty(options, "allowDangerouslySkipPermissions");
+        assert.deepEqual(Object.keys(options.extraArgs ?? {}).toSorted(), [
+          "betas",
+          "thinking-display",
+        ]);
+
+        const ordinary = yield* openSquireQuery({
+          name: `hostile-ordinary-${role}`,
+          path: "start",
+          launchArgs: HOSTILE_LAUNCH_ARGS,
+        });
+        assert.equal(ordinary.opened[0]!.extraArgs?.tools, "Read");
+      }),
+  );
+
+  it.effect("lets a home's permission callback allow Lecturn tools and nothing else", () =>
+    Effect.gen(function* () {
+      const { decisions } = yield* openSquireQuery({
+        name: "home-callback",
+        path: "start",
+        squireIsolation: "home",
+        toolCalls: ["mcp__lecturn__squire_send_steer", "Bash", "Read", "mcp__other__tool"],
+      });
+      assert.deepEqual(decisions, ["allow", "deny", "deny", "deny"]);
+    }),
+  );
+
+  it.effect("gives a home the Squire skill in place of the orchestration sections", () =>
+    Effect.gen(function* () {
+      const skill = ["## Squire\n\nStay quiet by default.", "### Writing a steer\n\nOne action."];
+      const home = yield* openSquireQuery({
+        name: "home-skill",
+        path: "start",
+        squireIsolation: "home",
+        squireInstructions: skill,
+      });
+      const homeAppend = (home.opened[0]!.systemPrompt as { readonly append: string }).append;
+      assert.include(homeAppend, skill.join("\n\n"));
+      assert.notInclude(homeAppend, "## Lecturn orchestration");
+      assert.notInclude(homeAppend, "delegate_task");
+
+      const ordinary = yield* openSquireQuery({ name: "ordinary-skill", path: "start" });
+      const ordinaryAppend = (ordinary.opened[0]!.systemPrompt as { readonly append: string })
+        .append;
+      assert.include(ordinaryAppend, "## Lecturn orchestration");
+      assert.notInclude(ordinaryAppend, "Stay quiet by default");
+    }),
+  );
+
+  it.effect("leaves an ordinary thread's MCP and permissions unchanged", () =>
+    Effect.gen(function* () {
+      const { opened } = yield* openSquireQuery({ name: "ordinary", path: "start" });
+      const options = opened[0]!;
+      assert.equal(options.permissionMode, "default");
+      assert.deepEqual(options.allowedTools, [ClaudeAdapterV2.CLAUDE_LECTURN_MCP_TOOL_WILDCARD]);
+      assert.deepEqual(options.mcpServers, LECTURN_SERVER);
+      assert.notProperty(options, "strictMcpConfig");
+      assert.isUndefined(options.env?.ENABLE_CLAUDEAI_MCP_SERVERS);
+      assert.isUndefined(options.env?.CLAUDE_CODE_SAFE_MODE);
+      assert.notDeepEqual(options.tools, []);
+    }),
+  );
+
+  it.effect.each(
+    paths.flatMap((path) => (["home", "probe"] as const).map((role) => ({ path, role }))),
+  )("refuses to start a $role on $path under a managed managed-mcp.json", ({ path, role }) =>
+    Effect.gen(function* () {
+      const { opened, started } = yield* openSquireQuery({
+        name: `managed-${role}-${path}`,
+        path,
+        squireIsolation: role,
+        managedMcpConfig: true,
+      });
+      assert.lengthOf(opened, 0, "no Claude process may start");
+      assert.isTrue(Result.isFailure(started));
+      assert.include(
+        Result.isFailure(started) ? causeChainText(started.failure) : "",
+        "managed-mcp.json",
+      );
+      const ordinary = yield* openSquireQuery({
+        name: `managed-ordinary-${role}-${path}`,
+        path,
+        managedMcpConfig: true,
+      });
+      assert.lengthOf(ordinary.opened, 1);
+    }),
   );
 });
 

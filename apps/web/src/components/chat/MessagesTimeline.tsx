@@ -78,6 +78,7 @@ import type { WorkflowOpening } from "@lecturn/client-runtime/state/subagentRunt
 import { observeResize } from "~/lib/observeResize";
 
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
+const EMPTY_MINIMAP_ITEMS: ReadonlyArray<TimelineMinimapItem> = [];
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
 const EMPTY_FORK_POINTS: ReadonlyMap<MessageId, ThreadForkPoint> = new Map();
 const NOOP_FORK_FROM_MESSAGE = (_messageId: MessageId) => {};
@@ -205,7 +206,9 @@ import {
   readTimelinePosition,
   type RememberedTimelinePosition,
   rememberTimelinePosition,
+  resolveTimelineOpeningPosition,
   timelineContentOverflowsViewport,
+  timelineNewestAppCardRowId,
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
@@ -372,17 +375,16 @@ interface TimelineRowSharedState {
   findActive: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   displayThreadKey?: string;
-  onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
+  onOpenTurnDiff: ((runId: RunId, filePath?: string) => void) | undefined;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
   workflowOpening: WorkflowOpening | null;
   onForkFromRun: (input: {
     readonly sourceThreadId: ThreadId;
     readonly runId: RunId;
   }) => Promise<void>;
-  onRollbackCheckpoint: (input: {
-    readonly checkpointId: string;
-    readonly scopeId: string;
-  }) => void;
+  onRollbackCheckpoint:
+    | ((input: { readonly checkpointId: string; readonly scopeId: string }) => void)
+    | undefined;
   onToggleTurnFold: (runId: RunId) => void;
   onToggleAttemptFold: (attemptId: RunAttemptId) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
@@ -525,7 +527,8 @@ interface MessagesTimelineProps {
   routeThreadKey: string;
   displayThreadKey?: string;
   paintOnly?: boolean;
-  onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
+  /** Lecturn: absent hides every diff action (ChatView `controls`). */
+  onOpenTurnDiff?: ((runId: RunId, filePath?: string) => void) | undefined;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
   parentThreadLink?: {
     readonly threadId: ThreadId;
@@ -537,10 +540,10 @@ interface MessagesTimelineProps {
     readonly sourceThreadId: ThreadId;
     readonly runId: RunId;
   }) => Promise<void>;
-  onRollbackCheckpoint: (input: {
-    readonly checkpointId: string;
-    readonly scopeId: string;
-  }) => void;
+  /** Lecturn: absent hides the inspector's "Roll back" (ChatView `controls`). */
+  onRollbackCheckpoint?:
+    | ((input: { readonly checkpointId: string; readonly scopeId: string }) => void)
+    | undefined;
   /** Lecturn: user messages that fork through the turn completed before them. */
   forkPointByUserMessageId?: ReadonlyMap<MessageId, ThreadForkPoint>;
   /**
@@ -595,6 +598,17 @@ interface MessagesTimelineProps {
   cancelPositionRestoreRef?: React.RefObject<(() => void) | null> | undefined;
   hideEmptyPlaceholder?: boolean;
   topFadeEnabled?: boolean;
+  /** Lecturn: false hides saving thread notes (ChatView `controls`). */
+  notesAllowed?: boolean;
+  /**
+   * Lecturn: open at the newest row's top, not the end, when it is an MCP App card and no
+   * reading position is remembered, as a user-scrolled position so live follow leaves it there.
+   */
+  openAtNewestAppCard?: boolean;
+  /** Lecturn: a Squire home thread's compact event rows (ChatView `controls`). */
+  compactSquireEvents?: boolean;
+  /** Lecturn: false hides the turn minimap (ChatView `controls`). */
+  minimapEnabled?: boolean;
   historyControls?: MessagesTimelineHistoryControls | undefined;
   loadEarlier?: CitationHistoryPage | null;
   findPositionReaderRef?: React.RefObject<ThreadFindPositionReader | null>;
@@ -695,6 +709,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
   cancelPositionRestoreRef,
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
+  notesAllowed = true,
+  openAtNewestAppCard = false,
+  compactSquireEvents = false,
+  minimapEnabled = true,
   historyControls,
   loadEarlier = null,
 }: MessagesTimelineProps) {
@@ -712,7 +730,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     () => listState.rememberedPosition?.disclosures?.attempts ?? new Set(),
   );
   const [positionedThreadKey, setPositionedThreadKey] = useState<string | null>(() =>
-    listState.rememberedPosition?.atEnd === false ? null : listIdentityKey,
+    listState.rememberedPosition?.atEnd === false || openAtNewestAppCard ? null : listIdentityKey,
   );
   const restoringThreadPosition = positionedThreadKey !== listIdentityKey;
   const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
@@ -737,7 +755,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   }
   const citationThreadRef = parseScopedThreadKey(routeThreadKey);
   const openPullRequest = useOpenPrLink(citationThreadRef ?? undefined);
-  const threadNotes = useThreadNotes(citationThreadRef);
+  const threadNotes = useThreadNotes(notesAllowed ? citationThreadRef : null);
   const showNoteHighlights = useThreadNoteUI((state) => state.highlights);
   const activeNote = useThreadNoteUI((state) => state.active);
   const [noteSelection, setNoteSelection] = useState<ThreadNoteSelection | null>(null);
@@ -1103,6 +1121,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     keepLatestTurnOpen,
     waitingOnUser: awaitingUser,
     hideWaitingRow: embedded,
+    compactSquireEvents,
   });
   const rows = useStableRows(rawRows, listIdentityKey);
   // Run status/timestamps churn on every stream event; the shared row context
@@ -1125,9 +1144,14 @@ const ConversationTimeline = memo(function ConversationTimeline({
       opened.identity = null;
     }
   });
+  // Lecturn: the newest MCP App card opens at its top (see `openAtNewestAppCard`).
+  const openingPosition = resolveTimelineOpeningPosition(
+    rememberedPosition,
+    restoringThreadPosition && openAtNewestAppCard ? timelineNewestAppCardRowId(rows) : null,
+  );
   const restoreRowIndex =
-    restoringThreadPosition && rememberedPosition?.atEnd === false
-      ? rows.findIndex((row) => row.id === rememberedPosition.rowId)
+    restoringThreadPosition && openingPosition?.atEnd === false
+      ? rows.findIndex((row) => row.id === openingPosition.rowId)
       : -1;
   const restoringAlwaysRender =
     restoringThreadPosition && restoreRowIndex >= 0 ? { indices: [restoreRowIndex] } : undefined;
@@ -1168,7 +1192,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     viewport?.addEventListener("touchmove", cancelForNavigation, { passive: true });
     viewport?.addEventListener("pointerdown", cancelForNavigation, { passive: true });
     viewport?.ownerDocument.addEventListener("keydown", onScrollKey);
-    const position = rememberedPosition;
+    const position = openingPosition;
     const index = position ? rows.findIndex((row) => row.id === position.rowId) : -1;
     if (position?.atEnd === false) onManualNavigation();
     if (cancelPositionRestoreRef) cancelPositionRestoreRef.current = cancelRestoration;
@@ -1244,7 +1268,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     listIdentityKey,
     listRef,
     onManualNavigation,
-    rememberedPosition,
+    openingPosition,
     restoringThreadPosition,
     rows,
   ]);
@@ -1819,7 +1843,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 renderItem={renderItem}
                 estimatedItemSize={90}
                 initialScrollAtEnd={
-                  !findActive && citationRequest === null && rememberedPosition?.atEnd !== false
+                  !findActive && citationRequest === null && openingPosition?.atEnd !== false
                 }
                 // Legend needs a data refresh to mount new pins without a scroll event.
                 dataVersion={readyCitationRequest?.key ?? listIdentityKey}
@@ -1829,7 +1853,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
                 maintainScrollAtEnd={
                   citationPositioning ||
-                  (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
+                  (restoringThreadPosition && openingPosition?.atEnd === false) ||
                   anchoredEndSpace ||
                   !liveFollowEnabled ||
                   fullscreenAppRowId !== null ||
@@ -1842,7 +1866,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 maintainVisibleContentPosition={
                   findActive ||
                   citationPositioning ||
-                  (restoringThreadPosition && rememberedPosition?.atEnd === false)
+                  (restoringThreadPosition && openingPosition?.atEnd === false)
                     ? false
                     : maintainVisibleContentPosition
                 }
@@ -1858,7 +1882,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
               />
             </div>
             <TimelineMinimap
-              items={minimapItems}
+              items={minimapEnabled ? minimapItems : EMPTY_MINIMAP_ITEMS}
               hasPersistentGutter={minimapHasPersistentGutter}
               hitStripWidth={minimapHitStripWidth}
               currentIndex={minimapCurrentIndex}
@@ -3069,12 +3093,14 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             />
           </AssistantCitationSource>
         </div>
-        <AssistantChangedFilesSection
-          turnSummary={row.assistantTurnDiffSummary}
-          routeThreadKey={ctx.routeThreadKey}
-          resolvedTheme={ctx.resolvedTheme}
-          onOpenTurnDiff={ctx.onOpenTurnDiff}
-        />
+        {ctx.onOpenTurnDiff ? (
+          <AssistantChangedFilesSection
+            turnSummary={row.assistantTurnDiffSummary}
+            routeThreadKey={ctx.routeThreadKey}
+            resolvedTheme={ctx.resolvedTheme}
+            onOpenTurnDiff={ctx.onOpenTurnDiff}
+          />
+        ) : null}
         {row.showAssistantMeta ? (
           <AssistantMessageMeta
             className="mt-1.5"
@@ -5589,6 +5615,7 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
       case "monitor":
         return "eye";
       case "background_task":
+      case "squire":
         return "zap";
       case "system":
         return "lecturn";

@@ -14,6 +14,8 @@
  *   `planRunlessForkHistory`).
  * - First new turn of a child that still carries its default fork title
  *   generates a real title (see `shouldGenerateForkChildTitle`).
+ * - `squireProbe` (server-only): the child is a Squire probe, marked and
+ *   read-only (see `squireProbeFields`).
  */
 import {
   MessageId,
@@ -164,6 +166,25 @@ export function validateForkWorkspace(command: ThreadForkCommand): string | unde
   return undefined;
 }
 
+/**
+ * Lecturn: a Squire "Ask about this" probe. The marker hides it
+ * and puts it under the Squire guards (deny runtime, no MCP, the command
+ * allowlist); the copied modes, PR links, and pins would otherwise let a
+ * read-only question run with the source's full access or show as its PR.
+ */
+const squireProbeFields = (squireId: NonNullable<ThreadForkCommand["squireProbe"]>["squireId"]) =>
+  ({
+    squire: { squireId, role: "probe" },
+    runtimeMode: "approval-required",
+    interactionMode: "default",
+    linkedPullRequest: null,
+    pullRequests: [],
+    branchPullRequest: null,
+    pinnedAt: null,
+    pinOrderKey: null,
+    activeOrderKey: null,
+  }) satisfies Partial<OrchestrationV2AppThread>;
+
 /** Apply the Lecturn fields to the child planned by ThreadForkService. */
 export function applyForkDeltas(input: {
   readonly targetThread: OrchestrationV2AppThread;
@@ -182,6 +203,7 @@ export function applyForkDeltas(input: {
           // The pull request found for the parent's branch is not this branch's.
           branchPullRequest: null,
         }),
+    ...(command.squireProbe === undefined ? {} : squireProbeFields(command.squireProbe.squireId)),
   };
 }
 

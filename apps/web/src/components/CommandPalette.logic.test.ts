@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@lecturn/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  SquireId,
+  SquireRoomId,
+  ThreadId,
+} from "@lecturn/contracts";
 import type { Project, Thread } from "../types";
 import { makeThreadFixture } from "../test-fixtures";
 import {
@@ -10,6 +17,10 @@ import {
   buildCommandPaletteRows,
   buildProjectActionItems,
   buildStaveAddProjectItems,
+  buildSquirePaletteItems,
+  buildSquireRoomPaletteItems,
+  buildSquireSetupPaletteItems,
+  buildSquireTrackPaletteItems,
   buildThreadActionItems,
   buildLinkedThreadActionItems,
   enumerateCommandPaletteItems,
@@ -1065,6 +1076,249 @@ describe("returning from file and content search", () => {
       ...root,
       openIntent: { kind: "search", query: "fresh" },
     });
+  });
+});
+
+describe("buildSquirePaletteItems", () => {
+  const local = EnvironmentId.make("local");
+  const remote = EnvironmentId.make("remote");
+  const lead = SquireId.make("lead");
+  const squire = (id: string, name: string, role: "lead" | "squire" = "squire") => ({
+    squire: { id: SquireId.make(id), name, role },
+  });
+  const build = (
+    environments: Parameters<typeof buildSquirePaletteItems>[0]["environments"],
+    openSquire = vi.fn(async () => {}),
+  ) =>
+    buildSquirePaletteItems({
+      environments,
+      environmentLabel: (environmentId) => (environmentId === local ? "Local" : "Studio"),
+      icon: () => null,
+      openSquire,
+    });
+
+  it("lists the Lead first and opens the chosen Squire's view", async () => {
+    const openSquire = vi.fn(async () => {});
+    const items = build(
+      [
+        {
+          environmentId: local,
+          state: { lead, squires: [squire("release", "Release"), squire("lead", "Lead", "lead")] },
+        },
+      ],
+      openSquire,
+    );
+
+    expect(items.map((item) => [item.title, item.description])).toEqual([
+      ["Open Squire: Lead", undefined],
+      ["Open Squire: Release", undefined],
+    ]);
+    await items[1]!.run();
+    expect(openSquire).toHaveBeenCalledWith({
+      environmentId: local,
+      squireId: SquireId.make("release"),
+    });
+  });
+
+  it("names the environment only when several have Squires, and searches by it", () => {
+    const items = build([
+      { environmentId: local, state: { lead, squires: [squire("lead", "Lead", "lead")] } },
+      { environmentId: remote, state: { lead: null, squires: [squire("research", "Research")] } },
+    ]);
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [{ value: "actions", label: "Actions", items }],
+      query: "squire studio",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+
+    expect(items.map((item) => item.description)).toEqual(["Local", "Studio"]);
+    expect(groups.flatMap((group) => group.items.map((item) => item.title))).toEqual([
+      "Open Squire: Research",
+    ]);
+    expect(
+      build([
+        { environmentId: local, state: { lead: null, squires: [squire("a", "Alpha")] } },
+        { environmentId: remote, state: { lead: null, squires: [] } },
+      ]).map((item) => item.description),
+    ).toEqual([undefined]);
+  });
+
+  it("offers nothing without a Squire-capable environment", () => {
+    expect(build([])).toEqual([]);
+  });
+});
+
+describe("buildSquireRoomPaletteItems", () => {
+  const room = (id: string, status: "open" | "closed") => ({
+    id: SquireRoomId.make(id),
+    topic: `Topic ${id}`,
+    status,
+    muted: false,
+    members: [],
+    includesLead: false,
+    unread: false,
+    lastPostAt: null,
+  });
+
+  it("opens open rooms only and offers New Squire room where a room may be created", () => {
+    const allowed = EnvironmentId.make("allowed");
+    const readOnly = EnvironmentId.make("read-only");
+    const openRoom = vi.fn(async () => {});
+    const newRoom = vi.fn();
+    const items = buildSquireRoomPaletteItems({
+      environments: [
+        { environmentId: allowed, rooms: [room("a", "open"), room("b", "closed")] },
+        { environmentId: readOnly, rooms: [] },
+      ],
+      canCreateRoom: (environmentId) => environmentId === allowed,
+      environmentLabel: (environmentId) => environmentId,
+      icon: null,
+      openRoom,
+      newRoom,
+    });
+    expect(items.map((item) => item.title)).toEqual(["Open room: Topic a", "New Squire room"]);
+  });
+});
+
+describe("buildSquireSetupPaletteItems", () => {
+  const local = EnvironmentId.make("local");
+  const remote = EnvironmentId.make("remote");
+  const squire = (id: string, name: string, role: "lead" | "squire" = "squire") => ({
+    squire: { id: SquireId.make(id), name, role },
+  });
+  const full = { canCreate: true, canEdit: true };
+
+  it("opens the setup sheet to create, or to edit the chosen Squire", async () => {
+    const openSetup = vi.fn();
+    const items = buildSquireSetupPaletteItems({
+      environments: [
+        {
+          environmentId: local,
+          state: {
+            lead: SquireId.make("lead"),
+            squires: [squire("lead", "Lead", "lead"), squire("release", "Release")],
+          },
+        },
+      ],
+      access: () => full,
+      environmentLabel: () => "Local",
+      icon: () => null,
+      newIcon: null,
+      openSetup,
+    });
+    expect(items.map((item) => [item.title, item.description])).toEqual([
+      ["New Squire…", undefined],
+      ["Edit Squire: Lead", undefined],
+      ["Edit Squire: Release", undefined],
+    ]);
+    await items[0]!.run();
+    expect(openSetup).toHaveBeenLastCalledWith({ kind: "create", environmentId: local });
+    await items[2]!.run();
+    expect(openSetup).toHaveBeenLastCalledWith({
+      kind: "edit",
+      environmentId: local,
+      squireId: SquireId.make("release"),
+    });
+  });
+
+  it("follows each environment's permissions and names environments when several qualify", () => {
+    const items = buildSquireSetupPaletteItems({
+      environments: [
+        { environmentId: local, state: { lead: null, squires: [squire("release", "Release")] } },
+        { environmentId: remote, state: { lead: null, squires: [squire("research", "Research")] } },
+      ],
+      access: (environmentId) =>
+        environmentId === local ? full : { canCreate: true, canEdit: false },
+      environmentLabel: (environmentId) => (environmentId === local ? "Local" : "Studio"),
+      icon: () => null,
+      newIcon: null,
+      openSetup: vi.fn(),
+    });
+    expect(items.map((item) => [item.title, item.description])).toEqual([
+      ["New Squire…", "Local"],
+      ["New Squire…", "Studio"],
+      ["Edit Squire: Release", undefined],
+    ]);
+  });
+});
+
+describe("Squire palette search", () => {
+  const local = EnvironmentId.make("local");
+  const squire = (id: string, name: string, role: "lead" | "squire" = "squire") => ({
+    squire: { id: SquireId.make(id), name, role },
+  });
+  const environments = [
+    {
+      environmentId: local,
+      state: {
+        lead: SquireId.make("lead"),
+        squires: [squire("lead", "Lead", "lead"), squire("release", "Release")],
+      },
+    },
+  ];
+  const items = [
+    ...buildSquirePaletteItems({
+      environments,
+      environmentLabel: () => null,
+      icon: () => null,
+      openSquire: vi.fn(async () => {}),
+    }),
+    ...buildSquireSetupPaletteItems({
+      environments,
+      access: () => ({ canCreate: true, canEdit: true }),
+      environmentLabel: () => null,
+      icon: () => null,
+      newIcon: null,
+      openSetup: vi.fn(),
+    }),
+  ];
+  const search = (query: string) =>
+    filterCommandPaletteGroups({
+      activeGroups: [{ value: "actions", label: "Actions", items }],
+      query,
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    }).flatMap((group) => group.items.map((item) => item.title));
+
+  it("puts New Squire… first for a bare squire query and finds every Edit Squire item", () => {
+    expect(search("Squire")).toEqual([
+      "New Squire…",
+      "Open Squire: Lead",
+      "Open Squire: Release",
+      "Edit Squire: Lead",
+      "Edit Squire: Release",
+    ]);
+    expect(search("edit squire")).toEqual(["Edit Squire: Lead", "Edit Squire: Release"]);
+    expect(search("new squire")).toEqual(["New Squire…"]);
+  });
+});
+
+describe("buildSquireTrackPaletteItems", () => {
+  it("offers Track for an untracked Squire and Stop tracking for a tracking one", async () => {
+    const run = vi.fn(async () => {});
+    const items = buildSquireTrackPaletteItems({
+      environmentId: EnvironmentId.make("local"),
+      subject: "Fix flaky test",
+      menu: {
+        canTrack: true,
+        canUntrack: true,
+        squires: [
+          { id: SquireId.make("release"), name: "Release", tracked: true },
+          { id: SquireId.make("research"), name: "Research", tracked: false },
+        ],
+      },
+      icons: { track: null, untrack: null },
+      run,
+    });
+    expect(items.map((item) => item.title)).toEqual([
+      "Stop tracking (Release)",
+      "Track with Research",
+    ]);
+    await items[0]!.run();
+    expect(run).toHaveBeenCalledWith({ action: "untrack", squireId: SquireId.make("release") });
   });
 });
 

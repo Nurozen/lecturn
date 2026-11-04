@@ -1,15 +1,24 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/models";
+import type { SquireSnapshotEntry } from "@lecturn/client-runtime/state/squire";
 import {
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
   RunId,
+  SquireCardId,
+  SquireCardRow,
+  SquireId,
+  SquireRule,
+  SquireRuleOffer,
+  SquireSnapshot,
   ThreadId,
   type PullRequestWatchSnapshot,
 } from "@lecturn/contracts";
+import * as Schema from "effect/Schema";
 import { makeThreadFixture } from "../../test-fixtures";
 import {
+  CoalescedActivityPublication,
   activityRowVisualState,
   withActivityAccountMarks,
   resolveActivityAction,
@@ -17,6 +26,17 @@ import {
   watchActivityRows,
   scopedPullRequestProjectIds,
   threadActivityRows,
+  resolveSquireActivityAction,
+  runSquireActivityAction,
+  squireActivityItemResult,
+  squireActivityOverlay,
+  squireActivityRowId,
+  squireActivityRows,
+  squireOfferRowId,
+  type SquireActivityAction,
+  type SquireActivityDeps,
+  type SquireActivityOffer,
+  type SquireActivitySource,
 } from "./desktopActivity.logic";
 
 const runningRuntime = {
@@ -466,5 +486,573 @@ describe("desktop activity account ownership", () => {
         new Map([["one", { accountId: "user_b", label: "Personal", color: "#aa55aa" }]]),
       )[0],
     ).toMatchObject({ accountId: "user_b", accountLabel: "Personal" });
+  });
+});
+
+// ── Squire rows (10c) ─────────────────────────────────────────
+
+const squireAt = "2026-11-01T10:00:00.000Z";
+const decodeSquireSnapshot = Schema.decodeUnknownSync(SquireSnapshot);
+const decodeCardRow = Schema.decodeUnknownSync(SquireCardRow);
+const encodeCardRow = Schema.encodeSync(SquireCardRow);
+const squireEnv = EnvironmentId.make("env");
+
+const squireEntry = (
+  id: string,
+  extra: {
+    held?: Array<{ cardId: string; executesInMs: number; heldOverCardId?: string }>;
+    role?: "lead" | "squire";
+  } = {},
+): SquireSnapshotEntry => ({
+  ...decodeSquireSnapshot({
+    squire: {
+      id,
+      role: extra.role ?? "squire",
+      name: id === "lead" ? "Lead" : "Release",
+      lifecycle: "ready",
+      status: "active",
+      homeProjectId: "home-project",
+      homeThreadId: `home-${id}`,
+      providerInstanceId: null,
+      modelSelection: null,
+      summaryModelSelection: null,
+      brief: "",
+      grants: [],
+      undoWindowSeconds: 60,
+      companion: { palette: id === "lead" ? "gold" : "brass" },
+      digest: null,
+      sweep: null,
+      onboardedAt: null,
+      automationPausedAt: null,
+      revision: 0,
+      createdAt: squireAt,
+      updatedAt: squireAt,
+    },
+    openDecisionCount: 1,
+    countsByKind: { steer: 1, question: 0, overlap: 0, proposal: 0, fyi: 0 },
+    held: (extra.held ?? []).map((hold) => ({
+      ...hold,
+      kind: "steer",
+      targetThreadId: "target",
+    })),
+    budget: { steersLeft: 7, threadsLeft: 3 },
+    conflicts: [],
+    trackedCount: 1,
+    containerNames: [],
+    recentActivity: [],
+    itemsRevision: 1,
+    decisionRevision: 1,
+  }),
+  receivedAt: 1_000,
+});
+
+const cardRow = (id: string, status: "open" | "held", ruleId: string | null = null) =>
+  decodeCardRow({
+    id,
+    squireId: "release",
+    ownerSquireId: "release",
+    kind: "steer",
+    status,
+    title: status === "held" ? "Rerun api-e2e" : "Rebase onto main",
+    targetThreadId: "target",
+    projectId: "project",
+    origin: "event",
+    steerKind: "rebase",
+    ruleId,
+    routedTaskId: null,
+    caption: null,
+    replacedCount: 0,
+    executesAt: null,
+    openedAt: null,
+    createdAt: squireAt,
+    updatedAt: squireAt,
+  });
+
+const allowRule = Schema.decodeSync(SquireRule)({
+  id: "rule-1",
+  squireId: "release",
+  effect: "allow",
+  actionClass: "steer",
+  targetKind: "thread",
+  targetId: "target",
+  steerKind: "rerun-checks",
+  matchCount: 1,
+  lastMatchedAt: null,
+  status: "active",
+  createdAt: squireAt,
+});
+
+const squireSource = (
+  items: ReadonlyArray<SquireCardRow>,
+  heldOverCardId?: string,
+): SquireActivitySource => {
+  const lead = squireEntry("lead", { role: "lead" });
+  const release = squireEntry("release", {
+    held: [
+      {
+        cardId: "held-1",
+        executesInMs: 60_000,
+        ...(heldOverCardId === undefined ? {} : { heldOverCardId }),
+      },
+    ],
+  });
+  return {
+    environmentId: squireEnv,
+    state: { lead: lead.squire.id, squires: [lead, release], rooms: [] },
+    items,
+    rules: new Map([[release.squire.id, [allowRule]]]),
+    threadTitle: () => "Fix invoice rounding",
+    targetName: () => "Fix invoice rounding",
+  };
+};
+
+const undoOffer: SquireActivityOffer = {
+  environmentId: squireEnv,
+  card: {
+    id: SquireCardId.make("held-1"),
+    squireId: SquireId.make("release"),
+    ownerSquireId: SquireId.make("release"),
+    kind: "steer",
+  },
+  squireName: "Release",
+  palette: "brass",
+  offer: Schema.decodeSync(SquireRuleOffer)({
+    effect: "ask-first",
+    actionClass: "steer",
+    targetKind: "thread",
+    targetId: "target",
+    steerKind: "rerun-checks",
+    text: 'Release asks first before sending rerun checks steers on "Fix invoice rounding"',
+    capReached: false,
+  }),
+};
+
+describe("Squire notch rows", () => {
+  const items = [cardRow("card-1", "open"), cardRow("held-1", "held", "rule-1")];
+
+  it("publishes an open card with its accept, dismiss, and open buttons", () => {
+    const [card] = squireActivityRows([squireSource(items)], [], 1_000);
+    expect(card).toMatchObject({
+      id: squireActivityRowId(squireEnv, SquireCardId.make("card-1")),
+      environmentId: "env",
+      threadId: "target",
+      title: "Rebase onto main",
+      squire: { squireId: "release", cardId: "card-1", cardKind: "steer", palette: "brass" },
+    });
+    expect(card!.squire!.holdRemainingMs).toBeUndefined();
+    expect(card!.actions.map((action) => action.id)).toEqual([
+      "squire-accept",
+      "squire-dismiss",
+      "squire-open",
+    ]);
+  });
+
+  it("publishes a held action with what remains of its hold, its rule label, and Undo", () => {
+    const rows = squireActivityRows([squireSource(items)], [], 11_000);
+    const held = rows.find((row) => row.squire?.cardId === "held-1")!;
+    expect(held.squire!.holdRemainingMs).toBe(50_000);
+    expect(held.detail).toContain("Auto by rule: Release may auto-send rerun checks steers");
+    expect(held.actions.map((action) => action.id)).toEqual(["squire-undo", "squire-open"]);
+  });
+
+  it("offers ask-first after an Undo, as its own row", () => {
+    const rows = squireActivityRows([squireSource([])], [undoOffer], 1_000);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: squireOfferRowId(squireEnv, SquireCardId.make("held-1")),
+      title: "Always ask first for this",
+      squire: { caption: undoOffer.offer.text },
+    });
+    expect(rows[0]!.actions.map((action) => action.id)).toEqual([
+      "squire-accept",
+      "squire-dismiss",
+    ]);
+  });
+});
+
+describe("Squire notch hold pairing", () => {
+  const items = [cardRow("card-1", "open"), cardRow("held-1", "held", "rule-1")];
+  const rows = squireActivityRows([squireSource(items, "card-1")], [], 11_000);
+
+  it("shows a hold beside its open card as one card, not a second row", () => {
+    expect(rows).toHaveLength(1);
+    const [card] = rows;
+    expect(card!.squire).toMatchObject({
+      cardId: "card-1",
+      caption: "A newer steer is about to send",
+      heldOver: {
+        heldCardId: "held-1",
+        label: "Newer steer held",
+        remainingMs: 50_000,
+        ruleLabel: expect.stringContaining("Auto by rule: Release may auto-send rerun checks"),
+      },
+    });
+    // The countdown is the hold's, on its line; the open card itself is not held.
+    expect(card!.squire!.holdRemainingMs).toBeUndefined();
+    // The open card keeps its own buttons, plus the hold's Undo that the notch puts on its line.
+    expect(card!.actions.map((action) => action.id)).toEqual([
+      "squire-accept",
+      "squire-dismiss",
+      "squire-open",
+      "squire-undo",
+    ]);
+  });
+
+  it("keeps a hold whose open card is not in the queue as its own row", () => {
+    const lone = squireActivityRows([squireSource([items[1]!], "card-1")], [], 11_000);
+    expect(lone.map((row) => row.squire?.cardId)).toEqual(["held-1"]);
+  });
+
+  it("undoes the held card, not the open one, from the paired card's Undo", async () => {
+    const source = squireSource(items, "card-1");
+    const [card] = rows;
+    const press = {
+      rowId: card!.id,
+      environmentId: card!.environmentId,
+      projectId: card!.projectId,
+      threadId: card!.threadId!,
+      kind: "squire-undo" as const,
+      requestId: "request-1",
+    };
+    const target = resolveSquireActivityAction(press, rows, [], [source]);
+    expect(target).toMatchObject({ type: "card", cardId: "held-1", card: { id: "held-1" } });
+    const act = vi.fn<SquireActivityDeps["act"]>(async () => ({
+      ok: true,
+      value: {
+        results: [{ cardId: SquireCardId.make("held-1"), status: "dismissed", error: null }],
+      },
+    }));
+    await runSquireActivityAction(press, target!, {
+      act,
+      createRule: async () => ({ ok: true, value: {} }),
+      open: async () => undefined,
+    });
+    expect(act).toHaveBeenCalledWith(squireEnv, { cardIds: ["held-1"], action: "undo" });
+    // Accept on the same card still acts on the open card.
+    expect(
+      resolveSquireActivityAction({ ...press, kind: "squire-accept" }, rows, [], [source]),
+    ).toMatchObject({ cardId: "card-1" });
+  });
+
+  it("reads an overlap as its thread count and project, as the web row does", () => {
+    const overlap = decodeCardRow({
+      ...encodeCardRow(items[0]!),
+      id: "overlap-1",
+      squireId: "lead",
+      kind: "overlap",
+      steerKind: null,
+      targetThreadId: null,
+      overlapProviders: ["codex", "claudeAgent"],
+    });
+    const [row] = squireActivityRows(
+      [
+        {
+          ...squireSource([overlap]),
+          projectTitle: (id) => (id === "project" ? "billing-service" : null),
+        },
+      ],
+      [],
+      1_000,
+    );
+    expect(row!.excerpt).toBe("2 threads · billing-service");
+  });
+});
+
+describe("Squire notch actions", () => {
+  const items = [cardRow("card-1", "open"), cardRow("held-1", "held")];
+  const rows = squireActivityRows([squireSource(items)], [undoOffer], 1_000);
+  const press = (row: (typeof rows)[number], kind: SquireActivityAction["kind"]) =>
+    ({
+      rowId: row.id,
+      environmentId: row.environmentId,
+      projectId: row.projectId,
+      ...(row.threadId ? { threadId: row.threadId } : {}),
+      kind,
+      requestId: "request-1",
+    }) satisfies SquireActivityAction;
+  const card = rows.find((row) => row.squire?.cardId === "card-1")!;
+  const held = rows.find(
+    (row) => row.id === squireActivityRowId(squireEnv, SquireCardId.make("held-1")),
+  )!;
+  const offerRow = rows.find(
+    (row) => row.id === squireOfferRowId(squireEnv, SquireCardId.make("held-1")),
+  )!;
+  const deps = (
+    act: SquireActivityDeps["act"],
+    createRule: SquireActivityDeps["createRule"] = async () => ({ ok: true, value: {} }),
+  ): SquireActivityDeps => ({ act, createRule, open: async () => undefined });
+
+  it("refuses a press whose identity is no longer published", () => {
+    expect(
+      resolveSquireActivityAction({ ...press(card, "squire-accept"), threadId: "other" }, rows, [
+        undoOffer,
+      ]),
+    ).toBeNull();
+    expect(resolveSquireActivityAction(press(card, "squire-undo"), rows, [undoOffer])).toBeNull();
+  });
+
+  it("returns the server's result for an accept, and its refusal for a refused one", async () => {
+    const target = resolveSquireActivityAction(press(card, "squire-accept"), rows, [undoOffer])!;
+    const accepted = await runSquireActivityAction(
+      press(card, "squire-accept"),
+      target,
+      deps(async () => ({
+        ok: true,
+        value: {
+          results: [{ cardId: SquireCardId.make("card-1"), status: "resolved", error: null }],
+        },
+      })),
+    );
+    expect(accepted.result).toEqual({ requestId: "request-1", ok: true });
+    const refused = await runSquireActivityAction(
+      press(card, "squire-accept"),
+      target,
+      deps(async () => ({
+        ok: true,
+        value: {
+          results: [
+            {
+              cardId: SquireCardId.make("card-1"),
+              status: "outdated",
+              error: { code: "outdated", message: "The thread started a new turn." },
+            },
+          ],
+        },
+      })),
+    );
+    // An outdated card is not a failure: the notch shows it as info.
+    expect(refused.result).toEqual({
+      requestId: "request-1",
+      ok: true,
+      error: "The thread started a new turn.",
+    });
+  });
+
+  it("classifies the server's per-card answers as success, info, or error", () => {
+    const answer = (
+      status: SquireCardRow["status"],
+      code: "outdated" | "not_found" | "invalid_request" | "permission_denied" | null,
+      message = "reason",
+    ) => squireActivityItemResult("r", { status, error: code === null ? null : { code, message } });
+    const kind = (result: { ok: boolean; error?: string }) =>
+      result.ok ? (result.error === undefined ? "success" : "info") : "error";
+    expect(kind(answer("resolved", null))).toBe("success");
+    expect(kind(squireActivityItemResult("r", undefined))).toBe("success");
+    // Already settled, outdated, and gone are not failures.
+    expect(kind(answer("dismissed", "invalid_request", "This item was dismissed."))).toBe("info");
+    expect(kind(answer("outdated", "outdated"))).toBe("info");
+    expect(kind(answer("open", "not_found"))).toBe("info");
+    // A refusal with a reason on a live card is.
+    expect(kind(answer("open", "invalid_request", "Choose an answer first."))).toBe("error");
+    expect(kind(answer("open", "permission_denied"))).toBe("error");
+    expect(answer("dismissed", "invalid_request", "This item was dismissed.")).toEqual({
+      requestId: "r",
+      ok: true,
+      error: "This item was dismissed.",
+    });
+  });
+
+  it("carries a refused RPC's reason in the result the notch receives", async () => {
+    const target = resolveSquireActivityAction(press(card, "squire-accept"), rows, [undoOffer])!;
+    const transport = await runSquireActivityAction(
+      press(card, "squire-accept"),
+      target,
+      deps(async () => ({ ok: false, error: "Release is paused. Resume it to act on cards." })),
+    );
+    expect(transport.result).toEqual({
+      requestId: "request-1",
+      ok: false,
+      error: "Release is paused. Resume it to act on cards.",
+    });
+    const thrown = await runSquireActivityAction(
+      press(card, "squire-accept"),
+      target,
+      deps(async () => {
+        throw new Error("Environment disconnected.");
+      }),
+    );
+    expect(thrown.result).toMatchObject({ ok: false, error: "Environment disconnected." });
+  });
+
+  it("turns an Undo's ask-first offer into an offer, and saving it settles the offer", async () => {
+    const undone = await runSquireActivityAction(
+      press(held, "squire-undo"),
+      resolveSquireActivityAction(press(held, "squire-undo"), rows, [undoOffer])!,
+      deps(async () => ({
+        ok: true,
+        value: {
+          results: [
+            {
+              cardId: SquireCardId.make("held-1"),
+              status: "open",
+              error: null,
+              ruleOffer: undoOffer.offer,
+            },
+          ],
+        },
+      })),
+    );
+    expect(undone.offer?.offer).toEqual(undoOffer.offer);
+    const created: unknown[] = [];
+    const saved = await runSquireActivityAction(
+      press(offerRow, "squire-accept"),
+      resolveSquireActivityAction(press(offerRow, "squire-accept"), rows, [undoOffer])!,
+      deps(
+        async () => ({ ok: false, error: "unexpected" }),
+        async (_environmentId, input) => {
+          created.push(input);
+          return { ok: true, value: {} };
+        },
+      ),
+    );
+    expect(saved).toMatchObject({ result: { ok: true }, settledOffer: "held-1" });
+    expect(saved.result.error).toBeUndefined();
+    expect(created).toEqual([
+      expect.objectContaining({ effect: "ask-first", targetId: "target", fromCardId: "held-1" }),
+    ]);
+  });
+
+  it("offers Always allow this after an accept, as the app does, when the queue card allows it", async () => {
+    const allowOffer: SquireRuleOffer = {
+      ...undoOffer.offer,
+      effect: "allow",
+      text: 'Release may auto-send rebase steers on "Fix invoice rounding"',
+    };
+    const accept = (sources: ReadonlyArray<SquireActivitySource>) =>
+      runSquireActivityAction(
+        press(card, "squire-accept"),
+        resolveSquireActivityAction(press(card, "squire-accept"), rows, [], sources)!,
+        deps(async () => ({
+          ok: true,
+          value: {
+            results: [
+              {
+                cardId: SquireCardId.make("card-1"),
+                status: "resolved",
+                error: null,
+                ruleOffer: allowOffer,
+              },
+            ],
+          },
+        })),
+      );
+    const accepted = await accept([squireSource(items)]);
+    expect(accepted.offer).toMatchObject({ card: { id: "card-1" }, offer: { effect: "allow" } });
+    expect(squireActivityRows([squireSource([])], [accepted.offer!], 1_000)[0]).toMatchObject({
+      title: "Always allow this",
+      status: "Rule offer",
+    });
+    // Without the queue card the notch cannot tell whether the rule could match, so no offer.
+    expect((await accept([])).offer).toBeNull();
+  });
+});
+
+describe("Squire notch rows from the Lead's combined queue", () => {
+  const leadRaised = decodeCardRow({
+    ...cardRow("lead-card", "open"),
+    squireId: "lead",
+    kind: "question",
+    steerKind: null,
+    title: "Which base should Release use?",
+  });
+  const fyi = decodeCardRow({ ...cardRow("fyi-1", "open"), kind: "fyi", steerKind: null });
+  const source = squireSource([cardRow("card-1", "open"), fyi, leadRaised]);
+  const rows = squireActivityRows([source], [], 1_000);
+
+  it("keeps queue order across Squires, names each raiser, and skips FYI", () => {
+    expect(rows.map((row) => [row.squire?.cardId, row.subtitle, row.status])).toEqual([
+      ["card-1", "Release", "Action · Rebase"],
+      ["lead-card", "Lead", "Question"],
+    ]);
+    expect(rows[1]).toMatchObject({
+      squire: { squireId: "release", palette: "gold", cardKind: "question" },
+      actions: [
+        { id: "squire-open", label: "Answer" },
+        { id: "squire-dismiss", label: "Dismiss" },
+        { id: "squire-open", label: "Open" },
+        { id: "open", label: "Open thread" },
+      ],
+    });
+  });
+
+  it("orders every card primary, Dismiss, Open, and adds Open thread only for a target thread", () => {
+    const overlap = (targetThreadId: string | null) =>
+      squireActivityRows(
+        [
+          squireSource([
+            decodeCardRow({
+              ...cardRow("overlap-1", "open"),
+              kind: "overlap",
+              steerKind: null,
+              targetThreadId,
+            }),
+          ]),
+        ],
+        [],
+        1_000,
+      )[0]!.actions.map((action) => [action.id, action.label]);
+    expect(overlap("target")).toEqual([
+      ["squire-open", "Review"],
+      ["squire-dismiss", "Dismiss"],
+      ["squire-open", "Open"],
+      ["open", "Open thread"],
+    ]);
+    expect(overlap(null)).toEqual([
+      ["squire-open", "Review"],
+      ["squire-dismiss", "Dismiss"],
+      ["squire-open", "Open"],
+    ]);
+  });
+
+  it("files a Lead-raised card's Undo offer under the Lead, which owns the rule", () => {
+    const row = rows[1]!;
+    const target = resolveSquireActivityAction(
+      {
+        rowId: row.id,
+        environmentId: row.environmentId,
+        projectId: row.projectId,
+        threadId: row.threadId!,
+        kind: "squire-dismiss",
+        requestId: "request-2",
+      },
+      rows,
+      [],
+      [source],
+    );
+    expect(target).toMatchObject({
+      type: "card",
+      squireId: "release",
+      card: { squireId: "lead", ownerSquireId: "release" },
+    });
+  });
+
+  it("disables only the pressed row", () => {
+    const [pressed, other] = squireActivityOverlay(rows, new Set([rows[0]!.id]));
+    expect(pressed!.status).toBe("Updating…");
+    expect(pressed!.actions.every((action) => action.disabled)).toBe(true);
+    expect(other).toBe(rows[1]);
+  });
+});
+
+describe("activity publication", () => {
+  // React's StrictMode runs every effect cleanup once at mount in dev, so the bridge disposes
+  // its publication and then offers again; that must still reach the host.
+  it("publishes after a dispose and re-offer, as a StrictMode remount does", () => {
+    vi.useFakeTimers();
+    try {
+      const published: string[] = [];
+      const publication = new CoalescedActivityPublication<string>(300);
+      publication.offer("first", (snapshot) => published.push(snapshot));
+      publication.dispose();
+      publication.offer("rows", (snapshot) => published.push(snapshot));
+      publication.offer("more rows", (snapshot) => published.push(snapshot));
+      vi.advanceTimersByTime(300);
+      expect(published).toEqual(["more rows"]);
+      publication.offer("later", (snapshot) => published.push(snapshot));
+      vi.advanceTimersByTime(300);
+      expect(published).toEqual(["more rows", "later"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

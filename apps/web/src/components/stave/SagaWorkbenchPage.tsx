@@ -18,7 +18,7 @@ import {
   type SagaWorkbenchSnapshot,
   type SagaWorkbenchWorkflow,
 } from "@lecturn/contracts";
-import { useProjects, useThreadShells } from "../../state/entities";
+import { useProjects, useVisibleThreadShells } from "../../state/entities";
 import { useEnvironment } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { environmentShell } from "../../state/shell";
@@ -54,7 +54,7 @@ export function SagaWorkbenchPage({
 }) {
   const navigate = useNavigate();
   const projects = useProjects();
-  const threads = useThreadShells();
+  const threads = useVisibleThreadShells();
   const threadShellState = useEnvironmentQuery(environmentShell.stateAtom(environmentId));
   const threadFactsAvailable = threadShellState.data?.snapshot._tag === "Some";
   const activities = sagaProjectActivities(threads, environmentId);

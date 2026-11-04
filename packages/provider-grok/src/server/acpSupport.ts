@@ -16,6 +16,7 @@ import * as HostProcess from "@lecturn/shared/HostProcess";
 import { normalizeModelSlug } from "@lecturn/shared/model";
 
 import * as AcpSessionRuntime from "@lecturn/provider-acp/server/AcpSessionRuntime";
+import type { GrokSquireLaunch } from "./squireHome.ts";
 import { makeXAiPromptCompletionRuntime } from "./xaiAcpExtension.ts";
 
 const GROK_API_KEY_ENV = "XAI_API_KEY";
@@ -34,6 +35,8 @@ interface GrokAcpRuntimeInput extends Omit<
   readonly grokSettings: GrokAcpRuntimeGrokSettings | null | undefined;
   readonly environment?: NodeJS.ProcessEnv;
   readonly runtimeMode?: RuntimeMode;
+  /** Lecturn: a Squire home or probe launches in its own Grok home. */
+  readonly squireLaunch?: GrokSquireLaunch;
 }
 
 /**
@@ -69,13 +72,14 @@ export function buildGrokAcpSpawnInput(
   cwd: string,
   environment?: NodeJS.ProcessEnv,
   runtimeMode?: RuntimeMode,
+  squireLaunch?: GrokSquireLaunch,
 ): AcpSessionRuntime.AcpSpawnInput {
   return {
     command: grokSettings?.binaryPath || "grok",
-    args: [...grokAcpSpawnArgs(runtimeMode)],
+    args: [...(squireLaunch?.args ?? grokAcpSpawnArgs(runtimeMode))],
     cwd,
     env: {
-      ...environment,
+      ...(squireLaunch?.environment ?? environment),
       [GROK_OAUTH2_REFERRER_ENV]: LECTURN_OAUTH_REFERRER,
     },
   };
@@ -164,8 +168,9 @@ export const makeGrokAcpRuntime = (
           input.cwd,
           input.environment,
           input.runtimeMode,
+          input.squireLaunch,
         ),
-        authMethodId: resolveGrokAuthMethodId(input.environment),
+        authMethodId: resolveGrokAuthMethodId(input.squireLaunch?.environment ?? input.environment),
         cancelMeta: { ...input.cancelMeta, ...GROK_ACP_CANCEL_META },
         initializeMeta: GROK_ACP_INITIALIZE_META,
         ...grokAcpRuntimeProcessOwnership(processGroupPlatform),

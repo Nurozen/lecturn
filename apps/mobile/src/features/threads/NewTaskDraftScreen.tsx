@@ -115,6 +115,7 @@ import {
 import {
   useEnvironmentServerConfig,
   useNewThreadTargetProjects,
+  useThreadListingCapabilities,
   useThreadShells,
 } from "../../state/entities";
 import { useProjectClone } from "../../state/projectClones";
@@ -485,6 +486,7 @@ export function NewTaskDraftScreen(props: {
     ownerKey: flow.draftKey,
     environmentId: selectedProject?.environmentId ?? null,
     threadShells: useThreadShells(),
+    threadListing: useThreadListingCapabilities(),
     pullRequestProjectId: selectedEnvironmentServerConfig?.environment.capabilities.pullRequests
       ? (selectedProject?.id ?? null)
       : null,

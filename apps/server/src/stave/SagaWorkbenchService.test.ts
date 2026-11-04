@@ -8,6 +8,7 @@ import {
   ProjectId,
   EventId,
   MessageId,
+  SquireId,
   ThreadId,
   ProviderInstanceId,
   ProviderDriverKind,
@@ -95,6 +96,7 @@ const harness = Effect.fn("harness")(function* (
     disabledServer?: boolean;
     saga?: boolean;
     unrelatedArchiveParent?: boolean;
+    squire?: boolean;
   } = {},
 ) {
   const fs = yield* FileSystem.FileSystem;
@@ -168,6 +170,7 @@ const harness = Effect.fn("harness")(function* (
     updatedAt: at,
     archivedAt: null,
     activeRunId: null,
+    ...(options.squire ? { squire: { squireId: SquireId.make("squire-1"), role: "home" } } : {}),
   });
   let turns = options.noTurns
     ? []
@@ -643,6 +646,21 @@ it.layer(testLayer)("Saga workbench service", (it) => {
         );
         assert.equal(h.counts().generations, 0);
       }),
+  );
+  it.effect("never prepares inference for a Squire thread", () =>
+    Effect.gen(function* () {
+      const h = yield* harness({ automaticStage: true, saga: true, squire: true });
+      assert.equal(
+        yield* h.service.preparePromptInference({
+          sequence: 1,
+          eventId: EventId.make("submitted"),
+          threadId: h.thread.id,
+          messageId: MessageId.make("prompt"),
+          modelSelection: h.thread.modelSelection,
+        }),
+        null,
+      );
+    }),
   );
   it.effect(
     "a completed workflow keeps completion and phase even with automatic inference enabled",

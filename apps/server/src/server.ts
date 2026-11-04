@@ -3,7 +3,6 @@ import type { RelayManagedEndpointRuntimeConfig } from "@lecturn/contracts/relay
 import * as Clock from "effect/Clock";
 import * as Random from "effect/Random";
 import * as Semaphore from "effect/Semaphore";
-import * as DatabaseStorage from "./persistence/DatabaseStorage.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
 import * as PullRequestWatchReactor from "./orchestration-v2/PullRequestWatchReactor.ts";
@@ -38,6 +37,11 @@ import * as StaveMemoryWiring from "./stave/StaveMemoryWiring.ts";
 import * as StaveLifecycleService from "./stave/lifecycle/StaveLifecycleService.ts";
 import * as StaveOrchestrationLive from "./stave/StaveOrchestrationLive.ts";
 import * as StaveOrchestrationHooks from "./stave/StaveOrchestrationHooks.ts";
+import * as SquireCommandHook from "./squire/SquireCommandHook.ts";
+import * as LayerSquire from "./squire/layerSquire.ts";
+import * as SquireFakeScripts from "./squire/SquireFakeScripts.ts";
+import * as SquireRepository from "./squire/SquireRepository.ts";
+import * as SquireHttp from "./squire/http.ts";
 import * as StaveProjectShells from "./stave/StaveProjectShells.ts";
 import * as StaveSettlement from "./stave/StaveSettlement.ts";
 import * as TeamProviderPolicyHooks from "./orchestration-v2/fork/TeamProviderPolicyHooks.ts";
@@ -223,8 +227,6 @@ import * as ResourceCleanupService from "./orchestration-v2/ResourceCleanupServi
 import * as ThreadSettlementService from "./orchestration-v2/ThreadSettlementService.ts";
 import * as ThreadPullRequestService from "./orchestration-v2/ThreadPullRequestService.ts";
 import * as RunFinalizationService from "./orchestration-v2/RunFinalizationService.ts";
-import * as EventStoreV2 from "./orchestration-v2/EventStore.ts";
-import * as ProjectionMaintenance from "./orchestration-v2/ProjectionMaintenance.ts";
 import * as ProjectionStoreV2 from "./orchestration-v2/ProjectionStore.ts";
 import { makePersistedServerRuntimeState } from "./serverRuntimeState.ts";
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
@@ -714,9 +716,11 @@ const layerScheduledTaskWebhookOrigin = Layer.effect(
 // RuntimeLayer.layerProduction so they register on the registry the
 // orchestrator resolves; their other services come from outer layers.
 // mergeAll builds these in parallel, so call order is not registration order:
-// the registry fixes it by name (LECTURN_HOOK_ORDER: team-provider-policy,
-// stave, contextual, provider-work-admission).
+// the registry fixes it by name (LECTURN_HOOK_ORDER: squire,
+// team-provider-policy, stave, contextual, provider-work-admission).
 const layerLecturnOrchestrationHookRegistrations = Layer.mergeAll(
+  // Lecturn: always on, switch off included, so marked threads stay guarded.
+  SquireCommandHook.layer.pipe(Layer.provide(SquireRepository.layer)),
   StaveOrchestrationHooks.layer,
   ContextualLayers.hooksLayer,
   AppsOrchestrationHooks.layer,
@@ -815,6 +819,10 @@ const layerStaveRuntimeServices = Layer.mergeAll(
   Layer.provideMerge(StaveOrchestrationLive.layer),
 );
 
+// Lecturn: the Squire CI excerpt reads GitHub through the shared provider registry.
+// One object, so the relay and the runtime services share a single instance.
+const layerSquireRuntime = LayerSquire.layer.pipe(Layer.provide(PullRequestProviderRegistry.layer));
+
 // Lecturn services next to the orchestration runtime; each needs its outputs.
 const layerLecturnRuntimeServices = Layer.mergeAll(
   layerStaveRuntimeServices,
@@ -825,21 +833,21 @@ const layerLecturnRuntimeServices = Layer.mergeAll(
   layerDecisionIngestion,
   layerDecisionWorker,
   layerDecisionCloud,
+  layerSquireRuntime,
 );
 
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
-  // The relay publishes PR watch activity (resolved once at construction).
-  AgentAwarenessRelay.layer.pipe(Layer.provide(layerPullRequestWatch)),
+  // The relay publishes PR watch activity and Squire rows (resolved once at construction).
+  AgentAwarenessRelay.layer.pipe(
+    Layer.provide(layerPullRequestWatch),
+    Layer.provide(layerSquireRuntime),
+  ),
   layerLecturnRuntimeServices,
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
   StorageCleanup.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
-  DatabaseStorage.layer.pipe(
-    Layer.provide(ProjectionMaintenance.layer),
-    Layer.provide(
-      Layer.merge(EventStoreV2.layerFromOrchestrationEventStore, ProjectionStoreV2.layer),
-    ),
-  ),
+  // Lecturn: compaction keeps the PR link events a Squire has not consumed.
+  LayerSquire.layerDatabaseStorage,
   layerThreadPullRequestWorker,
   DelegatedTaskAnalytics.layer,
   Layer.effectDiscard(
@@ -899,6 +907,9 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
       Layer.mergeAll(
         AntigravityInstallation.AntigravityInstallation.layer,
         CodexInstallation.CodexInstallation.layer,
+        // Lecturn: below the provider registry so the scripted adapter reads its
+        // script source; merged up so the fixture seam writes the same registry.
+        SquireFakeScripts.layerServer,
       ),
     ),
   );
@@ -984,6 +995,8 @@ const layerMakeRoutes = Layer.mergeAll(
     ),
     ServerHttp.layerOtlpTracesProxyRoute,
     ServerHttp.contextualExportRouteLayer,
+    // Lecturn: Squire dev fixture, action-log export, and webhook trigger routes.
+    SquireHttp.layer,
     ServerHttp.layerAssetRoute,
     ServerHttp.layerAttachmentUploadRoute,
     DeviceHubProxy.layer,

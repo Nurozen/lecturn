@@ -54,6 +54,7 @@ import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import {
   useProjects,
+  useThreadListingCapabilities,
   useThreadProjection,
   useThreadRelationshipShells,
 } from "../../state/entities";
@@ -212,6 +213,7 @@ export function ThreadRelationshipsPanel(props: {
   const projection = useThreadProjection(ref)?.projection ?? null;
   const providersByEnvironment = useEnvironmentProviders();
   const relationshipShells = useThreadRelationshipShells(ref);
+  const listingCapabilities = useThreadListingCapabilities().get(props.environmentId);
   const allProjects = useProjects();
   const archived = useArchivedThreadSnapshots([props.environmentId]);
   const navigate = useNavigate();
@@ -260,7 +262,11 @@ export function ThreadRelationshipsPanel(props: {
     ...relationshipShells,
     ...(archivedShells ?? []),
   ];
-  const graph = deriveThreadRelationshipGraph({ threads: shells, projection });
+  const graph = deriveThreadRelationshipGraph({
+    threads: shells,
+    projection,
+    capabilities: listingCapabilities,
+  });
   const currentThread = projection?.thread ?? graph.nodes.get(props.threadId)?.thread;
   const currentProject = projects.find((project) => project.id === currentThread?.projectId);
   const latestMergeBackRun = projection === null ? null : resolveLatestMergeBackRun(projection);

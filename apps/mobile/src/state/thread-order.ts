@@ -78,6 +78,7 @@ export function beginPendingThreadOrder(pending: PendingThreadOrder) {
     const ordered = getThreadListV2OrderedSection({
       threads: eligible,
       section: current.section,
+      listingCapabilities: appAtomRegistry.get(environmentThreadShells.listingCapabilitiesAtom),
       now,
       queuedThreadKeys: appAtomRegistry.get(queuedThreadKeysAtom),
       settlementEnvironmentIds: new Set(

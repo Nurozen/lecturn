@@ -10,6 +10,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import {
   type CodexSettings,
   DEFAULT_TEXT_GENERATION_REASONING_EFFORT,
+  type ProviderInstanceId,
   type ServerProviderModel,
   TextGenerationError,
 } from "@lecturn/contracts";
@@ -19,6 +20,7 @@ import { resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import { expandHomePath } from "@lecturn/provider-core/server/pathExpansion";
 import { codexExecLaunchArgs, resolveCodexLaunchArgs } from "../provider/codexLaunchArgs.ts";
+import { type CodexLaunch, makeCodexSquireHome } from "../provider/Drivers/CodexSquireHome.ts";
 import type * as TextGeneration from "./TextGeneration.ts";
 import * as TextGenerationOperations from "@lecturn/provider-core/server/textGenerationOperations";
 import { buildDecisionNotesPrompt } from "@lecturn/provider-core/server/textGenerationPrompts";
@@ -88,6 +90,12 @@ const codexMcpServersOff = (names: ReadonlyArray<string>): string | null =>
     ? null
     : `mcp_servers={${names.map((name) => `${JSON.stringify(name)}={enabled=false}`).join(",")}}`;
 const encodeJsonString = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+/** These run isolated from the checkout, and their errors never carry conversation text. */
+const isPrivateOperation = (operation: string) =>
+  operation === "generateWorkflowSummary" ||
+  operation === "generateContextualSummary" ||
+  operation === "generateSquireTurnSummary" ||
+  operation === "generateDecisionNotes";
 export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(function* (
   codexConfig: CodexSettings,
   environment?: NodeJS.ProcessEnv,
@@ -97,12 +105,37 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     import("@lecturn/contracts").ProviderSetupError,
     Scope.Scope
   >,
+  /** Lecturn: names the instance's Squire CODEX_HOME, where Squire summaries run. */
+  instanceId?: ProviderInstanceId,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const serverConfig = yield* Effect.service(ServerConfig.ServerConfig);
   const resolvedEnvironment = environment ?? process.env;
+  const squireHome =
+    instanceId === undefined
+      ? undefined
+      : yield* makeCodexSquireHome({
+          fileSystem,
+          path,
+          stateDir: serverConfig.stateDir,
+          instanceId,
+          homeDirectory: yield* HostProcess.HomeDirectory,
+        });
+
+  const resolveLaunch = (operation: string) =>
+    resolveRuntime
+      ? resolveRuntime.pipe(
+          Effect.map((resolved): CodexLaunch & { readonly managed: boolean } => ({
+            settings: resolved.config,
+            environment: resolved.environment,
+            managed: true,
+          })),
+          Effect.mapError((cause) => new TextGenerationError({ operation, detail: cause.detail })),
+        )
+      : Effect.succeed({ settings: codexConfig, environment: resolvedEnvironment, managed: false });
+  type ResolvedLaunch = Effect.Success<ReturnType<typeof resolveLaunch>>;
 
   const prepareIsolation = (input: Parameters<typeof prepareCodexInferenceIsolation>[0]) =>
     prepareCodexInferenceIsolation(input).pipe(
@@ -166,11 +199,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
             new TextGenerationError({
               operation,
               detail: `Failed to write temp file`,
-              ...(operation === "generateWorkflowSummary" ||
-              operation === "generateContextualSummary" ||
-              operation === "generateDecisionNotes"
-                ? {}
-                : { cause }),
+              ...(isPrivateOperation(operation) ? {} : { cause }),
             }),
         ),
       );
@@ -185,11 +214,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           new TextGenerationError({
             operation,
             detail: "Failed to encode structured output schema.",
-            ...(operation === "generateWorkflowSummary" ||
-            operation === "generateContextualSummary" ||
-            operation === "generateDecisionNotes"
-              ? {}
-              : { cause }),
+            ...(isPrivateOperation(operation) ? {} : { cause }),
           }),
       ),
     );
@@ -280,240 +305,263 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     Effect.orElseSucceed((): ReadonlyArray<string> => []),
   );
 
-  const runCodexJson = Effect.fn("runCodexJson")(function* <S extends Schema.Top>({
-    operation,
-    cwd,
-    prompt,
-    outputSchema: outputSchemaJson,
-    modelSelection,
-    attachments,
-    investigate,
-  }: TextGenerationOperations.Request<S>): Effect.fn.Return<
-    S["Type"],
-    TextGenerationError,
-    S["DecodingServices"]
-  > {
-    const imagePaths = yield* materializeImageAttachments(attachments);
-    const schemaJson = yield* encodeJsonForOperation(
+  const makeRunCodexJson = (
+    launchFor: (
+      operation: string,
+    ) => Effect.Effect<ResolvedLaunch, TextGenerationError, Scope.Scope>,
+  ) =>
+    Effect.fn("runCodexJson")(function* <S extends Schema.Top>({
       operation,
-      toCodexJsonSchemaObject(outputSchemaJson),
-    );
-    const schemaPath = yield* writeTempFile(operation, "codex-schema", schemaJson);
-    const outputPath = yield* writeTempFile(operation, "codex-output", "").pipe(
-      Effect.onError(() => removeTempFileDir(schemaPath)),
-    );
-
-    const runCodexCommand = Effect.fn("runCodexJson.runCodexCommand")(function* () {
-      const resolved = resolveRuntime
-        ? yield* resolveRuntime.pipe(
-            Effect.mapError(
-              (cause) => new TextGenerationError({ operation, detail: cause.detail }),
-            ),
-          )
-        : undefined;
-      const effectiveConfig = resolved?.config ?? codexConfig;
-      const effectiveEnvironment = resolved?.environment ?? resolvedEnvironment;
-      const model = yield* resolveModelSlug(modelSelection.model);
-      const inference =
-        operation === "generateWorkflowSummary" ||
-        operation === "generateContextualSummary" ||
-        operation === "generateDecisionNotes";
-      const commandCwd = inference
-        ? yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-workflow-inference-" }).pipe(
-            Effect.mapError(
-              (cause) =>
-                new TextGenerationError({
-                  operation,
-                  detail: "Could not isolate workflow inference.",
-                  ...(operation === "generateWorkflowSummary" ||
-                  operation === "generateContextualSummary" ||
-                  operation === "generateDecisionNotes"
-                    ? {}
-                    : { cause }),
-                }),
-            ),
-          )
-        : cwd;
-      const launchArgs = resolveCodexLaunchArgs(effectiveConfig.launchArgs, effectiveEnvironment);
-      const inferenceInstructions = inference
-        ? yield* writeTempFile(
-            operation,
-            "workflow-instructions",
-            "Classify only the supplied conversation and return the requested JSON. Do not use tools or external context.",
-          ).pipe(Effect.flatMap((filePath) => encodeJsonForOperation(operation, filePath)))
-        : undefined;
-      const reasoningEffort =
-        getModelSelectionStringOptionValue(modelSelection, "reasoningEffort") ??
-        (operation === "generateDecisionNotes"
-          ? undefined
-          : DEFAULT_TEXT_GENERATION_REASONING_EFFORT);
-      const serviceTier = resolved ? undefined : getCodexServiceTierOptionValue(modelSelection);
-      const binary = effectiveConfig.binaryPath || "codex";
-      const commandEnvironment = {
-        ...effectiveEnvironment,
-        ...(effectiveConfig.homePath
-          ? {
-              CODEX_HOME: expandHomePath(
-                effectiveConfig.homePath,
-                yield* HostProcess.HomeDirectory,
-              ),
-            }
-          : {}),
-      };
-      const execLaunchArgs = codexExecLaunchArgs(launchArgs);
-      const inferenceArgs = inference
-        ? [`model_instructions_file=${inferenceInstructions}`, ...CODEX_INFERENCE_CONFIG].flatMap(
-            (value) => ["--config", value],
-          )
-        : [];
-      const isolation = inference
-        ? yield* prepareIsolation({
-            binary,
-            args: [...execLaunchArgs, ...inferenceArgs],
-            env: commandEnvironment,
-            cwd: commandCwd,
-            operation,
-            model,
-          })
-        : undefined;
-      yield* isolation?.verify ?? Effect.void;
-      // Inference isolation already turns off every MCP server Codex reports.
-      const mcpServersOff = inference
-        ? null
-        : yield* listEnabledMcpServers({
-            binary,
-            cwd: commandCwd,
-            env: commandEnvironment,
-            // `codex mcp` rejects --strict-config; the overrides still apply.
-            launchArgs: execLaunchArgs.filter((arg) => arg !== "--strict-config"),
-          }).pipe(Effect.map(codexMcpServersOff));
-      const spawnCommand = yield* resolveSpawnCommand(
-        binary,
-        [
-          "exec",
-          ...execLaunchArgs,
-          // Text generation needs only the prompt. A user's MCP server would
-          // otherwise start and could act on it, as Claude's --strict-mcp-config
-          // prevents for Claude.
-          ...CODEX_NO_PLUGIN_ARGS,
-          ...(mcpServersOff ? ["--config", mcpServersOff] : []),
-          ...(inference ? ["--ignore-rules", ...inferenceArgs, ...(isolation?.args ?? [])] : []),
-          "--ephemeral",
-          "--skip-git-repo-check",
-          "-s",
-          "read-only",
-          "--model",
-          model,
-          ...(reasoningEffort ? ["--config", `model_reasoning_effort="${reasoningEffort}"`] : []),
-          ...(serviceTier ? ["--config", `service_tier="${serviceTier}"`] : []),
-          "--output-schema",
-          schemaPath,
-          "--output-last-message",
-          outputPath,
-          ...imagePaths.flatMap((imagePath) => ["--image", imagePath]),
-          "-",
-        ],
-        { env: effectiveEnvironment },
+      cwd,
+      prompt,
+      outputSchema: outputSchemaJson,
+      modelSelection,
+      attachments,
+      investigate,
+    }: TextGenerationOperations.Request<S>): Effect.fn.Return<
+      S["Type"],
+      TextGenerationError,
+      S["DecodingServices"]
+    > {
+      const imagePaths = yield* materializeImageAttachments(attachments);
+      const schemaJson = yield* encodeJsonForOperation(
+        operation,
+        toCodexJsonSchemaObject(outputSchemaJson),
       );
-      const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        env: commandEnvironment,
-        cwd: commandCwd,
-        shell: spawnCommand.shell,
-        stdin: {
-          stream: Stream.encodeText(Stream.make(prompt)),
-        },
+      const schemaPath = yield* writeTempFile(operation, "codex-schema", schemaJson);
+      const outputPath = yield* writeTempFile(operation, "codex-output", "").pipe(
+        Effect.onError(() => removeTempFileDir(schemaPath)),
+      );
+
+      const runCodexCommand = Effect.fn("runCodexJson.runCodexCommand")(function* () {
+        const launch = yield* launchFor(operation);
+        const effectiveConfig = launch.settings;
+        const effectiveEnvironment = launch.environment;
+        const model = yield* resolveModelSlug(modelSelection.model);
+        const inference = isPrivateOperation(operation);
+        const commandCwd = inference
+          ? yield* fileSystem
+              .makeTempDirectoryScoped({ prefix: "lecturn-workflow-inference-" })
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new TextGenerationError({
+                      operation,
+                      detail: "Could not isolate workflow inference.",
+                      ...(isPrivateOperation(operation) ? {} : { cause }),
+                    }),
+                ),
+              )
+          : cwd;
+        const launchArgs = resolveCodexLaunchArgs(effectiveConfig.launchArgs, effectiveEnvironment);
+        const inferenceInstructions = inference
+          ? yield* writeTempFile(
+              operation,
+              "workflow-instructions",
+              "Classify only the supplied conversation and return the requested JSON. Do not use tools or external context.",
+            ).pipe(Effect.flatMap((filePath) => encodeJsonForOperation(operation, filePath)))
+          : undefined;
+        const reasoningEffort =
+          getModelSelectionStringOptionValue(modelSelection, "reasoningEffort") ??
+          (operation === "generateDecisionNotes"
+            ? undefined
+            : DEFAULT_TEXT_GENERATION_REASONING_EFFORT);
+        const serviceTier = launch.managed
+          ? undefined
+          : getCodexServiceTierOptionValue(modelSelection);
+        const binary = effectiveConfig.binaryPath || "codex";
+        const commandEnvironment = {
+          ...effectiveEnvironment,
+          ...(effectiveConfig.homePath
+            ? {
+                CODEX_HOME: expandHomePath(
+                  effectiveConfig.homePath,
+                  yield* HostProcess.HomeDirectory,
+                ),
+              }
+            : {}),
+        };
+        const execLaunchArgs = codexExecLaunchArgs(launchArgs);
+        const inferenceArgs = inference
+          ? [`model_instructions_file=${inferenceInstructions}`, ...CODEX_INFERENCE_CONFIG].flatMap(
+              (value) => ["--config", value],
+            )
+          : [];
+        const isolation = inference
+          ? yield* prepareIsolation({
+              binary,
+              args: [...execLaunchArgs, ...inferenceArgs],
+              env: commandEnvironment,
+              cwd: commandCwd,
+              operation,
+              model,
+            })
+          : undefined;
+        yield* isolation?.verify ?? Effect.void;
+        // Inference isolation already turns off every MCP server Codex reports.
+        const mcpServersOff = inference
+          ? null
+          : yield* listEnabledMcpServers({
+              binary,
+              cwd: commandCwd,
+              env: commandEnvironment,
+              // `codex mcp` rejects --strict-config; the overrides still apply.
+              launchArgs: execLaunchArgs.filter((arg) => arg !== "--strict-config"),
+            }).pipe(Effect.map(codexMcpServersOff));
+        const spawnCommand = yield* resolveSpawnCommand(
+          binary,
+          [
+            "exec",
+            ...execLaunchArgs,
+            // Text generation needs only the prompt. A user's MCP server would
+            // otherwise start and could act on it, as Claude's --strict-mcp-config
+            // prevents for Claude.
+            ...CODEX_NO_PLUGIN_ARGS,
+            ...(mcpServersOff ? ["--config", mcpServersOff] : []),
+            ...(inference ? ["--ignore-rules", ...inferenceArgs, ...(isolation?.args ?? [])] : []),
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "-s",
+            "read-only",
+            "--model",
+            model,
+            ...(reasoningEffort ? ["--config", `model_reasoning_effort="${reasoningEffort}"`] : []),
+            ...(serviceTier ? ["--config", `service_tier="${serviceTier}"`] : []),
+            "--output-schema",
+            schemaPath,
+            "--output-last-message",
+            outputPath,
+            ...imagePaths.flatMap((imagePath) => ["--image", imagePath]),
+            "-",
+          ],
+          { env: effectiveEnvironment },
+        );
+        const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+          env: commandEnvironment,
+          cwd: commandCwd,
+          shell: spawnCommand.shell,
+          stdin: {
+            stream: Stream.encodeText(Stream.make(prompt)),
+          },
+        });
+
+        const child = yield* commandSpawner
+          .spawn(command)
+          .pipe(
+            Effect.mapError((cause) =>
+              normalizeCliError("codex", operation, cause, "Failed to spawn Codex CLI process"),
+            ),
+          );
+
+        const [stdout, stderr, exitCode] = yield* Effect.all(
+          [
+            readStreamAsString(operation, child.stdout),
+            readStreamAsString(operation, child.stderr),
+            child.exitCode.pipe(
+              Effect.mapError((cause) =>
+                normalizeCliError("codex", operation, cause, "Failed to read Codex CLI exit code"),
+              ),
+            ),
+          ],
+          { concurrency: "unbounded" },
+        );
+
+        yield* isolation?.verify ?? Effect.void;
+        if (exitCode !== 0) {
+          const stderrDetail = stderr.trim();
+          const stdoutDetail = stdout.trim();
+          const detail = stderrDetail.length > 0 ? stderrDetail : stdoutDetail;
+          return yield* new TextGenerationError({
+            operation,
+            detail:
+              !inference && detail.length > 0
+                ? `Codex CLI command failed: ${detail}`
+                : `Codex CLI command failed with code ${exitCode}.`,
+          });
+        }
       });
 
-      const child = yield* commandSpawner
-        .spawn(command)
-        .pipe(
-          Effect.mapError((cause) =>
-            normalizeCliError("codex", operation, cause, "Failed to spawn Codex CLI process"),
+      const cleanup = Effect.all([removeTempFileDir(schemaPath), removeTempFileDir(outputPath)], {
+        concurrency: "unbounded",
+      }).pipe(Effect.asVoid);
+
+      return yield* Effect.gen(function* () {
+        yield* runCodexCommand().pipe(
+          Effect.scoped,
+          Effect.timeoutOption(investigate?.timeoutMs ?? CODEX_TIMEOUT_MS),
+          Effect.flatMap(
+            Option.match({
+              onNone: () =>
+                Effect.fail(
+                  new TextGenerationError({ operation, detail: "Codex CLI request timed out." }),
+                ),
+              onSome: () => Effect.void,
+            }),
           ),
         );
 
-      const [stdout, stderr, exitCode] = yield* Effect.all(
-        [
-          readStreamAsString(operation, child.stdout),
-          readStreamAsString(operation, child.stderr),
-          child.exitCode.pipe(
-            Effect.mapError((cause) =>
-              normalizeCliError("codex", operation, cause, "Failed to read Codex CLI exit code"),
-            ),
-          ),
-        ],
-        { concurrency: "unbounded" },
-      );
-
-      yield* isolation?.verify ?? Effect.void;
-      if (exitCode !== 0) {
-        const stderrDetail = stderr.trim();
-        const stdoutDetail = stdout.trim();
-        const detail = stderrDetail.length > 0 ? stderrDetail : stdoutDetail;
-        return yield* new TextGenerationError({
-          operation,
-          detail:
-            !inference && detail.length > 0
-              ? `Codex CLI command failed: ${detail}`
-              : `Codex CLI command failed with code ${exitCode}.`,
+        const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(outputSchemaJson), {
+          onExcessProperty: operation === "generateDecisionNotes" ? "error" : "ignore",
         });
-      }
-    });
 
-    const cleanup = Effect.all([removeTempFileDir(schemaPath), removeTempFileDir(outputPath)], {
-      concurrency: "unbounded",
-    }).pipe(Effect.asVoid);
-
-    return yield* Effect.gen(function* () {
-      yield* runCodexCommand().pipe(
-        Effect.scoped,
-        Effect.timeoutOption(investigate?.timeoutMs ?? CODEX_TIMEOUT_MS),
-        Effect.flatMap(
-          Option.match({
-            onNone: () =>
-              Effect.fail(
-                new TextGenerationError({ operation, detail: "Codex CLI request timed out." }),
-              ),
-            onSome: () => Effect.void,
-          }),
-        ),
-      );
-
-      const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(outputSchemaJson), {
-        onExcessProperty: operation === "generateDecisionNotes" ? "error" : "ignore",
-      });
-
-      return yield* fileSystem.readFileString(outputPath).pipe(
-        Effect.mapError(
-          (cause) =>
-            new TextGenerationError({
-              operation,
-              detail: "Failed to read Codex output file.",
-              ...(operation === "generateWorkflowSummary" ||
-              operation === "generateContextualSummary" ||
-              operation === "generateDecisionNotes"
-                ? {}
-                : { cause }),
-            }),
-        ),
-        Effect.flatMap(decodeOutput),
-        Effect.catchTags({
-          SchemaError: (cause) =>
-            Effect.fail(
+        return yield* fileSystem.readFileString(outputPath).pipe(
+          Effect.mapError(
+            (cause) =>
               new TextGenerationError({
                 operation,
-                detail: "Codex returned invalid structured output.",
-                ...(operation === "generateWorkflowSummary" ||
-                operation === "generateContextualSummary" ||
-                operation === "generateDecisionNotes"
-                  ? {}
-                  : { cause }),
+                detail: "Failed to read Codex output file.",
+                ...(isPrivateOperation(operation) ? {} : { cause }),
               }),
-            ),
-        }),
+          ),
+          Effect.flatMap(decodeOutput),
+          Effect.catchTags({
+            SchemaError: (cause) =>
+              Effect.fail(
+                new TextGenerationError({
+                  operation,
+                  detail: "Codex returned invalid structured output.",
+                  ...(isPrivateOperation(operation) ? {} : { cause }),
+                }),
+              ),
+          }),
+        );
+      }).pipe(Effect.ensuring(cleanup));
+    });
+  const runCodexJson = makeRunCodexJson(resolveLaunch);
+
+  // Lecturn: Squire summaries run in the Squire CODEX_HOME, so the user's
+  // AGENTS.md, skills, and memories never reach a Squire's summary.
+  // The home is prepared before the runner, whose errors are masked, so a
+  // missing login reaches the caller in words.
+  const generateSquireTurnSummary: NonNullable<
+    TextGeneration.TextGeneration["Service"]["generateSquireTurnSummary"]
+  > = (input) =>
+    Effect.gen(function* () {
+      const operation = "generateSquireTurnSummary";
+      if (squireHome === undefined) {
+        return yield* new TextGenerationError({
+          operation,
+          detail: "Squire summaries need the instance's Squire Codex home.",
+        });
+      }
+      const launch = yield* resolveLaunch(operation);
+      const squireLaunch = yield* squireHome.prepare(launch).pipe(
+        Effect.mapError(
+          (error) =>
+            new TextGenerationError({
+              operation,
+              detail:
+                error._tag === "CodexSquireLoginError"
+                  ? error.message
+                  : "Could not prepare the Squire Codex home.",
+            }),
+        ),
       );
-    }).pipe(Effect.ensuring(cleanup));
-  });
+      return yield* TextGenerationOperations.squireTurnSummaryFromRunner(
+        "CodexTextGeneration",
+        makeRunCodexJson(() => Effect.succeed({ ...squireLaunch, managed: launch.managed })),
+      )(input);
+    }).pipe(Effect.scoped);
 
   const checkDecisionWriter: NonNullable<
     TextGeneration.TextGeneration["Service"]["checkDecisionWriter"]
@@ -595,6 +643,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       "CodexTextGeneration",
       runCodexJson,
     ),
+    generateSquireTurnSummary,
     checkDecisionWriter,
     generateDecisionNotes,
   };

@@ -34,6 +34,9 @@ import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import { PullRequestWatchDiscovery } from "./pullRequest/PullRequestWatchDiscovery.ts";
 import { PullRequestWatchService } from "./pullRequest/PullRequestWatchService.ts";
 import { StaveLifecycleService } from "./stave/lifecycle/StaveLifecycleService.ts";
+import { SquireClock } from "./squire/SquireClock.ts";
+import { SquireDelivery } from "./squire/SquireDelivery.ts";
+import { SquireReactor } from "./squire/SquireReactor.ts";
 import { SagaInferenceReactor } from "./stave/SagaInferenceReactor.ts";
 import { DecisionIngestion } from "./threadDecisions/DecisionIngestion.ts";
 import { DecisionWorker } from "./threadDecisions/DecisionWorker.ts";
@@ -122,6 +125,7 @@ it.effect.each([
           autoBootstrapProjectFromCwd: true,
           threadForkingEnabled: false,
           staveEnabled: false,
+          squireEnabled: false,
         }),
         Layer.mock(Keybindings.Keybindings)({ start: Effect.void }),
         Layer.mock(LegacyV1ThreadImporter.LegacyV1ThreadImporter)({
@@ -720,4 +724,31 @@ it.effect("starts the Lecturn background roots that are wired, in dependency ord
       "decisions.worker",
     ]);
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "starts the Squire reactor, batch re-dispatch, and clock when the switch built them",
+  () =>
+    Effect.gen(function* () {
+      const started: string[] = [];
+      const all = yield* Deferred.make<void>();
+      const record = (name: string) =>
+        Effect.sync(() => started.push(name)).pipe(
+          Effect.andThen((count) => (count === 3 ? Deferred.succeed(all, undefined) : Effect.void)),
+          Effect.andThen(Effect.never),
+        );
+      yield* ServerRuntimeStartup.startLecturnReactors.pipe(
+        Effect.provideService(SquireReactor, {
+          start: record("reactor"),
+        } as unknown as SquireReactor["Service"]),
+        Effect.provideService(SquireDelivery, {
+          redispatchBatched: record("redispatch"),
+        } as unknown as SquireDelivery["Service"]),
+        Effect.provideService(SquireClock, {
+          start: record("clock"),
+        } as unknown as SquireClock["Service"]),
+      );
+      yield* Deferred.await(all);
+      assert.sameMembers(started, ["reactor", "redispatch", "clock"]);
+    }).pipe(Effect.scoped),
 );

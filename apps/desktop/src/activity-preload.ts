@@ -1,5 +1,11 @@
-// @effect-diagnostics globalTimers:off -- This isolated Electron preload has no Effect runtime; the timeout bounds command feedback.
-import type { DesktopActivityAction, DesktopActivityRow } from "@lecturn/contracts";
+// @effect-diagnostics globalTimers:off globalDate:off -- This isolated Electron preload has no Effect runtime; the timeouts bound command feedback.
+import type {
+  DesktopActivityAction,
+  DesktopActivityActionKind,
+  DesktopActivityRow,
+  DesktopActivitySquireActionKind,
+  DesktopActivitySquireResult,
+} from "@lecturn/contracts";
 import {
   activityVisualState,
   activityVisualPresentation,
@@ -16,6 +22,22 @@ import * as Channels from "./activity/channels.ts";
 import { ActivitySnapshotChangeTracker } from "./activity/changes.ts";
 import { ActivityHoverIntent } from "./activity/hover.ts";
 import { activityStateColorVariable } from "./activity/theme.ts";
+import {
+  SquireCountdown,
+  SquireRequests,
+  SquireResults,
+  isSquireActionKind,
+  isSquireActivityRow,
+  squireCardView,
+  squirePressSuccess,
+  squireSection,
+  activityListState,
+  threadkeeperSmallMark,
+  type SquireActivityRow,
+  type SquireCardButton,
+  type SquireCountdownEntry,
+  type SquireResult,
+} from "./activity/squire.ts";
 import {
   isCurrentActivityAnnouncement,
   type ActivityAnnouncement,
@@ -54,6 +76,31 @@ window.addEventListener("DOMContentLoaded", () => {
   const expandedChecks = new Set<string>();
   const expandedContext = new Set<string>();
   const changes = new ActivitySnapshotChangeTracker();
+  const squireRequests = new SquireRequests();
+  const squireCountdown = new SquireCountdown();
+  const squirePresses = new Map<
+    string,
+    {
+      readonly success: ReturnType<typeof squirePressSuccess>;
+      readonly title: string;
+      readonly timeout: ReturnType<typeof setTimeout>;
+    }
+  >();
+  let squireHolds: SquireCountdownEntry[] = [];
+  // The rendered node for each result, so expiry and dismissal patch it out without a render.
+  let squireResultNodes = new Map<string, HTMLElement>();
+  const removeSquireResult = (rowId: string) => {
+    const node = squireResultNodes.get(rowId);
+    squireResultNodes.delete(rowId);
+    const section = node?.closest(".squire-section");
+    node?.remove();
+    if (section && !section.querySelector("article,.squire-toast")) {
+      section.remove();
+      if (!snapshot.rows.length && !cards.querySelector(".empty")) cards.append(emptyState());
+    }
+  };
+  const squireResults = new SquireResults(removeSquireResult);
+  let receivedAt = Date.now();
   let microRowId: string | null = null;
   let microLabel = "";
   let microColor = "var(--activity-accent)";
@@ -156,6 +203,12 @@ window.addEventListener("DOMContentLoaded", () => {
   document.getElementById("hide")!.addEventListener("click", () => {
     void ipcRenderer.invoke(Channels.ACTIVITY_SET_ENABLED, false);
   });
+  const emptyState = () =>
+    element(
+      "p",
+      "No active work yet. Open a project in Lecturn to watch a pull request or direct an agent.",
+      "empty",
+    );
   const element = (tag: string, text: string, className?: string) => {
     const result = document.createElement(tag);
     result.textContent = text;
@@ -225,7 +278,7 @@ window.addEventListener("DOMContentLoaded", () => {
   };
   const dispatch = async (
     row: DesktopActivityRow,
-    kind: DesktopActivityAction["kind"],
+    kind: DesktopActivityActionKind,
     text?: string,
   ) => {
     if (pending) return;
@@ -265,7 +318,153 @@ window.addEventListener("DOMContentLoaded", () => {
       render();
     }
   };
+  const forgetSquirePress = (requestId: string) => {
+    const press = squirePresses.get(requestId);
+    clearTimeout(press?.timeout);
+    squirePresses.delete(requestId);
+    return press;
+  };
+  const squireIdentity = (row: SquireActivityRow) => ({
+    rowId: row.id,
+    environmentId: row.environmentId,
+    projectId: row.projectId,
+    ...(row.threadId ? { threadId: row.threadId } : {}),
+    ...(row.watchId ? { watchId: row.watchId } : {}),
+    ...(row.watchRevision !== undefined ? { watchRevision: row.watchRevision } : {}),
+  });
+  const failSquire = (row: SquireActivityRow, text: string) =>
+    squireResults.record({ rowId: row.id, kind: "error", text, title: row.title });
+  /** The host only acknowledges forwarding; the outcome arrives on ACTIVITY_SQUIRE_RESULT. */
+  const dispatchSquire = async (row: SquireActivityRow, kind: DesktopActivitySquireActionKind) => {
+    if (squireRequests.isPending(row.id)) return;
+    squireResults.clear(row.id);
+    const requestId = squireRequests.begin(row.id, kind);
+    squirePresses.set(requestId, {
+      success: squirePressSuccess(row, kind),
+      title: row.title,
+      // Without this, a lost result would leave the card's buttons disabled for good.
+      timeout: setTimeout(() => {
+        squirePresses.delete(requestId);
+        squireRequests.abandon(requestId);
+        failSquire(row, "No result received yet. Open Lecturn to check before retrying.");
+        render();
+      }, 20_000),
+    });
+    render();
+    try {
+      await ipcRenderer.invoke(Channels.ACTIVITY_ACTION, {
+        ...squireIdentity(row),
+        kind,
+        requestId,
+      } satisfies DesktopActivityAction);
+    } catch (error) {
+      forgetSquirePress(requestId);
+      squireRequests.abandon(requestId);
+      failSquire(row, error instanceof Error ? error.message : "Unable to send request.");
+      render();
+    }
+  };
+  /** A card's Open shows its target thread; the host collapses the notch on success. */
+  const openSquireThread = (row: SquireActivityRow) => {
+    squireResults.clear(row.id);
+    void ipcRenderer
+      .invoke(Channels.ACTIVITY_ACTION, {
+        ...squireIdentity(row),
+        kind: "open",
+      } satisfies DesktopActivityAction)
+      .catch((error: unknown) => {
+        failSquire(row, error instanceof Error ? error.message : "Unable to open the thread.");
+        render();
+      });
+  };
+  /** A result on its card, or a toast row once the card is gone; errors carry a dismiss. */
+  const squireResultLine = (result: SquireResult, toast: boolean) => {
+    const line = element("div", "", `${toast ? "squire-toast" : "squire-result"} ${result.kind}`);
+    line.setAttribute("role", result.kind === "error" ? "alert" : "status");
+    line.append(element("span", result.text, "squire-result-text"));
+    if (toast) line.append(element("span", result.title, "squire-toast-title"));
+    if (result.kind === "error") {
+      const dismiss = element("button", "×", "squire-result-dismiss");
+      dismiss.dataset.focusKey = `${result.rowId}:result`;
+      dismiss.setAttribute("aria-label", "Dismiss message");
+      dismiss.title = "Dismiss message";
+      dismiss.addEventListener("click", () => {
+        squireResults.clear(result.rowId);
+        removeSquireResult(result.rowId);
+      });
+      line.append(dismiss);
+    }
+    squireResultNodes.set(result.rowId, line);
+    return line;
+  };
+  /** A plain card with no state classes, so the notch never animates for a Squire. */
+  const squireCard = (row: SquireActivityRow) => {
+    const view = squireCardView(row, squireRequests.isPending(row.id), squireResults.get(row.id));
+    const card = document.createElement("article");
+    card.className = "squire-card";
+    card.dataset.rowId = row.id;
+    card.dataset.focusKey = `${row.id}:card`;
+    card.tabIndex = -1;
+    const meta = element("div", "", "squire-meta");
+    meta.append(
+      element("span", view.subtitle, "squire-name"),
+      element("span", view.status, "status"),
+    );
+    card.append(meta, element("h2", view.title));
+    if (view.excerpt) card.append(element("div", view.excerpt, "card-excerpt"));
+    for (const label of view.labels) card.append(element("div", label, "squire-label"));
+    if (view.caption) card.append(element("div", view.caption, "squire-caption"));
+    const squireButton = (action: SquireCardButton) => {
+      const button = document.createElement("button");
+      button.className = action.primary ? "primary" : "secondary";
+      button.textContent = action.label;
+      // Review and Open both open the Squire view, so the primary keys by its role.
+      button.dataset.focusKey = `${row.id}:${action.primary ? "primary" : action.kind}`;
+      button.disabled = action.disabled;
+      const { kind } = action;
+      button.addEventListener("click", () =>
+        kind === "open" ? openSquireThread(row) : void dispatchSquire(row, kind),
+      );
+      return button;
+    };
+    if (view.holdRemainingMs !== null) {
+      const countdown = element("div", "", "squire-countdown");
+      countdown.setAttribute("role", "timer");
+      squireHolds.push({ node: countdown, holdRemainingMs: view.holdRemainingMs });
+      card.append(countdown);
+    }
+    if (view.buttons.length) {
+      const actions = element("div", "", "actions");
+      for (const action of view.buttons) actions.append(squireButton(action));
+      card.append(actions);
+    }
+    // The newer hold beside this open card, as one line under it with its own Undo.
+    if (view.heldLine !== null) {
+      const line = element("div", "", "squire-held-line");
+      const countdown = element("span", "", "squire-countdown");
+      countdown.setAttribute("role", "timer");
+      squireHolds.push({
+        node: countdown,
+        holdRemainingMs: view.heldLine.remainingMs,
+        label: view.heldLine.label,
+      });
+      line.append(countdown);
+      if (view.heldLine.ruleLabel)
+        line.append(element("span", view.heldLine.ruleLabel, "squire-label"));
+      if (view.heldLine.undo) line.append(squireButton(view.heldLine.undo));
+      card.append(line);
+    }
+    if (view.result) card.append(squireResultLine(view.result, false));
+    return card;
+  };
   const render = () => {
+    squireHolds = [];
+    squireResultNodes = new Map();
+    renderCards();
+    // Collapsed content is hidden, so no interval runs for it.
+    squireCountdown.sync(mode === "collapsed" ? [] : squireHolds, receivedAt);
+  };
+  const renderCards = () => {
     const scrollTop = cards.scrollTop;
     const focusedKey =
       document.activeElement instanceof HTMLElement
@@ -301,14 +500,17 @@ window.addEventListener("DOMContentLoaded", () => {
     updateSummary();
     visibility.disconnect();
     cards.replaceChildren();
-    if (!snapshot.rows.length)
-      cards.append(
-        element(
-          "p",
-          "No active work yet. Open a project in Lecturn to watch a pull request or direct an agent.",
-          "empty",
-        ),
-      );
+    // Peek and micro show no Squire section; the full list leads with it.
+    const section =
+      mode === "micro" || mode === "peek"
+        ? null
+        : squireSection(
+            snapshot.rows,
+            squireResults.sync(
+              new Set(snapshot.rows.filter(isSquireActivityRow).map((row) => row.id)),
+            ),
+          );
+    if (activityListState(snapshot.rows, section).empty) cards.append(emptyState());
     const previewRows = snapshot.rows.filter(
       (row) => !isViewedActivityThread(row, snapshot.viewedThread),
     );
@@ -325,9 +527,14 @@ window.addEventListener("DOMContentLoaded", () => {
       peekIds = rows.map((row) => row.id);
       void ipcRenderer.invoke(Channels.ACTIVITY_PEEK_COUNT, rows.length);
       for (const row of rows) {
-        const item = element("button", "", `peek-row activity-state ${stateFor(row)}`);
+        const squire = isSquireActivityRow(row);
+        const item = element(
+          "button",
+          "",
+          squire ? "peek-row" : `peek-row activity-state ${stateFor(row)}`,
+        );
         applyAccountSurface(item, row);
-        resumeMotion(item, stateFor(row));
+        if (!squire) resumeMotion(item, stateFor(row));
         item.dataset.focusKey = `${row.id}:peek`;
         item.setAttribute(
           "title",
@@ -352,7 +559,7 @@ window.addEventListener("DOMContentLoaded", () => {
           interact("expand");
         });
         cards.append(item);
-        visibility.observe(item);
+        if (!squire) visibility.observe(item);
       }
       const expand = element("button", "⌄", "peek-expand");
       expand.dataset.focusKey = "peek:expand";
@@ -363,24 +570,43 @@ window.addEventListener("DOMContentLoaded", () => {
       restoreFocus();
       return;
     }
+    if (section) {
+      // The header and its toasts stick while any of its cards are in view, so a toast for a
+      // card that left a scrolled list still shows.
+      const wrapper = element("section", "", "squire-section");
+      const head = element("div", "", "squire-section-head");
+      const title = element("h2", "", "section-title squire-section-title");
+      title.innerHTML = threadkeeperSmallMark;
+      title.append("Squire");
+      head.append(title);
+      for (const toast of section.toasts) head.append(squireResultLine(toast, true));
+      wrapper.append(head);
+      for (const row of section.cards) wrapper.append(squireCard(row));
+      cards.append(wrapper);
+    }
+    const threadRows = snapshot.rows.filter((row) => !isSquireActivityRow(row));
     const groups =
       mode === "micro"
         ? [{ title: "", rows: previewRows.filter((row) => row.id === microRowId) }]
         : [
-            { title: "Pull requests", rows: snapshot.rows.filter((row) => row.watchId) },
+            { title: "Pull requests", rows: threadRows.filter((row) => row.watchId) },
             {
               title: "Recent threads",
-              rows: snapshot.rows.filter((row) => !row.watchId && row.recent),
+              rows: threadRows.filter((row) => !row.watchId && row.recent),
             },
             {
               title: "Active threads",
-              rows: snapshot.rows.filter((row) => !row.watchId && !row.recent),
+              rows: threadRows.filter((row) => !row.watchId && !row.recent),
             },
           ];
     for (const group of groups) {
       if (!group.rows.length) continue;
       if (group.title) cards.append(element("h2", group.title, "section-title"));
       for (const row of group.rows) {
+        if (isSquireActivityRow(row)) {
+          cards.append(squireCard(row));
+          continue;
+        }
         const card = document.createElement("article");
         applyAccountSurface(card, row);
         const checksSummary = activityCheckSummary(row);
@@ -506,7 +732,9 @@ window.addEventListener("DOMContentLoaded", () => {
         }
         const actions = element("div", "", "actions");
         for (const action of row.actions) {
-          if (action.id === "steer") continue;
+          // Lecturn: Squire buttons carry a requestId and render from the row's card, not here.
+          const kind = action.id;
+          if (kind === "steer" || isSquireActionKind(kind)) continue;
           const button = document.createElement("button");
           const actionGlyphs = {
             open: "↗",
@@ -517,7 +745,7 @@ window.addEventListener("DOMContentLoaded", () => {
             steer: "",
           };
           button.dataset.focusKey = `${row.id}:${action.id}`;
-          button.textContent = action.id === "merge" ? action.label : actionGlyphs[action.id];
+          button.textContent = action.id === "merge" ? action.label : actionGlyphs[kind];
           button.title =
             action.id === "merge"
               ? `Send ${row.mergeRecipient ?? "the managing thread"} an instruction to merge when ready${row.mergeStatus ? `. ${row.mergeStatus}` : ""}`
@@ -525,7 +753,7 @@ window.addEventListener("DOMContentLoaded", () => {
           button.setAttribute("aria-label", action.label);
           button.className = action.id === "merge" ? "primary" : "secondary icon-button";
           button.disabled = pending || action.disabled === true;
-          button.addEventListener("click", () => void dispatch(row, action.id));
+          button.addEventListener("click", () => void dispatch(row, kind));
           if (action.id === "open") {
             button.className = "card-open";
             card.append(button);
@@ -600,6 +828,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const change = changes.update(next);
     clearTimeout(pendingTimeout);
     snapshot = next;
+    receivedAt = Date.now();
     for (const [id, text] of sentDrafts) {
       const row = next.rows.find((item) => item.id === id);
       if (!row) sentDrafts.delete(id);
@@ -646,6 +875,21 @@ window.addEventListener("DOMContentLoaded", () => {
     updateSummary();
   });
   ipcRenderer.on(Channels.ACTIVITY_MODE, (_event, next: ActivityMode) => setMode(next));
+  ipcRenderer.on(Channels.ACTIVITY_SQUIRE_RESULT, (_event, result: DesktopActivitySquireResult) => {
+    const settled = squireRequests.settle(result);
+    const press = forgetSquirePress(result.requestId);
+    if (!settled) return;
+    const success = settled.result === "success" ? (press?.success ?? null) : null;
+    const text = settled.result === "success" ? success?.text : settled.message;
+    if (text)
+      squireResults.record({
+        rowId: settled.rowId,
+        kind: success?.kind ?? settled.result,
+        text,
+        title: press?.title ?? "",
+      });
+    render();
+  });
   ipcRenderer.on(Channels.ACTIVITY_ANNOUNCE, (_event, announcement: ActivityAnnouncement) =>
     announce(announcement),
   );

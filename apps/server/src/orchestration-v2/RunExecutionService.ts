@@ -39,6 +39,7 @@ import { appInstructionsTurnInput } from "../apps/appTurnInstructions.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { squireInstructionsTurnInput } from "../squire/skill/skill.ts";
 import * as CheckpointService from "./CheckpointService.ts";
 import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
@@ -1431,6 +1432,8 @@ export const layer: Layer.Layer<
             runtimePolicy: input.runtimePolicy,
             ...(appContext.length === 0 ? {} : { appContext }),
             ...(yield* appInstructionsTurnInput(input.appThread.projectId)),
+            // Lecturn: a Squire home's skill; every other thread is unchanged.
+            ...(yield* squireInstructionsTurnInput(input.appThread)),
           };
           // Check after the context read: ingestion can settle the run while
           // it awaits. A failed ownership read fails the start below.

@@ -1,4 +1,5 @@
 import type { DesktopActivityAction, DesktopActivitySnapshot } from "@lecturn/contracts";
+import { isSquireActionKind } from "./squire.ts";
 
 export function isPublishedActivityAction(
   snapshot: DesktopActivitySnapshot,
@@ -13,7 +14,8 @@ export function isPublishedActivityAction(
     row.watchId === action.watchId &&
     row.watchRevision === action.watchRevision &&
     row.actions.some((candidate) => candidate.id === action.kind && candidate.disabled !== true) &&
-    (action.kind !== "steer" || Boolean(action.text?.trim()))
+    (action.kind !== "steer" || Boolean(action.text?.trim())) &&
+    (!isSquireActionKind(action.kind) || row.squire !== undefined)
   );
 }
 

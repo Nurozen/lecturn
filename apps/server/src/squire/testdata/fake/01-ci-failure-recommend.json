@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "steps": [
+    {
+      "onEvent": "pull-request-changed",
+      "toolCalls": [
+        {
+          "name": "squire_recommend_steer",
+          "args": {
+            "threadId": "thr_fix_invoice_rounding",
+            "steerKind": "fix-failing-check",
+            "reason": "PR #{{event.summary.pullRequest.number}}: required check api-e2e failed after the last turn; everything else is green and approved.",
+            "steer": "api-e2e is failing on #{{event.summary.pullRequest.number}}. Rerun it with verbose logging, find the first failing assertion, and fix it without changing the rounding behavior you just shipped."
+          }
+        }
+      ]
+    }
+  ]
+}

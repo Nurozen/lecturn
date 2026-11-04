@@ -12,25 +12,31 @@ import { scopedThreadKey } from "@lecturn/client-runtime/environment";
 import { resolveThreadRouteRef } from "../../threadRoutes";
 import { describeThreadActivity } from "@lecturn/client-runtime/state/activityContext";
 import { useAtomValue } from "@effect/atom-react";
-import { Atom } from "effect/reactivity";
+import * as Option from "effect/Option";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { environmentThreadDetails } from "../../state/threads";
 import { environmentShell } from "../../state/shell";
-import { useThreadShells, useProjects } from "../../state/entities";
+import { useProjects, useVisibleThreadShells } from "../../state/entities";
 import { DESKTOP_ACTIVITY_ENABLED_EVENT } from "./DesktopActivityToggle";
 import { randomUUID } from "../../lib/utils";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type {
   DesktopActivityAction,
+  DesktopActivitySquireResult,
   EnvironmentId,
   ProjectId,
   ProjectIconOverride,
+  SquireCardId,
+  SquireId,
   ThreadId,
 } from "@lecturn/contracts";
+import { squireEnvironment, useSquireEnvironments } from "../../state/squires";
 import { useEnvironments } from "../../state/environments";
 import { pullRequestWatchEnvironment, usePullRequestWatches } from "../../state/pullRequestWatch";
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
+  CoalescedActivityPublication,
   watchActivityRows,
   withActivityAccountMarks,
   contextualActivityRows,
@@ -38,6 +44,14 @@ import {
   threadActivityRows,
   resolveActivityAction,
   threadDetailMessages,
+  resolveSquireActivityAction,
+  runSquireActivityAction,
+  squireActivityInfo,
+  squireActivityOverlay,
+  squireActivityRows,
+  type SquireActivityAction,
+  type SquireActivityOffer,
+  type SquireActivitySource,
 } from "./desktopActivity.logic";
 import { useQuickSteer } from "./useQuickSteer";
 import { toastManager } from "../ui/toast";
@@ -59,6 +73,32 @@ const contextDetailsAtom = Atom.family((contextRefs: string) =>
     ),
   ),
 );
+
+// Keyed by serialized [environmentId, squireId] pairs, like the details above.
+const squireQueuesAtom = Atom.family((leads: string) =>
+  Atom.make((get) =>
+    (JSON.parse(leads) as [EnvironmentId, SquireId][]).map(
+      ([environmentId, squireId]) =>
+        Option.getOrNull(
+          AsyncResult.value(get(squireEnvironment.decisionItems({ environmentId, squireId }))),
+        )?.items ?? [],
+    ),
+  ),
+);
+
+// Only raisers with a rule-made card are read, to name the rule on its row.
+const squireRulesAtom = Atom.family((raisers: string) =>
+  Atom.make((get) =>
+    (JSON.parse(raisers) as [EnvironmentId, SquireId][]).map(
+      ([environmentId, squireId]) =>
+        Option.getOrNull(
+          AsyncResult.value(get(squireEnvironment.rules({ environmentId, input: { squireId } }))),
+        )?.rules ?? [],
+    ),
+  ),
+);
+
+const SQUIRE_ITEM_GONE = "This item is no longer available. Refresh activity in Lecturn.";
 
 function EnabledActivityBridge() {
   const accountMarks = useAtomValue(accountMarkByEnvironmentIdAtom);
@@ -82,7 +122,7 @@ function EnabledActivityBridge() {
         values.some(([valueId]) => valueId === id) ||
         failedEnvironmentIds.includes(id)),
   );
-  const threads = useThreadShells();
+  const threads = useVisibleThreadShells();
   const projects = useProjects();
   const sagaIndex = useSagaRepositoryIndex(projects);
   const interactions = useActivityRecentStore((state) => state.interactions);
@@ -91,6 +131,23 @@ function EnabledActivityBridge() {
   const inFlight = useRef(new Set<string>());
   const [acknowledged, setAcknowledged] = useState<ReadonlySet<string>>(new Set());
   const [failures, setFailures] = useState<Record<string, string>>({});
+  const [squireOffers, setSquireOffers] = useState<ReadonlyArray<SquireActivityOffer>>([]);
+  const squireEnvironments = useSquireEnvironments();
+  const squireLeads = squireEnvironments.flatMap(({ environmentId, state }) =>
+    state.lead === null ? [] : [[environmentId, state.lead] as const],
+  );
+  const squireQueues = useAtomValue(squireQueuesAtom(JSON.stringify(squireLeads)));
+  const squireRaisers = squireLeads
+    .flatMap(([environmentId], index) =>
+      (squireQueues[index] ?? [])
+        .filter((card) => card.ruleId !== null)
+        .map((card) => [environmentId, card.squireId] as const),
+    )
+    .filter(
+      (pair, index, pairs) =>
+        pairs.findIndex((item) => item[0] === pair[0] && item[1] === pair[1]) === index,
+    );
+  const squireRules = useAtomValue(squireRulesAtom(JSON.stringify(squireRaisers)));
   // Bound background detail subscriptions: shell metadata remains available for every row.
   const contextRefs = JSON.stringify(
     [
@@ -166,10 +223,57 @@ function EnabledActivityBridge() {
       contextDetails,
     );
   })();
+  const squireSources = squireLeads.flatMap(([environmentId], index): SquireActivitySource[] => {
+    const state = squireEnvironments.find((item) => item.environmentId === environmentId)?.state;
+    if (state === undefined) return [];
+    const threadTitle = (threadId: string) =>
+      threads.find((item) => item.environmentId === environmentId && item.id === threadId)?.title ??
+      null;
+    const projectTitle = (projectId: string) =>
+      projects.find((item) => item.environmentId === environmentId && item.id === projectId)
+        ?.title ?? null;
+    return [
+      {
+        environmentId,
+        state,
+        items: squireQueues[index] ?? [],
+        rules: new Map(
+          squireRaisers.flatMap(([raiserEnvironmentId, squireId], raiserIndex) =>
+            raiserEnvironmentId === environmentId
+              ? [[squireId, squireRules[raiserIndex] ?? []] as const]
+              : [],
+          ),
+        ),
+        threadTitle,
+        projectTitle,
+        targetName: (rule) =>
+          (rule.targetKind === "thread"
+            ? threadTitle(rule.targetId)
+            : rule.targetKind === "project"
+              ? projectTitle(rule.targetId)
+              : null) ?? rule.targetId,
+      },
+    ];
+  });
+  const squireRowsAt = (now: number) => {
+    const own = squireActivityOverlay(
+      squireActivityRows(squireSources, squireOffers, now),
+      new Set(pending.keys()),
+    );
+    // Project labels only: a Squire row's excerpt is its target thread's title, not its output.
+    return contextualActivityRows(own, [], projects, []).map((row, index) => {
+      const { excerpt: _excerpt, ...rest } = row;
+      const excerpt = own[index]?.excerpt;
+      return excerpt === undefined ? rest : { ...rest, excerpt };
+    });
+  };
+  // Render needs only the rows' identity and icons; publication reads the clock for hold times.
+  const [mountedAt] = useState(Date.now);
+  const squireRows = squireRowsAt(mountedAt);
   const iconRequests = JSON.stringify(
     [
       ...new Set(
-        rows
+        [...squireRows, ...rows]
           .slice(0, 200)
           .flatMap((row) => (row.projectIcon ? [JSON.stringify(row.projectIcon)] : [])),
       ),
@@ -195,14 +299,95 @@ function EnabledActivityBridge() {
       disposed = true;
     };
   }, [iconRequests]);
-  const publishedRows = rows.map((row) => {
-    const url = row.projectIcon ? iconImages.get(JSON.stringify(row.projectIcon)) : undefined;
-    return url ? { ...row, projectIconDataUrl: url } : row;
-  });
+  // Squire rows lead so the snapshot's row bound never drops a decision for watch history.
+  const publishedRowsAt = (now: number) =>
+    [...squireRowsAt(now), ...rows].map((row) => {
+      const url = row.projectIcon ? iconImages.get(JSON.stringify(row.projectIcon)) : undefined;
+      return url ? { ...row, projectIconDataUrl: url } : row;
+    });
   const command = useAtomCommand(pullRequestWatchEnvironment.command, { reportFailure: false });
+  const actSquire = useAtomCommand(squireEnvironment.itemsAct, { reportFailure: false });
+  const createSquireRule = useAtomCommand(squireEnvironment.ruleCreate, { reportFailure: false });
   const navigate = useNavigate();
   const steer = useQuickSteer();
+  // The host's reply to a notch press only confirms forwarding, so the outcome goes back by
+  // `requestId`, and the notch shows it on the card that was pressed.
+  const settleSquireAction = (result: DesktopActivitySquireResult) => {
+    void window.desktopBridge?.activity?.reportSquireResult(result).catch(() => undefined);
+  };
+  const onSquireAction = async (action: SquireActivityAction) => {
+    const target = resolveSquireActivityAction(action, squireRows, squireOffers, squireSources);
+    if (target === null) {
+      settleSquireAction(squireActivityInfo(action.requestId, SQUIRE_ITEM_GONE));
+      return;
+    }
+    const rowId = target.row.id;
+    if (inFlight.current.has(rowId)) {
+      settleSquireAction(squireActivityInfo(action.requestId, "This item is already updating."));
+      return;
+    }
+    inFlight.current.add(rowId);
+    setPending((current) => new Map(current).set(rowId, "Updating…"));
+    const outcome = await runSquireActivityAction(action, target, {
+      act: async (environmentId, input) => {
+        const result = await actSquire({
+          environmentId,
+          input: { requestId: randomUUID(), cardIds: [...input.cardIds], action: input.action },
+        });
+        return result._tag === "Failure"
+          ? { ok: false, error: formatEnvironmentQueryError(result.cause) }
+          : { ok: true, value: result.value };
+      },
+      createRule: async (environmentId, input) => {
+        const result = await createSquireRule({
+          environmentId,
+          input: { requestId: randomUUID(), ...input },
+        });
+        return result._tag === "Failure"
+          ? { ok: false, error: formatEnvironmentQueryError(result.cause) }
+          : { ok: true, value: result.value };
+      },
+      open: async (environmentId, squireId, cardId: SquireCardId) => {
+        await navigate({
+          to: "/squires/$environmentId/$squireId",
+          params: { environmentId, squireId },
+          search: { item: cardId },
+        });
+      },
+    });
+    inFlight.current.delete(rowId);
+    setPending((current) => {
+      const next = new Map(current);
+      next.delete(rowId);
+      return next;
+    });
+    const { offer, settledOffer } = outcome;
+    if (offer !== null || settledOffer !== null) {
+      setSquireOffers((current) => [
+        ...current.filter(
+          (item) =>
+            item.environmentId !== target.row.environmentId ||
+            (item.card.id !== settledOffer && item.card.id !== offer?.card.id),
+        ),
+        ...(offer === null ? [] : [offer]),
+      ]);
+    }
+    settleSquireAction(outcome.result);
+  };
   const onAction = useEffectEvent(async (action: DesktopActivityAction) => {
+    if ("requestId" in action) return await onSquireAction(action);
+    // A Squire card's Open goes to its target thread; the host already raised the window.
+    const squireThread = action.kind === "open" ? resolveActivityAction(action, squireRows) : null;
+    if (squireThread?.threadId) {
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId: squireThread.environmentId as EnvironmentId,
+          threadId: squireThread.threadId,
+        },
+      });
+      return;
+    }
     const row = resolveActivityAction(action, rows);
     if (!row || inFlight.current.has(row.id)) return;
     inFlight.current.add(row.id);
@@ -337,11 +522,10 @@ function EnabledActivityBridge() {
       });
   });
   useEffect(() => window.desktopBridge?.activity?.onAction((action) => void onAction(action)), []);
-  const publicationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingPublication = useRef<ReturnType<typeof boundedActivitySnapshot> | null>(null);
-  const publishLatest = useEffectEvent(() => {
-    const snapshot = pendingPublication.current;
-    if (!snapshot) return;
+  const [publication] = useState(
+    () => new CoalescedActivityPublication<ReturnType<typeof boundedActivitySnapshot>>(),
+  );
+  const publish = useEffectEvent((snapshot: ReturnType<typeof boundedActivitySnapshot>) => {
     void window.desktopBridge?.activity?.publish(snapshot).catch((cause) => {
       toastManager.add({
         type: "error",
@@ -351,42 +535,39 @@ function EnabledActivityBridge() {
     });
   });
   useEffect(() => {
-    pendingPublication.current = {
-      ...boundedActivitySnapshot(
-        withActivityAccountMarks(
-          publishedRows,
-          new Map(
-            [...accountMarks].map(([id, mark]) => [
-              id,
-              {
-                accountId: mark.accountId,
-                label: mark.label,
-                color: accountTintColor(mark.preset),
-              },
-            ]),
+    publication.offer(
+      {
+        ...boundedActivitySnapshot(
+          withActivityAccountMarks(
+            publishedRowsAt(Date.now()),
+            new Map(
+              [...accountMarks].map(([id, mark]) => [
+                id,
+                {
+                  accountId: mark.accountId,
+                  label: mark.label,
+                  color: accountTintColor(mark.preset),
+                },
+              ]),
+            ),
           ),
         ),
-      ),
-      readyEnvironmentIds,
-      ...(viewedThread ? { viewedThread } : {}),
-    };
-    // Coalesce streamed assistant text without starving updates during a long response.
-    if (publicationTimer.current !== null) return;
-    publicationTimer.current = setTimeout(() => {
-      publicationTimer.current = null;
-      publishLatest();
-    }, 300);
-  }, [publishedRows, readyEnvironmentIds, viewedThread, accountMarks]);
+        readyEnvironmentIds,
+        ...(viewedThread ? { viewedThread } : {}),
+      },
+      (snapshot) => publish(snapshot),
+    );
+  }, [publication, publishedRowsAt, readyEnvironmentIds, viewedThread, accountMarks]);
   useEffect(
     () => () => {
-      if (publicationTimer.current !== null) clearTimeout(publicationTimer.current);
+      publication.dispose();
       void window.desktopBridge?.activity?.publish({
         summary: "Disconnected",
         rows: [],
         readyEnvironmentIds: [],
       });
     },
-    [],
+    [publication],
   );
   return null;
 }

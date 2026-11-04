@@ -351,9 +351,21 @@
       "types": "./src/state/threadSort.ts",
       "default": "./src/state/threadSort.ts"
     },
+    "./state/thread-shell": {
+      "types": "./src/state/threadShell.ts",
+      "default": "./src/state/threadShell.ts"
+    },
     "./state/thread-inbox": {
       "types": "./src/state/threadInbox.ts",
       "default": "./src/state/threadInbox.ts"
+    },
+    "./state/squireIndicator": {
+      "types": "./src/state/squireIndicator.ts",
+      "default": "./src/state/squireIndicator.ts"
+    },
+    "./state/squire": {
+      "types": "./src/state/squire.ts",
+      "default": "./src/state/squire.ts"
     },
     "./state/thread-relationships": {
       "types": "./src/state/threadRelationships.ts",

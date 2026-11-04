@@ -140,4 +140,36 @@ describe("Lecturn orchestration provider instructions", () => {
       { interactionMode: "plan", hasLecturnMcp: true },
     );
   });
+
+  it("sends a Squire home its skill in place of the browser and orchestration sections", () => {
+    const prompt = "Squire events · 1 event";
+    const squireInstructions = ["## Squire\n\nStay quiet by default.", "### Steers\n\nOne action."];
+    const state = lecturnAcpInstructionState({
+      interactionMode: "default",
+      hasLecturnMcp: true,
+      squireInstructions,
+    });
+    const first = lecturnAcpPromptWithInstructions({ prompt, state, squireInstructions });
+    assert.include(first, squireInstructions.join("\n\n"));
+    assert.notInclude(first, LECTURN_ORCHESTRATION_INSTRUCTIONS.trim());
+    assert.notInclude(first, "## Lecturn collaborative browser");
+    assert.equal(
+      lecturnAcpPromptWithInstructions({ prompt, state, previousState: state, squireInstructions }),
+      prompt,
+    );
+
+    assert.equal(
+      lecturnOrchestrationSystemPrompt(true, squireInstructions),
+      squireInstructions.join("\n\n"),
+    );
+    assert.include(
+      lecturnOrchestrationPromptForFirstRun({
+        prompt,
+        runOrdinal: 1,
+        hasLecturnMcp: true,
+        squireInstructions,
+      }),
+      "Stay quiet by default.",
+    );
+  });
 });

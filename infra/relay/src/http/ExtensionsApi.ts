@@ -20,6 +20,22 @@ const json = (value: unknown, status = 200) =>
     headers: { "cache-control": "no-store", pragma: "no-cache" },
   });
 const invalid = () => decisionError("invalid", "Invalid extensions request");
+const hostFeatures = (header: string | undefined) =>
+  header?.split(",").map((feature) => feature.trim());
+/**
+ * Older hosts decode feature ids as a closed list, so one feature they cannot name would fail the
+ * whole response. Only the features the caller declared are reported.
+ */
+const forHost = (value: unknown, features: ReadonlyArray<string> | undefined): unknown => {
+  if (typeof value !== "object" || value === null) return value;
+  const readable = features ?? Contracts.LEGACY_EXTENSION_FEATURES;
+  const projected: Record<string, unknown> = Contracts.extensionFundingFor({ ...value }, readable);
+  if ("features" in value && Array.isArray(value.features))
+    projected.features = (value.features as ReadonlyArray<{ readonly featureId: string }>).filter(
+      (entry) => readable.includes(entry.featureId),
+    );
+  return projected;
+};
 const decoders = {
   approval: Schema.decodeUnknownEffect(Contracts.ExtensionFundingApprovalRequest),
   observe: Schema.decodeUnknownEffect(Contracts.ExtensionFundingObserveRequest),
@@ -42,6 +58,8 @@ export const extensionsApi = (routeConfig: DecisionsRouteConfig) =>
         const request = yield* HttpServerRequest.HttpServerRequest;
         const url = new URL(request.url, routeConfig.appOrigin);
         const path = url.pathname;
+        const declared = hostFeatures(request.headers[Contracts.EXTENSION_FEATURES_HEADER]);
+        const ok = (value: unknown) => json(forHost(value, declared));
         const bearer = /^Bearer (\S+)$/i.exec(request.headers.authorization ?? "")?.[1];
         if (!bearer) return json({ code: "forbidden", message: "Sign in to use extensions" }, 401);
         if (
@@ -95,7 +113,7 @@ export const extensionsApi = (routeConfig: DecisionsRouteConfig) =>
             Effect.mapError(() => decisionError("forbidden", "Sign in to manage extensions")),
           );
           const payerId = verified.sub;
-          if (path === "/v1/extensions/status") return json(yield* service.status(payerId));
+          if (path === "/v1/extensions/status") return ok(yield* service.status(payerId));
           if (
             path === "/v1/extensions/funding/approval" ||
             path === "/v1/extensions/funding/approve"
@@ -103,7 +121,7 @@ export const extensionsApi = (routeConfig: DecisionsRouteConfig) =>
             const body = yield* decode(decoders.approval);
             const funding = service.funding[body.featureId];
             if (request.method === "GET")
-              return json(yield* funding.approvalInfo(payerId, body.challengeId));
+              return ok(yield* funding.approvalInfo(payerId, body.challengeId));
             const user = yield* Effect.tryPromise({
               try: () =>
                 createClerkClient({
@@ -123,21 +141,21 @@ export const extensionsApi = (routeConfig: DecisionsRouteConfig) =>
                 "forbidden",
                 "Verify your account email before approving extensions",
               );
-            return json(yield* funding.approve(payerId, body.challengeId, email.emailAddress));
+            return ok(yield* funding.approve(payerId, body.challengeId, email.emailAddress));
           }
           if (path === "/v1/extensions/funding/account-list") {
             const body = yield* decode(decoders.list);
-            return json(yield* service.funding[body.featureId].listByPayer(payerId, body));
+            return ok(yield* service.funding[body.featureId].listByPayer(payerId, body));
           }
           if (path === "/v1/extensions/funding/account-status") {
             const body = yield* decode(decoders.status);
-            return json(
+            return ok(
               yield* service.funding[body.featureId].statusByPayer(payerId, body.environmentId),
             );
           }
           if (path === "/v1/extensions/funding/account-revoke") {
             const body = yield* decode(decoders.revoke);
-            return json(
+            return ok(
               yield* service.funding[body.featureId].revokeByPayer(
                 payerId,
                 body.environmentId,
@@ -165,7 +183,7 @@ export const extensionsApi = (routeConfig: DecisionsRouteConfig) =>
         if (path === "/v1/extensions/funding/status") {
           const body = yield* decode(decoders.status);
           yield* matches(body.environmentId);
-          return json(yield* service.funding[body.featureId].status(host));
+          return ok(yield* service.funding[body.featureId].status(host));
         }
         if (path === "/v1/extensions/funding/challenge") {
           const body = yield* decode(decoders.challenge);
@@ -175,7 +193,7 @@ export const extensionsApi = (routeConfig: DecisionsRouteConfig) =>
               "forbidden",
               "Environment key does not match this credential",
             );
-          return json(
+          return ok(
             yield* service.funding[body.featureId].challenge(host, body.expectedGeneration),
           );
         }
@@ -190,30 +208,32 @@ export const extensionsApi = (routeConfig: DecisionsRouteConfig) =>
           yield* matches(body.environmentId);
           const funding = service.funding[body.featureId];
           if (path.endsWith("/observe"))
-            return json(yield* funding.observe(host, body.challengeId, body.expectedGeneration));
+            return ok(yield* funding.observe(host, body.challengeId, body.expectedGeneration));
           if (path.endsWith("/cancel"))
-            return json(yield* funding.cancel(host, body.challengeId, body.expectedGeneration));
-          return json(yield* funding.redeem(host, body.challengeId, body.expectedGeneration));
+            return ok(yield* funding.cancel(host, body.challengeId, body.expectedGeneration));
+          return ok(yield* funding.redeem(host, body.challengeId, body.expectedGeneration));
         }
         if (path === "/v1/extensions/funding/revoke") {
           const body = yield* decode(decoders.revoke);
           yield* matches(body.environmentId);
-          return json(
+          return ok(
             yield* service.funding[body.featureId].revokeByHost(host, body.expectedGeneration),
           );
         }
         if (path === "/v1/extensions/evaluation/status")
-          return json(
+          return ok(
             yield* service.evaluationStatus(host, yield* decode(decoders.evaluationStatus)),
           );
         if (path === "/v1/extensions/evaluate")
-          return json(yield* service.evaluate(host, payload, "relevance"));
+          return ok(yield* service.evaluate(host, payload, "relevance"));
         if (path === "/v1/extensions/conflicts")
-          return json(yield* service.evaluate(host, payload, "conflicts"));
+          return ok(yield* service.evaluate(host, payload, "conflicts"));
         if (path === "/v1/extensions/equivalence")
-          return json(yield* service.evaluate(host, payload, "equivalence"));
+          return ok(yield* service.evaluate(host, payload, "equivalence"));
         if (path === "/v1/extensions/decisions")
-          return json(yield* service.evaluate(host, payload, "decisions"));
+          return ok(yield* service.evaluate(host, payload, "decisions"));
+        if (path === "/v1/extensions/squire-routing")
+          return ok(yield* service.evaluate(host, payload, "squire-routing"));
         return json({ message: "Not found" }, 404);
       }).pipe(
         Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(256 * 1024)),
@@ -241,6 +261,7 @@ export const extensionsApi = (routeConfig: DecisionsRouteConfig) =>
         .handleRaw("evaluate", () => handler)
         .handleRaw("conflicts", () => handler)
         .handleRaw("equivalence", () => handler)
-        .handleRaw("decisions", () => handler);
+        .handleRaw("decisions", () => handler)
+        .handleRaw("squireRouting", () => handler);
     }),
   );

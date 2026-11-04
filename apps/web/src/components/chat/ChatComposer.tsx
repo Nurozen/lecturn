@@ -97,7 +97,13 @@ import {
   isPathSuggestionCurrent,
   replaceTextRange,
 } from "../../composer-logic";
-import { idleComposerPlaceholder } from "../../composerPlaceholder";
+import { idleComposerPlaceholder, squireComposerPlaceholder } from "../../composerPlaceholder";
+import { useSquireEnvironmentState } from "../../state/squires";
+import {
+  allowsChatViewControl,
+  type ChatViewControl,
+  type ChatViewControls,
+} from "./chatViewControls";
 import { listContinuationForEnter, listIndentForTab } from "../../composer-list-continuation";
 import {
   deriveComposerSendState,
@@ -274,7 +280,7 @@ import {
 } from "~/lib/copiedComposerAttachments";
 import { matchComposerThreadItems } from "@lecturn/client-runtime/composerThreadItems";
 import { useThreadContextDrop, threadContextDropTargetProps } from "./threadContextDrag";
-import { readThreadShell, useThreadShells } from "~/state/entities";
+import { readThreadShell, useThreadListingCapabilities, useThreadShells } from "~/state/entities";
 import { requestConfirmDialog } from "~/confirmDialog";
 import { encodeComposerContextFragment } from "@lecturn/shared/composerContextClipboard";
 import type {
@@ -1678,6 +1684,8 @@ export interface ChatComposerProps {
   setThreadError: (threadId: ThreadId | null, error: string | null) => void;
   onExpandImage: (preview: ExpandedImagePreview) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
+  /** Lecturn: ChatView's allowlist; absent shows every composer control. */
+  controls?: ChatViewControls | undefined;
 }
 
 /**
@@ -1799,6 +1807,17 @@ function useProviderWorkspaceSnapshotRefresh(input: {
       workspaceSnapshotLossCount,
     ),
   );
+}
+
+/** Lecturn: the snapshot names a home thread's Squire; every other thread reads null. */
+function useSquireComposerPlaceholder(environmentId: EnvironmentId, shell: ThreadShell | null) {
+  const state = useSquireEnvironmentState(environmentId);
+  const homeThreadId = shell?.squire?.role === "home" ? shell.id : null;
+  const squire =
+    homeThreadId === null
+      ? undefined
+      : state?.squires.find((entry) => entry.squire.homeThreadId === homeThreadId)?.squire;
+  return squireComposerPlaceholder(squire ? { name: squire.name, role: squire.role } : null);
 }
 
 const NO_PROVIDER_MODELS: ServerProvider["models"] = [];
@@ -2021,7 +2040,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onFileOpen,
     editingQueuedAttachments,
     onRemoveEditingQueuedAttachment,
+    controls,
   } = props;
+  const allows = (control: ChatViewControl) => allowsChatViewControl(controls, control);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const composerDraftTargetKey = composerTargetKey(composerDraftTarget);
   const {
@@ -2577,6 +2598,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
   const environmentThreadShells = useThreadShells(isPathTrigger);
+  const threadListing = useThreadListingCapabilities();
   const workspaceEntries = useComposerPathSearch({
     environmentId,
     cwd: isPathTrigger ? gitCwd : null,
@@ -2660,6 +2682,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           environmentId,
           excludeThreadId: activeThreadId,
           query: composerTrigger.query,
+          listing: threadListing.get(environmentId),
         }),
         ...workspaceEntries.entries.map((entry) => ({
           id: `path:${entry.kind}:${entry.path}`,
@@ -2674,14 +2697,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (composerTrigger.kind === "slash-command") {
       const builtInSlashCommandItems = [
-        {
-          id: "slash:model",
-          type: "slash-command",
-          command: "model",
-          label: "/model",
-          description: "Switch response model for this thread",
-        },
-        ...(planModeUiEnabled
+        ...(allows("model-picker")
+          ? ([
+              {
+                id: "slash:model",
+                type: "slash-command",
+                command: "model",
+                label: "/model",
+                description: "Switch response model for this thread",
+              },
+            ] as const)
+          : []),
+        ...(planModeUiEnabled && allows("interaction-mode")
           ? ([
               {
                 id: "slash:plan",
@@ -2728,7 +2755,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           (skill.scope ? `${skill.scope} skill` : ""),
       }));
       const visibleProviderSlashCommandItems = providerSlashCommandItems.filter(
-        (item) => item.command.name !== "compact" || compactSlashCommandAvailable,
+        (item) =>
+          item.command.name !== "compact" || (compactSlashCommandAvailable && allows("compact")),
       );
       const slashCommandItems = slashCommandItemsForPromptPosition(
         [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],
@@ -2840,6 +2868,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     (!isComposerCollapsedMobile && showPlanFollowUpPrompt && activeProposedPlan !== null);
   const showCollapsedMobilePromptRow = isComposerCollapsedMobile && !isComposerApprovalState;
   const showComposerAttachAction =
+    allows("attachments") &&
     fileStagingLimit !== null &&
     (!activePendingProgress ||
       (supportsQuestionAttachments &&
@@ -4904,6 +4933,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     !composerControlsCollapsed && !showProviderUnavailable,
   );
   const embedComposerPlaceholder = useEmbedComposerPlaceholder();
+  const squirePlaceholder = useSquireComposerPlaceholder(environmentId, props.activeThreadShell);
   const [restingActionsElement, setRestingActionsElement] = useState<HTMLDivElement | null>(null);
   const [restingActionsWidth, setRestingActionsWidth] = useState<number | null>(null);
   useLayoutEffect(() => {
@@ -5117,6 +5147,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const contextualAvailable = useContextualAvailable(environmentId);
   const contextualBlock =
+    allows("contextual") &&
     contextualAvailable &&
     (activeThreadId !== null || Boolean(draftId && props.contextualProjectId));
   const contextualControl = (size: "xs" | "sm", hidden = false) =>
@@ -5148,7 +5179,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     hidden: composerControlsHidden || restingHiddenBlockCount > (contextualBlock ? 2 : 1),
   });
   const restingBlockDefs = [
-    ...(providerTraitsPicker
+    ...(providerTraitsPicker && allows("model-picker")
       ? [
           {
             id: "traits",
@@ -5165,7 +5196,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       id: "mode",
       content: (
         <ComposerFooterModeControls
-          showInteractionModeToggle={planModeUiEnabled}
+          showInteractionModeToggle={planModeUiEnabled && allows("interaction-mode")}
           interactionMode={interactionMode}
           runtimeMode={compatibleRuntimeMode}
           runtimeModeOptions={compatibleRuntimeModeOptions}
@@ -5176,7 +5207,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         />
       ),
     },
-  ];
+  ].filter((def) => def.id !== "mode" || allows("runtime-mode"));
   if (contextualBlock && !embedFooterStacked)
     restingBlockDefs.push({
       id: "contextual",
@@ -5193,7 +5224,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const hiddenRestingBlockIds = restingBlockDefs
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
     .map((def) => def.id);
-  const composerControls = showProviderUnavailable ? (
+  const showProviderSetupControl = showProviderUnavailable && allows("model-picker");
+  const composerControls = showProviderSetupControl ? (
     <>
       <ComposerControl
         type="button"
@@ -5222,96 +5254,98 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           data-resting-controls-separator="true"
         />
       ) : null}
-      <ProviderModelPicker
-        environmentId={environmentId}
-        compact={false}
-        isComposerOwned
-        disabled={providerCatalogPending || isSendBusy}
-        {...(routeKind === "draft" && supportsMultipleModels
-          ? {
-              ...(multipleModelSelections !== null
-                ? { selectedModels: multipleModelSelections }
-                : {}),
-              onToggleModel: (instanceId: ProviderInstanceId, model: string) => {
-                const current = multipleModelSelections ?? [selectedModelSelection];
-                const matchesModel = (selection: ModelSelection) => {
-                  if (selection.instanceId !== instanceId) return false;
-                  const entry = providerInstanceEntries.find(
-                    (entry) => entry.instanceId === selection.instanceId,
-                  );
-                  const resolvedModel = resolveModelPickerSelectedModel({
-                    driverKind: entry?.driverKind,
-                    model: selection.model,
-                    options: modelOptionsByInstance.get(selection.instanceId) ?? [],
-                  });
-                  return (resolvedModel?.slug ?? selection.model) === model;
-                };
-                const exists = current.some(matchesModel);
-                const next = exists
-                  ? current.filter((selection) => !matchesModel(selection))
-                  : [...current, createModelSelection(instanceId, model)];
-                if (next.length > 1) {
-                  setMultipleModelSelections(next);
-                } else {
-                  setMultipleModelSelections(null);
-                  const remaining = next[0] ?? selectedModelSelection;
-                  onProviderModelSelect(remaining.instanceId, remaining.model, {
-                    focusComposer: false,
-                  });
-                }
-              },
-            }
-          : {})}
-        activeInstanceId={
-          providerCatalogPending
-            ? (activeThreadModelSelection?.instanceId ?? selectedInstanceId)
-            : selectedInstanceId
-        }
-        model={
-          providerCatalogPending
-            ? (activeThreadModelSelection?.model ?? selectedModelForPickerWithCustomFallback)
-            : selectedModelForPickerWithCustomFallback
-        }
-        lockedProvider={lockedProvider}
-        lockedContinuationGroupKey={lockedContinuationGroupKey}
-        lockedInstanceId={unsentImportInstanceId}
-        instanceEntries={providerInstanceEntries}
-        keybindings={keybindings}
-        modelOptionsByInstance={modelOptionsByInstance}
-        size={composerControlsCollapsed ? "xs" : "sm"}
-        triggerClassName={
-          composerControlsCollapsed
-            ? cn(
-                "min-w-13 shrink text-xs!",
-                !showInlineRestingControls &&
-                  "@max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-0 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:flex-none",
-              )
-            : "-ms-2.5 min-w-13"
-        }
-        terminalOpen={terminalOpen}
-        open={isComposerModelPickerOpen}
-        instanceIndicatorBackground={
-          composerControlsCollapsed
-            ? "color-mix(in srgb, var(--chat-composer-glass-surface) var(--glass-opacity), transparent)"
-            : "var(--contrast-input)"
-        }
-        {...(composerProviderState.modelPickerIconClassName || composerControlsCollapsed
-          ? {
-              activeProviderIconClassName: cn(
-                composerProviderState.modelPickerIconClassName,
-                composerControlsCollapsed &&
-                  "fill-muted-foreground/70! text-muted-foreground/70! [&_path]:fill-muted-foreground/70! [&_rect]:fill-muted-foreground/70! [&_[data-icon-detail]]:fill-transparent! [&[data-provider-package-icon]]:opacity-70 [&[data-provider-package-icon]_path:not([data-icon-detail])]:fill-muted-foreground!",
-              ),
-            }
-          : {})}
-        onOpenChange={setIsComposerModelPickerOpen}
-        getModelDisabledReason={getModelDisabledReason}
-        onInstanceModelChange={(instanceId, model) => {
-          setMultipleModelSelections(null);
-          onProviderModelSelect(instanceId, model);
-        }}
-        onOpenProviderSetup={onOpenProviderSetup}
-      />
+      {allows("model-picker") ? (
+        <ProviderModelPicker
+          environmentId={environmentId}
+          compact={false}
+          isComposerOwned
+          disabled={providerCatalogPending || isSendBusy}
+          {...(routeKind === "draft" && supportsMultipleModels
+            ? {
+                ...(multipleModelSelections !== null
+                  ? { selectedModels: multipleModelSelections }
+                  : {}),
+                onToggleModel: (instanceId: ProviderInstanceId, model: string) => {
+                  const current = multipleModelSelections ?? [selectedModelSelection];
+                  const matchesModel = (selection: ModelSelection) => {
+                    if (selection.instanceId !== instanceId) return false;
+                    const entry = providerInstanceEntries.find(
+                      (entry) => entry.instanceId === selection.instanceId,
+                    );
+                    const resolvedModel = resolveModelPickerSelectedModel({
+                      driverKind: entry?.driverKind,
+                      model: selection.model,
+                      options: modelOptionsByInstance.get(selection.instanceId) ?? [],
+                    });
+                    return (resolvedModel?.slug ?? selection.model) === model;
+                  };
+                  const exists = current.some(matchesModel);
+                  const next = exists
+                    ? current.filter((selection) => !matchesModel(selection))
+                    : [...current, createModelSelection(instanceId, model)];
+                  if (next.length > 1) {
+                    setMultipleModelSelections(next);
+                  } else {
+                    setMultipleModelSelections(null);
+                    const remaining = next[0] ?? selectedModelSelection;
+                    onProviderModelSelect(remaining.instanceId, remaining.model, {
+                      focusComposer: false,
+                    });
+                  }
+                },
+              }
+            : {})}
+          activeInstanceId={
+            providerCatalogPending
+              ? (activeThreadModelSelection?.instanceId ?? selectedInstanceId)
+              : selectedInstanceId
+          }
+          model={
+            providerCatalogPending
+              ? (activeThreadModelSelection?.model ?? selectedModelForPickerWithCustomFallback)
+              : selectedModelForPickerWithCustomFallback
+          }
+          lockedProvider={lockedProvider}
+          lockedContinuationGroupKey={lockedContinuationGroupKey}
+          lockedInstanceId={unsentImportInstanceId}
+          instanceEntries={providerInstanceEntries}
+          keybindings={keybindings}
+          modelOptionsByInstance={modelOptionsByInstance}
+          size={composerControlsCollapsed ? "xs" : "sm"}
+          triggerClassName={
+            composerControlsCollapsed
+              ? cn(
+                  "min-w-13 shrink text-xs!",
+                  !showInlineRestingControls &&
+                    "@max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-0 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:flex-none",
+                )
+              : "-ms-2.5 min-w-13"
+          }
+          terminalOpen={terminalOpen}
+          open={isComposerModelPickerOpen}
+          instanceIndicatorBackground={
+            composerControlsCollapsed
+              ? "color-mix(in srgb, var(--chat-composer-glass-surface) var(--glass-opacity), transparent)"
+              : "var(--contrast-input)"
+          }
+          {...(composerProviderState.modelPickerIconClassName || composerControlsCollapsed
+            ? {
+                activeProviderIconClassName: cn(
+                  composerProviderState.modelPickerIconClassName,
+                  composerControlsCollapsed &&
+                    "fill-muted-foreground/70! text-muted-foreground/70! [&_path]:fill-muted-foreground/70! [&_rect]:fill-muted-foreground/70! [&_[data-icon-detail]]:fill-transparent! [&[data-provider-package-icon]]:opacity-70 [&[data-provider-package-icon]_path:not([data-icon-detail])]:fill-muted-foreground!",
+                ),
+              }
+            : {})}
+          onOpenChange={setIsComposerModelPickerOpen}
+          getModelDisabledReason={getModelDisabledReason}
+          onInstanceModelChange={(instanceId, model) => {
+            setMultipleModelSelections(null);
+            onProviderModelSelect(instanceId, model);
+          }}
+          onOpenProviderSetup={onOpenProviderSetup}
+        />
+      ) : null}
 
       <>
         {restingBlockDefs.map((def, index) => {
@@ -5467,7 +5501,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       readonly skipImageInlineChip?: boolean;
     },
   ): Promise<boolean> => {
-    if (!activeThreadId || files.length === 0 || isRevertingCheckpointRef.current) return false;
+    if (
+      !activeThreadId ||
+      files.length === 0 ||
+      isRevertingCheckpointRef.current ||
+      !allows("attachments")
+    )
+      return false;
     if (
       pendingUserInputs.length > 0 &&
       (!supportsQuestionAttachments ||
@@ -5722,7 +5762,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     bypassAutoAttachment: boolean,
     selectionOverride?: { start: number; end: number },
   ): boolean => {
-    if (isLiteralPendingAnswer) return false;
+    if (isLiteralPendingAnswer || !allows("attachments")) return false;
     const questionCanAttach =
       pendingUserInputs.length === 0 ||
       (supportsQuestionAttachments &&
@@ -5801,6 +5841,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (
       files.length > 0 &&
       activeThreadId &&
+      allows("attachments") &&
       shouldHandleComposerAttachmentPaste({ files, plainText })
     ) {
       event.preventDefault();
@@ -7308,7 +7349,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               : showProviderUnavailable
                                 ? "Enable a provider in Settings to send a message"
                                 : idleComposerPlaceholder({
-                                    hostPlaceholder: embedComposerPlaceholder,
+                                    hostPlaceholder: embedComposerPlaceholder ?? squirePlaceholder,
                                     hasSession: phase !== "disconnected",
                                     resting: isComposerResting,
                                     canAttach: showComposerAttachAction,
@@ -7458,7 +7499,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       compactDisabled || noProviderAvailable || isSendBusy || isConnecting
                     }
                     compactDisabledReason={resolvedCompactDisabledReason}
-                    {...(compactCommandAvailable
+                    {...(compactCommandAvailable && allows("compact")
                       ? { onCompactContext: compactThreadContextStable }
                       : {})}
                   />

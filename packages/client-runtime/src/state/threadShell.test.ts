@@ -3,6 +3,7 @@ import {
   ProjectId,
   RunId,
   RuntimeRequestId,
+  SquireId,
   ThreadId,
   type OrchestrationV2ShellSnapshot,
   type OrchestrationV2ThreadShell,
@@ -16,7 +17,11 @@ import { PrimaryConnectionTarget } from "../connection/model.ts";
 import { v2Now, v2ShellSnapshot, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
 import { applyShellStreamEvent } from "./shellReducer.ts";
 import { isThreadWorking } from "./threadInbox.ts";
-import { childThreadInputsTitle, createEnvironmentThreadShellAtoms } from "./threadShell.ts";
+import {
+  childThreadInputsTitle,
+  createEnvironmentThreadShellAtoms,
+  isListedThread,
+} from "./threadShell.ts";
 
 const environmentId = EnvironmentId.make("environment-v2");
 const remoteEnvironmentId = EnvironmentId.make("remote-environment-v2");
@@ -44,13 +49,42 @@ function makeHarness(environmentIds: ReadonlyArray<EnvironmentId> = [environment
       ]),
     ),
   });
+  const serverConfigAtom = Atom.family((_environmentId: EnvironmentId) =>
+    Atom.make<{
+      readonly environment: { readonly capabilities: { readonly squire?: boolean } };
+    } | null>(null),
+  );
   return {
     registry: AtomRegistry.make(),
     snapshotAtom,
     catalogValueAtom,
-    threads: createEnvironmentThreadShellAtoms({ catalogValueAtom, snapshotAtom }),
+    serverConfigAtom,
+    threads: createEnvironmentThreadShellAtoms({
+      catalogValueAtom,
+      snapshotAtom,
+      serverConfigAtom,
+    }),
   };
 }
+
+const squireThreads = () => {
+  const home = {
+    ...v2ThreadShell,
+    id: ThreadId.make("squire-home"),
+    squire: { squireId: SquireId.make("squire"), role: "home" as const },
+  };
+  const probe = {
+    ...v2ThreadShell,
+    id: ThreadId.make("squire-probe"),
+    lineage: {
+      ...v2ThreadShell.lineage,
+      parentThreadId: v2ThreadShell.id,
+      relationshipToParent: "fork" as const,
+    },
+    squire: { squireId: SquireId.make("squire"), role: "probe" as const },
+  };
+  return { home, probe };
+};
 
 describe("v2 thread shell lists", () => {
   it("preserves ordered reference arrays when a middle thread changes", () => {
@@ -212,6 +246,85 @@ describe("v2 thread shell lists", () => {
     expect(isThreadWorking(registry.get(parent)!)).toBe(true);
     disposeInputs();
     disposeParent();
+    registry.dispose();
+  });
+
+  it("lists a thread unless it is a subagent or a Squire thread its environment hides", () => {
+    const { home, probe } = squireThreads();
+    const subagent = {
+      ...v2ThreadShell,
+      lineage: { ...v2ThreadShell.lineage, relationshipToParent: "subagent" as const },
+    };
+    const squire = { squire: true };
+    expect(isListedThread(v2ThreadShell, squire)).toBe(true);
+    expect(isListedThread(subagent, undefined)).toBe(false);
+    expect(isListedThread(home, squire)).toBe(false);
+    expect(isListedThread(probe, squire)).toBe(false);
+    expect(isListedThread(home, undefined)).toBe(true);
+    expect(isListedThread(probe, null)).toBe(true);
+    expect(isListedThread(home, {})).toBe(true);
+  });
+
+  it("hides Squire threads only on environments that advertise Squires", () => {
+    const { registry, threads, snapshotAtom, serverConfigAtom } = makeHarness([
+      environmentId,
+      remoteEnvironmentId,
+    ]);
+    const { home, probe } = squireThreads();
+    const snapshot = { ...v2ShellSnapshot, threads: [v2ThreadShell, home, probe] };
+    registry.set(snapshotAtom(environmentId), snapshot);
+    registry.set(snapshotAtom(remoteEnvironmentId), snapshot);
+    const configWith = (squire?: boolean) => ({
+      environment: { capabilities: squire === undefined ? {} : { squire } },
+    });
+    registry.set(serverConfigAtom(environmentId), configWith(true));
+    registry.set(serverConfigAtom(remoteEnvironmentId), configWith());
+    const disposers = [
+      registry.mount(threads.navigationThreadShellsAtom),
+      registry.mount(threads.visibleThreadShellsAtom),
+      registry.mount(threads.listingCapabilitiesAtom),
+    ];
+    const keysOf = (shells: ReadonlyArray<{ environmentId: EnvironmentId; id: ThreadId }>) =>
+      shells.map(
+        (thread) => `${thread.environmentId === environmentId ? "local" : "remote"}:${thread.id}`,
+      );
+    const listedRemote = [`remote:${v2ThreadShell.id}`, `remote:${home.id}`, `remote:${probe.id}`];
+
+    expect(keysOf(registry.get(threads.navigationThreadShellsAtom))).toEqual([
+      `local:${v2ThreadShell.id}`,
+      ...listedRemote,
+    ]);
+    expect(keysOf(registry.get(threads.visibleThreadShellsAtom))).toEqual([
+      `local:${v2ThreadShell.id}`,
+      ...listedRemote,
+    ]);
+    expect(registry.get(threads.threadShellsAtom)).toHaveLength(6);
+    expect(
+      registry
+        .get(threads.threadShellsForProjectRefsAtom([{ environmentId, projectId: home.projectId }]))
+        .map((thread) => thread.id),
+    ).toEqual([v2ThreadShell.id]);
+
+    // Unrelated config churn keeps every list, and the capability map, as it was.
+    const listing = registry.get(threads.listingCapabilitiesAtom);
+    const navigation = registry.get(threads.navigationThreadShellsAtom);
+    registry.set(serverConfigAtom(environmentId), configWith(true));
+    expect(registry.get(threads.listingCapabilitiesAtom)).toBe(listing);
+    expect(registry.get(threads.navigationThreadShellsAtom)).toBe(navigation);
+
+    // Switching Squires off brings the threads back as ordinary rows.
+    registry.set(serverConfigAtom(environmentId), configWith(false));
+    expect(registry.get(threads.listingCapabilitiesAtom).size).toBe(0);
+    expect(registry.get(threads.visibleThreadShellsAtom)).toBe(
+      registry.get(threads.threadShellsAtom),
+    );
+    expect(keysOf(registry.get(threads.navigationThreadShellsAtom))).toEqual([
+      `local:${v2ThreadShell.id}`,
+      `local:${home.id}`,
+      `local:${probe.id}`,
+      ...listedRemote,
+    ]);
+    for (const dispose of disposers) dispose();
     registry.dispose();
   });
 

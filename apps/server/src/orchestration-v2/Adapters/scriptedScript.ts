@@ -1,9 +1,11 @@
 // @effect-diagnostics preferSchemaOverJson:off
 /**
- * The scripted test provider's step grammar. A turn's script is
- * a fenced `scripted` JSON block in its user message, or the entry for its
- * run ordinal in the file `LECTURN_SCRIPTED_PROVIDER_SCRIPTS` names.
+ * The scripted test provider's step grammar. A turn's script comes from the
+ * per-thread `ScriptedScriptSource` when one is provided and has a script for
+ * the turn, else a fenced `scripted` JSON block in its user message, else the
+ * entry for its run ordinal in the file `LECTURN_SCRIPTED_PROVIDER_SCRIPTS` names.
  */
+import { TrimmedNonEmptyString } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
@@ -17,7 +19,16 @@ export const ScriptedToolCall = Schema.Struct({
 export type ScriptedToolCall = typeof ScriptedToolCall.Type;
 
 export const ScriptedStep = Schema.Union([
-  Schema.Struct({ toolCall: ScriptedToolCall, saveAs: Schema.optionalKey(SaveName) }),
+  Schema.Struct({
+    toolCall: ScriptedToolCall,
+    saveAs: Schema.optionalKey(SaveName),
+    /**
+     * `continue`: a JSON-RPC or transport failure is recorded like an `isError`
+     * result (a failed row; `saveAs` keeps the error) and the script goes on, as
+     * a model reads a refusal and keeps going. Absent, it fails the turn.
+     */
+    onError: Schema.optionalKey(Schema.Literal("continue")),
+  }),
   Schema.Struct({ assistantText: Schema.String }),
   Schema.Struct({ expectApproval: Schema.Literal(true) }),
   Schema.Struct({
@@ -35,6 +46,15 @@ export const ScriptedStep = Schema.Union([
   }),
   Schema.Struct({
     hold: Schema.Union([Schema.Literal(true), Schema.Struct({ until: Schema.String })]),
+  }),
+  /** Raises a real `user_input` request and waits; `saveAs` keeps the answer. */
+  Schema.Struct({
+    askUser: Schema.Struct({
+      question: TrimmedNonEmptyString,
+      header: Schema.optionalKey(TrimmedNonEmptyString),
+      options: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+    }),
+    saveAs: Schema.optionalKey(SaveName),
   }),
 ]);
 export type ScriptedStep = typeof ScriptedStep.Type;
@@ -220,6 +240,11 @@ export function jsonEquals(left: unknown, right: unknown): boolean {
     );
   }
   return false;
+}
+
+/** A failed call as the error result a tolerant step records and saves. */
+export function toolErrorResult(detail: string): ScriptedToolResult {
+  return { isError: true, content: [{ type: "text", text: detail }] };
 }
 
 /** The text of a tool error result, for failure messages. */

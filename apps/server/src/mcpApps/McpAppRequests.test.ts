@@ -12,12 +12,16 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import { mcpAppToolCallableByApp } from "@lecturn/shared/mcpApp";
 
 import * as AppRuntimeState from "../apps/AppRuntimeState.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import type * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
 import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as SquireActions from "../squire/SquireActions.ts";
+import * as SquireMcpAppRoute from "../squire/SquireMcpAppRoute.ts";
+import * as SquireRepository from "../squire/SquireRepository.ts";
 import * as McpAppModelContext from "./McpAppModelContext.ts";
 import * as McpAppRequests from "./McpAppRequests.ts";
 
@@ -73,11 +77,54 @@ function makeLayer(input: {
   readonly item: OrchestrationV2TurnItem | null;
   readonly mcpApps?: ProviderAdapter.ProviderAdapterV2McpApps;
   readonly live?: boolean;
+  /** Builds the Squire layer's showcase route over these stand-ins. */
+  readonly squire?: {
+    readonly card: Partial<SquireRepository.SquireCardRow> | null;
+    readonly acted: Array<string>;
+  };
 }) {
+  const squire = input.squire;
+  const runtimeState =
+    squire === undefined
+      ? AppRuntimeState.layer
+      : SquireMcpAppRoute.layer.pipe(
+          Layer.provideMerge(AppRuntimeState.layer),
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(SquireRepository.SquireRepository)({
+                getCard: (id) =>
+                  Effect.succeed(
+                    squire.card === null
+                      ? Option.none()
+                      : Option.some({
+                          id,
+                          owner_squire_id: "squire-release",
+                          ...squire.card,
+                        } as SquireRepository.SquireCardRow),
+                  ),
+                getSquire: () =>
+                  Effect.succeed(Option.some({ lifecycle: "ready" } as SquireRepository.SquireRow)),
+              }),
+              Layer.mock(SquireActions.SquireActions)({
+                act: (request) =>
+                  Effect.sync(() => {
+                    squire.acted.push(`${request.action}:${request.cardIds.join(",")}`);
+                    return {
+                      results: request.cardIds.map((cardId) => ({
+                        cardId,
+                        status: "dismissed" as const,
+                        error: null,
+                      })),
+                    };
+                  }),
+              }),
+            ),
+          ),
+        );
   return McpAppRequests.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        AppRuntimeState.layer,
+        runtimeState,
         Layer.mock(McpAppModelContext.McpAppModelContext)({
           set: (entry) =>
             Effect.sync(() => {
@@ -319,5 +366,139 @@ describe("McpAppRequests", () => {
         }),
       ),
     ),
+  );
+  const showcase = (shown: ReadonlyArray<string>) =>
+    appItem(
+      {
+        content: [{ type: "text", text: "Published the showcase." }],
+        structuredContent: {
+          lecturnMcpApp: {
+            ...app,
+            server: "lecturn",
+            tool: "squire_publish_showcase",
+            resourceUri: "ui://lecturn/squire/showcase",
+          },
+          result: {
+            content: [{ type: "text", text: "Published the showcase." }],
+            structuredContent: { showcase: { itemIds: shown } },
+          },
+        },
+      },
+      { toolName: "mcp__lecturn__squire_publish_showcase", providerThreadId: null },
+    );
+
+  it.effect("serves showcase cards from the Squire route, without a provider thread", () => {
+    const acted: Array<string> = [];
+    return Effect.gen(function* () {
+      const requests = yield* McpAppRequests.McpAppRequests;
+      const before = calls.length;
+      const input = { threadId, itemId };
+      const info = yield* requests.toolInfo({ ...input, name: "squire_card_dismiss" });
+      assert.include(info, { callable: true, readOnly: false });
+      // App-only, so the client still asks before every call.
+      assert.isTrue(mcpAppToolCallableByApp((info.tool as { _meta: unknown })._meta));
+      assert.deepStrictEqual((info.tool as { _meta: unknown })._meta, {
+        ui: { visibility: ["app"] },
+      });
+      const result = yield* requests.callTool({
+        ...input,
+        name: "squire_card_dismiss",
+        arguments: { cardId: "card:steer:a" },
+      });
+      assert.deepStrictEqual(result.structuredContent, {
+        cardId: "card:steer:a",
+        status: "dismissed",
+      });
+      assert.deepStrictEqual(acted, ["dismiss:card:steer:a"]);
+      // The page only reaches the items it shows.
+      const other = yield* requests.callTool({
+        ...input,
+        name: "squire_card_accept",
+        arguments: { cardId: "card:steer:b" },
+      });
+      assert.isTrue(other.isError);
+      assert.deepStrictEqual(acted, ["dismiss:card:steer:a"]);
+      assert.equal(
+        yield* reason(requests.readResource({ ...input, uri: "ui://lecturn/squire/showcase" })),
+        "not-an-app",
+      );
+      assert.equal(calls.length, before);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          item: showcase(["card:steer:a"]),
+          mcpApps,
+          squire: { card: { status: "open" }, acted },
+        }),
+      ),
+    );
+  });
+
+  it.effect("refuses Squire tools that are not the showcase's app-only buttons", () => {
+    const acted: Array<string> = [];
+    return Effect.gen(function* () {
+      const requests = yield* McpAppRequests.McpAppRequests;
+      const input = { threadId, itemId };
+      for (const name of ["squire_publish_showcase", "squire_list_items", "squire_send_steer"]) {
+        assert.isFalse((yield* requests.toolInfo({ ...input, name })).callable);
+        assert.equal(
+          yield* reason(
+            requests.callTool({ ...input, name, arguments: { cardId: "card:steer:a" } }),
+          ),
+          "tool-not-callable",
+        );
+      }
+      assert.deepStrictEqual(acted, []);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          item: showcase(["card:steer:a"]),
+          squire: { card: { status: "open" }, acted },
+        }),
+      ),
+    );
+  });
+
+  it.effect("reports a closed item as outdated and leaves it alone", () => {
+    const acted: Array<string> = [];
+    return Effect.gen(function* () {
+      const requests = yield* McpAppRequests.McpAppRequests;
+      const result = yield* requests.callTool({
+        threadId,
+        itemId,
+        name: "squire_card_accept",
+        arguments: { cardId: "card:steer:a" },
+      });
+      assert.deepStrictEqual(result.structuredContent, {
+        cardId: "card:steer:a",
+        status: "resolved",
+        outdated: true,
+      });
+      assert.deepStrictEqual(acted, []);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          item: showcase(["card:steer:a"]),
+          squire: { card: { status: "resolved" }, acted },
+        }),
+      ),
+    );
+  });
+
+  it.effect("reports showcase cards unavailable while the Squire layer is off", () =>
+    Effect.gen(function* () {
+      const requests = yield* McpAppRequests.McpAppRequests;
+      assert.equal(
+        yield* reason(
+          requests.callTool({
+            threadId,
+            itemId,
+            name: "squire_card_accept",
+            arguments: { cardId: "card:steer:a" },
+          }),
+        ),
+        "app-unavailable",
+      );
+    }).pipe(Effect.provide(makeLayer({ item: showcase(["card:steer:a"]), mcpApps }))),
   );
 });

@@ -3,10 +3,12 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildNewThreadLink,
   parseNewThreadLink,
+  parseSquireLink,
   parseThreadLinkPrompt,
   promptLinkAppPath,
   promptLinkDeepLink,
   sanitizeLinkedPrompt,
+  squireLinkAppPath,
   withoutPromptLinkParams,
 } from "./promptLinks.ts";
 
@@ -123,6 +125,66 @@ describe("link round trips", () => {
     expect(promptLinkDeepLink("/env-1/thread-1?prompt=hi")).toBe(
       "lecturn://threads/env-1/thread-1?prompt=hi",
     );
+  });
+
+  it("maps Squire deep links both ways", () => {
+    expect(promptLinkAppPath("lecturn://squires/env-1/squire-1?item=card-1")).toBe(
+      "/squires/env-1/squire-1?item=card-1",
+    );
+    expect(promptLinkAppPath("lecturn-dev://squires/env-1/squire-1")).toBe(
+      "/squires/env-1/squire-1",
+    );
+    expect(promptLinkAppPath("lecturn://squires/env-1")).toBeNull();
+    expect(promptLinkAppPath("lecturn://squires/env-1/squire-1/extra")).toBeNull();
+    expect(
+      promptLinkAppPath("https://lecturn.cloudgatherer.net/squires/env-1/squire-1"),
+    ).toBeNull();
+    expect(promptLinkDeepLink("/squires/env-1/squire-1?item=card-1")).toBe(
+      "lecturn://squires/env-1/squire-1?item=card-1",
+    );
+    const link = promptLinkDeepLink("/squires/env-1/squire-1?item=card-1", "lecturn-preview");
+    expect(promptLinkAppPath(link)).toBe("/squires/env-1/squire-1?item=card-1");
+  });
+
+  it("maps Squire room deep links both ways", () => {
+    expect(promptLinkAppPath("lecturn://squires/env-1/rooms/room-1")).toBe(
+      "/squires/env-1/rooms/room-1",
+    );
+    expect(promptLinkAppPath("lecturn://squires/env-1/rooms")).toBeNull();
+    expect(promptLinkAppPath("lecturn://squires/env-1/rooms/room-1/extra")).toBeNull();
+    expect(promptLinkDeepLink("/squires/env-1/rooms/room-1")).toBe(
+      "lecturn://squires/env-1/rooms/room-1",
+    );
+  });
+
+  it("reads Squire links for in-app navigation", () => {
+    expect(parseSquireLink("lecturn://squires/env-1/squire-1?item=card-1&x=1")).toEqual({
+      kind: "squire",
+      environmentId: "env-1",
+      squireId: "squire-1",
+      item: "card-1",
+    });
+    expect(parseSquireLink("lecturn://squires/env-1/squire-1?item=")).toMatchObject({
+      item: null,
+    });
+    expect(parseSquireLink("lecturn://squires/env%201/rooms/room-1")).toEqual({
+      kind: "room",
+      environmentId: "env 1",
+      roomId: "room-1",
+    });
+    for (const refused of [
+      "lecturn://threads/env-1/thread-1",
+      "lecturn://apps/com.rw",
+      "lecturn://squires/env-1",
+      "lecturn://squires/env-1/%E0",
+      "lecturn-thread://squires/env-1/squire-1",
+      "https://lecturn.cloudgatherer.net/squires/env-1/squire-1",
+    ]) {
+      expect(parseSquireLink(refused)).toBeNull();
+    }
+    expect(
+      squireLinkAppPath({ kind: "squire", environmentId: "env 1", squireId: "s", item: "c&d" }),
+    ).toBe("/squires/env%201/s?item=c%26d");
   });
 
   it("maps app deep links both ways", () => {

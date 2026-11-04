@@ -124,6 +124,7 @@ import { expandHomePath } from "@lecturn/provider-core/server/pathExpansion";
 import { signalProcessGroup } from "@lecturn/provider-core/server/processGroup";
 import {
   claudeSignedOutMessage,
+  hasClaudeManagedMcpConfig,
   makeClaudeEnvironment,
 } from "../../provider/Drivers/ClaudeHome.ts";
 import {
@@ -145,7 +146,10 @@ import {
 } from "../../provider/claudeUsageLimits.ts";
 import type { ManagedServerProvider } from "@lecturn/provider-core/server/snapshot";
 import { mergeProviderInstanceEnvironment } from "@lecturn/provider-core/server/instanceEnvironment";
-import { LECTURN_ORCHESTRATION_INSTRUCTIONS } from "@lecturn/provider-core/server/orchestrationInstructions";
+import {
+  LECTURN_ORCHESTRATION_INSTRUCTIONS,
+  squireInstructionsText,
+} from "@lecturn/provider-core/server/orchestrationInstructions";
 import {
   makeClaudeMcpActivation,
   withConnectedAppInstructions,
@@ -408,6 +412,7 @@ export interface ClaudeAgentSdkQueryPresetTools {
 export type ClaudeAgentSdkQueryTools = ClaudeAgentSdkQueryToolList | ClaudeAgentSdkQueryPresetTools;
 
 export const CLAUDE_READ_ONLY_ALLOWED_TOOLS = ["Read", "Glob", "Grep"] as const;
+const CLAUDE_SQUIRE_NATIVE_TOOLS: ReadonlyArray<string> = [];
 
 function claudeAgentSdkQueryToolsForSdk(
   tools: ClaudeAgentSdkQueryTools,
@@ -1121,13 +1126,19 @@ export function makeClaudeQueryOptions(input: {
   readonly allowDangerouslySkipPermissions?: boolean;
   /** Lecturn: a connected app's registered instructions. */
   readonly appInstructions?: string;
+  /** Lecturn: a Squire home's skill, in place of the orchestration sections. */
+  readonly squireInstructions?: ReadonlyArray<string>;
+  /** Lecturn: a Squire home or probe loads no MCP server Lecturn did not pass. */
+  readonly squireIsolation?: ProviderAdapter.ProviderAdapterV2RuntimePolicy["squireIsolation"];
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
+  const launchFlags =
+    input.settings === undefined ? {} : parseCliArgs(input.settings.launchArgs).flags;
   const {
     "permission-mode": launchArgPermissionMode,
     "dangerously-skip-permissions": launchArgSkipPermissions,
     ...extraArgs
-  } = input.settings === undefined ? {} : parseCliArgs(input.settings.launchArgs).flags;
+  } = input.squireIsolation === undefined ? launchFlags : claudeSquireLaunchFlags(launchFlags);
   const requestThinkingSummaries =
     compiledSelection.settings.alwaysThinkingEnabled !== false &&
     extraArgs["thinking-display"] !== "omitted";
@@ -1198,14 +1209,29 @@ export function makeClaudeQueryOptions(input: {
     ...(input.settings?.binaryPath
       ? { pathToClaudeCodeExecutable: input.settings.binaryPath }
       : {}),
-    ...(input.environment === undefined ? {} : { env: input.environment }),
+    ...(input.squireIsolation === undefined
+      ? input.environment === undefined
+        ? {}
+        : { env: input.environment }
+      : {
+          // Without both, user, project, plugin, and claude.ai connector
+          // servers load beside the ones passed here (ClaudeProvider's probe).
+          // Safe mode also drops the user's CLAUDE.md, hooks, skills, and
+          // installed plugins, which strict MCP config leaves loaded.
+          strictMcpConfig: true,
+          env: {
+            ...(input.environment ?? process.env),
+            ENABLE_CLAUDEAI_MCP_SERVERS: "false",
+            CLAUDE_CODE_SAFE_MODE: "1",
+          },
+        }),
     ...(input.mcpServers === undefined ? {} : { mcpServers: input.mcpServers }),
     systemPrompt: {
       type: "preset" as const,
       preset: "claude_code" as const,
       append: withConnectedAppInstructions(
         buildRuntimeInstructions({ harness: "Claude Code" }) +
-          (input.mcpServers === undefined ? "" : LECTURN_ORCHESTRATION_INSTRUCTIONS),
+          claudeLecturnInstructions(input.mcpServers, input.squireInstructions),
         input.appInstructions,
       ),
     },
@@ -1218,6 +1244,40 @@ export function makeClaudeQueryOptions(input: {
   const withDirectories =
     additionalDirectories.length === 0 ? options : { ...options, additionalDirectories };
   return input.cwd === null ? withDirectories : { ...withDirectories, cwd: input.cwd };
+}
+
+/**
+ * Lecturn: the instance launch flags a Squire home or probe keeps. The CLI
+ * accumulates `--tools`, `--allowedTools`, `--add-dir`, `--settings`,
+ * `--mcp-config`, `--plugin-dir`, `--agents`, and more on top of the SDK's own
+ * values, and pre-approves before the permission callback runs, so any of
+ * them could hand a Squire a native tool. An allowlist, so a flag a later
+ * Claude adds stays out until it is listed here.
+ */
+const CLAUDE_SQUIRE_LAUNCH_FLAGS: ReadonlySet<string> = new Set([
+  "betas",
+  "fallback-model",
+  "max-budget-usd",
+  "thinking-display",
+]);
+
+function claudeSquireLaunchFlags(
+  flags: Record<string, string | null>,
+): Record<string, string | null> {
+  return Object.fromEntries(
+    Object.entries(flags).filter(([name]) => CLAUDE_SQUIRE_LAUNCH_FLAGS.has(name)),
+  );
+}
+
+function claudeLecturnInstructions(
+  mcpServers: ClaudeQueryOptions["mcpServers"] | undefined,
+  squireInstructions: ReadonlyArray<string> | undefined,
+): string {
+  const squire = squireInstructionsText(squireInstructions);
+  if (squire !== undefined) return `\n\n${squire}`;
+  return mcpServers === undefined || Object.keys(mcpServers).length === 0
+    ? ""
+    : LECTURN_ORCHESTRATION_INSTRUCTIONS;
 }
 
 export const CLAUDE_LECTURN_MCP_TOOL_WILDCARD = "mcp__lecturn__*";
@@ -1263,17 +1323,25 @@ export function claudeMcpQueryOverrides(input: {
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
   readonly readOnlySandbox: boolean;
   readonly allowedTools?: ReadonlyArray<string>;
+  readonly squireIsolation?: ProviderAdapter.ProviderAdapterV2RuntimePolicy["squireIsolation"];
 }): {
   readonly allowedTools?: ReadonlyArray<string>;
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
 } {
-  const session = input.mcpSession;
+  // Lecturn: a probe gets no MCP server even if a session exists. An empty
+  // map, not an absent one, so strict MCP config leaves Claude with none.
+  const session = input.squireIsolation === "probe" ? undefined : input.mcpSession;
   if (session === undefined) {
+    if (input.squireIsolation !== undefined) return { mcpServers: {} };
     return input.allowedTools === undefined ? {} : { allowedTools: input.allowedTools };
   }
-  const mcpAllowedTools = input.readOnlySandbox
-    ? CLAUDE_READ_ONLY_LECTURN_MCP_ALLOWED_TOOLS
-    : [CLAUDE_LECTURN_MCP_TOOL_WILDCARD];
+  // A home's credential lists only its role allowlist (SquireMcpGate), so the
+  // wildcard over Lecturn's server, the only one attached, allows exactly the
+  // Squire tools and follows the gate as that allowlist changes.
+  const mcpAllowedTools =
+    input.readOnlySandbox && input.squireIsolation === undefined
+      ? CLAUDE_READ_ONLY_LECTURN_MCP_ALLOWED_TOOLS
+      : [CLAUDE_LECTURN_MCP_TOOL_WILDCARD];
   return {
     allowedTools: Array.from(new Set([...(input.allowedTools ?? []), ...mcpAllowedTools])),
     mcpServers: {
@@ -1863,14 +1931,55 @@ export interface ClaudeRuntimeQueryPolicy {
   readonly installPermissionCallback: boolean;
 }
 
-export function claudeRuntimeQueryPolicyForRuntimePolicy(
+/**
+ * Lecturn: the deny runtime for Squire homes and probes. `dontAsk`
+ * denies anything not pre-approved; the read-only sandbox with no readable
+ * roots pre-approves no native read tool.
+ */
+const CLAUDE_SQUIRE_SANDBOX_POLICY = {
+  type: "readOnly",
+  access: { type: "restricted", includePlatformDefaults: false, readableRoots: [] },
+  networkAccess: false,
+} as const;
+
+/** Lecturn: a Squire acts through Lecturn's server alone, the only one a home attaches. */
+function claudeSquireToolPermission(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  toolUseID: string,
+): PermissionResult {
+  return toolName.startsWith("mcp__lecturn__")
+    ? { behavior: "allow", updatedInput: toolInput, toolUseID }
+    : { behavior: "deny", message: "A Squire acts only through its Lecturn tools.", toolUseID };
+}
+
+function claudeSquireRuntimePolicy(
   runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+): ProviderAdapter.ProviderAdapterV2RuntimePolicy {
+  return runtimePolicy.squireIsolation === undefined
+    ? runtimePolicy
+    : {
+        ...runtimePolicy,
+        interactionMode: "default",
+        approvalPolicy: "never",
+        sandboxPolicy: CLAUDE_SQUIRE_SANDBOX_POLICY,
+      };
+}
+
+export function claudeRuntimeQueryPolicyForRuntimePolicy(
+  requestedRuntimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
 ): ClaudeRuntimeQueryPolicy {
+  const runtimePolicy = claudeSquireRuntimePolicy(requestedRuntimePolicy);
   const permissionMode = permissionModeForClaudeRuntimePolicy(runtimePolicy);
+  // Lecturn: a Squire gets no native tool at all, so a user's own
+  // `permissions.allow` rule (settings load under dontAsk too) cannot
+  // pre-approve a read.
   const readOnlyTools =
-    sandboxPolicyKindForClaudeRuntimePolicy(runtimePolicy) === "readOnly"
-      ? CLAUDE_READ_ONLY_ALLOWED_TOOLS
-      : undefined;
+    runtimePolicy.squireIsolation !== undefined
+      ? CLAUDE_SQUIRE_NATIVE_TOOLS
+      : sandboxPolicyKindForClaudeRuntimePolicy(runtimePolicy) === "readOnly"
+        ? CLAUDE_READ_ONLY_ALLOWED_TOOLS
+        : undefined;
   const allowedTools =
     readOnlyTools !== undefined && readOnlyPolicyAllowsGlobalReads(runtimePolicy)
       ? readOnlyTools
@@ -3459,6 +3568,8 @@ export interface ClaudeAdapterV2Options {
       request: ProviderContinuationRequests.ProviderContinuationRequest,
     ) => Effect.Effect<void>;
   };
+  /** Lecturn: defaults to checking the host's managed-mcp.json. */
+  readonly hasManagedMcpConfig?: Effect.Effect<boolean>;
 }
 
 export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
@@ -3474,6 +3585,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
   const continuationRequests = adapterOptions.continuationRequests ?? {
     offer: () => Effect.void,
   };
+  const hasManagedMcpConfig =
+    adapterOptions.hasManagedMcpConfig ??
+    hasClaudeManagedMcpConfig().pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
 
   const userInvocableSkillNames = (cwd: string | null) =>
     discoverClaudeSkills(
@@ -8259,6 +8373,12 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             }
           }
 
+          // Lecturn: on a Squire home or probe, `dontAsk` already denies
+          // what is not pre-approved; the callback must never allow more.
+          if (context.input.runtimePolicy.squireIsolation !== undefined) {
+            return claudeSquireToolPermission(toolName, toolInput, callbackOptions.toolUseID);
+          }
+
           if (toolName === "AskUserQuestion") {
             const questions = claudeUserInputQuestions(nativeToolInput);
             const artifacts = yield* buildApprovalRequestArtifacts({
@@ -8537,10 +8657,22 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
           nativeThreadId: string,
         ) {
+          const { squireIsolation } = turnInput.runtimePolicy;
+          // Lecturn: Claude refuses --strict-mcp-config next to a managed
+          // managed-mcp.json and then drops Lecturn's server while keeping the
+          // managed ones, so a Squire home or probe must not start there.
+          if (squireIsolation !== undefined && (yield* hasManagedMcpConfig)) {
+            return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+              driver: CLAUDE_PROVIDER,
+              detail:
+                "A managed managed-mcp.json is present, so Claude cannot isolate a Squire thread's MCP servers.",
+            });
+          }
           const queryPolicy = claudeRuntimeQueryPolicyForRuntimePolicy(turnInput.runtimePolicy);
           const mcpSession = yield* mcpSessions.read(turnInput.threadId);
           const mcpOverrides = claudeMcpQueryOverrides({
             mcpSession,
+            ...(squireIsolation === undefined ? {} : { squireIsolation }),
             readOnlySandbox:
               sandboxPolicyKindForClaudeRuntimePolicy(turnInput.runtimePolicy) === "readOnly",
             ...(queryPolicy.allowedTools === undefined
@@ -8548,9 +8680,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               : { allowedTools: queryPolicy.allowedTools }),
           });
           // The system prompt is fixed for a process's life, so changed app
-          // instructions need a new one, as a changed policy does.
+          // instructions or Squire skill need a new one, as a changed policy does.
           const queryPolicyKey = withConnectedAppInstructions(
-            claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides),
+            claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides) +
+              (squireInstructionsText(turnInput.squireInstructions) ?? ""),
             turnInput.appInstructions,
           );
           const compiledSelection = compileClaudeModelSelection(turnInput.modelSelection);
@@ -8667,6 +8800,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ...(turnInput.appInstructions === undefined
               ? {}
               : { appInstructions: turnInput.appInstructions }),
+            ...(turnInput.squireInstructions === undefined
+              ? {}
+              : { squireInstructions: turnInput.squireInstructions }),
+            ...(squireIsolation === undefined ? {} : { squireIsolation }),
           });
           const querySession = yield* queryRunner
             .open({

@@ -75,6 +75,21 @@ export interface LecturnAcpInstructionState {
    * registration re-sends them while an unchanged one is not repeated.
    */
   readonly appInstructionsHash?: string;
+  /** Lecturn: likewise for a Squire home's skill. */
+  readonly squireInstructionsHash?: string;
+}
+
+/**
+ * Lecturn: on a Squire home the skill replaces the orchestration, browser,
+ * and device sections, which steer to tools its credential never lists.
+ * `undefined` on every other thread.
+ */
+export function squireInstructionsText(
+  squireInstructions: ReadonlyArray<string> | undefined,
+): string | undefined {
+  return squireInstructions === undefined || squireInstructions.length === 0
+    ? undefined
+    : squireInstructions.join("\n\n");
 }
 
 /**
@@ -102,12 +117,15 @@ export function lecturnAcpInstructionState(input: {
   readonly interactionMode: ProviderInteractionMode;
   readonly hasLecturnMcp: boolean;
   readonly appInstructions?: string;
+  readonly squireInstructions?: ReadonlyArray<string>;
 }): LecturnAcpInstructionState {
   const section = connectedAppInstructionsSection(input.appInstructions);
+  const squire = squireInstructionsText(input.squireInstructions);
   return {
     interactionMode: input.interactionMode,
     hasLecturnMcp: input.hasLecturnMcp,
     ...(section === undefined ? {} : { appInstructionsHash: instructionsDigest(section) }),
+    ...(squire === undefined ? {} : { squireInstructionsHash: instructionsDigest(squire) }),
   };
 }
 
@@ -121,13 +139,16 @@ export function lecturnAcpPromptWithInstructions(input: {
   readonly previousState?: LecturnAcpInstructionState;
   /** The text `state.appInstructionsHash` was computed from. */
   readonly appInstructions?: string;
+  /** The sections `state.squireInstructionsHash` was computed from. */
+  readonly squireInstructions?: ReadonlyArray<string>;
 }): string {
   // Native slash commands must remain at the start of the prompt.
   if (input.prompt.trimStart().startsWith("/")) return input.prompt;
   if (
     input.previousState?.interactionMode === input.state.interactionMode &&
     input.previousState.hasLecturnMcp === input.state.hasLecturnMcp &&
-    input.previousState.appInstructionsHash === input.state.appInstructionsHash
+    input.previousState.appInstructionsHash === input.state.appInstructionsHash &&
+    input.previousState.squireInstructionsHash === input.state.squireInstructionsHash
   ) {
     return input.prompt;
   }
@@ -135,13 +156,19 @@ export function lecturnAcpPromptWithInstructions(input: {
     input.state.appInstructionsHash === undefined
       ? undefined
       : connectedAppInstructionsSection(input.appInstructions);
+  const squire =
+    input.state.squireInstructionsHash === undefined
+      ? undefined
+      : squireInstructionsText(input.squireInstructions);
   const instructions = [
     input.state.interactionMode === "plan"
       ? LECTURN_ACP_PLAN_MODE_INSTRUCTIONS
       : LECTURN_ACP_DEFAULT_MODE_INSTRUCTIONS,
-    ...(input.state.hasLecturnMcp
-      ? [LECTURN_BROWSER_TOOL_INSTRUCTIONS.trim(), LECTURN_ORCHESTRATION_INSTRUCTIONS.trim()]
-      : []),
+    ...(squire !== undefined
+      ? [squire]
+      : input.state.hasLecturnMcp
+        ? [LECTURN_BROWSER_TOOL_INSTRUCTIONS.trim(), LECTURN_ORCHESTRATION_INSTRUCTIONS.trim()]
+        : []),
     ...(appSection === undefined ? [] : [appSection]),
   ];
   return `<lecturn_instructions>\n${instructions.join("\n\n")}\n</lecturn_instructions>\n\n<user_request>\n${input.prompt}\n</user_request>`;
@@ -150,20 +177,32 @@ export function lecturnAcpPromptWithInstructions(input: {
 /**
  * Keep the wrapper explicit so it cannot be mistaken for text authored by the user.
  */
-function prependLecturnOrchestrationInstructions(prompt: string): string {
-  return `<lecturn_orchestration_instructions>${LECTURN_ORCHESTRATION_INSTRUCTIONS.trim()}</lecturn_orchestration_instructions>\n\n<user_request>\n${prompt}\n</user_request>`;
+function prependLecturnOrchestrationInstructions(prompt: string, instructions: string): string {
+  return `<lecturn_orchestration_instructions>${instructions.trim()}</lecturn_orchestration_instructions>\n\n<user_request>\n${prompt}\n</user_request>`;
 }
 
 export function lecturnOrchestrationPromptForFirstRun(input: {
   readonly prompt: string;
   readonly runOrdinal: number;
   readonly hasLecturnMcp: boolean;
+  readonly squireInstructions?: ReadonlyArray<string>;
 }): string {
-  return input.runOrdinal === 1 && input.hasLecturnMcp
-    ? prependLecturnOrchestrationInstructions(input.prompt)
-    : input.prompt;
+  if (input.runOrdinal !== 1) return input.prompt;
+  const instructions = lecturnOrchestrationSystemPrompt(
+    input.hasLecturnMcp,
+    input.squireInstructions,
+  );
+  return instructions === undefined
+    ? input.prompt
+    : prependLecturnOrchestrationInstructions(input.prompt, instructions);
 }
 
-export function lecturnOrchestrationSystemPrompt(hasLecturnMcp: boolean): string | undefined {
-  return hasLecturnMcp ? LECTURN_ORCHESTRATION_INSTRUCTIONS : undefined;
+export function lecturnOrchestrationSystemPrompt(
+  hasLecturnMcp: boolean,
+  squireInstructions?: ReadonlyArray<string>,
+): string | undefined {
+  return (
+    squireInstructionsText(squireInstructions) ??
+    (hasLecturnMcp ? LECTURN_ORCHESTRATION_INSTRUCTIONS : undefined)
+  );
 }

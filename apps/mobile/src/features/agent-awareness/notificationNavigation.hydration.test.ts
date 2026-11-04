@@ -22,6 +22,7 @@ vi.mock("react", () => ({
   useRef: (current: unknown) => ({ current }),
 }));
 vi.mock("./androidNotifications", () => ({ setAndroidThreadOnScreen: vi.fn() }));
+vi.mock("../squires/squireLinks", () => ({ useSquireHomeThreadOnScreen: () => null }));
 vi.mock("@effect/atom-react", () => ({
   useAtomValue: (atom: unknown) =>
     atom === state.accountReadyAtom ? state.accountsReady : { isReady: state.catalogReady },

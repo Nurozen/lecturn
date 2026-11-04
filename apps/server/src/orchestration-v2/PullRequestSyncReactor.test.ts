@@ -384,6 +384,45 @@ function applySync(
 }
 
 describe("PullRequestSyncReactor", () => {
+  it.effect("never reads a Squire fixture link, so its committed snapshot stays (R98)", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const fixtureLink = makeLink(
+          318,
+          { headSha: "9f2c4e1", checksState: "failing" },
+          {
+            host: PullRequestSyncReactor.FIXTURE_PULL_REQUEST_HOST,
+            repository: "billing-service",
+            url: "https://fixture.invalid/billing-service/pull/318",
+          },
+        );
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([
+            makeThread("fixture", { pullRequests: [fixtureLink] }),
+            makeThread("real", { pullRequests: [makeLink(7, {})] }),
+          ]),
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* startAndSweep(fixture);
+          yield* reactor.requestSync({
+            host: PullRequestSyncReactor.FIXTURE_PULL_REQUEST_HOST,
+            repository: "billing-service",
+            number: 318,
+          });
+          yield* sweepAgain(fixture, reactor);
+          // The real link was read on both sweeps; the fixture link on neither.
+          const read = (yield* Ref.get(fixture.summaryCalls)).map((call) => call.number);
+          assert.include(read, 7);
+          assert.notInclude(read, 318);
+          assert.isFalse(
+            (yield* Ref.get(fixture.syncCommands)).some((command) => command.number === 318),
+          );
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
   it.effect("retries a failed stack read after the summary becomes terminal", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -656,6 +695,41 @@ describe("PullRequestSyncReactor", () => {
           assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 2);
           assert.strictEqual((yield* Ref.get(fixture.stackCalls)).length, 1);
           assert.strictEqual((yield* Ref.get(fixture.syncCommands)).length, 1);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("syncs a new head commit even when nothing else about the pull request moved", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const headSha = yield* Ref.make("a".repeat(40));
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([makeThread("one", { pullRequests: [makeLink(42)] })]),
+          summary: (input) =>
+            Ref.get(headSha).pipe(Effect.map((sha) => makeSummary(input, { headSha: sha }))),
+        });
+
+        yield* Effect.gen(function* () {
+          const reactor = yield* startAndSweep(fixture);
+          const firstSweep = yield* Ref.get(fixture.syncCommands);
+          assert.deepStrictEqual(
+            firstSweep.map((command) => command.snapshot.headSha),
+            ["a".repeat(40)],
+          );
+          yield* Ref.update(fixture.snapshots, (snapshot) => applySync(snapshot, firstSweep));
+
+          yield* sweepAgain(fixture, reactor);
+          assert.strictEqual((yield* Ref.get(fixture.syncCommands)).length, 1);
+
+          yield* Ref.set(headSha, "b".repeat(40));
+          yield* sweepAgain(fixture, reactor);
+
+          const commands = yield* Ref.get(fixture.syncCommands);
+          assert.strictEqual(commands.length, 2);
+          assert.strictEqual(commands[1]?.snapshot.state, "open");
+          assert.strictEqual(commands[1]?.snapshot.headSha, "b".repeat(40));
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),

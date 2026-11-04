@@ -308,5 +308,9 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       "AntigravityTextGeneration",
       runner,
     ),
+    generateSquireTurnSummary: TextGenerationOperations.squireTurnSummaryFromRunner(
+      "AntigravityTextGeneration",
+      runner,
+    ),
   };
 });

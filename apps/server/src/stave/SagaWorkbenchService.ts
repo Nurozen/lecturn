@@ -36,9 +36,10 @@ import { StaveOrchestration } from "./StaveOrchestration.ts";
 import { SagaWorkbenchRepository } from "../persistence/SagaWorkbenchRepository.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
-import { resolveSagaInferenceModel } from "./sagaInferenceModel.ts";
+import { resolveInferenceModel } from "../textGeneration/inferenceModel.ts";
 import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import { SagaWorkbenchEvidence } from "./SagaWorkbenchEvidence.ts";
+import { isSquireThread } from "../squire/squireThread.ts";
 import { archiveEntriesMatching } from "./StaveOperations.ts";
 import { StaveSpaceLock } from "./StaveSpaceLock.ts";
 import { StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
@@ -438,7 +439,9 @@ export const make = Effect.gen(function* () {
   ) {
     if (!config.staveEnabled || !(yield* settings.getSettings).stave.enabled) return null;
     const thread = yield* projections.getThreadShellById(event.threadId);
-    if (Option.isNone(thread) || thread.value.archivedAt) return null;
+    // A Squire's prompts are event batches, not user work to summarize.
+    if (Option.isNone(thread) || thread.value.archivedAt || isSquireThread(thread.value))
+      return null;
     const identity = yield* identityFor(thread.value.projectId).pipe(Effect.option);
     if (Option.isNone(identity)) return null;
     const member = yield* verifyBoardIdentity(identity.value).pipe(Effect.option);
@@ -513,7 +516,7 @@ export const make = Effect.gen(function* () {
     if (!instance?.enabled)
       return yield* fail("The conversation's provider account is unavailable.", "generation");
     const catalog = yield* instance.snapshot.getSnapshot;
-    const modelSelection = resolveSagaInferenceModel(
+    const modelSelection = resolveInferenceModel(
       source.modelSelection,
       instance.driverKind,
       catalog.models,

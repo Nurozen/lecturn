@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 2,
+  "steps": [
+    {
+      "onEvent": "turn-finished",
+      "toolCalls": [
+        {
+          "name": "squire_stay_quiet",
+          "args": {
+            "threadId": "thr_build_star_catalog",
+            "reason": "Routine progress; the next step is already known to the agent."
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,4 +1,10 @@
-import type { RelayDecisionsStatus } from "@lecturn/contracts";
+import type { ExtensionFeatureId, RelayDecisionsStatus } from "@lecturn/contracts";
+
+export const EXTENSION_FEATURE_LABELS: Record<ExtensionFeatureId, string> = {
+  decisions: "Decisions",
+  contextual: "Contextual",
+  squires: "Room routing with Jev",
+};
 
 export function decisionFundingDenial(
   reason: RelayDecisionsStatus["reason"] | undefined,

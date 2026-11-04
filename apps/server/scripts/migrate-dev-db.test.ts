@@ -38,6 +38,10 @@ const createFixtureSource = Effect.fn("createMigrateDevDbFixtureSource")(functio
         '{"lineage":{"parentThreadId":"stopped-thread","relationshipToParent":"fork","rootThreadId":"stopped-thread"}}';
       const subagentPayload =
         '{"lineage":{"parentThreadId":"subagent-parent","relationshipToParent":"subagent","rootThreadId":"subagent-parent"},"forkedFrom":{"type":"node","nodeId":"node-1"}}';
+      const homeForkPayload =
+        '{"lineage":{"parentThreadId":"squire-home","relationshipToParent":"fork","rootThreadId":"squire-home"}}';
+      const probePayload =
+        '{"lineage":{"parentThreadId":"stopped-thread","relationshipToParent":"fork","rootThreadId":"stopped-thread"},"squire":{"squireId":"squire-1","role":"probe"}}';
       const threads = [
         ["stopped-thread", "project-kept", "completed", "{}", "2026-08-01"],
         ["fork-thread", "project-kept", "completed", forkPayload, "2026-08-02"],
@@ -53,6 +57,15 @@ const createFixtureSource = Effect.fn("createMigrateDevDbFixtureSource")(functio
         ["subagent-parent", "project-kept", "completed", "{}", "2026-08-05"],
         ["subagent-child", "project-kept", "completed", subagentPayload, "2026-08-05"],
         ["deleted-project-thread", "project-deleted", "completed", "{}", "2026-08-05"],
+        [
+          "squire-home",
+          "project-kept",
+          "completed",
+          '{"squire":{"squireId":"squire-1","role":"home"}}',
+          "2026-08-09",
+        ],
+        ["squire-home-fork", "project-kept", "completed", homeForkPayload, "2026-08-09"],
+        ["squire-probe", "project-kept", "completed", probePayload, "2026-08-09"],
       ] as const;
       for (const [threadId, projectId, runStatus, payload, updatedAt] of threads) {
         yield* sql`INSERT INTO orchestration_v2_projection_threads
@@ -80,6 +93,17 @@ const createFixtureSource = Effect.fn("createMigrateDevDbFixtureSource")(functio
           created_at, updated_at, last_run_status, run_count)
         VALUES ('task-1', 'Nightly', 'Run it', 1, '{}', 'project-kept', '{}', '{}',
           'full-access', 'default', 'user', 'user', '2026-08-01', '2026-08-01', 'never', 0)`;
+      yield* sql`INSERT INTO squire
+        (id, role, name, lifecycle, home_thread_id, home_project_id, brief, status, events_json,
+          permissions_json, budgets_json, undo_window_seconds, companion_json, created_at, updated_at)
+        VALUES ('squire-1', 'squire', 'Research', 'ready', 'squire-home', 'project-kept', '',
+          'active', '{}', '{}', '{}', 10, '{}', '2026-08-01', '2026-08-01')`;
+      yield* sql`INSERT INTO squire_grant (squire_id, kind, target_id, origin, created_at)
+        VALUES ('squire-1', 'thread', 'stopped-thread', 'granted', '2026-08-01')`;
+      yield* sql`INSERT INTO squire_event
+        (squire_id, thread_id, kind, state_key, status, not_before, created_at)
+        VALUES ('squire-1', 'stopped-thread', 'turn-finished', 'run-1', 'pending', '2026-08-01', '2026-08-01')`;
+      yield* sql`UPDATE squire_reactor_cursor SET sequence = 99, enabled = 1`;
       yield* sql`INSERT INTO auth_sessions (session_id, subject, scopes, method, issued_at, expires_at)
         VALUES ('session-1', 'user', '[]', 'pairing', '2026-08-01', '2027-08-01')`;
     }),
@@ -133,6 +157,49 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
         ["session-shared"],
       );
       assert.deepStrictEqual(kept.leftovers, { auth: 0, tasks: 0, transfers: 0 });
+    }),
+  );
+
+  it.effect("drops Squire threads with their rows and clears every Squire table", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const sourceDir = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-squire-" });
+      const destDir = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-squire-dest-" });
+      const source = yield* createFixtureSource(sourceDir);
+
+      const result = yield* runMigrateDevDb(
+        { baseDir: destDir, source, projects: 5, threadsPerProject: 100 },
+        { sharedHome: sourceDir },
+      );
+
+      const copied = yield* withDatabase(
+        result.databasePath,
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const threads = yield* sql<{ thread_id: string }>`
+            SELECT thread_id FROM orchestration_v2_projection_threads ORDER BY thread_id`;
+          const [squireThreadRows] = yield* sql<{ count: number }>`
+            SELECT
+              (SELECT COUNT(*) FROM orchestration_v2_projection_runs WHERE thread_id LIKE 'squire-%')
+              + (SELECT COUNT(*) FROM orchestration_events WHERE stream_id LIKE 'squire-%')
+              AS count`;
+          const squireTables = yield* sql<{ name: string }>`
+            SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'squire%'`;
+          let squireRows = 0;
+          for (const { name } of squireTables) {
+            const [row] = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM ${sql(name)}`;
+            squireRows += row?.count ?? 0;
+          }
+          return { threads, squireThreadRows: squireThreadRows?.count, squireTables, squireRows };
+        }),
+      );
+      assert.deepStrictEqual(
+        copied.threads.map((row) => row.thread_id),
+        ["fork-thread", "stopped-thread"],
+      );
+      assert.equal(copied.squireThreadRows, 0);
+      assert.equal(copied.squireTables.length, 13);
+      assert.equal(copied.squireRows, 0);
     }),
   );
 

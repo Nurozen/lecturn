@@ -1,5 +1,6 @@
 import { StaveMemoryWiring } from "@lecturn/provider-core/server/staveMemory";
 import { ProviderDriverKind } from "@lecturn/contracts";
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { OpenCodeSettings } from "../settings.ts";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
@@ -106,6 +107,36 @@ function byOpenCodeRuntime<A, E, R, PE>(
 }
 
 /**
+ * Lecturn: an administrator's OpenCode config, which every server loads above
+ * the user's and a Squire's own (instructions, MCP servers, plugins).
+ */
+const openCodeManagedConfigPaths = (
+  platform: NodeJS.Platform,
+  environment: NodeJS.ProcessEnv,
+  path: Path.Path,
+): ReadonlyArray<string> => {
+  const directory =
+    platform === "darwin"
+      ? "/Library/Application Support/opencode"
+      : platform === "win32"
+        ? path.join(environment.ProgramData ?? "C:\\ProgramData", "opencode")
+        : "/etc/opencode";
+  return [
+    path.join(directory, "opencode.json"),
+    path.join(directory, "opencode.jsonc"),
+    ...(platform === "darwin"
+      ? [
+          `/Library/Managed Preferences/${environment.USER ?? ""}/ai.opencode.managed.plist`,
+          "/Library/Managed Preferences/ai.opencode.managed.plist",
+        ]
+      : []),
+  ];
+};
+
+const OPENCODE_SQUIRE_MANAGED_CONFIG =
+  "OpenCode uses a configuration managed on this machine, so Lecturn cannot keep a Squire away from its instructions and tools.";
+
+/**
  * Capability and selection reads are hot, so they use the last successful probe (1.x before one
  * lands) and never wait on a slow server. Opening a session waits for a probe, so each server is
  * spoken to in its own protocol.
@@ -114,6 +145,7 @@ function selectOpenCodeRuntimeAdapter(input: {
   readonly probe: OpenCodeRuntimeProbe;
   readonly v1: ProviderAdapter.ProviderAdapterV2["Service"];
   readonly v2: ProviderAdapter.ProviderAdapterV2["Service"];
+  readonly hasManagedConfig: Effect.Effect<boolean>;
 }): ProviderAdapter.ProviderAdapterV2["Service"] {
   const pick = <PE>(probed: Effect.Effect<ProbedOpenCode | undefined, PE>) =>
     byOpenCodeRuntime(probed, { v1: Effect.succeed(input.v1), v2: Effect.succeed(input.v2) });
@@ -126,6 +158,16 @@ function selectOpenCodeRuntimeAdapter(input: {
       Effect.flatMap(hot, (adapter) => adapter.planSelectionTransition(transition)),
     openSession: (session) =>
       Effect.flatMap(pick(input.probe.get), (adapter) => adapter.openSession(session)),
+    squireReadiness: pick(input.probe.get).pipe(
+      Effect.flatMap((adapter) => adapter.squireReadiness ?? Effect.succeed(null)),
+      Effect.flatMap((gap) =>
+        gap !== null
+          ? Effect.succeed(gap)
+          : input.hasManagedConfig.pipe(
+              Effect.map((managed) => (managed ? OPENCODE_SQUIRE_MANAGED_CONFIG : null)),
+            ),
+      ),
+    ),
   };
 }
 
@@ -297,6 +339,10 @@ export const OpenCodeDriver: ProviderDriver<
           Effect.provideService(OpenCode2Server.OpenCode2Server, openCode2Server),
           Effect.provideService(StaveMemoryWiring, staveMemoryWiring),
         ),
+        hasManagedConfig: Effect.forEach(
+          openCodeManagedConfigPaths(yield* HostProcess.Platform, processEnv, pathService),
+          (path) => fileSystem.exists(path).pipe(Effect.orElseSucceed(() => false)),
+        ).pipe(Effect.map((found) => found.includes(true))),
       });
       const loadOpenCode2Models = yield* makeOpenCode2ModelLoader(
         openCode2Server.withConnection(({ client }) =>

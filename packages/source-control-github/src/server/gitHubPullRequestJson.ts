@@ -1011,6 +1011,7 @@ export interface GitHubPullRequestSummary {
   readonly mergeability: PullRequestMergeability;
   /** Null when GitHub says the pull request is in no stack; absent when the read did not ask. */
   readonly stack?: PullRequestStackMembership | null;
+  readonly headSha?: string;
 }
 
 /** The summary a linked thread keeps current, from one slice of the batched read. */
@@ -1035,6 +1036,7 @@ export function toPullRequestSummary(pr: SummarizedPullRequest): GitHubPullReque
     checksState: rollupChecksState(rollupStates(pr.commits)),
     mergeability: toMergeability(pr.mergeable),
     ...(pr.stack === undefined ? {} : { stack: toStackMembership(pr) ?? null }),
+    ...(pr.headRefOid ? { headSha: pr.headRefOid } : {}),
   };
 }
 

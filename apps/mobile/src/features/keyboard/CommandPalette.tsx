@@ -1,6 +1,11 @@
 import { useNavigation } from "@react-navigation/native";
 import type { EnvironmentThreadSearchMatch } from "@lecturn/client-runtime/state/thread-search";
-import { THREAD_JUMP_KEYBINDING_COMMANDS } from "@lecturn/contracts";
+import type { SquireEnvironmentState } from "@lecturn/client-runtime/state/squire";
+import {
+  THREAD_JUMP_KEYBINDING_COMMANDS,
+  type EnvironmentId,
+  type SquireId,
+} from "@lecturn/contracts";
 import { threadPullRequestSearchTerms } from "@lecturn/shared/threadPullRequests";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -24,8 +29,9 @@ import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
 import { cn } from "../../lib/cn";
 import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import { LecturnKeyboardCommands } from "../../native/LecturnKeyboardCommands";
-import { useProjects, useThreadShell, useThreadShells } from "../../state/entities";
+import { useProjects, useThreadShell, useVisibleThreadShells } from "../../state/entities";
 import { useThreadSearch } from "../../state/queries";
+import { useSquireEnvironments } from "../../state/squire";
 import { useWorkspaceEnvironments } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
@@ -64,8 +70,43 @@ const ACTION_ICONS: Record<string, AppSymbolName> = {
   copyThreadReference: "link",
 };
 
+const SQUIRE_KEY_PREFIX = "squire:";
+
+/**
+ * Lecturn: one "Open Squire: <name>" per Squire, the Lead first in each environment. The
+ * environment is named only when several have Squires, as on web.
+ */
+function squirePaletteItems(
+  states: ReadonlyMap<EnvironmentId, SquireEnvironmentState>,
+  environmentLabel: (environmentId: EnvironmentId) => string,
+  openSquire: (environmentId: EnvironmentId, squireId: SquireId) => void,
+): CommandPaletteItem[] {
+  const withSquires = [...states].filter(([, state]) => state.squires.length > 0);
+  return withSquires.flatMap(([environmentId, state]) => {
+    const label = withSquires.length > 1 ? environmentLabel(environmentId) : null;
+    const isLead = (squire: SquireEnvironmentState["squires"][number]["squire"]) =>
+      squire.id === state.lead || squire.role === "lead";
+    return state.squires
+      .map(({ squire }) => squire)
+      .sort((a, b) => Number(isLead(b)) - Number(isLead(a)))
+      .map((squire) => {
+        const lead = isLead(squire);
+        const detail = [lead ? "Lead" : null, label].filter((part) => part !== null).join(" · ");
+        return {
+          key: `${SQUIRE_KEY_PREFIX}${environmentId}:${squire.id}`,
+          kind: "action" as const,
+          title: `Open Squire: ${squire.name}`,
+          ...(detail === "" ? {} : { detail }),
+          searchTerms: ["squire", ...(lead ? ["lead"] : []), ...(label === null ? [] : [label])],
+          run: () => openSquire(environmentId, squire.id),
+        };
+      });
+  });
+}
+
 function itemIcon(item: CommandPaletteItem): AppSymbolName {
   if (item.kind === "project") return "folder";
+  if (item.key.startsWith(SQUIRE_KEY_PREFIX)) return "person.crop.circle";
   if (item.kind === "thread") return "text.bubble";
   return ACTION_ICONS[item.key] ?? "ellipsis";
 }
@@ -143,10 +184,11 @@ export function CommandPalette(props: {
   const { selectThread } = useAdaptiveWorkspaceLayout();
   const runCommand = props.onCommand;
   const projects = useProjects();
-  const threads = useThreadShells();
+  const threads = useVisibleThreadShells();
   const activeThreadRef = useMemo(() => parseActiveThreadPath(props.pathname), [props.pathname]);
   const activeThread = useThreadShell(activeThreadRef);
   const environments = useWorkspaceEnvironments();
+  const squireStates = useSquireEnvironments(environments);
   const { savedConnectionsById } = useSavedRemoteConnections();
   const [query, setQuery] = useState("");
   const [selection, setSelection] = useState<string | null>(null);
@@ -342,7 +384,12 @@ export function CommandPalette(props: {
           run: () => selectThread(thread),
         };
       });
-    return [...actions, ...projectItems, ...threadItems];
+    const squireItems = squirePaletteItems(
+      squireStates,
+      (environmentId) => savedConnectionsById[environmentId]?.environmentLabel ?? environmentId,
+      (environmentId, squireId) => navigation.navigate("Squire", { environmentId, squireId }),
+    );
+    return [...actions, ...squireItems, ...projectItems, ...threadItems];
   }, [
     activeThread,
     activeThreadRef,
@@ -351,6 +398,7 @@ export function CommandPalette(props: {
     runCommand,
     savedConnectionsById,
     selectThread,
+    squireStates,
     threads,
   ]);
   const results = useMemo(

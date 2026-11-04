@@ -1,4 +1,11 @@
-import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@lecturn/contracts";
+import type {
+  EnvironmentId,
+  ScopedThreadRef,
+  SquireThreadMarker,
+  ThreadId,
+} from "@lecturn/contracts";
+
+import { isHiddenSquireThread, type ThreadListingCapabilities } from "./state/threadShell.ts";
 
 const COMPOSER_THREAD_RESULT_LIMIT = 5;
 
@@ -8,6 +15,7 @@ export interface ComposerThreadCandidate {
   readonly title: string;
   readonly updatedAt: string;
   readonly archivedAt: string | null;
+  readonly squire?: SquireThreadMarker | undefined;
 }
 
 export interface ComposerThreadItem {
@@ -27,6 +35,8 @@ export function matchComposerThreadItems(input: {
   environmentId: EnvironmentId;
   excludeThreadId: ThreadId | null;
   query: string;
+  /** The composer environment's listing capabilities: Squire threads are not mentionable. */
+  listing: ThreadListingCapabilities | null | undefined;
 }): ComposerThreadItem[] {
   const query = input.query.trim().toLowerCase();
   if (query.length === 0) return [];
@@ -36,6 +46,7 @@ export function matchComposerThreadItems(input: {
         shell.environmentId === input.environmentId &&
         shell.id !== input.excludeThreadId &&
         shell.archivedAt === null &&
+        !isHiddenSquireThread(shell, input.listing) &&
         shell.title.toLowerCase().includes(query),
     )
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))

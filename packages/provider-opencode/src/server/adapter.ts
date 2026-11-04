@@ -57,7 +57,10 @@ import * as Stream from "effect/Stream";
 import * as ProviderHost from "@lecturn/provider-core/server/ProviderHost";
 import { mcpToolPresentation } from "@lecturn/provider-core/server/mcpToolPresentation";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
-import { withAgentDeviceEnvironment } from "@lecturn/provider-core/server/mcpSession";
+import {
+  lecturnGatedToolPrefix,
+  withAgentDeviceEnvironment,
+} from "@lecturn/provider-core/server/mcpSession";
 import * as ProviderEventLoggers from "@lecturn/provider-core/server/ProviderEventLoggers";
 import {
   structuralProtocolMethod,
@@ -616,13 +619,74 @@ const OPENCODE_RESTRICTED_PERMISSIONS = [
   "doom_loop",
 ] as const;
 
+const OPENCODE_SQUIRE_EXTERNAL_SERVER =
+  "OpenCode is set to use its own server, so Lecturn cannot keep a Squire away from that server's tools and settings.";
+
+type OpenCodeSquireIsolation = NonNullable<
+  ProviderAdapter.ProviderAdapterV2RuntimePolicy["squireIsolation"]
+>;
+
+/**
+ * Lecturn: a Squire's whole ruleset. OpenCode drops a tool
+ * whose last matching rule denies every pattern, so a native tool or another
+ * MCP server's tool is never offered, and nothing is left to ask about. A
+ * home's credential lists only its role's tools (SquireMcpGate), so every
+ * tool of Lecturn's server, the only one it attaches, stays allowed.
+ */
+function openCodeSquirePermissionRules(isolation: OpenCodeSquireIsolation): PermissionRuleset {
+  const denyAll = { permission: "*", pattern: "*", action: "deny" } as const;
+  return isolation === "home"
+    ? [denyAll, { permission: "lecturn_*", pattern: "*", action: "allow" }]
+    : [denyAll];
+}
+
+/**
+ * Lecturn: a Squire session owns its `opencode serve`, launched without the
+ * user's global, project, or `~/.opencode` config (and their MCP servers,
+ * agents, and plugins), instruction files, or skills. The data home stays the
+ * user's: it holds the login, and the session store a native fork reads.
+ */
+function openCodeSquireServerEnvironment(
+  environment: NodeJS.ProcessEnv,
+  squireHome: string,
+  isolation: OpenCodeSquireIsolation,
+): NodeJS.ProcessEnv {
+  const {
+    OPENCODE_CONFIG: _config,
+    OPENCODE_CONFIG_DIR: _configDir,
+    OPENCODE_PERMISSION: _permission,
+    ...rest
+  } = environment;
+  return {
+    ...rest,
+    XDG_CONFIG_HOME: `${squireHome}/config`,
+    OPENCODE_TEST_HOME: `${squireHome}/home`,
+    OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+    OPENCODE_DISABLE_CLAUDE_CODE: "1",
+    OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
+    OPENCODE_PURE: "1",
+    // Agent rules too: the skills list in the system prompt follows the
+    // agent's `skill` rule, not the session's.
+    OPENCODE_CONFIG_CONTENT: JSON.stringify({
+      permission: Object.fromEntries(
+        openCodeSquirePermissionRules(isolation).map((rule) => [rule.permission, rule.action]),
+      ),
+    }),
+  };
+}
+
 /**
  * OpenCode does not provide an OS sandbox, so permission rules are also the
  * enforcement boundary for non-interactive policies.
  */
 export function openCodePermissionRules(
   runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+  /** Lecturn: tools Lecturn's MCP server gates itself, by name prefix. */
+  gatedToolPrefix?: string,
 ): PermissionRuleset {
+  if (runtimePolicy.squireIsolation !== undefined) {
+    return openCodeSquirePermissionRules(runtimePolicy.squireIsolation);
+  }
   const sandboxPolicy = recordValue(runtimePolicy, "sandboxPolicy");
   const sandboxType = recordString(sandboxPolicy, "type");
   const rawApprovalPolicy = runtimePolicy.approvalPolicy;
@@ -709,6 +773,12 @@ export function openCodePermissionRules(
     }
   }
 
+  // Last, since OpenCode applies the last matching rule. Its MCP tools are
+  // named `<server>_<tool>`.
+  if (gatedToolPrefix !== undefined) {
+    rules.push({ permission: `lecturn_${gatedToolPrefix}_*`, pattern: "*", action: "allow" });
+  }
+
   return rules;
 }
 
@@ -734,6 +804,8 @@ export function openCodeChildPermissionRules(
   nativeChildRules: PermissionRuleset,
 ): PermissionRuleset {
   const parentRules = openCodePermissionRules(runtimePolicy);
+  // Lecturn: a child agent's own allowances must not widen a Squire's.
+  if (runtimePolicy.squireIsolation !== undefined) return parentRules;
   const inheritedRules = parentRules.filter(
     (rule) => rule.permission === "external_directory" || rule.action === "deny",
   );
@@ -951,22 +1023,56 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
   const messageIdClock = yield* Ref.make({ epochMillis: -1, counter: 0 });
 
+  // Lecturn: a server Lecturn does not launch keeps the config it was started with.
+  const squireGap =
+    options.settings.serverUrl.trim().length > 0 ? OPENCODE_SQUIRE_EXTERNAL_SERVER : null;
+
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: options.instanceId,
     driver: OPENCODE_PROVIDER,
     getCapabilities: () => Effect.succeed(OpenCodeProviderCapabilitiesV2),
     planSelectionTransition: () => Effect.succeed(turnScopedSelectionTransition()),
+    squireReadiness: Effect.succeed(squireGap),
     openSession: Effect.fn("OpenCodeAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
         const scope = yield* Effect.scope;
         const cwd = input.runtimePolicy.cwd ?? host.paths.cwd;
         const mcpSession = yield* mcpSessions.read(input.threadId);
+        // Lecturn: a session opened for a Squire home or probe runs its own
+        // isolated server and serves only threads with the same isolation.
+        const squireIsolation = input.runtimePolicy.squireIsolation;
+        if (squireIsolation !== undefined && squireGap !== null) {
+          return yield* new OpenCodeRuntime.OpenCodeRuntimeError({
+            operation: "openSession",
+            detail: squireGap,
+          });
+        }
+        const sessionEnvironment = withAgentDeviceEnvironment(options.environment, mcpSession);
         const connection = yield* runtime.connectToOpenCodeServer({
           binaryPath: options.settings.binaryPath,
           directory: cwd,
           serverUrl: options.settings.serverUrl,
-          environment: withAgentDeviceEnvironment(options.environment, mcpSession),
+          environment:
+            squireIsolation === undefined
+              ? sessionEnvironment
+              : openCodeSquireServerEnvironment(
+                  sessionEnvironment,
+                  `${host.paths.stateDir}/providers/opencode/${options.instanceId}/squire-home`,
+                  squireIsolation,
+                ),
         });
+        const requireSessionIsolation = (
+          runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy | undefined,
+        ) =>
+          runtimePolicy === undefined || runtimePolicy.squireIsolation === squireIsolation
+            ? Effect.void
+            : Effect.fail(
+                protocolError(
+                  squireIsolation === undefined
+                    ? "A Squire thread cannot run on an ordinary OpenCode session, which loads the user's OpenCode config."
+                    : `This OpenCode session serves only Squire ${squireIsolation} threads.`,
+                ),
+              );
         const client = runtime.createOpenCodeSdkClient({
           baseUrl: connection.url,
           directory: cwd,
@@ -975,7 +1081,9 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             : {}),
         });
 
-        const hasLecturnMcp = mcpSession !== undefined && !connection.external;
+        const hasLecturnMcp =
+          mcpSession !== undefined && !connection.external && squireIsolation !== "probe";
+        const gatedToolPrefix = hasLecturnMcp ? lecturnGatedToolPrefix(mcpSession) : undefined;
         // One thread per session, and the server was added (or not) for it at open.
         const reportMcpActivation = (
           threadId: ThreadId,
@@ -988,7 +1096,6 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             driver: OPENCODE_PROVIDER,
             mcpActivated: hasLecturnMcp && threadId === input.threadId,
           });
-        const orchestrationSystemPrompt = lecturnOrchestrationSystemPrompt(hasLecturnMcp);
         if (hasLecturnMcp) {
           yield* OpenCodeRuntime.runOpenCodeSdk("mcp.add", () =>
             client.mcp.add({
@@ -1008,7 +1115,9 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
         // Lecturn: a Stave space with Marmot memory gets its memory server for
         // this directory, disconnected when the session closes.
         const staveMemory =
-          options.resolveStaveMemory === undefined || connection.external
+          options.resolveStaveMemory === undefined ||
+          connection.external ||
+          squireIsolation !== undefined
             ? undefined
             : configuredStaveMemory(yield* options.resolveStaveMemory(cwd));
         if (staveMemory !== undefined) {
@@ -1105,6 +1214,17 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
               }),
             ),
           );
+
+        // Lecturn: a fork or a resumed session from before isolation lacks the ruleset.
+        const applySquireRules = (sessionID: string) =>
+          squireIsolation === undefined
+            ? Effect.void
+            : sdkCall("session.update", { sessionID }, () =>
+                client.session.update({
+                  sessionID,
+                  permission: openCodeSquirePermissionRules(squireIsolation),
+                }),
+              ).pipe(Effect.asVoid);
 
         const abortDescendants = (rootId: string) =>
           Effect.gen(function* () {
@@ -3059,19 +3179,21 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           hasPendingBackgroundWork: Effect.sync(() => busySessionIds.size > 0),
           ensureThread: (threadInput) =>
             Effect.gen(function* () {
+              yield* requireSessionIsolation(threadInput.runtimePolicy);
               if (threadInput.existingProviderThread?.nativeThreadRef != null) {
                 return yield* runtimeSession.resumeThread({
                   providerThread: threadInput.existingProviderThread,
+                  runtimePolicy: threadInput.runtimePolicy,
                 });
               }
               // No title: OpenCode generates one from the first prompt only when
               // session.create leaves it unset (SessionPrompt.ensureTitle).
               const response = yield* sdkCall(
                 "session.create",
-                { permission: openCodePermissionRules(threadInput.runtimePolicy) },
+                { permission: openCodePermissionRules(threadInput.runtimePolicy, gatedToolPrefix) },
                 () =>
                   client.session.create({
-                    permission: openCodePermissionRules(threadInput.runtimePolicy),
+                    permission: openCodePermissionRules(threadInput.runtimePolicy, gatedToolPrefix),
                   }),
               );
               const nativeSession = unwrapData("session.create", response);
@@ -3111,10 +3233,12 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             ),
           resumeThread: (threadInput) =>
             Effect.gen(function* () {
+              yield* requireSessionIsolation(threadInput.runtimePolicy);
               const sessionId = nativeThreadId(threadInput.providerThread);
               const response = yield* sdkCall("session.get", { sessionID: sessionId }, () =>
                 client.session.get({ sessionID: sessionId }),
               );
+              yield* applySquireRules(sessionId);
               const nativeSession = unwrapData("session.get", response);
               const resumedAt = yield* DateTime.now;
               const providerThread = {
@@ -3147,6 +3271,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             }),
           startTurn: (turnInput) =>
             Effect.gen(function* () {
+              yield* requireSessionIsolation(turnInput.runtimePolicy);
               if (nativeStreamFailure !== null) {
                 return yield* protocolError(
                   "OpenCode event stream has ended; reconnect the provider session before starting another turn.",
@@ -3287,7 +3412,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                 return;
               }
               const systemPrompt = [
-                orchestrationSystemPrompt,
+                lecturnOrchestrationSystemPrompt(hasLecturnMcp, turnInput.squireInstructions),
                 buildRuntimeInstructions({
                   harness: "OpenCode",
                   model: turnInput.modelSelection.model,
@@ -3296,9 +3421,13 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
               ]
                 .filter(Boolean)
                 .join("\n\n");
+              // Lecturn: a Squire runs the default agent; a chosen one brings
+              // its own prompt and rules.
               const agent =
-                getModelSelectionStringOptionValue(turnInput.modelSelection, "agent") ??
-                (turnInput.runtimePolicy.interactionMode === "plan" ? "plan" : undefined);
+                squireIsolation !== undefined
+                  ? undefined
+                  : (getModelSelectionStringOptionValue(turnInput.modelSelection, "agent") ??
+                    (turnInput.runtimePolicy.interactionMode === "plan" ? "plan" : undefined));
               const variant = getModelSelectionStringOptionValue(
                 turnInput.modelSelection,
                 "variant",
@@ -3632,7 +3761,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                 yield* sdkCall("session.update", { sessionID: fork.id }, () =>
                   client.session.update({
                     sessionID: fork.id,
-                    permission: openCodePermissionRules(input.runtimePolicy),
+                    permission: openCodePermissionRules(input.runtimePolicy, gatedToolPrefix),
                   }),
                 );
                 retainedThread = {
@@ -3665,6 +3794,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             ),
           forkThread: (forkInput) =>
             Effect.gen(function* () {
+              yield* requireSessionIsolation(forkInput.runtimePolicy);
               const sourceSessionId = nativeThreadId(forkInput.sourceProviderThread);
               const sourceState = threads.get(sourceSessionId);
               if (sourceState?.activeTurn !== null && sourceState?.activeTurn !== undefined) {
@@ -3696,6 +3826,8 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                   }),
               );
               const nativeSession = unwrapData("session.fork", response);
+              // OpenCode does not copy a session's rules to its fork.
+              yield* applySquireRules(nativeSession.id);
               const forkedAt = yield* DateTime.now;
               const providerThread = makeProviderThread({
                 idAllocator,

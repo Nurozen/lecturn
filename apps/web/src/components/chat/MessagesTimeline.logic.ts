@@ -1,3 +1,4 @@
+import type { OrchestrationV2Notification } from "@lecturn/contracts";
 import { worktreeSetupAgentStarted } from "@lecturn/client-runtime/worktree-setup";
 export { worktreeSetupAgentStarted } from "@lecturn/client-runtime/worktree-setup";
 import { isLiveSubagentTurnItem } from "@lecturn/client-runtime/state/subagentRuntime";
@@ -190,6 +191,45 @@ export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string
   // An app's tool id is the name the agent called and the app documents, so it stays as written.
   if (isAppToolSource(entry.toolSource)) return heading;
   return `${heading.charAt(0).toUpperCase()}${heading.slice(1)}`;
+}
+
+/**
+ * Lecturn: a Squire home thread shows a delivered event batch as one compact row. A
+ * single message from another Squire keeps its handoff line, which says more than its kind.
+ */
+export function squireEventBatchLabel(
+  item: Pick<OrchestrationV2Notification, "source" | "summary">,
+) {
+  if (item.source.kind !== "squire") return null;
+  const { eventCount, eventKinds = [] } = item.source;
+  const distinct = [...new Set(eventKinds)];
+  // The server's summary is `1 Squire event: message` unless it wrote a handoff line.
+  if (eventCount === 1 && distinct[0] === "message" && item.summary !== "1 Squire event: message") {
+    return `Squire update · ${item.summary}`;
+  }
+  const kinds = distinct.map((kind) => kind.replaceAll("-", " "));
+  if (eventCount === 1 && kinds.length === 1) return `Squire update · ${kinds[0]}`;
+  if (kinds.length === 0) return `Squire update · ${eventCount} events`;
+  return `Squire update · ${eventCount} events: ${kinds.join(", ")}`;
+}
+
+/**
+ * Lecturn: a Squire home thread's fold names what it holds instead of how long the turn took,
+ * so the calls stay one quiet click away.
+ */
+export function squireTurnFoldLabel(
+  entries: ReadonlyArray<TimelineEntry>,
+  hiddenEntryIds: ReadonlySet<string>,
+): string {
+  const calls = entries.filter(
+    (entry) =>
+      hiddenEntryIds.has(entry.id) &&
+      entry.kind === "work" &&
+      entry.entry.tone !== "thinking" &&
+      entry.entry.itemType !== "reasoning" &&
+      workLogEntryIsToolLike(entry.entry),
+  ).length;
+  return calls === 0 ? "Details" : `Tool calls (${calls})`;
 }
 
 export function threadReadTargetId(entry: Pick<WorkLogEntry, "structuredPayload">) {
@@ -1433,6 +1473,11 @@ export function deriveMessagesTimelineRows(input: {
   waitingOnUser?: boolean;
   /** The embed pane, where the card is the one place that says the turn waits on the user. */
   hideWaitingRow?: boolean;
+  /**
+   * Lecturn: a Squire home thread (ChatView's `turn-details` control denied). Event batches read
+   * as one compact row and a settled turn's fold reads "Tool calls (N)", not "Worked for …".
+   */
+  compactSquireEvents?: boolean;
 }): MessagesTimelineRow[] {
   const timelineEntries = timelineRowEntries(input.timelineEntries);
   const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>();
@@ -1695,7 +1740,9 @@ export function deriveMessagesTimelineRows(input: {
         id: `turn-fold:${turnFold.runId}`,
         createdAt: turnFold.createdAt,
         runId: turnFold.runId,
-        label: turnFold.label,
+        label: input.compactSquireEvents
+          ? squireTurnFoldLabel(timelineEntries, turnFold.hiddenEntryIds)
+          : turnFold.label,
         expanded: input.expandedRunIds?.has(turnFold.runId) ?? false,
       });
     }
@@ -1755,12 +1802,18 @@ export function deriveMessagesTimelineRows(input: {
         timelineEntry.entry.itemType === "notification" ||
         timelineEntry.entry.questionAnswer !== undefined
       ) {
+        const payload = timelineEntry.entry.structuredPayload;
+        const squireLabel =
+          input.compactSquireEvents && payload?.type === "notification"
+            ? squireEventBatchLabel(payload)
+            : null;
         nextRows.push({
           kind: "work",
           id: timelineEntry.id,
           createdAt: timelineEntry.createdAt,
           groupedEntries: [timelineEntry.entry],
           isExpandedToolGroup: false,
+          ...(squireLabel === null ? {} : { displayLabel: squireLabel }),
         });
         continue;
       }

@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="squire-showcase-template" content="7" />
+    <title>Showcase</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: light-dark(#fbfaf7, #17171a);
+        --panel: light-dark(#ffffff, #1f1f23);
+        --line: light-dark(#e4e1d8, #33333a);
+        --text: light-dark(#1d1c1a, #ecebe8);
+        --muted: light-dark(#6b675f, #a09d96);
+        --gold: light-dark(#94701f, #d9b45a);
+        --gold-soft: light-dark(#f6edd6, #3a3120);
+        --warn: light-dark(#a5461f, #f0936b);
+        --ok: light-dark(#2f6b3d, #8bcf9a);
+        /* At least 3:1 against --bg and --panel in both themes, so an edge traces at a glance. */
+        --edge: light-dark(#857f73, #7a7984);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+      }
+      body {
+        font:
+          13px/1.45 ui-sans-serif,
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+        padding: 14px;
+      }
+      h2 {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 18px 0 8px;
+      }
+      header {
+        display: flex;
+        gap: 14px;
+        align-items: flex-end;
+      }
+      header img {
+        width: 109px;
+        height: 160px;
+        flex: none;
+        object-fit: contain;
+      }
+      header .placeholder {
+        width: 109px;
+        height: 160px;
+        flex: none;
+        border-radius: 10px;
+        background: var(--gold-soft);
+      }
+      header .title {
+        font-size: 18px;
+        font-weight: 650;
+      }
+      header .lead {
+        color: var(--gold);
+        font-weight: 600;
+      }
+      header .time {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .counts {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+        gap: 8px;
+        margin-top: 14px;
+      }
+      .count {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px 10px;
+      }
+      .count b {
+        display: block;
+        font-size: 20px;
+        font-variant-numeric: tabular-nums;
+      }
+      .count span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 6px;
+      }
+      .chip {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 1px 8px;
+        color: var(--muted);
+        font-size: 11.5px;
+        font-variant-numeric: tabular-nums;
+      }
+      .map {
+        position: relative;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        column-gap: 56px;
+      }
+      .map svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        overflow: visible;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        position: relative;
+      }
+      .node {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 6px 9px;
+        min-width: 0;
+      }
+      .node .name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .node .meta {
+        color: var(--muted);
+        font-size: 11.5px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .node.shared {
+        border-color: var(--gold);
+        background: var(--gold-soft);
+      }
+      .node .blocks {
+        color: var(--warn);
+        font-size: 11.5px;
+      }
+      .pr {
+        font-variant-numeric: tabular-nums;
+      }
+      .pr.open {
+        color: var(--ok);
+      }
+      .pr.merged {
+        color: var(--gold);
+      }
+      .pr.closed {
+        color: var(--muted);
+      }
+      .file {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+      }
+      path.touch {
+        stroke: var(--edge);
+        fill: none;
+        stroke-width: 1.75;
+      }
+      path.touch.shared {
+        stroke: var(--gold);
+        stroke-width: 2;
+      }
+      path.blocks {
+        stroke: var(--warn);
+        fill: none;
+        stroke-width: 1.75;
+        stroke-dasharray: 4 3;
+      }
+      .items {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .item {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px 10px;
+      }
+      .item .body {
+        flex: 1;
+        min-width: 0;
+      }
+      .item .why {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .kind {
+        font-size: 11px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .item.closed {
+        opacity: 0.6;
+      }
+      .actions {
+        display: flex;
+        gap: 6px;
+        flex: none;
+        align-items: center;
+      }
+      button {
+        font: inherit;
+        font-size: 12px;
+        border-radius: 6px;
+        padding: 4px 10px;
+        cursor: pointer;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--text);
+      }
+      button.primary {
+        background: var(--gold);
+        border-color: var(--gold);
+        color: light-dark(#fff, #1d1c1a);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .state {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .state.error {
+        color: var(--warn);
+      }
+      .empty {
+        color: var(--muted);
+      }
+      .bar {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-top: 12px;
+      }
+      .bar .summary {
+        flex: 1;
+        min-width: 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      /* Inline, the card is a summary that opens full size; full size, it is the whole page. A
+         host with no full screen gets the whole page inline (data-mode "page"). */
+      body[data-mode="inline"] .full,
+      body:not([data-mode="inline"]) .bar {
+        display: none;
+      }
+      body[data-mode="fullscreen"] {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 20px 24px 32px;
+      }
+      @media (max-width: 520px) {
+        .map {
+          column-gap: 28px;
+        }
+      }
+    </style>
+  </head>
+  <body data-mode="inline">
+    <header>
+      <div id="still"></div>
+      <div>
+        <div class="title">Showcase</div>
+        <div class="lead" id="lead"></div>
+        <div class="time" id="time"></div>
+      </div>
+    </header>
+    <div class="counts" id="counts"></div>
+    <div class="bar">
+      <span class="summary" id="summary"></span>
+      <span class="state error" id="expand-state"></span>
+      <button class="primary" id="expand" type="button">Expand</button>
+    </div>
+    <h2 class="full">Architecture</h2>
+    <div class="map full" id="map"></div>
+    <h2 class="full">Items</h2>
+    <div class="items full" id="items"></div>
+    <script type="application/json" id="squire-showcase-data">
+      {{SQUIRE_SHOWCASE_DATA}}
+    </script>
+    <script>
+      (() => {
+        const data = JSON.parse(document.getElementById("squire-showcase-data").textContent);
+        const el = (tag, className, text) => {
+          const node = document.createElement(tag);
+          if (className) node.className = className;
+          if (text !== undefined) node.textContent = text;
+          return node;
+        };
+
+        // The page is a snapshot: it reads nothing after publishing (P18.4).
+        const still = document.getElementById("still");
+        if (data.lead.still) {
+          const img = el("img");
+          img.src = data.lead.still;
+          img.alt = data.lead.name;
+          still.replaceWith(img);
+        } else {
+          still.className = "placeholder";
+        }
+        document.getElementById("lead").textContent = data.lead.name;
+        const generated = new Date(data.generatedAt);
+        const time = document.getElementById("time");
+        time.textContent = `Generated ${Number.isNaN(generated.getTime()) ? data.generatedAt : generated.toLocaleString()}`;
+        time.title = data.generatedAt;
+
+        // The decision count is the Lead header's ("3 need a decision"); its kinds are its
+        // breakdown, not tiles beside it.
+        const counts = document.getElementById("counts");
+        const label = (n, one, many) => (n === 1 ? one : many);
+        const tile = (value, label) => {
+          const node = el("div", "count");
+          node.append(el("b", "", String(value)), el("span", "", label));
+          counts.append(node);
+          return node;
+        };
+        const decisions = tile(
+          data.counts.needsDecision,
+          label(data.counts.needsDecision, "needs a decision", "need a decision"),
+        );
+        const chips = el("div", "chips");
+        // Every decision kind present, so the breakdown adds up to the count above it.
+        for (const [value, one, many] of [
+          [data.counts.steers ?? 0, "steer", "steers"],
+          [data.counts.openQuestions, "open question", "open questions"],
+          [data.counts.overlaps, "overlap", "overlaps"],
+          [data.counts.proposals ?? 0, "proposal", "proposals"],
+        ]) {
+          if (value > 0) chips.append(el("span", "chip", `${value} ${label(value, one, many)}`));
+        }
+        if (chips.childElementCount > 0) decisions.append(chips);
+        tile(
+          data.counts.threadsWatched,
+          label(data.counts.threadsWatched, "thread watched", "threads watched"),
+        );
+        document.getElementById("summary").textContent = [
+          `${data.threads.length} ${label(data.threads.length, "thread", "threads")} mapped`,
+          `${data.items.length} ${label(data.items.length, "item", "items")}`,
+        ].join(" · ");
+
+        const map = document.getElementById("map");
+        const threadNodes = new Map();
+        const fileNodes = new Map();
+        if (data.threads.length === 0) {
+          map.replaceWith(el("div", "empty full", "No tracked threads."));
+        } else {
+          const left = el("div", "col");
+          const right = el("div", "col");
+          const titles = new Map(data.threads.map((thread) => [thread.id, thread.title]));
+          for (const thread of data.threads) {
+            const node = el("div", "node");
+            node.append(el("div", "name", thread.title));
+            const meta = el("div", "meta");
+            if (thread.pr) {
+              const state =
+                thread.pr.isDraft && thread.pr.state === "open" ? "draft" : thread.pr.state;
+              meta.append(el("span", `pr ${thread.pr.state}`, `#${thread.pr.number} ${state}`));
+              if (thread.pr.checks) meta.append(` · checks ${thread.pr.checks}`);
+              meta.append(` · ${thread.project}`);
+            } else {
+              meta.textContent = `${thread.project} · no PR`;
+            }
+            node.append(meta);
+            for (const edge of data.edges.filter((candidate) => candidate.from === thread.id)) {
+              node.append(
+                el(
+                  "div",
+                  "blocks",
+                  `Waits on ${edge.label} (${titles.get(edge.to) ?? "a tracked PR"})`,
+                ),
+              );
+            }
+            threadNodes.set(thread.id, node);
+            left.append(node);
+          }
+          for (const file of data.files) {
+            const node = el("div", file.shared ? "node shared" : "node");
+            node.append(el("div", "name file", file.path));
+            node.append(
+              el(
+                "div",
+                "meta",
+                file.shared ? `${file.threads.length} threads edit this` : file.project,
+              ),
+            );
+            fileNodes.set(file.key, node);
+            right.append(node);
+          }
+          if (data.files.length === 0)
+            right.append(el("div", "empty", "No files in the stored summaries."));
+          map.append(left, right);
+        }
+
+        // Laid out once, and again only when the frame changes size: no animation.
+        const svgNs = "http://www.w3.org/2000/svg";
+        const drawMap = () => {
+          // Inline, the map is hidden: it is drawn when the page opens full size.
+          if (!map.isConnected || map.offsetParent === null) return;
+          map.querySelector("svg")?.remove();
+          const svg = document.createElementNS(svgNs, "svg");
+          const box = map.getBoundingClientRect();
+          const line = (d, className) => {
+            const path = document.createElementNS(svgNs, "path");
+            path.setAttribute("d", d);
+            path.setAttribute("class", className);
+            svg.append(path);
+          };
+          // The file column comes ordered by its threads (orderFilesByThreads), so these do not
+          // cross; shared edges are drawn last so the gold stays on top.
+          const byShared = [...data.files].sort((a, b) => Number(a.shared) - Number(b.shared));
+          for (const file of byShared) {
+            const to = fileNodes.get(file.key).getBoundingClientRect();
+            for (const threadId of file.threads) {
+              const from = threadNodes.get(threadId)?.getBoundingClientRect();
+              if (!from) continue;
+              const x1 = from.right - box.left;
+              const y1 = from.top + from.height / 2 - box.top;
+              const x2 = to.left - box.left;
+              const y2 = to.top + to.height / 2 - box.top;
+              const mid = (x1 + x2) / 2;
+              line(
+                `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`,
+                file.shared ? "touch shared" : "touch",
+              );
+            }
+          }
+          for (const edge of data.edges) {
+            const from = threadNodes.get(edge.from)?.getBoundingClientRect();
+            const to = threadNodes.get(edge.to)?.getBoundingClientRect();
+            if (!from || !to) continue;
+            const x = from.left - box.left;
+            const y1 = from.top + from.height / 2 - box.top;
+            const y2 = to.top + to.height / 2 - box.top;
+            line(`M${x},${y1} C${x - 18},${y1} ${x - 18},${y2} ${x},${y2}`, "blocks");
+          }
+          map.prepend(svg);
+        };
+
+        // The host sends only what changed, so each field keeps its last value.
+        let displayMode = "inline";
+        let canExpand = false;
+        const expand = document.getElementById("expand");
+        const expandState = document.getElementById("expand-state");
+        const applyContext = (context) => {
+          if (!context || typeof context !== "object") return;
+          if (context.theme === "light" || context.theme === "dark")
+            document.documentElement.style.colorScheme = context.theme;
+          if (Array.isArray(context.availableDisplayModes))
+            canExpand = context.availableDisplayModes.includes("fullscreen");
+          if (typeof context.displayMode === "string") displayMode = context.displayMode;
+          if (displayMode === "fullscreen") expandState.textContent = "";
+          document.body.dataset.mode =
+            displayMode === "fullscreen" ? "fullscreen" : canExpand ? "inline" : "page";
+        };
+
+        const rpc = (() => {
+          let nextId = 1;
+          const waiting = new Map();
+          window.addEventListener("message", (event) => {
+            if (event.source !== window.parent) return;
+            const message = event.data;
+            if (!message || message.jsonrpc !== "2.0") return;
+            if (
+              message.id !== undefined &&
+              message.method === undefined &&
+              waiting.has(message.id)
+            ) {
+              const settle = waiting.get(message.id);
+              waiting.delete(message.id);
+              settle(message);
+            }
+            if (message.method === "ui/notifications/host-context-changed")
+              applyContext(message.params);
+          });
+          return {
+            request: (method, params) =>
+              new Promise((resolve, reject) => {
+                const id = nextId++;
+                waiting.set(id, (message) =>
+                  message.error
+                    ? reject(new Error(message.error.message || "Request failed."))
+                    : resolve(message.result),
+                );
+                window.parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+              }),
+            notify: (method, params) =>
+              window.parent.postMessage({ jsonrpc: "2.0", method, params }, "*"),
+          };
+        })();
+
+        const items = document.getElementById("items");
+        if (data.items.length === 0) items.append(el("div", "empty", "Nothing waiting on you."));
+        const settled = {
+          accepted: "Accepted",
+          dismissed: "Dismissed",
+          resolved: "Done",
+          executed: "Done",
+          executing: "Running",
+          accepting: "Running",
+        };
+        for (const item of data.items) {
+          const row = el("div", "item");
+          const body = el("div", "body");
+          body.append(
+            el("div", "kind", `${item.kind} · ${item.squire}`),
+            el("div", "", item.outcome ? `${item.title} · ${item.outcome}` : item.title),
+          );
+          if (item.why) body.append(el("div", "why", item.why));
+          const actions = el("div", "actions");
+          const state = el("span", "state");
+          const buttons = [];
+          const close = (text, error) => {
+            state.textContent = text;
+            state.className = error ? "state error" : "state";
+            if (!error) {
+              row.classList.add("closed");
+              for (const button of buttons) button.remove();
+            }
+          };
+          // Lecturn opens its own deep links in the app; a host that refuses gets a pointer instead.
+          const open = async () => {
+            const fallback = `Open this item from ${item.owner}'s queue.`;
+            if (!item.link) {
+              close(fallback, true);
+              return;
+            }
+            try {
+              await rpc.request("ui/open-link", { url: item.link });
+              state.textContent = "";
+            } catch {
+              close(fallback, true);
+            }
+          };
+          const act = (tool) => async () => {
+            for (const button of buttons) button.disabled = true;
+            try {
+              const result = await rpc.request("tools/call", {
+                name: tool,
+                arguments: { cardId: item.id },
+              });
+              const outcome = result?.structuredContent ?? {};
+              if (outcome.outdated) close("Outdated");
+              else if (result?.isError)
+                close(result.content?.[0]?.text || "Could not act on this item.", true);
+              else close(settled[outcome.status] ?? "Done");
+            } catch (error) {
+              close(error instanceof Error ? error.message : "Could not act on this item.", true);
+            } finally {
+              for (const button of buttons) button.disabled = false;
+            }
+          };
+          for (const action of item.actions) {
+            const button = el("button", action.type === "dismiss" ? "" : "primary", action.label);
+            button.addEventListener(
+              "click",
+              action.type === "open"
+                ? open
+                : act(action.type === "accept" ? "squire_card_accept" : "squire_card_dismiss"),
+            );
+            buttons.push(button);
+          }
+          actions.append(state, ...buttons);
+          row.append(body, actions);
+          items.append(row);
+        }
+
+        // The host opens full size only from a click here; it can still keep the card inline.
+        expand.addEventListener("click", async () => {
+          expand.disabled = true;
+          try {
+            const result = await rpc.request("ui/request-display-mode", { mode: "fullscreen" });
+            applyContext({ displayMode: result?.mode });
+            if (result?.mode !== "fullscreen")
+              expandState.textContent = "Lecturn kept this inline. Try Expand again.";
+          } catch {
+            expandState.textContent = "Lecturn could not open this full size.";
+          } finally {
+            expand.disabled = false;
+          }
+        });
+
+        // The body's own box, not the document's scroll height: that never drops below the
+        // frame's current height, so a frame once sized taller (a narrower first layout) would
+        // keep its empty tail.
+        const reportSize = () => {
+          drawMap();
+          rpc.notify("ui/notifications/size-changed", {
+            height: Math.ceil(document.body.getBoundingClientRect().height),
+          });
+        };
+        new ResizeObserver(reportSize).observe(document.body);
+        rpc
+          .request("ui/initialize", {
+            protocolVersion: "2026-01-26",
+            appInfo: { name: "squire-showcase", version: String(data.templateVersion) },
+            appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] },
+          })
+          .then(
+            (result) => applyContext(result?.hostContext),
+            // No host to open it full size: the whole page shows inline.
+            () => applyContext({ availableDisplayModes: [] }),
+          )
+          .then(() => {
+            rpc.notify("ui/notifications/initialized", {});
+            reportSize();
+          });
+      })();
+    </script>
+  </body>
+</html>

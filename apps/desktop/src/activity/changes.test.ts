@@ -71,6 +71,21 @@ describe("semantic activity changes", () => {
       expect(activityChanges([temporary], [row()])).toBeUndefined();
     }
   });
+  it("never tints the count for a Squire card, whose status names a kind, not an outcome", () => {
+    const squire = row({
+      id: "squire-row",
+      status: "Action · Fix failing check",
+      squire: { squireId: "release", cardId: "card-1", cardKind: "steer", palette: "brass" },
+    } as Partial<DesktopActivityRow>);
+    const updating = { ...squire, status: "Updating…" };
+    expect(activityChanges([], [squire])).toBeUndefined();
+    expect(activityChanges([updating], [squire])).toBeUndefined();
+    // A thread's own failure still alerts alongside it.
+    expect(activityChanges([row()], [squire, row({ status: "Action failed" })])).toMatchObject({
+      rowId: "thread-1",
+      state: "failed",
+    });
+  });
   it("surfaces action failures and input requests after a temporary acknowledgement", () => {
     const sending = row({ status: "Sending instruction…", visualState: "active" });
     expect(activityChanges([sending], [row({ status: "Action failed" })])).toMatchObject({

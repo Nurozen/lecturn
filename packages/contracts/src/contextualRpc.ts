@@ -46,22 +46,26 @@ export const ContextualGroupReadRequest = Schema.Struct({
   cursor: Schema.optionalKey(id),
   limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 })),
 });
+// `features` lists what the client can decode; without it Squires is folded out of the allowance.
 export const ExtensionHostFundingRequest = Schema.Union([
   Schema.Struct({
     featureId: E.ExtensionFeatureId,
     operation: Schema.Literal("create"),
     expectedGeneration: NonNegativeInt,
+    features: E.ExtensionReaderFeatures,
   }),
   Schema.Struct({
     featureId: E.ExtensionFeatureId,
     operation: Schema.Literals(["observe", "redeem", "cancel"]),
     challengeId: id,
     expectedGeneration: NonNegativeInt,
+    features: E.ExtensionReaderFeatures,
   }),
   Schema.Struct({
     featureId: E.ExtensionFeatureId,
     operation: Schema.Literal("revoke"),
     expectedGeneration: NonNegativeInt,
+    features: E.ExtensionReaderFeatures,
   }),
 ]);
 export const ExtensionHostFundingResult = Schema.Union([
@@ -222,7 +226,7 @@ export const ContextualRpcs = [
     stream: true,
   }),
   Rpc.make(M.extensionsFundingStatus, {
-    payload: { featureId: E.ExtensionFeatureId },
+    payload: { featureId: E.ExtensionFeatureId, features: E.ExtensionReaderFeatures },
     success: E.ExtensionFundingStatusResult,
     error,
   }),

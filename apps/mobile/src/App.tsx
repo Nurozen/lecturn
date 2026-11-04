@@ -7,7 +7,7 @@ import { StatusBar } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { createStaticNavigation } from "@react-navigation/native";
+import { createStaticNavigation, getStateFromPath } from "@react-navigation/native";
 
 import { RegistryContext } from "@effect/atom-react";
 import { ThreadArrangementHost } from "./features/threads/ThreadArrangementSheet";
@@ -23,6 +23,7 @@ import { RootStack } from "./Stack";
 import { appAtomRegistry } from "./state/atom-registry";
 import { OverlayPortalHost } from "./components/ui/OverlayPortal";
 import { shouldHandleAppLink } from "./lib/appLinking";
+import { appSquireHomeThreadLookup, resolveSquireThreadPath } from "./features/squires/squireLinks";
 import { useMobileNavigationTheme } from "./lib/useMobileNavigationTheme";
 import { useUiRuntimeMemoryWarningGc } from "./lib/useUiRuntimeMemoryWarningGc";
 import { SubscriptionUsageCoordinator } from "./widgets/SubscriptionUsageCoordinator";
@@ -58,6 +59,10 @@ const appLinking = {
   },
   config: { initialRouteName: "Home" },
   filter: shouldHandleAppLink,
+  // Lecturn: push, Live Activity, and in-app links name a Squire's home thread; open its Squire
+  // screen. `linkTo` resolves through this too, so notification taps share it.
+  getStateFromPath: (path: string, options?: Parameters<typeof getStateFromPath>[1]) =>
+    getStateFromPath(resolveSquireThreadPath(path, appSquireHomeThreadLookup), options),
 };
 
 const Navigation = createStaticNavigation(RootStack);

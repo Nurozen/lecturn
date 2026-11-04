@@ -7,6 +7,8 @@ import * as Path from "effect/Path";
 import type * as EffectAcpSchema from "effect-acp/compat";
 import * as NodePath from "node:path";
 
+import { lecturnGatedToolPrefix } from "@lecturn/provider-core/server/mcpSession";
+
 import {
   acpClientExecuteDisposition,
   acpLecturnAppToolDisposition,
@@ -389,5 +391,21 @@ describe("acpLecturnAppToolDisposition", () => {
       acpLecturnAppToolDisposition(request({ title: "mcp__lecturn__rw_simulate" }), undefined),
       undefined,
     );
+  });
+  it("allows a Squire home's role tools, which its credential alone lists", () => {
+    const toolPrefix = lecturnGatedToolPrefix({
+      capabilities: new Set(["squire"]),
+      app: { appId: "dev.rocketwright", toolPrefix: "rw", toolNames: [] },
+    });
+    assert.equal(toolPrefix, "squire");
+    const squire = toolPrefix === undefined ? undefined : { toolPrefix };
+    assert.equal(
+      acpLecturnAppToolDisposition(request({ title: "mcp__lecturn__squire_notify" }), squire),
+      "allow",
+    );
+    for (const title of ["mcp__lecturn__lecturn_thread_send", "mcp__lecturn__rw_simulate"]) {
+      assert.equal(acpLecturnAppToolDisposition(request({ title }), squire), undefined);
+    }
+    assert.equal(lecturnGatedToolPrefix({ capabilities: new Set(["orchestration"]) }), undefined);
   });
 });

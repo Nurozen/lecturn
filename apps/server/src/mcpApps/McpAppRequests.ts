@@ -26,6 +26,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import type * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
 import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import { isSquireShowcaseApp } from "../squire/showcase/showcaseApp.ts";
 import * as McpAppModelContext from "./McpAppModelContext.ts";
 
 /**
@@ -66,7 +67,7 @@ const make = Effect.gen(function* () {
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
   const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
   const modelContext = yield* McpAppModelContext.McpAppModelContext;
-  const { mcpAppRoute } = yield* AppRuntimeState;
+  const { mcpAppRoute, squireMcpAppRoute } = yield* AppRuntimeState;
 
   const fail = (threadId: ThreadId, reason: McpAppRequestError["reason"], cause?: unknown) =>
     new McpAppRequestError({ threadId, reason, ...(cause === undefined ? {} : { cause }) });
@@ -89,7 +90,11 @@ const make = Effect.gen(function* () {
     ) {
       return yield* fail(input.threadId, "not-an-app");
     }
-    return { app, providerThreadId: item.providerThreadId };
+    return {
+      app,
+      providerThreadId: item.providerThreadId,
+      output: item.type === "dynamic_tool" ? item.output : undefined,
+    };
   });
 
   // Connected-app cards never reach the provider session, which on most
@@ -104,13 +109,32 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  // Lecturn: the showcase is served from Squire state, like a connected app,
+  // so its buttons work on every provider and in copies. Without the
+  // switch the route is absent.
+  const squireRoute = (threadId: ThreadId) =>
+    Ref.get(squireMcpAppRoute).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.fail(fail(threadId, "app-unavailable")),
+          onSome: (route) => Effect.succeed(route),
+        }),
+      ),
+    );
+
   const resolve = Effect.fn("McpAppRequests.resolve")(function* (input: {
     readonly threadId: ThreadId;
     readonly itemId: TurnItemId;
   }) {
-    const { app, providerThreadId } = yield* resolveApp(input);
+    const { app, providerThreadId, output } = yield* resolveApp(input);
+    if (isSquireShowcaseApp(app)) {
+      const card = { threadId: input.threadId, itemId: input.itemId, app, output };
+      const route = yield* squireRoute(input.threadId);
+      return { app, squire: { route, card }, connected: undefined } as const;
+    }
     if (app.server === LECTURN_MCP_APP_SERVER || providerThreadId === null) {
-      return { app, connected: yield* connectedAppRoute(input.threadId) } as const;
+      const connected = yield* connectedAppRoute(input.threadId);
+      return { app, connected, squire: undefined } as const;
     }
     const projection = yield* threadManagement
       .getThreadRecords(input.threadId, ["providerThreads"])
@@ -129,11 +153,11 @@ const make = Effect.gen(function* () {
     if (runtime === undefined) return yield* fail(input.threadId, "session-stopped");
     const mcpApps: ProviderAdapter.ProviderAdapterV2McpApps | undefined = runtime.mcpApps;
     if (mcpApps === undefined) return yield* fail(input.threadId, "provider-unsupported");
-    return { app, providerThread, mcpApps, connected: undefined };
+    return { app, providerThread, mcpApps, connected: undefined, squire: undefined };
   });
   type ProviderResolved = Extract<
     Effect.Success<ReturnType<typeof resolve>>,
-    { readonly connected: undefined }
+    { readonly connected: undefined; readonly squire: undefined }
   >;
 
   const findTool = Effect.fn("McpAppRequests.findTool")(function* (
@@ -149,6 +173,8 @@ const make = Effect.gen(function* () {
 
   const toolInfo = Effect.fn("McpAppRequests.toolInfo")(function* (input: McpAppToolInfoInput) {
     const resolved = yield* resolve(input);
+    if (resolved.squire)
+      return yield* resolved.squire.route.toolInfo({ ...resolved.squire.card, name: input.name });
     if (resolved.connected)
       return yield* resolved.connected.toolInfo({ ...input, app: resolved.app });
     const tool = yield* findTool(input.threadId, resolved, input.name);
@@ -163,6 +189,13 @@ const make = Effect.gen(function* () {
 
   const callTool = Effect.fn("McpAppRequests.callTool")(function* (input: McpAppCallToolInput) {
     const resolved = yield* resolve(input);
+    if (resolved.squire) {
+      return yield* resolved.squire.route.callTool({
+        ...resolved.squire.card,
+        name: input.name,
+        arguments: input.arguments,
+      });
+    }
     if (resolved.connected)
       return yield* resolved.connected.callTool({ ...input, app: resolved.app });
     // The spec forbids apps calling tools hidden from them; checked here too,
@@ -185,6 +218,9 @@ const make = Effect.gen(function* () {
     input: McpAppReadResourceInput,
   ) {
     const resolved = yield* resolve(input);
+    if (resolved.squire) {
+      return yield* resolved.squire.route.readResource({ ...resolved.squire.card, uri: input.uri });
+    }
     if (resolved.connected) {
       return yield* resolved.connected.readResource({ ...input, app: resolved.app });
     }

@@ -1,6 +1,7 @@
 import { HttpClient, FetchHttpClient } from "effect/http";
 import {
   ContextualError,
+  ExtensionFeatureId,
   type ContextualCaptureStatusResult,
   type ContextualDisclosure,
   type ContextualPreparation,
@@ -22,6 +23,10 @@ import {
   createEnvironmentRpcQueryAtomFamily,
   createEnvironmentRpcSubscriptionAtomFamily,
 } from "./runtime.ts";
+import { request, requestGuarded } from "../rpc/client.ts";
+
+/** Without this list the server folds features an older client cannot decode out of allowances. */
+const readableFeatures = ExtensionFeatureId.literals;
 
 /** A newer confirmed funding revision makes a local challenge obsolete, without proving who approved it. */
 export function fundingSupersedesChallenge(
@@ -370,6 +375,8 @@ export function createContextualEnvironmentAtoms<R, E>(
     fundingStatus: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "contextual:fundingStatus",
       tag: WS_METHODS.extensionsFundingStatus,
+      execute: (input) =>
+        request(WS_METHODS.extensionsFundingStatus, { ...input, features: readableFeatures }),
       staleTimeMs: 0,
       refreshTrigger,
     }),
@@ -437,6 +444,8 @@ export function createContextualEnvironmentAtoms<R, E>(
       ...options,
       label: "contextual:funding",
       tag: WS_METHODS.extensionsFunding,
+      execute: (input) =>
+        requestGuarded(WS_METHODS.extensionsFunding, { ...input, features: readableFeatures }),
     }),
   };
 }

@@ -9,6 +9,7 @@ import { AppReferencesProvider } from "./embed/AppReferencesProvider";
 import { resolveDraftPromotionNavigationTarget, threadHasStarted } from "./ChatView.logic";
 import { waitForDraftHeroTransition } from "./chat/draftHeroTransition";
 import { SidebarInset } from "./ui/sidebar";
+import { useSquireViewForThread } from "./squire/SquirePage";
 import {
   finalizePromotedDraftThreadByRef,
   markPromotedDraftThreadByRef,
@@ -68,6 +69,11 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
 
   const shellStatus = useEnvironmentShellStatus(serverThreadRef?.environmentId ?? null);
   const serverThreadShell = serverThread;
+  // Lecturn: a marked home thread opens as its Squire view instead.
+  const squireView = useSquireViewForThread(
+    target.kind === "server" ? target.threadRef : null,
+    serverThreadShell,
+  );
   const environmentThreadRefs = useEnvironmentThreadRefs(serverThreadRef?.environmentId ?? null);
   const bootstrapComplete = isThreadRouteSnapshotAuthoritative(shellStatus);
   const draftThread = useComposerDraftStore((store) =>
@@ -163,6 +169,18 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
     }
   }, [bootstrapComplete, environmentHasAnyThreads, navigate, renderState, target]);
 
+  // Lecturn: replace, so Back skips the thread route that only redirects.
+  const squireViewEnvironmentId = squireView?.environmentId ?? null;
+  const squireViewSquireId = squireView?.squireId ?? null;
+  useEffect(() => {
+    if (squireViewEnvironmentId === null || squireViewSquireId === null) return;
+    void navigate({
+      to: "/squires/$environmentId/$squireId",
+      params: { environmentId: squireViewEnvironmentId, squireId: squireViewSquireId },
+      replace: true,
+    });
+  }, [navigate, squireViewEnvironmentId, squireViewSquireId]);
+
   // Settings replaces this route, so its account pickers default to the thread left behind.
   const openEnvironmentId = routeThreadRef?.environmentId ?? null;
   useEffect(() => {
@@ -198,7 +216,11 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
         </AppReferencesProvider>
       );
     }
-  } else if (renderState === "ready" || (renderState === "loading" && serverThreadShell !== null)) {
+  } else if (
+    // Lecturn: a home thread redirecting to its Squire view never mounts ChatView here.
+    squireView === null &&
+    (renderState === "ready" || (renderState === "loading" && serverThreadShell !== null))
+  ) {
     view = (
       <AppReferencesProvider
         environmentId={target.threadRef.environmentId}

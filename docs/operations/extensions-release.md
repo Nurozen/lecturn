@@ -15,6 +15,19 @@ Canonical configuration names use `EXTENSIONS_*`. Compatibility aliases for the 
 
 Contextual status reports unavailable until the database promotion marker is present at phase 1. The relay refuses new Contextual funding challenges, approvals, redemptions and evaluation admission before creating funding or usage records when that marker is missing or still at phase 0, even if its admission flag is enabled. Decisions remains available during both compatibility phases. This readiness check does not promote the schema or replace the deployment, qualification and worker-retirement gates.
 
+Squire room routing (`squires`) follows the same phase-1 gate as Contextual. It ships dark: with `EXTENSIONS_SQUIRES_ENABLED` absent or false the server reports the feature unavailable and rooms route by rules. To enable it:
+
+1. Deploy the relay with migration `20261101000000_extensions_squires` and Squires admission off. Merging to `main` runs `deploy-relay.yml`.
+2. Add the `squire-routing-v1` policy to the private evaluator and verify the deployed Worker, not just its source.
+3. Confirm the promotion marker is at phase 1. Squires funding is refused at phase 0 even when admission is on.
+4. Set `EXTENSIONS_SQUIRES_ENABLED=true` and a nonempty `EXTENSIONS_SQUIRES_COHORT` in the `production` environment, then redeploy. Leave the cohort variable absent rather than empty while disabled; GitHub rejects empty values.
+5. Grant-funded test payers need their own `relay_extension_admission_grants` row with `feature_id='squires'`. A Decisions grant does not admit Squires.
+6. Run the gated live check `apps/server/src/squire/SquireJevRouter.integration.test.ts` against a funded test account and compare p95 latency with the 5 s routing deadline.
+
+Squires has its own account and per-environment concurrency slots and its own per-minute limit (`EXTENSIONS_SQUIRES_ACCOUNT_CONCURRENCY`, `EXTENSIONS_SQUIRES_ENVIRONMENT_CONCURRENCY`, `EXTENSIONS_SQUIRES_REQUESTS_PER_MINUTE`), so Decisions and Contextual work never blocks room routing. The monthly allowance pool, spending exposure caps and the global exposure cap stay shared.
+
+Hosts declare the features they can decode in the `x-lecturn-extension-features` header. For a host without it, which is every release before Squires, the relay leaves Squires out of feature lists and allowances. It also subtracts Squires usage from the reported limit, so the per-feature totals still add up and the remaining allowance stays exact.
+
 Funding cancellation, revocation, host unlinking and account deletion remain available when new paid admission is disabled. Monitor unresolved reservations, cleanup watermarks, grant generations, rejected old reservation epochs, helper capability failures and packet omission counts without logging source excerpts. Unresolved financial evidence can intentionally prevent cleanup watermark advancement; investigate rather than deleting it.
 
 A local PR Review uses a fresh synthetic home, local simulated evaluation and an ad-hoc signed app. It proves local wiring only. It does not prove production billing, signed-helper distribution, notarization, real Slack format coverage or paid model quality.

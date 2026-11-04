@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 2,
+  "id": "06-voice-steer",
+  "setup": {
+    "squire": {
+      "name": "Release",
+      "brief": "Done means CI green and PR approved. Stay quiet on routine progress. Prefer small, specific steers.",
+      "provider": "under-test",
+      "createdAt": "2026-10-01T09:00:00Z",
+      "timezone": "America/Los_Angeles"
+    },
+    "scope": [
+      {
+        "kind": "project",
+        "name": "billing-service"
+      },
+      {
+        "kind": "project",
+        "name": "Observatory"
+      }
+    ],
+    "threads": [
+      {
+        "threadId": "thr_fix_invoice_rounding",
+        "title": "Fix invoice rounding",
+        "project": "billing-service",
+        "provider": "claudeAgent"
+      },
+      {
+        "threadId": "thr_build_star_catalog",
+        "title": "Build the star catalog",
+        "project": "Observatory",
+        "provider": "codex"
+      }
+    ],
+    "permissions": {
+      "steer": "auto",
+      "createThread": "recommend",
+      "notify": "on"
+    },
+    "undoWindowSeconds": 10,
+    "budgetUsage": {
+      "steersPerDay": {
+        "used": 0,
+        "limit": 10
+      },
+      "threadsPerDay": {
+        "used": 0,
+        "limit": 3
+      },
+      "steersPerThreadPerHour": {
+        "limit": 2,
+        "usedByThread": {}
+      }
+    }
+  },
+  "events": [
+    {
+      "type": "voice-note",
+      "voiceNoteId": "vn_0001",
+      "transcript": "Squire, tell the billing thread to rerun the e2e suite and ping me when it's green.",
+      "speakerVerified": true,
+      "source": "dictation"
+    }
+  ],
+  "expected": {
+    "toolCalls": [
+      {
+        "anyOf": ["squire_recommend_steer", "squire_send_steer"]
+      }
+    ],
+    "cardTarget": "Fix invoice rounding",
+    "effects": {
+      "card_created": 1,
+      "notification_pushed": 1
+    },
+    "mustNotHappen": ["steer_sent", "action_held", "proposal_created", "thread_created"],
+    "ignore": ["squire_list_tracked", "squire_get_summary", "squire_get_detail"],
+    "assertions": ["card_origin_voice", "decision_recorded_voice"]
+  }
+}

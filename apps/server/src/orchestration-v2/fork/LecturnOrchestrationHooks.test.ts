@@ -152,6 +152,7 @@ describe("LecturnOrchestrationHooks", () => {
         "contextual",
         "stave",
         "team-provider-policy",
+        "squire",
       ]) {
         yield* hooks.register({
           name,

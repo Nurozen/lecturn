@@ -6,6 +6,7 @@ import {
   ProviderInstanceId,
   type RuntimeMode,
   type ServerProvider,
+  SquireId,
   ThreadId,
 } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
@@ -148,6 +149,36 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
       assert.equal(yield* modeFor(grokInstanceId, "auto"), "auto");
       assert.equal(yield* modeFor(grokInstanceId, "full-access"), "full-access");
       assert.equal(yield* modeFor(providerInstanceId, "auto-accept-edits"), "auto-accept-edits");
+    }),
+  );
+
+  it.effect("runs Squire home and probe threads under the deny runtime", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const squireId = SquireId.make("squire:runtime-policy");
+      for (const role of ["home", "probe"] as const) {
+        const resolved = yield* policy.resolve({
+          thread: {
+            ...makeThread({ now, worktreePath: "/squire-scratch", runtimeMode: "full-access" }),
+            interactionMode: "plan",
+            squire: { squireId, role },
+          },
+          modelSelection,
+        });
+        assert.deepEqual(resolved, {
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          cwd: "/squire-scratch",
+          squireIsolation: role,
+        });
+      }
+      const ordinary = yield* policy.resolve({
+        thread: makeThread({ now, worktreePath: null }),
+        modelSelection,
+      });
+      assert.notProperty(ordinary, "squireIsolation");
+      assert.equal(ordinary.runtimeMode, "full-access");
     }),
   );
 });

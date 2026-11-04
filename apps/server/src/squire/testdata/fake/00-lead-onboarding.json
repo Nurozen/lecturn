@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 2,
+  "steps": [
+    {
+      "onEvent": "onboarding",
+      "toolCalls": [
+        {
+          "name": "squire_propose_squire",
+          "args": {
+            "name": "Release",
+            "brief": "Done means CI green and PR approved. Stay quiet on routine progress. Prefer small, specific steers.",
+            "scope": [
+              {
+                "kind": "project",
+                "name": "billing-service"
+              }
+            ],
+            "permissions": {
+              "steer": "recommend",
+              "createThread": "recommend",
+              "notify": "on"
+            },
+            "companion": {
+              "presence": "figure",
+              "appearance": "male",
+              "hood": "down",
+              "equipment": "helmet",
+              "palette": "moonstone",
+              "motion": "subtle"
+            },
+            "reason": "billing-service has two threads working in the same code: Fix invoice rounding, with its PR in review, and Currency display cleanup."
+          }
+        },
+        {
+          "name": "squire_propose_squire",
+          "args": {
+            "name": "Research",
+            "brief": "Answer questions about what changed and why across tracked threads. Flag work that collides with other threads. Recommend only; never steer on routine progress.",
+            "scope": [
+              {
+                "kind": "project",
+                "name": "Observatory"
+              }
+            ],
+            "permissions": {
+              "steer": "recommend",
+              "createThread": "recommend",
+              "notify": "on"
+            },
+            "companion": {
+              "presence": "figure",
+              "appearance": "female",
+              "hood": "up",
+              "equipment": "astrolabe",
+              "palette": "sage",
+              "motion": "subtle"
+            },
+            "reason": "Observatory has two active threads, Build the star catalog and Plan the constellation explorer, with an open design question."
+          }
+        },
+        {
+          "name": "squire_propose_squire",
+          "args": {
+            "name": "Steward",
+            "brief": "Watch every project for threads that stall or wait on the user. Nudge once with the exact question; stay quiet otherwise.",
+            "scope": [
+              {
+                "kind": "project",
+                "name": "billing-service"
+              },
+              {
+                "kind": "project",
+                "name": "Observatory"
+              }
+            ],
+            "permissions": {
+              "steer": "recommend",
+              "createThread": "recommend",
+              "notify": "on"
+            },
+            "companion": {
+              "presence": "figure",
+              "appearance": "male",
+              "hood": "up",
+              "equipment": "grimoire",
+              "palette": "rose",
+              "motion": "subtle"
+            },
+            "reason": "Plan the constellation explorer has waited on you for 45 min; no Squire watches for stalled threads yet."
+          }
+        }
+      ]
+    },
+    {
+      "onEvent": "user-message",
+      "toolCalls": [
+        {
+          "name": "squire_publish_showcase",
+          "args": {}
+        }
+      ]
+    },
+    {
+      "onEvent": "*",
+      "toolCalls": [
+        {
+          "name": "squire_stay_quiet",
+          "args": {
+            "reason": "Nothing here needs the Lead."
+          }
+        }
+      ]
+    }
+  ]
+}

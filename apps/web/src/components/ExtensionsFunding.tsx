@@ -26,7 +26,10 @@ import {
 import { useAtomCommand } from "../state/use-atom-command";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import { decisionFundingDenial } from "./DecisionFundingApprovalPage.logic";
+import {
+  decisionFundingDenial,
+  EXTENSION_FEATURE_LABELS,
+} from "./DecisionFundingApprovalPage.logic";
 import {
   matchesFundingChallenge,
   matchesFundingRedemption,
@@ -45,9 +48,10 @@ export function ExtensionsFunding(props: ExtensionsFundingProps) {
   if (!available)
     return (
       <p className="text-xs text-muted-foreground">
-        Update this host to manage membership access for{" "}
-        {props.featureId === "decisions" ? "Decisions" : "Contextual"}. Existing saved data remains
-        available.
+        {`Update this host to manage membership access for ${EXTENSION_FEATURE_LABELS[props.featureId]}.`}{" "}
+        {props.featureId === "squires"
+          ? "Rooms route by mentions and rules."
+          : "Existing saved data remains available."}
       </p>
     );
   return resolveCloudPublicConfig().clerkPublishableKey ? (
@@ -129,7 +133,7 @@ function FundingControls({
   const command = useAtomCommand(contextualEnvironment.funding, { reportFailure: false });
   const canFund = useContextualAccess(environmentId).funding;
   const host = useEnvironment(environmentId)?.label ?? "this host";
-  const name = featureId === "contextual" ? "Contextual" : "Decisions";
+  const name = EXTENSION_FEATURE_LABELS[featureId];
   const [pending, setPending] = useState<{
     challenge: ExtensionFundingChallengeResult;
     state: ExtensionFundingObserveResult["state"];
@@ -380,7 +384,7 @@ function FundingControls({
               </span>
             </div>
             <p className="mt-1 text-muted-foreground">
-              One monthly pool shared by Decisions and Contextual.
+              One monthly pool shared by all Extensions.
               {!allowanceConfirmed
                 ? " This balance is not confirmed. Refresh membership status to check current access."
                 : ""}
@@ -388,9 +392,7 @@ function FundingControls({
             <dl className="mt-3 grid grid-cols-2 gap-3">
               {allowance.byFeature.map((usage) => (
                 <div key={usage.featureId}>
-                  <dt className="font-medium">
-                    {usage.featureId === "decisions" ? "Decisions" : "Contextual"}
-                  </dt>
+                  <dt className="font-medium">{EXTENSION_FEATURE_LABELS[usage.featureId]}</dt>
                   <dd className="mt-0.5 text-muted-foreground">
                     {usage.usedInputTokens.toLocaleString()} used ·{" "}
                     {usage.reservedInputTokens.toLocaleString()} reserved
@@ -405,7 +407,9 @@ function FundingControls({
             The shared allowance is exhausted.{" "}
             {featureId === "contextual"
               ? "Eligible local collection can continue; paid evaluation is paused."
-              : "New detection is paused until the allowance resets."}
+              : featureId === "squires"
+                ? "Rooms route by mentions and rules until the allowance resets."
+                : "New detection is paused until the allowance resets."}
           </p>
         )}
         {denial && <p>{denial.message}</p>}
@@ -536,7 +540,9 @@ function FundingControls({
                   Revoke {name} on {host}?{" "}
                   {featureId === "contextual"
                     ? "New evaluation and collection stop. Saved data stays available to inspect, export, or forget."
-                    : "New detection stops. Saved decisions remain available."}{" "}
+                    : featureId === "squires"
+                      ? "Jev stops routing; rooms route by mentions and rules."
+                      : "New detection stops. Saved decisions remain available."}{" "}
                   Other feature approvals stay unchanged.
                 </p>
                 <div className="flex flex-wrap gap-2">

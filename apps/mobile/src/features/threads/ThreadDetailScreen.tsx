@@ -171,6 +171,12 @@ import { useThreadQueuedCount } from "./ThreadQueueControl";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-live-follow";
 import { useGlobalVoiceInput } from "../voice-input/VoiceInputProvider";
+import { SquireThreadBanners } from "../squires/SquireThreadBanners";
+import {
+  allowsThreadRouteControl,
+  type ThreadRouteControl,
+  type ThreadRouteControls,
+} from "./threadRouteControls";
 
 export interface ThreadDetailScreenProps {
   readonly worktreeSetup?: WorktreeSetupCardProps | null;
@@ -264,6 +270,10 @@ export interface ThreadDetailScreenProps {
   readonly onSubmitUserInput: () => Promise<unknown>;
   readonly onDismissUserInput: () => Promise<unknown>;
   readonly showContent?: boolean;
+  /** Lecturn: the controls allowlist from the thread route; absent keeps every control. */
+  readonly controls?: ThreadRouteControls;
+  /** Lecturn: a Squire's home thread prompts with what it is for. */
+  readonly composerPlaceholder?: string;
 }
 
 /** Keep the thread configuration visible while its composer is parked. */
@@ -473,6 +483,8 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
 ) {
   const usesNativeWorkspaceColumns = useNativeWorkspaceColumnsSupported();
   const navigation = useNavigation();
+  // Lecturn: each gated control site below reads the controls allowlist through this.
+  const allows = (control: ThreadRouteControl) => allowsThreadRouteControl(props.controls, control);
   const { session: voiceInputSession } = useGlobalVoiceInput();
   const reportedModelSelection = useThreadReportedModelSelection(props.selectedThreadDetailRef);
   const deviceState = useEnvironmentQuery(
@@ -500,7 +512,8 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
     });
   };
   const insets = useSafeAreaInsets();
-  const settled = props.selectedThread.settledOverride === "settled";
+  // Lecturn: without Unsettle on the allowlist, a settled thread keeps its composer.
+  const settled = props.selectedThread.settledOverride === "settled" && allows("unsettle");
   const { unsettleThread } = useThreadListActions();
   const [unsettling, setUnsettling] = useState(false);
   useEffect(() => {
@@ -1094,7 +1107,8 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
     });
   };
 
-  const showScrollToEndButton = contentPresentationKind === "ready" && !endFollowEnabled;
+  const showScrollToEndButton =
+    contentPresentationKind === "ready" && !endFollowEnabled && allows("timeline-navigation");
   const { themeAppearance } = useAppearancePreferences();
   const isDarkMode = themeAppearance === "dark";
 
@@ -1181,7 +1195,12 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
               dispatchingMessageId={props.dispatchingMessageId}
               // A native subagent has no composer to edit a pending message in;
               // Cancel on the edit banner would discard it.
-              onEditPendingMessage={isProviderSubagent ? null : handleEditPendingMessage}
+              onEditPendingMessage={
+                isProviderSubagent || !allows("edit-pending-message")
+                  ? null
+                  : handleEditPendingMessage
+              }
+              forkEnabled={allows("fork-from-response")}
               contentPresentation={props.contentPresentation}
               agentLabel={agentLabel}
               threadTitle={props.selectedThread.title}
@@ -1202,14 +1221,16 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                 (showFloatingStatus ? FLOATING_WORKING_CONTROL_COVERAGE : 0)
               }
               contentMaxWidth={contentMaxWidth}
-              historyControls={props.historyControls}
+              historyControls={allows("load-earlier") ? props.historyControls : undefined}
               contentSideInsets={nativeMetrics?.safeArea}
               layoutVariant={layoutVariant}
               usesAutomaticContentInsets={props.usesAutomaticContentInsets}
               onHeaderMaterialVisibilityChange={props.onHeaderMaterialVisibilityChange}
               onEndFollowEnabledChange={handleEndFollowEnabledChange}
               skills={selectedProviderSkills}
-              onUseArtifactTemplate={handleUseArtifactTemplate}
+              onUseArtifactTemplate={
+                allows("artifact-templates") ? handleUseArtifactTemplate : undefined
+              }
             />
           </RenderErrorBoundary>
         </View>
@@ -1217,7 +1238,7 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
         <View className="flex-1">{arcaneBackdrop}</View>
       )}
 
-      {showContent ? (
+      {showContent && allows("previews") ? (
         <ThreadBrowserFloat
           key={selectedThreadKey}
           environmentId={props.environmentId}
@@ -1264,18 +1285,18 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                   status={floatingStatus}
                   lift={floatingControlLift}
                   devicePreview={
-                    devicePreviews.length > 0
+                    devicePreviews.length > 0 && allows("previews")
                       ? { count: devicePreviews.length, onPress: openDevicePreview }
                       : null
                   }
                   browserPreview={
-                    browserTabs.tabs.length > 0
+                    browserTabs.tabs.length > 0 && allows("previews")
                       ? { count: browserTabs.tabs.length, onPress: () => openBrowserPreview() }
                       : null
                   }
                   showScrollToEnd={showScrollToEndButton}
                   onScrollToEnd={handleScrollToEnd}
-                  agents={agentsSegment}
+                  agents={allows("agents") ? agentsSegment : null}
                   onOpenAgents={() => {
                     Keyboard.dismiss();
                     navigation.navigate("ThreadAgents", {
@@ -1283,7 +1304,7 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                       threadId: props.selectedThread.id,
                     });
                   }}
-                  queuedCount={queuedCount}
+                  queuedCount={allows("queued-runs") ? queuedCount : 0}
                   onOpenQueue={() => {
                     Keyboard.dismiss();
                     navigation.navigate("ThreadQueue", {
@@ -1308,11 +1329,13 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                       />
                     </Animated.View>
                   ) : null}
-                  <UsageLimitRecoveryCard
-                    key={props.selectedThread.latestRun?.runId}
-                    thread={props.selectedThread}
-                    environmentId={props.environmentId}
-                  />
+                  {allows("usage-limits") ? (
+                    <UsageLimitRecoveryCard
+                      key={props.selectedThread.latestRun?.runId}
+                      thread={props.selectedThread}
+                      environmentId={props.environmentId}
+                    />
+                  ) : null}
                   {props.feedbackSubmissions.map((submission) => (
                     <ComposerFeedback
                       key={submission.id}
@@ -1332,7 +1355,9 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                       />
                     </Animated.View>
                   ) : null}
-                  {usageLimitsReport && activeUserInputRequestId === null ? (
+                  {usageLimitsReport &&
+                  activeUserInputRequestId === null &&
+                  allows("usage-limits") ? (
                     <Animated.View
                       className="shrink-0 px-4 pb-3"
                       entering={FadeInDown.duration(220)}
@@ -1358,6 +1383,11 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                       />
                     </Animated.View>
                   ) : null}
+                  {/* Lecturn: Squire holds and budget on a home thread, decisions on a tracked one. */}
+                  <SquireThreadBanners
+                    environmentId={props.environmentId}
+                    thread={props.selectedThread}
+                  />
                   <AppClosedBanner thread={props.selectedThread} />
                   {props.activePendingApproval || props.activePendingUserInput ? (
                     <Animated.View
@@ -1511,15 +1541,20 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                     </View>
                   ) : (
                     <>
-                      <ContextualPreparationNotice
-                        environmentId={props.environmentId}
-                        threadId={props.selectedThread.id}
-                      />
+                      {allows("contextual") ? (
+                        <ContextualPreparationNotice
+                          environmentId={props.environmentId}
+                          threadId={props.selectedThread.id}
+                        />
+                      ) : null}
                       <ThreadComposer
+                        controls={props.controls}
                         canOperateThread={props.canOperateThread}
                         reportedModelSelection={reportedModelSelection}
                         editorRef={composerEditorRef}
-                        placeholder="Ask the repo agent, or run a command…"
+                        placeholder={
+                          props.composerPlaceholder ?? "Ask the repo agent, or run a command…"
+                        }
                         contentMaxWidth={contentMaxWidth}
                         connectionState={props.connectionStateLabel}
                         environmentLabel={props.environmentLabel}

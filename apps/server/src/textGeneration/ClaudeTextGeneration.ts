@@ -185,7 +185,9 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
 
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* () {
       const inference =
-        operation === "generateWorkflowSummary" || operation === "generateContextualSummary";
+        operation === "generateWorkflowSummary" ||
+        operation === "generateContextualSummary" ||
+        operation === "generateSquireTurnSummary";
       // Workflow inference and titles need only the supplied prompt, not
       // configuration from the checkout.
       const commandCwd = inference
@@ -345,6 +347,10 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
   return {
     ...TextGenerationOperations.fromRunner("ClaudeTextGeneration", runClaudeJson),
     generateContextualSummary: TextGenerationOperations.contextualSummaryFromRunner(
+      "ClaudeTextGeneration",
+      runClaudeJson,
+    ),
+    generateSquireTurnSummary: TextGenerationOperations.squireTurnSummaryFromRunner(
       "ClaudeTextGeneration",
       runClaudeJson,
     ),

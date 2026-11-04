@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  EnvironmentId,
   ProjectId,
   MessageId,
   NodeId,
@@ -55,9 +56,17 @@ import {
   GrokProviderCapabilitiesV2,
   GROK_PROVIDER,
   GROK_ACP_INITIALIZE_META,
+  GROK_SQUIRE_AGENT_PROFILE,
+  GROK_SQUIRE_CONFIG_TOML,
+  GROK_SQUIRE_DISALLOWED_TOOLS,
+  GROK_SQUIRE_UNVERIFIED_VERSION,
+  GROK_SQUIRE_VERIFIED_VERSIONS,
+  makeGrokSquireHome,
 } from "@lecturn/provider-grok/testing";
 
 import { makeAcpReplayRuntime, type AcpReplayTranscript } from "./AcpAdapterV2.testkit.ts";
+
+const decodeJsonLine = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
 const LAUNCH_TEST_GROK_SETTINGS = Schema.decodeSync(GrokSettings)({
   binaryPath: "grok-launch-test",
@@ -818,5 +827,365 @@ describe("Grok native questions", () => {
       });
       yield* Deferred.await(terminal);
     }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+});
+
+describe("Grok Squire isolation", () => {
+  const layerHost = TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer));
+  const layerTest = Layer.mergeAll(
+    NodeServices.layer,
+    IdAllocator.layer,
+    McpProviderSessions.layer,
+    layerHost,
+  );
+
+  // A user Grok home carrying everything a Squire must not reach.
+  const makeHomes = Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-grok-squire-" });
+    const userHome = path.join(root, "user");
+    const userGrokHome = path.join(userHome, ".grok");
+    yield* fs.makeDirectory(path.join(userGrokHome, "skills", "sentinel"), { recursive: true });
+    yield* fs.writeFileString(path.join(userGrokHome, "auth.json"), "{}");
+    yield* fs.writeFileString(path.join(userGrokHome, "AGENTS.md"), "SENTINEL-MEMORY-LEAK");
+    yield* fs.writeFileString(
+      path.join(userGrokHome, "config.toml"),
+      '[mcp_servers.sentinel]\ncommand = "sentinel"\n',
+    );
+    yield* fs.writeFileString(path.join(userGrokHome, "skills", "sentinel", "SKILL.md"), "x");
+    return { fs, path, root, userHome, userGrokHome, stateDir: path.join(root, "state") };
+  });
+
+  const squireHomeFor = (
+    homes: Effect.Success<typeof makeHomes>,
+    instanceId: ProviderInstanceId,
+    managedPolicyPaths: ReadonlyArray<string> = [],
+    cliVersion: string | null = GROK_SQUIRE_VERIFIED_VERSIONS[0] ?? null,
+  ) =>
+    makeGrokSquireHome({
+      fileSystem: homes.fs,
+      path: homes.path,
+      stateDir: homes.stateDir,
+      instanceId,
+      homeDirectory: homes.userHome,
+      managedPolicyPaths,
+      cliVersion: () => Effect.succeed(cliVersion),
+    });
+
+  const recordLaunches = (input: {
+    readonly homes: Effect.Success<typeof makeHomes>;
+    readonly squireIsolation?: "home" | "probe";
+    readonly initialNativeThreadId?: string;
+    readonly withSquireHome?: boolean;
+  }) =>
+    Effect.gen(function* () {
+      const launches: Array<{
+        readonly args: ReadonlyArray<string>;
+        readonly env: Record<string, string | undefined>;
+      }> = [];
+      const childProcessSpawner = ChildProcessSpawner.make((command) => {
+        if (command._tag === "StandardCommand") {
+          launches.push({ args: command.args, env: { ...command.options.env } });
+        }
+        return Effect.fail(
+          PlatformError.systemError({ _tag: "NotFound", module: "grok-squire", method: "spawn" }),
+        );
+      });
+      const instanceId = ProviderInstanceId.make("grok-squire-test");
+      const adapter = yield* makeGrokAdapterV2({
+        instanceId,
+        settings: LAUNCH_TEST_GROK_SETTINGS,
+        environment: { PATH: "/usr/bin", GROK_CONFIG: '{"subagents":{"enabled":true}}' },
+        hostPlatform: "darwin",
+        selfInvocation: yield* resolveSelfInvocation(),
+        ...(input.withSquireHome === false
+          ? {}
+          : { squireHome: squireHomeFor(input.homes, instanceId) }),
+      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner));
+      const exit = yield* adapter
+        .openSession({
+          threadId: ThreadId.make("grok-squire-test"),
+          providerSessionId: ProviderSessionId.make("grok-squire-test"),
+          modelSelection: { instanceId, model: "grok-build" },
+          runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            cwd: process.cwd(),
+            ...(input.squireIsolation === undefined
+              ? {}
+              : { squireIsolation: input.squireIsolation }),
+          }),
+          ...(input.initialNativeThreadId === undefined
+            ? {}
+            : { initialNativeThreadId: input.initialNativeThreadId }),
+        })
+        .pipe(Effect.scoped, Effect.exit);
+      return { launches, exit };
+    }).pipe(Effect.provideService(HostProcess.Platform, "darwin"));
+
+  it.effect.each(
+    (["home", "probe"] as const).flatMap((squireIsolation) =>
+      (["start", "resume"] as const).map((open) => [squireIsolation, open] as const),
+    ),
+  )("launches a %s on %s in its own Grok home with no native tools", ([squireIsolation, open]) =>
+    Effect.gen(function* () {
+      const homes = yield* makeHomes;
+      const { launches } = yield* recordLaunches({
+        homes,
+        squireIsolation,
+        ...(open === "resume" ? { initialNativeThreadId: "persisted-squire" } : {}),
+      });
+      const squireRoot = homes.path.join(
+        homes.stateDir,
+        "providers",
+        "grok",
+        "grok-squire-test",
+        "squire",
+      );
+      const grokHome = homes.path.join(squireRoot, "grok-home");
+      const profile = homes.path.join(grokHome, "lecturn-squire.md");
+      assert.isAbove(launches.length, 0);
+      for (const launch of launches) {
+        assert.deepEqual(launch.args, [
+          "--permission-mode",
+          "default",
+          "agent",
+          "--no-leader",
+          "--agent-profile",
+          profile,
+          "stdio",
+        ]);
+        assert.equal(launch.env.GROK_HOME, grokHome);
+        assert.equal(launch.env.HOME, homes.path.join(squireRoot, "home"));
+        assert.equal(launch.env.GROK_AUTH_PATH, homes.path.join(homes.userGrokHome, "auth.json"));
+        assert.isUndefined(launch.env.GROK_CONFIG);
+      }
+      assert.equal(yield* homes.fs.readFileString(profile), GROK_SQUIRE_AGENT_PROFILE);
+      assert.include(GROK_SQUIRE_AGENT_PROFILE, "\ntools: search_tool, use_tool\n");
+      for (const tool of ["run_terminal_command", "read_file", "write", "spawn_subagent"]) {
+        assert.include(GROK_SQUIRE_DISALLOWED_TOOLS, tool);
+      }
+      assert.equal(
+        yield* homes.fs.readFileString(homes.path.join(grokHome, "config.toml")),
+        GROK_SQUIRE_CONFIG_TOML,
+      );
+      // The user's MCP servers, skills, and AGENTS.md stay in the user's home.
+      assert.sameMembers(yield* homes.fs.readDirectory(grokHome), [
+        "config.toml",
+        "lecturn-squire.md",
+      ]);
+      assert.deepEqual(yield* homes.fs.readDirectory(homes.path.join(squireRoot, "home")), []);
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+
+  it.effect("launches ordinary threads in the user's Grok home as before", () =>
+    Effect.gen(function* () {
+      const homes = yield* makeHomes;
+      const { launches } = yield* recordLaunches({ homes });
+      assert.deepEqual(
+        launches.map((launch) => launch.args),
+        [["--permission-mode", "default", "agent", "stdio"]],
+      );
+      assert.isUndefined(launches[0]?.env.GROK_HOME);
+      assert.isUndefined(launches[0]?.env.GROK_AUTH_PATH);
+      assert.equal(launches[0]?.env.GROK_CONFIG, '{"subagents":{"enabled":true}}');
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+
+  it.effect("never launches a Squire on an instance without a Squire home", () =>
+    Effect.gen(function* () {
+      const homes = yield* makeHomes;
+      const { launches, exit } = yield* recordLaunches({
+        homes,
+        squireIsolation: "home",
+        withSquireHome: false,
+      });
+      assert.isTrue(exit._tag === "Failure");
+      assert.deepEqual(launches, []);
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+
+  it.effect("reports a missing sign-in or an organization policy as a Squire gap", () =>
+    Effect.gen(function* () {
+      const homes = yield* makeHomes;
+      const instanceId = ProviderInstanceId.make("grok-squire-readiness");
+      const ready = squireHomeFor(homes, instanceId);
+      assert.isNull(yield* ready.readiness({}));
+      yield* homes.fs.remove(homes.path.join(homes.userGrokHome, "auth.json"));
+      assert.include(yield* ready.readiness({}), "Run `grok login`");
+      assert.isNull(yield* ready.readiness({ XAI_API_KEY: "key" }));
+      const policyPath = homes.path.join(homes.root, "requirements.toml");
+      yield* homes.fs.writeFileString(policyPath, "");
+      assert.include(
+        yield* squireHomeFor(homes, instanceId, [policyPath]).readiness({ XAI_API_KEY: "key" }),
+        "organization policy",
+      );
+      const refused = yield* ready.prepare({}).pipe(Effect.flip);
+      assert.include(refused.message, "Run `grok login`");
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+
+  it.effect("refuses a Squire on a Grok version whose native tools were not checked", () =>
+    Effect.gen(function* () {
+      const homes = yield* makeHomes;
+      const instanceId = ProviderInstanceId.make("grok-squire-version");
+      for (const version of ["1.0.71", "2.0.0", null]) {
+        const home = squireHomeFor(homes, instanceId, [], version);
+        assert.equal(yield* home.readiness({}), GROK_SQUIRE_UNVERIFIED_VERSION, String(version));
+        const refused = yield* home.prepare({}).pipe(Effect.flip);
+        assert.include(refused.message, GROK_SQUIRE_UNVERIFIED_VERSION);
+      }
+      assert.isNull(yield* squireHomeFor(homes, instanceId).readiness({}));
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+
+  it.effect(
+    "approves a home's Squire tool and declines the rest without asking, even launched Auto",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const requestLog = path.join(
+          yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-grok-squire-contract-" }),
+          "requests.jsonl",
+        );
+        const mockAgentPath = yield* path.fromFileUrl(
+          new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+        );
+        const instanceId = ProviderInstanceId.make("grok-squire-contract");
+        const threadId = ThreadId.make("grok-squire-contract");
+        yield* (yield* McpProviderSessions.McpProviderSessions).set({
+          environmentId: EnvironmentId.make("environment-grok-squire-contract"),
+          threadId,
+          providerSessionId: "mcp-session-grok-squire-contract",
+          providerInstanceId: instanceId,
+          endpoint: "http://127.0.0.1:43123/mcp",
+          authorizationHeader: "Bearer squire-token",
+          browserToolsAvailable: false,
+          capabilities: new Set(["squire"]),
+        });
+        const adapter = yield* makeGrokAdapterV2({
+          instanceId,
+          settings: LAUNCH_TEST_GROK_SETTINGS,
+          environment: {},
+          hostPlatform: "darwin",
+          selfInvocation: yield* resolveSelfInvocation(),
+          makeRuntime: (input) =>
+            Effect.gen(function* () {
+              const context = yield* Layer.build(
+                AcpSessionRuntime.layer({
+                  ...input,
+                  spawn: {
+                    command: process.execPath,
+                    args: [mockAgentPath],
+                    cwd: process.cwd(),
+                    env: {
+                      LECTURN_ACP_SESSION_LIFECYCLE: "1",
+                      LECTURN_ACP_REQUEST_LOG_PATH: requestLog,
+                      LECTURN_ACP_EMIT_TOOL_CALLS: "1",
+                      // Grok's `use_tool` titles a Lecturn call by its qualified name.
+                      LECTURN_ACP_PERMISSION_TOOL_CALLS:
+                        "other|lecturn__squire_note,other|sentinel__sentinel_probe,execute|`cat ~/.ssh/id_rsa`,edit|Write notes.md,read|Read /etc/hosts",
+                    },
+                  },
+                  authMethodId: "test",
+                }),
+              );
+              return yield* AcpSessionRuntime.AcpSessionRuntime.pipe(Effect.provide(context));
+            }),
+        });
+        // Grok's own Auto mode leaves every prompt to the user; a Squire's must not.
+        const policy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "auto",
+          interactionMode: "default",
+          cwd: process.cwd(),
+          squireIsolation: "home",
+        });
+        const modelSelection = { instanceId, model: "grok-build" };
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("grok-squire-contract"),
+          modelSelection,
+          runtimePolicy: policy,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection,
+          runtimePolicy: policy,
+        });
+        const now = yield* DateTime.now;
+        yield* runtime.startTurn({
+          appThread: {
+            createdBy: "user",
+            creationSource: "web",
+            id: threadId,
+            projectId: ProjectId.make("grok-squire-contract"),
+            title: "Grok Squire",
+            providerInstanceId: instanceId,
+            modelSelection,
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: process.cwd(),
+            activeProviderThreadId: providerThread.id,
+            lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+            forkedFrom: null,
+            createdAt: now,
+            updatedAt: now,
+            archivedAt: null,
+            settledOverride: null,
+            settledAt: null,
+            lastVisitedAt: null,
+            deletedAt: null,
+          },
+          threadId,
+          runId: RunId.make("grok-squire-contract-run"),
+          runOrdinal: 1,
+          providerTurnOrdinal: 1,
+          attemptId: RunAttemptId.make("grok-squire-contract-attempt"),
+          rootNodeId: NodeId.make("grok-squire-contract-root"),
+          providerThread,
+          message: {
+            createdBy: "user",
+            creationSource: "web",
+            messageId: MessageId.make("grok-squire-contract-message"),
+            text: "Note the event.",
+            attachments: [],
+          },
+          modelSelection,
+          runtimePolicy: policy,
+          squireInstructions: ["You are this project's Squire."],
+        });
+        const events = Array.from(
+          yield* runtime.events.pipe(
+            Stream.takeUntil((event) => event.type === "turn.terminal"),
+            Stream.runCollect,
+          ),
+        );
+        assert.isFalse(events.some((event) => event.type === "runtime_request.updated"));
+        const received = (yield* fs.readFileString(requestLog))
+          .split("\n")
+          .filter((line) => line.trim().length > 0)
+          .map((line) => decodeJsonLine(line));
+        const prompt = received.find(
+          (message) => Reflect.get(Object(message), "method") === "session/prompt",
+        );
+        assert.include(JSON.stringify(prompt), "You are this project's Squire.");
+        const chosen = received.flatMap((message) => {
+          const optionId: unknown = Reflect.get(
+            Object(Reflect.get(Object(Reflect.get(Object(message), "result")), "outcome")),
+            "optionId",
+          );
+          return typeof optionId === "string" ? [optionId] : [];
+        });
+        assert.deepEqual(chosen, [
+          "allow-once",
+          "reject-once",
+          "reject-once",
+          "reject-once",
+          "reject-once",
+        ]);
+      }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 });
