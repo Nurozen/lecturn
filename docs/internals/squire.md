@@ -140,6 +140,28 @@ not the provider session, so its buttons work on every provider and in copied th
 fills a versioned template with data only, and the page reads nothing after publishing. Inline it
 shows counts and Expand, which asks the host for full screen.
 
+## Pages
+
+Every Squire gets `html_render` and `html_preview` as role tools ([SquireHtmlTools.ts][html-tools]),
+always locked down. The home thread's credential picks the mode, never an argument, and the
+ordinary handlers lock a Squire credential too. A Squire reads untrusted text, so its page is
+treated as an attacker's: it must not read local files or reach the network on any client,
+including clients older than the mode.
+
+- Local paths and `file:` URLs a page names are refused by name, never inlined.
+- A CSP alone does not close the network. CSP has no working `navigate-to`, so a script or
+  `<meta http-equiv=refresh>` can send the page to any URL carrying data, and CSP does not govern
+  WebRTC at all: STUN packets left Chromium and WebKit under a strict policy. So no page script
+  runs, and the server publishes the page as data in a wrapper document
+  ([htmlRender.ts][html-render], "Locked pages"). The wrapper's `frame-src 'none'` blocks every
+  navigation of the sandboxed `srcdoc` frame holding the page, the frame inherits that policy, and
+  only Lecturn's bootstrap runs, by hash. The wrapper relays height, keys, and inline images up and
+  theme and shortcuts down, so links do not open.
+- The host's headless browser previews and measures the page offline: every request but the page
+  fails, its proxy refuses every connection, and no host name resolves.
+- `HtmlRenderFrame.locked.browser.test.tsx` tries each exit against an ordinary-page control. A new
+  exit belongs there.
+
 ## Notifications
 
 Transport follows notification intents, not decision counts; Notify Off writes none.
@@ -165,5 +187,7 @@ intent is recorded as coalesced.
 [room-routing]: ../../apps/server/src/squire/squireRoomRouting.ts
 [jev]: ../../apps/server/src/squire/SquireJevRouter.ts
 [app-route]: ../../apps/server/src/squire/SquireMcpAppRoute.ts
+[html-tools]: ../../apps/server/src/squire/SquireHtmlTools.ts
+[html-render]: ../../packages/shared/src/htmlRender.ts
 [mobile-attention]: ../../apps/server/src/squire/SquireMobileAttention.ts
 [presence]: ../../apps/server/src/squire/SquirePresence.ts

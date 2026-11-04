@@ -35,6 +35,10 @@ or **Stop tracking** from the thread's menu or the command palette.
 A Squire runs on a provider you choose: Claude, Codex, or Grok (version 1.0.70). Cursor,
 OpenCode, GitHub Copilot, and Antigravity can't run Squires yet; the provider picker says why.
 
+A Squire can show a chart or table as a page in its thread. Its pages can't read files on your
+machine or load anything from the network, and their links don't open, so ask the Squire to put a
+link in its reply instead.
+
 ## Items
 
 When a Squire needs you, it raises an item: a steer to send, a thread to create, a question a

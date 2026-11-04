@@ -9,6 +9,7 @@ import "vite-plus/test/config";
 import { defineConfig, type Connect, type Plugin } from "vite-plus";
 import * as Hash from "effect/Hash";
 import pkg from "./package.json" with { type: "json" };
+import { htmlRenderLeakCommands } from "./test/htmlRenderLeakCommands.ts";
 
 import {
   DEV_PROXIED_ORIGIN_PRESERVING_PREFIXES,
@@ -112,6 +113,7 @@ const browserTestProject = {
       provider: playwright(),
       instances: [{ browser: "chromium" }],
       screenshotFailures: false,
+      commands: htmlRenderLeakCommands,
     },
   },
 } satisfies TestProjectInlineConfiguration;

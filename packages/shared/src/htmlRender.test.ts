@@ -7,6 +7,7 @@ import {
   htmlRenderTheme,
   htmlRenderThemeFragment,
   injectHtmlRenderBootstrap,
+  lockedHtmlRenderDocument,
   htmlRenderThemeMessage,
   readHtmlRenderContentHeight,
   readHtmlRenderImageRequest,
@@ -77,6 +78,21 @@ describe("injectHtmlRenderBootstrap", () => {
       injected.indexOf("<html><head>"),
     );
     expect(injected).toContain('<meta name="viewport" content="width=device-width');
+  });
+});
+
+describe("lockedHtmlRenderDocument", () => {
+  it("carries the page only as data that no markup in it can close", async () => {
+    const page = "<p>x</p></script><script>alert(1)</script><!--";
+    const document = await lockedHtmlRenderDocument(page, '"><b>Title');
+    const [, data] = /<script type="application\/json" id="lecturn-page">([\s\S]*?)<\/script>/.exec(
+      document,
+    )!;
+    expect(data).not.toContain("<");
+    expect(JSON.parse(data!).before + JSON.parse(data!).after).toContain(page);
+    expect(document.match(/<script/g)).toHaveLength(2);
+    expect(document).toContain("<title>&quot;>&lt;b>Title</title>");
+    expect(document).toContain("frame-src 'none'");
   });
 });
 

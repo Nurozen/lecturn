@@ -80,7 +80,7 @@ const exitingBrowser = (exit: string) =>
 const previewError = (executable: string) =>
   Effect.gen(function* () {
     const htmlRender = yield* HtmlRender.HtmlRender;
-    return yield* htmlRender.preview({ html: "<p>x</p>" }).pipe(Effect.flip);
+    return yield* htmlRender.preview({ html: "<p>x</p>", locked: false }).pipe(Effect.flip);
   }).pipe(Effect.provide(layerHtmlRender(executable)));
 
 describe("HtmlRender", () => {
@@ -210,6 +210,7 @@ describe("HtmlRender", () => {
       const htmlRender = yield* HtmlRender.HtmlRender;
 
       const reference = yield* htmlRender.publish({
+        locked: false,
         threadId: ThreadId.make("thread-html-render"),
         html: "<p>Quarterly revenue</p>",
         title: "  Revenue  ",
@@ -245,6 +246,7 @@ describe("HtmlRender", () => {
 
         const publishing = yield* htmlRender
           .publish({
+            locked: false,
             threadId: ThreadId.make("thread-html-cancel"),
             html: "<p>x</p>",
             title: "X",
@@ -306,6 +308,7 @@ describe("HtmlRender", () => {
         yield* Effect.gen(function* () {
           const htmlRender = yield* HtmlRender.HtmlRender;
           const preview = yield* htmlRender.preview({
+            locked: false,
             html: [
               '<!doctype html><html><head></head><body><div id="page" tabindex="0" style="height:300px;background:var(--accent)"></div>',
               '<img src="/nonexistent/lecturn-missing.png" hidden>',
@@ -372,6 +375,7 @@ describe("HtmlRender", () => {
           const secretUrl = NodeURL.pathToFileURL(secret).href;
 
           const preview = yield* htmlRender.preview({
+            locked: false,
             html: [
               `<script src="${secretUrl}"></script>`,
               `<iframe src="${secretUrl}" onload="console.log('frame loaded')"></iframe>`,
@@ -425,6 +429,7 @@ describe("HtmlRender", () => {
         yield* Effect.gen(function* () {
           const htmlRender = yield* HtmlRender.HtmlRender;
           yield* htmlRender.preview({
+            locked: false,
             html: [
               `<img src="${origin}/x.png"><iframe src="${origin}/"></iframe>`,
               `<script type="speculationrules">{"prefetch":[{"source":"list","urls":["${origin}/prefetch"]}]}</script>`,
@@ -443,6 +448,50 @@ describe("HtmlRender", () => {
   );
 
   it.live(
+    "previews a locked page with no network at all and none of its own scripts",
+    (ctx) =>
+      Effect.gen(function* () {
+        const executable = (yield* HostProcess.Environment)[TEST_BROWSER_ENV];
+        if (!executable) return ctx.skip(`Set ${TEST_BROWSER_ENV} to run this test.`);
+        const requests: Array<string> = [];
+        const server = yield* Effect.acquireRelease(
+          Effect.callback<NodeHttp.Server>((resume) => {
+            const listening = NodeHttp.createServer((request, response) => {
+              requests.push(request.url ?? "");
+              response.end("x");
+            });
+            listening.listen(0, "127.0.0.1", () => resume(Effect.succeed(listening)));
+          }),
+          (listening) =>
+            Effect.callback<void>((resume) => {
+              listening.close(() => resume(Effect.void));
+            }),
+        );
+        const address = server.address();
+        const origin = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
+        yield* Effect.gen(function* () {
+          const htmlRender = yield* HtmlRender.HtmlRender;
+          const preview = yield* htmlRender.preview({
+            locked: true,
+            html: [
+              '<div style="height:240px;background:var(--accent)"></div>',
+              `<img src="${origin}/img"><link rel="stylesheet" href="${origin}/css">`,
+              `<div style="background:url(${origin}/css-url)">x</div>`,
+              `<script>console.log("page script ran"); fetch("${origin}/fetch");</script>`,
+            ].join(""),
+            width: 400,
+          });
+          expect(preview.contentHeight).toBeGreaterThanOrEqual(240);
+          const texts = preview.consoleMessages.map((message) => message.text).join("\n");
+          expect(texts).not.toContain("page script ran");
+          expect(texts).toContain("Content Security Policy");
+        }).pipe(Effect.provide(layerHtmlRender(executable)));
+        expect(requests).toEqual([]);
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
+  it.live(
     "measures a published page at every client width with a fresh load each",
     (ctx) =>
       Effect.gen(function* () {
@@ -451,6 +500,7 @@ describe("HtmlRender", () => {
         yield* Effect.gen(function* () {
           const htmlRender = yield* HtmlRender.HtmlRender;
           const reference = yield* htmlRender.publish({
+            locked: false,
             threadId: ThreadId.make("thread-html-measure"),
             html: '<div id="chart" style="background:#888"></div><script>document.getElementById("chart").style.height = innerWidth / 2 + "px";</script>',
             title: "Chart",

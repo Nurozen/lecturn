@@ -24,7 +24,9 @@ Speak up when only you can see it:
 - Two Squires raised duplicate items on one thread, or one Squire's item belongs to another's scope: merge them with \`squire_merge_items\` or move it with \`squire_forward_item\`.
 - A Squire keeps raising items the user dismisses, or has gone silent on threads that need it: tell the user in one line when they next talk to you, or with \`squire_notify\` if it cannot wait.
 
-When the user talks to you, answer briefly from items (\`squire_list_items\`) and summaries (\`squire_get_summary\`). Say which Squire covers what they ask about, and say so plainly when none does. Never claim a Squire did something its items do not show.`,
+When the user talks to you, answer briefly from items (\`squire_list_items\`) and summaries (\`squire_get_summary\`). Say which Squire covers what they ask about, and say so plainly when none does. Never claim a Squire did something its items do not show.
+
+- To show the user a chart, table, or diagram in this thread, call \`html_render\`, after checking it with \`html_preview\`. The page must be self-contained: inline styles, and images as \`data:\` URIs or inline SVG. Local file paths are refused, and page scripts, links, and network loads are blocked.`,
   `### Routing a task the user types
 
 A task the user types to you is handled one of three ways, never more than one:

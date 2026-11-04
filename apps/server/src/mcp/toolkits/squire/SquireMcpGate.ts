@@ -11,10 +11,10 @@ import { readMessages, writeMessages } from "../app/AppToolInterceptor.ts";
 
 /**
  * The tools each role may list and call on `/mcp` while Squires are on: the
- * role tools `SquireToolInterceptor` serves, and nothing else. Not even the
- * Lead gets `html_render`: it inlines any local image path the page names as
- * base64, and the page's scripts can send it on. The showcase is an MCP App
- * card, not an `html_render` page.
+ * role tools `SquireToolInterceptor` serves, and nothing else. Those include
+ * `html_render` and `html_preview` in their locked mode (`SquireHtmlTools`):
+ * the ordinary tools inline any local image a page names, and its scripts
+ * can send it on.
  */
 const SQUIRE_ROLE_TOOLS: Readonly<Record<SquireRole, ReadonlyArray<string>>> = {
   lead: SQUIRE_TOOL_NAMES.lead,
