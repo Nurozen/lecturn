@@ -33,16 +33,23 @@ const answer = (id: string | number, result: unknown) =>
     { status: 200, headers: { "cache-control": "no-store" } },
   );
 
+/**
+ * A role tool that shares a registered tool's name (`html_render`) replaces it,
+ * so a Squire sees only its own definition.
+ */
 const appendTools =
   (id: string | number, tools: ReadonlyArray<SquireTools.SquireToolDefinition>) =>
   (message: unknown) => {
     if (!isRecord(message) || message.id !== id || !isRecord(message.result)) return message;
     const result = message.result;
+    if (!Array.isArray(result.tools)) return message;
+    const names = new Set(tools.map((tool) => tool.name));
+    const kept = result.tools.filter(
+      (tool) => !isRecord(tool) || typeof tool.name !== "string" || !names.has(tool.name),
+    );
     // Later pages already got the Squire tools on the last one.
-    if (!Array.isArray(result.tools) || result.nextCursor !== undefined) return message;
-    const listed = new Set(result.tools.flatMap((tool) => (isRecord(tool) ? [tool.name] : [])));
-    const added = tools.filter((tool) => !listed.has(tool.name));
-    return { ...message, result: { ...result, tools: [...result.tools, ...added] } };
+    const added = result.nextCursor === undefined ? tools : [];
+    return { ...message, result: { ...result, tools: [...kept, ...added] } };
   };
 
 /**
@@ -101,7 +108,12 @@ export const make = Effect.gen(function* () {
           ),
         );
       return answer(parsed.id, {
-        content: [{ type: "text", text: result.text }],
+        content: [
+          { type: "text", text: result.text },
+          ...("image" in result && result.image !== undefined
+            ? [{ type: "image", data: result.image.data, mimeType: result.image.mimeType }]
+            : []),
+        ],
         isError: result.isError,
         ...("structuredContent" in result && result.structuredContent !== undefined
           ? { structuredContent: result.structuredContent }

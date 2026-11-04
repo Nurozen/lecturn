@@ -7,6 +7,14 @@ import {
 import { EVENT_CODE_SHORTCUT_KEYS } from "./keybindings.ts";
 
 export const HTML_RENDER_TOOL_NAME = "html_render";
+
+// The sandbox gives the document an opaque origin: scripts run, but same-origin
+// cookies, storage, and API calls are out of reach. No modals: agent HTML can
+// open without a click (inline renders, and mobile loads it as the top document),
+// and must not raise blocking dialogs.
+/** What the asset route serves every HTML document with. */
+export const HTML_ASSET_CONTENT_SECURITY_POLICY =
+  "sandbox allow-scripts allow-forms allow-popups allow-downloads";
 export const HTML_RENDER_MIN_HEIGHT = 80;
 export const HTML_RENDER_MAX_HEIGHT = 2000;
 export const HTML_RENDER_MAX_TITLE_LENGTH = 200;
@@ -393,18 +401,21 @@ function rootRule(theme: HtmlRenderTheme): string {
 // match as resolveEventKeys reads them, so the client accepts what it claims.
 const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("lecturn-theme"),n=0;if(!s)return;var b=${JSON.stringify(BASE_CSS)};function a(t){if(!t||typeof t!=="object"||!t.variables||typeof t.variables!=="object")return;var c=":root{color-scheme:"+(t.appearance==="light"?"light":"dark")+";";for(var k in t.variables){if(/^--[a-z0-9-]+$/.test(k))c+=k+":"+String(t.variables[k]).replace(/[;{}<>]/g,"")+";";}s.textContent=c+"}"+b;}try{var m=/[#&]${THEME_FRAGMENT_KEY}=([^&]*)/.exec(location.hash);if(m){a(JSON.parse(decodeURIComponent(m[1])));history.replaceState(history.state,"",location.pathname+location.search);}}catch(e){}window.addEventListener("message",function(e){var d=e.data,p=d&&d.params;if(d&&d.jsonrpc==="2.0"&&d.method===${JSON.stringify(HOST_CONTEXT_CHANGED_METHOD)}&&p&&p.styles)a({appearance:p.theme,variables:p.styles.variables});});document.addEventListener("click",function(e){var l=e.isTrusted?e.composedPath().find(function(t){return t&&t.matches&&t.matches("a[href]");}):null,u;if(!l)return;try{u=new URL(l.getAttribute("href"),document.baseURI);}catch(x){return;}if(!/^https?:$/.test(u.protocol)||u.href.split("#")[0]===location.href.split("#")[0])return;if(window.parent!==window){e.preventDefault();window.parent.postMessage({jsonrpc:"2.0",id:"lecturn-link-"+(++n),method:${JSON.stringify(OPEN_LINK_METHOD)},params:{url:u.href,metaKey:e.metaKey,ctrlKey:e.ctrlKey}},"*");}else{l.setAttribute("target","_blank");l.setAttribute("rel","noopener");}},true);if(window.parent!==window){var h,o,z=function(){var r=document.documentElement,v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height);if(v===h)return;h=v;window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(SIZE_CHANGED_METHOD)},params:{height:v}},"*");};if(window.ResizeObserver){o=new ResizeObserver(z);o.observe(document.documentElement);}document.addEventListener("DOMContentLoaded",function(){if(o&&document.body)o.observe(document.body);z();});window.addEventListener("load",z);window.addEventListener("click",function(e){var t=e.composedPath()[0],u;if(!e.isTrusted||e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||!t||t.tagName!=="IMG"||t.closest("a[href],button"))return;u=t.currentSrc||t.src;if(u)setTimeout(function(){if(!e.defaultPrevented)window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(OPEN_IMAGE_METHOD)},params:{src:u,name:t.alt||t.title||""}},"*");});});var K=[],B=[],C=${JSON.stringify(EVENT_CODE_SHORTCUT_KEYS)};window.addEventListener("message",function(e){var d=e.data,p=d&&d.params;if(e.source===window.parent&&d&&d.jsonrpc==="2.0"&&d.method===${JSON.stringify(SHORTCUTS_METHOD)}&&p&&Array.isArray(p.shortcuts)&&Array.isArray(p.blocked)){K=p.shortcuts;B=p.blocked;}});window.addEventListener("keydown",function(e){var t=e.composedPath()[0],c=e.code||"",l=e.key.toLowerCase(),x=/^[a-z]$/.test(l)?[l]:[l,/^Key[A-Z]$/.test(c)?c.slice(3).toLowerCase():"",C.hasOwnProperty(c)?C[c]:""],f,m=function(s){return s&&s.metaKey===e.metaKey&&s.ctrlKey===e.ctrlKey&&s.shiftKey===e.shiftKey&&s.altKey===e.altKey&&x.indexOf(s.key)>-1;};if(!e.isTrusted||e.isComposing||e.getModifierState("AltGraph")&&!/^[a-z0-9]$/i.test(e.key)||t&&(t.isContentEditable||/^(?:INPUT|TEXTAREA|SELECT)$/.test(t.tagName))||!K.some(m)||B.some(m))return;f=function(v){window.removeEventListener("keydown",f);if(v!==e||e.defaultPrevented)return;e.preventDefault();window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(KEY_DOWN_METHOD)},params:{key:e.key,code:e.code,metaKey:e.metaKey,ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey,repeat:e.repeat}},"*");};window.addEventListener("keydown",f);setTimeout(function(){window.removeEventListener("keydown",f);});},true);}})();`;
 
-function bootstrapMarkup(markup: string): string {
-  const dark = htmlRenderTheme(STANDARD_DARK_THEME_COLORS, "dark");
-  const light = htmlRenderTheme(STANDARD_LIGHT_THEME_COLORS, "light");
-  const defaultCss = `${rootRule(dark)}@media (prefers-color-scheme: light){${rootRule(light)}}${BASE_CSS}`;
-  return [
-    /<meta\s[^>]*charset/i.test(markup.slice(0, 4096)) ? "" : '<meta charset="utf-8">',
-    /<meta\s[^>]*name\s*=\s*["']?viewport/i.test(markup)
-      ? ""
-      : '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    `<style id="lecturn-theme">${defaultCss}</style>`,
-    `<script>${BOOTSTRAP_SCRIPT}</script>`,
-  ].join("");
+const DEFAULT_THEME_CSS = `${rootRule(htmlRenderTheme(STANDARD_DARK_THEME_COLORS, "dark"))}@media (prefers-color-scheme: light){${rootRule(htmlRenderTheme(STANDARD_LIGHT_THEME_COLORS, "light"))}}${BASE_CSS}`;
+
+/** The bootstrap markup, split around the theme stylesheet's text. */
+function bootstrapMarkup(markup: string, firstInHead: string) {
+  return {
+    open: [
+      firstInHead,
+      /<meta\s[^>]*charset/i.test(markup.slice(0, 4096)) ? "" : '<meta charset="utf-8">',
+      /<meta\s[^>]*name\s*=\s*["']?viewport/i.test(markup)
+        ? ""
+        : '<meta name="viewport" content="width=device-width, initial-scale=1">',
+      '<style id="lecturn-theme">',
+    ].join(""),
+    close: `</style><script>${BOOTSTRAP_SCRIPT}</script>`,
+  };
 }
 
 // Comments, raw text, and template contents are blanked to the same length,
@@ -435,23 +446,122 @@ const blankNonMarkup = (html: string) => {
   return parts.join("");
 };
 
-export function injectHtmlRenderBootstrap(html: string): string {
+/** The page with the bootstrap in, split around the theme stylesheet's text. */
+function bootstrapParts(html: string, firstInHead = "") {
   const scan = blankNonMarkup(html);
-  const markup = bootstrapMarkup(scan);
+  const { open, close } = bootstrapMarkup(scan, firstInHead);
+  const split = (before: string, after: string) => ({
+    before: before + open,
+    after: close + after,
+  });
   const headOpen = /<head(?:\s[^>]*)?>/i.exec(scan);
   if (headOpen) {
     const at = headOpen.index + headOpen[0].length;
-    return html.slice(0, at) + markup + html.slice(at);
+    return split(html.slice(0, at), html.slice(at));
   }
   const htmlOpen = /<html(?:\s[^>]*)?>/i.exec(scan);
   if (htmlOpen) {
     const at = htmlOpen.index + htmlOpen[0].length;
-    return `${html.slice(0, at)}<head>${markup}</head>${html.slice(at)}`;
+    return split(`${html.slice(0, at)}<head>`, `</head>${html.slice(at)}`);
   }
   const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
   if (doctype) {
     const at = doctype[0].length;
-    return `${html.slice(0, at)}<head>${markup}</head>${html.slice(at)}`;
+    return split(`${html.slice(0, at)}<head>`, `</head>${html.slice(at)}`);
   }
-  return `<!doctype html><head>${markup}</head>${html}`;
+  return split("<!doctype html><head>", `</head>${html}`);
+}
+
+export function injectHtmlRenderBootstrap(html: string): string {
+  const { before, after } = bootstrapParts(html);
+  return before + DEFAULT_THEME_CSS + after;
+}
+
+// ── Locked pages ──
+//
+// A page whose author may be prompt-injected (a Squire's) must not reach the
+// network or carry data out. A CSP alone cannot promise that: CSP has no
+// working `navigate-to`, so a page can still send itself, by script or
+// `<meta http-equiv=refresh>`, to any URL. And CSP does not govern WebRTC at
+// all, so no page script can be allowed. The page therefore runs in a
+// sandboxed `srcdoc` frame inside a server-built wrapper whose `frame-src
+// 'none'` blocks every navigation of that frame before a request leaves. The
+// frame inherits the wrapper's policy and adds its own, and the only script
+// either allows is Lecturn's own bootstrap, by hash. The wrapper relays the
+// page's height and keys and only inline images up to the client, and the
+// client's theme and shortcuts down, so links do not open. Built on the
+// server, so clients that predate this get it too. See docs/internals/squire.md.
+
+const SIZE_CHANGED = JSON.stringify(SIZE_CHANGED_METHOD);
+const KEY_DOWN = JSON.stringify(KEY_DOWN_METHOD);
+const OPEN_IMAGE = JSON.stringify(OPEN_IMAGE_METHOD);
+const HOST_CONTEXT_CHANGED = JSON.stringify(HOST_CONTEXT_CHANGED_METHOD);
+const SHORTCUTS = JSON.stringify(SHORTCUTS_METHOD);
+
+// Builds the page frame with the client's theme from its URL fragment already
+// in, so the first paint is themed, then relays as above. On mobile the wrapper
+// is the top document, where `parent` is the wrapper itself.
+const WRAPPER_SCRIPT = `(function(){var P=JSON.parse(document.getElementById("lecturn-page").textContent),f=document.createElement("iframe"),r=document.documentElement,c=P.css,u=window.parent===window;function s(a){var v=a==="light"?"light":"dark";r.style.colorScheme=v;f.style.colorScheme=v;}try{var m=/[#&]${THEME_FRAGMENT_KEY}=([^&]*)/.exec(location.hash),t=m&&JSON.parse(decodeURIComponent(m[1]));if(t&&typeof t==="object"&&t.variables&&typeof t.variables==="object"){c=":root{color-scheme:"+(t.appearance==="light"?"light":"dark")+";";for(var k in t.variables){if(/^--[a-z0-9-]+$/.test(k))c+=k+":"+String(t.variables[k]).replace(/[;{}<>]/g,"")+";";}c+="}"+P.base;s(t.appearance);}}catch(e){}f.setAttribute("sandbox","allow-scripts");f.setAttribute("title",P.title);f.srcdoc=P.before+c+P.after;document.body.appendChild(f);window.addEventListener("message",function(e){var d=e.data,p=d&&d.params,w=f.contentWindow;if(!d||typeof d!=="object"||d.jsonrpc!=="2.0"||!p||typeof p!=="object")return;if(e.source===w&&w){if(d.method===${SIZE_CHANGED}&&typeof p.height==="number"&&p.height>0&&p.height<1e6){f.style.height=Math.ceil(p.height)+"px";if(!u)parent.postMessage({jsonrpc:"2.0",method:d.method,params:{height:p.height}},"*");}else if(!u&&d.method===${KEY_DOWN}&&typeof p.key==="string"&&typeof p.code==="string"){parent.postMessage({jsonrpc:"2.0",method:d.method,params:{key:p.key.slice(0,32),code:p.code.slice(0,32),metaKey:p.metaKey===true,ctrlKey:p.ctrlKey===true,shiftKey:p.shiftKey===true,altKey:p.altKey===true,repeat:p.repeat===true}},"*");}else if(!u&&d.method===${OPEN_IMAGE}&&typeof p.src==="string"&&/^data:image\\//i.test(p.src)){parent.postMessage({jsonrpc:"2.0",method:d.method,params:{src:p.src,name:String(p.name||"").slice(0,200)}},"*");}}else if(e.source===parent&&w&&(d.method===${HOST_CONTEXT_CHANGED}||d.method===${SHORTCUTS})){if(d.method===${HOST_CONTEXT_CHANGED})s(p.theme);w.postMessage(d,"*");}});})();`;
+
+const WRAPPER_CSS =
+  ":root{color-scheme:light dark}html{scrollbar-width:none}html::-webkit-scrollbar{display:none}body{margin:0}iframe{display:block;border:0;width:100%;height:100vh}";
+
+const LOCKED_POLICY =
+  "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; form-action 'none'; base-uri 'none'";
+
+const sha256Source = async (text: string) => {
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return `'sha256-${btoa(String.fromCharCode(...new Uint8Array(digest)))}'`;
+};
+
+let lockedPolicies: Promise<{ readonly wrapper: string; readonly page: string }> | undefined;
+
+/** The wrapper's policy, which the page frame inherits, and the page's own. */
+const htmlRenderLockedPolicies = () =>
+  (lockedPolicies ??= Promise.all([
+    sha256Source(WRAPPER_SCRIPT),
+    sha256Source(BOOTSTRAP_SCRIPT),
+  ]).then(([wrapper, bootstrap]) => ({
+    wrapper: `${LOCKED_POLICY}; frame-src 'none'; script-src ${wrapper} ${bootstrap}`,
+    page: `${LOCKED_POLICY}; script-src ${bootstrap}`,
+  })));
+
+const escapeAttribute = (value: string) =>
+  value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+
+/**
+ * A locked page as a document of its own, with its policy and no wrapper, for
+ * the host's headless browser to measure and preview offline.
+ */
+export async function lockedHtmlRenderPage(html: string): Promise<string> {
+  const { before, after } = bootstrapParts(
+    html,
+    lockedHead((await htmlRenderLockedPolicies()).page),
+  );
+  return before + DEFAULT_THEME_CSS + after;
+}
+
+const lockedHead = (policy: string) =>
+  `<meta http-equiv="Content-Security-Policy" content="${escapeAttribute(policy)}"><meta http-equiv="x-dns-prefetch-control" content="off">`;
+
+/** The document a locked page is published as: see "Locked pages" above. */
+export async function lockedHtmlRenderDocument(html: string, title: string): Promise<string> {
+  const policies = await htmlRenderLockedPolicies();
+  const { before, after } = bootstrapParts(html, lockedHead(policies.page));
+  // `<` is escaped so no part of the page can close the data block.
+  const data = JSON.stringify({
+    before,
+    after,
+    css: DEFAULT_THEME_CSS,
+    base: BASE_CSS,
+    title,
+  }).replaceAll("<", "\\u003c");
+  return [
+    "<!doctype html><html><head>",
+    lockedHead(policies.wrapper),
+    '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">',
+    `<title>${escapeAttribute(title)}</title><style>${WRAPPER_CSS}</style></head><body>`,
+    `<script type="application/json" id="lecturn-page">${data}</script>`,
+    `<script>${WRAPPER_SCRIPT}</script></body></html>`,
+  ].join("");
 }

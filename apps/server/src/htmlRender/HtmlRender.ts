@@ -9,6 +9,8 @@ import {
   htmlRenderTheme,
   htmlRenderThemeFragment,
   injectHtmlRenderBootstrap,
+  lockedHtmlRenderDocument,
+  lockedHtmlRenderPage,
   type HtmlRenderReference,
 } from "@lecturn/shared/htmlRender";
 import {
@@ -67,6 +69,19 @@ export class HtmlRenderPageTooLargeError extends Schema.TaggedError<HtmlRenderPa
   }
 }
 
+const MAX_LISTED_REFERENCES = 10;
+
+export class HtmlRenderLocalReferencesError extends Schema.TaggedError<HtmlRenderLocalReferencesError>()(
+  "HtmlRenderLocalReferencesError",
+  { references: Schema.Array(Schema.String) },
+) {
+  override get message(): string {
+    const listed = this.references.slice(0, MAX_LISTED_REFERENCES).join(", ");
+    const more = this.references.length - MAX_LISTED_REFERENCES;
+    return `This page names local files, which a Squire's page cannot load: ${listed}${more > 0 ? ` and ${more} more` : ""}. Put images inline as data: URIs or inline SVG.`;
+  }
+}
+
 export class HtmlRenderStoreError extends Schema.TaggedError<HtmlRenderStoreError>()(
   "HtmlRenderStoreError",
   { cause: Schema.Defect() },
@@ -79,7 +94,8 @@ export class HtmlRenderStoreError extends Schema.TaggedError<HtmlRenderStoreErro
 export type HtmlRenderPrepareError =
   | HtmlRenderImagesNotFoundError
   | HtmlRenderImageTooLargeError
-  | HtmlRenderPageTooLargeError;
+  | HtmlRenderPageTooLargeError
+  | HtmlRenderLocalReferencesError;
 
 export interface HtmlPreview {
   readonly png: string;
@@ -94,16 +110,19 @@ export class HtmlRender extends Context.Service<
   HtmlRender,
   {
     readonly prepare: (html: string) => Effect.Effect<string, HtmlRenderPrepareError>;
+    /** `locked`: see `lockedHtmlRenderDocument`. Set from the caller's credential, never a tool argument. */
     readonly publish: (input: {
       readonly threadId: ThreadId;
       readonly html: string;
       readonly title: string;
       readonly height: number;
+      readonly locked: boolean;
     }) => Effect.Effect<HtmlRenderReference, HtmlRenderPrepareError | HtmlRenderStoreError>;
     readonly preview: (input: {
       readonly html: string;
       readonly width?: number | undefined;
       readonly appearance?: ThemeAppearance | undefined;
+      readonly locked: boolean;
     }) => Effect.Effect<
       HtmlPreview,
       | Exclude<HtmlRenderPrepareError, HtmlRenderImagesNotFoundError>
@@ -297,6 +316,39 @@ const inlineLocalImages = Effect.fn("HtmlRender.inlineLocalImages")(function* (h
   };
 });
 
+// What a locked page could name as a local file: an absolute path or file: URL
+// in a URL attribute, srcset, or CSS url(), and any quoted image path, as the
+// inliner reads them. None would load; naming them in the refusal tells the
+// author why the page is missing them.
+const URL_ATTRIBUTE =
+  /\b(?:src|href|poster|data|action|background|xlink:href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi;
+const SRCSET_ATTRIBUTE = /\b(?:srcset|imagesrcset)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi;
+const CSS_URL = /url\(\s*(["']?)([^"')]*)\1\s*\)/gi;
+const FILE_URL = /\bfile:[^\s"'`<>()]+/gi;
+const LOCAL_PATH = new RegExp(String.raw`^${ABSOLUTE_PATH}.`, "i");
+
+const isLocalReference = (value: string) => {
+  const trimmed = value.trim();
+  return LOCAL_PATH.test(trimmed) || /^file:/i.test(trimmed);
+};
+
+const findLocalReferences = (html: string): ReadonlyArray<string> => {
+  const found = new Set<string>();
+  const add = (value: string | undefined) => {
+    if (value !== undefined && isLocalReference(value)) found.add(value.trim());
+  };
+  for (const match of html.matchAll(URL_ATTRIBUTE)) add(match[1] ?? match[2] ?? match[3]);
+  for (const match of html.matchAll(SRCSET_ATTRIBUTE)) {
+    for (const candidate of (match[1] ?? match[2] ?? match[3] ?? "").split(",")) {
+      add(candidate.trim().split(/\s+/, 1)[0]);
+    }
+  }
+  for (const match of html.matchAll(CSS_URL)) add(match[2]);
+  for (const match of html.matchAll(FILE_URL)) found.add(match[0]);
+  for (const reference of findLocalImages(html)) found.add(reference.path);
+  return [...found];
+};
+
 const MIN_PREVIEW_WIDTH = 240;
 const MAX_PREVIEW_WIDTH = 1_600;
 const MAX_CONCURRENT_BROWSERS = 2;
@@ -341,7 +393,7 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const measure = (html: string) =>
+  const measure = (html: string, offline: boolean) =>
     Effect.gen(function* () {
       const executable = yield* previewBrowser.installed;
       if (Option.isNone(executable)) return undefined;
@@ -352,6 +404,7 @@ const make = Effect.gen(function* () {
           html,
           widths: HTML_RENDER_MEASURE_WIDTHS,
           urlFragment: MEASURE_FRAGMENT,
+          offline,
         }).pipe(Effect.provideContext(services)),
       ).pipe(
         Effect.timeoutOrElse({
@@ -386,13 +439,37 @@ const make = Effect.gen(function* () {
     return inlined.html;
   });
 
+  const refuseLocalReferences = (html: string) => {
+    const references = findLocalReferences(html);
+    return references.length === 0
+      ? Effect.void
+      : Effect.fail(new HtmlRenderLocalReferencesError({ references }));
+  };
+
+  // A locked page is published as its wrapper and measured as the page itself,
+  // since the wrapper's frame takes the page's height only once it reports it.
+  const prepareLocked = Effect.fn("HtmlRender.prepareLocked")(function* (
+    html: string,
+    title: string,
+  ) {
+    yield* refuseLocalReferences(html);
+    const [document, page] = yield* Effect.promise(() =>
+      Promise.all([lockedHtmlRenderDocument(html, title), lockedHtmlRenderPage(html)]),
+    );
+    return { document, page };
+  });
+
   const publish = Effect.fn("HtmlRender.publish")(function* (input: {
     readonly threadId: ThreadId;
     readonly html: string;
     readonly title: string;
     readonly height: number;
+    readonly locked: boolean;
   }) {
-    const html = yield* prepare(input.html);
+    const title = input.title.trim().slice(0, HTML_RENDER_MAX_TITLE_LENGTH) || "HTML";
+    const { document: html, page: measured } = input.locked
+      ? yield* prepareLocked(input.html, title)
+      : yield* prepare(input.html).pipe(Effect.map((html) => ({ document: html, page: html })));
     // The `-html` id suffix makes the asset route serve it as a sandboxed text/html document.
     const attachmentId = createAttachmentId(input.threadId, "html");
     const filePath =
@@ -407,14 +484,14 @@ const make = Effect.gen(function* () {
     }
     const heights = yield* fileSystem.writeFileString(filePath, html).pipe(
       Effect.mapError((cause) => new HtmlRenderStoreError({ cause })),
-      Effect.andThen(measure(html)),
+      Effect.andThen(measure(measured, input.locked)),
       // Only the returned reference lets thread deletion find the page, so a
       // publish that fails or is interrupted before returning removes it.
       Effect.onError(() => fileSystem.remove(filePath, { force: true }).pipe(Effect.ignore)),
     );
     return {
       attachmentId,
-      title: input.title.trim().slice(0, HTML_RENDER_MAX_TITLE_LENGTH) || "HTML",
+      title,
       height: clampHtmlRenderHeight(input.height),
       ...(heights === undefined ? {} : { heights }),
     } satisfies HtmlRenderReference;
@@ -424,13 +501,17 @@ const make = Effect.gen(function* () {
     readonly html: string;
     readonly width?: number | undefined;
     readonly appearance?: ThemeAppearance | undefined;
+    readonly locked: boolean;
   }) {
     const width = Math.min(
       MAX_PREVIEW_WIDTH,
       Math.max(MIN_PREVIEW_WIDTH, Math.round(input.width ?? HTML_RENDER_COLUMN_WIDTH)),
     );
     const appearance = input.appearance ?? "dark";
-    const inlined = yield* inline(input.html);
+    if (input.locked) yield* refuseLocalReferences(input.html);
+    const inlined = input.locked
+      ? { html: yield* Effect.promise(() => lockedHtmlRenderPage(input.html)), missing: [] }
+      : yield* inline(input.html);
     const executable = yield* previewBrowser.executable;
     const theme = htmlRenderTheme(
       appearance === "light" ? STANDARD_LIGHT_THEME_COLORS : STANDARD_DARK_THEME_COLORS,
@@ -444,6 +525,7 @@ const make = Effect.gen(function* () {
         html: inlined.html,
         width,
         urlFragment: htmlRenderThemeFragment(theme),
+        offline: input.locked,
       }).pipe(Effect.provideContext(services)),
     );
     return {

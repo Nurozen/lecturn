@@ -31,6 +31,8 @@ export interface SquireToolResult {
   readonly structuredContent?: unknown;
   /** MCP result `_meta`, passed through by the interceptor (MCP Apps). */
   readonly _meta?: Record<string, unknown>;
+  /** Image content after the text (`html_preview`'s screenshot); never stored. */
+  readonly image?: { readonly data: string; readonly mimeType: string };
 }
 
 /** MCP `Tool.Encoded`. */

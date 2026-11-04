@@ -29,9 +29,16 @@ describe("Squire skill text", () => {
     const known = new Set<string>(SQUIRE_TOOL_NAMES[role]);
     for (const section of sections) {
       const later = section.includes("apply once their events and tools exist");
-      for (const [name] of section.matchAll(/squire_[a-z_]+/g)) {
+      for (const [name] of section.matchAll(/(?:squire|html)_[a-z_]+/g)) {
         if (!later) assert.isTrue(known.has(name), `${role} skill names unknown tool ${name}`);
       }
+    }
+  });
+
+  it.each(roles)("tells a %s its pages are self-contained and locked down", (role) => {
+    const text = squireSkillSections(role).join("\n\n");
+    for (const phrase of ["`html_render`", "self-contained", "Local file paths are refused"]) {
+      assert.include(text, phrase);
     }
   });
 

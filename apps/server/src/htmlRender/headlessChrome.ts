@@ -10,7 +10,7 @@ import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-import { publicProxy } from "./publicProxy.ts";
+import { offlineProxy, publicProxy } from "./publicProxy.ts";
 
 export class HtmlRenderBrowserError extends Schema.TaggedError<HtmlRenderBrowserError>()(
   "HtmlRenderBrowserError",
@@ -52,7 +52,9 @@ const CAPTURE_TIMEOUT = "20 seconds";
 // All of the browser's traffic goes through `publicProxy`, which only reaches
 // public addresses, so a page cannot reach this machine's local network. The
 // main frame also stays on the page and the browser opens no popups, so a
-// capture always shows the page itself.
+// capture always shows the page itself. An offline page (a Squire's) gets no
+// network at all: every request but the page's own fails, the proxy refuses
+// every connection, and no host name resolves.
 const PAGE_ORIGIN = "http://lecturn-page.localhost";
 const PAGE_URL = `${PAGE_ORIGIN}/page.html`;
 const PAGE_NAME = "page.html";
@@ -182,9 +184,10 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
   readonly executable: string;
   readonly noSandbox: boolean;
   readonly profileDirectory: string;
+  readonly offline: boolean;
 }) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const proxyPort = yield* publicProxy.pipe(
+  const proxyPort = yield* (input.offline ? offlineProxy : publicProxy).pipe(
     Effect.mapError(
       (cause) => new HtmlRenderBrowserError({ reason: "the preview proxy could not start", cause }),
     ),
@@ -208,6 +211,7 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
           "--proxy-bypass-list=<-loopback>",
           // WebRTC would otherwise send UDP, which no proxy carries.
           "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+          ...(input.offline ? ["--host-resolver-rules=MAP * ~NOTFOUND"] : []),
           ...(input.noSandbox ? ["--no-sandbox"] : []),
           `--user-data-dir=${input.profileDirectory}`,
           "about:blank",
@@ -304,6 +308,7 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
       // A frame inside the page may show another site; Local Network Access
       // still covers it. The main frame and Lecturn's own origin serve nothing else.
       const otherSiteFrame =
+        !input.offline &&
         paused.resourceType === "Document" &&
         paused.frameId !== page.mainFrameId &&
         !url.startsWith(`${PAGE_ORIGIN}/`);
@@ -442,14 +447,13 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
       sessionId,
     );
     // Pauses Lecturn's own origin, to serve the page, and every document, to keep
-    // the main frame on it.
+    // the main frame on it; offline, every request.
     yield* send(
       "Fetch.enable",
       {
-        patterns: [
-          { urlPattern: `${PAGE_ORIGIN}/*` },
-          { urlPattern: "*", resourceType: "Document" },
-        ],
+        patterns: input.offline
+          ? [{ urlPattern: "*" }]
+          : [{ urlPattern: `${PAGE_ORIGIN}/*` }, { urlPattern: "*", resourceType: "Document" }],
       },
       Ignored,
       sessionId,
@@ -544,6 +548,7 @@ export const captureHtmlScreenshot = Effect.fn("headlessChrome.captureHtmlScreen
     readonly html: string;
     readonly width: number;
     readonly urlFragment: string;
+    readonly offline: boolean;
   }) {
     const path = yield* Path.Path;
     const directory = yield* scratchDirectory;
@@ -551,6 +556,7 @@ export const captureHtmlScreenshot = Effect.fn("headlessChrome.captureHtmlScreen
       executable: input.executable,
       noSandbox: input.noSandbox,
       profileDirectory: path.join(directory, "profile"),
+      offline: input.offline,
     });
     const page = yield* browser.openPage(input.width);
     const contentHeight = yield* page.load(pageBody(input.html), input.urlFragment);
@@ -580,6 +586,7 @@ export const measureHtmlHeights = Effect.fn("headlessChrome.measureHtmlHeights")
   readonly html: string;
   readonly widths: ReadonlyArray<number>;
   readonly urlFragment: string;
+  readonly offline: boolean;
 }) {
   const path = yield* Path.Path;
   const directory = yield* scratchDirectory;
@@ -587,6 +594,7 @@ export const measureHtmlHeights = Effect.fn("headlessChrome.measureHtmlHeights")
     executable: input.executable,
     noSandbox: input.noSandbox,
     profileDirectory: path.join(directory, "profile"),
+    offline: input.offline,
   });
   const body = pageBody(input.html);
   return yield* Effect.forEach(

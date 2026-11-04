@@ -10,8 +10,11 @@
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { FetchHttpClient } from "effect/http";
 
 import * as ServerConfig from "../config.ts";
+import * as HtmlRender from "../htmlRender/HtmlRender.ts";
+import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
 import * as EventStoreV2 from "../orchestration-v2/EventStore.ts";
 import * as ProjectionMaintenance from "../orchestration-v2/ProjectionMaintenance.ts";
@@ -32,6 +35,7 @@ import * as SquireItems from "./SquireItems.ts";
 import * as SquireJevRouter from "./SquireJevRouter.ts";
 import * as SquireLaunchAction from "./SquireLaunchAction.ts";
 import * as SquireHooks from "./squireHooks.ts";
+import * as SquireHtmlTools from "./SquireHtmlTools.ts";
 import * as SquireLeadOnboarding from "./SquireLeadOnboarding.ts";
 import * as SquireLeadRpc from "./SquireLeadRpc.ts";
 import * as SquireLifecycle from "./SquireLifecycle.ts";
@@ -89,6 +93,12 @@ const layerSwitchOnServices = Layer.mergeAll(
       SquireOverlap.layer,
       SquireShowcase.layer,
       SquireMcpAppRoute.layer,
+      // The locked page tools, for every role. The headless browser install
+      // lives under the Lecturn home, so the MCP route's html tools share it.
+      SquireHtmlTools.layer.pipe(
+        Layer.provide(HtmlRender.layer),
+        Layer.provide(PreviewBrowser.layer.pipe(Layer.provide(FetchHttpClient.layer))),
+      ),
     ),
   ),
   // Above delivery, so a decision card can wake the Lead.
