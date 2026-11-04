@@ -558,7 +558,9 @@ jobs:
       matrix:
         include:
           - label: macOS arm64
-            runner: macos-26
+            # macos-26 arm64 runners have been capacity-starved since 2026-11-02
+            # (jobs never acquired a runner); macos-15 is arm64 with more capacity.
+            runner: macos-15
             platform: mac
             target: dmg
             arch: arm64
