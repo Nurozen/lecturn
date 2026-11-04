@@ -7,22 +7,17 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { ProjectId, SquireCreateInput, type SquireId, type ThreadId } from "@lecturn/contracts";
 import { readHtmlRenderReference } from "@lecturn/shared/htmlRender";
 import { htmlRenderFromToolItem } from "@lecturn/shared/toolOutput";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type * as Context from "effect/Context";
 import type * as Scope from "effect/Scope";
 
 import { ServerConfig } from "../config.ts";
-import * as HtmlRender from "../htmlRender/HtmlRender.ts";
-import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
-import * as SquireHtmlTools from "./SquireHtmlTools.ts";
 import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireService from "./SquireService.ts";
 import * as SquireTools from "./SquireTools.ts";
@@ -42,27 +37,9 @@ const need = <I, S>(tag: Context.Key<I, S>) =>
   Effect.map(Effect.serviceOption(tag), Option.getOrThrow);
 const decodeCreateInput = Schema.decodeSync(SquireCreateInput);
 
-// No installed browser: publishing skips measuring, and a preview that got past
-// its checks would fail here rather than launch one.
-const layerHtmlRender = HtmlRender.layer.pipe(
-  Layer.provide(
-    Layer.succeed(
-      PreviewBrowser.PreviewBrowser,
-      PreviewBrowser.PreviewBrowser.of({
-        executable: Effect.die("This test has no preview browser."),
-        installed: Effect.succeed(Option.none()),
-      }),
-    ),
-  ),
-  Layer.provide(NodeServices.layer),
-);
-
-const layerTest = (baseDir: string) =>
-  SquireHtmlTools.layer.pipe(
-    Layer.provide(layerHtmlRender),
-    Layer.provide(NodeServices.layer),
-    Layer.provideMerge(phase4Layer(baseDir)),
-  );
+// layerSquire registers the page tools; a temp Lecturn home has no browser
+// installed, so publishing skips measuring.
+const layerTest = phase4Layer;
 
 interface Caller {
   readonly squireId: SquireId;

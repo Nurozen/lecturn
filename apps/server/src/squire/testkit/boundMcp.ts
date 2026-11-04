@@ -16,6 +16,7 @@ import {
   type ThreadId,
 } from "@lecturn/contracts";
 import type { McpProviderSessionConfig } from "@lecturn/provider-core/server/mcpSession";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -117,6 +118,8 @@ const layerExternalClient = (
 
 export interface BoundMcp {
   readonly registry: McpSessionRegistry.McpSessionRegistryShape;
+  /** Where `html_render` stores published pages. */
+  readonly attachmentsDir: string;
   /** A home thread's credential, as `ProviderSessionManager` issues it. */
   readonly issueSquire: (input: {
     readonly threadId: ThreadId;
@@ -140,6 +143,11 @@ export const serveBoundMcp = (options: {
     | undefined;
 }): Effect.Effect<BoundMcp, never, Scope.Scope | HttpServer.HttpServer> =>
   Effect.gen(function* () {
+    // Built once, so tests can read the pages the server stores.
+    const config = yield* Layer.build(layerConfig(options.squireEnabled)).pipe(
+      Effect.provide(NodeServices.layer),
+      Effect.orDie,
+    );
     const registry = yield* McpSessionRegistry.__testing
       .make()
       .pipe(Effect.provide(Layer.merge(layerEnvironment, NodeServices.layer)));
@@ -156,7 +164,7 @@ export const serveBoundMcp = (options: {
     yield* HttpRouter.serve(routes, { disableListenLog: true, disableLogger: true }).pipe(
       Layer.provide(PreviewAutomationBroker.layer),
       Layer.provide(layerStubServices),
-      Layer.provide(layerConfig(options.squireEnabled)),
+      Layer.provide(Layer.succeedContext(config)),
       Layer.provide(layerEnvironment),
       Layer.provide(NodeServices.layer),
       Layer.build,
@@ -166,6 +174,7 @@ export const serveBoundMcp = (options: {
       registry.issue(request).pipe(Effect.map(({ config }) => config));
     return {
       registry,
+      attachmentsDir: Context.get(config, ServerConfig.ServerConfig).attachmentsDir,
       issueSquire: ({ threadId, squireId, role }) =>
         issue({
           threadId,

@@ -39,7 +39,6 @@ import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as AppToolInterceptor from "./toolkits/app/AppToolInterceptor.ts";
 import * as SquireMcpGate from "./toolkits/squire/SquireMcpGate.ts";
 import * as SquireToolInterceptor from "./toolkits/squire/SquireToolInterceptor.ts";
-import * as SquireHtmlTools from "../squire/SquireHtmlTools.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import { PreviewControlsToolkit } from "./toolkits/previewControls/tools.ts";
@@ -989,7 +988,6 @@ const imageToolRegistration = <Tools extends Record<string, Tool.Any>, A, E, R, 
 export const layerHtmlToolkit = Layer.mergeAll(
   toolkitRegistration(HtmlRenderToolkit, HtmlHandlers.layerRender),
   imageToolRegistration(registerHtmlPreview(), HtmlHandlers.layerPreview),
-  SquireHtmlTools.layer,
 ).pipe(Layer.provide(HtmlRender.layer));
 
 const layerPreviewStandardToolkitRegistration = toolkitRegistration(

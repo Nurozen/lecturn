@@ -3,8 +3,7 @@
  * locked down (`lockedHtmlRenderDocument`): no local files, no network, no
  * page scripts. Served as Squire role tools, so the mode comes from the home
  * thread's credential, never from an argument, and each call logs
- * `tool.called` like every other Squire tool. Registered from the MCP layer,
- * which holds the `HtmlRender` service.
+ * `tool.called` like every other Squire tool.
  *
  * @module squire/SquireHtmlTools
  */

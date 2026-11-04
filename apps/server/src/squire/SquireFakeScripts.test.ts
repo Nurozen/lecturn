@@ -1,4 +1,7 @@
-// @effect-diagnostics preferSchemaOverJson:off
+// @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
@@ -19,6 +22,7 @@ import type { McpProviderSessionConfig } from "@lecturn/provider-core/server/mcp
 import { checkpointWorkspace } from "@lecturn/provider-testing/replayWorkspace";
 import * as TestProviderHost from "@lecturn/provider-testing/TestProviderHost";
 import * as HostProcess from "@lecturn/shared/HostProcess";
+import { htmlRenderFromToolItem } from "@lecturn/shared/toolOutput";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -324,43 +328,77 @@ describe("SquireFakeScripts", () => {
           arguments: { html: "<p>hi</p>", title: "Hi", height: 200 },
         },
       };
+      // A local path the ordinary tool would inline; a Squire's page is refused for it.
+      const localPage = {
+        toolCall: {
+          name: "html_render",
+          arguments: { html: '<img src="/srv/secret.png">', title: "Leak", height: 200 },
+        },
+        onError: "continue",
+      } as const;
       yield* Effect.gen(function* () {
         const fakes = yield* SquireFakeScripts.SquireFakeScripts;
         const orchestrator = yield* Orchestrator.OrchestratorV2;
         yield* fakes.set(lead, {
           "*": [
-            { ...htmlRender, onError: "continue" },
+            htmlRender,
+            localPage,
             { toolCall: { name: "lecturn_thread_send", arguments: {} } },
           ],
         });
         yield* fakes.set(release, {
-          "*": [{ ...htmlRender, onError: "continue" }, { assistantText: "Refused; moving on." }],
+          "*": [htmlRender, localPage, { assistantText: "Rendered locked." }],
         });
         yield* createThread(lead);
         yield* createThread(release);
         yield* send(lead, "gated-lead", { text: "Go." });
         yield* send(release, "gated-release", { text: "Go." });
-        // The gate refuses with a JSON-RPC error: it ends a strict step's turn as failed,
-        // while an onError: continue step records it and the turn goes on.
+        // The gate refuses with a JSON-RPC error, which ends a strict step's turn as failed.
         assert.equal(yield* turnEnded(lead, 1), "failed");
         assert.equal(yield* turnEnded(release, 1), "completed");
-        assert.deepEqual(yield* assistantTexts(release), ["Refused; moving on."]);
-        const rows = (threadId: ThreadId) =>
+        assert.deepEqual(yield* assistantTexts(release), ["Rendered locked."]);
+        const tools = (threadId: ThreadId) =>
           orchestrator
             .getThreadProjection(threadId)
             .pipe(
               Effect.map((projection) =>
                 projection.turnItems.flatMap((item) =>
-                  item.type === "dynamic_tool" ? [[item.toolName, item.status]] : [],
+                  item.type === "dynamic_tool" ? [item] : [],
                 ),
               ),
             );
-        // Neither role may render or send.
-        assert.deepEqual(yield* rows(lead), [
-          ["lecturn.html_render", "failed"],
-          ["lecturn.lecturn_thread_send", "failed"],
-        ]);
-        assert.deepEqual(yield* rows(release), [["lecturn.html_render", "failed"]]);
+        // Both roles render, locked; neither may send.
+        const leadTools = yield* tools(lead);
+        assert.deepEqual(
+          leadTools.map((item) => [item.toolName, item.status]),
+          [
+            ["lecturn.html_render", "completed"],
+            ["lecturn.html_render", "failed"],
+            ["lecturn.lecturn_thread_send", "failed"],
+          ],
+        );
+        const releaseTools = yield* tools(release);
+        assert.deepEqual(
+          releaseTools.map((item) => [item.toolName, item.status]),
+          [
+            ["lecturn.html_render", "completed"],
+            ["lecturn.html_render", "failed"],
+          ],
+        );
+        for (const [published, refused] of [leadTools, releaseTools]) {
+          // The page is stored as the locked wrapper, with the page only as data in it.
+          const reference = htmlRenderFromToolItem(published!)!;
+          const stored = NodeFS.readFileSync(
+            NodePath.join(bound.attachmentsDir, `${reference.attachmentId}.html`),
+            "utf8",
+          );
+          assert.include(stored, "frame-src 'none'");
+          assert.notInclude(stored, "<p>hi</p>");
+          assert.include(
+            JSON.stringify(refused!.output),
+            "a Squire's page cannot load: /srv/secret.png",
+          );
+        }
       }).pipe(Effect.provide(layerFake({ configs })));
     }).pipe(Effect.scoped, Effect.provide(NodeHttpServer.layerTest)),
   );
