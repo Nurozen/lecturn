@@ -616,15 +616,22 @@ export function squireMiniComposerDraft(text: string, draft: string | null): str
 // ── Settings switch ───────────────────────────────────────────
 
 /**
- * The server reads its saved Squires switch only at start, so the saved value and what is
- * running can differ until a restart, or for good when `LECTURN_SQUIRE` overrides it.
+ * A server with `squireLiveSwitch` applies the saved switch at once, so the two differ only for
+ * a moment. Older servers read it at start, so they differ until a restart, and for good when
+ * `LECTURN_SQUIRE` overrides it.
  */
 export function squireSwitchDescription(input: {
   readonly saved: boolean;
   readonly running: boolean;
+  readonly live: boolean;
 }): string {
   if (input.saved && input.running) {
     return "On. Each Squire watches the threads you give it and acts within the rules you set.";
+  }
+  if (input.live) {
+    if (input.saved) return "Turning on…";
+    if (input.running) return "Turning off…";
+    return "Off. Turn on to set up a Lead and Squires.";
   }
   if (input.saved) {
     return "Saved as on. Squires start when this environment's server restarts. If they still don't, its LECTURN_SQUIRE variable is overriding this switch.";

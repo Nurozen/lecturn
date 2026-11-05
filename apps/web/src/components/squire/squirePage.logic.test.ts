@@ -656,14 +656,26 @@ describe("squireHoldRuleLabel", () => {
 });
 
 describe("squireSwitchDescription", () => {
-  it("says when the saved switch has not reached the running server yet", () => {
-    expect(squireSwitchDescription({ saved: true, running: true })).toMatch(/^On\./);
-    expect(squireSwitchDescription({ saved: false, running: false })).toMatch(/^Off\./);
-    expect(squireSwitchDescription({ saved: true, running: false })).toMatch(
+  it("says when the saved switch has not reached a server that reads it at start", () => {
+    const live = false;
+    expect(squireSwitchDescription({ saved: true, running: true, live })).toMatch(/^On\./);
+    expect(squireSwitchDescription({ saved: false, running: false, live })).toMatch(/^Off\./);
+    expect(squireSwitchDescription({ saved: true, running: false, live })).toMatch(
       /^Saved as on\. Squires start when .* restarts/,
     );
-    expect(squireSwitchDescription({ saved: false, running: true })).toMatch(
+    expect(squireSwitchDescription({ saved: false, running: true, live })).toMatch(
       /^Saved as off\. Squires keep running until .* restarts/,
     );
+  });
+
+  it("never mentions a restart when the server applies the switch live", () => {
+    const live = true;
+    for (const saved of [true, false]) {
+      for (const running of [true, false]) {
+        expect(squireSwitchDescription({ saved, running, live })).not.toMatch(/restart/);
+      }
+    }
+    expect(squireSwitchDescription({ saved: true, running: false, live })).toBe("Turning on…");
+    expect(squireSwitchDescription({ saved: false, running: true, live })).toBe("Turning off…");
   });
 });

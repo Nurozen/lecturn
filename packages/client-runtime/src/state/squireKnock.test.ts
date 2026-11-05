@@ -89,5 +89,7 @@ describe("createSquireKnockSession", () => {
     expect(session.claim(one)).toBe(true);
     expect(session.claim(one)).toBe(false);
     expect(session.claim(EnvironmentId.make("two"))).toBe(true);
+    session.release(one);
+    expect(session.claim(one)).toBe(true);
   });
 });

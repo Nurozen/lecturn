@@ -83,5 +83,9 @@ export function createSquireKnockSession() {
       knocked.add(environmentId);
       return true;
     },
+    /** After "Show again" in settings, so the reset is not held back until the next session. */
+    release(environmentId: EnvironmentId): void {
+      knocked.delete(environmentId);
+    },
   };
 }
