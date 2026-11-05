@@ -242,7 +242,7 @@ export function squireTurnFoldLabel(
  * running, and anything that waits on the user or that they asked to see (a card, a plan, a
  * question), stays out of the group.
  */
-export function squireUpdateEntryRole(
+function squireUpdateEntryRole(
   entry: TimelineEntry,
   runIsActive: (runId: RunId | null | undefined) => boolean,
 ): SquireUpdateItemRole {
