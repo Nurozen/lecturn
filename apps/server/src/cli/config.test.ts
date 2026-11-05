@@ -80,7 +80,6 @@ const liveProcess = Effect.acquireRelease(
 it.layer(NodeServices.layer)("cli config resolution", (it) => {
   const defaultRuntimeConfig = {
     staveEnabled: true,
-    squireEnabled: false,
     threadForkingEnabled: true,
     desktopTelemetryFd: undefined,
     desktopTelemetryControlFd: undefined,
@@ -455,14 +454,14 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     }),
   );
 
+  // The saved switch applies live (SquireSwitch); config carries only the pin.
   it.effect.each([
-    { saved: undefined, env: {}, expected: false },
-    { saved: false, env: {}, expected: false },
-    { saved: true, env: {}, expected: true },
+    { saved: undefined, env: {}, expected: undefined },
+    { saved: true, env: {}, expected: undefined },
     { saved: undefined, env: { LECTURN_SQUIRE: "1" }, expected: true },
     { saved: true, env: { LECTURN_SQUIRE: "0" }, expected: false },
   ])(
-    "resolves Squires from LECTURN_SQUIRE over the saved switch (saved $saved, env $env)",
+    "pins Squires only from LECTURN_SQUIRE, whatever the saved switch (saved $saved, env $env)",
     ({ saved, env, expected }) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
@@ -495,7 +494,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           ),
         );
 
-        expect(resolved.squireEnabled).toBe(expected);
+        expect(resolved.squireEnabledOverride).toBe(expected);
       }),
   );
 

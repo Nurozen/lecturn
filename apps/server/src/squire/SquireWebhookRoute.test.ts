@@ -27,6 +27,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as SquireHttp from "./http.ts";
 import * as SquirePolicyLock from "./SquirePolicyLock.ts";
 import * as SquireRepository from "./SquireRepository.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 import * as SquireTriggers from "./SquireTriggers.ts";
 import { squireRow } from "./testkit/scopeHarness.ts";
 
@@ -45,15 +46,10 @@ const memorySecrets = Layer.sync(ServerSecretStore.ServerSecretStore, () => {
   });
 });
 
-const layerConfig = Layer.effect(
-  ServerConfig.ServerConfig,
-  Effect.map(ServerConfig.ServerConfig, (config) =>
-    ServerConfig.make({ ...config, squireEnabled: true }),
-  ),
-).pipe(
-  Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-squire-webhook-" })),
-  Layer.provide(NodeServices.layer),
-);
+const layerConfig = Layer.merge(
+  ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-squire-webhook-" }),
+  SquireSwitch.layerTest(true),
+).pipe(Layer.provide(NodeServices.layer));
 
 const layerTriggers = SquireTriggers.layer.pipe(
   Layer.provideMerge(SquirePolicyLock.layer),
@@ -79,6 +75,7 @@ const routeHandler = (services: Context.Context<never>) =>
     const { handler, dispose } = HttpRouter.toWebHandler(
       SquireHttp.layer.pipe(
         Layer.provide(Layer.succeedContext(services)),
+        Layer.provide(SquireSwitch.layerTest(true)),
         Layer.provideMerge(Layer.mock(EnvironmentAuth.EnvironmentAuth)({})),
         Layer.provideMerge(Logger.layer([logger], { mergeWithExisting: false })),
         Layer.provide(HttpPlatform.layer),

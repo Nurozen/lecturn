@@ -24,6 +24,7 @@ import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as SquireHttp from "./http.ts";
 import * as SquireReadModel from "./SquireReadModel.ts";
 import * as SquireRepository from "./SquireRepository.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 import { tempRoot } from "./testkit/lifecycleHarness.ts";
 import { type Phase4Options, type Phase4Services, phase4Layer } from "./testkit/phase4Harness.ts";
 import scenario05Json from "./testdata/scenarios/05-merged-propose-thread.json" with { type: "json" };
@@ -121,7 +122,11 @@ describe("Squire dev fixture route", () => {
       const served = HttpRouter.serve(SquireHttp.layer, {
         disableListenLog: true,
         disableLogger: true,
-      }).pipe(Layer.provide(layerAuth), Layer.provideMerge(NodeHttpServer.layerTest));
+      }).pipe(
+        Layer.provide(layerAuth),
+        Layer.provide(SquireSwitch.layerTest(true)),
+        Layer.provideMerge(NodeHttpServer.layerTest),
+      );
       const response = yield* post("operate", { op: "reset", name: "Release" }).pipe(
         Effect.provide(served),
       );
@@ -204,7 +209,7 @@ const logEntry = (id: number) =>
   });
 
 /** The export over a read model that pages 250 entries newest first, 200 per page. */
-const exportGet = (token: string | undefined, path: string, readModel: boolean) =>
+const exportGet = (token: string | undefined, path: string, readModel: boolean, on = true) =>
   Effect.gen(function* () {
     const entries = Array.from({ length: 250 }, (_, index) => logEntry(250 - index));
     const layerReadModel = Layer.mock(SquireReadModel.SquireReadModel)({
@@ -228,6 +233,7 @@ const exportGet = (token: string | undefined, path: string, readModel: boolean) 
     }).pipe(
       Layer.provide(layerAuth),
       Layer.provide(readModel ? layerReadModel : Layer.empty),
+      Layer.provide(SquireSwitch.layerTest(on)),
       Layer.provideMerge(NodeHttpServer.layerTest),
     );
     return yield* Effect.gen(function* () {
@@ -267,6 +273,7 @@ describe("Squire action-log export", () => {
         404,
       );
       assert.strictEqual((yield* exportGet("read", path, false)).status, 404);
+      assert.strictEqual((yield* exportGet("read", path, true, false)).status, 404);
     }),
   );
 });

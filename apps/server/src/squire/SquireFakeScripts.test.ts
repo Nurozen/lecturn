@@ -403,7 +403,7 @@ describe("SquireFakeScripts", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("exists only with the Squire switch and test providers both on", () =>
+  it.effect("exists only with test providers on, whatever the Squire switch says", () =>
     Effect.gen(function* () {
       const present = (squireEnabled: boolean, testProviders: string | undefined) =>
         Effect.serviceOption(SquireFakeScripts.SquireFakeScripts).pipe(
@@ -434,7 +434,7 @@ describe("SquireFakeScripts", () => {
         );
       assert.isTrue(yield* present(true, "1"));
       assert.isFalse(yield* present(true, undefined));
-      assert.isFalse(yield* present(false, "1"));
+      assert.isTrue(yield* present(false, "1"));
       assert.isFalse(yield* present(true, "0"));
     }).pipe(Effect.provide(NodeServices.layer)),
   );

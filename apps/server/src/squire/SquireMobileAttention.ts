@@ -18,6 +18,7 @@ import {
   SquireRepository,
   type SquireRow,
 } from "./SquireRepository.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 
 /** Matches the relay's row text cap, so the published state is already within it. */
 const TITLE_MAX_LENGTH = 120;
@@ -170,6 +171,7 @@ const deliveryOutcomes = (row: SquireRelayRow, report: SquireMobileReport) => {
 
 const make = Effect.gen(function* () {
   const repository = yield* SquireRepository;
+  const squireSwitch = yield* SquireSwitch.SquireSwitch;
   const changes = yield* PubSub.unbounded<ReadonlyArray<ThreadId>>();
   const homeThreads = yield* Ref.make(new Map<ThreadId, SquireId>());
   const keys = new Map<SquireId, { readonly threadId: ThreadId | null; readonly key: string }>();
@@ -208,6 +210,20 @@ const make = Effect.gen(function* () {
     yield* Ref.set(homeThreads, threads);
     if (changed.size > 0) yield* PubSub.publish(changes, [...changed]);
   });
+
+  // While the switch is off a home thread publishes as an ordinary thread, so
+  // a flip republishes every one of them.
+  yield* squireSwitch.changes.pipe(
+    Stream.drop(1),
+    Stream.runForEach(() =>
+      Ref.get(homeThreads).pipe(
+        Effect.flatMap((threads) =>
+          threads.size === 0 ? Effect.void : PubSub.publish(changes, [...threads.keys()]),
+        ),
+      ),
+    ),
+    Effect.forkScoped,
+  );
 
   const repositoryChanges = yield* repository.subscribeChanges;
   yield* refresh;
@@ -319,8 +335,15 @@ const make = Effect.gen(function* () {
         Stream.fromSubscription(subscription).pipe(Stream.flattenIterable),
       ),
     ),
-    homeThreadIds: Ref.get(homeThreads).pipe(Effect.map((threads) => [...threads.keys()])),
-    isHomeThread: (threadId) => Ref.get(homeThreads).pipe(Effect.map((t) => t.has(threadId))),
+    homeThreadIds: Effect.gen(function* () {
+      if (!(yield* squireSwitch.isOn)) return [];
+      return [...(yield* Ref.get(homeThreads)).keys()];
+    }),
+    isHomeThread: (threadId) =>
+      Effect.gen(function* () {
+        if (!(yield* squireSwitch.isOn)) return false;
+        return (yield* Ref.get(homeThreads)).has(threadId);
+      }),
     row,
     record,
   });

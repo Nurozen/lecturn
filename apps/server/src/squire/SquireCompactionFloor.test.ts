@@ -11,18 +11,15 @@ import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as LayerSquire from "./layerSquire.ts";
 import * as SquireRepository from "./SquireRepository.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 import { squireRow } from "./testkit/scopeHarness.ts";
 
 const storageLayer = (squireEnabled: boolean) =>
   Layer.mergeAll(LayerSquire.layerDatabaseStorage, SquireRepository.layer).pipe(
     Layer.provide(OrchestrationEventStore.layer),
     Layer.provideMerge(SqlitePersistence.layerMemory),
-    Layer.provide(
-      Layer.effect(
-        ServerConfig.ServerConfig,
-        Effect.map(ServerConfig.ServerConfig, (config) => ({ ...config, squireEnabled })),
-      ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "squire-floor-" }))),
-    ),
+    Layer.provide(SquireSwitch.layerTest(squireEnabled)),
+    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "squire-floor-" })),
     Layer.provide(NodeServices.layer),
   );
 

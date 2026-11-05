@@ -28,12 +28,12 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import * as ServerConfig from "../config.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
 import { SquireEventPayloadJson } from "./squireEvents.ts";
 import { orSquireError } from "./SquireLifecycle.ts";
 import * as SquirePresence from "./SquirePresence.ts";
 import * as SquireRepository from "./SquireRepository.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 import * as SquireSweep from "./SquireSweep.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -73,17 +73,13 @@ export class SquireDigest extends Context.Service<
 const make = Effect.gen(function* () {
   const repository = yield* SquireRepository.SquireRepository;
   const sweep = yield* SquireSweep.SquireSweep;
-  const config = yield* Effect.serviceOption(ServerConfig.ServerConfig);
   const delivery = yield* Effect.serviceOption(SquireDelivery.SquireDelivery);
   const presence = yield* Effect.serviceOption(SquirePresence.SquirePresence);
-  const enabled = Option.isSome(config) && config.value.squireEnabled;
+  const enabled = (yield* SquireSwitch.SquireSwitch).isOn;
 
   /** The digest's time when it is on (`digest_json` set) and the Lead can take a turn. */
   const scheduleOf = (lead: SquireRepository.SquireRow) =>
-    enabled &&
-    lead.status === "active" &&
-    lead.lifecycle === "ready" &&
-    lead.home_thread_id !== null
+    lead.status === "active" && lead.lifecycle === "ready" && lead.home_thread_id !== null
       ? decodeSettings(lead.digest_json ?? "")
       : Option.none();
 
@@ -268,6 +264,7 @@ const make = Effect.gen(function* () {
 
   const due: SquireDigest["Service"]["due"] = (now) =>
     Effect.gen(function* () {
+      if (!(yield* enabled)) return false;
       const found = yield* repository.getLead;
       if (Option.isNone(found)) return false;
       const lead = found.value;
@@ -314,6 +311,7 @@ const make = Effect.gen(function* () {
 
   const nextDueAt: SquireDigest["Service"]["nextDueAt"] = (now) =>
     Effect.gen(function* () {
+      if (!(yield* enabled)) return Option.none();
       const found = yield* repository.getLead;
       if (Option.isNone(found)) return Option.none();
       const lead = found.value;

@@ -49,6 +49,7 @@ import * as SquireContainers from "./SquireContainers.ts";
 import { withSquireDispatchOrigin } from "./SquireDispatchOrigin.ts";
 import { SquireRepository, type SquireEventRow, type SquireRow } from "./SquireRepository.ts";
 import * as SquireRoomStore from "./SquireRoomStore.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 import {
   ROOM_CONTEXT_LOG_KEY,
   type RoomContextBlock,
@@ -322,6 +323,7 @@ const make = Effect.gen(function* () {
   const orchestrator = yield* Orchestrator.OrchestratorV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const projects = yield* ProjectStore.ProjectStoreV2;
+  const squireSwitch = yield* SquireSwitch.SquireSwitch;
   const fibers = yield* FiberSet.make();
   const spaceLock = yield* Effect.serviceOption(StaveSpaceLock.StaveSpaceLock);
   const containers = yield* Effect.serviceOption(SquireContainers.SquireContainers);
@@ -668,6 +670,9 @@ const make = Effect.gen(function* () {
     // Absent on a re-dispatch: the window the first attempt stored is shown again.
     shown?: { readonly origin: SquireTurnOrigin; readonly text: string },
   ) {
+    // With the switch off no new Squire turn starts; the batch stays batched
+    // and the next on period's re-dispatch sends it. Running turns finish.
+    if (!(yield* squireSwitch.isOn)) return "off" as const;
     const { origin, text } =
       shown ??
       (yield* Effect.gen(function* () {
@@ -804,6 +809,7 @@ const make = Effect.gen(function* () {
    */
   const deliverNext = (squireId: SquireId): Effect.Effect<void, SquireDeliveryError> =>
     Effect.gen(function* () {
+      if (!(yield* squireSwitch.isOn)) return;
       const found = yield* repository.getSquire(squireId);
       if (Option.isNone(found)) return;
       const squire = found.value;

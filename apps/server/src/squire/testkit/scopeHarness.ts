@@ -30,6 +30,7 @@ import * as ProviderInstanceRegistry from "../../provider/ProviderInstanceRegist
 import * as ServerSettings from "../../serverSettings.ts";
 import * as SourceControlProviderRegistry from "../../sourceControl/SourceControlProviderRegistry.ts";
 import type * as SquireRepository from "../SquireRepository.ts";
+import * as SquireSwitch from "../SquireSwitch.ts";
 
 const instanceId = ProviderInstanceId.make("codex");
 const driver = ProviderDriverKind.make("codex");
@@ -54,12 +55,16 @@ const providerInstance = {
   importExternalSession: () => Effect.die("imports are not used by Squire scope tests"),
 } satisfies ProviderInstance;
 
-/** The V2 orchestrator over in-memory SQLite, with no provider sessions. */
+/**
+ * The V2 orchestrator over in-memory SQLite, with no provider sessions, and the
+ * Squires switch on for the services built over it.
+ */
 export const orchestratorLayer = Layer.mergeAll(
   RuntimeLayer.layer,
   RuntimeLayer.layerEventSink,
   ProjectStore.layer,
   ProjectionStore.layer,
+  SquireSwitch.layerTest(true),
 ).pipe(
   Layer.provide(McpSessionRegistryTestkit.layer),
   Layer.provide(McpProviderSessions.layer),

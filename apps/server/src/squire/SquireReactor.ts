@@ -47,7 +47,6 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
-import * as SquireCursorStartup from "./SquireCursorStartup.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
 import { withSquireDispatchOrigin } from "./SquireDispatchOrigin.ts";
 import { questionCardTrigger, readSquireQuestion, squireQuestionTitle } from "./SquireItems.ts";
@@ -82,8 +81,12 @@ export type SquireReactorError = SquireScope.SquireScopeError;
 export class SquireReactor extends Context.Service<
   SquireReactor,
   {
-    /** The cursor loop; restarts from the durable cursor after a storage failure. */
-    readonly start: Effect.Effect<never>;
+    /**
+     * The cursor loop for one on period; restarts from the durable cursor
+     * after a storage failure. `turnedOn` when the period's cursor sync jumped
+     * the cursor, so the off period's cascades are applied first.
+     */
+    readonly start: (input: { readonly turnedOn: boolean }) => Effect.Effect<never>;
     /** Resolves once the cursor passed `sequence` and the work it forked settled. */
     readonly drainThrough: (sequence: number) => Effect.Effect<void>;
     /**
@@ -190,7 +193,6 @@ const make = Effect.gen(function* () {
   const hooks = yield* Effect.serviceOption(SquireHooks.SquireHooks);
   const config = yield* ServerConfig.ServerConfig;
   const projects = yield* ProjectStore.ProjectStoreV2;
-  const switchTurnedOn = yield* Effect.serviceOption(SquireCursorStartup.SquireSwitchTurnedOn);
 
   const seen = yield* SubscriptionRef.make(0);
   const outstanding = yield* TxRef.make(0);
@@ -1194,51 +1196,53 @@ const make = Effect.gen(function* () {
       return candidates.length > 0 || effects.length > 0;
     }).pipe(Effect.withSpan("SquireReactor.handle"));
 
-  let offPeriodPending = Option.exists(switchTurnedOn, ({ turnedOn }) => turnedOn);
-
-  const start: SquireReactor["Service"]["start"] = Effect.gen(function* () {
-    if (offPeriodPending) {
-      yield* reconcileOffPeriod.pipe(logged("Squire off-period reconcile failed"));
-      offPeriodPending = false;
-    }
-    const cursor = yield* repository.readCursor;
-    yield* SubscriptionRef.set(seen, cursor.sequence);
-    let ignored = 0;
-    yield* Stream.runForEach(
-      events.streamApplicationEvents({ afterSequence: cursor.sequence }),
-      (stored) =>
-        Effect.gen(function* () {
-          const worked = yield* handle(stored).pipe(
-            Effect.retry({ schedule: Schedule.exponential("100 millis"), times: 3 }),
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.interrupt
-                : Effect.logError("Squire reactor skipped an event it could not process", {
-                    sequence: stored.sequence,
-                    cause: Cause.pretty(cause),
-                  }).pipe(Effect.as(true)),
-            ),
-          );
-          ignored = worked ? 0 : ignored + 1;
-          if (worked || ignored >= IGNORED_CURSOR_WRITE_INTERVAL) {
-            ignored = 0;
-            yield* repository.writeCursor({ sequence: stored.sequence, enabled: cursor.enabled });
-          }
-          yield* SubscriptionRef.set(seen, stored.sequence);
-        }),
-    );
-    return yield* Effect.die("the application event stream ended");
-  }).pipe(
-    Effect.tapCause((cause) =>
-      Cause.hasInterruptsOnly(cause)
-        ? Effect.void
-        : Effect.logError("Squire reactor stopped; restarting from its cursor", {
-            cause: Cause.pretty(cause),
+  const start: SquireReactor["Service"]["start"] = ({ turnedOn }) => {
+    // Once per on period, not per restart of the loop below.
+    let offPeriodPending = turnedOn;
+    return Effect.gen(function* () {
+      if (offPeriodPending) {
+        yield* reconcileOffPeriod.pipe(logged("Squire off-period reconcile failed"));
+        offPeriodPending = false;
+      }
+      const cursor = yield* repository.readCursor;
+      yield* SubscriptionRef.set(seen, cursor.sequence);
+      let ignored = 0;
+      yield* Stream.runForEach(
+        events.streamApplicationEvents({ afterSequence: cursor.sequence }),
+        (stored) =>
+          Effect.gen(function* () {
+            const worked = yield* handle(stored).pipe(
+              Effect.retry({ schedule: Schedule.exponential("100 millis"), times: 3 }),
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.interrupt
+                  : Effect.logError("Squire reactor skipped an event it could not process", {
+                      sequence: stored.sequence,
+                      cause: Cause.pretty(cause),
+                    }).pipe(Effect.as(true)),
+              ),
+            );
+            ignored = worked ? 0 : ignored + 1;
+            if (worked || ignored >= IGNORED_CURSOR_WRITE_INTERVAL) {
+              ignored = 0;
+              yield* repository.writeCursor({ sequence: stored.sequence, enabled: cursor.enabled });
+            }
+            yield* SubscriptionRef.set(seen, stored.sequence);
           }),
-    ),
-    Effect.retry(Schedule.spaced("5 seconds")),
-    Effect.orDie,
-  );
+      );
+      return yield* Effect.die("the application event stream ended");
+    }).pipe(
+      Effect.tapCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.void
+          : Effect.logError("Squire reactor stopped; restarting from its cursor", {
+              cause: Cause.pretty(cause),
+            }),
+      ),
+      Effect.retry(Schedule.spaced("5 seconds")),
+      Effect.orDie,
+    );
+  };
 
   const drainThrough: SquireReactor["Service"]["drainThrough"] = (sequence) =>
     SubscriptionRef.changes(seen).pipe(

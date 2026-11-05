@@ -21,6 +21,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -32,6 +33,7 @@ import { TextGeneration } from "../textGeneration/TextGeneration.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
 import * as SquirePolicyLock from "./SquirePolicyLock.ts";
 import * as SquireRepository from "./SquireRepository.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 import * as SquireService from "./SquireService.ts";
 import { SquireRunSource, layer as summariesLayer } from "./SquireSummaries.ts";
 import * as SquireTriggers from "./SquireTriggers.ts";
@@ -65,15 +67,10 @@ const memorySecrets = Layer.sync(ServerSecretStore.ServerSecretStore, () => {
 });
 
 const layerConfig = (squireEnabled: boolean) =>
-  Layer.effect(
-    ServerConfig.ServerConfig,
-    Effect.map(ServerConfig.ServerConfig, (config) =>
-      ServerConfig.make({ ...config, squireEnabled }),
-    ),
-  ).pipe(
-    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-squire-triggers-" })),
-    Layer.provide(NodeServices.layer),
-  );
+  Layer.merge(
+    ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-squire-triggers-" }),
+    SquireSwitch.layerTest(squireEnabled),
+  ).pipe(Layer.provide(NodeServices.layer));
 
 const withTriggers = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
@@ -351,6 +348,29 @@ describe("SquireTriggers schedules", () => {
         assert.lengthOf(yield* events, 0);
       }),
       { enabled: false },
+    ),
+  );
+
+  it.effect("refuses a webhook, a create, and a due slot once the switch turns off, live", () =>
+    withTriggers(
+      Effect.gen(function* () {
+        yield* seed();
+        const hook = yield* webhook();
+        yield* schedule({ kind: "interval", hours: 1 });
+        yield* SubscriptionRef.set(yield* SquireSwitch.SquireSwitchControl, false);
+
+        assert.equal(yield* receive(hook.trigger.id, bearer(hook.secret), unreadBody), "not_found");
+        assert.equal(
+          yield* refusal(schedule({ kind: "interval", hours: 2 })),
+          "disabled_by_server",
+        );
+        yield* advance(2 * 60 * 60_000);
+        assert.equal(yield* fire, 0);
+        assert.lengthOf(yield* events, 0);
+
+        yield* SubscriptionRef.set(yield* SquireSwitch.SquireSwitchControl, true);
+        assert.equal(yield* receive(hook.trigger.id, bearer(hook.secret)), "queued");
+      }),
     ),
   );
 });

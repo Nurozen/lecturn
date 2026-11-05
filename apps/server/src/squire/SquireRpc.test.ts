@@ -27,6 +27,7 @@ import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireRpcHandlers from "./SquireRpcHandlers.ts";
 import * as SquireScope from "./SquireScope.ts";
 import * as SquireService from "./SquireService.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 import * as SquireTriggers from "./SquireTriggers.ts";
 import { invoiceThread, need, withRoomCast } from "./testkit/roomHarness.ts";
 import { orchestratorLayer, squireRow } from "./testkit/scopeHarness.ts";
@@ -34,15 +35,10 @@ import { orchestratorLayer, squireRow } from "./testkit/scopeHarness.ts";
 const release = SquireId.make("squire:release");
 
 const layerConfig = (squireEnabled: boolean) =>
-  Layer.effect(
-    ServerConfig.ServerConfig,
-    Effect.map(ServerConfig.ServerConfig, (config) =>
-      ServerConfig.make({ ...config, squireEnabled }),
-    ),
-  ).pipe(
-    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-squire-rpc-" })),
-    Layer.provide(NodeServices.layer),
-  );
+  Layer.merge(
+    ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-squire-rpc-" }),
+    SquireSwitch.layerTest(squireEnabled),
+  ).pipe(Layer.provide(NodeServices.layer));
 
 const memorySecrets = Layer.sync(ServerSecretStore.ServerSecretStore, () => {
   const store = new Map<string, Uint8Array>();

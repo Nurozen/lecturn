@@ -17,6 +17,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as SquireContainers from "./SquireContainers.ts";
 import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireScope from "./SquireScope.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 import {
   createThread,
   dispatchThread,
@@ -293,6 +294,7 @@ describe("SquireContainers live layer", () => {
     "project:plain": null,
   };
   const live = SquireContainers.layer.pipe(
+    Layer.provide(SquireSwitch.layerTest(true)),
     Layer.provide(
       Layer.mock(ProjectService.ProjectService)({
         getShell: (projectId) =>

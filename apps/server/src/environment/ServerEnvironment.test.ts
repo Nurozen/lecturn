@@ -10,6 +10,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import { DEFAULT_SIGNAL_EXPORT } from "@lecturn/shared/observability";
 import * as HostProcess from "@lecturn/shared/HostProcess";
@@ -24,6 +25,8 @@ import {
 } from "../cloud/config.ts";
 import { resolveServerConfig } from "../cli/config.ts";
 import * as ServerConfig from "../config.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as SquireSwitch from "../squire/SquireSwitch.ts";
 import * as ServerEnvironment from "./ServerEnvironment.ts";
 
 const isServerEnvironmentIdPersistenceError = Schema.is(
@@ -33,6 +36,7 @@ const isServerEnvironmentIdPersistenceError = Schema.is(
 const layerServerEnvironment = (baseDir: string) =>
   ServerEnvironment.layer.pipe(
     Layer.provide(ServerSecretStore.layer),
+    Layer.provide(SquireSwitch.layerTest(false)),
     Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)),
   );
 
@@ -74,7 +78,6 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
     tailscaleServePort: 443,
     threadForkingEnabled: true,
     staveEnabled: true,
-    squireEnabled: false,
     port: 0,
     host: undefined,
     desktopBootstrapToken: undefined,
@@ -111,6 +114,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
           Effect.provide(
             ServerEnvironment.layer.pipe(
               Layer.provide(layerEmptySecretStore),
+              Layer.provide(SquireSwitch.layerTest(false)),
               Layer.provide(ServerConfig.layer({ ...config, mode })),
             ),
           ),
@@ -246,7 +250,10 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
         prefix: "lecturn-server-environment-publish-test-",
       });
       const layerTest = Layer.mergeAll(
-        ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer)),
+        ServerEnvironment.layer.pipe(
+          Layer.provide(ServerSecretStore.layer),
+          Layer.provide(SquireSwitch.layerTest(false)),
+        ),
         ServerSecretStore.layer,
       ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)));
 
@@ -295,6 +302,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
           Effect.provide(
             ServerEnvironment.layer.pipe(
               Layer.provide(ServerSecretStore.layer),
+              Layer.provide(SquireSwitch.layerTest(false)),
               Layer.provide(ServerConfig.layer({ ...serverConfig, ...overrides })),
             ),
           ),
@@ -334,6 +342,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
           Effect.provide(
             ServerEnvironment.layer.pipe(
               Layer.provide(ServerSecretStore.layer),
+              Layer.provide(SquireSwitch.layerTest(false)),
               Layer.provide(ServerConfig.layer({ ...serverConfig, ...overrides })),
             ),
           ),
@@ -347,7 +356,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
     }),
   );
 
-  it.effect("advertises the Squire capability only when the kill switch is on", () =>
+  it.effect("reads the Squire capability from the live switch on every descriptor", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
@@ -356,72 +365,91 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       const serverConfig = yield* makeServerConfig(baseDir);
       yield* fileSystem.makeDirectory(serverConfig.stateDir, { recursive: true });
 
-      const describeWith = (squireEnabled: boolean) =>
-        Effect.gen(function* () {
+      yield* Effect.gen(function* () {
+        const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+        const control = yield* SquireSwitch.SquireSwitchControl;
+        const off = yield* serverEnvironment.getDescriptor;
+        expect(off.capabilities).not.toHaveProperty("squire");
+        expect(off.capabilities.squireLiveSwitch).toBe(true);
+        yield* SubscriptionRef.set(control, true);
+        const on = yield* serverEnvironment.getDescriptor;
+        expect(on.capabilities.squire).toBe(true);
+        expect(on.capabilities.squireLiveSwitch).toBe(true);
+      }).pipe(
+        Effect.provide(
+          ServerEnvironment.layer.pipe(
+            Layer.provide(ServerSecretStore.layer),
+            Layer.provideMerge(SquireSwitch.layerTest(false)),
+            Layer.provide(ServerConfig.layer(serverConfig)),
+          ),
+        ),
+      );
+    }),
+  );
+
+  // Squires stay opt-in: unset, the saved setting (default off) drives them live;
+  // set, LECTURN_SQUIRE pins them and the saved setting is ignored.
+  it.effect.each([
+    { env: {}, saved: false, squire: false, live: true },
+    { env: {}, saved: true, squire: true, live: true },
+    { env: { LECTURN_SQUIRE: "0" }, saved: true, squire: false, live: false },
+    { env: { LECTURN_SQUIRE: "1" }, saved: false, squire: true, live: false },
+  ])(
+    "advertises Squires from LECTURN_SQUIRE over the saved switch (env $env, saved $saved)",
+    ({ env, saved, squire, live }) =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "lecturn-server-environment-squire-default-test-",
+        });
+        const resolved = yield* resolveServerConfig(
+          {
+            mode: Option.none(),
+            port: Option.none(),
+            host: Option.none(),
+            baseDir: Option.none(),
+            cwd: Option.none(),
+            devUrl: Option.none(),
+            noBrowser: Option.none(),
+            bootstrapFd: Option.none(),
+            autoBootstrapProjectFromCwd: Option.none(),
+            logWebSocketEvents: Option.none(),
+            tailscaleServeEnabled: Option.none(),
+            tailscaleServePort: Option.none(),
+          },
+          Option.none(),
+        ).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              ConfigProvider.layer(
+                ConfigProvider.fromEnv({ env: { LECTURN_HOME: baseDir, ...env } }),
+              ),
+              NetService.layer,
+            ),
+          ),
+        );
+        yield* fileSystem.makeDirectory(resolved.stateDir, { recursive: true });
+
+        const descriptor = yield* Effect.gen(function* () {
           const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
           return yield* serverEnvironment.getDescriptor;
         }).pipe(
           Effect.provide(
             ServerEnvironment.layer.pipe(
               Layer.provide(ServerSecretStore.layer),
-              Layer.provide(ServerConfig.layer({ ...serverConfig, squireEnabled })),
+              Layer.provide(
+                SquireSwitch.layer.pipe(
+                  Layer.provide(ServerSettings.layerTest({ squire: { enabled: saved } })),
+                ),
+              ),
+              Layer.provide(ServerConfig.layer(resolved)),
             ),
           ),
         );
 
-      expect((yield* describeWith(false)).capabilities).not.toHaveProperty("squire");
-      expect((yield* describeWith(true)).capabilities.squire).toBe(true);
-    }),
-  );
-
-  // Squires stay opt-in, so an environment without LECTURN_SQUIRE never advertises them.
-  it.effect("does not advertise Squires when LECTURN_SQUIRE is unset", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "lecturn-server-environment-squire-default-test-",
-      });
-      const resolved = yield* resolveServerConfig(
-        {
-          mode: Option.none(),
-          port: Option.none(),
-          host: Option.none(),
-          baseDir: Option.none(),
-          cwd: Option.none(),
-          devUrl: Option.none(),
-          noBrowser: Option.none(),
-          bootstrapFd: Option.none(),
-          autoBootstrapProjectFromCwd: Option.none(),
-          logWebSocketEvents: Option.none(),
-          tailscaleServeEnabled: Option.none(),
-          tailscaleServePort: Option.none(),
-        },
-        Option.none(),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            ConfigProvider.layer(ConfigProvider.fromEnv({ env: { LECTURN_HOME: baseDir } })),
-            NetService.layer,
-          ),
-        ),
-      );
-      yield* fileSystem.makeDirectory(resolved.stateDir, { recursive: true });
-
-      const descriptor = yield* Effect.gen(function* () {
-        const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
-        return yield* serverEnvironment.getDescriptor;
-      }).pipe(
-        Effect.provide(
-          ServerEnvironment.layer.pipe(
-            Layer.provide(ServerSecretStore.layer),
-            Layer.provide(ServerConfig.layer(resolved)),
-          ),
-        ),
-      );
-
-      expect(resolved.squireEnabled).toBe(false);
-      expect(descriptor.capabilities).not.toHaveProperty("squire");
-    }),
+        expect(descriptor.capabilities.squire === true).toBe(squire);
+        expect(descriptor.capabilities.squireLiveSwitch === true).toBe(live);
+      }),
   );
 
   it.effect("structures persisted environment id filesystem failures", () =>
@@ -466,6 +494,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
           Effect.provide(
             ServerEnvironment.layer.pipe(
               Layer.provide(layerEmptySecretStore),
+              Layer.provide(SquireSwitch.layerTest(false)),
               Layer.provide(Layer.merge(ServerConfig.layer(serverConfig), layerFailingFileSystem)),
             ),
           ),

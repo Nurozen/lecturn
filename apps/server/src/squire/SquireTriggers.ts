@@ -36,7 +36,6 @@ import * as Ref from "effect/Ref";
 import * as Semaphore from "effect/Semaphore";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { nextScheduledRunAt } from "../scheduledTasks/Schedule.ts";
 import {
@@ -46,6 +45,7 @@ import {
 import { orSquireError } from "./SquireLifecycle.ts";
 import * as SquirePolicyLock from "./SquirePolicyLock.ts";
 import * as SquireRepository from "./SquireRepository.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 import { touchUserActivity } from "./squireUserActivity.ts";
 
 const RUNS_PER_TRIGGER_PER_HOUR = 6;
@@ -217,18 +217,18 @@ const make = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const { withPolicyLock } = yield* SquirePolicyLock.SquirePolicyLock;
-  const config = yield* Effect.serviceOption(ServerConfig.ServerConfig);
-  // The service is only built with the switch on; a missing config reads as off.
-  const enabled = Option.isSome(config) && config.value.squireEnabled;
+  const enabled = (yield* SquireSwitch.SquireSwitch).isOn;
   // The last `squire` settings block the sweep saw; a change is the user acting.
   const lastSquireSettings = yield* Ref.make(Option.none<string>());
   // Orders the count-then-insert of run admission, which the limits depend on.
   const runLock = (yield* Semaphore.make(1)).withPermits(1);
 
   const nowUtc = DateTime.now;
-  const requireEnabled = enabled
-    ? Effect.void
-    : Effect.fail(refuse("disabled_by_server", "Squires are turned off on this server."));
+  const requireEnabled = Effect.flatMap(enabled, (on) =>
+    on
+      ? Effect.void
+      : Effect.fail(refuse("disabled_by_server", "Squires are turned off on this server.")),
+  );
 
   const leadZone = repository.getLead.pipe(
     Effect.map((lead) =>
@@ -288,7 +288,7 @@ const make = Effect.gen(function* () {
   /** The Squire when its triggers may fire: switch on, active, not the Lead, no inactivity pause. */
   const firingSquire = (squireId: SquireId) =>
     Effect.gen(function* () {
-      if (!enabled) return Option.none();
+      if (!(yield* enabled)) return Option.none();
       const squire = yield* repository.getSquire(squireId);
       if (
         Option.isNone(squire) ||
@@ -738,7 +738,7 @@ const make = Effect.gen(function* () {
 
   const fireDueSlots: SquireTriggers["Service"]["fireDueSlots"] = (now) =>
     Effect.gen(function* () {
-      if (!enabled) return 0;
+      if (!(yield* enabled)) return 0;
       const nowIso = DateTime.formatIso(now);
       const due = (yield* repository.listArmedTriggers).filter(
         (row) => row.next_slot_at !== null && row.next_slot_at <= nowIso,
@@ -753,7 +753,7 @@ const make = Effect.gen(function* () {
     }).pipe(orSquireError("fire the due triggers"));
 
   const earliestSlotAt: SquireTriggers["Service"]["earliestSlotAt"] = Effect.gen(function* () {
-    if (!enabled) return Option.none();
+    if (!(yield* enabled)) return Option.none();
     for (const row of yield* repository.listArmedTriggers) {
       if (row.next_slot_at !== null && Option.isSome(yield* firingSquire(row.squire_id))) {
         return Option.some(DateTime.makeUnsafe(row.next_slot_at));
@@ -765,7 +765,7 @@ const make = Effect.gen(function* () {
   const receive: SquireTriggers["Service"]["receive"] = (rawTriggerId, rawHeaders, body) =>
     Effect.gen(function* () {
       const missing = { outcome: "not_found" } as const;
-      if (!enabled) return missing;
+      if (!(yield* enabled)) return missing;
       const triggerId = decodeTriggerId(rawTriggerId);
       if (Option.isNone(triggerId)) return missing;
       const found = yield* repository.getTrigger(triggerId.value);
@@ -972,7 +972,7 @@ const make = Effect.gen(function* () {
 
   const checkInactivity: SquireTriggers["Service"]["checkInactivity"] = (now) =>
     Effect.gen(function* () {
-      if (!enabled) return;
+      if (!(yield* enabled)) return;
       const at = DateTime.formatIso(now);
       // Read here rather than from the settings stream: no fiber, and a
       // sweep-late stamp is nothing against a window of days.

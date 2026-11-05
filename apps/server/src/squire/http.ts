@@ -1,8 +1,8 @@
 /**
  * Squire raw HTTP routes: the dev fixture route, the action-log export, and
- * the webhook trigger route. Each resolves its
- * service once at build time, because the Squire services exist only with
- * the switch on (and the fixture seam only with test providers on).
+ * the webhook trigger route. Each resolves its service once at build time, as
+ * an option: a focused runtime may lack it, and the fixture seam exists only
+ * with test providers on. The switch itself is read per request.
  */
 import {
   AuthOrchestrationOperateScope,
@@ -31,6 +31,7 @@ import * as HttpServerRespondable from "effect/http/HttpServerRespondable";
 import { authenticateRawRouteWithScope } from "../http.ts";
 import * as SquireDevFixtures from "./SquireDevFixtures.ts";
 import * as SquireReadModel from "./SquireReadModel.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 import * as SquireTriggers from "./SquireTriggers.ts";
 
 export const SQUIRE_DEV_FIXTURE_ROUTE = "/api/dev/squire/fixture";
@@ -98,16 +99,20 @@ const fixtureFailure = (
 ): HttpServerResponse.HttpServerResponse =>
   json(422, { error: error._tag, message: error.message });
 
-// Absent, so a 404, unless SquireDevFixtures is provided (switch on and LECTURN_TEST_PROVIDERS=1).
+// Absent, so a 404, unless SquireDevFixtures is provided (LECTURN_TEST_PROVIDERS=1);
+// a 404 too while the switch is off.
 const layerDevFixtureRoute = Layer.unwrap(
-  Effect.map(Effect.serviceOption(SquireDevFixtures.SquireDevFixtures), (fixtures) =>
-    Option.match(fixtures, {
+  Effect.gen(function* () {
+    const fixtures = yield* Effect.serviceOption(SquireDevFixtures.SquireDevFixtures);
+    const squireSwitch = yield* SquireSwitch.SquireSwitch;
+    return Option.match(fixtures, {
       onNone: () => Layer.empty,
       onSome: (service) =>
         HttpRouter.add(
           "POST",
           SQUIRE_DEV_FIXTURE_ROUTE,
           Effect.gen(function* () {
+            if (!(yield* squireSwitch.isOn)) return json(404, { error: "not_found" });
             // Before the body: `load-fixture` probes the gate with an unauthenticated request.
             yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
             const request = yield* HttpServerRequest.schemaBodyJson(SquireDevFixtureRequest).pipe(
@@ -125,8 +130,8 @@ const layerDevFixtureRoute = Layer.unwrap(
             );
           }).pipe(Effect.catchTags(authFailures)),
         ),
-    }),
-  ),
+    });
+  }),
 );
 
 // ── Action-log export ─────────────────────────────────────────
@@ -136,13 +141,17 @@ const decodeSquireId = Schema.decodeUnknownOption(SquireId);
 
 /** Newest first, as `squire.actionLog.list` pages; read-scoped like the RPC. */
 const layerActionLogExportRoute = Layer.unwrap(
-  Effect.map(Effect.serviceOption(SquireReadModel.SquireReadModel), (readModel) =>
-    HttpRouter.add(
+  Effect.gen(function* () {
+    const readModel = yield* Effect.serviceOption(SquireReadModel.SquireReadModel);
+    const squireSwitch = yield* SquireSwitch.SquireSwitch;
+    return HttpRouter.add(
       "GET",
       "/api/squire/:squireId/action-log",
       Effect.gen(function* () {
         yield* authenticateRawRouteWithScope(AuthOrchestrationReadScope);
-        if (Option.isNone(readModel)) return json(404, { error: "not_found" });
+        if (Option.isNone(readModel) || !(yield* squireSwitch.isOn)) {
+          return json(404, { error: "not_found" });
+        }
         const squireId = decodeSquireId((yield* HttpRouter.params).squireId);
         if (Option.isNone(squireId)) return json(400, { error: "invalid_request" });
         const page = (before: number | undefined) =>
@@ -181,8 +190,8 @@ const layerActionLogExportRoute = Layer.unwrap(
           },
         });
       }).pipe(Effect.catchTags(authFailures)),
-    ),
-  ),
+    );
+  }),
 );
 
 // ── Webhook route ─────────────────────────────────────────────
@@ -195,7 +204,8 @@ class SquireWebhookBodyTooLarge extends Schema.TaggedError<SquireWebhookBodyTooL
 /**
  * Outside session auth, like the scheduled-task webhook: the per-trigger
  * secret is the only gate. Always registered, so with the switch off
- * it answers 404 instead of falling through to the static route.
+ * (`receive` reads it per request) it answers 404 instead of falling through
+ * to the static route.
  */
 const layerWebhookRoute = Layer.unwrap(
   Effect.map(Effect.serviceOption(SquireTriggers.SquireTriggers), (triggers) =>

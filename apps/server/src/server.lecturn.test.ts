@@ -22,6 +22,7 @@ import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import { requiredScopeForRpcMethod } from "./auth/RpcAuthorization.ts";
 import * as ServerConfig from "./config.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
+import * as SquireSwitch from "./squire/SquireSwitch.ts";
 import { forkKillSwitchRejection, WS_RPC_HANDLER_GROUPS } from "./ws.ts";
 
 const read = AuthOrchestrationReadScope;
@@ -138,6 +139,7 @@ it.layer(NodeServices.layer)("Lecturn environment descriptor", (it) => {
         Effect.provide(
           ServerEnvironment.layer.pipe(
             Layer.provide(ServerSecretStore.layer),
+            Layer.provide(SquireSwitch.layerTest(false)),
             Layer.provide(ServerConfig.layer({ ...config, ...overrides })),
           ),
         ),

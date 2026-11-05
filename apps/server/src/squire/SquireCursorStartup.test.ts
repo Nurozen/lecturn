@@ -31,16 +31,13 @@ const appendEvents = (count: number) =>
     }
   });
 
-const start = (squireEnabled: boolean) =>
+const start = (on: boolean) =>
   Effect.gen(function* () {
-    const config = yield* ServerConfig.ServerConfig;
-    yield* SquireCursorStartup.syncCursorWithSwitch.pipe(
-      Effect.provideService(ServerConfig.ServerConfig, { ...config, squireEnabled }),
-    );
+    yield* SquireCursorStartup.syncCursorWithSwitch(on);
     return yield* (yield* SquireRepository.SquireRepository).readCursor;
   });
 
-it.effect("a start that turns the switch on skips everything committed while it was off", () =>
+it.effect("an on period that turns the switch on skips everything committed while it was off", () =>
   Effect.gen(function* () {
     const repository = yield* SquireRepository.SquireRepository;
     yield* appendEvents(3);
@@ -48,12 +45,12 @@ it.effect("a start that turns the switch on skips everything committed while it 
 
     assert.deepEqual(yield* start(true), { sequence: 3, enabled: true });
 
-    // While on, the reactor owns the sequence: a restart leaves it alone.
+    // While on, the reactor owns the sequence: another on period leaves it alone.
     yield* repository.writeCursor({ sequence: 4, enabled: true });
     yield* appendEvents(3);
     assert.deepEqual(yield* start(true), { sequence: 4, enabled: true });
 
-    // Off keeps the sequence; the next enabling start jumps past the off period.
+    // Off keeps the sequence; the next on period jumps past the off period.
     assert.deepEqual(yield* start(false), { sequence: 4, enabled: false });
     yield* appendEvents(2);
     assert.deepEqual(yield* start(true), { sequence: 8, enabled: true });

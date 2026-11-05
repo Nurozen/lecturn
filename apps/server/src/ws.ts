@@ -291,6 +291,7 @@ import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
 import { previewCheckpointRevert } from "./orchestration-v2/fork/CheckpointRevertPreview.ts";
 import { guardWorktreeRemoval } from "./orchestration-v2/fork/WorktreeRemovalGuard.ts";
 import * as SquireRpcHandlers from "./squire/SquireRpcHandlers.ts";
+import * as SquireSwitch from "./squire/SquireSwitch.ts";
 import { refuseSquireWorkspacePath } from "./squire/SquireWorkspace.ts";
 
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
@@ -461,6 +462,8 @@ export const withLateEditorConfig = <E, R>(
   config: ClientServerConfig,
   liveUpdates: Stream.Stream<ServerConfigStreamEvent, E, R>,
   launcher: EditorDiscovery,
+  // Descriptors read on a capability change; one that differs re-sends the snapshot.
+  environmentChanges: Stream.Stream<ClientServerConfig["environment"], E, R> = Stream.empty,
 ) => {
   const lateEditorConfig = Stream.fromEffect(launcher.resolveAvailableEditors()).pipe(
     Stream.filter(
@@ -481,7 +484,11 @@ export const withLateEditorConfig = <E, R>(
     Stream.map((editorConfig) => ({ type: "editorsResolved" as const, editorConfig })),
   );
 
-  return Stream.merge(liveUpdates, lateEditorConfig).pipe(
+  const environmentResolved = environmentChanges.pipe(
+    Stream.map((environment) => ({ type: "environmentResolved" as const, environment })),
+  );
+
+  return Stream.merge(liveUpdates, Stream.merge(lateEditorConfig, environmentResolved)).pipe(
     Stream.mapAccum(
       (): ClientServerConfig => config,
       (current, event): readonly [ClientServerConfig, ReadonlyArray<ServerConfigStreamEvent>] => {
@@ -494,6 +501,13 @@ export const withLateEditorConfig = <E, R>(
               ...rest
             } = current;
             const next = { ...rest, ...event.editorConfig };
+            return [next, [{ version: 1, type: "snapshot", config: next }]];
+          }
+          case "environmentResolved": {
+            if (JSON.stringify(event.environment) === JSON.stringify(current.environment)) {
+              return [current, []];
+            }
+            const next = { ...current, environment: event.environment };
             return [next, [{ version: 1, type: "snapshot", config: next }]];
           }
           case "keybindingsUpdated":
@@ -1460,6 +1474,7 @@ const makeWsRpcHandlers = (
     const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
     const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+    const squireSwitch = yield* SquireSwitch.SquireSwitch;
     const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
     const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
     yield* Effect.addFinalizer(() =>
@@ -1937,7 +1952,7 @@ const makeWsRpcHandlers = (
     // group middleware and RpcScopeAuthorization checks their scopes like any RPC.
     const staveRpcHandlers = yield* makeStaveRpcHandlers();
     const appsRpcHandlers = yield* AppsRpcHandlers.make(currentSession);
-    // Lecturn: Squire RPCs refuse `disabled_by_server` while LECTURN_SQUIRE is off.
+    // Lecturn: Squire RPCs refuse `disabled_by_server` while the Squires switch is off.
     const squireRpcHandlers = yield* SquireRpcHandlers.make();
 
     const getOrchestrationV2ArchivedShellSnapshot = Effect.gen(function* () {
@@ -3362,9 +3377,13 @@ const makeWsRpcHandlers = (
               ),
             );
 
+            // The Squires switch applies live; clients learn it from a fresh snapshot.
+            const environmentChanges = squireSwitch.changes.pipe(
+              Stream.mapEffect(() => serverEnvironment.getDescriptor),
+            );
             return Stream.concat(
               rpcInitialItems([{ version: 1 as const, type: "snapshot" as const, config }]),
-              withLateEditorConfig(config, liveUpdates, externalLauncher),
+              withLateEditorConfig(config, liveUpdates, externalLauncher, environmentChanges),
             );
           }),
         ),

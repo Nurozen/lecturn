@@ -29,7 +29,6 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
-import * as ServerConfig from "../config.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import type { PersistenceSqlError } from "../persistence/Errors.ts";
 import { nextScheduledRunAt } from "../scheduledTasks/Schedule.ts";
@@ -37,6 +36,7 @@ import * as SquireDelivery from "./SquireDelivery.ts";
 import { squireStateKey } from "./squireEvents.ts";
 import { orSquireError } from "./SquireLifecycle.ts";
 import * as SquireRepository from "./SquireRepository.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 import * as SquireScope from "./SquireScope.ts";
 import { isSquireThread } from "./squireThread.ts";
 
@@ -188,9 +188,8 @@ const make = Effect.gen(function* () {
   const repository = yield* SquireRepository.SquireRepository;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const scope = yield* SquireScope.SquireScope;
-  const config = yield* Effect.serviceOption(ServerConfig.ServerConfig);
   const delivery = yield* Effect.serviceOption(SquireDelivery.SquireDelivery);
-  const enabled = Option.isSome(config) && config.value.squireEnabled;
+  const enabled = (yield* SquireSwitch.SquireSwitch).isOn;
   // Orders the dedupe-and-count of a sweep with its insert.
   const runLock = (yield* Semaphore.make(1)).withPermits(1);
 
@@ -251,7 +250,7 @@ const make = Effect.gen(function* () {
   /** A slot belongs to the Lead from its creation on, so a new Lead does not sweep at once. */
   const dueSlot = (lead: SquireRepository.SquireRow, now: DateTime.Utc) =>
     Effect.gen(function* () {
-      if (!enabled || !sweeping(lead)) return Option.none<DateTime.Utc>();
+      if (!(yield* enabled) || !sweeping(lead)) return Option.none<DateTime.Utc>();
       const { latest } = slotsAround(lead, now);
       if (Option.isNone(latest) || DateTime.formatIso(latest.value) < lead.created_at) {
         return Option.none<DateTime.Utc>();
@@ -478,14 +477,14 @@ const make = Effect.gen(function* () {
   const nextDueAt: SquireSweep["Service"]["nextDueAt"] = (now) =>
     Effect.gen(function* () {
       const lead = yield* repository.getLead;
-      if (!enabled || Option.isNone(lead) || !sweeping(lead.value)) return Option.none();
+      if (!(yield* enabled) || Option.isNone(lead) || !sweeping(lead.value)) return Option.none();
       if (Option.isSome(yield* dueSlot(lead.value, now))) return Option.some(now);
       return slotsAround(lead.value, now).next;
     }).pipe(orSquireError("read the next sweep slot"));
 
   const request: SquireSweep["Service"]["request"] = (input) =>
     Effect.gen(function* () {
-      if (!enabled) {
+      if (!(yield* enabled)) {
         return yield* new SquireError({
           code: "disabled_by_server",
           message: "Squires are turned off on this server.",

@@ -26,6 +26,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 
@@ -37,6 +38,9 @@ import { StaveLifecycleService } from "./stave/lifecycle/StaveLifecycleService.t
 import { SquireClock } from "./squire/SquireClock.ts";
 import { SquireDelivery } from "./squire/SquireDelivery.ts";
 import { SquireReactor } from "./squire/SquireReactor.ts";
+import * as SquireRepository from "./squire/SquireRepository.ts";
+import * as SquireSwitch from "./squire/SquireSwitch.ts";
+import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
 import { SagaInferenceReactor } from "./stave/SagaInferenceReactor.ts";
 import { DecisionIngestion } from "./threadDecisions/DecisionIngestion.ts";
 import { DecisionWorker } from "./threadDecisions/DecisionWorker.ts";
@@ -125,7 +129,6 @@ it.effect.each([
           autoBootstrapProjectFromCwd: true,
           threadForkingEnabled: false,
           staveEnabled: false,
-          squireEnabled: false,
         }),
         Layer.mock(Keybindings.Keybindings)({ start: Effect.void }),
         Layer.mock(LegacyV1ThreadImporter.LegacyV1ThreadImporter)({
@@ -727,28 +730,81 @@ it.effect("starts the Lecturn background roots that are wired, in dependency ord
 );
 
 it.effect(
-  "starts the Squire reactor, batch re-dispatch, and clock when the switch built them",
+  "runs the Squire on period only while the switch is on, cursor first in and last out",
   () =>
     Effect.gen(function* () {
-      const started: string[] = [];
-      const all = yield* Deferred.make<void>();
-      const record = (name: string) =>
-        Effect.sync(() => started.push(name)).pipe(
-          Effect.andThen((count) => (count === 3 ? Deferred.succeed(all, undefined) : Effect.void)),
+      const log: string[] = [];
+      const started = yield* Ref.make(0);
+      const stopped = yield* Ref.make(0);
+      const allStarted = yield* Deferred.make<void>();
+      const allStopped = yield* Deferred.make<void>();
+      const cursorOff = yield* Deferred.make<void>();
+      const cursor = { sequence: 0, enabled: false };
+      const piece = (name: string) =>
+        Effect.sync(() => log.push(`start:${name}`)).pipe(
+          Effect.andThen(Ref.updateAndGet(started, (n) => n + 1)),
+          Effect.flatMap((n) =>
+            n % 3 === 0 ? Deferred.succeed(allStarted, undefined) : Effect.void,
+          ),
           Effect.andThen(Effect.never),
+          Effect.onInterrupt(() =>
+            Effect.sync(() => log.push(`stop:${name}`)).pipe(
+              Effect.andThen(Ref.updateAndGet(stopped, (n) => n + 1)),
+              Effect.flatMap((n) =>
+                n === 3 ? Deferred.succeed(allStopped, undefined) : Effect.void,
+              ),
+            ),
+          ),
         );
-      yield* ServerRuntimeStartup.startLecturnReactors.pipe(
-        Effect.provideService(SquireReactor, {
-          start: record("reactor"),
+      const services = Layer.mergeAll(
+        SquireSwitch.layerTest(false),
+        Layer.succeed(SquireReactor, {
+          start: ({ turnedOn }: { readonly turnedOn: boolean }) =>
+            piece(`reactor(turnedOn=${turnedOn})`),
         } as unknown as SquireReactor["Service"]),
-        Effect.provideService(SquireDelivery, {
-          redispatchBatched: record("redispatch"),
+        Layer.succeed(SquireDelivery, {
+          redispatchBatched: piece("redispatch"),
         } as unknown as SquireDelivery["Service"]),
-        Effect.provideService(SquireClock, {
-          start: record("clock"),
-        } as unknown as SquireClock["Service"]),
+        Layer.succeed(SquireClock, { start: piece("clock") } as unknown as SquireClock["Service"]),
+        Layer.succeed(SquireRepository.SquireRepository, {
+          readCursor: Effect.sync(() => ({ ...cursor })),
+          writeCursor: (next: { readonly sequence: number; readonly enabled: boolean }) =>
+            Effect.sync(() => {
+              Object.assign(cursor, next);
+              log.push(`cursor:${next.enabled}@${next.sequence}`);
+            }).pipe(
+              Effect.andThen(next.enabled ? Effect.void : Deferred.succeed(cursorOff, undefined)),
+            ),
+        } as unknown as SquireRepository.SquireRepository["Service"]),
+        Layer.succeed(OrchestrationEventStore.OrchestrationEventStore, {
+          latestApplicationSequence: Effect.succeed(7),
+        } as unknown as OrchestrationEventStore.OrchestrationEventStore["Service"]),
       );
-      yield* Deferred.await(all);
-      assert.sameMembers(started, ["reactor", "redispatch", "clock"]);
+      yield* Effect.gen(function* () {
+        const control = yield* SquireSwitch.SquireSwitchControl;
+        yield* ServerRuntimeStartup.startLecturnReactors;
+        // Off at start: nothing runs and the cursor stays as it was.
+        assert.deepStrictEqual(log, []);
+
+        yield* SubscriptionRef.set(control, true);
+        yield* Deferred.await(allStarted);
+        assert.strictEqual(log[0], "cursor:true@7");
+        assert.sameMembers(log.slice(1), [
+          "start:reactor(turnedOn=true)",
+          "start:redispatch",
+          "start:clock",
+        ]);
+
+        log.length = 0;
+        yield* SubscriptionRef.set(control, false);
+        yield* Deferred.await(cursorOff);
+        yield* Deferred.await(allStopped);
+        assert.sameMembers(log.slice(0, 3), [
+          "stop:reactor(turnedOn=true)",
+          "stop:redispatch",
+          "stop:clock",
+        ]);
+        assert.deepStrictEqual(log.slice(3), ["cursor:false@7"]);
+      }).pipe(Effect.provide(services));
     }).pipe(Effect.scoped),
 );

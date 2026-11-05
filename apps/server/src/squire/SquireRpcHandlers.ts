@@ -1,11 +1,9 @@
 import { SquireError, SquireRpcs, WS_METHODS as M } from "@lecturn/contracts";
-import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as Stream from "effect/Stream";
 
-import * as ServerConfig from "../config.ts";
 import * as SquireActions from "./SquireActions.ts";
 import * as SquireItems from "./SquireItems.ts";
 import * as SquireLeadRpc from "./SquireLeadRpc.ts";
@@ -15,6 +13,7 @@ import * as SquireProbe from "./SquireProbe.ts";
 import * as SquireReadModel from "./SquireReadModel.ts";
 import * as SquireRules from "./SquireRules.ts";
 import * as SquireService from "./SquireService.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 import * as SquireTriggers from "./SquireTriggers.ts";
 
 // Only for typing the handler record; ws.ts serves these through its own group.
@@ -26,29 +25,31 @@ const disabled = new SquireError({
 });
 
 /**
- * Server-lifetime handlers for every Squire RPC. The services exist only
- * while `LECTURN_SQUIRE` is on (layerSquire.ts), so each is resolved as an
- * option, and every method refuses `disabled_by_server` when the switch is off
- * or its service is absent: the switch is unbypassable, like Stave's.
+ * Server-lifetime handlers for every Squire RPC. A focused runtime may lack a
+ * service, so each is resolved as an option, and every method refuses
+ * `disabled_by_server` when the switch reads off at the call or its service is
+ * absent: the switch is unbypassable, like Stave's.
  */
 export const make = Effect.fn("SquireRpcHandlers.make")(function* () {
-  const config = yield* ServerConfig.ServerConfig;
-  const resolve = <I, S>(tag: Context.Key<I, S>) =>
-    config.squireEnabled ? Effect.serviceOption(tag) : Effect.succeed(Option.none<S>());
-  const readModel = yield* resolve(SquireReadModel.SquireReadModel);
-  const service = yield* resolve(SquireService.SquireService);
-  const items = yield* resolve(SquireItems.SquireItems);
-  const rules = yield* resolve(SquireRules.SquireRules);
-  const triggers = yield* resolve(SquireTriggers.SquireTriggers);
-  const actions = yield* resolve(SquireActions.SquireActions);
-  const probe = yield* resolve(SquireProbe.SquireProbe);
-  const presence = yield* resolve(SquirePresence.SquirePresence);
-  const lead = yield* resolve(SquireLeadRpc.SquireLeadRpc);
+  const squireSwitch = yield* SquireSwitch.SquireSwitch;
+  // `refresh`, so a call that follows the client's own settings write sees it.
+  const requireOn = Effect.flatMap(squireSwitch.refresh, (on) =>
+    on ? Effect.void : Effect.fail(disabled),
+  );
+  const readModel = yield* Effect.serviceOption(SquireReadModel.SquireReadModel);
+  const service = yield* Effect.serviceOption(SquireService.SquireService);
+  const items = yield* Effect.serviceOption(SquireItems.SquireItems);
+  const rules = yield* Effect.serviceOption(SquireRules.SquireRules);
+  const triggers = yield* Effect.serviceOption(SquireTriggers.SquireTriggers);
+  const actions = yield* Effect.serviceOption(SquireActions.SquireActions);
+  const probe = yield* Effect.serviceOption(SquireProbe.SquireProbe);
+  const presence = yield* Effect.serviceOption(SquirePresence.SquirePresence);
+  const lead = yield* Effect.serviceOption(SquireLeadRpc.SquireLeadRpc);
 
   const use =
     <S>(option: Option.Option<S>) =>
     <A>(run: (service: S) => Effect.Effect<A, SquireError>): Effect.Effect<A, SquireError> =>
-      Option.isSome(option) ? run(option.value) : Effect.fail(disabled);
+      Option.isSome(option) ? Effect.andThen(requireOn, run(option.value)) : Effect.fail(disabled);
   const withReadModel = use(readModel);
   const withService = use(service);
   const withItems = use(items);
@@ -62,7 +63,9 @@ export const make = Effect.fn("SquireRpcHandlers.make")(function* () {
   return SquireRpcGroup.of({
     // Read-only: the Lead appears here only after `squire.lead.ensure` made it.
     [M.squireSubscribe]: () =>
-      Option.isSome(readModel) ? readModel.value.subscribe : Stream.fail(disabled),
+      Option.isSome(readModel)
+        ? Stream.unwrap(Effect.as(requireOn, readModel.value.subscribe))
+        : Stream.fail(disabled),
     [M.squireItemsList]: (input) => withReadModel((model) => model.itemsList(input)),
     [M.squireItemGet]: ({ cardId }) =>
       withItems((service) =>

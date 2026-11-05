@@ -327,24 +327,26 @@ const awaitMessageAfter = (threadId: ThreadId, afterSequence: number) =>
   );
 
 describe("Squire reactor and delivery integration", () => {
-  it.effect("the switch alone decides whether the reactor, delivery, and clock exist", () =>
-    withHome(({ restart }) =>
-      Effect.gen(function* () {
-        const present = Effect.gen(function* () {
-          return [
-            Option.isSome(yield* Effect.serviceOption(SquireReactor.SquireReactor)),
-            Option.isSome(yield* Effect.serviceOption(SquireDelivery.SquireDelivery)),
-            Option.isSome(yield* Effect.serviceOption(SquireClock.SquireClock)),
-          ];
-        });
-        assert.deepStrictEqual(yield* restart()(present), [true, true, true]);
-        assert.deepStrictEqual(yield* restart({ squireEnabled: false })(present), [
-          false,
-          false,
-          false,
-        ]);
-      }),
-    ),
+  it.effect(
+    "the reactor, delivery, and clock exist whatever the switch says, so it flips live",
+    () =>
+      withHome(({ restart }) =>
+        Effect.gen(function* () {
+          const present = Effect.gen(function* () {
+            return [
+              Option.isSome(yield* Effect.serviceOption(SquireReactor.SquireReactor)),
+              Option.isSome(yield* Effect.serviceOption(SquireDelivery.SquireDelivery)),
+              Option.isSome(yield* Effect.serviceOption(SquireClock.SquireClock)),
+            ];
+          });
+          assert.deepStrictEqual(yield* restart()(present), [true, true, true]);
+          assert.deepStrictEqual(yield* restart({ squireEnabled: false })(present), [
+            true,
+            true,
+            true,
+          ]);
+        }),
+      ),
   );
 
   it.effect("the Squire clock ticks on the runtime's Scheduler and builds none of its own", () =>
