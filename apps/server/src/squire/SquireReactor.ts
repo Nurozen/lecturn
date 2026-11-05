@@ -1241,6 +1241,10 @@ const make = Effect.gen(function* () {
       ),
       Effect.retry(Schedule.spaced("5 seconds")),
       Effect.orDie,
+      // The forked work belongs to the on period: turning Squires off stops a
+      // paid summary call mid-flight, and its `generating` row settles to
+      // `partial` before the next period's reactor can start the same summary.
+      Effect.ensuring(FiberSet.clear(fibers)),
     );
   };
 

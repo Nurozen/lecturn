@@ -103,6 +103,8 @@ interface Calls {
   gate: Deferred.Deferred<void> | undefined;
   /** Resolved when a summary generation starts. */
   ensureStarted: Deferred.Deferred<void> | undefined;
+  /** Resolved when a summary generation is interrupted. */
+  ensureInterrupted: Deferred.Deferred<void> | undefined;
   /** When set, summary generation returns it instead of the stub. */
   summary: typeof STUB_SUMMARY | undefined;
 }
@@ -116,6 +118,7 @@ const makeHarness = () => {
     driven: [],
     gate: undefined,
     ensureStarted: undefined,
+    ensureInterrupted: undefined,
     summary: undefined,
   };
   const delivery = Layer.succeed(
@@ -136,7 +139,14 @@ const makeHarness = () => {
         Effect.gen(function* () {
           calls.ensured.push(`${request.threadId}:${request.runId}:${request.stage}`);
           if (calls.ensureStarted) yield* Deferred.succeed(calls.ensureStarted, undefined);
-          if (calls.gate) yield* Deferred.await(calls.gate);
+          if (calls.gate) {
+            const interrupted = calls.ensureInterrupted;
+            yield* Deferred.await(calls.gate).pipe(
+              Effect.onInterrupt(() =>
+                interrupted ? Deferred.succeed(interrupted, undefined) : Effect.void,
+              ),
+            );
+          }
           return {
             status: "complete" as const,
             summary: calls.summary ?? STUB_SUMMARY,
@@ -791,6 +801,25 @@ describe("SquireReactor deferrals", () => {
         yield* Deferred.succeed(gate, undefined);
         yield* drain;
         assert.strictEqual((yield* rows)[0]?.status, "pending");
+      }),
+    ),
+  );
+
+  it.effect("ending the on period interrupts a summary it started", () =>
+    runIn((calls) =>
+      Effect.gen(function* () {
+        yield* setup();
+        const { fiber } = yield* startReactor;
+        const started = yield* Deferred.make<void>();
+        const interrupted = yield* Deferred.make<void>();
+        calls.gate = yield* Deferred.make<void>();
+        calls.ensureStarted = started;
+        calls.ensureInterrupted = interrupted;
+        yield* finishRun(RunId.make("run:paid"), "completed", yield* DateTime.now);
+        yield* Deferred.await(started);
+
+        yield* Fiber.interrupt(fiber);
+        assert.isTrue(yield* Deferred.isDone(interrupted));
       }),
     ),
   );
