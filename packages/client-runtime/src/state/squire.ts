@@ -1821,33 +1821,38 @@ const SQUIRE_UPDATE_GROUP_MIN = 2;
 /**
  * Consecutive Squire wakes in a home thread, with what each wake's turn produced, collapse
  * into one group: every wake is a row plus a fold plus a reply, which drowns the conversation.
+ * The newest wake stays out of every group, so its reply is always in view.
  */
 export function squireUpdateGroups<T>(
   items: ReadonlyArray<T>,
   roleOf: (item: T) => SquireUpdateItemRole,
   eventKindsOf: (item: T) => ReadonlyArray<string>,
 ): ReadonlyArray<SquireUpdateGroup> {
+  const roles = items.map(roleOf);
+  const newestWake = roles.lastIndexOf("wake");
   const groups: SquireUpdateGroup[] = [];
-  let start = -1;
-  let wakeCount = 0;
-  let kinds: string[] = [];
+  let wakes: number[] = [];
   const close = (end: number) => {
-    if (start !== -1 && wakeCount >= SQUIRE_UPDATE_GROUP_MIN) {
-      groups.push({ start, end, wakeCount, eventKinds: kinds });
+    const folded = wakes.at(-1) === newestWake ? wakes.slice(0, -1) : wakes;
+    if (folded.length >= SQUIRE_UPDATE_GROUP_MIN) {
+      const eventKinds: string[] = [];
+      for (const index of folded) {
+        for (const kind of eventKindsOf(items[index]!)) {
+          if (!eventKinds.includes(kind)) eventKinds.push(kind);
+        }
+      }
+      groups.push({
+        start: folded[0]!,
+        end: folded.length === wakes.length ? end : wakes.at(-1)!,
+        wakeCount: folded.length,
+        eventKinds,
+      });
     }
-    start = -1;
-    wakeCount = 0;
-    kinds = [];
+    wakes = [];
   };
-  items.forEach((item, index) => {
-    const role = roleOf(item);
-    if (role === "wake") {
-      if (start === -1) start = index;
-      wakeCount++;
-      for (const kind of eventKindsOf(item)) if (!kinds.includes(kind)) kinds.push(kind);
-    } else if (role !== "update") {
-      close(index);
-    }
+  roles.forEach((role, index) => {
+    if (role === "wake") wakes.push(index);
+    else if (role !== "update") close(index);
   });
   close(items.length);
   return groups;

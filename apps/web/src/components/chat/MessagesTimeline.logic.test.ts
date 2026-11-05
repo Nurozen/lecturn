@@ -5384,14 +5384,30 @@ describe("Squire home thread event rows", () => {
     );
   });
 
+  it("keeps the newest wake out of the group, so its reply stays in view", () => {
+    expect(grouped([...wake(1, []), ...wake(2, [])]).map((row) => row.id)).toEqual([
+      "batch-1",
+      "reply-1",
+      "batch-2",
+      "reply-2",
+    ]);
+    expect(grouped([...wake(1, []), ...wake(2, []), ...wake(3, [])]).map((row) => row.id)).toEqual([
+      "squire-updates:batch-1",
+      "batch-3",
+      "reply-3",
+    ]);
+  });
+
   it("shows a group's rows once expanded, and never folds an ordinary thread", () => {
-    const entries = [...wake(1, []), ...wake(2, [])];
+    const entries = [...wake(1, []), ...wake(2, []), ...wake(3, [])];
     expect(grouped(entries, new Set(["squire-updates:batch-1"])).map((row) => row.id)).toEqual([
       "squire-updates:batch-1",
       "batch-1",
       "reply-1",
       "batch-2",
       "reply-2",
+      "batch-3",
+      "reply-3",
     ]);
     expect(
       deriveMessagesTimelineRows({

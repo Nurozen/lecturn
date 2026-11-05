@@ -1632,7 +1632,7 @@ describe("squireUpdateGroups", () => {
       (item) => item.kinds ?? [],
     );
 
-  it("folds consecutive wakes with what their turns produced", () => {
+  it("folds older consecutive wakes with what their turns produced, never the newest", () => {
     expect(
       groups([
         { role: "user" },
@@ -1642,13 +1642,21 @@ describe("squireUpdateGroups", () => {
         { role: "update" },
         { role: "wake", kinds: ["pr-failed", "turn-completed"] },
         { role: "update" },
+        { role: "wake", kinds: ["message"] },
+        { role: "update" },
       ]),
     ).toEqual([{ start: 2, end: 7, wakeCount: 2, eventKinds: ["turn-completed", "pr-failed"] }]);
   });
 
   it("leaves a lone wake alone, and splits at the user's own messages", () => {
     expect(
-      groups([{ role: "wake" }, { role: "update" }, { role: "user" }, { role: "wake" }]),
+      groups([
+        { role: "wake" },
+        { role: "update" },
+        { role: "user" },
+        { role: "wake" },
+        { role: "wake" },
+      ]),
     ).toEqual([]);
   });
 
@@ -1660,6 +1668,7 @@ describe("squireUpdateGroups", () => {
         { role: "wake" },
         { role: "keep" },
         { role: "update" },
+        { role: "wake" },
       ]),
     ).toEqual([{ start: 0, end: 3, wakeCount: 2, eventKinds: [] }]);
   });

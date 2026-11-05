@@ -55,11 +55,20 @@ describe("groupSquireUpdates", () => {
     message("server-note", "r2", "user", "agent"),
     message("reply-2", "r2", "assistant"),
     message("follow-up", "r3", "user", "user"),
+    wake("wake-3", "r4", ["message"]),
+    message("reply-3", "r4", "assistant"),
   ];
 
   it("folds consecutive wakes and their output behind one collapsed row", () => {
     const rows = groupSquireUpdates(feed, null, new Set());
-    expect(ids(rows)).toEqual(["ask", "answer", "squire-updates:wake-1", "follow-up"]);
+    expect(ids(rows)).toEqual([
+      "ask",
+      "answer",
+      "squire-updates:wake-1",
+      "follow-up",
+      "wake-3",
+      "reply-3",
+    ]);
     expect(rows[2]).toMatchObject({
       type: "squire-updates",
       label: "2 Squire updates · pr failed, turn completed",
@@ -75,6 +84,8 @@ describe("groupSquireUpdates", () => {
       "squire-updates:wake-1",
       ...ids(feed.slice(2, 8)),
       "follow-up",
+      "wake-3",
+      "reply-3",
     ]);
   });
 
@@ -95,6 +106,11 @@ describe("groupSquireUpdates", () => {
       new Set(),
     );
     expect(ids(rows)).toEqual(ids([...feed.slice(2, 5), question, ...feed.slice(5)]));
+  });
+
+  it("never folds the newest wake, so its reply stays in view", () => {
+    const latest = feed.slice(0, 8);
+    expect(groupSquireUpdates(latest, null, new Set())).toBe(latest);
   });
 
   it("returns the feed untouched when no two wakes run together", () => {
