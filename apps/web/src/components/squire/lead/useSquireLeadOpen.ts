@@ -18,8 +18,9 @@ export function useSquireLeadOnboardingRun(
 }
 
 /**
- * `squire.lead.open` once per Lead view open. The server queues onboarding on the first
- * open and records the client's time zone for the digest; a queued onboarding shows the "looking" state.
+ * `squire.lead.open` once per Lead view open. It records the client's time zone for the digest
+ * and defers the paid onboarding, so the Lead's intro shows first; an older server ignores the
+ * deferral and queues it, which shows the "looking" state.
  */
 export function useSquireLeadOpen(environmentId: EnvironmentId, enabled: boolean) {
   const allowed = useAtomValue(squireEnvironment.leadOpen.permissionAtom(environmentId));
@@ -29,10 +30,29 @@ export function useSquireLeadOpen(environmentId: EnvironmentId, enabled: boolean
   useEffect(() => {
     if (!enabled || !allowed || opened.current) return;
     opened.current = true;
-    void leadOpen({ environmentId, input: { requestId: randomUUID() } }).then((result) => {
-      if (result._tag === "Success" && result.value.onboardingQueued) {
-        squireLeadOnboardingRuns.queued(environmentId);
-      }
-    });
+    void leadOpen({ environmentId, input: { requestId: randomUUID(), onboarding: "defer" } }).then(
+      (result) => {
+        if (result._tag === "Success" && result.value.onboardingQueued) {
+          squireLeadOnboardingRuns.queued(environmentId);
+        }
+      },
+    );
   }, [allowed, enabled, environmentId, leadOpen]);
+}
+
+/** The intro's "look over my threads": queues the paid onboarding turn. */
+export function useSquireLeadStartOnboarding(environmentId: EnvironmentId) {
+  const allowed = useAtomValue(squireEnvironment.leadOpen.permissionAtom(environmentId));
+  const leadOpen = useAtomCommand(squireEnvironment.leadOpen, { reportFailure: false });
+  const start = async () => {
+    const result = await leadOpen({
+      environmentId,
+      input: { requestId: randomUUID(), onboarding: "start" },
+    });
+    if (result._tag === "Failure") return false;
+    // Not queued means it already ran, from another client; the snapshot ends the intro then.
+    if (result.value.onboardingQueued) squireLeadOnboardingRuns.queued(environmentId);
+    return true;
+  };
+  return { allowed, start };
 }

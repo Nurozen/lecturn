@@ -169,6 +169,8 @@ describe("proposal portraits", () => {
   });
 });
 
+type PhaseInput = Parameters<typeof squireLeadOnboardingPhase>[0];
+
 describe("onboarding visibility", () => {
   const lead = {
     onboardedAt: "2026-11-01T10:00:00.000Z",
@@ -176,46 +178,40 @@ describe("onboarding visibility", () => {
     status: "active",
   } as const;
 
+  const phase = (
+    input: Partial<Omit<PhaseInput, "lead">> & { readonly lead?: Partial<PhaseInput["lead"]> },
+  ) =>
+    squireLeadOnboardingPhase({
+      proposalCount: 0,
+      run: null,
+      homeVisibleItemCount: 0,
+      ...input,
+      lead: { ...lead, ...input.lead },
+    });
+
   it("shows proposals whenever the Lead has some open", () => {
-    expect(squireLeadOnboardingPhase({ lead, proposalCount: 2, run: null })).toBe("proposals");
-    expect(
-      squireLeadOnboardingPhase({
-        lead: { ...lead, status: "paused" },
-        proposalCount: 1,
-        run: null,
-      }),
-    ).toBe("proposals");
+    expect(phase({ proposalCount: 2 })).toBe("proposals");
+    expect(phase({ lead: { status: "paused" }, proposalCount: 1 })).toBe("proposals");
   });
 
-  it("looks before the first open is recorded and while a queued onboarding runs", () => {
-    expect(
-      squireLeadOnboardingPhase({
-        lead: { ...lead, onboardedAt: null },
-        proposalCount: 0,
-        run: null,
-      }),
-    ).toBe("looking");
-    expect(squireLeadOnboardingPhase({ lead, proposalCount: 0, run: { sawWorking: true } })).toBe(
-      "looking",
-    );
+  it("introduces itself before any look-over while its home thread is empty", () => {
+    expect(phase({ lead: { onboardedAt: null } })).toBe("intro");
+  });
+
+  it("drops the intro once the user asks something, or until the home thread loads", () => {
+    expect(phase({ lead: { onboardedAt: null }, homeVisibleItemCount: 2 })).toBe("hidden");
+    expect(phase({ lead: { onboardedAt: null }, homeVisibleItemCount: null })).toBe("hidden");
+  });
+
+  it("looks while a queued look-over runs, even before the open is recorded", () => {
+    expect(phase({ run: { sawWorking: true } })).toBe("looking");
+    expect(phase({ lead: { onboardedAt: null }, run: { sawWorking: false } })).toBe("looking");
   });
 
   it("hides once onboarded with nothing open, or when the Lead cannot run", () => {
-    expect(squireLeadOnboardingPhase({ lead, proposalCount: 0, run: null })).toBe("hidden");
-    expect(
-      squireLeadOnboardingPhase({
-        lead: { ...lead, onboardedAt: null, lifecycle: "needs_provider" },
-        proposalCount: 0,
-        run: null,
-      }),
-    ).toBe("hidden");
-    expect(
-      squireLeadOnboardingPhase({
-        lead: { ...lead, onboardedAt: null, status: "paused" },
-        proposalCount: 0,
-        run: null,
-      }),
-    ).toBe("hidden");
+    expect(phase({})).toBe("hidden");
+    expect(phase({ lead: { onboardedAt: null, lifecycle: "needs_provider" } })).toBe("hidden");
+    expect(phase({ lead: { onboardedAt: null, status: "paused" } })).toBe("hidden");
   });
 
   it("ends a queued run only after the Lead was seen working and then stopped", () => {
@@ -272,7 +268,10 @@ describe("Lead greet on proposals", () => {
 });
 
 describe("Lead greeting line", () => {
-  it("speaks as the Lead while looking and once proposals are shown", () => {
+  it("speaks as the Lead in its intro, while looking, and once proposals are shown", () => {
+    expect(squireLeadGreeting("Lead", "intro", 0)).toBe(
+      "Hi, I'm your Lead. Here's what Squires can do for you.",
+    );
     expect(squireLeadGreeting("Lead", "looking", 0)).toBe(
       "Hi, I'm your Lead. I'm looking at your projects…",
     );

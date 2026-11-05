@@ -7,6 +7,7 @@ import type {
   SquireId,
 } from "@lecturn/contracts";
 import { UnknownUnionMember } from "@lecturn/contracts";
+import { squireLeadHello, squireLeadShowsIntro } from "@lecturn/client-runtime/state/squire";
 
 // Shared with the mobile app; re-exported so the Lead view's callers keep one import.
 export {
@@ -119,26 +120,26 @@ export function createSquireLeadOnboardingRuns() {
   };
 }
 
-export type SquireLeadOnboardingPhase = "proposals" | "looking" | "hidden";
+export type SquireLeadOnboardingPhase = "proposals" | "looking" | "intro" | "hidden";
 
 /**
- * Proposal cards while the Lead has open Squire proposals; "looking" before the first
- * open is recorded or while the queued onboarding turn has yet to end; otherwise nothing.
- * A Lead that cannot run (no provider, paused) never looks.
+ * Proposal cards while the Lead has open Squire proposals; "looking" while a look-over this page
+ * queued has yet to end; the fixed intro before any look-over while the home thread is empty;
+ * otherwise nothing. A Lead that cannot run (no provider, paused) shows none of them.
  */
 export function squireLeadOnboardingPhase(input: {
   readonly lead: Pick<Squire, "onboardedAt" | "lifecycle" | "status">;
   readonly proposalCount: number;
   readonly run: SquireLeadOnboardingRun | null;
+  /** Null until the home thread loads. */
+  readonly homeVisibleItemCount: number | null;
 }): SquireLeadOnboardingPhase {
   if (input.proposalCount > 0) return "proposals";
   if (input.lead.lifecycle !== "ready" || input.lead.status !== "active") return "hidden";
-  if (input.lead.onboardedAt === null || input.run !== null) return "looking";
+  if (input.run !== null) return "looking";
+  if (squireLeadShowsIntro(input)) return "intro";
   return "hidden";
 }
-
-/** The name a new Lead is created with; a Lead still called this greets as "your Lead". */
-const SQUIRE_LEAD_DEFAULT_NAME = "Lead";
 
 /**
  * The line the Lead says at the top of its onboarding panel, in its own
@@ -149,11 +150,8 @@ export function squireLeadGreeting(
   phase: Exclude<SquireLeadOnboardingPhase, "hidden">,
   proposalCount: number,
 ): string {
-  const trimmed = name.trim();
-  const who =
-    trimmed === "" || trimmed.toLowerCase() === SQUIRE_LEAD_DEFAULT_NAME.toLowerCase()
-      ? "Hi, I'm your Lead."
-      : `Hi, I'm ${trimmed}, your Lead.`;
+  const who = squireLeadHello(name);
+  if (phase === "intro") return `${who} Here's what Squires can do for you.`;
   if (phase === "looking") return `${who} I'm looking at your projects…`;
   const suggestion = proposalCount === 1 ? "this Squire" : "these Squires";
   return `${who} I looked at your projects and suggest ${suggestion}.`;
