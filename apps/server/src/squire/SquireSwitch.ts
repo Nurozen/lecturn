@@ -7,6 +7,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
@@ -38,6 +39,9 @@ const fromRef = (
   ref: SubscriptionRef.SubscriptionRef<boolean>,
   pinned: boolean,
   readSaved: Effect.Effect<boolean>,
+  // Orders `refresh` with the settings stream's writes, so a refresh that read
+  // a saved "on" cannot land after the stream applied a later "off".
+  writes: Semaphore.Semaphore,
 ) => {
   const isOn = SubscriptionRef.get(ref);
   const changes = SubscriptionRef.changes(ref).pipe(Stream.changes);
@@ -45,12 +49,16 @@ const fromRef = (
     isOn,
     changes,
     pinned,
-    refresh: Effect.gen(function* () {
-      if (pinned || (yield* isOn)) return yield* isOn;
-      const saved = yield* readSaved;
-      if (saved) yield* SubscriptionRef.set(ref, true);
-      return saved;
-    }),
+    refresh: pinned
+      ? isOn
+      : writes.withPermits(1)(
+          Effect.gen(function* () {
+            if (yield* isOn) return true;
+            const saved = yield* readSaved;
+            if (saved) yield* SubscriptionRef.set(ref, true);
+            return saved;
+          }),
+        ),
     whileOn: (effect) =>
       changes.pipe(
         Stream.switchMap((on) => (on ? Stream.fromEffect(effect) : Stream.empty)),
@@ -63,7 +71,7 @@ const make = Effect.gen(function* () {
   const { squireEnabledOverride } = yield* ServerConfig.ServerConfig;
   if (squireEnabledOverride !== undefined) {
     const ref = yield* SubscriptionRef.make(squireEnabledOverride);
-    return fromRef(ref, true, Effect.succeed(squireEnabledOverride));
+    return fromRef(ref, true, Effect.succeed(squireEnabledOverride), Semaphore.makeUnsafe(1));
   }
   const settings = yield* ServerSettings.ServerSettingsService;
   // An unreadable settings file reads as off, like a missing one.
@@ -79,10 +87,11 @@ const make = Effect.gen(function* () {
   // Subscribed before the seed read, so no write falls between them.
   const saved = yield* settings.subscribeChanges;
   const ref = yield* SubscriptionRef.make(yield* readSaved);
+  const writes = yield* Semaphore.make(1);
   yield* Stream.runForEach(saved, (current) =>
-    SubscriptionRef.set(ref, current.squire.enabled),
+    writes.withPermits(1)(SubscriptionRef.set(ref, current.squire.enabled)),
   ).pipe(Effect.forkScoped);
-  return fromRef(ref, false, readSaved);
+  return fromRef(ref, false, readSaved, writes);
 });
 
 export const layer = Layer.effect(SquireSwitch, make);
@@ -99,6 +108,6 @@ export const layerTest = (on: boolean) =>
     SquireSwitch,
     Effect.gen(function* () {
       const ref = yield* SquireSwitchControl;
-      return fromRef(ref, false, SubscriptionRef.get(ref));
+      return fromRef(ref, false, SubscriptionRef.get(ref), Semaphore.makeUnsafe(1));
     }),
   ).pipe(Layer.provideMerge(Layer.effect(SquireSwitchControl, SubscriptionRef.make(on))));
