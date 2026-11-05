@@ -1741,3 +1741,56 @@ export function squireProposalPermissionsLabel(permissions: SquirePermissions): 
   if (parts.length === 0) return notify === null ? "Recommend only" : `Recommend only · ${notify}`;
   return [...parts, ...(notify === null ? [] : [notify])].join(" · ");
 }
+
+// ── Lead intro ────────────────────────────────────────────────
+
+/** The name a new Lead is created with; a Lead still called this introduces itself as "your Lead". */
+const SQUIRE_LEAD_DEFAULT_NAME = "Lead";
+
+/** "Hi, I'm your Lead.", or under the name the user gave it. */
+export function squireLeadHello(name: string): string {
+  const trimmed = name.trim();
+  return trimmed === "" || trimmed.toLowerCase() === SQUIRE_LEAD_DEFAULT_NAME.toLowerCase()
+    ? "Hi, I'm your Lead."
+    : `Hi, I'm ${trimmed}, your Lead.`;
+}
+
+/** Starts the paid onboarding turn from the intro. */
+export const SQUIRE_LEAD_INTRO_START_LABEL = "Look over my threads";
+
+/**
+ * The Lead's fixed first message, so meeting it costs no provider turn. Mobile has no New
+ * Squire or composer of its own on the Lead's screen, so it points elsewhere.
+ */
+export function squireLeadIntro(surface: "desktop" | "mobile"): ReadonlyArray<string> {
+  return [
+    "Squires keep watch over your threads. When one finishes, stalls, or waits on you, its Squire stays quiet, asks you to decide, or acts within the permissions you set.",
+    surface === "mobile"
+      ? "I can propose Squires that fit your work, or you can add one with New Squire on desktop or web."
+      : "I can propose Squires that fit your work, or you can add one with New Squire.",
+    surface === "mobile"
+      ? "Each Squire's rules are at the bottom of its screen. Accepting a recommendation can save one with Always allow this."
+      : "Each Squire's rules are in its settings. Accepting a recommendation can save one with Always allow this.",
+    surface === "mobile"
+      ? `Open Chat to ask me anything, or tap ${SQUIRE_LEAD_INTRO_START_LABEL} and I'll suggest a few. That runs one turn on my provider.`
+      : `Ask me anything below, or choose ${SQUIRE_LEAD_INTRO_START_LABEL} and I'll suggest a few. That runs one turn on my provider.`,
+  ];
+}
+
+/**
+ * The intro shows until onboarding has run and while the Lead's home thread is still empty, so
+ * a question asked below or a look-over started anywhere ends it. A Lead that cannot run (no
+ * provider, paused) has nothing to offer here. `homeVisibleItemCount` is null until the home
+ * thread loads, which keeps the intro from flashing over an existing conversation.
+ */
+export function squireLeadShowsIntro(input: {
+  readonly lead: Pick<Squire, "onboardedAt" | "lifecycle" | "status">;
+  readonly homeVisibleItemCount: number | null;
+}): boolean {
+  return (
+    input.lead.onboardedAt === null &&
+    input.lead.lifecycle === "ready" &&
+    input.lead.status === "active" &&
+    input.homeVisibleItemCount === 0
+  );
+}

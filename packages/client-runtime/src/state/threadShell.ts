@@ -130,6 +130,24 @@ export function isListedThread(
   );
 }
 
+/**
+ * Top-level threads with a run in flight right now. Squire threads and subagents are left out,
+ * and so is a run stopped on the user, since that thread is not busy.
+ */
+export function runningThreadCount(threads: ReadonlyArray<OrchestrationV2ThreadShell>): number {
+  let count = 0;
+  for (const thread of threads) {
+    if (thread.archivedAt !== null || thread.deletedAt !== null) continue;
+    if (thread.lineage.relationshipToParent === "subagent" || thread.squire !== undefined) continue;
+    if (thread.pendingRuntimeRequest !== null) continue;
+    // Older servers omit the activity run, so the latest run's status stands in.
+    const status =
+      thread.activityRunStatus === undefined ? thread.status : thread.activityRunStatus;
+    if (status === "preparing" || status === "starting" || status === "running") count++;
+  }
+  return count;
+}
+
 const sameWireThreadShell = Schema.toEquivalence(OrchestrationV2ThreadShell);
 
 // While a run streams, the server bumps the shell's timestamps, item counts and
@@ -221,6 +239,13 @@ export function createEnvironmentThreadShellAtoms(input: {
       (get): ReadonlyArray<OrchestrationV2ThreadShell> =>
         get(input.snapshotAtom(environmentId))?.threads ?? EMPTY_THREADS,
     ).pipe(Atom.withLabel(`environment-threads:${environmentId}`)),
+  );
+
+  /** A number, so a streaming snapshot stops here unless the count changes. */
+  const runningThreadCountAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make((get) => runningThreadCount(get(environmentThreadsAtom(environmentId)))).pipe(
+      Atom.withLabel(`environment-running-thread-count:${environmentId}`),
+    ),
   );
 
   const environmentThreadIndexAtom = Atom.family((environmentId: EnvironmentId) =>
@@ -500,6 +525,7 @@ export function createEnvironmentThreadShellAtoms(input: {
   return {
     environmentThreadsAtom,
     environmentThreadIndexAtom,
+    runningThreadCountAtom,
     environmentThreadRefsAtom,
     environmentThreadRefsByProjectAtom,
     threadRefsAtom,
