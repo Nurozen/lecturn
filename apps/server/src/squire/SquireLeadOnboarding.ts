@@ -61,9 +61,10 @@ export class SquireLeadOnboarding extends Context.Service<
   {
     /**
      * `squire.lead.open`: creates the Lead if absent, stores the
-     * client's timezone when the Lead has none, and on the first open not
-     * marked `defer` enqueues `onboarding` once. A Lead without a provider
-     * keeps the row pending until it has one.
+     * client's timezone when the Lead has none, and enqueues `onboarding`
+     * once: on `start`, or on a plain first open before the user has chatted
+     * with the Lead. A Lead without a provider keeps the row pending until it
+     * has one.
      */
     readonly open: (
       input: typeof SquireLeadOpenInput.Type,
@@ -318,8 +319,15 @@ const make = Effect.gen(function* () {
       const lead = yield* requireLead(input.requestId);
       const zone = validZone(input.timezone);
       const now = yield* nowIso;
-      // A deferred open leaves `onboarded_at` unset, so a later open queues it.
-      const queueOnboarding = lead.onboarded_at === null && input.onboarding !== "defer";
+      // `start` queues the scan unless one was queued already; a plain open
+      // (older clients) only while `onboarded_at` is unset, which a deferred
+      // open leaves and the user's first chat with the Lead stamps.
+      const queueOnboarding =
+        input.onboarding === "defer"
+          ? false
+          : input.onboarding === "start"
+            ? Option.isNone(yield* queuedBy(lead.id).pipe(orSquireError("read the Lead's log")))
+            : lead.onboarded_at === null;
       // Read before the transaction: the scan reads other stores, and the
       // event key keeps a concurrent open from queuing twice anyway.
       const context = queueOnboarding ? yield* scan.pipe(orSquireError("scan the projects")) : null;

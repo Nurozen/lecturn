@@ -30,10 +30,12 @@ import * as Stream from "effect/Stream";
 
 import * as EffectWorker from "../orchestration-v2/EffectWorker.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as SquireActions from "./SquireActions.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
 import { withSquireDispatchOrigin } from "./SquireDispatchOrigin.ts";
 import * as SquireLeadOnboarding from "./SquireLeadOnboarding.ts";
+import * as SquireReactor from "./SquireReactor.ts";
 import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireService from "./SquireService.ts";
 import * as SquireTools from "./SquireTools.ts";
@@ -282,6 +284,28 @@ describe("SquireLeadOnboarding.open", () => {
         );
         assert.lengthOf(onboarding, 1);
         assert.isFalse((yield* open("open-4")).onboardingQueued);
+      }),
+    ),
+  );
+
+  it.effect("a chat with the Lead keeps a plain open from queuing the scan; start still does", () =>
+    withLead((lead) =>
+      Effect.gen(function* () {
+        assert.isFalse((yield* open("open-1", undefined, "defer")).onboardingQueued);
+        const reactor = yield* need(SquireReactor.SquireReactor);
+        yield* Effect.forkScoped(reactor.start({ turnedOn: false }));
+        yield* userTurn(lead.homeThreadId, "Hello.");
+        const events = yield* need(OrchestrationEventStore.OrchestrationEventStore);
+        yield* reactor.drainThrough(yield* events.latestApplicationSequence);
+        assert.isNotNull((yield* leadRow(lead.squireId)).onboarded_at);
+
+        assert.isFalse((yield* open("open-2")).onboardingQueued);
+        assert.isTrue((yield* open("open-3", undefined, "start")).onboardingQueued);
+        assert.isFalse((yield* open("open-4", undefined, "start")).onboardingQueued);
+        const onboarding = (yield* eventsOf(lead.squireId)).filter(
+          (row) => row.kind === "onboarding",
+        );
+        assert.lengthOf(onboarding, 1);
       }),
     ),
   );

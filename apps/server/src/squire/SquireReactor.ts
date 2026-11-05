@@ -1118,6 +1118,26 @@ const make = Effect.gen(function* () {
       });
     }).pipe(logged("Squire auto-decline failed", { requestId: effect.requestId }));
 
+  /**
+   * A user who talks to the Lead before its first-run scan has met it their
+   * own way: the scan stays off until a client asks for it with `start`, so
+   * an older client's plain open never queues it later.
+   */
+  const noteLeadChat = (squireId: SquireId, threadId: ThreadId, runId: RunId) =>
+    Effect.gen(function* () {
+      const squire = yield* repository.getSquire(squireId);
+      if (Option.isNone(squire) || squire.value.role !== "lead") return;
+      if (squire.value.onboarded_at !== null) return;
+      const message = yield* projections.getRunMessage(threadId, runId);
+      if (message?.createdBy !== "user") return;
+      const now = yield* nowIso;
+      yield* repository.updateSquire({
+        id: squireId,
+        patch: { onboarded_at: now },
+        updatedAt: now,
+      });
+    });
+
   const apply = (effect: SquireReactorEffect, stored: ApplicationStoredEvent) => {
     switch (effect.type) {
       case "request-resolved":
@@ -1136,12 +1156,16 @@ const make = Effect.gen(function* () {
         return effect.squire.role === "home"
           ? fork(
               "Squire run finalize failed",
-              delivery.finalizeRun({
-                squireId: effect.squire.squireId,
-                homeThreadId: effect.threadId,
-                runId: effect.runId,
-                status: effect.status,
-              }),
+              noteLeadChat(effect.squire.squireId, effect.threadId, effect.runId).pipe(
+                Effect.andThen(
+                  delivery.finalizeRun({
+                    squireId: effect.squire.squireId,
+                    homeThreadId: effect.threadId,
+                    runId: effect.runId,
+                    status: effect.status,
+                  }),
+                ),
+              ),
             )
           : Option.isSome(probe)
             ? fork(
