@@ -8,7 +8,7 @@ import type {
 // The "squire knocks" suggestion: a Squire offers to help a busy user while Squires are off.
 
 /** Threads running at once on one environment before a Squire offers to help. */
-export const SQUIRE_KNOCK_MIN_RUNNING = 2;
+const SQUIRE_KNOCK_MIN_RUNNING = 2;
 
 const SQUIRE_KNOCK_SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -31,6 +31,19 @@ export function squireKnockHidden(knock: SquireKnockSettings, now: number): bool
   if (knock.snoozedUntil === "") return false;
   const until = Date.parse(knock.snoozedUntil);
   return Number.isFinite(until) && until > now;
+}
+
+/**
+ * Settings' line for a suggestion the user turned away, or null when there is nothing to bring
+ * back: never hidden, or a snooze that has run out.
+ */
+export function squireKnockResetDescription(
+  knock: SquireKnockSettings,
+  now: number,
+): string | null {
+  if (knock.dismissed) return "Hidden with Don't show again.";
+  if (squireKnockHidden(knock, now)) return "Hidden for now with Not now.";
+  return null;
 }
 
 /**

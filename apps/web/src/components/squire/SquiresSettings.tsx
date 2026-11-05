@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { resolveProviderInstanceDisplayName } from "@lecturn/client-runtime/state/provider-instance-display";
+import { squireKnockResetDescription } from "@lecturn/client-runtime/state/squireKnock";
 import {
   squireStateLine,
   type SquireEnvironmentState,
@@ -176,18 +177,16 @@ function SquireKnockResetRow(props: { readonly environmentId: EnvironmentId }) {
     .capabilities;
   const canWrite = useEnvironmentScope(environmentId, AuthSettingsWriteScope);
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
-  if (
-    knock === undefined ||
-    (!knock.dismissed && knock.snoozedUntil === "") ||
-    capabilities?.squireLiveSwitch !== true ||
-    capabilities.squire === true
-  ) {
+  // Read once per mount: a snooze that runs out while Settings stays open shows until revisited.
+  const [now] = useState(() => Date.now());
+  const hidden = knock === undefined ? null : squireKnockResetDescription(knock, now);
+  if (hidden === null || capabilities?.squireLiveSwitch !== true || capabilities.squire === true) {
     return null;
   }
   return (
     <SettingsRow
       title="Squire suggestion"
-      description="Hidden. While Squires are off, a Squire offers to help when two or more threads run at once."
+      description={`${hidden} While Squires are off, a Squire offers to help when two or more threads run at once.`}
       control={
         <Button
           size="xs"

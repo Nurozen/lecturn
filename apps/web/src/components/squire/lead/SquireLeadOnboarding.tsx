@@ -30,6 +30,7 @@ import {
 import { SquireProposalSummary } from "./SquireProposalSummary";
 import {
   squireLeadOnboardingRuns,
+  useSquireLeadIntroSupported,
   useSquireLeadOnboardingRun,
   useSquireLeadStartOnboarding,
 } from "./useSquireLeadOpen";
@@ -99,6 +100,7 @@ export function SquireLeadOnboarding(props: {
   const run = useSquireLeadOnboardingRun(environmentId);
   const working = useSquireIndicator(environmentId, lead).state === "working";
   const homeShell = useSquireHomeShell(environmentId, lead);
+  const introSupported = useSquireLeadIntroSupported(environmentId);
   // Re-runs when a run is queued, since the Lead may already be working by then.
   useEffect(() => {
     if (run === null) return;
@@ -115,6 +117,7 @@ export function SquireLeadOnboarding(props: {
     run,
     homeVisibleItemCount:
       lead.squire.homeThreadId === null ? 0 : (homeShell?.visibleItemCount ?? null),
+    introSupported,
   });
   const shownKey = phase === "proposals" ? shown.map((proposal) => proposal.card.id).join() : "";
   // Greet when the cards first appear, on whichever figure is mounted. Child effects run

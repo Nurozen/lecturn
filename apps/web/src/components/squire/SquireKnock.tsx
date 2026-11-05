@@ -7,23 +7,21 @@ import {
   SQUIRE_KNOCK_TITLE,
   squireKnockSnoozedUntil,
 } from "@lecturn/client-runtime/state/squireKnock";
+import type { SquireEnvironmentState } from "@lecturn/client-runtime/state/squire";
 import {
+  AuthOrchestrationReadScope,
   AuthSettingsWriteScope,
   type EnvironmentId,
   type ServerSettingsPatch,
 } from "@lecturn/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { Atom } from "effect/reactivity";
-import { useEffect, useEffectEvent, useRef } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { useEnvironmentIdentities } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentScope } from "../../state/session";
-import {
-  squireCapableAtom,
-  squireEnvironment,
-  useSquireEnvironmentState,
-} from "../../state/squires";
+import { squireCapableAtom, squireEnvironment } from "../../state/squires";
 import { environmentThreadShells } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { toastManager } from "../ui/toast";
@@ -47,12 +45,22 @@ const NOT_ENSURING = Atom.make(false);
 
 export function SquireKnockCoordinator() {
   const environments = useEnvironmentIdentities();
-  return environments.map(({ environmentId }) => (
-    <SquireKnockEnvironment key={environmentId} environmentId={environmentId} />
+  return environments.map(({ environmentId, label }) => (
+    <SquireKnockEnvironment
+      key={environmentId}
+      environmentId={environmentId}
+      label={environments.length > 1 ? label : null}
+    />
   ));
 }
 
-function SquireKnockEnvironment(props: { readonly environmentId: EnvironmentId }) {
+const NO_STATE = Atom.make<SquireEnvironmentState | null>(null);
+
+function SquireKnockEnvironment(props: {
+  readonly environmentId: EnvironmentId;
+  /** Set when more than one environment could knock, so the toast says which. */
+  readonly label: string | null;
+}) {
   const { environmentId } = props;
   const navigate = useNavigate();
   const config = useAtomValue(serverEnvironment.configValueAtom(environmentId));
@@ -62,16 +70,20 @@ function SquireKnockEnvironment(props: { readonly environmentId: EnvironmentId }
     environmentThreadShells.runningThreadCountAtom(environmentId),
   );
   const capable = useAtomValue(squireCapableAtom(environmentId));
-  const lead = useSquireEnvironmentState(environmentId)?.lead ?? null;
+  const readable = useEnvironmentScope(environmentId, AuthOrchestrationReadScope);
+  // "Meet your Lead" waits here, past the toast, for the switch to apply and the Lead to exist.
+  // Squires are subscribed only then, and only where this session may read them.
+  const [meetingToast, setMeetingToast] = useState<string | null>(null);
+  const waiting = meetingToast !== null && capable && readable;
+  const lead = useAtomValue(waiting ? squireEnvironment.state(environmentId) : NO_STATE)?.lead;
+  // Creates a missing Lead, as the sidebar does.
+  useAtomValue(waiting ? squireEnvironment.ensureLead(environmentId) : NOT_ENSURING);
+  const navigated = useRef<string | null>(null);
   const writeSettings = useAtomCommand(serverEnvironment.updateSettings, {
     label: "squire suggestion",
     reportFailure: false,
   });
-  // Creates a missing Lead once Squires run, as the sidebar does, for "Meet your Lead".
-  useAtomValue(capable ? squireEnvironment.ensureLead(environmentId) : NOT_ENSURING);
   const shownToast = useRef<string | null>(null);
-  // "Meet your Lead" waits here, past the toast, for the switch to apply and the Lead to exist.
-  const meetingToast = useRef<string | null>(null);
 
   const capabilities = config?.environment.capabilities ?? null;
   const save = async (patch: ServerSettingsPatch) => {
@@ -87,14 +99,11 @@ function SquireKnockEnvironment(props: { readonly environmentId: EnvironmentId }
 
   const meetLead = async () => {
     const toastId = toastManager.add({ type: "loading", title: "Waking your Lead…", timeout: 0 });
-    if (!(await save({ squire: { enabled: true } }))) {
-      toastManager.close(toastId);
-      return;
-    }
-    meetingToast.current = toastId;
-    setTimeout(() => {
-      if (meetingToast.current !== toastId) return;
-      meetingToast.current = null;
+    // Waiting before the save returns, so a Lead that is quicker than the reply is not missed.
+    setMeetingToast(toastId);
+    const timer = setTimeout(() => {
+      if (navigated.current === toastId) return;
+      setMeetingToast(null);
       toastManager.update(toastId, {
         type: "info",
         title: "Squires are on",
@@ -102,6 +111,11 @@ function SquireKnockEnvironment(props: { readonly environmentId: EnvironmentId }
         timeout: 8_000,
       });
     }, MEET_LEAD_TIMEOUT_MS);
+    if (!(await save({ squire: { enabled: true } }))) {
+      clearTimeout(timer);
+      setMeetingToast(null);
+      toastManager.close(toastId);
+    }
   };
 
   // An event, so the clock is read outside render and the toast's handlers are current.
@@ -121,7 +135,8 @@ function SquireKnockEnvironment(props: { readonly environmentId: EnvironmentId }
     };
     shownToast.current = toastManager.add({
       title: SQUIRE_KNOCK_TITLE,
-      description: SQUIRE_KNOCK_BODY,
+      description:
+        props.label === null ? SQUIRE_KNOCK_BODY : `On ${props.label}. ${SQUIRE_KNOCK_BODY}`,
       timeout: 0,
       onClose: () => {
         shownToast.current = null;
@@ -183,18 +198,22 @@ function SquireKnockEnvironment(props: { readonly environmentId: EnvironmentId }
       },
     });
   });
-  // Eligible but for a snooze, which the event checks against the clock.
+  // Eligible but for a snooze, which the event checks against the clock. Keyed by the saved
+  // knock, so "Show again" in settings re-arms it.
   const candidate =
     capabilities !== null &&
+    knock !== undefined &&
     shouldSquireKnock({
       capabilities,
       canWriteSettings,
-      knock: knock === undefined ? null : { ...knock, snoozedUntil: "" },
+      knock: { ...knock, snoozedUntil: "" },
       runningThreadCount,
       now: 0,
-    });
+    })
+      ? `${knock.dismissed}:${knock.snoozedUntil}`
+      : null;
   useEffect(() => {
-    if (candidate) knockOnce();
+    if (candidate !== null) knockOnce();
   }, [candidate]);
 
   // Squires came on from anywhere: the offer is moot.
@@ -205,15 +224,16 @@ function SquireKnockEnvironment(props: { readonly environmentId: EnvironmentId }
   }, [capable]);
 
   useEffect(() => {
-    const toastId = meetingToast.current;
-    if (toastId === null || !capable || lead === null) return;
-    meetingToast.current = null;
-    toastManager.close(toastId);
+    if (meetingToast === null || lead == null || navigated.current === meetingToast) return;
+    // The waiting state is left set: the knock is spent for this session, and the sidebar
+    // keeps the same subscription once Squires are on.
+    navigated.current = meetingToast;
+    toastManager.close(meetingToast);
     void navigate({
       to: "/squires/$environmentId/$squireId",
       params: { environmentId, squireId: lead },
     });
-  }, [capable, environmentId, lead, navigate]);
+  }, [environmentId, lead, meetingToast, navigate]);
 
   return null;
 }

@@ -6,6 +6,7 @@ import {
   randomSquireKnockPortrait,
   shouldSquireKnock,
   squireKnockHidden,
+  squireKnockResetDescription,
   squireKnockSnoozedUntil,
   type SquireKnockInput,
 } from "./squireKnock.ts";
@@ -60,6 +61,18 @@ describe("shouldSquireKnock", () => {
 describe("squireKnockHidden", () => {
   it("snoozes for a week", () => {
     expect(squireKnockSnoozedUntil(NOW)).toBe("2026-11-12T12:00:00.000Z");
+  });
+
+  it("offers a reset only while the suggestion is hidden", () => {
+    const snoozedUntil = squireKnockSnoozedUntil(NOW);
+    expect(squireKnockResetDescription({ dismissed: true, snoozedUntil: "" }, NOW)).toMatch(
+      /Don't show again/,
+    );
+    expect(squireKnockResetDescription({ dismissed: false, snoozedUntil }, NOW)).toMatch(/Not now/);
+    expect(
+      squireKnockResetDescription({ dismissed: false, snoozedUntil }, Date.parse(snoozedUntil)),
+    ).toBeNull();
+    expect(squireKnockResetDescription({ dismissed: false, snoozedUntil: "" }, NOW)).toBeNull();
   });
 
   it("treats an unreadable snooze as no snooze", () => {

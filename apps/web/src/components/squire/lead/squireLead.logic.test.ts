@@ -185,6 +185,7 @@ describe("onboarding visibility", () => {
       proposalCount: 0,
       run: null,
       homeVisibleItemCount: 0,
+      introSupported: true,
       ...input,
       lead: { ...lead, ...input.lead },
     });
@@ -201,6 +202,11 @@ describe("onboarding visibility", () => {
   it("drops the intro once the user asks something, or until the home thread loads", () => {
     expect(phase({ lead: { onboardedAt: null }, homeVisibleItemCount: 2 })).toBe("hidden");
     expect(phase({ lead: { onboardedAt: null }, homeVisibleItemCount: null })).toBe("hidden");
+  });
+
+  it("looks until the first open is recorded on a server without the intro", () => {
+    expect(phase({ lead: { onboardedAt: null }, introSupported: false })).toBe("looking");
+    expect(phase({ introSupported: false })).toBe("hidden");
   });
 
   it("looks while a queued look-over runs, even before the open is recorded", () => {
