@@ -140,12 +140,13 @@ const eventsOf = (squireId: SquireId) =>
     }),
   );
 
-const open = (requestId: string, timezone?: string) =>
+const open = (requestId: string, timezone?: string, onboarding?: "start" | "defer") =>
   Effect.gen(function* () {
-    const onboarding = yield* SquireLeadOnboarding.SquireLeadOnboarding;
-    const result = yield* onboarding.open({
+    const service = yield* SquireLeadOnboarding.SquireLeadOnboarding;
+    const result = yield* service.open({
       requestId,
       ...(timezone === undefined ? {} : { timezone }),
+      ...(onboarding === undefined ? {} : { onboarding }),
     });
     yield* (yield* need(SquireDelivery.SquireDelivery)).drain;
     return result;
@@ -262,6 +263,25 @@ describe("SquireLeadOnboarding.open", () => {
         const view = Option.getOrThrow(yield* service.get(lead.squireId));
         assert.strictEqual(view.timezone, "America/Los_Angeles");
         assert.isNull(view.digest);
+      }),
+    ),
+  );
+
+  it.effect("a deferred open makes the Lead without onboarding; a later start queues it", () =>
+    withLead((lead) =>
+      Effect.gen(function* () {
+        const deferred = yield* open("open-1", "America/Los_Angeles", "defer");
+        assert.deepStrictEqual(deferred, { squireId: lead.squireId, onboardingQueued: false });
+        assert.isNull((yield* leadRow(lead.squireId)).onboarded_at);
+        assert.strictEqual((yield* leadRow(lead.squireId)).timezone, "America/Los_Angeles");
+        assert.isFalse((yield* open("open-2", undefined, "defer")).onboardingQueued);
+
+        assert.isTrue((yield* open("open-3", undefined, "start")).onboardingQueued);
+        const onboarding = (yield* eventsOf(lead.squireId)).filter(
+          (row) => row.kind === "onboarding",
+        );
+        assert.lengthOf(onboarding, 1);
+        assert.isFalse((yield* open("open-4")).onboardingQueued);
       }),
     ),
   );
