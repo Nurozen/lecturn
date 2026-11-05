@@ -1741,6 +1741,10 @@ export const SquireLeadOpenInput = Schema.Struct({
   requestId: RequestId,
   /** The client's IANA zone; stored on the Lead when it has none. */
   timezone: Schema.optionalKey(TrimmedNonEmptyString),
+  /** `defer` opens without queuing the paid first-run onboarding, so the client can
+      show the fixed intro first; `start` queues it if it has not run. Absent means
+      `start`, the behavior of clients older than the intro. */
+  onboarding: Schema.optionalKey(Schema.Literals(["start", "defer"])),
 });
 export const SquireLeadOpenResult = Schema.Struct({
   squireId: SquireId,
