@@ -80,6 +80,12 @@ isolation on start, resume, and fork.
 
 ## Events
 
+Settled and archived threads are outside every Squire's scope, thread grants included:
+`SquireScope` reads the shell fresh on each decision, so a settle untracks at once and an unsettle
+brings the grants back. When a thread settles or archives the reactor drops its waiting events and
+outdates its cards and holds, and a held steer re-checks at execution, since the settle may not have
+reached the reactor yet.
+
 [SquireReactor.ts][reactor] classifies each transition from its stored payload, never the current
 projection, and dedupes on (Squire, kind, thread, state key). PR keys are absolute states, because
 the sync reactor republishes unchanged snapshots, so the daily prune keeps PR keys while their

@@ -594,7 +594,68 @@ const finishRun = (
     yield* write([runEvent(threadId, runId, status, now)]);
   });
 
+const settleThread = (type: "thread.settle" | "thread.unsettle", threadId = worker) =>
+  Effect.flatMap(Orchestrator.OrchestratorV2, (orchestrator) =>
+    orchestrator.dispatch(
+      type === "thread.settle"
+        ? { type, commandId: CommandId.make(`${threadId}:settle:${++counter}`), threadId }
+        : {
+            type,
+            commandId: CommandId.make(`${threadId}:unsettle:${++counter}`),
+            threadId,
+            reason: "user",
+          },
+    ),
+  );
+
 describe("SquireReactor stops and scope", () => {
+  it.effect(
+    "a settled thread raises no rows, and its waiting rows and held steer go; unsettled, it is back",
+    () =>
+      runIn(() =>
+        Effect.gen(function* () {
+          const repository = yield* SquireRepository.SquireRepository;
+          yield* setup();
+          const { drain } = yield* startReactor;
+          yield* repository.insertCard(
+            openCard("card:held", {
+              status: "held",
+              executes_at: "2026-11-01T00:10:00.000Z",
+            }),
+          );
+          yield* repository.insertEvent({
+            squire_id: release,
+            thread_id: worker,
+            kind: "turn-finished",
+            state_key: "run:before",
+            payload_json: null,
+            status: "pending",
+            defer_reason: null,
+            not_before: "2026-11-01T00:00:00.000Z",
+            batch_id: null,
+            created_at: "2026-11-01T00:00:00.000Z",
+          });
+
+          yield* settleThread("thread.settle");
+          yield* finishRun(RunId.make("run:settled"), "completed", yield* DateTime.now);
+          yield* drain;
+          assert.deepStrictEqual(yield* cardStatus("card:held"), Option.some("outdated"));
+          assert.deepStrictEqual(
+            (yield* rows).map((row) => [row.state_key, row.status]),
+            [["run:before", "dropped"]],
+          );
+
+          yield* settleThread("thread.unsettle");
+          yield* finishRun(RunId.make("run:back"), "completed", yield* DateTime.now);
+          yield* drain;
+          assert.include(
+            (yield* rows).map((row) => row.state_key),
+            "run:back",
+          );
+        }),
+      ),
+  );
+
   it.effect(
     "user stops are silent; agent, system, crash, and failure stops are thread-stopped",
     () =>

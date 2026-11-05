@@ -87,7 +87,7 @@ export class SquireScope extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<SquireId>, SquireScopeError>;
     /**
      * The thread and the containers rules can name; None for a thread no
-     * Squire may track (missing, deleted, archived, or a Squire thread).
+     * Squire may track (missing, deleted, archived, settled, or a Squire thread).
      */
     readonly targetOf: (
       threadId: ThreadId,
@@ -136,13 +136,21 @@ const make = Effect.gen(function* () {
   });
 
   // Shells are read fresh: a PK read is cheaper than following every thread
-  // event, and archive or delete must untrack before the next decision.
+  // event, and settle, archive, or delete must untrack before the next
+  // decision. A settled thread is finished work, so even a thread grant does
+  // not reach it: nothing reads it, reports on it, or steers it until it is
+  // unsettled, and then its grants apply again.
   const trackableShell = (threadId: ThreadId) =>
     projections
       .getThreadShell(threadId)
       .pipe(
         Effect.map((shell): OrchestrationV2ThreadShell | null =>
-          shell === null || shell.archivedAt !== null || isSquireThread(shell) ? null : shell,
+          shell === null ||
+          shell.archivedAt !== null ||
+          shell.settledAt !== null ||
+          isSquireThread(shell)
+            ? null
+            : shell,
         ),
       );
 

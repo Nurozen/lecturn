@@ -945,6 +945,33 @@ const make = Effect.gen(function* () {
           ),
         );
 
+  /**
+   * A settled or archived thread leaves every Squire's scope (SquireScope), so
+   * what was queued about it goes too: its waiting events are dropped and its
+   * open cards and holds outdated, so nothing is delivered or fires against
+   * finished work. Unsettling brings the thread back for what happens next.
+   */
+  const onThreadLeftScope = (threadId: ThreadId, reason: string) =>
+    Effect.gen(function* () {
+      const lead = yield* withPolicyLock(
+        repository.transaction(
+          Effect.gen(function* () {
+            const waiting = yield* repository.listEvents({
+              statuses: ["pending", "deferred"],
+              threadId,
+            });
+            yield* repository.setEventStatus({
+              ids: waiting.map((row) => row.id),
+              fromStatuses: ["pending", "deferred"],
+              status: "dropped",
+            });
+            return yield* outdateThreadCards(threadId, yield* nowIso, reason);
+          }),
+        ),
+      );
+      yield* wakeLead(lead);
+    });
+
   const onThreadDeleted = (
     effect: Extract<SquireReactorEffect, { readonly type: "thread-deleted" }>,
   ) =>
@@ -1216,6 +1243,16 @@ const make = Effect.gen(function* () {
       }
       if (event !== null && Option.isSome(hooks) && THREAD_CHANGE_EVENTS.has(event.type)) {
         yield* hooks.value.threadChanged(event.threadId);
+      }
+      const leftScope =
+        event?.type === "thread.settled"
+          ? "the thread was settled"
+          : event?.type === "thread.archived"
+            ? "the thread was archived"
+            : undefined;
+      if (event !== null && leftScope !== undefined) {
+        yield* onThreadLeftScope(event.threadId, leftScope);
+        return true;
       }
       return candidates.length > 0 || effects.length > 0;
     }).pipe(Effect.withSpan("SquireReactor.handle"));

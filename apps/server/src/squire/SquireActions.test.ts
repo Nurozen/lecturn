@@ -358,6 +358,28 @@ describe("SquireActions held execution", () => {
     ),
   );
 
+  it.effect("a hold on a thread settled during its undo window is dropped, never sent", () =>
+    withSquire((home) =>
+      Effect.gen(function* () {
+        yield* sendSteer(home);
+        const card = yield* onlyCard(home.squireId);
+        assert.strictEqual(card.status, "held");
+        const threads = yield* ThreadManagement.ThreadManagementService;
+        yield* threads.dispatch({
+          type: "thread.settle",
+          commandId: CommandId.make("test:settle"),
+          threadId: tracked,
+        });
+
+        yield* advance(11);
+        yield* executeDue;
+        assert.strictEqual((yield* cardOf(card.id)).status, "outdated");
+        assert.lengthOf(yield* actionMessages, 0);
+        assert.lengthOf(yield* budgetRows(home.squireId), 0);
+      }),
+    ),
+  );
+
   it.effect("no interrupt-restart on a provider without active steering: the steer queues", () =>
     withSquire((home) =>
       Effect.gen(function* () {
