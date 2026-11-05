@@ -13,15 +13,16 @@ Squires are off by default, and you turn them on per environment:
 
 - **Desktop app or web:** go to **Settings → Squires**, pick the environment if you have more than
   one, and turn on **Enable Squires**. The change applies right away, with no restart.
-- **Mobile:** turn Squires on from the desktop app or web, or from the suggestion below. Once the
-  environment runs them, they appear on mobile too.
+- **Mobile:** go to **Settings → Thread behavior** and turn on **Squires**. Servers that need a
+  restart for the change don't show the switch on mobile; use the desktop app or web for them.
 - **Server you start yourself (`npx lecturn`):** use the same setting, or start the server with
   `LECTURN_SQUIRE=1`. The variable overrides the setting either way and pins it, so
   `LECTURN_SQUIRE=0` keeps Squires off.
 
 While Squires are off and two or more threads run at once, a Squire may offer to turn them on for
 you. If you hide the offer with **Not now** (for a week) or **Don't show again**, bring it back with
-**Show again** in **Settings → Squires**.
+**Show again** in **Settings → Squires**, or on mobile with **Show the Squire suggestion again** in
+**Settings → Thread behavior**.
 
 Turning Squires off stops every Squire on that environment and keeps their setup for when you turn
 them back on. Once the environment has a project, a Lead appears in the sidebar's **Squires** group. Open it and it
