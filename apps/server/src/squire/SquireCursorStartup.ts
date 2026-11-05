@@ -16,10 +16,11 @@ import * as SquireSwitch from "./SquireSwitch.ts";
 /**
  * True when the cursor jumped to the log head. The jump skips the off
  * period's project and thread deletes too, so the reactor then applies their
- * cascades from current state.
+ * cascades from current state. `forceJump` jumps even from a cursor still
+ * marked on, for an off period whose own write failed.
  */
 export const syncCursorWithSwitch = Effect.fn("SquireCursorStartup.syncCursorWithSwitch")(
-  function* (on: boolean) {
+  function* (on: boolean, options: { readonly forceJump?: boolean } = {}) {
     const repository = yield* SquireRepository.SquireRepository;
     const events = yield* OrchestrationEventStore.OrchestrationEventStore;
     const cursor = yield* repository.readCursor;
@@ -28,7 +29,7 @@ export const syncCursorWithSwitch = Effect.fn("SquireCursorStartup.syncCursorWit
         yield* repository.writeCursor({ sequence: cursor.sequence, enabled: false });
       return false;
     }
-    if (cursor.enabled) return false;
+    if (cursor.enabled && options.forceJump !== true) return false;
     // The reactor cursor shares the application event sequence space.
     const head = yield* events.latestApplicationSequence;
     yield* repository.writeCursor({ sequence: Math.max(head, cursor.sequence), enabled: true });

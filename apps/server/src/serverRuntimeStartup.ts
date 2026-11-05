@@ -571,16 +571,24 @@ const followSquireSwitch = (squireSwitch: SquireSwitch.SquireSwitch["Service"]) 
   Effect.gen(function* () {
     const repository = yield* Effect.serviceOption(SquireRepository.SquireRepository);
     const events = yield* Effect.serviceOption(OrchestrationEventStore.OrchestrationEventStore);
-    // Squire bookkeeping must not stop the switch. A cursor left disabled is
-    // fast-forwarded by the next on period that writes it.
+    // Squire bookkeeping must not stop the switch: a failed sync is logged and
+    // reads as `None`. An off period whose write failed leaves the cursor
+    // marked on, so the next on period forces the jump past the off period
+    // instead of delivering it.
+    let offUnrecorded = false;
     const syncCursor = (on: boolean) =>
       Option.isNone(repository) || Option.isNone(events)
-        ? Effect.succeed(false)
-        : syncCursorWithSwitch(on).pipe(
+        ? Effect.succeedSome(false)
+        : syncCursorWithSwitch(on, { forceJump: on && offUnrecorded }).pipe(
             Effect.provideService(SquireRepository.SquireRepository, repository.value),
             Effect.provideService(OrchestrationEventStore.OrchestrationEventStore, events.value),
+            Effect.tap(() => Effect.sync(() => void (offUnrecorded = false))),
+            Effect.asSome,
             Effect.catchCause((cause) =>
-              Effect.logWarning("Squire cursor sync failed", { on, cause }).pipe(Effect.as(false)),
+              Effect.logWarning("Squire cursor sync failed", { on, cause }).pipe(
+                Effect.andThen(Effect.sync(() => void (offUnrecorded ||= !on))),
+                Effect.as(Option.none<boolean>()),
+              ),
             ),
           );
     const atStart = yield* Effect.serviceOption(SquireCursorAtStart);
@@ -590,7 +598,7 @@ const followSquireSwitch = (squireSwitch: SquireSwitch.SquireSwitch["Service"]) 
       ? atStart.value
       : yield* Effect.gen(function* () {
           const on = yield* squireSwitch.isOn;
-          return { on, turnedOn: yield* syncCursor(on) };
+          return { on, turnedOn: Option.getOrElse(yield* syncCursor(on), () => false) };
         });
     const parent = yield* Effect.scope;
     let period: Scope.Closeable | undefined;
@@ -601,7 +609,10 @@ const followSquireSwitch = (squireSwitch: SquireSwitch.SquireSwitch["Service"]) 
           presynced = undefined;
           if (on) {
             if (period !== undefined) return;
-            const turnedOn = synced?.on === true ? synced.turnedOn : yield* syncCursor(true);
+            const turnedOn =
+              synced?.on === true
+                ? synced.turnedOn
+                : Option.getOrElse(yield* syncCursor(true), () => false);
             const scope = yield* Scope.fork(parent, "parallel");
             period = scope;
             yield* squireOnPeriod(turnedOn).pipe(Scope.provide(scope));

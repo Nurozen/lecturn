@@ -25,6 +25,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
@@ -733,28 +734,16 @@ it.effect(
   "runs the Squire on period only while the switch is on, cursor first in and last out",
   () =>
     Effect.gen(function* () {
-      const log: string[] = [];
-      const started = yield* Ref.make(0);
-      const stopped = yield* Ref.make(0);
-      const allStarted = yield* Deferred.make<void>();
-      const allStopped = yield* Deferred.make<void>();
-      const cursorOff = yield* Deferred.make<void>();
+      // Every start, stop, and cursor write, in order; the test takes them as milestones.
+      const log = yield* Queue.unbounded<string>();
+      const take = (n: number) => Queue.takeN(log, n).pipe(Effect.map((items) => [...items]));
       const cursor = { sequence: 0, enabled: false };
+      const head = { sequence: 7 };
+      const failOffWrite = { next: false };
       const piece = (name: string) =>
-        Effect.sync(() => log.push(`start:${name}`)).pipe(
-          Effect.andThen(Ref.updateAndGet(started, (n) => n + 1)),
-          Effect.flatMap((n) =>
-            n % 3 === 0 ? Deferred.succeed(allStarted, undefined) : Effect.void,
-          ),
+        Queue.offer(log, `start:${name}`).pipe(
           Effect.andThen(Effect.never),
-          Effect.onInterrupt(() =>
-            Effect.sync(() => log.push(`stop:${name}`)).pipe(
-              Effect.andThen(Ref.updateAndGet(stopped, (n) => n + 1)),
-              Effect.flatMap((n) =>
-                n === 3 ? Deferred.succeed(allStopped, undefined) : Effect.void,
-              ),
-            ),
-          ),
+          Effect.onInterrupt(() => Queue.offer(log, `stop:${name}`)),
         );
       const services = Layer.mergeAll(
         SquireSwitch.layerTest(false),
@@ -769,42 +758,52 @@ it.effect(
         Layer.succeed(SquireRepository.SquireRepository, {
           readCursor: Effect.sync(() => ({ ...cursor })),
           writeCursor: (next: { readonly sequence: number; readonly enabled: boolean }) =>
-            Effect.sync(() => {
+            Effect.suspend(() => {
+              if (!next.enabled && failOffWrite.next) {
+                failOffWrite.next = false;
+                return Queue.offer(log, "cursor:failed").pipe(
+                  Effect.andThen(Effect.die("disk full")),
+                );
+              }
               Object.assign(cursor, next);
-              log.push(`cursor:${next.enabled}@${next.sequence}`);
-            }).pipe(
-              Effect.andThen(next.enabled ? Effect.void : Deferred.succeed(cursorOff, undefined)),
-            ),
+              return Queue.offer(log, `cursor:${next.enabled}@${next.sequence}`);
+            }),
         } as unknown as SquireRepository.SquireRepository["Service"]),
         Layer.succeed(OrchestrationEventStore.OrchestrationEventStore, {
-          latestApplicationSequence: Effect.succeed(7),
+          latestApplicationSequence: Effect.sync(() => head.sequence),
         } as unknown as OrchestrationEventStore.OrchestrationEventStore["Service"]),
       );
+      const started = ["start:reactor(turnedOn=true)", "start:redispatch", "start:clock"];
+      const stopped = ["stop:reactor(turnedOn=true)", "stop:redispatch", "stop:clock"];
       yield* Effect.gen(function* () {
         const control = yield* SquireSwitch.SquireSwitchControl;
         yield* ServerRuntimeStartup.startLecturnReactors;
         // Off at start: nothing runs and the cursor stays as it was.
-        assert.deepStrictEqual(log, []);
+        assert.strictEqual(yield* Queue.size(log), 0);
 
         yield* SubscriptionRef.set(control, true);
-        yield* Deferred.await(allStarted);
-        assert.strictEqual(log[0], "cursor:true@7");
-        assert.sameMembers(log.slice(1), [
-          "start:reactor(turnedOn=true)",
-          "start:redispatch",
-          "start:clock",
-        ]);
+        const on = yield* take(4);
+        assert.strictEqual(on[0], "cursor:true@7");
+        assert.sameMembers(on.slice(1), started);
 
-        log.length = 0;
         yield* SubscriptionRef.set(control, false);
-        yield* Deferred.await(cursorOff);
-        yield* Deferred.await(allStopped);
-        assert.sameMembers(log.slice(0, 3), [
-          "stop:reactor(turnedOn=true)",
-          "stop:redispatch",
-          "stop:clock",
-        ]);
-        assert.deepStrictEqual(log.slice(3), ["cursor:false@7"]);
+        const off = yield* take(4);
+        assert.sameMembers(off.slice(0, 3), stopped);
+        assert.strictEqual(off[3], "cursor:false@7");
+
+        // An off period whose cursor write failed still never replays: the next
+        // on period jumps from a cursor left marked on.
+        yield* SubscriptionRef.set(control, true);
+        assert.sameMembers((yield* take(4)).slice(1), started);
+        failOffWrite.next = true;
+        yield* SubscriptionRef.set(control, false);
+        assert.sameMembers(yield* take(4), [...stopped, "cursor:failed"]);
+        assert.isTrue(cursor.enabled);
+        head.sequence = 9;
+        yield* SubscriptionRef.set(control, true);
+        const resumed = yield* take(4);
+        assert.strictEqual(resumed[0], "cursor:true@9");
+        assert.sameMembers(resumed.slice(1), started);
       }).pipe(Effect.provide(services));
     }).pipe(Effect.scoped),
 );
