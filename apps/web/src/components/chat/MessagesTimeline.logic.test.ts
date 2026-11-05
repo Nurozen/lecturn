@@ -5298,6 +5298,110 @@ describe("Squire home thread event rows", () => {
     expect(squireTurnFoldLabel(entries, new Set(["a", "t"]))).toBe("Tool calls (1)");
     expect(squireTurnFoldLabel(entries, new Set(["t", "n"]))).toBe("Details");
   });
+
+  const wake = (n: number, kinds: ReadonlyArray<string>) => {
+    const runId = RunId.make(`wake-${n}`);
+    return [
+      {
+        kind: "work" as const,
+        id: `batch-${n}`,
+        createdAt: time(n * 10),
+        entry: {
+          id: `batch-${n}`,
+          runId,
+          createdAt: time(n * 10),
+          label: "Squire event",
+          tone: "info" as const,
+          itemType: "notification" as const,
+          structuredPayload: {
+            type: "notification",
+            outcome: "updated",
+            ...batch(kinds, "Squire event"),
+          } as never,
+        },
+      },
+      {
+        kind: "message" as const,
+        id: `reply-${n}`,
+        createdAt: time(n * 10 + 1),
+        message: {
+          id: MessageId.make(`reply-${n}`),
+          role: "assistant" as const,
+          text: "Noted.",
+          runId,
+          createdAt: time(n * 10 + 1),
+          updatedAt: time(n * 10 + 1),
+          streaming: false,
+        },
+      },
+    ];
+  };
+  const userMessage = (n: number, createdBy: "user" | "agent") => ({
+    kind: "message" as const,
+    id: `user-${n}`,
+    createdAt: time(n * 10 + 5),
+    message: {
+      id: MessageId.make(`user-${n}`),
+      role: "user" as const,
+      text: "Hi",
+      runId: null,
+      createdBy,
+      createdAt: time(n * 10 + 5),
+      updatedAt: time(n * 10 + 5),
+      streaming: false,
+    },
+  });
+  const grouped = (
+    timelineEntries: ReadonlyArray<TimelineEntry>,
+    expandedWorkGroupIds?: ReadonlySet<string>,
+  ) =>
+    deriveMessagesTimelineRows({
+      timelineEntries,
+      isWorking: false,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+      compactSquireEvents: true,
+      ...(expandedWorkGroupIds === undefined ? {} : { expandedWorkGroupIds }),
+    });
+
+  it("folds consecutive wakes into one collapsed row until the user writes", () => {
+    const list = grouped([
+      ...wake(1, ["pr-failed"]),
+      userMessage(1, "agent"),
+      ...wake(2, ["turn-completed"]),
+      userMessage(2, "user"),
+      ...wake(3, ["pr-failed"]),
+    ]);
+    expect(list.map((row) => row.id)).toEqual([
+      "squire-updates:batch-1",
+      "user-2",
+      "batch-3",
+      "reply-3",
+    ]);
+    const group = list[0];
+    expect(group?.kind === "squire-updates" ? group.label : null).toBe(
+      "2 Squire updates · pr failed, turn completed",
+    );
+  });
+
+  it("shows a group's rows once expanded, and never folds an ordinary thread", () => {
+    const entries = [...wake(1, []), ...wake(2, [])];
+    expect(grouped(entries, new Set(["squire-updates:batch-1"])).map((row) => row.id)).toEqual([
+      "squire-updates:batch-1",
+      "batch-1",
+      "reply-1",
+      "batch-2",
+      "reply-2",
+    ]);
+    expect(
+      deriveMessagesTimelineRows({
+        timelineEntries: entries,
+        isWorking: false,
+        turnDiffSummaries: [],
+        supportsConversationRollback: false,
+      }).some((row) => row.kind === "squire-updates"),
+    ).toBe(false);
+  });
 });
 
 it("keeps the working header in place across worktree setup handoff", () => {
