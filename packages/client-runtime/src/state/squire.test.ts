@@ -104,6 +104,9 @@ import {
   squireWaitingSince,
   squireWhyText,
   type SquireSnapshotEntry,
+  squireUpdateGroupLabel,
+  squireUpdateGroups,
+  type SquireUpdateItemRole,
 } from "./squire.ts";
 
 vi.mock("./session.ts", () => ({
@@ -1617,5 +1620,57 @@ describe("queue cards", () => {
       const longer = [{ id: "q1", question: `${title}\nMore detail.` }];
       expect(squireQuestionPanelQuestions(longer, title)).toBe(longer);
     });
+  });
+});
+
+describe("squireUpdateGroups", () => {
+  type Item = { readonly role: SquireUpdateItemRole; readonly kinds?: ReadonlyArray<string> };
+  const groups = (items: ReadonlyArray<Item>) =>
+    squireUpdateGroups(
+      items,
+      (item) => item.role,
+      (item) => item.kinds ?? [],
+    );
+
+  it("folds consecutive wakes with what their turns produced", () => {
+    expect(
+      groups([
+        { role: "user" },
+        { role: "update" },
+        { role: "wake", kinds: ["turn-completed"] },
+        { role: "update" },
+        { role: "update" },
+        { role: "wake", kinds: ["pr-failed", "turn-completed"] },
+        { role: "update" },
+      ]),
+    ).toEqual([{ start: 2, end: 7, wakeCount: 2, eventKinds: ["turn-completed", "pr-failed"] }]);
+  });
+
+  it("leaves a lone wake alone, and splits at the user's own messages", () => {
+    expect(
+      groups([{ role: "wake" }, { role: "update" }, { role: "user" }, { role: "wake" }]),
+    ).toEqual([]);
+  });
+
+  it("keeps a running turn or a waiting card outside the group", () => {
+    expect(
+      groups([
+        { role: "wake" },
+        { role: "update" },
+        { role: "wake" },
+        { role: "keep" },
+        { role: "update" },
+      ]),
+    ).toEqual([{ start: 0, end: 3, wakeCount: 2, eventKinds: [] }]);
+  });
+
+  it("labels the count and the first few event kinds", () => {
+    expect(squireUpdateGroupLabel({ wakeCount: 3, eventKinds: ["pr-failed"] })).toBe(
+      "3 Squire updates · pr failed",
+    );
+    expect(squireUpdateGroupLabel({ wakeCount: 2, eventKinds: [] })).toBe("2 Squire updates");
+    expect(squireUpdateGroupLabel({ wakeCount: 4, eventKinds: ["a", "b", "c", "d"] })).toBe(
+      "4 Squire updates · a, b, c, …",
+    );
   });
 });

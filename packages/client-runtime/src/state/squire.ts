@@ -1794,3 +1794,74 @@ export function squireLeadShowsIntro(input: {
     input.homeVisibleItemCount === 0
   );
 }
+
+// ── Squire updates in a home thread ───────────────────────────
+
+/**
+ * How a timeline item takes part in a Squire home thread's update groups. A `wake` is a
+ * delivered event batch and opens an update; `update` is what that wake's turn produced; a
+ * `user` message ends a run of updates; `keep` stays visible and also ends it (a turn still
+ * running, a card or question waiting on the user).
+ */
+export type SquireUpdateItemRole = "wake" | "update" | "user" | "keep";
+
+export interface SquireUpdateGroup {
+  /** Index of the first item, the first wake. */
+  readonly start: number;
+  /** Exclusive. */
+  readonly end: number;
+  readonly wakeCount: number;
+  /** The wakes' event kinds, first seen first. */
+  readonly eventKinds: ReadonlyArray<string>;
+}
+
+/** Updates fold together only from this many in a row; a lone one reads fine as it is. */
+const SQUIRE_UPDATE_GROUP_MIN = 2;
+
+/**
+ * Consecutive Squire wakes in a home thread, with what each wake's turn produced, collapse
+ * into one group: every wake is a row plus a fold plus a reply, which drowns the conversation.
+ */
+export function squireUpdateGroups<T>(
+  items: ReadonlyArray<T>,
+  roleOf: (item: T) => SquireUpdateItemRole,
+  eventKindsOf: (item: T) => ReadonlyArray<string>,
+): ReadonlyArray<SquireUpdateGroup> {
+  const groups: SquireUpdateGroup[] = [];
+  let start = -1;
+  let wakeCount = 0;
+  let kinds: string[] = [];
+  const close = (end: number) => {
+    if (start !== -1 && wakeCount >= SQUIRE_UPDATE_GROUP_MIN) {
+      groups.push({ start, end, wakeCount, eventKinds: kinds });
+    }
+    start = -1;
+    wakeCount = 0;
+    kinds = [];
+  };
+  items.forEach((item, index) => {
+    const role = roleOf(item);
+    if (role === "wake") {
+      if (start === -1) start = index;
+      wakeCount++;
+      for (const kind of eventKindsOf(item)) if (!kinds.includes(kind)) kinds.push(kind);
+    } else if (role !== "update") {
+      close(index);
+    }
+  });
+  close(items.length);
+  return groups;
+}
+
+const SQUIRE_UPDATE_KINDS_SHOWN = 3;
+
+/** "3 Squire updates · pr failed, turn completed". */
+export function squireUpdateGroupLabel(
+  group: Pick<SquireUpdateGroup, "wakeCount" | "eventKinds">,
+): string {
+  const kinds = group.eventKinds.map((kind) => kind.replaceAll("-", " "));
+  const shown = kinds.slice(0, SQUIRE_UPDATE_KINDS_SHOWN).join(", ");
+  const more = kinds.length > SQUIRE_UPDATE_KINDS_SHOWN ? ", …" : "";
+  const head = `${group.wakeCount} Squire updates`;
+  return shown === "" ? head : `${head} · ${shown}${more}`;
+}
