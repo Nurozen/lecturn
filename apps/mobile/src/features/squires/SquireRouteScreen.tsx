@@ -1,7 +1,12 @@
 import { useAtomValue } from "@effect/atom-react";
+import { scopeThreadRef } from "@lecturn/client-runtime/environment";
 import {
+  squireLeadHello,
+  squireLeadIntro,
+  squireLeadShowsIntro,
   squireStateLine,
   squireScopeLine,
+  SQUIRE_LEAD_INTRO_START_LABEL,
   type SquireSnapshotEntry,
 } from "@lecturn/client-runtime/state/squire";
 import { EnvironmentId, SquireCardId, SquireId } from "@lecturn/contracts";
@@ -18,6 +23,7 @@ import {
 import { EmptyState } from "../../components/ui/EmptyState";
 import { AppText as Text } from "../../components/ui/AppText";
 import { uuidv4 } from "../../lib/uuid";
+import { useQuietThreadShell } from "../../state/entities";
 import { squireEnvironment, useSquireIndicator, useSquireSupported } from "../../state/squire";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { RequestActionButton } from "../threads/RequestActionButton";
@@ -133,6 +139,7 @@ function SquireReady(props: {
         onLayout={scrollViewport.onLayout}
       >
         <SquireHeader environmentId={environmentId} entry={entry} isLead={isLead} team={team} />
+        {isLead ? <SquireLeadIntro environmentId={environmentId} lead={squire} /> : null}
         {isLead && team.length > 0 ? (
           <SquireTeamStrip
             environmentId={environmentId}
@@ -241,6 +248,74 @@ function SquireHeader(props: {
       {statusError === null ? null : (
         <Text accessibilityRole="alert" className="font-sans text-sm text-danger-foreground">
           {statusError}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+/** The Lead's fixed first message, until onboarding runs or its home thread gains a message. */
+function SquireLeadIntro(props: {
+  readonly environmentId: EnvironmentId;
+  readonly lead: SquireSnapshotEntry["squire"];
+}) {
+  const { environmentId, lead } = props;
+  const homeShell = useQuietThreadShell(
+    lead.homeThreadId === null ? null : scopeThreadRef(environmentId, lead.homeThreadId),
+  );
+  const homeVisibleItemCount =
+    lead.homeThreadId === null ? 0 : (homeShell?.visibleItemCount ?? null);
+  const canOpen = useAtomValue(squireEnvironment.leadOpen.permissionAtom(environmentId));
+  const leadOpen = useAtomCommand(squireEnvironment.leadOpen, { reportFailure: false });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!squireLeadShowsIntro({ lead, homeVisibleItemCount })) return null;
+
+  // Stays disabled after success: the block leaves once the server records onboarding.
+  const start = async () => {
+    setBusy(true);
+    setError(null);
+    const result = await leadOpen({
+      environmentId,
+      input: { requestId: uuidv4(), onboarding: "start" },
+    });
+    if (result._tag === "Failure") {
+      setBusy(false);
+      setError("Your Lead could not start. Try again.");
+    }
+  };
+
+  return (
+    <View className="gap-3 rounded-2xl border border-border bg-card px-3.5 py-3">
+      <View className="flex-row items-center gap-2.5">
+        <SquireIndicator
+          state="waiting"
+          companion={lead.companion}
+          isLead
+          size={32}
+          label={lead.name}
+        />
+        <Text className="min-w-0 flex-1 font-lecturn-bold text-sm text-foreground">
+          {`${squireLeadHello(lead.name)} Here's what Squires can do for you.`}
+        </Text>
+      </View>
+      {squireLeadIntro("mobile").map((paragraph) => (
+        <Text key={paragraph} className="font-sans text-sm text-foreground-secondary">
+          {paragraph}
+        </Text>
+      ))}
+      {canOpen ? (
+        <View className="flex-row">
+          <RequestActionButton
+            label={SQUIRE_LEAD_INTRO_START_LABEL}
+            disabled={busy}
+            onPress={() => void start()}
+          />
+        </View>
+      ) : null}
+      {error === null ? null : (
+        <Text accessibilityRole="alert" className="font-sans text-sm text-danger-foreground">
+          {error}
         </Text>
       )}
     </View>
