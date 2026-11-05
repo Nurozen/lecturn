@@ -1228,6 +1228,10 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
               onHeaderMaterialVisibilityChange={props.onHeaderMaterialVisibilityChange}
               onEndFollowEnabledChange={handleEndFollowEnabledChange}
               skills={selectedProviderSkills}
+              squireHome={
+                props.selectedThread.squire?.role === "home" &&
+                props.serverConfig?.environment.capabilities.squire === true
+              }
               onUseArtifactTemplate={
                 allows("artifact-templates") ? handleUseArtifactTemplate : undefined
               }

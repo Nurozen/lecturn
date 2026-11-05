@@ -230,6 +230,7 @@ import {
 import { appendPendingThreadMessages, type PendingThreadFeedEntry } from "./pending-thread-feed";
 import type { QueuedThreadMessage } from "../../state/thread-outbox-model";
 import { resolveThreadFeedFixedItemSize } from "./thread-feed-item-size";
+import { groupSquireUpdates } from "./ThreadFeed.logic";
 import { htmlRenderFrameHeight } from "@lecturn/shared/htmlRender";
 import { htmlRenderRowHeight, ThreadHtmlRender } from "./HtmlRenderWebView";
 import { ThreadMcpApp } from "./McpAppWebView";
@@ -357,6 +358,8 @@ export interface ThreadFeedProps {
   readonly onEndFollowEnabledChange?: (enabled: boolean) => void;
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
   readonly onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
+  /** A Squire's home thread on an environment with Squires on: its runs of wakes fold away. */
+  readonly squireHome?: boolean;
 }
 
 async function waitForThreadShell(
@@ -1051,6 +1054,7 @@ function renderFeedEntry(
     readonly onToggleWorkGroup: (groupId: string, anchorKey?: string) => void;
     readonly onToggleWorkRow: (rowId: string, anchorKey?: string, groupId?: string) => void;
     readonly onToggleTurnFold: (runId: RunId) => void;
+    readonly onToggleSquireUpdates: (groupId: string) => void;
     readonly onPressPreview: (source: FilePreviewSource) => void;
     readonly onPressVideo: (attachment: ChatFileAttachment, sourceIdentifier: string) => void;
     readonly markdownLinkHandlers: MarkdownLinkHandlers;
@@ -1106,6 +1110,35 @@ function renderFeedEntry(
         <Text
           key={props.workRowSizing.textSizeKey}
           className="font-lecturn-medium text-sm tabular-nums text-foreground-muted"
+        >
+          {entry.label}
+        </Text>
+        <ThreadDisclosureChevron
+          expanded={entry.expanded}
+          collapsedDirection="right"
+          size={15}
+          tintColor={iconSubtleColor}
+        />
+      </Pressable>
+    );
+  }
+
+  if (entry.type === "squire-updates") {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: entry.expanded }}
+        onPress={() => props.onToggleSquireUpdates(entry.id)}
+        hitSlop={4}
+        className="mb-1 min-h-11 flex-row items-center gap-2 border-b border-border-subtle px-2"
+        style={{
+          minHeight: Math.max(TURN_FOLD_HEIGHT - 3.5, props.workRowSizing.estimatedRowHeight),
+        }}
+      >
+        <Text
+          key={props.workRowSizing.textSizeKey}
+          className="shrink font-lecturn-medium text-sm tabular-nums text-foreground-muted"
+          numberOfLines={1}
         >
           {entry.label}
         </Text>
@@ -1843,6 +1876,9 @@ function ThreadFeedView(props: ThreadFeedProps) {
     expandedTurnIds: new Set(),
   });
   const { copiedRowId, expandedWorkGroups, expandedWorkRows, expandedTurnIds } = interactionState;
+  const [expandedSquireUpdates, setExpandedSquireUpdates] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [expandedFile, setExpandedFile] = useState<FilePreviewSource | null>(null);
   const [expandedVideo, setExpandedVideo] = useState<VideoPreviewSource | null>(null);
   const fileShareSourceIdentifier = useId();
@@ -2223,7 +2259,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
     reportHeaderMaterialVisibility(false);
   }, [feedThreadKey, reportHeaderMaterialVisibility]);
 
-  const presentedFeed = appendPendingThreadMessages(
+  const ungroupedFeed = appendPendingThreadMessages(
     deriveThreadFeedPresentation(
       props.feed,
       props.latestRun,
@@ -2240,6 +2276,9 @@ function ThreadFeedView(props: ThreadFeedProps) {
     props.feed,
     props.queuedMessages,
   );
+  const presentedFeed = props.squireHome
+    ? groupSquireUpdates(ungroupedFeed, unsettledTurnId, expandedSquireUpdates)
+    : ungroupedFeed;
   const presentedFeedRef = useRef(presentedFeed);
   useLayoutEffect(() => {
     presentedFeedRef.current = presentedFeed;
@@ -2413,7 +2452,13 @@ function ThreadFeedView(props: ThreadFeedProps) {
     if (disclosureAnchorKeyRef.current !== null) {
       settleDisclosureAfterLayout();
     }
-  }, [expandedTurnIds, expandedWorkGroups, expandedWorkRows, settleDisclosureAfterLayout]);
+  }, [
+    expandedTurnIds,
+    expandedWorkGroups,
+    expandedWorkRows,
+    expandedSquireUpdates,
+    settleDisclosureAfterLayout,
+  ]);
 
   const handleItemSizeChanged = () => {
     if (disclosureAnchorKeyRef.current !== null) {
@@ -2493,6 +2538,15 @@ function ThreadFeedView(props: ThreadFeedProps) {
     });
   };
 
+  const onToggleSquireUpdates = (groupId: string) => {
+    suspendEndScrollMaintenanceForDisclosure(groupId);
+    setExpandedSquireUpdates((current) => {
+      const next = new Set(current);
+      if (!next.delete(groupId)) next.add(groupId);
+      return next;
+    });
+  };
+
   const onPressPreview = (source: FilePreviewSource) => {
     setExpandedFile((current) => current ?? source);
   };
@@ -2515,6 +2569,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
     }
     switch (entry.type) {
       case "run-fold":
+      case "squire-updates":
       case "import-divider":
         return resolveThreadFeedFixedItemSize(entry.type);
       case "work-toggle":
@@ -2582,6 +2637,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
             onToggleWorkGroup,
             onToggleWorkRow,
             onToggleTurnFold,
+            onToggleSquireUpdates,
             onPressPreview,
             onPressVideo,
             markdownLinkHandlers,
