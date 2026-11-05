@@ -33,6 +33,11 @@ import { SquireIndicator } from "./SquireIndicator";
 const knockSession = createSquireKnockSession();
 const offeredKnocks = new Set<EnvironmentId>();
 
+/** Settings' "Show the Squire suggestion again" lets it return this session too. */
+export function releaseSquireKnock(environmentId: EnvironmentId) {
+  knockSession.release(environmentId);
+}
+
 const LEAD_WAIT_MS = 20_000;
 
 const NO_LEAD_ATOM = Atom.make<SquireId | null>(null);
@@ -66,13 +71,29 @@ export function SquireKnockCards(props: {
         environment.environmentId === props.selectedEnvironmentId),
   );
   return connected.map((environment) => (
-    <SquireKnockCard
+    <SquireKnockSlot
       key={environment.environmentId}
       environmentId={environment.environmentId}
       label={props.environments.length > 1 ? environment.label : null}
       pane={props.pane}
     />
   ));
+}
+
+/** Remounts the card when the saved knock changes, so a reset from settings re-arms it. */
+function SquireKnockSlot(props: {
+  readonly environmentId: EnvironmentId;
+  readonly label: string | null;
+  readonly pane: "sidebar" | "screen";
+}) {
+  const knock = useAtomValue(serverEnvironment.settingsValueAtom(props.environmentId))?.squire
+    .knock;
+  return (
+    <SquireKnockCard
+      key={knock === undefined ? "" : `${knock.dismissed}:${knock.snoozedUntil}`}
+      {...props}
+    />
+  );
 }
 
 function SquireKnockCard(props: {
@@ -145,13 +166,14 @@ function SquireKnockCard(props: {
   const write = async (patch: ServerSettingsPatch, next: "meeting" | "done") => {
     setError(null);
     setPhase(next);
+    // Spent before the reply: the saved knock remounts this card, which must not offer again.
+    offeredKnocks.delete(environmentId);
     const result = await updateSettings({ environmentId, input: { patch } });
     if (result._tag === "Failure") {
+      offeredKnocks.add(environmentId);
       setPhase("offer");
       setError("Couldn't save that. Try again.");
-      return;
     }
-    offeredKnocks.delete(environmentId);
   };
   const meeting = phase === "meeting";
 

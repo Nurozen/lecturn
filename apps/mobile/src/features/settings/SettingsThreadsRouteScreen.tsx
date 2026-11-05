@@ -15,6 +15,7 @@ import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsProjectOverridesSection } from "./components/SettingsProjectOverridesSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
+import { SquireSettingsSection } from "./components/SquireSettingsSection";
 import { SettingsScreen } from "./components/SettingsScreen";
 import {
   AndroidSettingsEnvironmentFilter,
@@ -46,6 +47,7 @@ export function SettingsThreadsRouteScreen() {
           contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
         >
           <AutoSettleSettingsRows />
+          <SquireSettingsRows />
           <BetaSettingsSection />
           <LegacySettingsSection />
         </ScrollView>
@@ -243,6 +245,11 @@ function AutoSettleSettingsRows() {
       ) : null}
     </View>
   );
+}
+
+function SquireSettingsRows() {
+  const { selectedTargets } = useSettingsEnvironmentFilter();
+  return <SquireSettingsSection targets={selectedTargets} />;
 }
 
 function BetaSettingsSection() {
