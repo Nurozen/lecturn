@@ -12,19 +12,22 @@ route your requests to the right Squire.
 Squires are off by default, and you turn them on per environment:
 
 - **Desktop app or web:** go to **Settings → Squires**, pick the environment if you have more than
-  one, and turn on **Enable Squires**. The change applies when that environment's server restarts.
-  For the desktop app's own environment, quit and reopen Lecturn. The setting says when a change is
-  waiting for a restart.
-- **Mobile:** turn Squires on from the desktop app or web. Once the environment runs them, they
-  appear on mobile too.
+  one, and turn on **Enable Squires**. The change applies right away, with no restart.
+- **Mobile:** turn Squires on from the desktop app or web, or from the suggestion below. Once the
+  environment runs them, they appear on mobile too.
 - **Server you start yourself (`npx lecturn`):** use the same setting, or start the server with
-  `LECTURN_SQUIRE=1`. The variable overrides the setting either way, so `LECTURN_SQUIRE=0` keeps
-  Squires off.
+  `LECTURN_SQUIRE=1`. The variable overrides the setting either way and pins it, so
+  `LECTURN_SQUIRE=0` keeps Squires off.
+
+While Squires are off and two or more threads run at once, a Squire may offer to turn them on for
+you. If you hide the offer with **Not now** (for a week) or **Don't show again**, bring it back with
+**Show again** in **Settings → Squires**.
 
 Turning Squires off stops every Squire on that environment and keeps their setup for when you turn
 them back on. Once the environment has a project, a Lead appears in the sidebar's **Squires** group. Open it and it
-proposes two or three Squires based on your recent work. Accept the ones you want, edit them first,
-or create your own with **New Squire**. **Delete** in **Settings → Squires** removes a Squire for
+explains what Squires do. Ask it a question, or choose **Look over my threads**, which runs one turn
+on the Lead's provider, and it proposes two or three Squires based on your recent work. Accept the
+ones you want, edit them first, or create your own with **New Squire**. **Delete** in **Settings → Squires** removes a Squire for
 good, along with its rules and triggers, and archives its home thread. The threads it watched are
 kept.
 
