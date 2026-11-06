@@ -1020,6 +1020,10 @@ from upstream's side.
   - `MenuPopup` (`ui/menu.tsx`) keeps the fork `surface` prop
     (`panel-glass`) alongside upstream's `width` (#22566 compact approval
     menu).
+  - Mermaid via pele (#21472) is taken whole, including its MathML
+    allowlist. Upstream deleted `MermaidDiagram.browser.test.tsx`; the fork
+    exports `sanitizeDiagramSvg` and `sanitizeMathDiagramSvg` and keeps a
+    rewritten test of their MathML and link/script stripping.
 
 ## Recurring mechanical conflicts
 

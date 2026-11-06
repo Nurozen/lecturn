@@ -44,8 +44,8 @@ it("keeps the act environment off outside the helper", async () => {
 
 it("restores exactly the stubbed global", () => {
   {
-    using _stub = stubGlobal("t3TestGlobal", 1);
-    expect(Reflect.get(globalThis, "t3TestGlobal")).toBe(1);
+    using _stub = stubGlobal("lecturnTestGlobal", 1);
+    expect(Reflect.get(globalThis, "lecturnTestGlobal")).toBe(1);
   }
-  expect("t3TestGlobal" in globalThis).toBe(false);
+  expect("lecturnTestGlobal" in globalThis).toBe(false);
 });

@@ -233,7 +233,7 @@ const composerHeightTransition: LayoutAnimationFunction = (values) => {
 };
 export const COMPOSER_LAYOUT_TRANSITION =
   Platform.OS === "android" ? undefined : composerHeightTransition;
-// Share of the one-row composer the draft keeps; a long model name truncates first.
+// Share of the one-row composer the draft keeps beside the row controls.
 const INLINE_EDITOR_MIN_WIDTH = "40%";
 // The one-row editor's horizontal padding plus room for the caret.
 const INLINE_EDITOR_TEXT_SLACK = 10;
@@ -527,9 +527,9 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   const isVoiceInputPresented = voicePresentation.statusLabel !== null;
   const isExpanded = isFocused || settingsSheetPresentation.keepsComposerExpanded;
   const { setComposerEditing } = useAdaptiveWorkspaceLayout();
-  // The composer stays one row, with the model picker in it, until the draft would
-  // wrap. Then the draft stacks above the controls and returns to the row once it
-  // fits again. The native editor reports its laid-out text size: more than one
+  // The composer stays one row until the draft would wrap (the model tray sits
+  // under the composer, not in the row). Then the draft stacks above the
+  // controls and returns to the row once it fits again. The native editor reports its laid-out text size: more than one
   // line means the draft wrapped where it is, and the widest line is a one-line
   // draft's natural width, which is compared with the row's text area so a draft
   // laid out in the wider card still returns to the row when it fits, including

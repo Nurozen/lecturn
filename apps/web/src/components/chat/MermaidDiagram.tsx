@@ -156,7 +156,7 @@ let purifier: ReturnType<typeof DOMPurify> | null = null;
 // Diagrams can come from untrusted PR descriptions. Pele escapes labels and
 // links and images are off, so this is defense in depth against anything that
 // could navigate, run script, or fetch remote content.
-function sanitizeDiagramSvg(svg: string): Node {
+export function sanitizeDiagramSvg(svg: string): Node {
   purifier ??= DOMPurify(window);
   return purifier.sanitize(svg, {
     FORBID_ATTR: ["href", "xlink:href", "src", "srcset"],
@@ -167,7 +167,7 @@ function sanitizeDiagramSvg(svg: string): Node {
 }
 
 // Pele puts MathML labels in a <foreignObject> with an HTML <div> around them.
-function sanitizeMathDiagramSvg(svg: string): Node {
+export function sanitizeMathDiagramSvg(svg: string): Node {
   purifier ??= DOMPurify(window);
   return purifier.sanitize(svg, {
     // DOMPurify still only accepts <math> under an HTML parent and checks every

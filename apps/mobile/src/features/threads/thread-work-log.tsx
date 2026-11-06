@@ -490,6 +490,7 @@ interface ThreadWorkLogProps {
   readonly anchorKey: string;
   readonly environmentId: EnvironmentId;
   readonly workspaceRoot?: string | null | undefined;
+  readonly planSaveEnabled?: boolean | undefined;
   readonly copiedRowId: string | null;
   readonly expandedRows: Readonly<Record<string, boolean>>;
   readonly rowSizing: ReturnType<typeof deriveThreadWorkLogSizing>;
@@ -534,6 +535,7 @@ export function ThreadWorkLog(props: ThreadWorkLogProps) {
       <ProposedPlanCard
         environmentId={props.environmentId}
         workspaceRoot={props.workspaceRoot}
+        saveEnabled={props.planSaveEnabled !== false}
         markdown={plan.markdown}
         renderMarkdown={props.renderReasoning}
       />

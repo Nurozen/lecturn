@@ -791,12 +791,14 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
             threadId: props.selectedThread.id,
           });
         },
-        action: {
-          label: statusPending ? "Stopping..." : "Stop",
-          accessibilityLabel: "Stop background work",
-          disabled: !props.canOperateThread || statusPending,
-          onPress: () => void runStatusAction("stop"),
-        },
+        action: allows("stop")
+          ? {
+              label: statusPending ? "Stopping..." : "Stop",
+              accessibilityLabel: "Stop background work",
+              disabled: !props.canOperateThread || statusPending,
+              onPress: () => void runStatusAction("stop"),
+            }
+          : null,
       };
     }
     if (contentPresentationKind === "ready" && allows("thread-actions") && (snoozed || woke)) {
@@ -1391,6 +1393,7 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                   : handleEditPendingMessage
               }
               forkEnabled={allows("fork-from-response")}
+              planSaveEnabled={allows("files")}
               contentPresentation={props.contentPresentation}
               agentLabel={agentLabel}
               threadTitle={props.selectedThread.title}

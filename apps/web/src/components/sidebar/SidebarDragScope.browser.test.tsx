@@ -180,7 +180,8 @@ const dndContext = () =>
     }>;
   };
 const projectedText = () => mounted!.screen.container.querySelector("div")!.textContent;
-// Resets the shared mocks for one test; disposing unmounts whatever the test rendered.
+// Resets the shared mocks for one test; disposing unmounts whatever the test
+// rendered and restores stubbed globals.
 function setup(): AsyncDisposable {
   vi.clearAllMocks();
   state.accounts.clear();
@@ -199,7 +200,12 @@ function setup(): AsyncDisposable {
         },
       },
     });
-  return { [Symbol.asyncDispose]: unmount };
+  return {
+    async [Symbol.asyncDispose]() {
+      await unmount();
+      vi.unstubAllGlobals();
+    },
+  };
 }
 
 function scope(

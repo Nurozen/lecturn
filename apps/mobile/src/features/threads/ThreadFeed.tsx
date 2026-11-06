@@ -342,6 +342,8 @@ export interface ThreadFeedProps {
   readonly onEditPendingMessage: ((message: QueuedThreadMessage) => void) | null;
   /** Lecturn: false hides "Fork from this response" (the controls allowlist); absent forks as today. */
   readonly forkEnabled?: boolean;
+  /** Lecturn: false hides a proposed plan's "Save to workspace" (the controls allowlist). */
+  readonly planSaveEnabled?: boolean;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly threadTitle: string;
@@ -1051,6 +1053,7 @@ function renderFeedEntry(
     | "dispatchingMessageId"
     | "onEditPendingMessage"
     | "forkEnabled"
+    | "planSaveEnabled"
     | "threadId"
     | "workspaceRoot"
   > & {
@@ -1590,6 +1593,7 @@ function renderFeedEntry(
       continuesWorkLog={entry.continuesWorkLog}
       environmentId={props.environmentId}
       workspaceRoot={props.workspaceRoot}
+      planSaveEnabled={props.planSaveEnabled}
       anchorKey={entry.id}
       copiedRowId={props.copiedRowId}
       expandedRows={props.expandedWorkRows}
@@ -2314,6 +2318,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
     dispatchingMessageId: props.dispatchingMessageId,
     // Lecturn: the allowlist can arrive with the server config, after rows rendered.
     forkEnabled: props.forkEnabled,
+    planSaveEnabled: props.planSaveEnabled,
     pendingEditEnabled: props.onEditPendingMessage !== null,
     unsettledTurnId,
     copiedRowId,
@@ -2798,6 +2803,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
             dispatchingMessageId: props.dispatchingMessageId,
             onEditPendingMessage: props.onEditPendingMessage,
             forkEnabled: props.forkEnabled,
+            planSaveEnabled: props.planSaveEnabled,
             onUseArtifactTemplate: props.onUseArtifactTemplate,
             threadId: props.threadId,
             copiedRowId,

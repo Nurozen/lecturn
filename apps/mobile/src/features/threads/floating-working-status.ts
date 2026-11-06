@@ -23,7 +23,8 @@ export type FloatingWorkingStatus =
       readonly accessibilityLabel: string;
       readonly waiting: boolean;
       readonly onPress: () => void;
-      readonly action: FloatingStatusAction;
+      /** Lecturn: null when the controls allowlist denies "stop". */
+      readonly action: FloatingStatusAction | null;
     }
   | {
       readonly kind: "lifecycle";
