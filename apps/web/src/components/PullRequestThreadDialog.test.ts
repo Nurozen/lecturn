@@ -85,6 +85,7 @@ vi.mock("~/state/git", () => ({
       return AsyncResult.success({
         branch: "feature/pr",
         worktreePath: mode === "worktree" ? "/worktree" : null,
+        isOnPullRequestHead: true,
       });
     },
   },
@@ -105,6 +106,7 @@ vi.mock("~/state/vcs", () => ({
 vi.mock("./ui/button", () => ({ Button: "Button" }));
 vi.mock("./ui/input", () => ({ Input: "Input" }));
 vi.mock("./ui/spinner", () => ({ Spinner: "Spinner" }));
+vi.mock("./ui/toast", () => ({ toastManager: { add: vi.fn() } }));
 vi.mock("./ui/dialog", () => ({
   Dialog: "Dialog",
   DialogDescription: "DialogDescription",

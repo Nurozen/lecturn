@@ -4,9 +4,11 @@ import * as Headers from "effect/http/Headers";
 
 export const layer = Layer.effect(
   Headers.CurrentRedactedNames,
+  // `expo-session` carries the `eas login` session secret on Expo API requests.
   Effect.map(Headers.CurrentRedactedNames, (names) => [
     ...names,
     "dpop",
+    "expo-session",
     "x-lecturn-gateway-auth",
     "x-lecturn-gateway-path",
   ]),

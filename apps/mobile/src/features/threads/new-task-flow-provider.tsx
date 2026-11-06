@@ -24,6 +24,7 @@ import {
   ThreadId,
 } from "@lecturn/contracts";
 import { sanitizeNewRefName } from "@lecturn/shared/git";
+import { threadContextsOutsideEnvironment } from "@lecturn/shared/composerContextReferences";
 import { resolveNewThreadEnvMode, resolveProjectSettings } from "@lecturn/shared/projectSettings";
 import { parseLecturnProjectFile } from "@lecturn/shared/lecturnProjectFile";
 import * as Arr from "effect/Array";
@@ -474,13 +475,19 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       forcedWorkspaceMode === undefined
       ? projectEnvironment.readFile({
           environmentId: selectedProject.environmentId,
-          input: { cwd: selectedProject.workspaceRoot, relativePath: LECTURN_PROJECT_FILE_NAME },
+          input: {
+            cwd: selectedProject.workspaceRoot,
+            relativePath: LECTURN_PROJECT_FILE_NAME,
+            allowMissing: true,
+          },
         })
       : null,
   );
   const lecturnProjectFileData = lecturnProjectFileQuery.data as ProjectReadFileResult | null;
   const lecturnProjectFile =
-    lecturnProjectFileData === null || lecturnProjectFileData.truncated
+    lecturnProjectFileData === null ||
+    lecturnProjectFileData.exists === false ||
+    lecturnProjectFileData.truncated
       ? null
       : parseLecturnProjectFile(lecturnProjectFileData.contents);
   const projectSettings = resolveProjectSettings(
@@ -999,6 +1006,15 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         selectedProject.id,
       ) ?? selectedModel;
     if ((text.length === 0 && draft.attachments.length === 0) || !draftModelSelection) {
+      return null;
+    }
+    if (
+      threadContextsOutsideEnvironment({
+        text: draft.text,
+        records: draft.context?.records ?? [],
+        environmentId: selectedProject.environmentId,
+      }).length > 0
+    ) {
       return null;
     }
     const workspaceSelection = canChooseWorkspace ? draft.workspaceSelection : undefined;

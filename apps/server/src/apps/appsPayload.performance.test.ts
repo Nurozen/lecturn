@@ -125,6 +125,7 @@ const makeEnvironmentLayer = (name: string) =>
         }),
         Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
           resolvePath: () => Effect.succeed(null),
+          invalidate: () => Effect.void,
         }),
       ),
     ),

@@ -1,4 +1,5 @@
 import type { ThreadId } from "@lecturn/contracts";
+import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import {
   clampHtmlRenderHeight,
@@ -82,6 +83,34 @@ export class HtmlRenderLocalReferencesError extends Schema.TaggedError<HtmlRende
   }
 }
 
+export class HtmlRenderViewportHeightError extends Schema.TaggedError<HtmlRenderViewportHeightError>()(
+  "HtmlRenderViewportHeightError",
+  { found: Schema.String },
+) {
+  override get message(): string {
+    return `The page uses a viewport height unit (${this.found}). The frame grows to fit the page, so a size that follows the viewport makes it grow again and again. Let content set the height, or use fixed pixel heights.`;
+  }
+}
+
+// Only stylesheets and style attributes are checked, so page text that mentions
+// a unit passes; comments match first so their contents are skipped. Scripts
+// are still checked, since markup they insert applies. An unclosed comment,
+// tag, or quote runs to the end of the page, which keeps both patterns linear
+// on hostile input.
+const CSS_SOURCE =
+  /<!--[\s\S]*?(?:-->|$)|<style\b[^>]*(?:>|$)([\s\S]*?)(?:<\/style\s*>|$)|\sstyle\s*=\s*(?:"([^"]*)(?:"|$)|'([^']*)(?:'|$)|([^\s>]+))/gi;
+// The lookbehind skips base64 runs, such as an inlined image that happens to contain "1vh".
+const VIEWPORT_HEIGHT_UNIT = /(?<![\w.+/])(?:\d+(?:\.\d+)?|\.\d+)[sld]?vh(?![\w-])/i;
+
+const rejectViewportHeight = (html: string) => {
+  for (const [, sheet, doubleQuoted, singleQuoted, unquoted] of html.matchAll(CSS_SOURCE)) {
+    const css = sheet ?? doubleQuoted ?? singleQuoted ?? unquoted ?? "";
+    const found = VIEWPORT_HEIGHT_UNIT.exec(css)?.[0];
+    if (found !== undefined) return Effect.fail(new HtmlRenderViewportHeightError({ found }));
+  }
+  return Effect.void;
+};
+
 export class HtmlRenderStoreError extends Schema.TaggedError<HtmlRenderStoreError>()(
   "HtmlRenderStoreError",
   { cause: Schema.Defect() },
@@ -95,7 +124,8 @@ export type HtmlRenderPrepareError =
   | HtmlRenderImagesNotFoundError
   | HtmlRenderImageTooLargeError
   | HtmlRenderPageTooLargeError
-  | HtmlRenderLocalReferencesError;
+  | HtmlRenderLocalReferencesError
+  | HtmlRenderViewportHeightError;
 
 export interface HtmlPreview {
   readonly png: string;
@@ -362,6 +392,7 @@ const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const config = yield* ServerConfig.ServerConfig;
   const previewBrowser = yield* PreviewBrowser.PreviewBrowser;
+  const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
   const services = yield* Effect.context<
     FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
   >();
@@ -431,6 +462,7 @@ const make = Effect.gen(function* () {
     inlineLocalImages(injectHtmlRenderBootstrap(html)).pipe(Effect.provideContext(services));
 
   const prepare = Effect.fn("HtmlRender.prepare")(function* (html: string) {
+    yield* rejectViewportHeight(html);
     const inlined = yield* inline(html);
     if (inlined.missing.length > 0) {
       return yield* new HtmlRenderImagesNotFoundError({ paths: inlined.missing });
@@ -451,6 +483,7 @@ const make = Effect.gen(function* () {
     html: string,
     title: string,
   ) {
+    yield* rejectViewportHeight(html);
     yield* refuseLocalReferences(html);
     const [document, page] = yield* Effect.promise(() =>
       Promise.all([lockedHtmlRenderDocument(html, title), lockedHtmlRenderPage(html)]),
@@ -481,19 +514,35 @@ const make = Effect.gen(function* () {
     if (attachmentId === null || filePath === null) {
       return yield* new HtmlRenderStoreError({ cause: new Error("Invalid thread id.") });
     }
-    const heights = yield* fileSystem.writeFileString(filePath, html).pipe(
-      Effect.mapError((cause) => new HtmlRenderStoreError({ cause })),
-      Effect.andThen(measure(measured, input.locked)),
-      // Only the returned reference lets thread deletion find the page, so a
-      // publish that fails or is interrupted before returning removes it.
-      Effect.onError(() => fileSystem.remove(filePath, { force: true }).pipe(Effect.ignore)),
-    );
-    return {
+    const baseReference: HtmlRenderReference = {
       attachmentId,
       title,
       height: clampHtmlRenderHeight(input.height),
-      ...(heights === undefined ? {} : { heights }),
-    } satisfies HtmlRenderReference;
+    };
+    return yield* fileSystem.writeFileString(filePath, html).pipe(
+      Effect.mapError((cause) => new HtmlRenderStoreError({ cause })),
+      Effect.uninterruptible,
+      Effect.andThen(measure(measured, input.locked)),
+      Effect.andThen((heights) => {
+        const reference: HtmlRenderReference = {
+          ...baseReference,
+          ...(heights === undefined ? {} : { heights }),
+        };
+        return mcpSessions
+          .recordHtmlRender(input.threadId, input, reference)
+          .pipe(Effect.as(reference));
+      }),
+      // An interrupted publish must leave neither an attachment nor a recoverable reference.
+      Effect.onError(() =>
+        Effect.all(
+          [
+            fileSystem.remove(filePath, { force: true }).pipe(Effect.ignore),
+            mcpSessions.takeHtmlRender(input.threadId, input, baseReference).pipe(Effect.ignore),
+          ],
+          { discard: true },
+        ),
+      ),
+    );
   });
 
   const preview = Effect.fn("HtmlRender.preview")(function* (input: {
@@ -507,6 +556,7 @@ const make = Effect.gen(function* () {
       Math.max(MIN_PREVIEW_WIDTH, Math.round(input.width ?? HTML_RENDER_COLUMN_WIDTH)),
     );
     const appearance = input.appearance ?? "dark";
+    yield* rejectViewportHeight(input.html);
     if (input.locked) yield* refuseLocalReferences(input.html);
     const inlined = input.locked
       ? { html: yield* Effect.promise(() => lockedHtmlRenderPage(input.html)), missing: [] }

@@ -162,6 +162,7 @@ async function renderTimeline(options: {
     <MessagesTimeline
       isWorking={false}
       activeTurnInProgress={false}
+      emptyPlaceholderInset={0}
       listRef={createRef<LegendListRef | null>()}
       latestRun={{ runId: LATEST, status: "completed", startedAt: at(30), completedAt: at(50) }}
       turnDiffSummaries={[]}

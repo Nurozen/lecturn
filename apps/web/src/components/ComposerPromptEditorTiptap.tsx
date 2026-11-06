@@ -45,6 +45,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type RefObject,
 } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import {
@@ -72,6 +73,7 @@ import {
   caretTakesMarksBefore,
   convertBulletItemToTask,
   ComposerCodeExtension,
+  ComposerItalicExtension,
   ComposerTaskItemExtension,
   ComposerTaskListExtension,
   flatToMarkdown,
@@ -141,6 +143,7 @@ export interface ComposerPromptEditorHandle {
 }
 
 export interface ComposerPromptEditorProps {
+  draftKey?: string;
   value: string;
   cursor: number;
   richTextEnabled?: boolean;
@@ -778,6 +781,7 @@ function replaceSkillChips(
 }
 
 export function ComposerPromptEditorTiptap(props: ComposerPromptEditorProps) {
+  const restoreFocusRef = useRef(false);
   const { onChange: onPromptChange } = props;
   const [selection, setSelection] = useState<{
     value: string;
@@ -797,8 +801,9 @@ export function ComposerPromptEditorTiptap(props: ComposerPromptEditorProps) {
   // a caret inside unknown `$name` text, so retain the exact Markdown offset here.
   return (
     <ComposerPromptEditorTiptapInner
-      key={props.literalText ? "literal" : props.richTextEnabled ? "rich" : "plain"}
+      key={`${props.draftKey ?? ""}:${props.literalText ? "literal" : props.richTextEnabled ? "rich" : "plain"}`}
       {...props}
+      restoreFocusRef={restoreFocusRef}
       initialExpandedCursor={
         selection?.value === props.value && selection.cursor === props.cursor
           ? selection.expandedCursor
@@ -847,7 +852,8 @@ function createComposerExtensions(richText: boolean) {
       code: false,
       listKeymap: false,
       undoRedo: { newGroupDelay: COMPOSER_UNDO_GROUP_DELAY },
-      ...(richText ? {} : { bold: false, italic: false, strike: false }),
+      italic: false,
+      ...(richText ? {} : { bold: false, strike: false }),
     }),
     ComposerUndoGroupingExtension,
     ComposerMentionExtension,
@@ -858,6 +864,7 @@ function createComposerExtensions(richText: boolean) {
     ComposerMarkersExtension,
     ...(richText
       ? [
+          ComposerItalicExtension,
           ComposerCodeExtension,
           ComposerCodeBlockExtension.extend({
             addNodeView() {
@@ -937,7 +944,10 @@ const RICH_TEXT_EXTENSIONS = createComposerExtensions(true);
 const PLAIN_TEXT_EXTENSIONS = createComposerExtensions(false);
 
 function ComposerPromptEditorTiptapInner(
-  props: ComposerPromptEditorProps & { initialExpandedCursor: number },
+  props: ComposerPromptEditorProps & {
+    initialExpandedCursor: number;
+    restoreFocusRef: RefObject<boolean>;
+  },
 ) {
   const {
     value,
@@ -967,6 +977,7 @@ function ComposerPromptEditorTiptapInner(
     onCitationDraftSave,
     onPaste,
     editorRef,
+    restoreFocusRef,
   } = props;
   const richText = !literalText && (richTextEnabled ?? false);
   const clampEditorCursor = (text: string, position: number) =>
@@ -1023,7 +1034,10 @@ function ComposerPromptEditorTiptapInner(
   });
   const selectionRangeRef = useRef({ start: initialExpandedCursor, end: initialExpandedCursor });
   const isApplyingControlledUpdateRef = useRef(false);
-  const hasAppliedControlledSelectionRef = useRef(false);
+  // The editor the controlled selection was last applied to. Tiptap replaces an
+  // editor it destroyed (cold load, a hidden composer revealed), and the
+  // replacement starts with its caret at the document start.
+  const controlledSelectionEditorRef = useRef<TiptapEditor | null>(null);
   const citationRequestRef = useRef<ComposerCitationCommentRequest | null>(null);
   const [openCitation, setOpenCitation] = useState<OpenCitationComment | null>(null);
   const citationDraftRef = useRef<{ key: string; comment: string } | null>(null);
@@ -1557,9 +1571,10 @@ function ComposerPromptEditorTiptapInner(
   });
 
   useLayoutEffect(() => {
-    if (!editor) return;
-    const initialSelection = !hasAppliedControlledSelectionRef.current;
-    hasAppliedControlledSelectionRef.current = true;
+    // A destroyed editor is about to be replaced, and this effect reruns for the new one.
+    if (!editor || editor.isDestroyed) return;
+    const initialSelection = controlledSelectionEditorRef.current !== editor;
+    controlledSelectionEditorRef.current = editor;
     const normalizedCursor = clampEditorCursor(value, cursor);
     const previousSnapshot = snapshotRef.current;
     if (
@@ -1647,8 +1662,23 @@ function ComposerPromptEditorTiptapInner(
     if (replacements.length > 0) replaceSkillChips(editor, replacements);
   }, [editor, literalText, skills]);
 
+  useLayoutEffect(() => {
+    // Leave a pending restore for the editor that replaces a destroyed one.
+    if (!editor || editor.isDestroyed) return;
+    if (restoreFocusRef.current) {
+      restoreFocusRef.current = false;
+      editor.view.focus();
+      scrollTiptapCaretIntoView(editor);
+    }
+    return () => {
+      // Capture focus before the keyed editor's DOM is removed. A destroyed
+      // editor has no view to ask, so keep what an earlier cleanup captured.
+      if (!editor.isDestroyed) restoreFocusRef.current = editor.view.hasFocus();
+    };
+  }, [editor, restoreFocusRef]);
+
   const focusAt = (nextCursor: number, exactExpandedCursor?: number) => {
-    if (!editor) return;
+    if (!editor || editor.isDestroyed) return;
     // view.focus() writes the state selection to the DOM as it focuses. A
     // bare DOM focus leaves the native caret at the start until
     // ProseMirror resyncs it 20ms later, and dictation tools type fast
@@ -1736,7 +1766,7 @@ function ComposerPromptEditorTiptapInner(
         if (edge === "start" ? beforeCaret.includes("\n") : afterCaret.includes("\n")) {
           return false;
         }
-        const rootElement = editor?.view.dom;
+        const rootElement = editor && !editor.isDestroyed ? editor.view.dom : null;
         const selection = window.getSelection();
         if (
           !rootElement ||

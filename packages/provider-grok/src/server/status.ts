@@ -61,13 +61,17 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
 });
 
 const VERSION_PROBE_TIMEOUT_MS = 4_000;
-const GROK_ACP_INITIALIZE_TIMEOUT_MS = 8_000;
+// Grok writes the initialize result only after startup work (settings,
+// skill discovery, file watching). From a home directory that work measured
+// 9-14s on CLI 1.0.52, so an 8s cap records a healthy CLI as a failed probe.
+const GROK_ACP_INITIALIZE_TIMEOUT_MS = 20_000;
 /**
- * Discovery runs the version, `grok models`, and ACP initialize probes in
- * sequence, so its outer limit covers all three plus spawn and skill-scan slack.
+ * Discovery runs the version probe, up to two `grok models` probes (the second
+ * tells a token refresh from a logout), and ACP initialize in sequence, so its
+ * outer limit covers all of them plus spawn and skill-scan slack.
  */
 export const GROK_DETECTION_TIMEOUT_MS =
-  VERSION_PROBE_TIMEOUT_MS + AUTH_PROBE_TIMEOUT_MS + GROK_ACP_INITIALIZE_TIMEOUT_MS + 5_000;
+  VERSION_PROBE_TIMEOUT_MS + 2 * AUTH_PROBE_TIMEOUT_MS + GROK_ACP_INITIALIZE_TIMEOUT_MS + 5_000;
 const GROK_API_KEY_ENV = "XAI_API_KEY";
 
 const GROK_BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
@@ -309,6 +313,37 @@ const runGrokCliCommand = Effect.fn("GrokProviderStatus.runGrokCliCommand")(func
   );
 });
 
+const probeGrokModels = Effect.fn("GrokProviderStatus.probeGrokModels")(function* (
+  grokSettings: GrokSettings,
+  environment: NodeJS.ProcessEnv,
+) {
+  const modelsResult = yield* runGrokCliCommand(grokSettings, ["models"], environment).pipe(
+    Effect.timeoutOption(AUTH_PROBE_TIMEOUT_MS),
+    Effect.result,
+  );
+  // Only a clean exit is parsed. Failed invocations print help or error text that
+  // must not be read as model slugs or as a login verdict.
+  const modelsOutput =
+    Result.isSuccess(modelsResult) &&
+    Option.isSome(modelsResult.success) &&
+    modelsResult.success.value.code === 0
+      ? modelsResult.success.value
+      : undefined;
+  const cliModels: GrokModelsCliOutput = modelsOutput
+    ? parseGrokModelsCliOutput(`${modelsOutput.stdout}\n${modelsOutput.stderr}`)
+    : { authenticated: null, models: [] };
+  if (!modelsOutput) {
+    yield* Effect.logWarning("Grok CLI model listing failed or timed out.", {
+      errorTag: Result.isFailure(modelsResult)
+        ? modelsResult.failure._tag
+        : Option.isNone(modelsResult.success)
+          ? "Timeout"
+          : `ExitCode${modelsResult.success.value.code}`,
+    });
+  }
+  return cliModels;
+});
+
 const decodeAvailableCommands = Schema.decodeUnknownOption(Schema.Array(Schema.Unknown));
 const decodeAvailableCommand = Schema.decodeUnknownOption(
   Schema.Struct({
@@ -393,6 +428,7 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
   }
 
   const probeEnvironment = grokProbeEnvironment(environment);
+  const apiKey = environment[GROK_API_KEY_ENV]?.trim();
 
   const versionResult = yield* runGrokCliCommand(
     grokSettings,
@@ -462,32 +498,17 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
   }
 
   // `grok models` reports login state and model slugs without starting the agent.
-  const modelsResult = yield* runGrokCliCommand(grokSettings, ["models"], probeEnvironment).pipe(
-    Effect.timeoutOption(AUTH_PROBE_TIMEOUT_MS),
-    Effect.result,
-  );
-  // Only a clean exit is parsed. Failed invocations print help or error text that
-  // must not be read as model slugs or as a login verdict.
-  const modelsOutput =
-    Result.isSuccess(modelsResult) &&
-    Option.isSome(modelsResult.success) &&
-    modelsResult.success.value.code === 0
-      ? modelsResult.success.value
-      : undefined;
-  const cliModels: GrokModelsCliOutput = modelsOutput
-    ? parseGrokModelsCliOutput(`${modelsOutput.stdout}\n${modelsOutput.stderr}`)
-    : { authenticated: null, models: [] };
-  if (!modelsOutput) {
-    yield* Effect.logWarning("Grok CLI model listing failed or timed out.", {
-      errorTag: Result.isFailure(modelsResult)
-        ? modelsResult.failure._tag
-        : Option.isNone(modelsResult.success)
-          ? "Timeout"
-          : `ExitCode${modelsResult.success.value.code}`,
-    });
+  let cliModels = yield* probeGrokModels(grokSettings, probeEnvironment);
+  // An expired access token prints the logged-out line, then the CLI refreshes it in the same
+  // process. Probing again after that process exited tells a refresh from a real logout.
+  if (cliModels.authenticated === false && !apiKey) {
+    const recheck = yield* probeGrokModels(grokSettings, probeEnvironment);
+    if (recheck.authenticated !== null) {
+      cliModels = recheck;
+    }
   }
 
-  const auth: ServerProviderAuth = environment[GROK_API_KEY_ENV]?.trim()
+  const auth: ServerProviderAuth = apiKey
     ? { status: "authenticated", type: "api_key", label: "xAI API key" }
     : cliModels.authenticated === true
       ? { status: "authenticated", type: "cached_token", label: "Grok account" }

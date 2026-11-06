@@ -27,6 +27,6 @@ export async function readLecturnProjectFile(
     LECTURN_PROJECT_FILE_NAME,
     result._tag === "Success" ? result.value : null,
   );
-  if (data === null || data.truncated) return null;
+  if (data === null || data.exists === false || data.truncated) return null;
   return parseLecturnProjectFile(data.contents);
 }

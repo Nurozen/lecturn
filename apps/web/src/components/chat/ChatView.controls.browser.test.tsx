@@ -217,10 +217,32 @@ function seedHomeThread() {
     item,
   }));
   const projection = makeThreadProjectionFixture();
+  // Edit from here needs the live provider conversation to have reached the target run.
+  const providerThreadId = "provider-thread-home";
+  const attemptId = "attempt-1";
   fixture.projection = {
     ...projection,
-    thread: { ...projection.thread, id: THREAD_ID, projectId: PROJECT_ID },
-    runs: [run(RUN_ID, 1, "user-1", 1), run(RUN_2_ID, 2, "user-2", 6)],
+    thread: {
+      ...projection.thread,
+      id: THREAD_ID,
+      projectId: PROJECT_ID,
+      activeProviderThreadId: providerThreadId,
+    },
+    providerThreads: [
+      {
+        id: providerThreadId,
+        providerInstanceId: projection.thread.modelSelection.instanceId,
+        providerSessionId: "provider-session-home",
+      },
+    ],
+    attempts: [{ id: attemptId, runId: RUN_ID, providerTurnId: null }],
+    providerTurns: [
+      { id: "provider-turn-1", providerThreadId, runAttemptId: attemptId, ordinal: 1 },
+    ],
+    runs: [
+      { ...run(RUN_ID, 1, "user-1", 1), activeAttemptId: attemptId },
+      run(RUN_2_ID, 2, "user-2", 6),
+    ],
     turnItems: items,
     visibleTurnItems: fixture.items,
     checkpoints: [

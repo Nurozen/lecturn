@@ -9,8 +9,11 @@ import {
   RelayDpopAccessTokenRequest,
   RelayDpopProofRequestHeaders,
   RelayDpopTokenExchangeGrantType,
+  RelayEnvironmentLinkUnavailableError,
   RelayJwtSubjectTokenType,
 } from "./relay.ts";
+
+const decodeLinkUnavailableError = Schema.decodeUnknownSync(RelayEnvironmentLinkUnavailableError);
 
 const decodeExchangeRequest = Schema.decodeUnknownSync(RelayDpopAccessTokenRequest);
 const decodeProofHeaders = Schema.decodeUnknownSync(RelayDpopProofRequestHeaders);
@@ -90,6 +93,20 @@ describe("mobile device platforms", () => {
         pushToStartToken: "apple-token",
       })._tag,
     ).toBe("Failure");
+  });
+});
+
+describe("relay provisioning error compatibility", () => {
+  it("preserves a stage introduced by a newer relay", () => {
+    const error = {
+      _tag: "RelayEnvironmentLinkUnavailableError",
+      code: "environment_link_unavailable",
+      reason: "managed_endpoint_provisioning_failed",
+      provisioningStage: "future-provisioning-stage",
+      traceId: "trace-1",
+    };
+
+    expect(decodeLinkUnavailableError(error)).toMatchObject(error);
   });
 });
 

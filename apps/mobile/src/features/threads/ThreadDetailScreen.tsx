@@ -8,7 +8,7 @@ import {
   useThreadShell,
 } from "../../state/entities";
 import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
-import { useNavigation } from "@react-navigation/native";
+import { StackActions, useNavigation } from "@react-navigation/native";
 import type { WorktreeSetupCardProps } from "./worktree-setup-card";
 import type { ComposerTextPaste } from "../../native/LecturnComposerEditor.types";
 import { ContextualPreparationNotice } from "../contextual/ContextualControls";
@@ -73,7 +73,7 @@ import type { QueuedRunEdit } from "../../state/queued-run-edit";
 import type { FollowUpBehavior } from "../../lib/followUpBehavior";
 import type { ActiveTurnComposerAction } from "@lecturn/client-runtime/state/composer-dispatch";
 import * as Haptics from "expo-haptics";
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   AppState,
   Pressable,
@@ -82,6 +82,7 @@ import {
   useWindowDimensions,
   View,
   type GestureResponderEvent,
+  type LayoutChangeEvent,
   type ViewInstance,
 } from "react-native";
 import {
@@ -124,6 +125,7 @@ import { ThreadBrowserFloat } from "../browser/ThreadBrowserFloat";
 import { useThreadServerBrowserTabs } from "../../state/preview";
 import type { QueuedThreadMessage } from "../../state/thread-outbox-model";
 import { scopedThreadKey } from "../../lib/scopedEntities";
+import { parentThreadIsBelow } from "../../lib/android-workspace-navigation";
 import {
   clearThreadComposerError,
   threadComposerErrorsAtom,
@@ -401,6 +403,9 @@ function useStreamingHaptics(threadId: ThreadId, feed: ReadonlyArray<ThreadFeedE
   }, [threadId, feed]);
 }
 
+const USAGE_LIMITS_PANEL_GAP = 12;
+const USAGE_LIMITS_PANEL_MIN_HEIGHT = 44;
+
 const USER_INPUT_TOGGLE_TIMING = {
   duration: USER_INPUT_TOGGLE_DURATION_MS,
   easing: Easing.out(Easing.cubic),
@@ -598,16 +603,13 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
   const [anchorMessageId, setAnchorMessageId] = useState<MessageId | null>(null);
   const [submittedMessageId, setSubmittedMessageId] = useState<MessageId | null>(null);
   const [endFollowEnabled, setEndFollowEnabled] = useState(true);
-  // Android keys the safe-area padding on keyboard visibility (#5988): the back gesture closes
-  // the keyboard while the editor stays focused, and a focus-keyed inset would leave the toolbar
-  // under the gesture bar. iOS must NOT use visibility — it only flips on keyboardDidHide, after
-  // the hide animation, so the composer would ride down flush to the screen edge and then snap up
-  // into the inset.
-  const composerBottomInset = (
-    Platform.OS === "android" ? isKeyboardVisible : composerExpanded || composerFocused
-  )
-    ? 0
-    : Math.max(insets.bottom, 12);
+  // Android Back hides the keyboard without blurring. Keep its safe-area padding
+  // fixed through the animation and cancel it with matching composer/list offsets.
+  const composerBottomInset =
+    Platform.OS === "ios" && (composerExpanded || composerFocused)
+      ? 0
+      : Math.max(insets.bottom, 12);
+  const composerKeyboardOffset = Platform.OS === "android" ? composerBottomInset : 0;
   const contentPresentationKind = props.contentPresentation.kind;
   const realThreadSyncLabel = (() => {
     switch (props.threadSyncStatus) {
@@ -660,10 +662,12 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
         accessibilityLabel: `Open ${childInput.hasPendingApprovals ? "approval" : "question"} from ${childInput.title}`,
         onPress: () => {
           Keyboard.dismiss();
-          navigation.navigate("Thread", {
-            environmentId: props.environmentId,
-            threadId: childInput.id,
-          });
+          navigation.dispatch(
+            StackActions.push("Thread", {
+              environmentId: props.environmentId,
+              threadId: childInput.id,
+            }),
+          );
         },
       };
     }
@@ -779,10 +783,11 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
       setLastKnownKeyboardHeight(liveKeyboardHeight);
     }
   }, [lastKnownKeyboardHeight, liveKeyboardHeight]);
+  const reservedKeyboardHeight =
+    lastKnownKeyboardHeight > 0 ? lastKnownKeyboardHeight : ESTIMATED_KEYBOARD_HEIGHT;
   const pendingUserInputMaxHeight = derivePendingUserInputMaxHeight({
     windowHeight,
-    keyboardHeight:
-      lastKnownKeyboardHeight > 0 ? lastKnownKeyboardHeight : ESTIMATED_KEYBOARD_HEIGHT,
+    keyboardHeight: reservedKeyboardHeight,
     navigationHeaderHeight,
     composerOverlapHeight: composerBottomInset,
   });
@@ -802,6 +807,51 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
     Math.max(0, estimatedOverlayHeight - nativeInsetOvercount),
     -nativeInsetOvercount,
     Platform.OS === "ios" ? COMPOSER_TRANSITION_DURATION_MS : 0,
+  );
+  // Android lays the screen out below its opaque header and reports a zero
+  // header height, so the window height overstates the room by the header.
+  const [screenHeight, setScreenHeight] = useState<number | null>(null);
+  const handleScreenLayout = useCallback((event: LayoutChangeEvent) => {
+    setScreenHeight(event.nativeEvent.layout.height);
+  }, []);
+  const screenAreaHeight = screenHeight ?? windowHeight;
+  // The usage panel stacks with the composer and any approval card, so it gets
+  // whatever room they leave below the header. Measured only while it is open
+  // so typing in the composer does not re-render the screen.
+  const usageLimitsOpen = usageLimitsReport !== null && activeUserInputRequestId === null;
+  const [usageLimitsLayout, setUsageLimitsLayout] = useState({ overlay: 0, panel: 0 });
+  const handleComposerOverlayLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      onComposerLayout(event);
+      if (!usageLimitsOpen) return;
+      const overlay = event.nativeEvent.layout.height;
+      setUsageLimitsLayout((current) =>
+        current.overlay === overlay ? current : { ...current, overlay },
+      );
+    },
+    [onComposerLayout, usageLimitsOpen],
+  );
+  const handleUsageLimitsLayout = useCallback((event: LayoutChangeEvent) => {
+    const panel = event.nativeEvent.layout.height;
+    setUsageLimitsLayout((current) => (current.panel === panel ? current : { ...current, panel }));
+  }, []);
+  const overlayBesideUsageLimits =
+    usageLimitsLayout.overlay > 0
+      ? usageLimitsLayout.overlay - usageLimitsLayout.panel
+      : composerOverlapHeight;
+  // The keyboard is reserved even while closed, like the question card, so the
+  // panel never grows over the header while the keyboard animates. The floor
+  // keeps the close row on screen when the stack below leaves no room at all.
+  const usageLimitsMaxHeight = Math.max(
+    USAGE_LIMITS_PANEL_MIN_HEIGHT,
+    Math.min(
+      Math.round(screenAreaHeight * 0.4),
+      screenAreaHeight -
+        navigationHeaderHeight -
+        reservedKeyboardHeight -
+        overlayBesideUsageLimits -
+        USAGE_LIMITS_PANEL_GAP * 2,
+    ),
   );
   const userInputCardProgress = useSharedValue(1);
   const userInputInsetProgress = useSharedValue(1);
@@ -1156,7 +1206,7 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
   );
 
   return (
-    <View className="flex-1">
+    <View className="flex-1" onLayout={handleScreenLayout}>
       {!usesNativeWorkspaceColumns ? <NativeLayoutObserver onChange={setScreenMetrics} /> : null}
       <ThreadVisitWatermark
         environmentId={props.environmentId}
@@ -1225,6 +1275,7 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
               anchorMessageId={anchorMessageId}
               submittedMessageId={submittedMessageId}
               contentInsetEndAdjustment={combinedContentInsetEndAdjustment}
+              keyboardOffset={composerKeyboardOffset}
               contentTopInset={0}
               contentBottomInset={
                 estimatedOverlayHeight +
@@ -1266,12 +1317,11 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
 
       {showContent ? (
         <KeyboardStickyView
-          // iOS emits a native animated height target on both will-show and
-          // will-hide, so stay subscribed for the full transition.
-          enabled={Platform.OS === "ios" || (isKeyboardVisible && !keyboardStateSuspect)}
+          // Waiting for a visibility render misses the first keyboard frames.
+          enabled={Platform.OS === "ios" || !keyboardStateSuspect}
           pointerEvents="box-none"
           style={{ position: "absolute", bottom: 0, left: 0, right: 0, top: 0 }}
-          offset={{ closed: 0, opened: 0 }}
+          offset={{ closed: 0, opened: composerKeyboardOffset }}
         >
           <ComposerPopoverHost hidden={composerSlotHidden} popoverHeight={composerPopoverHeight}>
             {/* Let the measured overlay size the iOS dock without a second frame
@@ -1293,7 +1343,11 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
               {/* No paddingTop here: the overlay's measured height becomes the
                 list's bottom inset, so any padding above the pill/composer
                 pushes the resting content floor up by the same amount. */}
-              <View ref={composerOverlayRef} onLayout={onComposerLayout} className="w-full">
+              <View
+                ref={composerOverlayRef}
+                onLayout={handleComposerOverlayLayout}
+                className="w-full"
+              >
                 <FloatingWorkingControl
                   colorScheme={isDarkMode ? "dark" : "light"}
                   status={floatingStatus}
@@ -1373,13 +1427,16 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                   activeUserInputRequestId === null &&
                   allows("usage-limits") ? (
                     <Animated.View
-                      className="shrink-0 px-4 pb-3"
+                      className="shrink-0 px-4"
+                      style={{ paddingBottom: USAGE_LIMITS_PANEL_GAP }}
+                      onLayout={handleUsageLimitsLayout}
                       entering={FadeInDown.duration(220)}
                       exiting={FadeOut.duration(140)}
                     >
                       <ComposerUsageLimits
                         report={usageLimitsReport}
                         environmentId={props.environmentId}
+                        maxHeight={usageLimitsMaxHeight}
                         onClose={dismissUsageLimits}
                       />
                     </Animated.View>
@@ -1446,10 +1503,6 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                   ) : null}
                 </View>
 
-                {/*
-                 * Hidden (not unmounted) while a user-input request owns the composer slot, so
-                 * composer drafts and editor state survive.
-                 */}
                 {settled ? (
                   <View
                     style={{
@@ -1545,11 +1598,17 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                         onOpenParent={
                           props.selectedThread.lineage.parentThreadId === null
                             ? null
-                            : () =>
-                                navigation.navigate("Thread", {
+                            : () => {
+                                const parent = {
                                   environmentId: String(props.environmentId),
                                   threadId: String(props.selectedThread.lineage.parentThreadId),
-                                })
+                                };
+                                navigation.dispatch((state) =>
+                                  parentThreadIsBelow(state, parent)
+                                    ? StackActions.pop()
+                                    : StackActions.push("Thread", parent),
+                                );
+                              }
                         }
                       />
                     </View>
@@ -1594,6 +1653,7 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                         draftKey={props.composerDraftKey ?? undefined}
                         followUpBehavior={props.followUpBehavior}
                         canSteerActiveTurn={props.canSteerActiveTurn}
+                        hidden={composerSlotHidden}
                         queuedEdit={
                           props.queuedRunEdit === null
                             ? null

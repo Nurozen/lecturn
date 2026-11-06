@@ -55,6 +55,8 @@ describe("connected-app migrations on a divergent ledger", () => {
         assert.deepEqual(executed, [
           [81, "CanonicalizeThreadPullRequestLinks"],
           [82, "Squire"],
+          [83, "CodexUsageNativeTurnIndex"],
+          [84, "RepairClientSettlementTimestamps"],
           [79, "AppRegistrations"],
           [80, "ProjectionProjectsAppBinding"],
         ]);
@@ -64,6 +66,8 @@ describe("connected-app migrations on a divergent ledger", () => {
           ...before,
           { migration_id: 81, name: "CanonicalizeThreadPullRequestLinks" },
           { migration_id: 82, name: "Squire" },
+          { migration_id: 83, name: "CodexUsageNativeTurnIndex" },
+          { migration_id: 84, name: "RepairClientSettlementTimestamps" },
         ]);
         // Every later start repairs again; the SQL is idempotent, so that is a no-op.
         yield* runMigrations();
@@ -104,6 +108,8 @@ describe("connected-app migrations on a divergent ledger", () => {
         [80, "ProjectionProjectsAppBinding"],
         [81, "CanonicalizeThreadPullRequestLinks"],
         [82, "Squire"],
+        [83, "CodexUsageNativeTurnIndex"],
+        [84, "RepairClientSettlementTimestamps"],
         [79, "AppRegistrations"],
       ]);
       yield* assertAppSchema;

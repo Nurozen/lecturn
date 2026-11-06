@@ -28,6 +28,7 @@ import {
   resolveLatestMergeBackRun,
 } from "@lecturn/client-runtime/state/thread-workflows";
 import {
+  isOrchestrationV2WorkActive,
   isProviderNativeSubagentThread,
   NodeId,
   type EnvironmentId,
@@ -180,9 +181,9 @@ function currentSubagent<Agent extends RuntimeSubagent>(
   agent: Agent | undefined,
   childThread: OrchestrationV2ThreadShell | null | undefined,
 ): Agent | undefined {
+  if (!agent || !childThread || isOrchestrationV2WorkActive(agent.status)) return agent;
   const liveStatus =
-    childThread?.activityRunStatus ?? (childThread?.status === "queued" ? "queued" : null);
-  if (!agent || !childThread) return agent;
+    childThread.activityRunStatus ?? (childThread.status === "queued" ? "queued" : null);
   const newerRun =
     childThread.latestRunRequestedAt &&
     DateTime.toEpochMillis(childThread.latestRunRequestedAt) >

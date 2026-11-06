@@ -180,7 +180,7 @@ export const layer = Layer.effect(
         electronDialog
           .showErrorBox(
             "This Lecturn home is unavailable",
-            "Another Lecturn server, such as the background service, is using this data directory. Stop that server and reopen Lecturn, or set a separate LECTURN_HOME and pair with the running server.",
+            "Another Lecturn server, such as the background service, is using this data directory, or an older background service is set up for it. Stop that server or try `lecturn update`. If the older launcher cannot update, run `lecturn service uninstall` and optionally reinstall with `lecturn service install` from a current CLI. Use `npx lecturn@latest` if `lecturn` is missing or outdated, and pass `--base-dir` with the service's Lecturn home to each command. Then reopen Lecturn. You can also set a separate LECTURN_HOME and pair with the running server.",
           )
           .pipe(Effect.andThen(electronApp.quit)),
     });

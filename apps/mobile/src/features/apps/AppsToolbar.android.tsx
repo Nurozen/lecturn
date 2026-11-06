@@ -2,63 +2,35 @@ import { useNavigation } from "@react-navigation/native";
 import { View } from "react-native";
 
 import { CompactBrandTitle } from "../../components/CompactBrandTitle";
-import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
+import { useToolbarLayout } from "../../components/ui/useToolbarLayout";
 import { WorkspaceConnectionTitle } from "../home/WorkspaceConnectionTitle";
-import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
-import { useWorkspaceListNavigation } from "../workspace/useAndroidWorkspaceNavigation";
 
 /**
- * Keeps the environment switcher and Settings reachable while the Apps tab is selected. The
- * split-view sidebar has no navigation bar, so there it also switches to the other lists.
+ * Keeps the environment switcher reachable while the Apps tab is selected. It draws the same
+ * plain row as the Chats and Pulls tabs (`WorkspaceListToolbarRow`), so switching tabs leaves
+ * the title where it was; Settings and the other lists live in the navigation bar or rail.
  */
-export function AppsToolbar(props: { readonly sidebar?: boolean }) {
+export function AppsToolbar() {
   const navigation = useNavigation();
-  const showThreads = useWorkspaceListNavigation("threads");
-  const showPullRequests = useWorkspaceListNavigation("pullRequests");
+  const { height, paddingTop, paddingBottom } = useToolbarLayout();
   return (
-    <AndroidScreenHeader
-      title="Apps"
-      titleContent={
-        <View className="min-w-0 flex-1 pl-3">
+    <View className="bg-header px-2" style={{ paddingTop, paddingBottom }}>
+      <View className="flex-row items-center gap-1" style={{ minHeight: height }}>
+        <View className="min-w-0 flex-1 pl-4">
           <WorkspaceConnectionTitle
             grow
-            brand={
-              <CompactBrandTitle allowFontScaling={false} accessibilityLabel="Lecturn, Apps" fit />
-            }
             onPress={() =>
               navigation.navigate("SettingsSheet", {
                 screen: "SettingsContent",
                 params: { screen: "SettingsEnvironments" },
               })
             }
+            brand={
+              <CompactBrandTitle allowFontScaling={false} accessibilityLabel="Lecturn, Apps" fit />
+            }
           />
         </View>
-      }
-      actions={[
-        ...(props.sidebar
-          ? [
-              {
-                accessibilityLabel: "Show threads",
-                icon: "text.bubble",
-                onPress: showThreads,
-              } as const,
-              {
-                accessibilityLabel: "Show pull requests",
-                icon: PullRequestGlyph.pullRequest,
-                onPress: showPullRequests,
-              } as const,
-            ]
-          : []),
-        {
-          accessibilityLabel: "Open settings",
-          icon: "gearshape",
-          onPress: () =>
-            navigation.navigate("SettingsSheet", {
-              screen: "SettingsContent",
-              params: { screen: "Settings" },
-            }),
-        },
-      ]}
-    />
+      </View>
+    </View>
   );
 }

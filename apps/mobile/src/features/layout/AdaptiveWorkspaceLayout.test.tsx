@@ -77,7 +77,15 @@ const stubModules: Record<string, unknown> = {
     runOnJS: (fn: unknown) => fn,
     useAnimatedStyle: () => ({}),
     useDerivedValue: () => React.useRef({ value: 0 }).current,
-    useSharedValue: (value: number) => React.useRef({ value }).current,
+    useSharedValue: (value: number) => {
+      const shared = React.useRef({
+        value,
+        set(next: number) {
+          shared.value = next;
+        },
+      }).current;
+      return shared;
+    },
     withTiming: (value: number) => value,
   },
   "../../lib/adaptive-navigation": {
@@ -98,6 +106,10 @@ const stubModules: Record<string, unknown> = {
   },
   "../home/AndroidHomeFab": { AndroidHomeFabLayout: Passthrough },
   "../workspace/AndroidWorkspaceSidebar": { AndroidWorkspaceSidebar: Passthrough },
+  "../workspace/AndroidWorkspaceNavigation": {
+    AndroidWorkspaceNavigation: () => null,
+    ANDROID_WORKSPACE_RAIL_WIDTH: 72,
+  },
   "../workspace/useAndroidWorkspaceSelection": {
     useAndroidWorkspaceSelection: () => selectWorkspace,
   },

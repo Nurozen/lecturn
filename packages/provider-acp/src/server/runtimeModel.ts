@@ -816,6 +816,7 @@ export function canonicalItemTypeFromAcpToolKind(kind: string | undefined): Tool
 function makeToolCallState(
   input: {
     readonly toolCallId: string;
+    readonly name?: string | null | undefined;
     readonly title?: string | null | undefined;
     readonly kind?: EffectAcpSchema.ToolKind | null | undefined;
     readonly status?: EffectAcpSchema.ToolCallStatus | null | undefined;
@@ -843,6 +844,7 @@ function makeToolCallState(
       ? title
       : undefined;
   const data: Record<string, unknown> = { toolCallId };
+  if (input.name != null) data.name = input.name;
   if (kind) {
     data.kind = kind;
   }
@@ -913,6 +915,7 @@ function parseTypedToolCallState(
   return makeToolCallState(
     {
       toolCallId: event.toolCallId,
+      name: event.name,
       title: event.title,
       kind: event.kind,
       status: event.status,
@@ -1090,15 +1093,11 @@ const LECTURN_MCP_TITLE_SUFFIX_CALL =
   /^(?<tool>[A-Za-z0-9][A-Za-z0-9_.-]*?)(?: \(lecturn MCP Server\)(?::|$)|[-_.]lecturn$)/i;
 
 /**
- * glm-acp-agent and Kimi CLI register injected MCP tools under their bare
- * names; Kimi additionally appends ": <raw args json>". The Lecturn inventory
- * gate alone is not enough: an agent can have its own tool of the same name
- * (Hermes has a built-in `delegate_task`) and title it "<tool>: <description>",
- * so only a bare name or a JSON object after the colon counts. The match stops
- * at the opening brace because Kimi retitles on every streamed args chunk, so
- * the JSON is often still incomplete.
+ * glm and Kimi use bare names; Antigravity uses "Running <tool>". Kimi appends
+ * streamed JSON arguments. Require a name or JSON opening brace so built-ins
+ * titled "<tool>: <description>" cannot impersonate an inventory entry.
  */
-const LECTURN_MCP_BARE_TITLE_CALL = /^(?<tool>[A-Za-z0-9_]+)(?::\s*\{|$)/;
+const LECTURN_MCP_BARE_TITLE_CALL = /^(?:Running )?(?<tool>[A-Za-z0-9_]+)(?::\s*\{|$)/;
 
 /**
  * Lecturn's own tools, plus a registered connected app's `<prefix>_<tool>`:

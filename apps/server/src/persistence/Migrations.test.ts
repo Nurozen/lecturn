@@ -167,6 +167,8 @@ describe("runMigrations", () => {
         [80, "ProjectionProjectsAppBinding"],
         [81, "CanonicalizeThreadPullRequestLinks"],
         [82, "Squire"],
+        [83, "CodexUsageNativeTurnIndex"],
+        [84, "RepairClientSettlementTimestamps"],
       ]);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -197,7 +199,11 @@ describe("runMigrations", () => {
       yield* runMigrations({ toMigrationInclusive: 81 });
       yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (82, 'UpstreamNext')`;
 
-      assert.deepStrictEqual(yield* runMigrations(), [[82, "Squire"]]);
+      assert.deepStrictEqual(yield* runMigrations(), [
+        [83, "CodexUsageNativeTurnIndex"],
+        [84, "RepairClientSettlementTimestamps"],
+        [82, "Squire"],
+      ]);
       assert.equal(yield* squireTableCount, 13);
       assert.deepStrictEqual(
         yield* sql`SELECT name FROM effect_sql_migrations WHERE migration_id = 82`,

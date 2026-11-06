@@ -188,7 +188,7 @@ const ESTIMATED_THREAD_LIST_V2_ROW_HEIGHT = 72;
 /** Hierarchy groups only supply project/saga structure here (row order comes
     from the v2 partition), so their internal thread order is fixed. */
 const HIERARCHY_THREAD_SORT_ORDER = "updated_at";
-// Rows away from the viewport are cheap dormant frames (see
+// Rows away from the viewport skip their swipe actions (see
 // swipe-row-activation), so render further ahead: a fast fling then reaches
 // rows that are already built instead of rows still being rebuilt.
 const THREAD_LIST_V2_DRAW_DISTANCE = 1_000;

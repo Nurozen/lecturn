@@ -15,6 +15,7 @@ import * as ProviderLatestVersions from "@lecturn/provider-core/server/ProviderL
 import * as ProviderEventLoggers from "@lecturn/provider-core/server/ProviderEventLoggers";
 import * as TestProviderHost from "@lecturn/provider-testing/TestProviderHost";
 import { GrokDriver } from "./driver.ts";
+import { resolveLatestProviderVersion } from "@lecturn/provider-core/server/maintenanceResolver";
 
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
@@ -112,7 +113,7 @@ it.layer(layerTest)("GrokDriver", (it) => {
       name: "upgrades a Homebrew grok-build cask through brew",
       binary: ["Caskroom", "grok-build", "1.2.3,456", "grok"],
       reportedPrefix: "own",
-      brewArgs: [["--prefix"], ["info", "--json=v2", "grok-build"]],
+      brewArgs: [["--prefix"]],
       latestVersion: "1.2.4",
       update: (brewPath: string, _binaryPath: string) => ({
         command: "brew upgrade --cask grok-build",
@@ -184,8 +185,11 @@ it.layer(layerTest)("GrokDriver", (it) => {
 
         const update = testCase.update(brewPath, binaryPath);
         expect(brewArgs).toEqual(testCase.brewArgs);
-        expect(capabilities.latestVersion).toBe(testCase.latestVersion);
         expect(capabilities.update).toEqual(update && expect.objectContaining(update));
+        if (testCase.latestVersion !== undefined) {
+          expect(yield* resolveLatestProviderVersion(capabilities)).toBe(testCase.latestVersion);
+          expect(brewArgs).toEqual([...testCase.brewArgs, ["info", "--json=v2", "grok-build"]]);
+        }
       }).pipe(
         Effect.provideService(
           ChildProcessSpawner.ChildProcessSpawner,

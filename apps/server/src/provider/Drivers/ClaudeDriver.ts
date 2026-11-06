@@ -253,6 +253,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
                 ),
             ),
           ),
+          Effect.tap((provider) =>
+            provider.auth.status === "unauthenticated" ? capabilitiesCache.invalidate : Effect.void,
+          ),
           Effect.map(stampIdentity),
         ),
       ),

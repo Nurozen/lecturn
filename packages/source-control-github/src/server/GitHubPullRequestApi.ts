@@ -65,6 +65,7 @@ import {
   pullRequestChecksFromContexts,
   decodeWorkflowRunsJson,
   type GitHubPullRequestCore,
+  type GitHubPullRequestFileStat,
   type GitHubPullRequestWatchFingerprint,
   isSubjectOfPullRequest,
   LenientPullRequestList,
@@ -77,6 +78,7 @@ import {
   toPullRequestCheckContextsPage,
   toPullRequestCore,
   toPullRequestFilesViewedPage,
+  toPullRequestFileStatsPage,
   toPullRequestHeads,
   toPullRequestNodeId,
   toPullRequestPreview,
@@ -108,6 +110,7 @@ import {
   type GitHubReviewThreadEntry,
   type GitHubReviewThreadPage,
   type GitHubViewerAccess,
+  IMMEDIATELY_MERGEABLE,
 } from "./gitHubPullRequestJson.ts";
 import type {
   ProviderAcceptanceEvidence,
@@ -337,6 +340,24 @@ const isGraphQlClientError = (error: unknown): error is GraphQLClientError.Graph
 
 const { isNotFoundOnly } = GitHubGraphQlClient;
 
+const isRefusedRequestedReviewersOnly = (error: unknown): boolean =>
+  isGraphQlClientError(error) &&
+  error.reason._tag === "ResponseError" &&
+  error.reason.status === 200 &&
+  error.reason.errors.every(
+    ({ path, type }) =>
+      type === "FORBIDDEN" &&
+      path?.length === 6 &&
+      path[0] === "repository" &&
+      path[1] === "pullRequest" &&
+      path[2] === "reviewRequests" &&
+      path[3] === "nodes" &&
+      typeof path[4] === "number" &&
+      Number.isInteger(path[4]) &&
+      path[4] >= 0 &&
+      path[5] === "requestedReviewer",
+  );
+
 /** A large pull request can produce a multi-megabyte patch; past this it is truncated. */
 const DIFF_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const DIFF_TIMEOUT = Duration.seconds(60);
@@ -409,6 +430,11 @@ export interface GitHubPullRequestDiffSlice {
 
 export interface GitHubPullRequestFilesViewed {
   readonly files: ReadonlyArray<PullRequestFileViewed>;
+  readonly truncated: boolean;
+}
+
+export interface GitHubPullRequestFileStats {
+  readonly files: ReadonlyArray<GitHubPullRequestFileStat>;
   readonly truncated: boolean;
 }
 
@@ -586,6 +612,13 @@ export class GitHubPullRequestApi extends Context.Service<
       readonly host: string;
       readonly number: number;
     }) => Effect.Effect<GitHubPullRequestFilesViewed, GitHubPullRequestApiError>;
+
+    readonly getPullRequestFileStats: (input: {
+      readonly cwd: string;
+      readonly repository: string;
+      readonly host: string;
+      readonly number: number;
+    }) => Effect.Effect<GitHubPullRequestFileStats, GitHubPullRequestApiError>;
 
     /**
      * GitHub takes a single path per mutation, so a burst is batched with aliases into one
@@ -918,9 +951,6 @@ const PullRequestGraphQLGroup = GraphQLGroup.merge(
   AcceptanceEvidenceGraphQLGroup,
 ).middleware(GitHubGraphQlClient.GitHubGraphQlAuth);
 
-/** States in which `gh pr merge --auto` merges at once instead of arming auto-merge. */
-const IMMEDIATELY_MERGEABLE = new Set(["CLEAN", "HAS_HOOKS", "UNSTABLE"]);
-
 interface RestReadInput<A> {
   readonly cwd: string;
   readonly host: string;
@@ -981,6 +1011,9 @@ export const make = Effect.gen(function* () {
       });
   });
   const revalidateChecks = yield* makeChecksRevalidator;
+  const client = yield* GraphQLClient.make(PullRequestGraphQLGroup).pipe(
+    Effect.provide(GitHubGraphQlClient.layer),
+  );
   const routingIdentities = new Map<
     string,
     {
@@ -989,14 +1022,12 @@ export const make = Effect.gen(function* () {
     }
   >();
   const identityLocks = new Map<string, { gate: Semaphore.Semaphore; users: number }>();
-  const decodeRoutingIdentity = Schema.decodeUnknownEffect(
-    Schema.fromJsonString(
-      Schema.Struct({
-        id: PositiveInt,
-        login: TrimmedNonEmptyString,
-      }),
-    ),
-  );
+  const RoutingIdentity = Schema.Struct({
+    id: PositiveInt,
+    login: TrimmedNonEmptyString,
+  });
+  const decodeRoutingIdentity = Schema.decodeUnknownEffect(Schema.fromJsonString(RoutingIdentity));
+  const decodeViewerIdentity = Schema.decodeUnknownEffect(RoutingIdentity);
   const captureVerifiedCredential = Effect.fn("GitHubPullRequestApi.captureVerifiedCredential")(
     function* (input: { readonly cwd: string; readonly host: string }) {
       const unavailable = () => new GitHubViewerLoginUnavailableError({ cwd: input.cwd });
@@ -1017,16 +1048,36 @@ export const make = Effect.gen(function* () {
               const cached = routingIdentities.get(key);
               if (cached !== undefined && now - cached.at < 10 * 60_000)
                 return { ...credential, ...cached.value };
-              // Pin this read so an auth switch cannot poison its cache entry.
-              const response = yield* api
+              // Pin verification so an auth switch cannot poison its cache entry.
+              const identity = yield* api
                 .rest({ host, operation: "getRoutingIdentity", path: "user", allowReserve: true })
                 .pipe(
+                  Effect.flatMap((response) =>
+                    decodeRoutingIdentity(response.body).pipe(Effect.mapError(unavailable)),
+                  ),
+                  Effect.catchTags({
+                    GitHubApiResponseError: (error) =>
+                      Effect.gen(function* () {
+                        if (error.status !== 403) return yield* error;
+                        const { viewer } = yield* client.RoutingIdentityViewer({}).pipe(
+                          GitHubGraphQlClient.call({
+                            host,
+                            operation: "getRoutingIdentity",
+                            allowReserve: true,
+                          }),
+                          Effect.catchTags({
+                            GraphQLClientError: () => Effect.fail(unavailable()),
+                          }),
+                        );
+                        return yield* decodeViewerIdentity({
+                          id: viewer.databaseId,
+                          login: viewer.login,
+                        }).pipe(Effect.mapError(unavailable));
+                      }),
+                  }),
                   Effect.provideService(GitHubRequestPolicy.PinnedGitHubCredential, credential),
                   Effect.provideService(SourceControlRateLimit.CredentialScope, key),
                 );
-              const identity = yield* decodeRoutingIdentity(response.body).pipe(
-                Effect.mapError(unavailable),
-              );
               const value = { accountId: String(identity.id), viewer: identity.login };
               if (routingIdentities.size >= 128)
                 routingIdentities.delete(routingIdentities.keys().next().value!);
@@ -1062,10 +1113,6 @@ export const make = Effect.gen(function* () {
     captureVerifiedCredential(input).pipe(
       Effect.map(({ accountId, viewer }) => ({ accountId, viewer })),
     );
-
-  const client = yield* GraphQLClient.make(PullRequestGraphQLGroup).pipe(
-    Effect.provide(GitHubGraphQlClient.layer),
-  );
 
   const readError = (cwd: string, operation: string, cause: unknown) =>
     new GitHubPullRequestReadError({ cwd, operation, cause });
@@ -1476,43 +1523,45 @@ export const make = Effect.gen(function* () {
   const getPullRequestDetail: GitHubPullRequestApi["Service"]["getPullRequestDetail"] = (input) => {
     const { owner, name } = parseRepositorySelector(input.repository);
     const operation = "getPullRequestDetail";
+    const read = (requestedReviewers: number) =>
+      client.PullRequestCore({
+        owner,
+        name,
+        number: input.number,
+        headRef: `refs/pull/${input.number}/head`,
+        required: asksRequired(input.host),
+        requestedReviewers,
+      });
     return SourceControlRateLimit.Interactive.pipe(
       Effect.flatMap((allowReserve) =>
-        client
-          .PullRequestCore({
-            owner,
-            name,
-            number: input.number,
-            headRef: `refs/pull/${input.number}/head`,
-            required: asksRequired(input.host),
-          })
-          .pipe(
-            graphql({ ...input, operation, allowReserve }),
-            Effect.map(toPullRequestCore),
-            Effect.flatMap(found({ ...input, operation })),
-            // Past a hundred checks the first page would let the rest imply success, so the whole
-            // rollup is walked instead.
-            Effect.filterOrElse(
-              (core) => !core.checksTruncated,
-              (core) =>
-                readAllCheckContexts(input, allowReserve).pipe(
-                  Effect.filterOrFail(
-                    (all) => all.headSha === core.headSha,
-                    () =>
-                      readError(
-                        input.cwd,
-                        operation,
-                        new Error("Pull request head changed while reading checks."),
-                      ),
-                  ),
-                  Effect.map((all) => ({
-                    ...core,
-                    ...pullRequestChecksFromContexts(all.contexts),
-                    checksTruncated: all.truncated,
-                  })),
+        read(100).pipe(
+          Effect.catchIf(isRefusedRequestedReviewersOnly, () => read(0)),
+          graphql({ ...input, operation, allowReserve }),
+          Effect.map(toPullRequestCore),
+          Effect.flatMap(found({ ...input, operation })),
+          // Past a hundred checks the first page would let the rest imply success, so the whole
+          // rollup is walked instead.
+          Effect.filterOrElse(
+            (core) => !core.checksTruncated,
+            (core) =>
+              readAllCheckContexts(input, allowReserve).pipe(
+                Effect.filterOrFail(
+                  (all) => all.headSha === core.headSha,
+                  () =>
+                    readError(
+                      input.cwd,
+                      operation,
+                      new Error("Pull request head changed while reading checks."),
+                    ),
                 ),
-            ),
+                Effect.map((all) => ({
+                  ...core,
+                  ...pullRequestChecksFromContexts(all.contexts),
+                  checksTruncated: all.truncated,
+                })),
+              ),
           ),
+        ),
       ),
     );
   };
@@ -2277,12 +2326,25 @@ export const make = Effect.gen(function* () {
       function* (input) {
         const { owner, name } = parseRepositorySelector(input.repository);
         const target = { ...input, operation: "listReviewThreadComments" };
+        let requestedReviewers = 50;
         const threadPage = (
           after: string | null,
-        ): Effect.Effect<GitHubReviewThreadPage, GitHubPullRequestApiError> =>
-          client
-            .ReviewThreads({ owner, name, number: input.number, after })
-            .pipe(graphql(target), Effect.map(toReviewThreadPage), Effect.flatMap(found(target)));
+        ): Effect.Effect<GitHubReviewThreadPage, GitHubPullRequestApiError> => {
+          const read = () =>
+            client.ReviewThreads({ owner, name, number: input.number, after, requestedReviewers });
+          return read().pipe(
+            Effect.catchIf(
+              (error) => requestedReviewers > 0 && isRefusedRequestedReviewersOnly(error),
+              () => {
+                requestedReviewers = 0;
+                return read();
+              },
+            ),
+            graphql(target),
+            Effect.map(toReviewThreadPage),
+            Effect.flatMap(found(target)),
+          );
+        };
         const entries: GitHubReviewThreadEntry[] = [];
         const avatarsByLogin = new Map<string, string>();
         const botLogins = new Set<string>();
@@ -2682,8 +2744,8 @@ export const make = Effect.gen(function* () {
         const message = yield* mergeMessageWithoutAgentCredits(input);
         const body = message?.body;
         const expectedHead = message?.headRefOid;
-        // A merge queue takes a pull request through auto-merge rather than a direct merge, and
-        // `--auto` on a pull request that is mergeable right now simply merges it, as `gh` does.
+        // Merge queues always use auto-merge. A PR that became ready since detail loaded
+        // merges directly, matching `gh pr merge --auto`.
         const auto =
           state.isMergeQueueEnabled === true ||
           (action === "enable-auto-merge" &&
@@ -2742,6 +2804,34 @@ export const make = Effect.gen(function* () {
           variables: { owner, name, number: input.number },
           connection: (result) => {
             const page = toPullRequestFilesViewedPage(result);
+            return {
+              ...page,
+              pageInfo: { hasNextPage: page.nextCursor !== null, endCursor: page.nextCursor },
+            };
+          },
+        }),
+        {
+          ...target,
+          maxPages: FILES_VIEWED_MAX_PAGES,
+          hasNextPage: (page) => page.nextCursor !== null,
+        },
+      ).pipe(
+        graphql(target),
+        Effect.map(({ pages, truncated }) => ({
+          files: pages.flatMap((page) => page.files),
+          truncated,
+        })),
+      );
+    },
+
+    getPullRequestFileStats: (input) => {
+      const { owner, name } = parseRepositorySelector(input.repository);
+      const target = { ...input, operation: "getPullRequestFileStats" };
+      return readPages(
+        GraphQLClient.pages(client.PullRequestFileStats, {
+          variables: { owner, name, number: input.number },
+          connection: (result) => {
+            const page = toPullRequestFileStatsPage(result);
             return {
               ...page,
               pageInfo: { hasNextPage: page.nextCursor !== null, endCursor: page.nextCursor },

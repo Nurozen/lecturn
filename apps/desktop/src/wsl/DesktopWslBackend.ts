@@ -136,7 +136,7 @@ export const layer = Layer.effect(
                 Ref.set(
                   preflightErrorRef,
                   Option.some(
-                    "Another Lecturn server is using this distro's Lecturn home. Stop it, or pair with it instead.",
+                    "Another Lecturn server is using this distro's Lecturn home, or an older background service is set up for it. Stop that server or pair with it, or try `lecturn update` in the distro. If the older launcher cannot update, run `lecturn service uninstall` and optionally reinstall with `lecturn service install` from a current CLI in the distro. Use `npx lecturn@latest` if `lecturn` is missing or outdated, and pass `--base-dir` with the service's Lecturn home to each command.",
                   ),
                 ),
               ),

@@ -1,5 +1,17 @@
+diff --git a/build/ExpoWidgets.js b/build/ExpoWidgets.js
+index 85f3fbd..05b8dd8 100644
+--- a/build/ExpoWidgets.js
++++ b/build/ExpoWidgets.js
+@@ -34,6 +34,7 @@ class LiveActivityFactoryStub {
+     getInstances() {
+         return [];
+     }
++    dismissEnded() {}
+ }
+ class CustomNotificationStub {
+     getId() {
 diff --git a/build/Widgets.d.ts b/build/Widgets.d.ts
-index fb37d5d..70d71b6 100644
+index fb37d5d..be9e18c 100644
 --- a/build/Widgets.d.ts
 +++ b/build/Widgets.d.ts
 @@ -46,6 +46,7 @@ export declare class LiveActivity<T extends object = object> {
@@ -10,8 +22,17 @@ index fb37d5d..70d71b6 100644
      getId(): string;
      /**
       * Updates the Live Activity's content. The UI reflects the new properties immediately.
+@@ -100,6 +101,8 @@ export declare class LiveActivityFactory<T extends object = object> {
+      * @platform ios
+      */
+     getInstances(): LiveActivity<T>[];
++    /** Dismisses ended instances that iOS still shows on the Lock Screen. */
++    dismissEnded(): void;
+ }
+ /**
+  * Creates a dismissal policy that removes the Live Activity at the specified time within a four-hour window.
 diff --git a/build/Widgets.js b/build/Widgets.js
-index cc1efce..8ba1cab 100644
+index cc1efce..887202d 100644
 --- a/build/Widgets.js
 +++ b/build/Widgets.js
 @@ -68,7 +68,10 @@ import ExpoWidgetsModule from './ExpoWidgets';
@@ -26,8 +47,18 @@ index cc1efce..8ba1cab 100644
          return this.nativeLiveActivity.getId();
      }
      /**
+@@ -134,6 +137,9 @@ import ExpoWidgetsModule from './ExpoWidgets';
+    */ getInstances() {
+         return this.nativeLiveActivityFactory.getInstances().map((instance)=>new LiveActivity(instance));
+     }
++    dismissEnded() {
++        this.nativeLiveActivityFactory.dismissEnded();
++    }
+ }
+ /**
+  * Creates a dismissal policy that removes the Live Activity at the specified time within a four-hour window.
 diff --git a/build/Widgets.types.d.ts b/build/Widgets.types.d.ts
-index 4c474bb..b4c6a46 100644
+index 4c474bb..bcb7ab2 100644
 --- a/build/Widgets.types.d.ts
 +++ b/build/Widgets.types.d.ts
 @@ -98,6 +98,10 @@ export type LiveActivityEnvironment = {
@@ -41,8 +72,11 @@ index 4c474bb..b4c6a46 100644
      /**
       * Whether the activity is displayed in a context with reduced luminance.
       * @platform iOS 16+
-@@ -309,6 +313,7 @@ export declare class NativeLiveActivityFactory extends SharedObject {
+@@ -307,8 +311,10 @@ export declare class NativeLiveActivityFactory extends SharedObject {
+     constructor(name: string, layout: string);
+     start(props?: string, url?: string, staleDate?: number): NativeLiveActivity;
      getInstances(): NativeLiveActivity[];
++    dismissEnded(): void;
  }
  export declare class NativeLiveActivity extends SharedObject<LiveActivityEvents> {
 +    getAccountId(): string | null;
@@ -65,20 +99,29 @@ index b80655d..53b034f 100644
      guard let activity = Activity<LiveActivityAttributes>.activities.first(where: { $0.id == id }) else {
        throw LiveActivityNotFoundException(id)
 diff --git a/ios/LiveActivityFactory.swift b/ios/LiveActivityFactory.swift
-index 29e4f15..8ea7531 100644
+index 29e4f15..db87bb6 100644
 --- a/ios/LiveActivityFactory.swift
 +++ b/ios/LiveActivityFactory.swift
-@@ -19,10 +19,19 @@ final class LiveActivityFactory: SharedObject {
-       throw LiveActivitiesNotSupportedException()
-     }
+@@ -14,15 +14,28 @@ final class LiveActivityFactory: SharedObject {
+     WidgetsStorage.set(layout, forKey: "__expo_widgets_live_activity_\(name)_layout")
+   }
  
-+    // iOS ends an activity after 8 hours but leaves it frozen on the Lock Screen for up to
-+    // 4 more. getInstances() can't see it, so a caller starting a replacement would leave
-+    // both cards visible. Dismiss the ended ones now.
++  // iOS ends an activity after 8 hours but leaves it frozen on the Lock Screen for up to
++  // 4 more. getInstances() can't see it, so dismiss the ended ones directly.
++  func dismissEnded() {
 +    for activity in Activity<LiveActivityAttributes>.activities
 +    where activity.content.state.name == name && activity.activityState == .ended {
 +      Task { await activity.end(nil, dismissalPolicy: .immediate) }
 +    }
++  }
++
+   func start(props: String?, url: URL?, staleDate: Date?) throws -> LiveActivity {
+     guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+       throw LiveActivitiesNotSupportedException()
+     }
+ 
++    // A replacement started beside an ended card would leave both visible.
++    dismissEnded()
 +
      do {
 +      let accountId = props.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } as? [String: Any]
@@ -223,10 +266,17 @@ index 4d135c4..88801e6 100644
        LiveActivityBanner(context: context, nodes: nodes)
      } else if let node = nodes["banner"] as? [String: Any] {
 diff --git a/ios/WidgetsModule.swift b/ios/WidgetsModule.swift
-index 285136b..ace9614 100644
+index 285136b..3bc3dee 100644
 --- a/ios/WidgetsModule.swift
 +++ b/ios/WidgetsModule.swift
-@@ -100,6 +100,10 @@ public final class WidgetsModule: Module {
+@@ -97,9 +97,17 @@ public final class WidgetsModule: Module {
+       Function("getInstances") { (liveActivity: LiveActivityFactory) in
+         try liveActivity.getInstances()
+       }
++
++      Function("dismissEnded") { (liveActivity: LiveActivityFactory) in
++        liveActivity.dismissEnded()
++      }
      }
  
      Class("LiveActivity", LiveActivity.self) {
@@ -237,8 +287,20 @@ index 285136b..ace9614 100644
        Function("getId") { (instance: LiveActivity) in
          instance.id
        }
+diff --git a/src/ExpoWidgets.ts b/src/ExpoWidgets.ts
+index db15000..6863dc9 100644
+--- a/src/ExpoWidgets.ts
++++ b/src/ExpoWidgets.ts
+@@ -59,6 +59,7 @@ class LiveActivityFactoryStub {
+   getInstances(): NativeLiveActivity[] {
+     return [];
+   }
++  dismissEnded(): void {}
+ }
+ 
+ class CustomNotificationStub {
 diff --git a/src/Widgets.ts b/src/Widgets.ts
-index 814b312..75d9fd7 100644
+index 814b312..8ca15b1 100644
 --- a/src/Widgets.ts
 +++ b/src/Widgets.ts
 @@ -111,6 +111,10 @@ export class LiveActivity<T extends object = object> {
@@ -252,8 +314,20 @@ index 814b312..75d9fd7 100644
    getId(): string {
      return this.nativeLiveActivity.getId();
    }
+@@ -213,6 +217,11 @@ export class LiveActivityFactory<T extends object = object> {
+       .getInstances()
+       .map((instance) => new LiveActivity<T>(instance));
+   }
++
++  /** Dismisses ended instances that iOS still shows on the Lock Screen. */
++  dismissEnded(): void {
++    this.nativeLiveActivityFactory.dismissEnded();
++  }
+ }
+ 
+ /**
 diff --git a/src/Widgets.types.ts b/src/Widgets.types.ts
-index 690d069..c4c1074 100644
+index 690d069..19c2c65 100644
 --- a/src/Widgets.types.ts
 +++ b/src/Widgets.types.ts
 @@ -112,6 +112,10 @@ export type LiveActivityEnvironment = {
@@ -267,7 +341,11 @@ index 690d069..c4c1074 100644
    /**
     * Whether the activity is displayed in a context with reduced luminance.
     * @platform iOS 16+
-@@ -340,6 +344,7 @@ export declare class NativeLiveActivityFactory extends SharedObject {
+@@ -337,9 +341,11 @@ export declare class NativeLiveActivityFactory extends SharedObject {
+   constructor(name: string, layout: string);
+   start(props?: string, url?: string, staleDate?: number): NativeLiveActivity;
+   getInstances(): NativeLiveActivity[];
++  dismissEnded(): void;
  }
  
  export declare class NativeLiveActivity extends SharedObject<LiveActivityEvents> {

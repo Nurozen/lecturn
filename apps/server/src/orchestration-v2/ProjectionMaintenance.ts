@@ -1,4 +1,5 @@
 import { ThreadId } from "@lecturn/contracts";
+import * as NodeSqliteClient from "@lecturn/shared/nodeSqliteClient";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -242,8 +243,7 @@ export const layer: Layer.Layer<
     const supersedableThreadEventTypes = new Set(SUPERSEDABLE_THREAD_EVENT_TYPES);
     const readStateThreadEventTypes = new Set(READ_STATE_THREAD_EVENT_TYPES);
     // Keep subagent.updated and turn-item.updated rows: slimmed payloads reference their prompts.
-    // Discovery runs on the shared synchronous connection; json_extract over
-    // large payloads made 500-row pages block the event loop for ~90ms.
+    // Small pages bound work on the reader worker and synchronous fallback.
     const COMPACTION_PAGE_SIZE = 50;
 
     /**
@@ -321,7 +321,7 @@ export const layer: Layer.Layer<
           WHERE event.sequence <= ${throughSequence}
           ORDER BY event.sequence DESC
           LIMIT ${COMPACTION_PAGE_SIZE}
-        `;
+        `.pipe(NodeSqliteClient.readOnly);
         const obsolete: number[] = [];
         for (const row of rows) {
           if (row.imported_legacy_thread === 1) {
@@ -372,8 +372,7 @@ export const layer: Layer.Layer<
             }
           }
         }
-        // Both discovery and deletion use the synchronous connection. Yield even
-        // when this page has nothing to delete so startup and requests can progress.
+        // Yield even without deletions for clients using the synchronous fallback.
         yield* Effect.yieldNow;
         if (obsolete.length > 0) {
           yield* sql`DELETE FROM orchestration_events WHERE sequence IN ${sql.in(obsolete)}`;
@@ -406,7 +405,7 @@ export const layer: Layer.Layer<
           WHERE receipt.rowid <= ${throughReceiptRowId}
           ORDER BY receipt.rowid DESC
           LIMIT ${COMPACTION_PAGE_SIZE}
-        `;
+        `.pipe(NodeSqliteClient.readOnly);
         const obsolete = rows
           .filter((row) => row.imported_legacy_thread === 1)
           .map((row) => row.command_id);

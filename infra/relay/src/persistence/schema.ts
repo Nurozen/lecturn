@@ -143,6 +143,13 @@ export const relayManagedEndpointAllocations = pgTable(
   ],
 );
 
+// One row per upstream API whose rate limit is shared by every Worker
+// isolate, so a 429 seen by one isolate pauses the rest.
+export const relayUpstreamApiPauses = pgTable("relay_upstream_api_pauses", {
+  api: varchar("api", { length: 64 }).primaryKey(),
+  pausedUntilMs: bigint("paused_until_ms", { mode: "number" }).notNull(),
+});
+
 export const relayManagedTunnelLimits = pgTable("relay_managed_tunnel_limits", {
   userId: varchar("user_id", { length: 191 }).primaryKey(),
   maxTunnels: integer("max_tunnels").notNull(),

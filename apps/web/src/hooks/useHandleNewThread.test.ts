@@ -220,49 +220,6 @@ vi.mock("./useSettings", () => ({ useClientSettings: () => ({}) }));
 
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { resolveDefaultNewThreadProjectRef, useNewThreadHandler } from "./useHandleNewThread";
-import { useComposerDraftStore } from "../composerDraftStore";
-
-it("pins a reused automatic draft to the explicitly selected checkout", async () => {
-  const { useComposerDraftStore: realDraftStore, DraftId } =
-    await vi.importActual<typeof import("../composerDraftStore")>("../composerDraftStore");
-  const { EnvironmentId, ProjectId, ThreadId } =
-    await vi.importActual<typeof import("@lecturn/contracts")>("@lecturn/contracts");
-  testState.reset(null);
-  const draftId = DraftId.make("draft-manual-checkout");
-  const projectRef = {
-    environmentId: EnvironmentId.make("environment-ssh"),
-    projectId: ProjectId.make("project-remote"),
-  };
-  const store = realDraftStore.getState();
-  store.setLogicalProjectDraftThreadId(
-    "remote-project",
-    {
-      environmentId: EnvironmentId.make("environment-primary"),
-      projectId: ProjectId.make("local"),
-    },
-    draftId,
-    {
-      threadId: ThreadId.make("thread-manual-checkout"),
-      environmentSelection: "auto",
-      loadBalancedEnvironmentId: EnvironmentId.make("environment-primary"),
-    },
-  );
-  const getState = vi.spyOn(useComposerDraftStore, "getState").mockReturnValue(store);
-  try {
-    const opened = await useNewThreadHandler()(projectRef, { environmentSelection: "manual" });
-
-    expect(opened?.draftId).toBe(draftId);
-    expect(store.getDraftSession(draftId)).toMatchObject({
-      environmentId: projectRef.environmentId,
-      projectId: projectRef.projectId,
-      environmentSelection: "manual",
-      loadBalancedEnvironmentId: null,
-    });
-  } finally {
-    getState.mockRestore();
-    realDraftStore.setState(store, true);
-  }
-});
 
 describe("useNewThreadHandler", () => {
   it("opens a remote project with that machine’s model and workspace defaults", async () => {

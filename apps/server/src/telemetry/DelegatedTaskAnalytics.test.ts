@@ -114,6 +114,7 @@ function analyticsLayer(
             record: (event, properties) =>
               Effect.sync(() => void recorded.push({ event, properties })),
             flush: Effect.void,
+            recordOwners: () => Effect.void,
           }),
         ),
       ),

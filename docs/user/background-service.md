@@ -53,7 +53,33 @@ nightly, or `--allow-downgrade` to move backwards.
 `lecturn uninstall` removes the background service, the `lecturn` launcher, and
 the downloaded versions under `~/.lecturn/runtime` after showing you the list
 and asking once. Your projects, threads, and settings under
-`~/.lecturn/userdata` are kept. Pass `--yes` from a script.
+`~/.lecturn/userdata` are kept, along with `service.env` under Lecturn home.
+Pass `--yes` from a script.
+
+## Configure the service environment
+
+Put custom environment variables in `service.env` under the service's Lecturn
+home directory, normally `~/.lecturn/service.env`. This file survives service
+installation and updates. For example:
+
+```dotenv
+LECTURN_PORT=3773
+LECTURN_HOST=127.0.0.1
+```
+
+Use `KEY=VALUE` entries, quoting values that contain spaces or `#`. Values are
+literal: shell commands and variable expansion are not evaluated. Entries
+override the inherited service environment, except for `PATH`, `LECTURN_HOME`,
+`LECTURN_BOOT_SERVICE_UNIT`, and `LECTURN_SERVICE_LAUNCHER_CONTEXT` (including
+case variants).
+
+Run `lecturn service restart` after changing the file. Changes apply when the
+service starts again; switching the server version alone keeps the current
+values. For a service installed before env-file support, run
+`lecturn service install` once with an up-to-date CLI.
+A missing file is ignored; other read failures stop service startup.
+If the file contains credentials, restrict access to that file with `chmod 600`
+(for the default Lecturn home, `chmod 600 ~/.lecturn/service.env`).
 
 ## Platform support
 
@@ -109,7 +135,7 @@ Downloads, it may need Full Disk Access for the `lecturn` executable listed in
 `~/Library/LaunchAgents/com.cloudgatherer.lecturn.service.plist`.
 
 For failures after signing in to Lecturn Connect, see
-[connection troubleshooting](./remote-access.md#lecturn-connect-troubleshooting).
+[connection troubleshooting](./lecturn-connect-troubleshooting.md).
 
 ## Reclaim database space
 
