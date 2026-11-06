@@ -972,12 +972,15 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
   });
   // Every Git command would otherwise walk each ancestor directory first, which
-  // also lets a timed status wait start late. A new manifest or agent-work
-  // setting takes effect once an entry expires.
-  const staveCeilingEnvCache = yield* Cache.make({
-    lookup: resolveStaveCeilingEnv,
+  // also lets a timed status wait start late. Only found ceilings are cached,
+  // so a new manifest or agent-work setting applies to the next command.
+  const staveCeilingEnvCache = yield* Cache.makeWith(resolveStaveCeilingEnv, {
     capacity: STAVE_CEILING_CACHE_CAPACITY,
-    timeToLive: STAVE_CEILING_CACHE_TTL,
+    timeToLive: Exit.match({
+      onSuccess: (env) =>
+        env.GIT_CEILING_DIRECTORIES === undefined ? Duration.zero : STAVE_CEILING_CACHE_TTL,
+      onFailure: () => Duration.zero,
+    }),
   });
   const staveCeilingEnv = (cwd: string) => Cache.get(staveCeilingEnvCache, cwd);
   const serviceScope = yield* Effect.scope;

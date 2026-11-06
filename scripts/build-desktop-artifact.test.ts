@@ -310,7 +310,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-concurrent-build-" });
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-concurrent-build-" });
       yield* fs.writeFileString(
         path.join(root, "package.json"),
         '{ "scripts": { "build:desktop": "node build.cjs" } }',
@@ -387,7 +387,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-interrupted-build-" });
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-interrupted-build-" });
       const original = '{ "version": "0.0.42", "private": true }\n';
       for (const relativePath of releasePackageFiles) {
         const filePath = path.join(root, relativePath);
@@ -452,7 +452,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-desktop-build-version-" });
+        const root = yield* fs.makeTempDirectoryScoped({
+          prefix: "lecturn-desktop-build-version-",
+        });
         const packageJson = `{
           "name": "desktop-version-fixture",
           "version": "0.0.42",
@@ -529,7 +531,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-manifest-restore-failure-" });
+      const root = yield* fs.makeTempDirectoryScoped({
+        prefix: "lecturn-manifest-restore-failure-",
+      });
       yield* fs.writeFileString(
         path.join(root, "package.json"),
         `{

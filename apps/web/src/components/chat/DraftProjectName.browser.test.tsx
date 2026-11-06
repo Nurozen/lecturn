@@ -150,9 +150,14 @@ it("moves a name below the heading when it stops fitting and returns it inline w
   const value = "CustomerPortal-Production";
   await render(value);
   expect(title().innerText).toBe("What should we build in");
+  // Derive the boundary from the rendered display font; its metrics vary by platform.
+  const inlineWidth = host
+    .querySelector<HTMLSpanElement>("span[aria-hidden] > span")!
+    .getBoundingClientRect().width;
+  expect(inlineWidth).toBeLessThan(900);
 
   await act(async () => {
-    host.style.width = "650px";
+    host.style.width = `${Math.floor(inlineWidth) - 1}px`;
     await expect.poll(() => title().innerText).toBe("What should we build?");
   });
   expect(label().textContent).toBe(value);
@@ -161,7 +166,7 @@ it("moves a name below the heading when it stops fitting and returns it inline w
   expectAboveComposer();
 
   await act(async () => {
-    host.style.width = "900px";
+    host.style.width = `${Math.ceil(inlineWidth) + 1}px`;
     await expect.poll(() => title().innerText).toBe("What should we build in");
   });
   expect(label().textContent).toBe(value);

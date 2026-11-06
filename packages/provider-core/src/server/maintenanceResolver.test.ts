@@ -835,7 +835,7 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
     (launcher, { skip }) => {
       if (windowsHost || (launcher === "symlink" && !symlinksSupported)) skip();
       return Effect.gen(function* () {
-        const tempDir = yield* makeTempDir("t3-native-mise");
+        const tempDir = yield* makeTempDir("lecturn-native-mise");
         const nativePath = NodePath.join(tempDir, ".local", "bin", "native-package-tool");
         if (launcher === "wrapper") {
           writeExecutable(nativePath);

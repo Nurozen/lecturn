@@ -1568,7 +1568,8 @@ function ComposerPromptEditorTiptapInner(
   });
 
   useLayoutEffect(() => {
-    if (!editor) return;
+    // A destroyed editor is about to be replaced, and this effect reruns for the new one.
+    if (!editor || editor.isDestroyed) return;
     const initialSelection = !hasAppliedControlledSelectionRef.current;
     hasAppliedControlledSelectionRef.current = true;
     const normalizedCursor = clampEditorCursor(value, cursor);
@@ -1659,20 +1660,22 @@ function ComposerPromptEditorTiptapInner(
   }, [editor, literalText, skills]);
 
   useLayoutEffect(() => {
-    if (!editor) return;
+    // Leave a pending restore for the editor that replaces a destroyed one.
+    if (!editor || editor.isDestroyed) return;
     if (restoreFocusRef.current) {
       restoreFocusRef.current = false;
       editor.view.focus();
       scrollTiptapCaretIntoView(editor);
     }
     return () => {
-      // Capture focus before the keyed editor's DOM is removed.
-      restoreFocusRef.current = editor.view.hasFocus();
+      // Capture focus before the keyed editor's DOM is removed. A destroyed
+      // editor has no view to ask, so keep what an earlier cleanup captured.
+      if (!editor.isDestroyed) restoreFocusRef.current = editor.view.hasFocus();
     };
   }, [editor, restoreFocusRef]);
 
   const focusAt = (nextCursor: number, exactExpandedCursor?: number) => {
-    if (!editor) return;
+    if (!editor || editor.isDestroyed) return;
     // view.focus() writes the state selection to the DOM as it focuses. A
     // bare DOM focus leaves the native caret at the start until
     // ProseMirror resyncs it 20ms later, and dictation tools type fast
@@ -1760,7 +1763,7 @@ function ComposerPromptEditorTiptapInner(
         if (edge === "start" ? beforeCaret.includes("\n") : afterCaret.includes("\n")) {
           return false;
         }
-        const rootElement = editor?.view.dom;
+        const rootElement = editor && !editor.isDestroyed ? editor.view.dom : null;
         const selection = window.getSelection();
         if (
           !rootElement ||

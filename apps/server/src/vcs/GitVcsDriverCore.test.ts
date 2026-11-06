@@ -579,8 +579,11 @@ describe("pullCurrentBranch", () => {
         return makeSuccessfulHandle("main\n");
       }),
     );
+    // Only found Stave ceilings are cached. Covering the fixture keeps repeated
+    // commands free of filesystem waits that TestClock.adjust cannot observe.
     const driver = yield* makeGitVcsDriverCore().pipe(
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.provide(StaveRoots.layerFixed((yield* Path.Path).dirname(cwd))),
     );
     const status = Effect.fn("test.controlledStatusFetch.status")((directory = cwd) =>
       driver
@@ -1004,8 +1007,10 @@ describe("pullCurrentBranch", () => {
           );
         }),
       );
+      // A covered cwd keeps its found ceiling cached between TestClock steps.
       const driver = yield* makeGitVcsDriverCore().pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provide(StaveRoots.layerFixed((yield* Path.Path).dirname(cwd))),
       );
       const first = yield* driver.statusDetailsRemote(cwd).pipe(Effect.forkScoped);
       yield* Deferred.await(started);
@@ -6078,6 +6083,31 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           );
           assert.equal((yield* top(path.join(alias, "editable"))).stdout.trim(), repo);
         }),
+    );
+    it.effect("applies a manifest created after an uncovered lookup without waiting", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const parent = yield* fs.realPath(yield* makeTmpDir("git-stave-late-manifest-"));
+        const space = path.join(parent, "space");
+        yield* fs.makeDirectory(space, { recursive: true });
+        yield* initRepoWithCommit(parent);
+        const driver = yield* makeGitVcsDriverCore().pipe(
+          Effect.provide(Layer.merge(StaveRoots.layerNoop, layerServerConfig)),
+        );
+        const top = () =>
+          driver.execute({
+            operation: "test.lateManifest",
+            cwd: space,
+            args: ["rev-parse", "--show-toplevel"],
+            allowNonZeroExit: true,
+          });
+        assert.equal((yield* top()).stdout.trim(), parent);
+        yield* fs.writeFileString(path.join(space, ".stave.yaml"), "id: space\nrepos: []\n");
+        const blocked = yield* top();
+        assert.notEqual(blocked.exitCode, 0);
+        assert.include(blocked.stderr, "not a git repository");
+      }),
     );
   });
 });

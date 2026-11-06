@@ -112,7 +112,7 @@ it("keeps only the usage limit attached while an active goal waits in the collap
 
 it("reveals the full running command only while its title is clipped", async () => {
   const command =
-    "Running: /usr/bin/zsh -lc 'sleep 600 > /tmp/t3-background-command-with-a-long-log-filename-for-truncation.log 2>&1'";
+    "Running: /usr/bin/zsh -lc 'sleep 600 > /tmp/lecturn-background-command-with-a-long-log-filename-for-truncation.log 2>&1'";
   container.style.width = "240px";
   await act(async () =>
     root.render(
