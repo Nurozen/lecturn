@@ -1,5 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { SquireSnapshotEntry } from "@lecturn/client-runtime/state/squire";
+import {
+  SQUIRE_LEAD_INTRO_START_LABEL,
+  squireLeadIntro,
+  type SquireSnapshotEntry,
+} from "@lecturn/client-runtime/state/squire";
 import type { EnvironmentId, SquireCard, SquireCardId, SquireId } from "@lecturn/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -12,7 +16,7 @@ import { toastManager } from "../../ui/toast";
 import { useSquireItemsAct } from "../queue/squireQueueState";
 import { openSquireSetup } from "../setup/squireSetupStore";
 import { SquireCompanion, type SquireCompanionHandle } from "../SquireCompanion";
-import { SquirePortrait, useSquireIndicator } from "../SquireHeader";
+import { SquirePortrait, useSquireHomeShell, useSquireIndicator } from "../SquireHeader";
 import { requestSquireGesture, useSquireGestureRequests } from "./squireGestureRequests";
 import {
   SQUIRE_LEAD_MORE_PROPOSALS_TEXT,
@@ -24,7 +28,12 @@ import {
   type SquireProposalPayload,
 } from "./squireLead.logic";
 import { SquireProposalSummary } from "./SquireProposalSummary";
-import { squireLeadOnboardingRuns, useSquireLeadOnboardingRun } from "./useSquireLeadOpen";
+import {
+  squireLeadOnboardingRuns,
+  useSquireLeadIntroSupported,
+  useSquireLeadOnboardingRun,
+  useSquireLeadStartOnboarding,
+} from "./useSquireLeadOpen";
 
 interface LeadProposal {
   readonly card: SquireCard;
@@ -73,8 +82,8 @@ export function useSquireLeadOnboardingCardIds(
 }
 
 /**
- * Onboarding in the Lead's view: the full figure playing `greet` and the proposal cards.
- * Renders nothing once the Lead has no onboarding proposals open.
+ * Onboarding in the Lead's view: its fixed intro, then the full figure playing `greet` and the
+ * proposal cards. Renders nothing once the Lead has no onboarding proposals open.
  */
 export function SquireLeadOnboarding(props: {
   readonly environmentId: EnvironmentId;
@@ -90,6 +99,8 @@ export function SquireLeadOnboarding(props: {
   const proposals = useAtomValue(leadProposalsAtom(leadProposalsKey(environmentId, leadId)));
   const run = useSquireLeadOnboardingRun(environmentId);
   const working = useSquireIndicator(environmentId, lead).state === "working";
+  const homeShell = useSquireHomeShell(environmentId, lead);
+  const introSupported = useSquireLeadIntroSupported(environmentId);
   // Re-runs when a run is queued, since the Lead may already be working by then.
   useEffect(() => {
     if (run === null) return;
@@ -104,6 +115,9 @@ export function SquireLeadOnboarding(props: {
     lead: lead.squire,
     proposalCount: shown.length,
     run,
+    homeVisibleItemCount:
+      lead.squire.homeThreadId === null ? 0 : (homeShell?.visibleItemCount ?? null),
+    introSupported,
   });
   const shownKey = phase === "proposals" ? shown.map((proposal) => proposal.card.id).join() : "";
   // Greet when the cards first appear, on whichever figure is mounted. Child effects run
@@ -150,7 +164,9 @@ export function SquireLeadOnboarding(props: {
             {squireLeadGreeting(lead.squire.name, phase, shown.length)}
           </p>
         </div>
-        {phase === "looking" ? null : (
+        {phase === "intro" ? (
+          <SquireLeadIntro environmentId={environmentId} />
+        ) : phase === "looking" ? null : (
           <>
             <p className="text-xs text-muted-foreground">
               Each starts recommend-only. Accept to create it, or edit it first.
@@ -190,6 +206,36 @@ export function SquireLeadOnboarding(props: {
         )}
       </div>
     </section>
+  );
+}
+
+/** What Squires are, in the Lead's voice, before any paid turn; the conversation below takes questions. */
+function SquireLeadIntro(props: { readonly environmentId: EnvironmentId }) {
+  const { allowed, start } = useSquireLeadStartOnboarding(props.environmentId);
+  const [starting, setStarting] = useState(false);
+  const lookOver = async () => {
+    setStarting(true);
+    const started = await start();
+    setStarting(false);
+    if (!started) {
+      toastManager.add({ type: "error", title: "The Lead could not start. Try again." });
+    }
+  };
+  return (
+    <>
+      {squireLeadIntro("desktop").map((paragraph) => (
+        <p key={paragraph} className="text-sm text-foreground/85">
+          {paragraph}
+        </p>
+      ))}
+      {allowed ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button size="xs" disabled={starting} onClick={() => void lookOver()}>
+            {SQUIRE_LEAD_INTRO_START_LABEL}
+          </Button>
+        </div>
+      ) : null}
+    </>
   );
 }
 

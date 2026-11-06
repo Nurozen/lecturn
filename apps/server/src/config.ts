@@ -115,12 +115,10 @@ export class ServerConfig extends Context.Service<
      */
     readonly staveEnabled: boolean;
     /**
-     * Kill switch for Squires (`LECTURN_SQUIRE`, else the saved
-     * `squire.enabled` setting; default off), fixed for the process: drives the
-     * advertised `squire` capability and gates every Squire RPC, reactor,
-     * and timer. Guard rails for Squire-marked threads stay on regardless.
+     * `LECTURN_SQUIRE`, when set: pins the Squires switch for the process.
+     * Unset, the saved `squire.enabled` setting drives it live (SquireSwitch).
      */
-    readonly squireEnabled: boolean;
+    readonly squireEnabledOverride?: boolean | undefined;
   }
 >()("lecturn/config/ServerConfig") {
   static readonly layerTest = (
@@ -251,7 +249,6 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     tailscaleServePort: 443,
     threadForkingEnabled: true,
     staveEnabled: true,
-    squireEnabled: false,
     port: 0,
     host: undefined,
     desktopBootstrapToken: undefined,

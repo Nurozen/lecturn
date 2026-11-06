@@ -21,6 +21,7 @@ import {
   childThreadInputsTitle,
   createEnvironmentThreadShellAtoms,
   isListedThread,
+  runningThreadCount,
 } from "./threadShell.ts";
 
 const environmentId = EnvironmentId.make("environment-v2");
@@ -495,5 +496,56 @@ describe("v2 thread shell lists", () => {
       dispose();
       harness.registry.dispose();
     }
+  });
+});
+
+describe("runningThreadCount", () => {
+  const running = (id: string, patch: Partial<OrchestrationV2ThreadShell> = {}) => ({
+    ...v2ThreadShell,
+    id: ThreadId.make(id),
+    status: "running" as const,
+    ...patch,
+  });
+
+  it("counts top-level threads with a run in flight", () => {
+    expect(
+      runningThreadCount([
+        running("a"),
+        running("b", { status: "starting" }),
+        running("c", { status: "idle" }),
+        running("d", { status: "completed" }),
+      ]),
+    ).toBe(2);
+  });
+
+  it("prefers the activity run, so a queued follow-up behind a finished run is not busy", () => {
+    expect(runningThreadCount([running("a", { activityRunStatus: null })])).toBe(0);
+    expect(
+      runningThreadCount([running("a", { status: "completed", activityRunStatus: "running" })]),
+    ).toBe(1);
+  });
+
+  it("skips threads waiting on the user, subagents, Squire threads, and archived ones", () => {
+    const { home } = squireThreads();
+    expect(
+      runningThreadCount([
+        running("waiting", {
+          pendingRuntimeRequest: {
+            id: RuntimeRequestId.make("request"),
+            kind: "permission",
+            createdAt: v2Now,
+          },
+        }),
+        running("child", {
+          lineage: {
+            ...v2ThreadShell.lineage,
+            parentThreadId: v2ThreadShell.id,
+            relationshipToParent: "subagent",
+          },
+        }),
+        { ...home, status: "running" },
+        running("archived", { archivedAt: v2Now }),
+      ]),
+    ).toBe(0);
   });
 });

@@ -968,9 +968,18 @@ export const SquireRoomIdleTtlHours = Schema.Int.check(
 
 // Environment-wide, so per-Squire records stay free of settings every Squire
 // shares. Defaulted as a whole, like `stave`.
+// The "squire knocks" suggestion offered to busy users while Squires are off.
+// An empty `snoozedUntil` means not snoozed; an ISO instant hides it until then.
+export const SquireKnockSettings = Schema.Struct({
+  dismissed: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  snoozedUntil: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+}).pipe(Schema.withDecodingDefault(Effect.succeed({})));
+export type SquireKnockSettings = typeof SquireKnockSettings.Type;
+
 export const SquireEnvironmentSettings = Schema.Struct({
-  // Read once at server start (`LECTURN_SQUIRE` overrides it), so a change applies on restart.
+  // Applies live; `LECTURN_SQUIRE` overrides it and pins the switch.
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  knock: SquireKnockSettings,
   phoneAlertsWhileDesktop: SquirePhoneAlertsWhileDesktop.pipe(
     Schema.withDecodingDefault(Effect.succeed("after-3-min" as const)),
   ),
@@ -1621,6 +1630,12 @@ export const ServerSettingsPatch = Schema.Struct({
   squire: Schema.optionalKey(
     Schema.Struct({
       enabled: Schema.optionalKey(Schema.Boolean),
+      knock: Schema.optionalKey(
+        Schema.Struct({
+          dismissed: Schema.optionalKey(Schema.Boolean),
+          snoozedUntil: Schema.optionalKey(Schema.String),
+        }),
+      ),
       phoneAlertsWhileDesktop: Schema.optionalKey(SquirePhoneAlertsWhileDesktop),
       inactivityDays: Schema.optionalKey(SquireInactivityDays),
       botMessages: Schema.optionalKey(Schema.Boolean),

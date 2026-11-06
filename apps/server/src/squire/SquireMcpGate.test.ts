@@ -120,6 +120,21 @@ describe("SquireMcpGate on the bound /mcp", () => {
     ),
   );
 
+  it.live("turning the switch off fences an open Squire session at its next request", () =>
+    withBound(true, (bound) =>
+      Effect.gen(function* () {
+        const config = yield* bound.issueSquire({ threadId: homeThreadId, squireId, role: "lead" });
+        const client = yield* promise(() => connectMcp(config));
+        assert.sameMembers(yield* promise(() => client.listToolNames()), [...HTML_TOOLS]);
+
+        yield* bound.setSquireEnabled(false);
+        assert.deepEqual(yield* promise(() => client.listToolNames()), []);
+        const { answer } = yield* promise(() => client.callTool("html_render", htmlRenderArgs));
+        assert.isTrue(isRefusal(answer), JSON.stringify(answer));
+      }),
+    ),
+  );
+
   // The ordinary html_render inlines a local image a page names, and its scripts can send it on.
   it.live("locks a Squire's page whatever the html_render arguments say", () =>
     withBound(true, (bound) =>

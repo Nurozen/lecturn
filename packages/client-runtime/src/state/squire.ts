@@ -1741,3 +1741,132 @@ export function squireProposalPermissionsLabel(permissions: SquirePermissions): 
   if (parts.length === 0) return notify === null ? "Recommend only" : `Recommend only · ${notify}`;
   return [...parts, ...(notify === null ? [] : [notify])].join(" · ");
 }
+
+// ── Lead intro ────────────────────────────────────────────────
+
+/** The name a new Lead is created with; a Lead still called this introduces itself as "your Lead". */
+const SQUIRE_LEAD_DEFAULT_NAME = "Lead";
+
+/** "Hi, I'm your Lead.", or under the name the user gave it. */
+export function squireLeadHello(name: string): string {
+  const trimmed = name.trim();
+  return trimmed === "" || trimmed.toLowerCase() === SQUIRE_LEAD_DEFAULT_NAME.toLowerCase()
+    ? "Hi, I'm your Lead."
+    : `Hi, I'm ${trimmed}, your Lead.`;
+}
+
+/** Starts the paid onboarding turn from the intro. */
+export const SQUIRE_LEAD_INTRO_START_LABEL = "Look over my threads";
+
+/**
+ * The Lead's fixed first message, so meeting it costs no provider turn. Mobile has no New
+ * Squire or composer of its own on the Lead's screen, so it points elsewhere.
+ */
+export function squireLeadIntro(surface: "desktop" | "mobile"): ReadonlyArray<string> {
+  return [
+    "Squires keep watch over your threads. When one finishes, stalls, or waits on you, its Squire stays quiet, asks you to decide, or acts within the permissions you set.",
+    surface === "mobile"
+      ? "I can propose Squires that fit your work, or you can add one with New Squire on desktop or web."
+      : "I can propose Squires that fit your work, or you can add one with New Squire.",
+    surface === "mobile"
+      ? "Each Squire's rules are at the bottom of its screen. Accepting a recommendation can save one with Always allow this."
+      : "Each Squire's rules are in its settings. Accepting a recommendation can save one with Always allow this.",
+    surface === "mobile"
+      ? `Open Chat to ask me anything, or tap ${SQUIRE_LEAD_INTRO_START_LABEL} and I'll suggest a few. That runs one turn on my provider.`
+      : `Ask me anything below, or choose ${SQUIRE_LEAD_INTRO_START_LABEL} and I'll suggest a few. That runs one turn on my provider.`,
+  ];
+}
+
+/**
+ * The intro shows until onboarding has run and while the Lead's home thread is still empty, so
+ * a question asked below or a look-over started anywhere ends it. A Lead that cannot run (no
+ * provider, paused) has nothing to offer here. `homeVisibleItemCount` is null until the home
+ * thread loads, which keeps the intro from flashing over an existing conversation.
+ */
+export function squireLeadShowsIntro(input: {
+  readonly lead: Pick<Squire, "onboardedAt" | "lifecycle" | "status">;
+  readonly homeVisibleItemCount: number | null;
+}): boolean {
+  return (
+    input.lead.onboardedAt === null &&
+    input.lead.lifecycle === "ready" &&
+    input.lead.status === "active" &&
+    input.homeVisibleItemCount === 0
+  );
+}
+
+// ── Squire updates in a home thread ───────────────────────────
+
+/**
+ * How a timeline item takes part in a Squire home thread's update groups. A `wake` is a
+ * delivered event batch and opens an update; `update` is what that wake's turn produced; a
+ * `user` message ends a run of updates; `keep` stays visible and also ends it (a turn still
+ * running, a card or question waiting on the user).
+ */
+export type SquireUpdateItemRole = "wake" | "update" | "user" | "keep";
+
+export interface SquireUpdateGroup {
+  /** Index of the first item, the first wake. */
+  readonly start: number;
+  /** Exclusive. */
+  readonly end: number;
+  readonly wakeCount: number;
+  /** The wakes' event kinds, first seen first. */
+  readonly eventKinds: ReadonlyArray<string>;
+}
+
+/** Updates fold together only from this many in a row; a lone one reads fine as it is. */
+const SQUIRE_UPDATE_GROUP_MIN = 2;
+
+/**
+ * Consecutive Squire wakes in a home thread, with what each wake's turn produced, collapse
+ * into one group: every wake is a row plus a fold plus a reply, which drowns the conversation.
+ * The newest wake stays out of every group, so its reply is always in view.
+ */
+export function squireUpdateGroups<T>(
+  items: ReadonlyArray<T>,
+  roleOf: (item: T) => SquireUpdateItemRole,
+  eventKindsOf: (item: T) => ReadonlyArray<string>,
+): ReadonlyArray<SquireUpdateGroup> {
+  const roles = items.map(roleOf);
+  const newestWake = roles.lastIndexOf("wake");
+  const groups: SquireUpdateGroup[] = [];
+  let wakes: number[] = [];
+  const close = (end: number) => {
+    const folded = wakes.at(-1) === newestWake ? wakes.slice(0, -1) : wakes;
+    if (folded.length >= SQUIRE_UPDATE_GROUP_MIN) {
+      const eventKinds: string[] = [];
+      for (const index of folded) {
+        for (const kind of eventKindsOf(items[index]!)) {
+          if (!eventKinds.includes(kind)) eventKinds.push(kind);
+        }
+      }
+      groups.push({
+        start: folded[0]!,
+        end: folded.length === wakes.length ? end : wakes.at(-1)!,
+        wakeCount: folded.length,
+        eventKinds,
+      });
+    }
+    wakes = [];
+  };
+  roles.forEach((role, index) => {
+    if (role === "wake") wakes.push(index);
+    else if (role !== "update") close(index);
+  });
+  close(items.length);
+  return groups;
+}
+
+const SQUIRE_UPDATE_KINDS_SHOWN = 3;
+
+/** "3 Squire updates · pr failed, turn completed". */
+export function squireUpdateGroupLabel(
+  group: Pick<SquireUpdateGroup, "wakeCount" | "eventKinds">,
+): string {
+  const kinds = group.eventKinds.map((kind) => kind.replaceAll("-", " "));
+  const shown = kinds.slice(0, SQUIRE_UPDATE_KINDS_SHOWN).join(", ");
+  const more = kinds.length > SQUIRE_UPDATE_KINDS_SHOWN ? ", …" : "";
+  const head = `${group.wakeCount} Squire updates`;
+  return shown === "" ? head : `${head} · ${shown}${more}`;
+}

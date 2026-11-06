@@ -21,6 +21,7 @@ import { resolveServerSelfUpdateCapability } from "../cloud/selfUpdate.ts";
 import { resolveServiceLauncherMode } from "../cloud/serviceLauncherClient.ts";
 import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
+import * as SquireSwitch from "../squire/SquireSwitch.ts";
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
 import { detectServerEnvironmentMachineKind } from "./ServerEnvironmentMachine.ts";
 
@@ -191,6 +192,7 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig.ServerConfig;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
+  const squireSwitch = yield* SquireSwitch.SquireSwitch;
   const identity = yield* ServerEnvironmentIdentity;
   const hostPlatform = yield* HostProcess.Platform;
   const hostArchitecture = yield* HostProcess.Architecture;
@@ -268,7 +270,6 @@ export const make = Effect.gen(function* () {
       manualCloudLink: true,
       ...(serverConfig.threadForkingEnabled ? { threadForking: true } : {}),
       ...(serverConfig.staveEnabled ? { stave: { protocolVersion: STAVE_PROTOCOL_VERSION } } : {}),
-      ...(serverConfig.squireEnabled ? { squire: true } : {}),
       serverResolvedCommandContext: true,
       environmentIcon: true,
       projectCloneTracking: true,
@@ -284,15 +285,22 @@ export const make = Effect.gen(function* () {
 
   return ServerEnvironment.of({
     getEnvironmentId: Effect.succeed(environmentId),
-    // The publish opt-in and relay link change at runtime (`lecturn connect
-    // publish`, the client settings toggle), so the capability is read per
-    // descriptor request rather than baked in at startup.
-    getDescriptor: readAgentActivityPublishingActive(secrets).pipe(
-      Effect.map((agentActivityPublishing) => ({
+    // The publish opt-in, relay link, and Squires switch change at runtime
+    // (`lecturn connect publish`, the client settings toggles), so their
+    // capabilities are read per descriptor request rather than baked in at startup.
+    getDescriptor: Effect.gen(function* () {
+      const agentActivityPublishing = yield* readAgentActivityPublishingActive(secrets);
+      const squire = yield* squireSwitch.isOn;
+      return {
         ...descriptor,
-        capabilities: { ...descriptor.capabilities, agentActivityPublishing },
-      })),
-    ),
+        capabilities: {
+          ...descriptor.capabilities,
+          agentActivityPublishing,
+          ...(squire ? { squire: true } : {}),
+          ...(squireSwitch.pinned ? {} : { squireLiveSwitch: true }),
+        },
+      };
+    }),
   });
 });
 

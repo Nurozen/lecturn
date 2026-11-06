@@ -30,10 +30,21 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./tooltip";
 import { useThreadRouteTarget } from "~/hooks/useThreadRouteTarget";
 
+type ThreadToastActionVariant =
+  | "default"
+  | "destructive"
+  | "destructive-outline"
+  | "ghost"
+  | "link"
+  | "outline"
+  | "secondary";
+
 export type ThreadToastData = {
   threadRef?: ScopedThreadRef | null;
   threadId?: ThreadId | null;
   leadingIcon?: ReactNode;
+  /** A portrait or avatar beside the title and description, in place of the icon. */
+  leadingMedia?: ReactNode;
   tooltipStyle?: boolean;
   onClose?: (() => void) | undefined;
   dismissAfterVisibleMs?: number;
@@ -41,28 +52,16 @@ export type ThreadToastData = {
   additionalActions?: ReadonlyArray<{
     id: string;
     props: ComponentPropsWithoutRef<"button">;
+    /** Defaults to `secondaryActionVariant`. */
+    variant?: ThreadToastActionVariant;
   }>;
   secondaryActionProps?: ComponentPropsWithoutRef<"button">;
-  secondaryActionVariant?:
-    | "default"
-    | "destructive"
-    | "destructive-outline"
-    | "ghost"
-    | "link"
-    | "outline"
-    | "secondary";
+  secondaryActionVariant?: ThreadToastActionVariant;
   expandableContent?: ReactNode;
   expandableLabels?: { expand?: string; collapse?: string };
   expandableDescriptionTrigger?: boolean;
   actionLayout?: "inline" | "stacked-end";
-  actionVariant?:
-    | "default"
-    | "destructive"
-    | "destructive-outline"
-    | "ghost"
-    | "link"
-    | "outline"
-    | "secondary";
+  actionVariant?: ThreadToastActionVariant;
 };
 
 const toastManager = Toast.createToastManager<ThreadToastData>();
@@ -322,57 +321,70 @@ function ToastBodyContent({
   const additionalActions = toastData?.additionalActions ?? [];
   const secondaryActionProps = toastData?.secondaryActionProps;
   const leadingIcon = toastData?.leadingIcon;
+  const leadingMedia = toastData?.leadingMedia;
   const { className: secondaryActionClassName, ...secondaryActionRest } =
     secondaryActionProps ?? {};
+  const text = (
+    <div
+      className={cn(
+        "flex min-h-0 min-w-0 flex-col gap-0.5",
+        leadingMedia ? "flex-1" : stackedActionLayout ? "pr-5" : "flex-1",
+      )}
+    >
+      <div className="flex min-w-0 gap-2">
+        {leadingMedia ? null : leadingIcon ? (
+          <div
+            className="flex h-lh w-4 shrink-0 items-center justify-center"
+            data-slot="toast-icon"
+          >
+            {leadingIcon}
+          </div>
+        ) : Icon ? (
+          <div
+            className="[&>svg]:h-lh [&>svg]:w-4 [&_svg]:pointer-events-none [&_svg]:shrink-0"
+            data-slot="toast-icon"
+          >
+            <Icon className="in-data-[type=error]:text-destructive in-data-[type=info]:text-info in-data-[type=success]:text-success in-data-[type=warning]:text-warning in-data-[type=loading]:opacity-80" />
+          </div>
+        ) : null}
+        <Toast.Title className="min-w-0 wrap-break-word font-medium" data-slot="toast-title" />
+      </div>
+      <ToastDescriptionAndExpandable
+        toastData={toastData}
+        toastDescription={toastDescription}
+        toastType={toastType}
+      />
+    </div>
+  );
 
   return (
     <>
-      <div
-        className={cn(
-          "flex min-h-0 min-w-0 flex-col gap-0.5",
-          stackedActionLayout ? "pr-5" : "flex-1",
-        )}
-      >
-        <div className="flex min-w-0 gap-2">
-          {leadingIcon ? (
-            <div
-              className="flex h-lh w-4 shrink-0 items-center justify-center"
-              data-slot="toast-icon"
-            >
-              {leadingIcon}
-            </div>
-          ) : Icon ? (
-            <div
-              className="[&>svg]:h-lh [&>svg]:w-4 [&_svg]:pointer-events-none [&_svg]:shrink-0"
-              data-slot="toast-icon"
-            >
-              <Icon className="in-data-[type=error]:text-destructive in-data-[type=info]:text-info in-data-[type=success]:text-success in-data-[type=warning]:text-warning in-data-[type=loading]:opacity-80" />
-            </div>
-          ) : null}
-          <Toast.Title className="min-w-0 wrap-break-word font-medium" data-slot="toast-title" />
+      {leadingMedia ? (
+        <div className={cn("flex min-h-0 min-w-0 gap-3", stackedActionLayout ? "pr-5" : "flex-1")}>
+          <div className="shrink-0" data-slot="toast-media">
+            {leadingMedia}
+          </div>
+          {text}
         </div>
-        <ToastDescriptionAndExpandable
-          toastData={toastData}
-          toastDescription={toastDescription}
-          toastType={toastType}
-        />
-      </div>
+      ) : (
+        text
+      )}
       {hasTrailingControls ? (
         <div
           className={cn(
             "flex items-center gap-1.5",
-            stackedActionLayout ? "w-full justify-end" : "shrink-0",
+            stackedActionLayout ? "w-full flex-wrap justify-end" : "shrink-0",
           )}
         >
           {copyErrorText !== null ? <CopyErrorButton text={copyErrorText} /> : null}
-          {additionalActions.map(({ id, props: { className, ...props } }) => (
+          {additionalActions.map(({ id, variant, props: { className, ...props } }) => (
             <Button
               {...props}
               className={className}
               key={id}
               size="xs"
               type="button"
-              variant={secondaryActionVariant}
+              variant={variant ?? secondaryActionVariant}
             />
           ))}
           {secondaryActionProps ? (

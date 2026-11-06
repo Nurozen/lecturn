@@ -30,10 +30,12 @@ import * as Stream from "effect/Stream";
 
 import * as EffectWorker from "../orchestration-v2/EffectWorker.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as SquireActions from "./SquireActions.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
 import { withSquireDispatchOrigin } from "./SquireDispatchOrigin.ts";
 import * as SquireLeadOnboarding from "./SquireLeadOnboarding.ts";
+import * as SquireReactor from "./SquireReactor.ts";
 import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireService from "./SquireService.ts";
 import * as SquireTools from "./SquireTools.ts";
@@ -140,12 +142,13 @@ const eventsOf = (squireId: SquireId) =>
     }),
   );
 
-const open = (requestId: string, timezone?: string) =>
+const open = (requestId: string, timezone?: string, onboarding?: "start" | "defer") =>
   Effect.gen(function* () {
-    const onboarding = yield* SquireLeadOnboarding.SquireLeadOnboarding;
-    const result = yield* onboarding.open({
+    const service = yield* SquireLeadOnboarding.SquireLeadOnboarding;
+    const result = yield* service.open({
       requestId,
       ...(timezone === undefined ? {} : { timezone }),
+      ...(onboarding === undefined ? {} : { onboarding }),
     });
     yield* (yield* need(SquireDelivery.SquireDelivery)).drain;
     return result;
@@ -262,6 +265,47 @@ describe("SquireLeadOnboarding.open", () => {
         const view = Option.getOrThrow(yield* service.get(lead.squireId));
         assert.strictEqual(view.timezone, "America/Los_Angeles");
         assert.isNull(view.digest);
+      }),
+    ),
+  );
+
+  it.effect("a deferred open makes the Lead without onboarding; a later start queues it", () =>
+    withLead((lead) =>
+      Effect.gen(function* () {
+        const deferred = yield* open("open-1", "America/Los_Angeles", "defer");
+        assert.deepStrictEqual(deferred, { squireId: lead.squireId, onboardingQueued: false });
+        assert.isNull((yield* leadRow(lead.squireId)).onboarded_at);
+        assert.strictEqual((yield* leadRow(lead.squireId)).timezone, "America/Los_Angeles");
+        assert.isFalse((yield* open("open-2", undefined, "defer")).onboardingQueued);
+
+        assert.isTrue((yield* open("open-3", undefined, "start")).onboardingQueued);
+        const onboarding = (yield* eventsOf(lead.squireId)).filter(
+          (row) => row.kind === "onboarding",
+        );
+        assert.lengthOf(onboarding, 1);
+        assert.isFalse((yield* open("open-4")).onboardingQueued);
+      }),
+    ),
+  );
+
+  it.effect("a chat with the Lead keeps a plain open from queuing the scan; start still does", () =>
+    withLead((lead) =>
+      Effect.gen(function* () {
+        assert.isFalse((yield* open("open-1", undefined, "defer")).onboardingQueued);
+        const reactor = yield* need(SquireReactor.SquireReactor);
+        yield* Effect.forkScoped(reactor.start({ turnedOn: false }));
+        yield* userTurn(lead.homeThreadId, "Hello.");
+        const events = yield* need(OrchestrationEventStore.OrchestrationEventStore);
+        yield* reactor.drainThrough(yield* events.latestApplicationSequence);
+        assert.isNotNull((yield* leadRow(lead.squireId)).onboarded_at);
+
+        assert.isFalse((yield* open("open-2")).onboardingQueued);
+        assert.isTrue((yield* open("open-3", undefined, "start")).onboardingQueued);
+        assert.isFalse((yield* open("open-4", undefined, "start")).onboardingQueued);
+        const onboarding = (yield* eventsOf(lead.squireId)).filter(
+          (row) => row.kind === "onboarding",
+        );
+        assert.lengthOf(onboarding, 1);
       }),
     ),
   );

@@ -10,14 +10,22 @@ decisions; orchestration deltas are additive fields marked `Lecturn:`. Server co
 
 ## Kill switch
 
-Squires are opt-in and off by default. The server decides once at start: `LECTURN_SQUIRE` when set,
-otherwise the saved `squire.enabled` setting, read from `settings.json` in
-[cli/config.ts][cli-config] like the OTLP endpoints. Desktop users cannot set environment
-variables, so the Settings switch is their only way in, and it takes effect on restart because the
-Squire layer is built at startup. Off means no `squire` capability, `squire.*` RPCs
-fail `disabled_by_server`, webhooks answer 404, and no reactor, timer, or Jev request runs. The
-guard rails for marked threads stay on in both states: the deny runtime, the narrowed MCP
-credential and its gate, provider-side MCP isolation, and the command allowlist.
+Squires are opt-in and off by default. [SquireSwitch.ts][switch] owns the switch: the saved
+`squire.enabled` setting, applied live, unless `LECTURN_SQUIRE` is set, which pins it for the
+process and withholds the `squireLiveSwitch` capability. Desktop users cannot set environment
+variables, so the Settings switch is their only way in.
+
+Because the switch can flip under a running server, every Squire service is built whatever it
+says, and nothing may capture it at construction: gates read it per call, and background work
+(reactor, clock, delivery re-dispatch, Jev resume, CI excerpts, the read model's event followers)
+runs only inside an on period that startup opens and closes on each change. Off means no `squire`
+capability, `squire.*` RPCs fail `disabled_by_server`, webhooks and the action-log export answer
+404, the MCP gate lists nothing, delivery starts no new turn (running ones finish), and nothing
+ticks. A flip re-sends the server config snapshot, the only way the descriptor reaches clients.
+The settings stream applies a write asynchronously, so the RPC gate re-reads the saved setting
+before it refuses: a client may call `squire.lead.open` right after its own write. The guard rails
+for marked threads stay on in both states: the deny runtime, the narrowed MCP credential and its
+gate, provider-side MCP isolation, and the command allowlist.
 
 ## Threads first
 
@@ -72,6 +80,12 @@ isolation on start, resume, and fork.
 
 ## Events
 
+Settled and archived threads are outside every Squire's scope, thread grants included:
+`SquireScope` reads the shell fresh on each decision, so a settle untracks at once and an unsettle
+brings the grants back. When a thread settles or archives the reactor drops its waiting events and
+outdates its cards and holds, and a held steer re-checks at execution, since the settle may not have
+reached the reactor yet.
+
 [SquireReactor.ts][reactor] classifies each transition from its stored payload, never the current
 projection, and dedupes on (Squire, kind, thread, state key). PR keys are absolute states, because
 the sync reactor republishes unchanged snapshots, so the daily prune keeps PR keys while their
@@ -80,8 +94,10 @@ thread lives; other finished rows go after 30 days because their keys never recu
 `isHeadShaRevision` must gate anything that treats the revision as a commit. A snapshot with
 neither yields no event. Compaction would delete the PR
 events the reactor has not read; [SquireCompactionFloor.ts][floor] keeps them, `lecturn doctor`
-included. Turning the switch on fast-forwards the cursor, so the off period is never delivered;
-the skipped project and thread deletes still cascade, from current state, on that start.
+included. Turning the switch on fast-forwards the cursor before anything else in the on period
+runs, so the off period is never delivered; the skipped project and thread deletes still cascade,
+from current state, when the reactor starts. Turning it off records the cursor as off only after the
+reactor has stopped, since the reactor rewrites the flag it read when it started.
 User stops are silent and are classified from `createdBy` on `run.interrupt` and `thread.stop`,
 because thread `actor_kind` never records a client.
 
@@ -177,7 +193,7 @@ intent is recorded as coalesced.
 
 [orchestrator]: ../../apps/server/src/orchestration-v2/Orchestrator.ts
 [squire]: ../../apps/server/src/squire/
-[cli-config]: ../../apps/server/src/cli/config.ts
+[switch]: ../../apps/server/src/squire/SquireSwitch.ts
 [squire-thread]: ../../apps/server/src/squire/squireThread.ts
 [command-hook]: ../../apps/server/src/squire/SquireCommandHook.ts
 [service]: ../../apps/server/src/squire/SquireService.ts

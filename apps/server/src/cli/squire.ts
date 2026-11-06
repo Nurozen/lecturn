@@ -3,8 +3,8 @@
  * running dev or test server through the dev fixture route. It targets the
  * worktree's own Lecturn home unless `--base-dir` names one, never the shared
  * home, and refuses before it issues an auth session unless that server
- * serves the fixture route, which exists only with `LECTURN_SQUIRE=1` and
- * `LECTURN_TEST_PROVIDERS=1`.
+ * serves the fixture route, which answers only with `LECTURN_TEST_PROVIDERS=1`
+ * and Squires on (`LECTURN_SQUIRE=1` or the saved setting).
  */
 import {
   AuthOrchestrationOperateScope,

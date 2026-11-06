@@ -622,6 +622,13 @@ const make = Effect.gen(function* () {
       const now = yield* nowIso;
       const budgetRows = yield* budgetRowsOf(squire.id, now);
       if (intent.type === "steer") {
+        // Settled or archived work has nothing to steer; the card goes, not back to open.
+        const shell = yield* projections.getThreadShell(intent.threadId);
+        if (shell !== null && (shell.settledAt !== null || shell.archivedAt !== null)) {
+          return toOutdated(
+            shell.archivedAt !== null ? "the thread was archived" : "the thread was settled",
+          );
+        }
         const target = (yield* scope.isTracked(squire.id, intent.threadId))
           ? yield* scope.targetOf(intent.threadId)
           : Option.none();

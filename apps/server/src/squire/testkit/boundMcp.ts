@@ -21,6 +21,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import type * as Scope from "effect/Scope";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import { HttpRouter, HttpServer } from "effect/http";
 
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
@@ -52,6 +53,7 @@ import * as ServerSettings from "../../serverSettings.ts";
 import * as SourceControlRepositoryService from "../../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import * as VcsStatusBroadcaster from "../../vcs/VcsStatusBroadcaster.ts";
+import * as SquireSwitch from "../SquireSwitch.ts";
 import * as SquireTools from "../SquireTools.ts";
 
 /** `McpToolAccessTestkit.liveThreadShell` callers run on this instance. */
@@ -84,14 +86,9 @@ const layerStubServices = Layer.mergeAll(
 );
 
 const layerConfig = (squireEnabled: boolean) =>
-  Layer.effect(
-    ServerConfig.ServerConfig,
-    Effect.gen(function* () {
-      const config = yield* ServerConfig.ServerConfig;
-      return ServerConfig.make({ ...config, squireEnabled });
-    }),
-  ).pipe(
-    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-squire-bound-mcp-" })),
+  Layer.merge(
+    ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-squire-bound-mcp-" }),
+    SquireSwitch.layerTest(squireEnabled),
   );
 
 const layerEnvironment = Layer.succeed(
@@ -128,6 +125,8 @@ export interface BoundMcp {
   }) => Effect.Effect<McpProviderSessionConfig>;
   /** An ordinary thread's credential. */
   readonly issueNormal: (threadId: ThreadId) => Effect.Effect<McpProviderSessionConfig>;
+  /** Flips the Squires switch, as a settings write would. */
+  readonly setSquireEnabled: (on: boolean) => Effect.Effect<void>;
 }
 
 /**
@@ -183,6 +182,8 @@ export const serveBoundMcp = (options: {
         }),
       issueNormal: (threadId) =>
         issue({ threadId, providerInstanceId: boundMcpProviderInstanceId }),
+      setSquireEnabled: (on) =>
+        SubscriptionRef.set(Context.get(config, SquireSwitch.SquireSwitchControl), on),
     } satisfies BoundMcp;
   });
 

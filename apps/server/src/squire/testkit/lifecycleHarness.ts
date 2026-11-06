@@ -54,6 +54,7 @@ import * as SquirePolicyLock from "../SquirePolicyLock.ts";
 import * as SquireRepository from "../SquireRepository.ts";
 import * as SquireRules from "../SquireRules.ts";
 import * as SquireScope from "../SquireScope.ts";
+import * as SquireSwitch from "../SquireSwitch.ts";
 import * as SquireService from "../SquireService.ts";
 import * as SquireWorkspace from "../SquireWorkspace.ts";
 
@@ -201,6 +202,8 @@ export const serverLayer = (baseDir: string, options: HarnessOptions = {}) => {
     workspace,
     registry,
     rules,
+    // On, for the Squire services a test builds over this server.
+    SquireSwitch.layerTest(true),
   ).pipe(Layer.provideMerge(NodeServices.layer));
 };
 

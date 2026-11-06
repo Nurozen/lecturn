@@ -4,7 +4,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 
-import * as ServerConfig from "../../../config.ts";
+import * as SquireSwitch from "../../../squire/SquireSwitch.ts";
 import { SQUIRE_TOOL_NAMES } from "../../../squire/squireToolNames.ts";
 import type * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { readMessages, writeMessages } from "../app/AppToolInterceptor.ts";
@@ -66,11 +66,15 @@ const keepAllowedTools = (allowed: ReadonlySet<string>) => (message: unknown) =>
  * `tools/list` answers only the role allowlist, any other tool call is
  * refused without reaching the transport, and so is every method that is
  * neither a tool request nor protocol plumbing. Other credentials pass
- * untouched. A missing `ServerConfig` reads as the switch off.
+ * untouched. The switch is read per request, so turning it off fences a
+ * running Squire at once; a missing `SquireSwitch` reads as off.
  */
 export const make = Effect.gen(function* () {
-  const config = yield* Effect.serviceOption(ServerConfig.ServerConfig);
-  const squireEnabled = Option.isSome(config) && config.value.squireEnabled;
+  const squireSwitch = yield* Effect.serviceOption(SquireSwitch.SquireSwitch);
+  const squireEnabled = Option.match(squireSwitch, {
+    onNone: () => Effect.succeed(false),
+    onSome: (service) => service.isOn,
+  });
   return <E, R>(
     invocation: McpInvocationContext.McpInvocationScope,
     httpEffect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
@@ -82,8 +86,8 @@ export const make = Effect.gen(function* () {
     if (invocation.squire === undefined && !invocation.capabilities.has("squire")) {
       return httpEffect;
     }
-    const allowed = squireToolAllowlist(invocation.squire?.role, squireEnabled);
     return Effect.gen(function* () {
+      const allowed = squireToolAllowlist(invocation.squire?.role, yield* squireEnabled);
       const request = yield* HttpServerRequest.HttpServerRequest;
       // GET opens the server's event stream and DELETE ends the session; neither runs a tool.
       if (request.method !== "POST") return yield* httpEffect;

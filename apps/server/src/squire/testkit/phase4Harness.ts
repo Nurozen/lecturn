@@ -77,13 +77,14 @@ import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import * as LayerSquire from "../layerSquire.ts";
+import * as SquireSwitch from "../SquireSwitch.ts";
 import * as SquireCommandHook from "../SquireCommandHook.ts";
 import * as SquireFakeScripts from "../SquireFakeScripts.ts";
 import * as SquireRepository from "../SquireRepository.ts";
 import { ALL_INSTANCES, scripted, scriptedModel } from "./lifecycleHarness.ts";
 
 export interface Phase4Options {
-  /** `LECTURN_SQUIRE`; on unless set. */
+  /** The Squires switch at build; on unless set. */
   readonly squireEnabled?: boolean;
   /** The summary model; absent, summaries keep their deterministic fields. */
   readonly generateSquireTurnSummary?: TextGeneration["Service"]["generateSquireTurnSummary"];
@@ -322,12 +323,10 @@ const hostPowerUnknown = Layer.effect(
 );
 
 export const phase4Layer = (baseDir: string, options: Phase4Options = {}) => {
-  const squireEnabled = options.squireEnabled ?? true;
   const config = Layer.effect(
     ServerConfig.ServerConfig,
     Effect.map(ServerConfig.ServerConfig, (current) => ({
       ...current,
-      squireEnabled,
       threadForkingEnabled: options.threadForkingEnabled ?? current.threadForkingEnabled,
     })),
   ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)));
@@ -441,6 +440,8 @@ export const phase4Layer = (baseDir: string, options: Phase4Options = {}) => {
     // The server's runtime layer provides it; the showcase route publishes into it.
     Layer.provideMerge(AppRuntimeState.layer),
     Layer.provideMerge(settings),
+    // Flipped through `SquireSwitchControl`, as a settings write flips the server's.
+    Layer.provideMerge(SquireSwitch.layerTest(options.squireEnabled ?? true)),
     Layer.provideMerge(stores),
     // The server provides it beside the Squire layer; only `staveSpaceLock` admits through it.
     Layer.provideMerge(StaveSpaceLock.layer),

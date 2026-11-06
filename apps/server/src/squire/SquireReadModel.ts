@@ -51,6 +51,7 @@ import * as SquireContainers from "./SquireContainers.ts";
 import * as squirePolicy from "./squirePolicy.ts";
 import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireScope from "./SquireScope.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 import { toRule } from "./SquireTools.ts";
 
 /**
@@ -257,27 +258,36 @@ const make = Effect.gen(function* () {
   const threadSetChanges = yield* PubSub.sliding<void>(1);
   const eventStore = yield* Effect.serviceOption(OrchestrationEventStore.OrchestrationEventStore);
   const fixtureStave = yield* Effect.serviceOption(SquireContainers.SquireFixtureStave);
+  const squireSwitch = yield* SquireSwitch.SquireSwitch;
+  const threadSetChanged = Ref.update(threadSet, (n) => n + 1).pipe(
+    Effect.andThen(PubSub.publish(threadSetChanges, undefined)),
+  );
+  // Followed only while Squires are on; each on period first counts as a
+  // change, since the off period's thread events went unseen.
   if (Option.isSome(eventStore)) {
-    const highWater = yield* eventStore.value.latestApplicationSequence.pipe(Effect.option);
-    if (Option.isSome(highWater)) {
-      yield* Effect.forkScoped(
-        Stream.runForEach(
-          eventStore.value.streamApplicationEvents({ afterSequence: highWater.value }),
-          (stored) =>
-            "event" in stored && THREAD_SET_EVENTS.has(stored.event.type)
-              ? Ref.update(threadSet, (n) => n + 1).pipe(
-                  Effect.andThen(PubSub.publish(threadSetChanges, undefined)),
-                )
-              : Effect.void,
-        ).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("Squire thread-set follower stopped; tracking refreshes by TTL.", {
-              cause,
-            }),
-          ),
-        ),
-      );
-    }
+    const store = eventStore.value;
+    yield* Effect.forkScoped(
+      squireSwitch.whileOn(
+        Effect.gen(function* () {
+          const highWater = yield* store.latestApplicationSequence.pipe(Effect.option);
+          yield* threadSetChanged;
+          if (Option.isNone(highWater)) return;
+          yield* Stream.runForEach(
+            store.streamApplicationEvents({ afterSequence: highWater.value }),
+            (stored) =>
+              "event" in stored && THREAD_SET_EVENTS.has(stored.event.type)
+                ? threadSetChanged
+                : Effect.void,
+          ).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Squire thread-set follower stopped; tracking refreshes by TTL.", {
+                cause,
+              }),
+            ),
+          );
+        }),
+      ),
+    );
   }
 
   const toSquire = (

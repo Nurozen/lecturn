@@ -46,7 +46,6 @@ import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore
 import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
 import * as SquireCommandHook from "./SquireCommandHook.ts";
 import * as SquireContainers from "./SquireContainers.ts";
-import * as SquireCursorStartup from "./SquireCursorStartup.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
 import * as SquireFakeScripts from "./SquireFakeScripts.ts";
 import * as SquireItems from "./SquireItems.ts";
@@ -104,11 +103,13 @@ interface Calls {
   gate: Deferred.Deferred<void> | undefined;
   /** Resolved when a summary generation starts. */
   ensureStarted: Deferred.Deferred<void> | undefined;
+  /** Resolved when a summary generation is interrupted. */
+  ensureInterrupted: Deferred.Deferred<void> | undefined;
   /** When set, summary generation returns it instead of the stub. */
   summary: typeof STUB_SUMMARY | undefined;
 }
 
-const makeHarness = (options: { readonly turnedOn?: boolean } = {}) => {
+const makeHarness = () => {
   const calls: Calls = {
     wakes: [],
     finalized: [],
@@ -117,6 +118,7 @@ const makeHarness = (options: { readonly turnedOn?: boolean } = {}) => {
     driven: [],
     gate: undefined,
     ensureStarted: undefined,
+    ensureInterrupted: undefined,
     summary: undefined,
   };
   const delivery = Layer.succeed(
@@ -137,7 +139,14 @@ const makeHarness = (options: { readonly turnedOn?: boolean } = {}) => {
         Effect.gen(function* () {
           calls.ensured.push(`${request.threadId}:${request.runId}:${request.stage}`);
           if (calls.ensureStarted) yield* Deferred.succeed(calls.ensureStarted, undefined);
-          if (calls.gate) yield* Deferred.await(calls.gate);
+          if (calls.gate) {
+            const interrupted = calls.ensureInterrupted;
+            yield* Deferred.await(calls.gate).pipe(
+              Effect.onInterrupt(() =>
+                interrupted ? Deferred.succeed(interrupted, undefined) : Effect.void,
+              ),
+            );
+          }
           return {
             status: "complete" as const,
             summary: calls.summary ?? STUB_SUMMARY,
@@ -166,10 +175,6 @@ const makeHarness = (options: { readonly turnedOn?: boolean } = {}) => {
     delivery,
     summaries,
     lifecycle,
-    Layer.succeed(
-      SquireCursorStartup.SquireSwitchTurnedOn,
-      SquireCursorStartup.SquireSwitchTurnedOn.of({ turnedOn: options.turnedOn === true }),
-    ),
   ).pipe(
     Layer.provideMerge(SquireRepository.layer),
     Layer.provideMerge(RuntimeLayer.layerEventInfrastructure),
@@ -178,14 +183,19 @@ const makeHarness = (options: { readonly turnedOn?: boolean } = {}) => {
   return { calls, layer: SquireReactor.layer.pipe(Layer.provideMerge(services)) };
 };
 
-/** Starts the reactor and returns a drain through everything committed so far. */
-const startReactor = Effect.gen(function* () {
-  const reactor = yield* SquireReactor.SquireReactor;
-  const events = yield* OrchestrationEventStore.OrchestrationEventStore;
-  const fiber = yield* Effect.forkScoped(reactor.start);
-  const drain = Effect.flatMap(events.latestApplicationSequence, reactor.drainThrough);
-  return { reactor, fiber, drain };
-});
+/**
+ * Starts the reactor for an on period and returns a drain through everything
+ * committed so far. `turnedOn` as when the period's cursor sync jumped.
+ */
+const startReactorWith = (input: { readonly turnedOn: boolean }) =>
+  Effect.gen(function* () {
+    const reactor = yield* SquireReactor.SquireReactor;
+    const events = yield* OrchestrationEventStore.OrchestrationEventStore;
+    const fiber = yield* Effect.forkScoped(reactor.start(input));
+    const drain = Effect.flatMap(events.latestApplicationSequence, reactor.drainThrough);
+    return { reactor, fiber, drain };
+  });
+const startReactor = startReactorWith({ turnedOn: false });
 
 // ── Event builders ──
 
@@ -508,9 +518,8 @@ type HarnessServices = Layer.Success<ReturnType<typeof makeHarness>["layer"]>;
 
 const runIn = <A, E>(
   effect: (calls: Calls) => Effect.Effect<A, E, HarnessServices | Scope.Scope>,
-  options: { readonly turnedOn?: boolean } = {},
 ) => {
-  const harness = makeHarness(options);
+  const harness = makeHarness();
   return effect(harness.calls).pipe(Effect.scoped, Effect.provide(harness.layer));
 };
 
@@ -585,7 +594,68 @@ const finishRun = (
     yield* write([runEvent(threadId, runId, status, now)]);
   });
 
+const settleThread = (type: "thread.settle" | "thread.unsettle", threadId = worker) =>
+  Effect.flatMap(Orchestrator.OrchestratorV2, (orchestrator) =>
+    orchestrator.dispatch(
+      type === "thread.settle"
+        ? { type, commandId: CommandId.make(`${threadId}:settle:${++counter}`), threadId }
+        : {
+            type,
+            commandId: CommandId.make(`${threadId}:unsettle:${++counter}`),
+            threadId,
+            reason: "user",
+          },
+    ),
+  );
+
 describe("SquireReactor stops and scope", () => {
+  it.effect(
+    "a settled thread raises no rows, and its waiting rows and held steer go; unsettled, it is back",
+    () =>
+      runIn(() =>
+        Effect.gen(function* () {
+          const repository = yield* SquireRepository.SquireRepository;
+          yield* setup();
+          const { drain } = yield* startReactor;
+          yield* repository.insertCard(
+            openCard("card:held", {
+              status: "held",
+              executes_at: "2026-11-01T00:10:00.000Z",
+            }),
+          );
+          yield* repository.insertEvent({
+            squire_id: release,
+            thread_id: worker,
+            kind: "turn-finished",
+            state_key: "run:before",
+            payload_json: null,
+            status: "pending",
+            defer_reason: null,
+            not_before: "2026-11-01T00:00:00.000Z",
+            batch_id: null,
+            created_at: "2026-11-01T00:00:00.000Z",
+          });
+
+          yield* settleThread("thread.settle");
+          yield* finishRun(RunId.make("run:settled"), "completed", yield* DateTime.now);
+          yield* drain;
+          assert.deepStrictEqual(yield* cardStatus("card:held"), Option.some("outdated"));
+          assert.deepStrictEqual(
+            (yield* rows).map((row) => [row.state_key, row.status]),
+            [["run:before", "dropped"]],
+          );
+
+          yield* settleThread("thread.unsettle");
+          yield* finishRun(RunId.make("run:back"), "completed", yield* DateTime.now);
+          yield* drain;
+          assert.include(
+            (yield* rows).map((row) => row.state_key),
+            "run:back",
+          );
+        }),
+      ),
+  );
+
   it.effect(
     "user stops are silent; agent, system, crash, and failure stops are thread-stopped",
     () =>
@@ -792,6 +862,25 @@ describe("SquireReactor deferrals", () => {
         yield* Deferred.succeed(gate, undefined);
         yield* drain;
         assert.strictEqual((yield* rows)[0]?.status, "pending");
+      }),
+    ),
+  );
+
+  it.effect("ending the on period interrupts a summary it started", () =>
+    runIn((calls) =>
+      Effect.gen(function* () {
+        yield* setup();
+        const { fiber } = yield* startReactor;
+        const started = yield* Deferred.make<void>();
+        const interrupted = yield* Deferred.make<void>();
+        calls.gate = yield* Deferred.make<void>();
+        calls.ensureStarted = started;
+        calls.ensureInterrupted = interrupted;
+        yield* finishRun(RunId.make("run:paid"), "completed", yield* DateTime.now);
+        yield* Deferred.await(started);
+
+        yield* Fiber.interrupt(fiber);
+        assert.isTrue(yield* Deferred.isDone(interrupted));
       }),
     ),
   );
@@ -1468,60 +1557,58 @@ describe("SquireReactor Squire threads and cascades", () => {
   );
 
   it.effect("the start that turns the switch on applies the deletes its cursor jump skipped", () =>
-    runIn(
-      (calls) =>
-        Effect.gen(function* () {
-          const repository = yield* SquireRepository.SquireRepository;
-          const events = yield* OrchestrationEventStore.OrchestrationEventStore;
-          const gone = ThreadId.make("thread:gone");
-          const goneProject = ProjectId.make("project:gone");
-          yield* seedProject(projectA, process.cwd());
-          yield* seedProject(goneProject, process.cwd());
-          yield* setup([
-            squireRow(release, { home_project_id: projectA }),
-            squireRow(billing, { home_project_id: goneProject }),
-          ]);
-          yield* createThread(gone, projectA);
-          yield* repository.insertGrant(grantRow(release, "thread", gone));
-          yield* repository.insertGrant(grantRow(billing, "project", goneProject));
-          yield* repository.insertCard(openCard("card:gone", { target_thread_id: gone }));
-          yield* repository.insertCard(openCard("card:live"));
-          yield* repository.insertEvent({
-            squire_id: release,
-            thread_id: gone,
-            kind: "turn-finished",
-            state_key: "run:gone",
-            payload_json: null,
-            status: "pending",
-            defer_reason: null,
-            not_before: "2026-11-01T00:00:00.000Z",
-            batch_id: null,
-            created_at: "2026-11-01T00:00:00.000Z",
-          });
-          // The off period: both deletes commit, then the turn-on start jumps past them.
-          yield* dispatchThread("thread.delete", gone);
-          yield* deleteProject(goneProject);
-          yield* repository.writeCursor({
-            sequence: yield* events.latestApplicationSequence,
-            enabled: true,
-          });
+    runIn((calls) =>
+      Effect.gen(function* () {
+        const repository = yield* SquireRepository.SquireRepository;
+        const events = yield* OrchestrationEventStore.OrchestrationEventStore;
+        const gone = ThreadId.make("thread:gone");
+        const goneProject = ProjectId.make("project:gone");
+        yield* seedProject(projectA, process.cwd());
+        yield* seedProject(goneProject, process.cwd());
+        yield* setup([
+          squireRow(release, { home_project_id: projectA }),
+          squireRow(billing, { home_project_id: goneProject }),
+        ]);
+        yield* createThread(gone, projectA);
+        yield* repository.insertGrant(grantRow(release, "thread", gone));
+        yield* repository.insertGrant(grantRow(billing, "project", goneProject));
+        yield* repository.insertCard(openCard("card:gone", { target_thread_id: gone }));
+        yield* repository.insertCard(openCard("card:live"));
+        yield* repository.insertEvent({
+          squire_id: release,
+          thread_id: gone,
+          kind: "turn-finished",
+          state_key: "run:gone",
+          payload_json: null,
+          status: "pending",
+          defer_reason: null,
+          not_before: "2026-11-01T00:00:00.000Z",
+          batch_id: null,
+          created_at: "2026-11-01T00:00:00.000Z",
+        });
+        // The off period: both deletes commit, then the turn-on start jumps past them.
+        yield* dispatchThread("thread.delete", gone);
+        yield* deleteProject(goneProject);
+        yield* repository.writeCursor({
+          sequence: yield* events.latestApplicationSequence,
+          enabled: true,
+        });
 
-          const { drain } = yield* startReactor;
-          yield* drain;
-          assert.deepStrictEqual(
-            (yield* repository.listGrants(release)).map((grant) => grant.kind),
-            ["project"],
-          );
-          assert.deepStrictEqual(
-            (yield* repository.listGrants(billing)).map((grant) => grant.target_id),
-            [projectA],
-          );
-          assert.deepStrictEqual(yield* cardStatus("card:gone"), Option.some("outdated"));
-          assert.deepStrictEqual(yield* cardStatus("card:live"), Option.some("open"));
-          assert.deepStrictEqual(yield* rows, []);
-          assert.deepStrictEqual(calls.rehomed, [billing]);
-        }),
-      { turnedOn: true },
+        const { drain } = yield* startReactorWith({ turnedOn: true });
+        yield* drain;
+        assert.deepStrictEqual(
+          (yield* repository.listGrants(release)).map((grant) => grant.kind),
+          ["project"],
+        );
+        assert.deepStrictEqual(
+          (yield* repository.listGrants(billing)).map((grant) => grant.target_id),
+          [projectA],
+        );
+        assert.deepStrictEqual(yield* cardStatus("card:gone"), Option.some("outdated"));
+        assert.deepStrictEqual(yield* cardStatus("card:live"), Option.some("open"));
+        assert.deepStrictEqual(yield* rows, []);
+        assert.deepStrictEqual(calls.rehomed, [billing]);
+      }),
     ),
   );
 

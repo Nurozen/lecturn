@@ -47,7 +47,6 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
-import * as SquireCursorStartup from "./SquireCursorStartup.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
 import { withSquireDispatchOrigin } from "./SquireDispatchOrigin.ts";
 import { questionCardTrigger, readSquireQuestion, squireQuestionTitle } from "./SquireItems.ts";
@@ -82,8 +81,12 @@ export type SquireReactorError = SquireScope.SquireScopeError;
 export class SquireReactor extends Context.Service<
   SquireReactor,
   {
-    /** The cursor loop; restarts from the durable cursor after a storage failure. */
-    readonly start: Effect.Effect<never>;
+    /**
+     * The cursor loop for one on period; restarts from the durable cursor
+     * after a storage failure. `turnedOn` when the period's cursor sync jumped
+     * the cursor, so the off period's cascades are applied first.
+     */
+    readonly start: (input: { readonly turnedOn: boolean }) => Effect.Effect<never>;
     /** Resolves once the cursor passed `sequence` and the work it forked settled. */
     readonly drainThrough: (sequence: number) => Effect.Effect<void>;
     /**
@@ -190,7 +193,6 @@ const make = Effect.gen(function* () {
   const hooks = yield* Effect.serviceOption(SquireHooks.SquireHooks);
   const config = yield* ServerConfig.ServerConfig;
   const projects = yield* ProjectStore.ProjectStoreV2;
-  const switchTurnedOn = yield* Effect.serviceOption(SquireCursorStartup.SquireSwitchTurnedOn);
 
   const seen = yield* SubscriptionRef.make(0);
   const outstanding = yield* TxRef.make(0);
@@ -943,6 +945,33 @@ const make = Effect.gen(function* () {
           ),
         );
 
+  /**
+   * A settled or archived thread leaves every Squire's scope (SquireScope), so
+   * what was queued about it goes too: its waiting events are dropped and its
+   * open cards and holds outdated, so nothing is delivered or fires against
+   * finished work. Unsettling brings the thread back for what happens next.
+   */
+  const onThreadLeftScope = (threadId: ThreadId, reason: string) =>
+    Effect.gen(function* () {
+      const lead = yield* withPolicyLock(
+        repository.transaction(
+          Effect.gen(function* () {
+            const waiting = yield* repository.listEvents({
+              statuses: ["pending", "deferred"],
+              threadId,
+            });
+            yield* repository.setEventStatus({
+              ids: waiting.map((row) => row.id),
+              fromStatuses: ["pending", "deferred"],
+              status: "dropped",
+            });
+            return yield* outdateThreadCards(threadId, yield* nowIso, reason);
+          }),
+        ),
+      );
+      yield* wakeLead(lead);
+    });
+
   const onThreadDeleted = (
     effect: Extract<SquireReactorEffect, { readonly type: "thread-deleted" }>,
   ) =>
@@ -1116,6 +1145,26 @@ const make = Effect.gen(function* () {
       });
     }).pipe(logged("Squire auto-decline failed", { requestId: effect.requestId }));
 
+  /**
+   * A user who talks to the Lead before its first-run scan has met it their
+   * own way: the scan stays off until a client asks for it with `start`, so
+   * an older client's plain open never queues it later.
+   */
+  const noteLeadChat = (squireId: SquireId, threadId: ThreadId, runId: RunId) =>
+    Effect.gen(function* () {
+      const squire = yield* repository.getSquire(squireId);
+      if (Option.isNone(squire) || squire.value.role !== "lead") return;
+      if (squire.value.onboarded_at !== null) return;
+      const message = yield* projections.getRunMessage(threadId, runId);
+      if (message?.createdBy !== "user") return;
+      const now = yield* nowIso;
+      yield* repository.updateSquire({
+        id: squireId,
+        patch: { onboarded_at: now },
+        updatedAt: now,
+      });
+    });
+
   const apply = (effect: SquireReactorEffect, stored: ApplicationStoredEvent) => {
     switch (effect.type) {
       case "request-resolved":
@@ -1134,12 +1183,16 @@ const make = Effect.gen(function* () {
         return effect.squire.role === "home"
           ? fork(
               "Squire run finalize failed",
-              delivery.finalizeRun({
-                squireId: effect.squire.squireId,
-                homeThreadId: effect.threadId,
-                runId: effect.runId,
-                status: effect.status,
-              }),
+              noteLeadChat(effect.squire.squireId, effect.threadId, effect.runId).pipe(
+                Effect.andThen(
+                  delivery.finalizeRun({
+                    squireId: effect.squire.squireId,
+                    homeThreadId: effect.threadId,
+                    runId: effect.runId,
+                    status: effect.status,
+                  }),
+                ),
+              ),
             )
           : Option.isSome(probe)
             ? fork(
@@ -1191,54 +1244,70 @@ const make = Effect.gen(function* () {
       if (event !== null && Option.isSome(hooks) && THREAD_CHANGE_EVENTS.has(event.type)) {
         yield* hooks.value.threadChanged(event.threadId);
       }
+      const leftScope =
+        event?.type === "thread.settled"
+          ? "the thread was settled"
+          : event?.type === "thread.archived"
+            ? "the thread was archived"
+            : undefined;
+      if (event !== null && leftScope !== undefined) {
+        yield* onThreadLeftScope(event.threadId, leftScope);
+        return true;
+      }
       return candidates.length > 0 || effects.length > 0;
     }).pipe(Effect.withSpan("SquireReactor.handle"));
 
-  let offPeriodPending = Option.exists(switchTurnedOn, ({ turnedOn }) => turnedOn);
-
-  const start: SquireReactor["Service"]["start"] = Effect.gen(function* () {
-    if (offPeriodPending) {
-      yield* reconcileOffPeriod.pipe(logged("Squire off-period reconcile failed"));
-      offPeriodPending = false;
-    }
-    const cursor = yield* repository.readCursor;
-    yield* SubscriptionRef.set(seen, cursor.sequence);
-    let ignored = 0;
-    yield* Stream.runForEach(
-      events.streamApplicationEvents({ afterSequence: cursor.sequence }),
-      (stored) =>
-        Effect.gen(function* () {
-          const worked = yield* handle(stored).pipe(
-            Effect.retry({ schedule: Schedule.exponential("100 millis"), times: 3 }),
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.interrupt
-                : Effect.logError("Squire reactor skipped an event it could not process", {
-                    sequence: stored.sequence,
-                    cause: Cause.pretty(cause),
-                  }).pipe(Effect.as(true)),
-            ),
-          );
-          ignored = worked ? 0 : ignored + 1;
-          if (worked || ignored >= IGNORED_CURSOR_WRITE_INTERVAL) {
-            ignored = 0;
-            yield* repository.writeCursor({ sequence: stored.sequence, enabled: cursor.enabled });
-          }
-          yield* SubscriptionRef.set(seen, stored.sequence);
-        }),
-    );
-    return yield* Effect.die("the application event stream ended");
-  }).pipe(
-    Effect.tapCause((cause) =>
-      Cause.hasInterruptsOnly(cause)
-        ? Effect.void
-        : Effect.logError("Squire reactor stopped; restarting from its cursor", {
-            cause: Cause.pretty(cause),
+  const start: SquireReactor["Service"]["start"] = ({ turnedOn }) => {
+    // Once per on period, not per restart of the loop below.
+    let offPeriodPending = turnedOn;
+    return Effect.gen(function* () {
+      if (offPeriodPending) {
+        yield* reconcileOffPeriod.pipe(logged("Squire off-period reconcile failed"));
+        offPeriodPending = false;
+      }
+      const cursor = yield* repository.readCursor;
+      yield* SubscriptionRef.set(seen, cursor.sequence);
+      let ignored = 0;
+      yield* Stream.runForEach(
+        events.streamApplicationEvents({ afterSequence: cursor.sequence }),
+        (stored) =>
+          Effect.gen(function* () {
+            const worked = yield* handle(stored).pipe(
+              Effect.retry({ schedule: Schedule.exponential("100 millis"), times: 3 }),
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.interrupt
+                  : Effect.logError("Squire reactor skipped an event it could not process", {
+                      sequence: stored.sequence,
+                      cause: Cause.pretty(cause),
+                    }).pipe(Effect.as(true)),
+              ),
+            );
+            ignored = worked ? 0 : ignored + 1;
+            if (worked || ignored >= IGNORED_CURSOR_WRITE_INTERVAL) {
+              ignored = 0;
+              yield* repository.writeCursor({ sequence: stored.sequence, enabled: cursor.enabled });
+            }
+            yield* SubscriptionRef.set(seen, stored.sequence);
           }),
-    ),
-    Effect.retry(Schedule.spaced("5 seconds")),
-    Effect.orDie,
-  );
+      );
+      return yield* Effect.die("the application event stream ended");
+    }).pipe(
+      Effect.tapCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.void
+          : Effect.logError("Squire reactor stopped; restarting from its cursor", {
+              cause: Cause.pretty(cause),
+            }),
+      ),
+      Effect.retry(Schedule.spaced("5 seconds")),
+      Effect.orDie,
+      // The forked work belongs to the on period: turning Squires off stops a
+      // paid summary call mid-flight, and its `generating` row settles to
+      // `partial` before the next period's reactor can start the same summary.
+      Effect.ensuring(FiberSet.clear(fibers)),
+    );
+  };
 
   const drainThrough: SquireReactor["Service"]["drainThrough"] = (sequence) =>
     SubscriptionRef.changes(seen).pipe(

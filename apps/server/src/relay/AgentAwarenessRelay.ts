@@ -478,7 +478,7 @@ export const make = Effect.gen(function* () {
   const projectStore = yield* ProjectStore.ProjectStoreV2;
   const appRegistrations = yield* AppRegistrationRepository;
   const watches = yield* Effect.serviceOption(PullRequestWatchService);
-  // Present only with LECTURN_SQUIRE on.
+  // Absent in runtimes built without Squires; reads no home thread while the switch is off.
   const squireAttention = yield* Effect.serviceOption(SquireMobileAttention);
   const crypto = yield* Crypto.Crypto;
   const scope = yield* Effect.scope;

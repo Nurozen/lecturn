@@ -2,6 +2,11 @@ import type { OrchestrationV2Notification } from "@lecturn/contracts";
 import { worktreeSetupAgentStarted } from "@lecturn/client-runtime/worktree-setup";
 export { worktreeSetupAgentStarted } from "@lecturn/client-runtime/worktree-setup";
 import { isLiveSubagentTurnItem } from "@lecturn/client-runtime/state/subagentRuntime";
+import {
+  squireUpdateGroupLabel,
+  squireUpdateGroups,
+  type SquireUpdateItemRole,
+} from "@lecturn/client-runtime/state/squire";
 import * as DateTime from "effect/DateTime";
 import * as Equal from "effect/Equal";
 import {
@@ -230,6 +235,47 @@ export function squireTurnFoldLabel(
       workLogEntryIsToolLike(entry.entry),
   ).length;
   return calls === 0 ? "Details" : `Tool calls (${calls})`;
+}
+
+/**
+ * Lecturn: a Squire home thread's entries by their part in an update group. A turn still
+ * running, and anything that waits on the user or that they asked to see (a card, a plan, a
+ * question), stays out of the group.
+ */
+function squireUpdateEntryRole(
+  entry: TimelineEntry,
+  runIsActive: (runId: RunId | null | undefined) => boolean,
+): SquireUpdateItemRole {
+  switch (entry.kind) {
+    case "message":
+      if (runIsActive(entry.message.runId)) return "keep";
+      // Older messages carry no author; they read as the user's own.
+      return entry.message.role === "user" && (entry.message.createdBy ?? "user") === "user"
+        ? "user"
+        : "update";
+    case "work": {
+      if (runIsActive(entry.entry.runId)) return "keep";
+      if (entry.entry.questionAnswer !== undefined) return "keep";
+      const payload = entry.entry.structuredPayload;
+      return payload?.type === "notification" && payload.source.kind === "squire"
+        ? "wake"
+        : "update";
+    }
+    case "proposed-plan":
+    case "html-render":
+    case "mcp-app":
+      return "keep";
+    default:
+      return "update";
+  }
+}
+
+function squireUpdateEventKinds(entry: TimelineEntry): ReadonlyArray<string> {
+  if (entry.kind !== "work") return [];
+  const payload = entry.entry.structuredPayload;
+  return payload?.type === "notification" && payload.source.kind === "squire"
+    ? (payload.source.eventKinds ?? [])
+    : [];
 }
 
 export function threadReadTargetId(entry: Pick<WorkLogEntry, "structuredPayload">) {
@@ -593,6 +639,15 @@ type MessagesTimelineRowContent =
       toolIcon?: WorkLogEntry["toolIcon"];
       summaryToolIcon?: "browser" | "device" | "lecturn" | "pull-request";
       hasFailure: boolean;
+    }
+  | {
+      kind: "squire-updates";
+      id: string;
+      createdAt: string;
+      /** Its expansion lives with the work groups'. */
+      groupId: string;
+      label: string;
+      expanded: boolean;
     }
   | {
       kind: "turn-fold";
@@ -1559,6 +1614,38 @@ export function deriveMessagesTimelineRows(input: {
     ? lastResponseBoundaryIndex(timelineEntries) + 1
     : timelineEntries.length;
 
+  // Lecturn: consecutive Squire wakes fold into one row, collapsed until opened.
+  const squireGroupByStart = new Map<
+    number,
+    Extract<MessagesTimelineRow, { kind: "squire-updates" }>
+  >();
+  const collapsedSquireIndexes = new Set<number>();
+  if (input.compactSquireEvents) {
+    const groups = squireUpdateGroups(
+      timelineEntries,
+      (entry) => squireUpdateEntryRole(entry, runIdIsActiveResponse),
+      squireUpdateEventKinds,
+    );
+    for (const group of groups) {
+      const first = timelineEntries[group.start]!;
+      const groupId = `squire-updates:${first.id}`;
+      const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
+      squireGroupByStart.set(group.start, {
+        kind: "squire-updates",
+        id: groupId,
+        createdAt: first.createdAt,
+        groupId,
+        label: squireUpdateGroupLabel(group),
+        expanded,
+      });
+      if (!expanded) {
+        for (let index = group.start; index < group.end; index += 1) {
+          collapsedSquireIndexes.add(index);
+        }
+      }
+    }
+  }
+
   const activeToolEntries: Array<Extract<TimelineEntry, { kind: "work" }>> = [];
   if (input.isWorking && (unsettledRunId !== null || runlessWorkActive)) {
     let tailAttemptId: string | null | undefined;
@@ -1732,6 +1819,10 @@ export function deriveMessagesTimelineRows(input: {
     ) {
       continue;
     }
+
+    const squireGroup = squireGroupByStart.get(index);
+    if (squireGroup) nextRows.push(squireGroup);
+    if (collapsedSquireIndexes.has(index)) continue;
 
     const turnFold = foldsByAnchorEntryId.get(timelineEntry.id);
     if (turnFold) {
@@ -2406,7 +2497,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       );
     }
 
-    case "turn-fold": {
+    case "turn-fold":
+    case "squire-updates": {
       const bf = b as typeof a;
       return a.createdAt === bf.createdAt && a.label === bf.label && a.expanded === bf.expanded;
     }

@@ -93,7 +93,6 @@ const layerConfig = (overrides: Partial<ServerConfig.ServerConfig["Service"]>) =
         startupPresentation: "browser",
         threadForkingEnabled: false,
         staveEnabled: false,
-        squireEnabled: false,
         ...overrides,
       });
     }),

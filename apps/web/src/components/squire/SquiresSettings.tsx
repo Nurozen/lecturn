@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { resolveProviderInstanceDisplayName } from "@lecturn/client-runtime/state/provider-instance-display";
+import { squireKnockResetDescription } from "@lecturn/client-runtime/state/squireKnock";
 import {
   squireStateLine,
   type SquireEnvironmentState,
@@ -33,6 +34,7 @@ import { NumberField, NumberFieldGroup, NumberFieldInput } from "../ui/number-fi
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { SquirePortrait, useSquireIndicator } from "./SquireHeader";
+import { releaseSquireKnock } from "./SquireKnock";
 import { squireSwitchDescription } from "./squirePage.logic";
 import { openSquireSetup } from "./setup/squireSetupStore";
 import { SquireAutomationPausedNotice } from "./setup/SquireTriggersSection";
@@ -112,6 +114,7 @@ export function SquiresSettings(props: {
           />
         ) : null}
         <SquireEnabledRow environmentId={selectedId} />
+        <SquireKnockResetRow environmentId={selectedId} />
       </SettingsSection>
       {selected === undefined ? null : (
         <>
@@ -129,11 +132,17 @@ export function SquiresSettings(props: {
   );
 }
 
-/** The saved `squire.enabled` switch; the server applies it on its next start. */
+/**
+ * The saved `squire.enabled` switch. A server with `squireLiveSwitch` applies it at once; older
+ * ones on their next start.
+ */
 function SquireEnabledRow(props: { readonly environmentId: EnvironmentId }) {
   const { environmentId } = props;
   const settings = useAtomValue(serverEnvironment.settingsValueAtom(environmentId));
   const running = useAtomValue(squireCapableAtom(environmentId));
+  const live =
+    useAtomValue(serverEnvironment.configValueAtom(environmentId))?.environment.capabilities
+      .squireLiveSwitch === true;
   const canWrite = useEnvironmentScope(environmentId, AuthSettingsWriteScope);
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const saved = settings?.squire.enabled;
@@ -143,7 +152,7 @@ function SquireEnabledRow(props: { readonly environmentId: EnvironmentId }) {
       description={
         saved === undefined
           ? "Loading this environment's settings."
-          : squireSwitchDescription({ saved, running })
+          : squireSwitchDescription({ saved, running, live })
       }
       control={
         <Switch
@@ -152,6 +161,44 @@ function SquireEnabledRow(props: { readonly environmentId: EnvironmentId }) {
           aria-label="Enable Squires"
           onCheckedChange={(checked) => updateSettings({ squire: { enabled: Boolean(checked) } })}
         />
+      }
+    />
+  );
+}
+
+/**
+ * The way back from the suggestion's "Not now" and "Don't show again", while it could still
+ * show: Squires off on a server that turns them on live.
+ */
+function SquireKnockResetRow(props: { readonly environmentId: EnvironmentId }) {
+  const { environmentId } = props;
+  const knock = useAtomValue(serverEnvironment.settingsValueAtom(environmentId))?.squire.knock;
+  const capabilities = useAtomValue(serverEnvironment.configValueAtom(environmentId))?.environment
+    .capabilities;
+  const canWrite = useEnvironmentScope(environmentId, AuthSettingsWriteScope);
+  const updateSettings = useUpdateEnvironmentSettings(environmentId);
+  // Read once per mount: a snooze that runs out while Settings stays open shows until revisited.
+  const [now] = useState(() => Date.now());
+  const hidden = knock === undefined ? null : squireKnockResetDescription(knock, now);
+  if (hidden === null || capabilities?.squireLiveSwitch !== true || capabilities.squire === true) {
+    return null;
+  }
+  return (
+    <SettingsRow
+      title="Squire suggestion"
+      description={`${hidden} While Squires are off, a Squire offers to help when two or more threads run at once.`}
+      control={
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={!canWrite}
+          onClick={() => {
+            releaseSquireKnock(environmentId);
+            updateSettings({ squire: { knock: { dismissed: false, snoozedUntil: "" } } });
+          }}
+        >
+          Show again
+        </Button>
       }
     />
   );

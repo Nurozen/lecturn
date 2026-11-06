@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import {
+  CommandId,
   type OrchestrationProjectShell,
   ProjectId,
   SquireId,
@@ -11,12 +12,14 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as SquireContainers from "./SquireContainers.ts";
 import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireScope from "./SquireScope.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 import {
   createThread,
   dispatchThread,
@@ -163,6 +166,39 @@ describe("SquireScope", () => {
     ),
   );
 
+  it.effect("drops a settled thread from project and thread grants until it is unsettled", () =>
+    withScope(
+      Effect.gen(function* () {
+        const scope = yield* SquireScope.SquireScope;
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const settled = ThreadId.make("thread:settled");
+        yield* seed(
+          [squireRow(release), squireRow(billing)],
+          [grantRow(release, "project", projectA), grantRow(billing, "thread", settled)],
+        );
+        yield* createThread(settled, projectA);
+        assert.deepStrictEqual(yield* scope.trackersOf(settled), [release, billing]);
+
+        yield* orchestrator.dispatch({
+          type: "thread.settle",
+          commandId: CommandId.make("settle"),
+          threadId: settled,
+        });
+        assert.deepStrictEqual(yield* scope.trackersOf(settled), []);
+        assert.isFalse(yield* scope.isTracked(billing, settled));
+        assert.isTrue(Option.isNone(yield* scope.targetOf(settled)));
+
+        yield* orchestrator.dispatch({
+          type: "thread.unsettle",
+          commandId: CommandId.make("unsettle"),
+          threadId: settled,
+          reason: "user",
+        });
+        assert.deepStrictEqual(yield* scope.trackersOf(settled), [release, billing]);
+      }),
+    ),
+  );
+
   it.effect("never tracks a Squire thread, an archived thread, or a deleted one", () =>
     withScope(
       Effect.gen(function* () {
@@ -293,6 +329,7 @@ describe("SquireContainers live layer", () => {
     "project:plain": null,
   };
   const live = SquireContainers.layer.pipe(
+    Layer.provide(SquireSwitch.layerTest(true)),
     Layer.provide(
       Layer.mock(ProjectService.ProjectService)({
         getShell: (projectId) =>

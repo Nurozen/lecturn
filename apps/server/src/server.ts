@@ -41,6 +41,7 @@ import * as SquireCommandHook from "./squire/SquireCommandHook.ts";
 import * as LayerSquire from "./squire/layerSquire.ts";
 import * as SquireFakeScripts from "./squire/SquireFakeScripts.ts";
 import * as SquireRepository from "./squire/SquireRepository.ts";
+import * as SquireSwitch from "./squire/SquireSwitch.ts";
 import * as SquireHttp from "./squire/http.ts";
 import * as StaveProjectShells from "./stave/StaveProjectShells.ts";
 import * as StaveSettlement from "./stave/StaveSettlement.ts";
@@ -524,7 +525,14 @@ const layerProjectFaviconResolver = ProjectFaviconResolver.layer.pipe(
   Layer.provide(LecturnProjectFileLoader.layer),
 );
 
-const layerServerEnvironment = ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer));
+// One switch for the process: the descriptor, the Squire services, compaction, and
+// the on-period subscriber in startup all read this instance.
+const layerSquireSwitch = SquireSwitch.layer.pipe(Layer.provide(layerServerSettings));
+
+const layerServerEnvironment = ServerEnvironment.layer.pipe(
+  Layer.provide(ServerSecretStore.layer),
+  Layer.provide(layerSquireSwitch),
+);
 
 const layerAuth = EnvironmentAuth.layer.pipe(
   Layer.provideMerge(layerPersistence),
@@ -946,6 +954,7 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   // layerStave carries the Forgejo-refining layerRepositoryIdentityResolver.
   Layer.provideMerge(Layer.mergeAll(layerStave, layerStaveProjectShells, layerStaveRuntimeFence)),
   Layer.provideMerge(layerServerEnvironment),
+  Layer.provideMerge(layerSquireSwitch),
   Layer.provideMerge(layerAuth),
   Layer.provideMerge(ServerSecretStore.layer),
   Layer.provideMerge(
@@ -1406,11 +1415,7 @@ const layerMakeServer = Layer.unwrap(
     return layerServerApplication.pipe(
       Layer.provide(CloudLink.layer),
       Layer.provideMerge(layerRuntimeServices),
-      Layer.provideMerge(
-        McpSessionRegistry.layer.pipe(
-          Layer.provide(ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer))),
-        ),
-      ),
+      Layer.provideMerge(McpSessionRegistry.layer.pipe(Layer.provide(layerServerEnvironment))),
       Layer.provide(layerActivation),
       Layer.provideMerge(RelayTracing.layerServerRelayBroker),
       Layer.provideMerge(layerHttpServer),

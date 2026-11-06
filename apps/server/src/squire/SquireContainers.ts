@@ -11,6 +11,7 @@ import * as Stream from "effect/Stream";
 
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 
 /**
  * A project's Stave containers. `unknown` means the project could not be read,
@@ -115,6 +116,7 @@ const MEMBERSHIP_TTL = Duration.seconds(15);
 const makeLive = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const events = yield* OrchestrationEventStore.OrchestrationEventStore;
+  const squireSwitch = yield* SquireSwitch.SquireSwitch;
   const fixtureStave = yield* Effect.serviceOption(SquireFixtureStave);
   const cache = yield* Cache.makeWith(
     (projectId: ProjectId) => projects.getShell(projectId).pipe(Effect.map(fromShell)),
@@ -127,25 +129,31 @@ const makeLive = Effect.gen(function* () {
     },
   );
 
-  // Project writes and Stave refreshes are project application events.
-  const highWater = yield* events.latestApplicationSequence.pipe(Effect.option);
-  if (Option.isSome(highWater)) {
-    yield* Effect.forkScoped(
-      Stream.runForEach(
-        events.streamApplicationEvents({ afterSequence: highWater.value }),
-        (event) =>
-          "aggregateKind" in event && event.aggregateKind === "project"
-            ? Cache.invalidate(cache, event.aggregateId)
-            : Effect.void,
-      ).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("Squire container invalidation stopped; entries expire by TTL.", {
-            cause,
-          }),
-        ),
-      ),
-    );
-  }
+  // Project writes and Stave refreshes are project application events. They
+  // are followed only while Squires are on; each on period first drops what
+  // the off period may have left stale.
+  yield* Effect.forkScoped(
+    squireSwitch.whileOn(
+      Effect.gen(function* () {
+        const highWater = yield* events.latestApplicationSequence.pipe(Effect.option);
+        yield* Cache.invalidateAll(cache);
+        if (Option.isNone(highWater)) return;
+        yield* Stream.runForEach(
+          events.streamApplicationEvents({ afterSequence: highWater.value }),
+          (event) =>
+            "aggregateKind" in event && event.aggregateKind === "project"
+              ? Cache.invalidate(cache, event.aggregateId)
+              : Effect.void,
+        ).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Squire container invalidation stopped; entries expire by TTL.", {
+              cause,
+            }),
+          ),
+        );
+      }),
+    ),
+  );
 
   return SquireContainers.of({
     ofProject: (projectId) =>

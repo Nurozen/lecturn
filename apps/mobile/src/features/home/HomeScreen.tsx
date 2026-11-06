@@ -127,6 +127,7 @@ import { useFabScroll } from "./FabScrollContext";
 import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
 import { ThreadListFilters } from "./ThreadListFilters";
 import { SquireHomeListRow, useSquireHomeItems } from "../squires/SquireHomeRows";
+import { SquireKnockCards } from "../squires/SquireKnockCard";
 import { SquireMotionClock } from "../squires/SquireIndicator";
 import { isHomeSquireItem } from "../squires/squireHomeItems.logic";
 
@@ -1060,6 +1061,12 @@ export function HomeScreen(props: HomeScreenProps) {
           onProjectChange={props.onProjectChange}
         />
       ) : null}
+      {/* Lecturn: a Squire offers help while Squires are off. */}
+      <SquireKnockCards
+        environments={props.environments}
+        selectedEnvironmentId={props.selectedEnvironmentId}
+        pane={primaryColumn ? "sidebar" : "screen"}
+      />
     </>
   );
 

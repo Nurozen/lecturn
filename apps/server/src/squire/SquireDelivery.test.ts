@@ -24,6 +24,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
@@ -41,6 +42,7 @@ import * as SquireDelivery from "./SquireDelivery.ts";
 import { squireCardRowFields, squireFyiOutcome } from "./SquireItems.ts";
 import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireRoomStore from "./SquireRoomStore.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 import * as SquireService from "./SquireService.ts";
 import { SquireRunSource, layer as summariesLayer } from "./SquireSummaries.ts";
 import { SquireEventPayloadJson } from "./squireEvents.ts";
@@ -502,6 +504,28 @@ describe("SquireDelivery", () => {
           })
           .pipe(Effect.flip);
         assert.isDefined(refused);
+      }),
+    ),
+  );
+
+  it.live("starts no Squire turn while the switch is off and delivers once it is on again", () =>
+    withHome(({ squireId, homeThreadId }) =>
+      Effect.gen(function* () {
+        const delivery = yield* SquireDelivery.SquireDelivery;
+        const control = yield* SquireSwitch.SquireSwitchControl;
+        yield* storeSummary(tracked, "run-1", "complete");
+        yield* turnFinished(squireId, tracked, "run-1");
+
+        yield* SubscriptionRef.set(control, false);
+        yield* delivery.wake(squireId);
+        yield* delivery.drain;
+        yield* delivery.deliverReady(squireId);
+        assert.lengthOf(yield* squireMessages(homeThreadId), 0);
+        assert.deepEqual(yield* statuses(squireId), ["turn-finished:pending"]);
+
+        yield* SubscriptionRef.set(control, true);
+        yield* delivery.deliverReady(squireId);
+        assert.lengthOf(yield* squireMessages(homeThreadId), 1);
       }),
     ),
   );

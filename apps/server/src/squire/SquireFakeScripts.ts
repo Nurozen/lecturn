@@ -18,7 +18,6 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 
-import * as ServerConfig from "../config.ts";
 import { ScriptedScriptSource } from "../orchestration-v2/Adapters/ScriptedAdapterV2.ts";
 import type { ScriptedScript } from "../orchestration-v2/Adapters/scriptedScript.ts";
 
@@ -137,14 +136,14 @@ export const layer = layerScriptSource.pipe(
 );
 
 /**
- * `layer` with both gates on, else nothing. Promises no service, so
+ * `layer` with test providers on, else nothing. Promises no service, so
  * the scripted adapter and the fixture seam reach it with `serviceOption`.
+ * Not gated on the Squires switch, which can turn on after the server built it.
  */
 export const layerServer = Layer.unwrap(
   Effect.gen(function* () {
-    const config = yield* ServerConfig.ServerConfig;
     const environment = yield* HostProcess.Environment;
     const on: Layer.Layer<never> = layer;
-    return config.squireEnabled && environment.LECTURN_TEST_PROVIDERS === "1" ? on : Layer.empty;
+    return environment.LECTURN_TEST_PROVIDERS === "1" ? on : Layer.empty;
   }),
 );

@@ -25,7 +25,9 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 
@@ -37,6 +39,9 @@ import { StaveLifecycleService } from "./stave/lifecycle/StaveLifecycleService.t
 import { SquireClock } from "./squire/SquireClock.ts";
 import { SquireDelivery } from "./squire/SquireDelivery.ts";
 import { SquireReactor } from "./squire/SquireReactor.ts";
+import * as SquireRepository from "./squire/SquireRepository.ts";
+import * as SquireSwitch from "./squire/SquireSwitch.ts";
+import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
 import { SagaInferenceReactor } from "./stave/SagaInferenceReactor.ts";
 import { DecisionIngestion } from "./threadDecisions/DecisionIngestion.ts";
 import { DecisionWorker } from "./threadDecisions/DecisionWorker.ts";
@@ -125,7 +130,6 @@ it.effect.each([
           autoBootstrapProjectFromCwd: true,
           threadForkingEnabled: false,
           staveEnabled: false,
-          squireEnabled: false,
         }),
         Layer.mock(Keybindings.Keybindings)({ start: Effect.void }),
         Layer.mock(LegacyV1ThreadImporter.LegacyV1ThreadImporter)({
@@ -727,28 +731,79 @@ it.effect("starts the Lecturn background roots that are wired, in dependency ord
 );
 
 it.effect(
-  "starts the Squire reactor, batch re-dispatch, and clock when the switch built them",
+  "runs the Squire on period only while the switch is on, cursor first in and last out",
   () =>
     Effect.gen(function* () {
-      const started: string[] = [];
-      const all = yield* Deferred.make<void>();
-      const record = (name: string) =>
-        Effect.sync(() => started.push(name)).pipe(
-          Effect.andThen((count) => (count === 3 ? Deferred.succeed(all, undefined) : Effect.void)),
+      // Every start, stop, and cursor write, in order; the test takes them as milestones.
+      const log = yield* Queue.unbounded<string>();
+      const take = (n: number) => Queue.takeN(log, n).pipe(Effect.map((items) => [...items]));
+      const cursor = { sequence: 0, enabled: false };
+      const head = { sequence: 7 };
+      const failOffWrite = { next: false };
+      const piece = (name: string) =>
+        Queue.offer(log, `start:${name}`).pipe(
           Effect.andThen(Effect.never),
+          Effect.onInterrupt(() => Queue.offer(log, `stop:${name}`)),
         );
-      yield* ServerRuntimeStartup.startLecturnReactors.pipe(
-        Effect.provideService(SquireReactor, {
-          start: record("reactor"),
+      const services = Layer.mergeAll(
+        SquireSwitch.layerTest(false),
+        Layer.succeed(SquireReactor, {
+          start: ({ turnedOn }: { readonly turnedOn: boolean }) =>
+            piece(`reactor(turnedOn=${turnedOn})`),
         } as unknown as SquireReactor["Service"]),
-        Effect.provideService(SquireDelivery, {
-          redispatchBatched: record("redispatch"),
+        Layer.succeed(SquireDelivery, {
+          redispatchBatched: piece("redispatch"),
         } as unknown as SquireDelivery["Service"]),
-        Effect.provideService(SquireClock, {
-          start: record("clock"),
-        } as unknown as SquireClock["Service"]),
+        Layer.succeed(SquireClock, { start: piece("clock") } as unknown as SquireClock["Service"]),
+        Layer.succeed(SquireRepository.SquireRepository, {
+          readCursor: Effect.sync(() => ({ ...cursor })),
+          writeCursor: (next: { readonly sequence: number; readonly enabled: boolean }) =>
+            Effect.suspend(() => {
+              if (!next.enabled && failOffWrite.next) {
+                failOffWrite.next = false;
+                return Queue.offer(log, "cursor:failed").pipe(
+                  Effect.andThen(Effect.die("disk full")),
+                );
+              }
+              Object.assign(cursor, next);
+              return Queue.offer(log, `cursor:${next.enabled}@${next.sequence}`);
+            }),
+        } as unknown as SquireRepository.SquireRepository["Service"]),
+        Layer.succeed(OrchestrationEventStore.OrchestrationEventStore, {
+          latestApplicationSequence: Effect.sync(() => head.sequence),
+        } as unknown as OrchestrationEventStore.OrchestrationEventStore["Service"]),
       );
-      yield* Deferred.await(all);
-      assert.sameMembers(started, ["reactor", "redispatch", "clock"]);
+      const started = ["start:reactor(turnedOn=true)", "start:redispatch", "start:clock"];
+      const stopped = ["stop:reactor(turnedOn=true)", "stop:redispatch", "stop:clock"];
+      yield* Effect.gen(function* () {
+        const control = yield* SquireSwitch.SquireSwitchControl;
+        yield* ServerRuntimeStartup.startLecturnReactors;
+        // Off at start: nothing runs and the cursor stays as it was.
+        assert.strictEqual(yield* Queue.size(log), 0);
+
+        yield* SubscriptionRef.set(control, true);
+        const on = yield* take(4);
+        assert.strictEqual(on[0], "cursor:true@7");
+        assert.sameMembers(on.slice(1), started);
+
+        yield* SubscriptionRef.set(control, false);
+        const off = yield* take(4);
+        assert.sameMembers(off.slice(0, 3), stopped);
+        assert.strictEqual(off[3], "cursor:false@7");
+
+        // An off period whose cursor write failed still never replays: the next
+        // on period jumps from a cursor left marked on.
+        yield* SubscriptionRef.set(control, true);
+        assert.sameMembers((yield* take(4)).slice(1), started);
+        failOffWrite.next = true;
+        yield* SubscriptionRef.set(control, false);
+        assert.sameMembers(yield* take(4), [...stopped, "cursor:failed"]);
+        assert.isTrue(cursor.enabled);
+        head.sequence = 9;
+        yield* SubscriptionRef.set(control, true);
+        const resumed = yield* take(4);
+        assert.strictEqual(resumed[0], "cursor:true@9");
+        assert.sameMembers(resumed.slice(1), started);
+      }).pipe(Effect.provide(services));
     }).pipe(Effect.scoped),
 );

@@ -1,18 +1,15 @@
 /**
- * Squire server wiring. The always-on part runs with the switch off too,
- * so it stays a no-op until a marked thread exists. The command allowlist
- * hook, the MCP gate, and the runtime policy branch sit inside the
- * orchestration runtime and read `SquireRepository` there. Everything else is
- * built only when `LECTURN_SQUIRE` is on. Its services are absent otherwise,
- * so the layer promises none of them: callers reach them through
- * `Effect.serviceOption`.
+ * Squire server wiring. The command allowlist hook, the MCP gate, and the
+ * runtime policy branch sit inside the orchestration runtime and read
+ * `SquireRepository` there. Everything else is built whatever the switch says,
+ * so turning it on needs no restart: each service checks `SquireSwitch` where
+ * it acts, and background work runs only during an on period.
  */
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient } from "effect/http";
 
-import * as ServerConfig from "../config.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
@@ -78,7 +75,7 @@ const testProvidersOnly = <ROut, E, RIn>(layer: Layer.Layer<ROut, E, RIn>) =>
     }),
   );
 
-const layerSwitchOnServices = Layer.mergeAll(
+const layerServices = Layer.mergeAll(
   testProvidersOnly(SquireDevFixtures.layer),
   // The RPC seams (SquireRpcHandlers.ts) sit on top, so they see every service below.
   SquireReadModel.layer,
@@ -159,23 +156,18 @@ const layerSwitchOnServices = Layer.mergeAll(
   Layer.provideMerge(Layer.mergeAll(SquireToolKit.layer, SquireHooks.layer, SquireRoomStore.layer)),
 );
 
-const layerSwitchOn = Layer.unwrap(
-  Effect.gen(function* () {
-    const config = yield* ServerConfig.ServerConfig;
-    const on: Layer.Layer<
-      never,
-      Layer.Error<typeof layerSwitchOnServices>,
-      Layer.Services<typeof layerSwitchOnServices>
-    > = layerSwitchOnServices;
-    return config.squireEnabled ? on : Layer.empty;
-  }),
-);
+// Built first, so the start's cursor sync precedes anything a Squire service commits.
+const layerWithCursor = layerServices.pipe(Layer.provideMerge(SquireCursorStartup.layer));
 
-// The cursor startup builds first, so the reactor reads whether this start turned the switch on.
-export const layer = layerSwitchOn.pipe(
-  Layer.provide(SquireCursorStartup.layer),
-  Layer.provide(SquireRepository.layer),
-);
+// Promises no service: consumers reach them with `serviceOption`, so focused
+// runtimes built without Squires still start.
+const layerOpaque: Layer.Layer<
+  never,
+  Layer.Error<typeof layerWithCursor>,
+  Layer.Services<typeof layerWithCursor>
+> = layerWithCursor;
+
+export const layer = layerOpaque.pipe(Layer.provide(SquireRepository.layer));
 
 /**
  * The server's database storage branch, named so its test builds what the

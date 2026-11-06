@@ -27,8 +27,11 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
+import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "./config.ts";
+import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import { flushCompileCache } from "./compileCache.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -68,7 +71,10 @@ import { SquireLifecycle } from "./squire/SquireLifecycle.ts";
 import { SquireCiExcerpt } from "./squire/SquireCiExcerpt.ts";
 import { SquireProbe } from "./squire/SquireProbe.ts";
 import { SquireReactor } from "./squire/SquireReactor.ts";
+import { SquireCursorAtStart, syncCursorWithSwitch } from "./squire/SquireCursorStartup.ts";
+import * as SquireRepository from "./squire/SquireRepository.ts";
 import { SquireSummaries } from "./squire/SquireSummaries.ts";
+import * as SquireSwitch from "./squire/SquireSwitch.ts";
 import { DecisionRelations } from "./threadDecisions/DecisionRelations.ts";
 import { DecisionWorker } from "./threadDecisions/DecisionWorker.ts";
 import {
@@ -474,68 +480,154 @@ export const startLecturnReactors = Effect.gen(function* () {
   if (Option.isSome(watches)) yield* watches.value.start;
   const discovery = yield* Effect.serviceOption(PullRequestWatchDiscovery);
   if (Option.isSome(discovery)) yield* discovery.value.start;
-  // Present only with LECTURN_SQUIRE on: resumes setups and deletes a crash interrupted.
-  const squireLifecycle = yield* Effect.serviceOption(SquireLifecycle);
-  if (Option.isSome(squireLifecycle)) yield* forkParked(squireLifecycle.value.reconcileAll);
-  // Summaries a crash left `generating` settle to `partial` before the
-  // reactor could start new ones for the same run.
-  const squireSummaries = yield* Effect.serviceOption(SquireSummaries);
-  const settleSquireSummaries = Option.isSome(squireSummaries)
-    ? squireSummaries.value.settleInterrupted.pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("Squire summary settle at startup failed", { cause }),
-        ),
-      )
-    : Effect.void;
-  const squireReactor = yield* Effect.serviceOption(SquireReactor);
-  if (Option.isSome(squireReactor))
-    yield* forkParked(settleSquireSummaries.pipe(Effect.andThen(squireReactor.value.start)));
-  const squireDelivery = yield* Effect.serviceOption(SquireDelivery);
-  if (Option.isSome(squireDelivery))
-    yield* forkParked(
-      squireDelivery.value.redispatchBatched.pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("Squire batch re-dispatch failed; the next wake retries", { cause }),
-        ),
-      ),
-    );
-  // Lecturn: a Jev request in flight at a restart is asked again under its request id.
-  const squireJev = yield* Effect.serviceOption(SquireJevRouting);
-  if (Option.isSome(squireJev))
-    yield* forkParked(
-      squireJev.value.resumePending.pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("Squire Jev resume failed; the deadline falls back", { cause }),
-        ),
-      ),
-    );
-  const squireClock = yield* Effect.serviceOption(SquireClock);
-  // Executions a crash left unfinished are settled from their receipts
-  // (charged once) before the clock can run a hold against the same budget.
-  const squireActions = yield* Effect.serviceOption(SquireActions);
-  const reconcileSquireActions = Option.isSome(squireActions)
-    ? squireActions.value.reconcileStartup.pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("Squire action reconcile at startup failed", { cause }),
-        ),
-      )
-    : Effect.void;
-  if (Option.isSome(squireClock))
-    yield* forkParked(reconcileSquireActions.pipe(Effect.andThen(squireClock.value.start)));
-  // Excerpts CI-failure cards off committed rows; a restart re-reads its window.
-  const squireCiExcerpt = yield* Effect.serviceOption(SquireCiExcerpt);
-  if (Option.isSome(squireCiExcerpt)) yield* forkParked(squireCiExcerpt.value.start);
-  // An ask a crash left running resumes or settles from its derived ids.
-  const squireProbe = yield* Effect.serviceOption(SquireProbe);
-  if (Option.isSome(squireProbe))
-    yield* forkParked(
-      squireProbe.value.reconcileStartup.pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("Squire probe reconcile at startup failed", { cause }),
-        ),
-      ),
-    );
+  const squireSwitch = yield* Effect.serviceOption(SquireSwitch.SquireSwitch);
+  if (Option.isSome(squireSwitch)) yield* followSquireSwitch(squireSwitch.value);
 });
+
+/**
+ * One Squire on period, each piece forked into the period's scope so turning
+ * the switch off interrupts it. Each service is optional so focused runtimes
+ * without it still start.
+ */
+const squireOnPeriod = (turnedOn: boolean) =>
+  Effect.gen(function* () {
+    // Resumes setups and deletes a crash interrupted.
+    const squireLifecycle = yield* Effect.serviceOption(SquireLifecycle);
+    if (Option.isSome(squireLifecycle))
+      yield* Effect.forkScoped(squireLifecycle.value.reconcileAll);
+    // Summaries a crash left `generating` settle to `partial` before the
+    // reactor could start new ones for the same run.
+    const squireSummaries = yield* Effect.serviceOption(SquireSummaries);
+    const settleSquireSummaries = Option.isSome(squireSummaries)
+      ? squireSummaries.value.settleInterrupted.pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Squire summary settle failed", { cause }),
+          ),
+        )
+      : Effect.void;
+    const squireReactor = yield* Effect.serviceOption(SquireReactor);
+    if (Option.isSome(squireReactor))
+      yield* Effect.forkScoped(
+        settleSquireSummaries.pipe(Effect.andThen(squireReactor.value.start({ turnedOn }))),
+      );
+    const squireDelivery = yield* Effect.serviceOption(SquireDelivery);
+    if (Option.isSome(squireDelivery))
+      yield* Effect.forkScoped(
+        squireDelivery.value.redispatchBatched.pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Squire batch re-dispatch failed; the next wake retries", { cause }),
+          ),
+        ),
+      );
+    // Lecturn: a Jev request in flight at a restart is asked again under its request id.
+    const squireJev = yield* Effect.serviceOption(SquireJevRouting);
+    if (Option.isSome(squireJev))
+      yield* Effect.forkScoped(
+        squireJev.value.resumePending.pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Squire Jev resume failed; the deadline falls back", { cause }),
+          ),
+        ),
+      );
+    const squireClock = yield* Effect.serviceOption(SquireClock);
+    // Executions a crash left unfinished are settled from their receipts
+    // (charged once) before the clock can run a hold against the same budget.
+    const squireActions = yield* Effect.serviceOption(SquireActions);
+    const reconcileSquireActions = Option.isSome(squireActions)
+      ? squireActions.value.reconcileStartup.pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Squire action reconcile failed", { cause }),
+          ),
+        )
+      : Effect.void;
+    if (Option.isSome(squireClock))
+      yield* Effect.forkScoped(
+        reconcileSquireActions.pipe(Effect.andThen(squireClock.value.start)),
+      );
+    // Excerpts CI-failure cards off committed rows; a restart re-reads its window.
+    const squireCiExcerpt = yield* Effect.serviceOption(SquireCiExcerpt);
+    if (Option.isSome(squireCiExcerpt)) yield* Effect.forkScoped(squireCiExcerpt.value.start);
+    // An ask a crash left running resumes or settles from its derived ids.
+    const squireProbe = yield* Effect.serviceOption(SquireProbe);
+    if (Option.isSome(squireProbe))
+      yield* Effect.forkScoped(
+        squireProbe.value.reconcileStartup.pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Squire probe reconcile failed", { cause }),
+          ),
+        ),
+      );
+  });
+
+/**
+ * Runs an on period while the switch is on, so turning Squires on or off needs
+ * no restart; off, nothing Squire ticks. The cursor sync comes first on the way
+ * in, before anything can commit an event the jump would skip, and last on the
+ * way out, after the reactor that rewrites the cursor's flag has stopped. The
+ * start's own sync ran when the Squire layer was built (SquireCursorAtStart),
+ * or runs here, unparked, without it; the periods themselves wait for activation.
+ */
+const followSquireSwitch = (squireSwitch: SquireSwitch.SquireSwitch["Service"]) =>
+  Effect.gen(function* () {
+    const repository = yield* Effect.serviceOption(SquireRepository.SquireRepository);
+    const events = yield* Effect.serviceOption(OrchestrationEventStore.OrchestrationEventStore);
+    // Squire bookkeeping must not stop the switch: a failed sync is logged and
+    // reads as `None`. An off period whose write failed leaves the cursor
+    // marked on, so the next on period forces the jump past the off period
+    // instead of delivering it.
+    let offUnrecorded = false;
+    const syncCursor = (on: boolean) =>
+      Option.isNone(repository) || Option.isNone(events)
+        ? Effect.succeedSome(false)
+        : syncCursorWithSwitch(on, { forceJump: on && offUnrecorded }).pipe(
+            Effect.provideService(SquireRepository.SquireRepository, repository.value),
+            Effect.provideService(OrchestrationEventStore.OrchestrationEventStore, events.value),
+            Effect.tap(() => Effect.sync(() => void (offUnrecorded = false))),
+            Effect.asSome,
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Squire cursor sync failed", { on, cause }).pipe(
+                Effect.andThen(Effect.sync(() => void (offUnrecorded ||= !on))),
+                Effect.as(Option.none<boolean>()),
+              ),
+            ),
+          );
+    const atStart = yield* Effect.serviceOption(SquireCursorAtStart);
+    let presynced: { readonly on: boolean; readonly turnedOn: boolean } | undefined = Option.isSome(
+      atStart,
+    )
+      ? atStart.value
+      : yield* Effect.gen(function* () {
+          const on = yield* squireSwitch.isOn;
+          return { on, turnedOn: Option.getOrElse(yield* syncCursor(on), () => false) };
+        });
+    const parent = yield* Effect.scope;
+    let period: Scope.Closeable | undefined;
+    yield* forkParked(
+      Stream.runForEach(squireSwitch.changes, (on) =>
+        Effect.gen(function* () {
+          const synced = presynced;
+          presynced = undefined;
+          if (on) {
+            if (period !== undefined) return;
+            const turnedOn =
+              synced?.on === true
+                ? synced.turnedOn
+                : Option.getOrElse(yield* syncCursor(true), () => false);
+            const scope = yield* Scope.fork(parent, "parallel");
+            period = scope;
+            yield* squireOnPeriod(turnedOn).pipe(Scope.provide(scope));
+            return;
+          }
+          if (period !== undefined) {
+            const scope = period;
+            period = undefined;
+            yield* Scope.close(scope, Exit.void);
+          }
+          if (synced?.on !== false) yield* syncCursor(false);
+        }),
+      ),
+    );
+  });
 
 interface StartupOptions {
   readonly activate?: Effect.Effect<void>;

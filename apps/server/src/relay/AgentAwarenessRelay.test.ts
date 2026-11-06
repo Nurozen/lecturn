@@ -65,6 +65,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as SquireMobileAttention from "../squire/SquireMobileAttention.ts";
 import * as SquirePresence from "../squire/SquirePresence.ts";
 import * as SquireRepository from "../squire/SquireRepository.ts";
+import * as SquireSwitch from "../squire/SquireSwitch.ts";
 import { squireRow } from "../squire/testkit/scopeHarness.ts";
 import * as AgentAwarenessRelay from "./AgentAwarenessRelay.ts";
 
@@ -1280,6 +1281,7 @@ const layerSquireStorage = SquirePresence.layer.pipe(
   Layer.provideMerge(
     Layer.mergeAll(
       SquireRepository.layer,
+      SquireSwitch.layerTest(true),
       ServerSettings.layerTest({ squire: { phoneAlertsWhileDesktop: "after-3-min" } }),
     ),
   ),

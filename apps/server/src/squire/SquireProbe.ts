@@ -38,6 +38,7 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { withSquireDispatchOrigin } from "./SquireDispatchOrigin.ts";
 import { orSquireError } from "./SquireLifecycle.ts";
 import * as SquireRepository from "./SquireRepository.ts";
+import * as SquireSwitch from "./SquireSwitch.ts";
 import * as SquireService from "./SquireService.ts";
 
 export class SquireProbe extends Context.Service<
@@ -124,6 +125,7 @@ const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const service = yield* SquireService.SquireService;
   const config = yield* ServerConfig.ServerConfig;
+  const squireSwitch = yield* SquireSwitch.SquireSwitch;
   // Asks are rare; one at a time keeps two different requests on one card from both forking.
   const asking = yield* Semaphore.make(1);
 
@@ -186,7 +188,7 @@ const make = Effect.gen(function* () {
 
   const ask: SquireProbe["Service"]["ask"] = Effect.fn("SquireProbe.ask")(
     function* (input) {
-      if (!config.squireEnabled) {
+      if (!(yield* squireSwitch.isOn)) {
         return yield* refuse("disabled_by_server", "Squires are turned off on this server.");
       }
       if (!config.threadForkingEnabled) {

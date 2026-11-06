@@ -25,6 +25,7 @@ import * as SquireDigest from "../SquireDigest.ts";
 import * as SquireRepository from "../SquireRepository.ts";
 import * as SquireScope from "../SquireScope.ts";
 import * as SquireSweep from "../SquireSweep.ts";
+import * as SquireSwitch from "../SquireSwitch.ts";
 
 export const PROJECT = ProjectId.make("project:work");
 
@@ -60,15 +61,10 @@ const projectionsLayer = Layer.unwrap(
   ),
 );
 
-const configLayer = Layer.effect(
-  ServerConfig.ServerConfig,
-  Effect.map(ServerConfig.ServerConfig, (config) =>
-    ServerConfig.make({ ...config, squireEnabled: true }),
-  ),
-).pipe(
-  Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-squire-sweep-" })),
-  Layer.provide(NodeServices.layer),
-);
+const configLayer = Layer.merge(
+  ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-squire-sweep-" }),
+  SquireSwitch.layerTest(true),
+).pipe(Layer.provide(NodeServices.layer));
 
 /** A fresh store and shell list per test. */
 export const sweepLayer = () =>

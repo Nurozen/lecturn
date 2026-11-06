@@ -1108,6 +1108,7 @@ describe("ServerSettings.squire", () => {
 
     expect(settings.squire).toEqual({
       enabled: false,
+      knock: { dismissed: false, snoozedUntil: "" },
       phoneAlertsWhileDesktop: "after-3-min",
       inactivityDays: 7,
       botMessages: true,
