@@ -7,10 +7,10 @@ import {
   type SquireWebhookSecret,
 } from "@lecturn/contracts";
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
+
+import { act, render } from "../../../../test/render";
 
 const commands = vi.hoisted(() => ({
   create: vi.fn(),
@@ -86,8 +86,6 @@ function trigger(overrides: Partial<SquireTrigger>): SquireTrigger {
 }
 
 let registry: AtomRegistry.AtomRegistry;
-let root: Root;
-let container: HTMLDivElement;
 let listed: Array<SquireTrigger>;
 
 function setTriggers(next: Array<SquireTrigger>) {
@@ -95,8 +93,8 @@ function setTriggers(next: Array<SquireTrigger>) {
   registry.set(triggersAtom, AsyncResult.success({ triggers: next }));
 }
 
-beforeEach(async () => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+// Mounts the section on a fresh registry; disposing unmounts it and drops the registry.
+async function setup(): Promise<AsyncDisposable> {
   registry = AtomRegistry.make();
   listed = [];
   for (const fn of Object.values(commands)) fn.mockReset();
@@ -118,27 +116,29 @@ beforeEach(async () => {
     },
   }));
   commands.test.mockResolvedValue({ _tag: "Success", value: { outcome: "queued", retryAt: null } });
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
   setTriggers([]);
-  await act(async () =>
-    root.render(
-      <RegistryContext.Provider value={registry}>
-        <SquireTriggersSection
-          environmentId={environmentId}
-          squire={{ id: squireId, name: "Release", role: "squire" }}
-        />
-      </RegistryContext.Provider>,
-    ),
-  );
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  registry.dispose();
-});
+  const current = registry;
+  const screen = await render(
+    <RegistryContext.Provider value={current}>
+      <SquireTriggersSection
+        environmentId={environmentId}
+        squire={{ id: squireId, name: "Release", role: "squire" }}
+      />
+    </RegistryContext.Provider>,
+  ).catch((error: unknown) => {
+    current.dispose();
+    throw error;
+  });
+  return {
+    async [Symbol.asyncDispose]() {
+      try {
+        await screen[Symbol.asyncDispose]();
+      } finally {
+        current.dispose();
+      }
+    },
+  };
+}
 
 // No app CSS loads here, so the dialog's unstyled popup sits under its own inert backdrop and
 // a pointer click cannot reach Done; press it the way a keyboard user would.
@@ -155,6 +155,7 @@ const inputValues = () =>
   );
 
 it("offers only a schedule from Add trigger; a custom webhook waits behind Advanced", async () => {
+  await using _env = await setup();
   await userEvent.click(page.getByRole("button", { name: "Add trigger" }));
   await expect.element(page.getByLabelText("Time of day")).toBeVisible();
   expect(page.getByRole("textbox", { name: "When this webhook fires" }).elements()).toHaveLength(0);
@@ -170,6 +171,7 @@ it("offers only a schedule from Add trigger; a custom webhook waits behind Advan
 });
 
 it("reveals a webhook secret once and keeps its controls behind the disclosure", async () => {
+  await using _env = await setup();
   await userEvent.click(page.getByRole("button", { name: "Advanced: custom webhook" }));
   await userEvent.click(page.getByRole("button", { name: "Add custom webhook" }));
   await userEvent.fill(
@@ -235,6 +237,7 @@ it("reveals a webhook secret once and keeps its controls behind the disclosure",
 });
 
 it("starts a just-listed webhook collapsed and shows a schedule's Test now by default", async () => {
+  await using _env = await setup();
   await act(async () =>
     setTriggers([
       trigger({}),

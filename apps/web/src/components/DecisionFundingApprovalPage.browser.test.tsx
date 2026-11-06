@@ -1,6 +1,7 @@
-import { act, type ReactElement, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import type { ReactElement, ReactNode } from "react";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+import { act, render as renderUi, type Screen } from "../../test/render";
 
 const mocks = vi.hoisted(() => ({ info: vi.fn(), approve: vi.fn(), userId: "account" }));
 vi.mock(import("@clerk/react"), async (original) => ({
@@ -40,15 +41,10 @@ const info = {
   approved: false,
   eligible: false,
 };
-let mounted: { root: Root; container: HTMLDivElement } | undefined;
+let mounted: Screen | undefined;
 async function mount(element: ReactElement) {
-  if (!mounted) {
-    const container = document.createElement("div");
-    document.body.append(container);
-    mounted = { root: createRoot(container), container };
-  }
-  const { root } = mounted;
-  await act(async () => root.render(element));
+  if (mounted) await mounted.rerender(element);
+  else mounted = await renderUi(element, { router: false });
 }
 async function render() {
   await mount(<DecisionFundingApprovalPage challengeId="challenge" />);
@@ -58,22 +54,19 @@ const button = (name: string) =>
   [...(mounted?.container.querySelectorAll("button") ?? [])].find(
     (candidate) => candidate.textContent === name,
   );
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+function setup(): AsyncDisposable {
   vi.clearAllMocks();
   mocks.userId = "account";
   vi.spyOn(console, "error").mockImplementation(() => {});
-});
-afterEach(async () => {
-  const current = mounted;
-  mounted = undefined;
-  if (current) {
-    await act(async () => current.root.unmount());
-    current.container.remove();
-  }
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-});
+  return {
+    async [Symbol.asyncDispose]() {
+      const current = mounted;
+      mounted = undefined;
+      await current?.[Symbol.asyncDispose]();
+      vi.restoreAllMocks();
+    },
+  };
+}
 
 describe("Decisions approval eligibility", () => {
   it.each([
@@ -87,6 +80,7 @@ describe("Decisions approval eligibility", () => {
   ] as const)(
     "explains %s without misdirecting users to billing",
     async (reason, message, billing) => {
+      await using _setup = setup();
       mocks.info.mockResolvedValue({ ...info, ...(reason ? { reason } : {}) });
       await render();
       expect(pageText()).toContain(message);
@@ -99,6 +93,7 @@ describe("Decisions approval eligibility", () => {
   );
 
   it("reloads denied access and allows approval only after eligibility is confirmed", async () => {
+    await using _setup = setup();
     mocks.info
       .mockResolvedValueOnce({ ...info, reason: "stale-billing" })
       .mockResolvedValueOnce({ ...info, eligible: true, reason: "eligible" });
@@ -129,6 +124,7 @@ describe("Extensions approval lifecycle", () => {
     await mount(<ExtensionsFundingApprovalPage challengeId="challenge" featureId="contextual" />);
   }
   it("keeps approval distinct from linking and refreshes the host state", async () => {
+    await using _setup = setup();
     mocks.info
       .mockResolvedValueOnce(extensionInfo)
       .mockResolvedValueOnce({ ...extensionInfo, state: "linked" });
@@ -146,6 +142,7 @@ describe("Extensions approval lifecycle", () => {
   it.each(["expired", "revoked", "canceled"])(
     "never offers approval for a %s request",
     async (state) => {
+      await using _setup = setup();
       mocks.info.mockResolvedValue({ ...extensionInfo, state });
       await renderExtension();
       expect(pageText()).toContain(`This request is `);
@@ -154,6 +151,7 @@ describe("Extensions approval lifecycle", () => {
     },
   );
   it("discards an in-flight approval after switching accounts", async () => {
+    await using _setup = setup();
     let finish!: (value: unknown) => void;
     mocks.info.mockResolvedValue(extensionInfo);
     mocks.approve.mockReturnValue(

@@ -15,10 +15,9 @@ import {
   type HtmlRenderTheme,
 } from "@lecturn/shared/htmlRender";
 import { STANDARD_DARK_THEME_COLORS } from "@lecturn/shared/themePalettes";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
 import { commands, userEvent } from "vite-plus/test/browser";
+import { render as renderUi, type Screen } from "../../../test/render";
 
 import "~/index.css";
 
@@ -75,33 +74,28 @@ const withRadius = (radius: string): HtmlRenderTheme => ({
 });
 
 let origins: Awaited<ReturnType<typeof leak.htmlRenderLeakStart>>;
-let root: Root;
 let container: HTMLDivElement;
-const popups: Array<Window> = [];
-let served = 0;
 
-beforeAll(async () => {
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   origins = await leak.htmlRenderLeakStart();
-});
-
-afterAll(async () => {
-  await leak.htmlRenderLeakStop();
-});
-
-beforeEach(() => {
   theme.current = darkTheme;
   openLink.mockReset().mockResolvedValue(undefined);
   container = document.createElement("div");
   container.style.width = "480px";
   document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(() => root.unmount());
-  container.remove();
-  for (const popup of popups.splice(0)) popup.close();
-});
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+      for (const popup of popups.splice(0)) popup.close();
+      await leak.htmlRenderLeakStop();
+    },
+  };
+}
+const popups: Array<Window> = [];
+let served = 0;
 
 // Until a page reports its height the frame keeps the published 2000px, so a
 // smaller frame shows the page loaded and its bootstrap ran.
@@ -136,20 +130,18 @@ async function showInThread(pages: Record<Kind, string>) {
     locked: await publish(pages.locked, "locked"),
   };
   const render = () =>
-    act(async () =>
-      root.render(
-        <>
-          {(["ordinary", "locked"] as const).map((kind) => (
-            <div key={kind} data-kind={kind}>
-              <HtmlRenderFrame
-                environmentId={threadRef.environmentId}
-                htmlRender={{ attachmentId: ids[kind], title: kind, height: 2000 }}
-                threadRef={threadRef}
-              />
-            </div>
-          ))}
-        </>,
-      ),
+    testScreen.rerender(
+      <>
+        {(["ordinary", "locked"] as const).map((kind) => (
+          <div key={kind} data-kind={kind}>
+            <HtmlRenderFrame
+              environmentId={threadRef.environmentId}
+              htmlRender={{ attachmentId: ids[kind], title: kind, height: 2000 }}
+              threadRef={threadRef}
+            />
+          </div>
+        ))}
+      </>,
     );
   await render();
   const frameOf = (kind: Kind) =>
@@ -206,6 +198,7 @@ const CLIENT_PROBES: ReadonlyArray<readonly [name: string, probe: string, path: 
 it.each(CLIENT_PROBES)(
   "a locked page in the thread cannot leak through %s",
   async (_, probe, path) => {
+    await using _setup = await setup();
     const { boxOf } = await showInThread({
       ordinary: pageFor(probe, "ordinary"),
       locked: pageFor(probe, "locked"),
@@ -225,6 +218,7 @@ const formHits = async (kind: Kind) =>
   (await hitsOf(kind)).requests.filter((url) => url.startsWith("/form")).length;
 
 it("a locked page cannot submit a form the reader clicks", async () => {
+  await using _setup = await setup();
   const probe = `<form action="{L}/form" method="get"><button style="${FULL_SIZE}">Send</button></form>`;
   const pages = { ordinary: pageFor(probe, "ordinary"), locked: pageFor(probe, "locked") };
   const { frameOf, boxOf } = await showInThread(pages);
@@ -240,6 +234,7 @@ it("a locked page cannot submit a form the reader clicks", async () => {
 // A link's ping goes out only with a navigation, and a framed page's link click
 // never navigates: it asks the client by postMessage, which is the control here.
 it("a locked page cannot get the client to open a link, or ping, when the reader clicks it", async () => {
+  await using _setup = await setup();
   const probe = `<a href="{L}/link" ping="{L}/ping" style="${FULL_SIZE}">Open</a>`;
   const pages = { ordinary: pageFor(probe, "ordinary"), locked: pageFor(probe, "locked") };
   const { frameOf, boxOf } = await showInThread(pages);
@@ -283,6 +278,7 @@ async function openAsTopDocument(url: string) {
 it.each(TOP_LEVEL_PROBES)(
   "a locked page shown as the top document cannot leak through %s",
   async (_, probe, path) => {
+    await using _setup = await setup();
     const ordinary = urls.get(await publish(pageFor(probe, "ordinary"), "ordinary"))!;
     const locked = urls.get(await publish(pageFor(probe, "locked"), "locked"))!;
     await openAsTopDocument(locked);
@@ -298,6 +294,7 @@ it.each(TOP_LEVEL_PROBES)(
 );
 
 it("fits the frame to a locked page and follows the client's theme", async () => {
+  await using _setup = await setup();
   theme.current = withRadius("3px");
   const page = '<div style="height:calc(var(--radius) * 100)"></div>';
   const { boxOf, render } = await showInThread({ ordinary: page, locked: page });

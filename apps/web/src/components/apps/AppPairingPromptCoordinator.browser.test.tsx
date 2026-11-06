@@ -1,7 +1,6 @@
 import { AppId, EnvironmentId, type AppRegistration, type AppStatus } from "@lecturn/contracts";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { act, render as renderUi, type Screen } from "../../../test/render";
 
 const state = vi.hoisted(() => ({
   apps: [] as unknown[],
@@ -105,24 +104,23 @@ function pendingApp(overrides: Partial<AppStatus> = {}): AppStatus {
   };
 }
 
-let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   Object.assign(state, { apps: [], canRead: true, canManage: true, calls: [], failNext: null });
   container = document.createElement("div");
   document.body.append(container);
-  root = createRoot(container);
-});
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+    },
+  };
+}
 
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.unstubAllGlobals();
-});
-
-const render = () => act(async () => root.render(<AppPairingPromptCoordinator />));
+const render = () => testScreen.rerender(<AppPairingPromptCoordinator />);
 const prompt = () => document.querySelector<HTMLElement>('[data-testid="app-pairing-prompt"]');
 const button = (label: string) => {
   const found = [...(prompt()?.querySelectorAll("button") ?? [])].find(
@@ -148,6 +146,7 @@ const chooseCeiling = async (label: string) => {
 
 describe("AppPairingPromptCoordinator", () => {
   it("shows the exact command, env and gated tools the app asked for", async () => {
+    await using _setup = await setup();
     state.apps = [pendingApp()];
     await render();
 
@@ -163,6 +162,7 @@ describe("AppPairingPromptCoordinator", () => {
   });
 
   it("grants the waiting request and closes", async () => {
+    await using _setup = await setup();
     state.apps = [pendingApp()];
     await render();
     await click(button("Approve"));
@@ -177,6 +177,7 @@ describe("AppPairingPromptCoordinator", () => {
   });
 
   it("applies a chosen ceiling before granting, so the app never runs above it", async () => {
+    await using _setup = await setup();
     state.apps = [pendingApp()];
     await render();
     await chooseCeiling("Read-only");
@@ -189,6 +190,7 @@ describe("AppPairingPromptCoordinator", () => {
   });
 
   it("clears an existing ceiling when re-pairing with the thread's mode", async () => {
+    await using _setup = await setup();
     state.apps = [pendingApp({ state: "revoked", runtimeCeiling: "read-only" })];
     await render();
     await chooseCeiling("Thread's mode");
@@ -201,6 +203,7 @@ describe("AppPairingPromptCoordinator", () => {
   });
 
   it("denies the waiting request", async () => {
+    await using _setup = await setup();
     state.apps = [pendingApp()];
     await render();
     await click(button("Deny"));
@@ -214,6 +217,7 @@ describe("AppPairingPromptCoordinator", () => {
   });
 
   it("keeps the prompt open when the decision fails", async () => {
+    await using _setup = await setup();
     state.apps = [pendingApp()];
     state.failNext = { _tag: "AppsError", code: "conflict", message: "Tool prefix taken." };
     await render();
@@ -223,6 +227,7 @@ describe("AppPairingPromptCoordinator", () => {
   });
 
   it("offers a re-pair for a revoked app and flags a changed command", async () => {
+    await using _setup = await setup();
     state.apps = [pendingApp({ state: "revoked" })];
     await render();
     expect(prompt()?.textContent).toContain("Pair Rocket again?");
@@ -245,6 +250,7 @@ describe("AppPairingPromptCoordinator", () => {
   });
 
   it("goes away when another client answers, and returns for a new request", async () => {
+    await using _setup = await setup();
     state.apps = [pendingApp()];
     await render();
     expect(prompt()).not.toBeNull();
@@ -255,6 +261,7 @@ describe("AppPairingPromptCoordinator", () => {
   });
 
   it("goes away when a request lapses unanswered, whatever the app falls back to", async () => {
+    await using _setup = await setup();
     // A denied app keeps its state while it asks again, and after the request lapses.
     state.apps = [pendingApp({ state: "denied" })];
     await render();
@@ -273,6 +280,7 @@ describe("AppPairingPromptCoordinator", () => {
   });
 
   it("stays hidden for a client without access:write", async () => {
+    await using _setup = await setup();
     state.apps = [pendingApp()];
     state.canManage = false;
     await render();

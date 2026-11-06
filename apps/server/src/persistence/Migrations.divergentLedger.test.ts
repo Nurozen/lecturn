@@ -57,6 +57,7 @@ describe("connected-app migrations on a divergent ledger", () => {
           [82, "Squire"],
           [83, "CodexUsageNativeTurnIndex"],
           [84, "RepairClientSettlementTimestamps"],
+          [85, "WebhookDedupe"],
           [79, "AppRegistrations"],
           [80, "ProjectionProjectsAppBinding"],
         ]);
@@ -68,6 +69,7 @@ describe("connected-app migrations on a divergent ledger", () => {
           { migration_id: 82, name: "Squire" },
           { migration_id: 83, name: "CodexUsageNativeTurnIndex" },
           { migration_id: 84, name: "RepairClientSettlementTimestamps" },
+          { migration_id: 85, name: "WebhookDedupe" },
         ]);
         // Every later start repairs again; the SQL is idempotent, so that is a no-op.
         yield* runMigrations();
@@ -110,6 +112,7 @@ describe("connected-app migrations on a divergent ledger", () => {
         [82, "Squire"],
         [83, "CodexUsageNativeTurnIndex"],
         [84, "RepairClientSettlementTimestamps"],
+        [85, "WebhookDedupe"],
         [79, "AppRegistrations"],
       ]);
       yield* assertAppSchema;

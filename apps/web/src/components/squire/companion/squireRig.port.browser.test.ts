@@ -1,6 +1,6 @@
 // Behavior the port adds to v5, on an injected
 // clock. The ported v5 contract checks live in squireRig.browser.test.ts.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createManualCompanionClock, setCompanionClockForTests } from "./companionClock";
 import { defineSquireRig, type SquireRigElement } from "./squireRig";
@@ -46,19 +46,22 @@ function pointerOver(rig: HTMLElement) {
   );
 }
 
-beforeEach(() => {
+// A manual clock for one test; disposing removes what it mounted and restores the real clock.
+function setup(): Disposable {
   clock = createManualCompanionClock({ frameMs: 1000 / 120 });
   setCompanionClockForTests(clock);
-});
-
-afterEach(() => {
-  for (const element of mounted) element.remove();
-  mounted = [];
-  setCompanionClockForTests(null);
-});
+  return {
+    [Symbol.dispose]() {
+      for (const element of mounted) element.remove();
+      mounted = [];
+      setCompanionClockForTests(null);
+    },
+  };
+}
 
 describe("<squire-rig> port behavior", () => {
   it("renders at most 30 frames per second on a 120 Hz display", async () => {
+    using _env = setup();
     const rig = await mountRig();
     clock.advance(500);
     const start = frames(rig);
@@ -70,6 +73,7 @@ describe("<squire-rig> port behavior", () => {
   });
 
   it("settles to a still pose within 20.55 s and renders nothing afterwards", async () => {
+    using _env = setup();
     const rig = await mountRig({ state: "attentive" });
     clock.advance(20_550);
     expect(rig.debugState.reason).toBe("settled");
@@ -83,6 +87,7 @@ describe("<squire-rig> port behavior", () => {
   });
 
   it("wakes a settled rig for a gesture and for a state change, and both move", async () => {
+    using _env = setup();
     const rig = await mountRig();
     clock.advance(21_000);
     expect(rig.debugState.reason).toBe("settled");
@@ -105,6 +110,7 @@ describe("<squire-rig> port behavior", () => {
   });
 
   it("restarts the settle deadline on pointer movement and wakes a settled rig on pointer", async () => {
+    using _env = setup();
     const rig = await mountRig();
     clock.advance(15_000);
     pointerOver(rig);
@@ -123,6 +129,7 @@ describe("<squire-rig> port behavior", () => {
   });
 
   it("pauses while the window is unfocused, and pointer or play() resume nothing", async () => {
+    using _env = setup();
     const rig = await mountRig();
     clock.advance(300);
     clock.setFocused(false);
@@ -141,6 +148,7 @@ describe("<squire-rig> port behavior", () => {
   });
 
   it("runs one live rig: the later panel or an overlay holds, the other yields its last frame", async () => {
+    using _env = setup();
     const first = await mountRig();
     clock.advance(300);
     const second = await mountRig();
@@ -168,6 +176,7 @@ describe("<squire-rig> port behavior", () => {
   });
 
   it("keeps the attentive halo at constant opacity and scale with no beacon, ring, or pulse nodes", async () => {
+    using _env = setup();
     const rig = await mountRig({ state: "attentive" });
     clock.advance(2500);
     const root = rig.shadowRoot!;
@@ -198,6 +207,7 @@ describe("<squire-rig> port behavior", () => {
   // At panel size attentive read as idle and thinking's grey oval read as the attentive
   // halo. Each state now has its own cue in the settled frame the panel shows after 20 s.
   it("settles each state on its own cue: attentive turns to the viewer under a gold halo, thinking holds a cool light", async () => {
+    using _env = setup();
     const settled = async (state: string) => {
       const rig = await mountRig({ state });
       clock.advance(20_550);
@@ -253,6 +263,7 @@ describe("<squire-rig> port behavior", () => {
 
   // The panel and hover bust flip the figure with scaleX(-1) and pass mirrored="on".
   it("follows the pointer on screen when the host mirrors the figure", async () => {
+    using _env = setup();
     const lookAt = async (mirrored: boolean, side: "left" | "right") => {
       const rig = await mountRig({ gaze: "pointer", ...(mirrored ? { mirrored: "on" } : {}) });
       if (mirrored) rig.style.transform = "scaleX(-1)";
@@ -277,6 +288,7 @@ describe("<squire-rig> port behavior", () => {
   // Lead onboarding: a greet played on a freshly mounted rig read as a fade-in (the entrance ran
   // under it). Gestures play at full opacity; only an ungreeted first appearance fades in.
   it("greets at full opacity on a figure already shown, and fades in only on first appearance", async () => {
+    using _env = setup();
     const bodyOpacity = (rig: SquireRigElement) => {
       let k = 1;
       const body = rig.shadowRoot!.querySelector("[data-bone=body]");
@@ -314,6 +326,7 @@ describe("<squire-rig> port behavior", () => {
   });
 
   it("draws the Lead's gold palette and crest only when asked", async () => {
+    using _env = setup();
     const brass = await mountRig({ palette: "brass" });
     expect(brass.shadowRoot!.querySelector('[data-fx="crest"]')).toBeNull();
     const lead = await mountRig({ palette: "gold", crest: "on" });

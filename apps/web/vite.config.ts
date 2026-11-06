@@ -114,7 +114,14 @@ const browserTestProject = {
       provider: playwright(),
       instances: [{ browser: "chromium" }],
       screenshotFailures: false,
-      commands: htmlRenderLeakCommands,
+      commands: {
+        ...htmlRenderLeakCommands,
+        // Playwright's mouse outlives each test, so whatever mounts under its last
+        // position starts hovered. test/render.tsx parks it off the page after each test.
+        resetPointer: async ({ page }) => {
+          await page.mouse.move(-1, -1);
+        },
+      },
     },
   },
 } satisfies TestProjectInlineConfiguration;

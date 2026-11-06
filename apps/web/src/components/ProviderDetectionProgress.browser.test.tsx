@@ -4,9 +4,9 @@ import {
   ProviderInstanceId,
   type ServerProvider,
 } from "@lecturn/contracts";
-import { act, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { type ComponentProps } from "react";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { act, render as renderUi, type Screen } from "../../test/render";
 
 const state = vi.hoisted(() => ({
   environments: [] as Array<{
@@ -56,8 +56,22 @@ const failed: ServerProvider = {
   skills: [],
   discovery: { status: "error", phase: "provider" },
 };
-let root: Root;
 let container: HTMLDivElement;
+
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
+  vi.clearAllMocks();
+  state.environments = [environment("phone")];
+  container = document.createElement("div");
+  document.body.append(container);
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+    },
+  };
+}
 function environment(id: string, provider = failed, phase = "connected") {
   return {
     environmentId: EnvironmentId.make(id),
@@ -67,7 +81,7 @@ function environment(id: string, provider = failed, phase = "connected") {
   };
 }
 async function render() {
-  await act(async () => root.render(<ProviderDetectionProgress />));
+  await testScreen.rerender(<ProviderDetectionProgress />);
 }
 const isEmpty = () => container.childElementCount === 0;
 const dismissButtons = () => [
@@ -75,22 +89,10 @@ const dismissButtons = () => [
     'button[aria-label="Dismiss provider notification"]',
   ),
 ];
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.clearAllMocks();
-  state.environments = [environment("phone")];
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-});
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.unstubAllGlobals();
-});
 
 describe("provider detection notifications", () => {
   it("keeps dismissal through repeated detection and reconnect, then re-arms after recovery", async () => {
+    await using _setup = await setup();
     await render();
     expect(dismissButtons()).toHaveLength(1);
     await act(async () => dismissButtons()[0]!.click());
@@ -124,6 +126,7 @@ describe("provider detection notifications", () => {
   });
 
   it("dismisses the shared shell probe without replacing it with another provider's copy", async () => {
+    await using _setup = await setup();
     const shell = { ...failed, discovery: { status: "detecting", phase: "shell" } } as const;
     state.environments = [
       {
@@ -138,6 +141,7 @@ describe("provider detection notifications", () => {
   });
 
   it("isolates dismissal by environment and preserves recovery for the other provider", async () => {
+    await using _setup = await setup();
     state.environments = [environment("phone"), environment("laptop")];
     await render();
     await act(async () => dismissButtons()[0]!.click());

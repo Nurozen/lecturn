@@ -4,7 +4,7 @@ import {
   claimWorkspaceBasenameLookup,
   needsWorkspaceBasenameLookup,
   pickWorkspaceBasenameMatch,
-} from "./workspaceBasenameLookup";
+} from "@lecturn/client-runtime/workspace-basename-lookup";
 
 describe("needsWorkspaceBasenameLookup", () => {
   it("flags bare filenames", () => {

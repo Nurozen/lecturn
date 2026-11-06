@@ -1,6 +1,4 @@
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, ThreadId } from "@lecturn/contracts";
 import {
   EMPTY_TERMINAL_BUFFER_STATE,
@@ -23,19 +21,10 @@ vi.mock(import("./query"), async (original) => ({
   useEnvironmentQuery: ((kind: string) =>
     kind === "attach" ? query.attach : { data: null, error: null }) as never,
 }));
+
+import { render } from "../../test/render";
 import { useAttachedTerminalSession } from "./terminalSessions";
 
-let root: Root;
-let container: HTMLDivElement;
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  container = document.createElement("div");
-  root = createRoot(container);
-});
-afterEach(async () => {
-  await act(async () => root.unmount());
-  vi.unstubAllGlobals();
-});
 function Fixture() {
   const state = useAttachedTerminalSession({
     environmentId: EnvironmentId.make("synthetic-phone"),
@@ -44,12 +33,12 @@ function Fixture() {
   return <output>{state.status}</output>;
 }
 it("does not report a live auth PTY closed while its reconnect snapshot is pending", async () => {
-  const status = () => container.textContent;
-  await act(async () => root.render(<Fixture />));
+  await using screen = await render(<Fixture />);
+  const status = () => screen.container.textContent;
   expect(status()).toBe("starting");
   const update = async (state: TerminalBufferState | null, error: string | null = null) => {
     query.attach = { data: state, error };
-    await act(async () => root.render(<Fixture />));
+    await screen.rerender(<Fixture />);
   };
   await update({ ...EMPTY_TERMINAL_BUFFER_STATE, version: 1, status: "running" });
   expect(status()).toBe("running");

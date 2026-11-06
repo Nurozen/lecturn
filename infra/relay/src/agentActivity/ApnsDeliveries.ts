@@ -47,6 +47,7 @@ import * as ApnsDeliveryQueue from "./ApnsDeliveryQueue.ts";
 import { ManagedAccess, type ManagedAccessUnavailable } from "../billing/ManagedAccess.ts";
 import { withSpanAttributes } from "../observability.ts";
 import type { NotifiedPushEvent } from "../persistence/schema.ts";
+import { rowPhasesChanged } from "./agentActivityAlerts.ts";
 
 const MIN_LIVE_ACTIVITY_UPDATE_INTERVAL_MS = 15_000;
 const FRESHLY_ARMED_GRACE_MS = 2 * 60 * 1_000;
@@ -338,10 +339,9 @@ function shouldUpdateLiveActivity(input: {
   if (aggregateNeedsAttention(input.nextAggregate)) {
     return true;
   }
-  // A thread finishing must never be throttled away: when a completion and a
-  // new start land in the same window, activeCount is unchanged and the Done
-  // transition (and its alert) would otherwise be suppressed.
-  if (newlyTerminalRows(input.previousAggregate, input.nextAggregate).length > 0) {
+  // Phase and row changes may be the last update until the next transition.
+  // Throttling them would leave the card showing a stale state indefinitely.
+  if (rowPhasesChanged(input.previousAggregate, input.nextAggregate)) {
     return true;
   }
   const lastDeliveryAtMs =

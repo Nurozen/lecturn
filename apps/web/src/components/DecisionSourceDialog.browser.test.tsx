@@ -1,6 +1,4 @@
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { Schema } from "effect";
 import {
   EnvironmentId,
@@ -22,6 +20,7 @@ vi.mock(import("../state/threadDecisions"), async (original) => ({
   ...(await original()),
   threadDecisionEnvironment: { sourceWindow: () => null } as never,
 }));
+import { act, render as renderUi } from "../../test/render";
 import { DecisionSourceDialog } from "./DecisionSourceDialog";
 import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
 const environmentId = EnvironmentId.make("remote"),
@@ -54,29 +53,18 @@ const source = Schema.decodeUnknownSync(ThreadDecisionSourceWindowResult)({
   reason: null,
 });
 const note = { id: "decision", title: "Use Postgres" } as ThreadDecision;
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-});
 // The dialog renders in a portal, so queries read the document rather than the container.
-async function render() {
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root = createRoot(container);
-  await act(async () => {
-    root.render(
-      <DecisionSourceDialog
-        environmentId={environmentId}
-        projectId={projectId}
-        note={note}
-        evidence={evidence}
-        onClose={mocks.close}
-      />,
-    );
-  });
-  return async () => {
-    await act(async () => root.unmount());
-    container.remove();
-  };
+function render() {
+  return renderUi(
+    <DecisionSourceDialog
+      environmentId={environmentId}
+      projectId={projectId}
+      note={note}
+      evidence={evidence}
+      onClose={mocks.close}
+    />,
+    { router: false },
+  );
 }
 function openSourceButton() {
   return [...document.querySelectorAll("button")].find(
@@ -87,7 +75,7 @@ describe("source thread activation", () => {
   it("preserves the exact raw excerpt and targets its message without rendered-text coordinates", async () => {
     mocks.navigate.mockClear();
     mocks.source = source;
-    const unmount = await render();
+    await using _screen = await render();
     expect(document.querySelectorAll("mark")).toHaveLength(1);
     await act(async () => openSourceButton()!.click());
     expect(mocks.navigate).toHaveBeenCalledWith(
@@ -101,25 +89,24 @@ describe("source thread activation", () => {
       assistantCitationFromLocation("#" + mocks.navigate.mock.calls[0]![0].hash),
     ).toMatchObject({ coordinateSpace: "raw-message", messageId: "message", text: evidence.quote });
     expect(mocks.close).toHaveBeenCalled();
-    await unmount();
   });
   it("targets a nonexact source message and never offers a jump for unavailable evidence", async () => {
     mocks.navigate.mockClear();
     mocks.source = { ...source, outcome: "message-only", start: null, end: null };
-    const unmount = await render();
-    expect(document.querySelectorAll("mark")).toHaveLength(0);
-    await act(async () => openSourceButton()!.click());
-    expect(mocks.navigate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        to: "/$environmentId/$threadId",
-        params: { environmentId, threadId: "thread" },
-        hash: expect.stringContaining("assistant-citation="),
-      }),
-    );
-    await unmount();
+    {
+      await using _screen = await render();
+      expect(document.querySelectorAll("mark")).toHaveLength(0);
+      await act(async () => openSourceButton()!.click());
+      expect(mocks.navigate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: "/$environmentId/$threadId",
+          params: { environmentId, threadId: "thread" },
+          hash: expect.stringContaining("assistant-citation="),
+        }),
+      );
+    }
     mocks.source = { ...source, outcome: "unavailable", messages: [], start: null, end: null };
-    const unmountMissing = await render();
+    await using _missing = await render();
     expect(openSourceButton()).toBeUndefined();
-    await unmountMissing();
   });
 });

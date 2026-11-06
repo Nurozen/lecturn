@@ -105,6 +105,9 @@ import Migration0082 from "./Migrations/082_Squire.ts";
 // so they run here as 83 and 84, after Squire.
 import Migration0083 from "./Migrations/065_CodexUsageNativeTurnIndex.ts";
 import Migration0084 from "./Migrations/066_RepairClientSettlementTimestamps.ts";
+// Upstream published this as 67, which Lecturn's ledger already used
+// (MessageContextTitleStateCompatibility), so it runs here as 85.
+import Migration0085 from "./Migrations/067_WebhookDedupe.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -148,6 +151,19 @@ const CodexUsageNativeTurnIndexCompatibility = Effect.gen(function* () {
   `;
   if (indexes.length > 0) return;
   yield* Migration0083;
+});
+
+// Upstream 67 adds a column and tables without IF NOT EXISTS. A database that
+// already ran it under upstream's id keeps that schema, so only add it when
+// missing. Migrations run in a transaction, so the schema is all or nothing.
+const WebhookDedupeCompatibility = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const tables = yield* sql`
+    SELECT name FROM sqlite_master
+    WHERE type = 'table' AND name = 'scheduled_task_webhook_replay_keys'
+  `;
+  if (tables.length > 0) return;
+  yield* Migration0085;
 });
 
 /**
@@ -267,6 +283,8 @@ export const migrationEntries = [
   // Upstream 66. It only rewrites settlements still at their sweep time, so a
   // database that already ran it under upstream's id is safe to run again here.
   [84, "RepairClientSettlementTimestamps", Migration0084],
+  // Upstream 67.
+  [85, "WebhookDedupe", WebhookDedupeCompatibility],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

@@ -3,12 +3,13 @@ import type { SortableContextProps } from "@dnd-kit/sortable";
 import { scopeThreadRef, scopedThreadKey } from "@lecturn/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/models";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@lecturn/contracts";
-import { act, type ComponentProps, type ReactElement, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { type ComponentProps, type ReactElement, type ReactNode, useState } from "react";
 import { Cause } from "effect";
 import type { SidebarLists } from "./sidebarDragScope.logic";
 import { AsyncResult } from "effect/reactivity";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
+
+import { act, render as renderScreen, type Screen } from "../../../test/render";
 import { SidebarDragBoundary, SidebarDragScope, ScopedSortableThreadRow } from "./SidebarDragScope";
 import { sidebarMarkerId } from "../Sidebar.logic";
 import { makeThreadFixture } from "../../test-fixtures";
@@ -134,22 +135,43 @@ function thread(id: string, environmentId: string, pinned = false): EnvironmentT
     pinnedAt: pinned ? "2026-03-09T10:00:00Z" : null,
   });
 }
-let mounted: { root: Root; container: HTMLDivElement } | null = null;
+// Holds the rendered element in state so a callback already running inside act can swap it
+// (as the old direct root.render did) and have that act flush the update.
+function Swappable({
+  initial,
+  bind,
+}: {
+  initial: ReactElement;
+  bind: (swap: (next: ReactElement) => void) => void;
+}) {
+  const [element, setElement] = useState(initial);
+  bind(setElement);
+  return element;
+}
+let mounted: { screen: Screen; swap: (next: ReactElement) => void } | null = null;
 async function render(element: ReactElement) {
-  if (!mounted) {
-    const container = document.createElement("div");
-    document.body.append(container);
-    mounted = { root: createRoot(container), container };
+  if (mounted) {
+    const { swap } = mounted;
+    await act(() => swap(element));
+    return;
   }
-  const { root } = mounted;
-  await act(async () => root.render(element));
+  let swap!: (next: ReactElement) => void;
+  const screen = await renderScreen(
+    <Swappable
+      initial={element}
+      bind={(next) => {
+        swap = next;
+      }}
+    />,
+    { router: false },
+  );
+  mounted = { screen, swap };
 }
 async function unmount() {
   const current = mounted;
   mounted = null;
   if (!current) return;
-  await act(async () => current.root.unmount());
-  current.container.remove();
+  await current.screen[Symbol.asyncDispose]();
 }
 const dndContext = () =>
   state.dnd as Required<DndContextProps> & {
@@ -157,9 +179,9 @@ const dndContext = () =>
       options: { onAttach(sensor: unknown): void; onFinish(cancelled: boolean): void };
     }>;
   };
-const projectedText = () => mounted!.container.querySelector("div")!.textContent;
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+const projectedText = () => mounted!.screen.container.querySelector("div")!.textContent;
+// Resets the shared mocks for one test; disposing unmounts whatever the test rendered.
+function setup(): AsyncDisposable {
   vi.clearAllMocks();
   state.accounts.clear();
   state.known.needsSignIn = [];
@@ -177,11 +199,8 @@ beforeEach(() => {
         },
       },
     });
-});
-afterEach(async () => {
-  await unmount();
-  vi.unstubAllGlobals();
-});
+  return { [Symbol.asyncDispose]: unmount };
+}
 
 function scope(
   lists: SidebarLists,
@@ -227,6 +246,7 @@ async function drop(
 it.each(["capability", "access", "operate scope"])(
   "moves next to a destination that lacks %s without ever writing to its environment",
   async (reason) => {
+    await using _env = setup();
     if (reason === "capability")
       state.configs.get("target")!.environment.capabilities.threadPinReorder = false;
     else if (reason === "operate scope") state.readOnly.add("target");
@@ -248,6 +268,7 @@ it.each(["capability", "access", "operate scope"])(
 );
 
 it("never picks up or writes a row whose connection cannot operate threads", async () => {
+  await using _env = setup();
   state.readOnly.add("source");
   await render(
     scope({ pinned: [], active: [thread("move", "source")], snoozed: [], settled: [] }, () => (
@@ -267,6 +288,7 @@ it("never picks up or writes a row whose connection cannot operate threads", asy
 });
 
 it("enables pickup once the connection's operate grant loads", async () => {
+  await using _env = setup();
   state.readOnly.add("source");
   const row = thread("move", "source");
   await render(
@@ -284,6 +306,7 @@ it("enables pickup once the connection's operate grant loads", async () => {
 });
 
 it("unpins and materializes each destination member using its own environment", async () => {
+  await using _env = setup();
   await drop();
   expect(unpin).toHaveBeenCalledWith(
     scopeThreadRef(EnvironmentId.make("source"), ThreadId.make("move")),
@@ -295,6 +318,7 @@ it("unpins and materializes each destination member using its own environment", 
 });
 
 it("rejects another account's row even when its thread id matches a local row", async () => {
+  await using _env = setup();
   const source = thread("move", "source", true);
   const local = thread("destination", "source");
   const foreign = thread("destination", "target");
@@ -313,6 +337,7 @@ it("rejects another account's row even when its thread id matches a local row", 
 it.each(["active", "pinned"] as const)(
   "moves the only thread into empty %s within its owning scope",
   async (destination) => {
+    await using _env = setup();
     const source = thread("move", "source", destination === "active");
     await render(
       scope({
@@ -344,6 +369,7 @@ it.each(["active", "pinned"] as const)(
 );
 
 it("cancels the attached pointer sensor when its account/project scope unmounts", async () => {
+  await using _env = setup();
   await render(scope({ pinned: [], active: [thread("move", "source")], snoozed: [], settled: [] }));
   const sensor = { cancel: vi.fn() };
   dndContext().sensors[0]!.options.onAttach(sensor);
@@ -387,6 +413,7 @@ class GeometryNode {
 it.each([false, true])(
   "reserves owning flow space and restores it on release (nested shelves: %s)",
   async (nested) => {
+    await using _env = setup();
     const scale = 1.5;
     const source = thread("move", "source", true);
     const target = thread("destination", "source");
@@ -451,7 +478,7 @@ it.each([false, true])(
     await render(scope({ pinned: [source], active: [target], snoozed: [], settled: [] }, body));
     // Stand-in for react-test-renderer's createNodeMock: registered rows and
     // markers report the fixture geometry and hierarchy instead of real layout.
-    for (const element of mounted!.container.querySelectorAll<HTMLElement>(
+    for (const element of mounted!.screen.container.querySelectorAll<HTMLElement>(
       "[data-testid], [data-geometry-key]",
     )) {
       const node = nodes.get(element.dataset.testid ?? element.dataset.geometryKey ?? "");
@@ -533,6 +560,7 @@ it.each([false, true])(
 it.each(["failure", "interruption"])(
   "releases the optimistic order after a partial lifecycle acknowledgement and %s",
   async (reason) => {
+    await using _env = setup();
     const result = AsyncResult.failure(
       reason === "failure" ? Cause.die(new Error("reorder rejected")) : Cause.interrupt(),
     );
@@ -542,7 +570,7 @@ it.each(["failure", "interruption"])(
     });
     reorder.mockReturnValueOnce(pending);
     await drop((source, target) => {
-      mounted!.root.render(
+      mounted!.swap(
         scope({
           pinned: [],
           active: [{ ...source, pinnedAt: null }, target],

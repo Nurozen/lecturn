@@ -1,3 +1,4 @@
+/* oxlint-disable lecturn/require-disposable-render -- A node-environment test that renders into a stubbed document and window; the browser render helper cannot load here. */
 import {
   MULTI_ACCOUNT_ENABLED_MARKER_KEY,
   isMultiAccountMarkerFresh,

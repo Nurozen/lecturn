@@ -1,6 +1,5 @@
-import { act, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import type { ComponentProps } from "react";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId } from "@lecturn/contracts";
 const mocks = vi.hoisted(() => ({
   administer: true,
@@ -116,9 +115,10 @@ vi.mock(import("../ui/checkbox"), () => ({
     <input {...props} type="checkbox" onChange={(event) => onCheckedChange(event.target.checked)} />
   )) as never,
 }));
+import { act, render as renderUi, type Screen } from "../../../test/render";
 import { ContextualHostSettings } from "./ContextualHostSettings";
 const environmentId = EnvironmentId.make("host");
-let view: { root: Root; container: HTMLDivElement } | undefined;
+let view: Screen | undefined;
 function button(label: string) {
   return [...view!.container.querySelectorAll("button")].find((node) =>
     node.textContent?.includes(label),
@@ -132,18 +132,11 @@ async function click(label: string) {
 const text = () => view!.container.textContent ?? "";
 const checkbox = () => view!.container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
 async function render() {
-  if (!view) {
-    const container = document.createElement("div");
-    document.body.append(container);
-    view = { root: createRoot(container), container };
-  }
-  const { root } = view;
-  await act(async () => {
-    root.render(<ContextualHostSettings environmentId={environmentId} />);
-  });
+  const ui = <ContextualHostSettings environmentId={environmentId} />;
+  if (view) await view.rerender(ui);
+  else view = await renderUi(ui, { router: false });
 }
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+function setup(): AsyncDisposable {
   vi.clearAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => {});
   mocks.administer = true;
@@ -153,19 +146,18 @@ beforeEach(() => {
   mocks.funding.eligible = true;
   mocks.funding.state = "active";
   mocks.command.mockResolvedValue({ _tag: "Success", value: {} });
-});
-afterEach(async () => {
-  const current = view;
-  view = undefined;
-  if (current) {
-    await act(async () => current.root.unmount());
-    current.container.remove();
-  }
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-});
+  return {
+    async [Symbol.asyncDispose]() {
+      const current = view;
+      view = undefined;
+      await current?.[Symbol.asyncDispose]();
+      vi.restoreAllMocks();
+    },
+  };
+}
 describe("Contextual host source controls", () => {
   it("discovers metadata only after an explicit action and never starts collection on setup", async () => {
+    await using _setup = setup();
     await render();
     expect(mocks.queries).not.toHaveBeenCalledWith("sources");
     expect(mocks.command).not.toHaveBeenCalled();
@@ -174,6 +166,7 @@ describe("Contextual host source controls", () => {
     expect(mocks.command).not.toHaveBeenCalled();
   });
   it("preserves unseen selected sources across pagination and requires explicit DM selection", async () => {
+    await using _setup = setup();
     await render();
     await click("Discover sources");
     const dm = checkbox();
@@ -196,6 +189,7 @@ describe("Contextual host source controls", () => {
     });
   });
   it("does not overwrite another administrator's newer source policy", async () => {
+    await using _setup = setup();
     await render();
     await click("Discover sources");
     await act(async () => checkbox().click());
@@ -207,6 +201,7 @@ describe("Contextual host source controls", () => {
     expect(text()).toContain("Another administrator changed");
   });
   it("allows eligible local collection even when paid inference allowance is exhausted", async () => {
+    await using _setup = setup();
     await render();
     expect(button("Start collection").disabled).toBe(false);
     await click("Start collection");
@@ -216,6 +211,7 @@ describe("Contextual host source controls", () => {
     });
   });
   it("keeps pause available after funding becomes ineligible", async () => {
+    await using _setup = setup();
     mocks.capture.state = "running";
     mocks.funding.eligible = false;
     await render();
@@ -227,6 +223,7 @@ describe("Contextual host source controls", () => {
     });
   });
   it("never queries raw source metadata or exposes archive management to non-administrators", async () => {
+    await using _setup = setup();
     mocks.administer = false;
     await render();
     expect(mocks.queries).not.toHaveBeenCalledWith("sources");
@@ -236,6 +233,7 @@ describe("Contextual host source controls", () => {
     expect(mocks.command).not.toHaveBeenCalled();
   });
   it("does not call new RPC methods on older hosts", async () => {
+    await using _setup = setup();
     mocks.available = false;
     await render();
     expect(mocks.queries).not.toHaveBeenCalled();
@@ -244,6 +242,7 @@ describe("Contextual host source controls", () => {
 });
 
 it("explains disabled collection during a membership outage and offers refresh", async () => {
+  await using _setup = setup();
   mocks.funding.state = "unavailable";
   mocks.funding.eligible = false;
   await render();

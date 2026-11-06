@@ -188,6 +188,10 @@ export default defineConfig({
         rules: { "lecturn/prefer-effect-fn": "off" },
       },
       {
+        files: ["apps/web/**/*.test.{ts,tsx}"],
+        rules: { "lecturn/require-disposable-render": "error" },
+      },
+      {
         files: ["apps/**/src/**", "packages/**/src/**"],
         excludeFiles: DOM_TEST_ENVIRONMENT_ALLOWLIST,
         rules: { "lecturn/no-dom-test-environment": "error" },

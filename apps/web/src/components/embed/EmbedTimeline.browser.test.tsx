@@ -5,10 +5,10 @@ import { RegistryProvider } from "@effect/atom-react";
 import { parseScopedThreadKey, scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { EnvironmentId, MessageId, ProjectId, RunId } from "@lecturn/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
-import { act, createRef, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { createRef, type ComponentProps } from "react";
+import { describe, expect, it } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";
+import { act, render as renderUi, type Screen } from "../../../test/render";
 
 import { EmbedPresentationContext } from "../../embed/EmbedPresentationContext";
 import { serverEnvironment } from "../../state/server";
@@ -123,24 +123,23 @@ function turns(toolSource: ToolSource): Entry[] {
 }
 
 let threadCount = 0;
-let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   document.documentElement.classList.add("dark");
   container = document.createElement("div");
   document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  delete document.documentElement.dataset.lecturnEmbed;
-  document.documentElement.classList.remove("dark");
-  vi.unstubAllGlobals();
-});
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+      delete document.documentElement.dataset.lecturnEmbed;
+      document.documentElement.classList.remove("dark");
+    },
+  };
+}
 
 async function renderTimeline(options: {
   embedded: boolean;
@@ -191,34 +190,32 @@ async function renderTimeline(options: {
       timelineEntries={turns(options.toolSource)}
     />
   );
-  await act(async () =>
-    root.render(
-      <RegistryProvider
-        initialValues={[
-          [serverEnvironment.providersValueAtom(ENVIRONMENT_ID), options.providers ?? providers],
-          ...(options.threadInstanceId === undefined
-            ? []
-            : ([
-                [
-                  environmentThreadShells.quietThreadShellAtom(threadRef),
-                  {
-                    environmentId: ENVIRONMENT_ID,
-                    id: threadRef.threadId,
-                    projectId: presentation.projectRef.projectId,
-                    providerInstanceId: options.threadInstanceId,
-                    modelSelection: { instanceId: options.threadInstanceId, model: "gpt-6" },
-                  },
-                ],
-              ] as const)),
-        ]}
-      >
-        {options.embedded ? (
-          <EmbedPresentationContext value={presentation}>{timeline}</EmbedPresentationContext>
-        ) : (
-          timeline
-        )}
-      </RegistryProvider>,
-    ),
+  await testScreen.rerender(
+    <RegistryProvider
+      initialValues={[
+        [serverEnvironment.providersValueAtom(ENVIRONMENT_ID), options.providers ?? providers],
+        ...(options.threadInstanceId === undefined
+          ? []
+          : ([
+              [
+                environmentThreadShells.quietThreadShellAtom(threadRef),
+                {
+                  environmentId: ENVIRONMENT_ID,
+                  id: threadRef.threadId,
+                  projectId: presentation.projectRef.projectId,
+                  providerInstanceId: options.threadInstanceId,
+                  modelSelection: { instanceId: options.threadInstanceId, model: "gpt-6" },
+                },
+              ],
+            ] as const)),
+      ]}
+    >
+      {options.embedded ? (
+        <EmbedPresentationContext value={presentation}>{timeline}</EmbedPresentationContext>
+      ) : (
+        timeline
+      )}
+    </RegistryProvider>,
   );
   await act(async () => document.fonts.ready);
 }
@@ -280,6 +277,7 @@ async function measureTypeScale() {
 
 describe("embed timeline at the pane width", () => {
   it("sets the timeline in the desktop type sizes, with the body at 14 px", async () => {
+    await using _setup = await setup();
     await renderTimeline({ embedded: true, width: PANE_WIDTH });
     const embedded = await measureTypeScale();
     expect(embedded).toEqual({
@@ -290,9 +288,8 @@ describe("embed timeline at the pane width", () => {
       workLogFold: 14,
     });
 
-    await act(async () => root.unmount());
+    await testScreen.rerender(null);
     delete document.documentElement.dataset.lecturnEmbed;
-    root = createRoot(container);
     await renderTimeline({ embedded: false, width: 1280 });
     const desktop = await measureTypeScale();
     // Full Lecturn is unchanged: its row containers still inherit the 16 px root.
@@ -300,6 +297,7 @@ describe("embed timeline at the pane width", () => {
   });
 
   it("keeps the latest turn's tool rows open and folds the earlier turn", async () => {
+    await using _setup = await setup();
     await renderTimeline({ embedded: true, width: PANE_WIDTH });
     expect(foldButtons()).toHaveLength(1);
     expect(visibleToolLabels()).toEqual(["rw_component_update", "rw_simulate candidate"]);
@@ -311,12 +309,14 @@ describe("embed timeline at the pane width", () => {
   });
 
   it("folds every finished turn outside the embed", async () => {
+    await using _setup = await setup();
     await renderTimeline({ embedded: false, width: PANE_WIDTH });
     expect(foldButtons()).toHaveLength(2);
     expect(visibleToolLabels()).toEqual([]);
   });
 
   it("draws the latest turn's app calls as one row each, with the success mark", async () => {
+    await using _setup = await setup();
     await renderTimeline({ embedded: true, width: PANE_WIDTH, toolSource: APP_SOURCE });
     const rows = appToolRows();
     expect(rows.map((row) => row.textContent)).toEqual([
@@ -330,14 +330,14 @@ describe("embed timeline at the pane width", () => {
     // The earlier turn keeps its calls grouped behind one summary row.
     expect(visibleToolLabels()).not.toContain("rw_design_check");
 
-    await act(async () => root.unmount());
+    await testScreen.rerender(null);
     delete document.documentElement.dataset.lecturnEmbed;
-    root = createRoot(container);
     await renderTimeline({ embedded: false, width: PANE_WIDTH, toolSource: APP_SOURCE });
     expect(appToolRows()).toHaveLength(0);
   });
 
   it("names the agent above each reply to a user message", async () => {
+    await using _setup = await setup();
     await renderTimeline({ embedded: true, width: PANE_WIDTH });
     const names = Array.from(
       container.querySelectorAll<HTMLElement>("[data-testid='embed-agent-name']"),
@@ -355,6 +355,7 @@ describe("embed timeline at the pane width", () => {
   });
 
   it("leaves replies unnamed outside the embed", async () => {
+    await using _setup = await setup();
     await renderTimeline({ embedded: false, width: PANE_WIDTH });
     expect(container.querySelector("[data-testid='embed-agent-name']")).toBeNull();
   });
@@ -367,6 +368,7 @@ describe.each([352, 320])("the agent's name in an imported thread at %i px", (wi
     );
 
   it("takes the thread's model provider when the thread has no runs", async () => {
+    await using _setup = await setup();
     await renderTimeline({
       embedded: true,
       width,
@@ -378,11 +380,13 @@ describe.each([352, 320])("the agent's name in an imported thread at %i px", (wi
   });
 
   it("falls back to the environment's default provider", async () => {
+    await using _setup = await setup();
     await renderTimeline({ embedded: true, width, runs: [] });
     expect(agentNames()).toEqual(["Claude", "Claude"]);
   });
 
   it("draws no name line when no provider can be named", async () => {
+    await using _setup = await setup();
     await renderTimeline({ embedded: true, width, runs: [], providers: [] });
     expect(agentNames()).toEqual([]);
     const reply = byText("[data-message-role='assistant']", "proposed fin set")!;

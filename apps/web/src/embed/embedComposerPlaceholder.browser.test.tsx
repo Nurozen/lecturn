@@ -2,10 +2,9 @@ import "~/index.css";
 import "./embed.css";
 
 import type { EmbedHostContext } from "@lecturn/contracts/embedBridge";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
+import { act, render } from "../../test/render";
 import { idleComposerPlaceholder } from "../composerPlaceholder";
 import {
   installEmbedComposerPlaceholder,
@@ -36,25 +35,29 @@ const IDLE_STATES: ReadonlyArray<readonly [string, IdleState, string]> = [
   ["an expanded composer", EXPANDED, LECTURN_PLACEHOLDER],
 ];
 
-let root: Root;
-let container: HTMLDivElement;
-let uninstall: () => void = () => undefined;
-
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+// Marks the document as the embed and owns the installed placeholder bridge for one test.
+// The container is handed to render(), which removes it on dispose.
+function setup(width?: number) {
   document.documentElement.dataset.lecturnEmbed = "";
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  uninstall();
-  container.remove();
-  delete document.documentElement.dataset.lecturnEmbed;
-  vi.unstubAllGlobals();
-});
+  const container = document.createElement("div");
+  if (width !== undefined) container.style.width = `${width}px`;
+  let uninstall: () => void = () => undefined;
+  return {
+    container,
+    install(bridge: Parameters<typeof installEmbedComposerPlaceholder>[0]) {
+      uninstall = installEmbedComposerPlaceholder(bridge);
+    },
+    uninstall: () =>
+      act(() => {
+        uninstall();
+        uninstall = () => undefined;
+      }),
+    [Symbol.dispose]() {
+      uninstall();
+      delete document.documentElement.dataset.lecturnEmbed;
+    },
+  };
+}
 
 function fakeBridge(initial: EmbedHostContext) {
   let context = initial;
@@ -107,14 +110,13 @@ function Composer({ state = EXPANDED }: { readonly state?: IdleState }) {
 }
 
 const placeholderElement = () =>
-  container.querySelector<HTMLElement>("[data-composer-placeholder]")!;
+  document.querySelector<HTMLElement>("[data-composer-placeholder]")!;
 
 describe.each([352, 320])("the host's composer placeholder in a %i px pane", (width) => {
   it("shows the host's wording whole on the input line", async () => {
-    container.style.width = `${width}px`;
-    const bridge = fakeBridge({ ...base, composerPlaceholder: "Ask for changes…" });
-    uninstall = installEmbedComposerPlaceholder(bridge);
-    await act(async () => root.render(<Composer />));
+    using env = setup(width);
+    env.install(fakeBridge({ ...base, composerPlaceholder: "Ask for changes…" }));
+    await using _screen = await render(<Composer />, { container: env.container });
 
     const placeholder = placeholderElement();
     expect(placeholder.textContent).toBe("Ask for changes…");
@@ -126,10 +128,10 @@ describe.each([352, 320])("the host's composer placeholder in a %i px pane", (wi
 
 describe.each([352, 320])("every idle prompt in a %i px pane", (width) => {
   it.each(IDLE_STATES)("gives %s the host's placeholder", async (_name, state, lecturn) => {
-    container.style.width = `${width}px`;
+    using env = setup(width);
     const bridge = fakeBridge(base);
-    uninstall = installEmbedComposerPlaceholder(bridge);
-    await act(async () => root.render(<Composer state={state} />));
+    env.install(bridge);
+    await using _screen = await render(<Composer state={state} />, { container: env.container });
     expect(placeholderElement().textContent).toBe(lecturn);
 
     await act(async () =>
@@ -141,9 +143,10 @@ describe.each([352, 320])("every idle prompt in a %i px pane", (width) => {
 
 describe("installEmbedComposerPlaceholder", () => {
   it("follows the host's changes and gives the prompt back when cleared or uninstalled", async () => {
+    using env = setup();
     const bridge = fakeBridge(base);
-    uninstall = installEmbedComposerPlaceholder(bridge);
-    await act(async () => root.render(<Composer />));
+    env.install(bridge);
+    await using _screen = await render(<Composer />, { container: env.container });
     expect(placeholderElement().textContent).toBe(LECTURN_PLACEHOLDER);
 
     await act(async () => bridge.change({ ...base, composerPlaceholder: "Describe the change…" }));
@@ -153,14 +156,14 @@ describe("installEmbedComposerPlaceholder", () => {
     expect(placeholderElement().textContent).toBe(LECTURN_PLACEHOLDER);
 
     await act(async () => bridge.change({ ...base, composerPlaceholder: "Ask for changes…" }));
-    await act(async () => uninstall());
-    uninstall = () => undefined;
+    await env.uninstall();
     expect(placeholderElement().textContent).toBe(LECTURN_PLACEHOLDER);
   });
 
   it("leaves Lecturn's prompt alone without a bridge", async () => {
-    uninstall = installEmbedComposerPlaceholder(null);
-    await act(async () => root.render(<Composer />));
+    using env = setup();
+    env.install(null);
+    await using _screen = await render(<Composer />, { container: env.container });
     expect(placeholderElement().textContent).toBe(LECTURN_PLACEHOLDER);
   });
 });

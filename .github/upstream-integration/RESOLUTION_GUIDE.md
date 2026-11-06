@@ -966,6 +966,61 @@ from upstream's side.
     (`HostFreezeToastCoordinator`, `AddProjectToMachineDialogHost`) go into
     `AppShell.tsx`.
 
+**Upstream changes taken in a Lecturn shape (sync to upstream c3540a78).**
+
+- **Server migrations.** Upstream 67 (`067_WebhookDedupe.ts`) runs as fork
+  id 85, after 84. `WebhookDedupeCompatibility` skips it when
+  `scheduled_task_webhook_replay_keys` exists, because upstream's DDL has no
+  `IF NOT EXISTS`. The file keeps its upstream name, as 064-066 do.
+- **Webhook filters and dedupe (#22194, #22234)** are taken whole into the
+  fork webhook automations. The fork keeps the `lecturn/` service keys,
+  `x-lecturn-hook-outcome`, CloudLink and `RelayDeliveryProof`. Tool and docs
+  copy says "Lecturn Connect".
+- **Disposable render lint (#22187).** Upstream's rule runs as
+  `lecturn/require-disposable-render`, with upstream's scope:
+  `apps/web/**/*.test.{ts,tsx}`, error. Fork-only browser tests use a per-file
+  `setup()` that renders through `apps/web/test/render.tsx`
+  (`router: false`) and returns an `AsyncDisposable`. Tests start with
+  `await using _setup = await setup()`, and `root.render` becomes
+  `screen.rerender`. The node-env `apps/web/src/cloud/managedAuth.test.ts`
+  turns the rule off with a file-level `oxlint-disable` and a reason, because
+  the browser helper cannot load in node. Squire companion tests capture
+  console and page errors at module scope, and the file's last test checks
+  them.
+- **Release CI.** `release-desktop.yml` and `scripts/build-npm-launcher.ts`
+  stay deleted. The upstream Windows arm64 cross-build (jsign plus the
+  esbuild verify bundle) is not wired into fork `release.yml`. The supporting
+  `scripts/lib/windows-jsign.ts`, `windows-tar.ts` and
+  `verify-windows-desktop-artifact.ts` stay for when it is. Server tests keep
+  3 shards on `ubuntu-24.04` in both `ci.yml` and `release.yml`; upstream's
+  8-shard Blacksmith split is not taken. The jsign env var is
+  `LECTURN_JSIGN`.
+- **Relay alert throttle (#21405).** The throttle bypass uses upstream
+  `rowPhasesChanged`. The fork's `newlyTerminalRows` still drives finished
+  alerts.
+- **Mobile.**
+  - `ThreadComposer` keeps the fork model tray under the composer and does not
+    render upstream's inline `ComposerModelControl` (#21406, #20812) in the
+    row or the card. The one-row-until-wrap layout and the queued-edit
+    submission lock (#21390) are taken. The new-task draft screen does use
+    `ComposerModelControl`.
+  - The settled thread card keeps Unsettle. Upstream's floating lifecycle
+    pill shows only the snoozed and woke states, behind
+    `allows("thread-actions")`.
+  - The new-task repository check (#21404) queries `resolveNewTaskGitCwd`
+    (the Stave primary repo), so a Stave space root never reads as non-git.
+    `staveForcedEnvMode` outranks the resolved workspace selection.
+- **Web.**
+  - The `ProjectSettingsPanel` removal dialog uses upstream
+    `planProjectRemoval` for the thread and target logic. Its copy stays
+    local, because the fork lists Stave worktree deletions where upstream has
+    the files-on-disk line.
+  - The `ChatOverlayHosts` test covers only `BranchRestoreConfirmHost`. The
+    fork has no `RevertConfirmHost`.
+  - `MenuPopup` (`ui/menu.tsx`) keeps the fork `surface` prop
+    (`panel-glass`) alongside upstream's `width` (#22566 compact approval
+    menu).
+
 ## Recurring mechanical conflicts
 
 **Published migration identities are persistent data.** The fork's

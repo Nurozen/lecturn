@@ -1,26 +1,20 @@
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
+
+import { render } from "../../test/render";
 import { phoneAuthViewportRef } from "./usePhoneAuthViewport";
 
-let root: Root;
-let container: HTMLDivElement;
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+// Spies and the synthetic visualViewport stay for one test; disposing restores them.
+function setup(): Disposable {
   vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect").mockReturnValue(
     DOMRect.fromRect({ x: 0, y: 24, width: 0, height: 0 }),
   );
-  // Attached, so the input can take focus.
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-});
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-});
+  return {
+    [Symbol.dispose]() {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    },
+  };
+}
 
 function syntheticViewport() {
   const viewport = Object.assign(new EventTarget(), { height: 760, offsetTop: 0 });
@@ -29,13 +23,14 @@ function syntheticViewport() {
   return viewport;
 }
 
-function focusInput() {
+function focusInput(container: HTMLElement) {
   const input = container.querySelector("input")!;
   input.focus();
   return input;
 }
 
 it("attaches after a portal delay and cleans up when only the viewport unmounts", async () => {
+  using _env = setup();
   const viewport = syntheticViewport();
   const subscribe = vi.spyOn(viewport, "addEventListener");
   const unsubscribe = vi.spyOn(viewport, "removeEventListener");
@@ -48,11 +43,12 @@ it("attaches after a portal delay and cleans up when only the viewport unmounts"
       </div>
     ) : null;
   }
-  await act(async () => root.render(<Fixture show={false} />));
+  // The render helper attaches the container, so the input can take focus.
+  await using screen = await render(<Fixture show={false} />, { router: false });
   expect(subscribe).not.toHaveBeenCalled();
-  await act(async () => root.render(<Fixture show />));
-  let element = container.firstElementChild as HTMLDivElement;
-  focusInput();
+  await screen.rerender(<Fixture show />);
+  let element = screen.container.firstElementChild as HTMLDivElement;
+  focusInput(screen.container);
   expect(element.style.height).toBe("736px");
   expect(subscribe.mock.calls.map(([event]) => event)).toEqual(["resize", "scroll"]);
   viewport.height = 280;
@@ -60,9 +56,9 @@ it("attaches after a portal delay and cleans up when only the viewport unmounts"
   expect(element.style.height).toBe("256px");
   expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
 
-  await act(async () => root.render(<Fixture show />));
+  await screen.rerender(<Fixture show />);
   expect(subscribe).toHaveBeenCalledTimes(2);
-  await act(async () => root.render(<Fixture show={false} />));
+  await screen.rerender(<Fixture show={false} />);
   expect(unsubscribe.mock.calls).toEqual(subscribe.mock.calls);
   expect(element.style.height).toBe("");
   scrollIntoView.mockClear();
@@ -72,16 +68,17 @@ it("attaches after a portal delay and cleans up when only the viewport unmounts"
   expect(element.style.height).toBe("");
   expect(scrollIntoView).not.toHaveBeenCalled();
 
-  await act(async () => root.render(<Fixture show />));
-  element = container.firstElementChild as HTMLDivElement;
+  await screen.rerender(<Fixture show />);
+  element = screen.container.firstElementChild as HTMLDivElement;
   expect(element.style.height).toBe("426px");
   expect(subscribe).toHaveBeenCalledTimes(4);
-  await act(async () => root.unmount());
+  await screen.unmount();
   expect(unsubscribe.mock.calls).toEqual(subscribe.mock.calls);
   expect(element.style.height).toBe("");
 });
 
 it("reflows on keyboard resize, keeps the focused input visible and restores normal sizing on exit", async () => {
+  using _env = setup();
   const viewport = syntheticViewport();
   const scrollIntoView = vi.spyOn(HTMLInputElement.prototype, "scrollIntoView");
   function Fixture({ enabled }: { enabled: boolean }) {
@@ -91,9 +88,9 @@ it("reflows on keyboard resize, keeps the focused input visible and restores nor
       </div>
     );
   }
-  await act(async () => root.render(<Fixture enabled />));
-  const element = container.firstElementChild as HTMLDivElement;
-  focusInput();
+  await using screen = await render(<Fixture enabled />, { router: false });
+  const element = screen.container.firstElementChild as HTMLDivElement;
+  focusInput(screen.container);
   expect(element.style.height).toBe("736px");
   viewport.height = 280;
   viewport.dispatchEvent(new Event("resize"));
@@ -102,7 +99,7 @@ it("reflows on keyboard resize, keeps the focused input visible and restores nor
   viewport.dispatchEvent(new Event("scroll"));
   expect(element.style.height).toBe("266px");
   expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
-  await act(async () => root.render(<Fixture enabled={false} />));
+  await screen.rerender(<Fixture enabled={false} />);
   expect(element.style.height).toBe("");
   viewport.height = 450;
   viewport.dispatchEvent(new Event("resize"));

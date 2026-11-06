@@ -3,9 +3,10 @@ import type { AtomCommandResult } from "@lecturn/client-runtime/state/runtime";
 import { EnvironmentId, ORCHESTRATION_PROTOCOL_VERSION } from "@lecturn/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";
-import { act, useState } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { useState, type ReactElement } from "react";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+import { act, fakeTimers, render } from "../../../test/render";
 
 type DiscoveredEnvironments = Discovery.RelayEnvironmentDiscoveryState["environments"];
 
@@ -117,7 +118,6 @@ const linkedMachines: DiscoveredEnvironments = new Map([
   ],
 ]);
 
-let root: Root | null;
 let container: HTMLDivElement;
 let visibility: DocumentVisibilityState;
 
@@ -126,13 +126,10 @@ function publish(state: Discovery.RelayEnvironmentDiscoveryState) {
   for (const listener of discovery.listeners) listener();
 }
 
-async function render(element: React.ReactElement) {
-  root ??= createRoot(container);
-  await act(async () => root!.render(element));
-}
+const renderRows = (element: ReactElement) => render(element, { container });
 
-async function mount(refreshWhileEmpty = true) {
-  await render(
+function mount(refreshWhileEmpty = true) {
+  return renderRows(
     <CloudEnvironmentConnectRows
       primaryEnvironmentId={null}
       savedEnvironments={[]}
@@ -160,14 +157,12 @@ async function advance(milliseconds: number) {
   });
 }
 
-beforeEach(() => {
-  vi.useFakeTimers();
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+function setup() {
+  using stack = new DisposableStack();
+  stack.use(fakeTimers());
   visibility = "visible";
-  vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
+  stack.use(vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility));
   container = document.createElement("div");
-  document.body.append(container);
-  root = null;
   discovery.listeners.clear();
   discovery.accountIds = [];
   discovery.accountStates = new Map();
@@ -187,18 +182,12 @@ beforeEach(() => {
     publish({ environments, refreshing: false, offline: false, error: Option.none() });
     return AsyncResult.success(undefined);
   });
-});
-
-afterEach(async () => {
-  await act(async () => root?.unmount());
-  container.remove();
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-});
+  return stack.move();
+}
 
 describe("cloud environment offline reasons", () => {
   it("tells the user to update a computer whose idle tunnel was removed", async () => {
+    using _environment = setup();
     const base = linkedMachines.get(newMachineId)!;
     const offlineEntry = (offlineReason?: "tunnel_released") => ({
       ...base,
@@ -214,7 +203,7 @@ describe("cloud environment offline reasons", () => {
     });
 
     discovery.listEnvironments.mockResolvedValue(new Map([[newMachineId, offlineEntry()]]));
-    await mount();
+    await using _screen = await mount();
     expect(text()).toContain("Lecturn Connect · Not added · Relay offline");
 
     await act(async () => {
@@ -233,6 +222,7 @@ describe("cloud onboarding discovery", () => {
   it.each(["expired session", "unlisted computer", "offline discovery", "loading discovery"])(
     "keeps saved selections editable with %s and preserves ownership on rediscovery",
     async (scenario) => {
+      using _environment = setup();
       const localId = EnvironmentId.make("local-computer");
       const local = { environmentId: localId, connection: { phase: "connected" } };
       const saved = {
@@ -284,7 +274,7 @@ describe("cloud onboarding discovery", () => {
           </>
         );
       }
-      await render(<Setup />);
+      await using _screen = await renderRows(<Setup />);
       const continueButton = () =>
         [...container.querySelectorAll("button")].find(
           (element) => element.textContent === "Continue",
@@ -317,6 +307,7 @@ describe("cloud onboarding discovery", () => {
   );
 
   it("signals that the section can expand after initial discovery settles", async () => {
+    using _environment = setup();
     let finishDiscovery!: (environments: DiscoveredEnvironments) => void;
     discovery.listEnvironments.mockReturnValue(
       new Promise((resolve) => {
@@ -324,7 +315,7 @@ describe("cloud onboarding discovery", () => {
       }),
     );
     const onDiscoveryReady = vi.fn();
-    await render(
+    await using _screen = await renderRows(
       <CloudEnvironmentConnectRows
         primaryEnvironmentId={null}
         savedEnvironments={[]}
@@ -340,6 +331,7 @@ describe("cloud onboarding discovery", () => {
   });
 
   it("keeps incompatible discoveries unselected until the user enables a compatible server", async () => {
+    using _environment = setup();
     const base = linkedMachines.get(newMachineId)!;
     const entry = (protocolVersion: number) => ({
       ...base,
@@ -388,7 +380,7 @@ describe("cloud onboarding discovery", () => {
         />
       );
     }
-    await render(<Setup />);
+    await using _screen = await renderRows(<Setup />);
     expect(discovery.register).not.toHaveBeenCalled();
     expect(onSelectionChange).toHaveBeenCalledWith(newMachineId, false);
     expect(checked()).toBe(false);
@@ -411,6 +403,7 @@ describe("cloud onboarding discovery", () => {
   });
 
   it("connects and selects discovered computers by default without overwriting deselection", async () => {
+    using _environment = setup();
     discovery.listEnvironments.mockResolvedValue(linkedMachines);
     const autoSelectedComputers = new Set<EnvironmentId>();
     function Setup() {
@@ -434,7 +427,7 @@ describe("cloud onboarding discovery", () => {
         />
       );
     }
-    await render(<Setup />);
+    await using _screen = await renderRows(<Setup />);
 
     expect(discovery.register).toHaveBeenCalledTimes(1);
     expect(checked()).toBe(true);
@@ -447,6 +440,7 @@ describe("cloud onboarding discovery", () => {
   });
 
   it("auto-connects a computer under the account that discovered it", async () => {
+    using _environment = setup();
     discovery.accountIds = ["first-account", "second-account"];
     discovery.accountStates = new Map([
       ["first-account", { ...discovery.state!, environments: new Map() }],
@@ -454,7 +448,7 @@ describe("cloud onboarding discovery", () => {
     ]);
     discovery.listEnvironments.mockResolvedValue(linkedMachines);
     const onChange = vi.fn();
-    await render(
+    await using _screen = await renderRows(
       <CloudEnvironmentConnectRows
         primaryEnvironmentId={null}
         savedEnvironments={[]}
@@ -475,10 +469,11 @@ describe("cloud onboarding discovery", () => {
   });
 
   it("shows a newly linked computer without remounting and stops polling once found", async () => {
+    using _environment = setup();
     discovery.listEnvironments
       .mockResolvedValueOnce(new Map())
       .mockResolvedValueOnce(linkedMachines);
-    await mount();
+    await using _screen = await mount();
     expect(text()).toBe("Waiting for your computer to connect.");
 
     await advance(5_000);
@@ -490,10 +485,11 @@ describe("cloud onboarding discovery", () => {
   });
 
   it("keeps a discovered computer visible when it is added to the browser", async () => {
+    using _environment = setup();
     discovery.listEnvironments.mockResolvedValue(linkedMachines);
-    await mount();
+    await using screen = await mount();
     expect(button()?.textContent).toBe("Add");
-    await render(
+    await screen.rerender(
       <CloudEnvironmentConnectRows
         primaryEnvironmentId={null}
         savedEnvironments={[
@@ -513,8 +509,9 @@ describe("cloud onboarding discovery", () => {
   });
 
   it("waits while hidden and refreshes immediately when visible again", async () => {
+    using _environment = setup();
     visibility = "hidden";
-    await mount();
+    await using _screen = await mount();
     await advance(30_000);
     expect(discovery.listEnvironments).not.toHaveBeenCalled();
 
@@ -528,12 +525,13 @@ describe("cloud onboarding discovery", () => {
   });
 
   it("does not overlap a slow refresh or restart polling after unmount", async () => {
+    using _environment = setup();
     let resolveRefresh!: (environments: DiscoveredEnvironments) => void;
     const pending = new Promise<DiscoveredEnvironments>((resolve) => {
       resolveRefresh = resolve;
     });
     discovery.listEnvironments.mockResolvedValueOnce(new Map()).mockReturnValueOnce(pending);
-    await mount();
+    await using screen = await mount();
     await advance(5_000);
     expect(text()).toBe("Waiting for your computer to connect.");
 
@@ -542,15 +540,15 @@ describe("cloud onboarding discovery", () => {
     await advance(30_000);
     expect(discovery.listEnvironments).toHaveBeenCalledTimes(2);
 
-    await act(async () => root!.unmount());
-    root = null;
+    await screen.unmount();
     await act(async () => resolveRefresh(new Map()));
     await advance(30_000);
     expect(discovery.listEnvironments).toHaveBeenCalledTimes(2);
   });
 
   it("pauses while offline and resumes when discovery is online", async () => {
-    await mount();
+    using _environment = setup();
+    await using _screen = await mount();
     await act(async () => publish({ ...discovery.state!, offline: true }));
     await advance(30_000);
     expect(discovery.listEnvironments).toHaveBeenCalledTimes(1);
@@ -561,7 +559,8 @@ describe("cloud onboarding discovery", () => {
   });
 
   it("does not add polling to other cloud lists", async () => {
-    await mount(false);
+    using _environment = setup();
+    await using _screen = await mount(false);
     await advance(30_000);
     expect(discovery.listEnvironments).toHaveBeenCalledTimes(1);
   });

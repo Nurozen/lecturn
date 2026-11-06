@@ -1,8 +1,9 @@
 import { RegistryProvider } from "@effect/atom-react";
 import type { EnvironmentId, SquireId, SquireRoomId } from "@lecturn/contracts";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { flushSync } from "react-dom";
+import { expect, it, vi } from "vite-plus/test";
+
+import { act, render } from "../../../../test/render";
 
 vi.mock(import("../../../state/squires"), async (original) => {
   const actual = await original();
@@ -34,20 +35,6 @@ vi.mock(import("../../../state/use-atom-command"), async (original) => ({
 
 import { SquireRoomComposer } from "./SquireRoomComposer";
 
-let root: Root;
-let container: HTMLDivElement;
-
-beforeEach(() => {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-});
-
 const setTextareaValue = (element: HTMLTextAreaElement, value: string, caret: number) => {
   Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
     element,
@@ -58,28 +45,27 @@ const setTextareaValue = (element: HTMLTextAreaElement, value: string, caret: nu
 };
 
 it("keeps the caret after a picked mention, so the next keystroke lands there", async () => {
-  await act(async () =>
-    root.render(
-      <RegistryProvider>
-        <SquireRoomComposer
-          environmentId={"env" as EnvironmentId}
-          roomId={"room" as SquireRoomId}
-          members={[
-            { squireId: "research" as SquireId, name: "Research" },
-            { squireId: "release" as SquireId, name: "Release" },
-          ]}
-          lead={null}
-          closed={false}
-        />
-      </RegistryProvider>,
-    ),
+  await using screen = await render(
+    <RegistryProvider>
+      <SquireRoomComposer
+        environmentId={"env" as EnvironmentId}
+        roomId={"room" as SquireRoomId}
+        members={[
+          { squireId: "research" as SquireId, name: "Research" },
+          { squireId: "release" as SquireId, name: "Release" },
+        ]}
+        lead={null}
+        closed={false}
+      />
+    </RegistryProvider>,
   );
-  const textarea = container.querySelector("textarea")!;
+  const textarea = screen.container.querySelector("textarea")!;
   textarea.focus();
   await act(async () => setTextareaValue(textarea, "@Res can you check", 4));
-  expect(container.querySelector('[role="listbox"]')).not.toBeNull();
+  expect(screen.container.querySelector('[role="listbox"]')).not.toBeNull();
 
-  act(() => {
+  // flushSync commits the pick within this task; act() would yield to a later task first.
+  flushSync(() => {
     textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   });
 
@@ -91,23 +77,21 @@ it("keeps the caret after a picked mention, so the next keystroke lands there", 
 });
 
 it("shows each candidate's still face beside its name, the Lead with its crest", async () => {
-  await act(async () =>
-    root.render(
-      <RegistryProvider>
-        <SquireRoomComposer
-          environmentId={"env" as EnvironmentId}
-          roomId={"room" as SquireRoomId}
-          members={[{ squireId: "research" as SquireId, name: "Research" }]}
-          lead={{ squireId: "lead" as SquireId, name: "Lead" }}
-          closed={false}
-        />
-      </RegistryProvider>,
-    ),
+  await using screen = await render(
+    <RegistryProvider>
+      <SquireRoomComposer
+        environmentId={"env" as EnvironmentId}
+        roomId={"room" as SquireRoomId}
+        members={[{ squireId: "research" as SquireId, name: "Research" }]}
+        lead={{ squireId: "lead" as SquireId, name: "Lead" }}
+        closed={false}
+      />
+    </RegistryProvider>,
   );
-  const textarea = container.querySelector("textarea")!;
+  const textarea = screen.container.querySelector("textarea")!;
   textarea.focus();
   await act(async () => setTextareaValue(textarea, "@", 1));
-  const options = [...container.querySelectorAll<HTMLElement>('[role="option"]')];
+  const options = [...screen.container.querySelectorAll<HTMLElement>('[role="option"]')];
   const faces = options.map((option) => ({
     name: option.querySelector(".truncate")?.textContent,
     portrait: option.querySelector<HTMLImageElement>('[data-slot="squire-portrait"]')?.src,
@@ -119,6 +103,6 @@ it("shows each candidate's still face beside its name, the Lead with its crest",
   ]);
   expect(faces[0]!.portrait).toContain("male-down-gold");
   expect(faces[1]!.portrait).toContain("female-down-sage");
-  const listbox = container.querySelector<HTMLElement>('[role="listbox"]')!;
+  const listbox = screen.container.querySelector<HTMLElement>('[role="listbox"]')!;
   expect(listbox.getAnimations({ subtree: true })).toEqual([]);
 });

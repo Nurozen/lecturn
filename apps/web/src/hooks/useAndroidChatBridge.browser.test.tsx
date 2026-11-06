@@ -1,11 +1,9 @@
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
+
+import { act, render } from "../../test/render";
 import { useAndroidChatBridge } from "./useAndroidChatBridge";
 import type { AndroidHost } from "../lib/androidHostAccess";
 
-let root: Root;
-let container: HTMLDivElement;
 // The real window: the hook listens on it, and the host bridge lives on it.
 const target = window as unknown as Window & {
   symbaHost?: AndroidHost;
@@ -23,7 +21,8 @@ function Chat({ scope, ready = true }: { scope: string; ready?: boolean }) {
   });
   return <output>{composerExpanded ? "expanded" : "collapsed"}</output>;
 }
-beforeEach(() => {
+// Fake timers, the host bridge and frame stubs live for one test; disposing restores them.
+function setup(): Disposable {
   vi.useFakeTimers();
   vi.clearAllMocks();
   publishChatWidget.mockReset().mockResolvedValue({ published: true });
@@ -39,28 +38,25 @@ beforeEach(() => {
   delete target.__lecturnComposeRequested;
   vi.stubGlobal("requestAnimationFrame", (callback: () => void) => setTimeout(callback, 16));
   vi.stubGlobal("cancelAnimationFrame", (handle: number) => clearTimeout(handle));
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  container = document.createElement("div");
-  root = createRoot(container);
-});
-afterEach(async () => {
-  await act(async () => root.unmount());
-  delete target.symbaHost;
-  delete target.__lecturnComposeRequested;
-  vi.useRealTimers();
-  vi.unstubAllGlobals();
-});
+  return {
+    [Symbol.dispose]() {
+      delete target.symbaHost;
+      delete target.__lecturnComposeRequested;
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    },
+  };
+}
 it("clears the old environment/thread before publishing the newly selected conversation and clears on unmount", async () => {
-  await act(async () => {
-    root.render(<Chat scope="a/thread" />);
-  });
+  using _env = setup();
+  await using screen = await render(<Chat scope="a/thread" />, { router: false });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1500);
   });
   expect(publishChatWidget).toHaveBeenLastCalledWith(
     expect.objectContaining({ threadId: "a/thread" }),
   );
-  await act(async () => root.render(<Chat scope="b/thread" />));
+  await screen.rerender(<Chat scope="b/thread" />);
   expect(publishChatWidget).toHaveBeenLastCalledWith(null);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1500);
@@ -68,19 +64,18 @@ it("clears the old environment/thread before publishing the newly selected conve
   expect(publishChatWidget).toHaveBeenLastCalledWith(
     expect.objectContaining({ threadId: "b/thread" }),
   );
-  await act(async () => root.unmount());
+  await screen.unmount();
   expect(publishChatWidget).toHaveBeenLastCalledWith(null);
 });
 it("consumes an early compose request and later events by focusing only", async () => {
+  using _env = setup();
   target.__lecturnComposeRequested = true;
-  await act(async () => {
-    root.render(<Chat scope="a/thread" />);
-  });
+  await using screen = await render(<Chat scope="a/thread" />, { router: false });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(16);
   });
   expect(focusComposer).toHaveBeenCalledTimes(1);
-  expect(container.textContent).toBe("expanded");
+  expect(screen.container.textContent).toBe("expanded");
   expect(target.__lecturnComposeRequested).toBe(false);
   await act(async () => {
     target.dispatchEvent(new Event("lecturn:compose"));
@@ -89,7 +84,7 @@ it("consumes an early compose request and later events by focusing only", async 
     await vi.advanceTimersByTimeAsync(16);
   });
   expect(focusComposer).toHaveBeenCalledTimes(2);
-  await act(async () => root.unmount());
+  await screen.unmount();
   await act(async () => {
     target.dispatchEvent(new Event("lecturn:compose"));
   });
@@ -99,10 +94,9 @@ it("consumes an early compose request and later events by focusing only", async 
   expect(focusComposer).toHaveBeenCalledTimes(2);
 });
 it("supports older hosts without a widget publisher", async () => {
+  using _env = setup();
   delete target.symbaHost?.publishChatWidget;
-  await act(async () => {
-    root.render(<Chat scope="a/thread" />);
-  });
+  await using _screen = await render(<Chat scope="a/thread" />, { router: false });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10000);
   });
@@ -110,16 +104,15 @@ it("supports older hosts without a widget publisher", async () => {
 });
 
 it("clears when sign-out removes the environment and waits for a ready composer before consuming Reply", async () => {
+  using _env = setup();
   target.__lecturnComposeRequested = true;
-  await act(async () => {
-    root.render(<Chat scope="a/thread" ready={false} />);
-  });
+  await using screen = await render(<Chat scope="a/thread" ready={false} />, { router: false });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(16);
   });
   expect(focusComposer).not.toHaveBeenCalled();
   expect(target.__lecturnComposeRequested).toBe(true);
-  await act(async () => root.render(<Chat scope="a/thread" />));
+  await screen.rerender(<Chat scope="a/thread" />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1500);
   });
@@ -127,7 +120,7 @@ it("clears when sign-out removes the environment and waits for a ready composer 
   expect(publishChatWidget).toHaveBeenLastCalledWith(
     expect.objectContaining({ threadId: "a/thread" }),
   );
-  await act(async () => root.render(<Chat scope="a/thread" ready={false} />));
+  await screen.rerender(<Chat scope="a/thread" ready={false} />);
   expect(publishChatWidget).toHaveBeenLastCalledWith(null);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10000);
@@ -136,10 +129,9 @@ it("clears when sign-out removes the environment and waits for a ready composer 
 });
 
 it("recovers exhausted native rejections on resume without a new chat render", async () => {
+  using _env = setup();
   publishChatWidget.mockResolvedValue({ published: false });
-  await act(async () => {
-    root.render(<Chat scope="a/thread" />);
-  });
+  await using _screen = await render(<Chat scope="a/thread" />, { router: false });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10000);
   });
@@ -170,6 +162,7 @@ it("recovers exhausted native rejections on resume without a new chat render", a
 it.each([true, false])(
   "pagehide stays cleared across a late receipt and React update (revoked=%s)",
   async (revoked) => {
+    using _env = setup();
     let nativeSnapshot: Parameters<NonNullable<AndroidHost["publishChatWidget"]>>[0] = null;
     let acknowledge: (value: { published: boolean }) => void = () => undefined;
     let pending = true;
@@ -183,9 +176,7 @@ it.each([true, false])(
       }
       return Promise.resolve({ published: true });
     });
-    await act(async () => {
-      root.render(<Chat scope="a/thread" />);
-    });
+    await using screen = await render(<Chat scope="a/thread" />, { router: false });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1500);
     });
@@ -194,9 +185,7 @@ it.each([true, false])(
       target.dispatchEvent(new Event("pagehide"));
     });
     expect(nativeSnapshot).toBeNull();
-    await act(async () => {
-      root.render(<Chat scope="a/thread" ready={!revoked} />);
-    });
+    await screen.rerender(<Chat scope="a/thread" ready={!revoked} />);
     await act(async () => {
       acknowledge({ published: true });
       target.dispatchEvent(new Event("lecturn:chat-visible"));

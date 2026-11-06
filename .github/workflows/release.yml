@@ -272,6 +272,8 @@ jobs:
       - name: Typecheck
         run: vp run typecheck
 
+  # Keep tests on their own runners, using the same package split and server
+  # shards as CI (test, test_web, test_server in ci.yml). Keep the two in sync.
   test_packages:
     name: Release package tests
     needs: [preflight]
@@ -305,6 +307,8 @@ jobs:
       - name: Test
         run: vp run --parallel --concurrency-limit 4 --filter '!lecturn' --filter '!@lecturn/monorepo' --filter '!@lecturn/web' test
 
+  # Web browser tests time out when they share a runner with the other package
+  # suites: Chromium gets too little CPU and diff workers miss their 10s start budget.
   test_web:
     name: Release web tests
     needs: [preflight]
