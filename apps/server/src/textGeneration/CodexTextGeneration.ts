@@ -265,6 +265,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           env: input.env,
           cwd: input.cwd,
           shell: spawnCommand.shell,
+          forceKillAfter: "1 second",
         }),
       );
       const [stdout, , exitCode] = yield* Effect.all(
@@ -443,6 +444,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           stdin: {
             stream: Stream.encodeText(Stream.make(prompt)),
           },
+          forceKillAfter: "1 second",
         });
 
         const child = yield* commandSpawner
@@ -535,33 +537,32 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
   // missing login reaches the caller in words.
   const generateSquireTurnSummary: NonNullable<
     TextGeneration.TextGeneration["Service"]["generateSquireTurnSummary"]
-  > = (input) =>
-    Effect.gen(function* () {
-      const operation = "generateSquireTurnSummary";
-      if (squireHome === undefined) {
-        return yield* new TextGenerationError({
-          operation,
-          detail: "Squire summaries need the instance's Squire Codex home.",
-        });
-      }
-      const launch = yield* resolveLaunch(operation);
-      const squireLaunch = yield* squireHome.prepare(launch).pipe(
-        Effect.mapError(
-          (error) =>
-            new TextGenerationError({
-              operation,
-              detail:
-                error._tag === "CodexSquireLoginError"
-                  ? error.message
-                  : "Could not prepare the Squire Codex home.",
-            }),
-        ),
-      );
-      return yield* TextGenerationOperations.squireTurnSummaryFromRunner(
-        "CodexTextGeneration",
-        makeRunCodexJson(() => Effect.succeed({ ...squireLaunch, managed: launch.managed })),
-      )(input);
-    }).pipe(Effect.scoped);
+  > = Effect.fn("CodexTextGeneration.generateSquireTurnSummary")(function* (input) {
+    const operation = "generateSquireTurnSummary";
+    if (squireHome === undefined) {
+      return yield* new TextGenerationError({
+        operation,
+        detail: "Squire summaries need the instance's Squire Codex home.",
+      });
+    }
+    const launch = yield* resolveLaunch(operation);
+    const squireLaunch = yield* squireHome.prepare(launch).pipe(
+      Effect.mapError(
+        (error) =>
+          new TextGenerationError({
+            operation,
+            detail:
+              error._tag === "CodexSquireLoginError"
+                ? error.message
+                : "Could not prepare the Squire Codex home.",
+          }),
+      ),
+    );
+    return yield* TextGenerationOperations.squireTurnSummaryFromRunner(
+      "CodexTextGeneration",
+      makeRunCodexJson(() => Effect.succeed({ ...squireLaunch, managed: launch.managed })),
+    )(input);
+  }, Effect.scoped);
 
   const checkDecisionWriter: NonNullable<
     TextGeneration.TextGeneration["Service"]["checkDecisionWriter"]

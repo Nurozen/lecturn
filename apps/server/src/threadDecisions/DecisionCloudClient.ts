@@ -89,23 +89,24 @@ export const make = Effect.gen(function* () {
   const fundingMutex = sharedFunding.mutex;
   const changes = yield* PubSub.sliding<DecisionFundingStatusResult>({ capacity: 16 });
   let observed: DecisionFundingStatusResult | undefined;
-  const observe = (status: DecisionFundingStatusResult) =>
-    Effect.gen(function* () {
-      const previous = observed;
-      observed = status;
-      if (
-        status.state === "active" &&
-        status.eligible &&
-        (!previous ||
-          previous.state !== "active" ||
-          !previous.eligible ||
-          previous.generation !== status.generation ||
-          previous.allowance?.windowStart !== status.allowance?.windowStart ||
-          (status.allowance?.remainingInputTokens ?? 0) >
-            (previous.allowance?.remainingInputTokens ?? 0))
-      )
-        yield* PubSub.publish(changes, status);
-    });
+  const observe = Effect.fn("DecisionCloudClient.observe")(function* (
+    status: DecisionFundingStatusResult,
+  ) {
+    const previous = observed;
+    observed = status;
+    if (
+      status.state === "active" &&
+      status.eligible &&
+      (!previous ||
+        previous.state !== "active" ||
+        !previous.eligible ||
+        previous.generation !== status.generation ||
+        previous.allowance?.windowStart !== status.allowance?.windowStart ||
+        (status.allowance?.remainingInputTokens ?? 0) >
+          (previous.allowance?.remainingInputTokens ?? 0))
+    )
+      yield* PubSub.publish(changes, status);
+  });
   const empty: DecisionFundingStatusResult = {
     environmentId,
     state: "unfunded",

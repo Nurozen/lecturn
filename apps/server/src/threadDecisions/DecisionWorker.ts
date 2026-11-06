@@ -122,166 +122,162 @@ interface ValidatedAction {
   readonly evidence: ReadonlyArray<DecisionEvidence>;
   readonly key: string;
 }
-export const validateActions = (
+export const validateActions = Effect.fn("DecisionWorker.validateActions")(function* (
   output: DecisionWriterOutputAny,
   input: Omit<DecisionWriterInput, "modelSelection">,
   primaryId: string,
-) =>
-  Effect.gen(function* () {
-    if (!output.complete && output.unresolvedCandidateIds.length === 0)
-      return yield* fail(
-        "invalid",
-        "An incomplete writer response must identify the candidates that still need work.",
-      );
-    const candidates = new Map(input.candidates.map((candidate) => [candidate.id, candidate]));
-    const anchors = new Map(input.evidence.map((anchor) => [anchor.id, anchor]));
-    const existing = new Map(input.existingDecisions.map((note) => [note.id, note]));
-    const mentioned = new Set<string>(output.unresolvedCandidateIds);
-    const actions: ValidatedAction[] = [];
-    for (const unresolved of output.unresolvedCandidateIds)
-      if (!candidates.has(unresolved))
-        return yield* fail("invalid", "The writer referenced an unknown unresolved candidate.");
-    for (const action of output.actions) {
-      const candidate = candidates.get(action.candidateId);
-      if (!candidate) return yield* fail("invalid", "The writer referenced an unknown candidate.");
-      mentioned.add(action.candidateId);
-      const evidence: DecisionEvidence[] = [];
-      if ("evidence" in action) {
-        for (const reference of action.evidence) {
-          const anchor = anchors.get(reference.evidenceId);
-          if (!anchor)
-            return yield* fail("invalid", "The writer referenced evidence outside its input.");
-          const resolved = resolveDecisionQuote(anchor.quote, reference.quote);
-          if (!resolved)
-            return yield* fail(
-              "invalid",
-              "A writer quotation is missing or ambiguous in its supplied evidence.",
-            );
-          evidence.push({
-            ...anchor,
-            quote: reference.quote,
-            start: anchor.start + resolved.start,
-            end: anchor.start + resolved.end,
-            prefix: `${anchor.prefix}${anchor.quote.slice(0, resolved.start)}`.slice(-80),
-            suffix: `${anchor.quote.slice(resolved.end)}${anchor.suffix}`.slice(0, 80),
-          });
-        }
-        if (
-          !action.evidence.some(
-            (reference) =>
-              candidate.evidenceIds.includes(reference.evidenceId) &&
-              anchors.get(reference.evidenceId)?.messageId === primaryId,
-          )
-        )
+) {
+  if (!output.complete && output.unresolvedCandidateIds.length === 0)
+    return yield* fail(
+      "invalid",
+      "An incomplete writer response must identify the candidates that still need work.",
+    );
+  const candidates = new Map(input.candidates.map((candidate) => [candidate.id, candidate]));
+  const anchors = new Map(input.evidence.map((anchor) => [anchor.id, anchor]));
+  const existing = new Map(input.existingDecisions.map((note) => [note.id, note]));
+  const mentioned = new Set<string>(output.unresolvedCandidateIds);
+  const actions: ValidatedAction[] = [];
+  for (const unresolved of output.unresolvedCandidateIds)
+    if (!candidates.has(unresolved))
+      return yield* fail("invalid", "The writer referenced an unknown unresolved candidate.");
+  for (const action of output.actions) {
+    const candidate = candidates.get(action.candidateId);
+    if (!candidate) return yield* fail("invalid", "The writer referenced an unknown candidate.");
+    mentioned.add(action.candidateId);
+    const evidence: DecisionEvidence[] = [];
+    if ("evidence" in action) {
+      for (const reference of action.evidence) {
+        const anchor = anchors.get(reference.evidenceId);
+        if (!anchor)
+          return yield* fail("invalid", "The writer referenced evidence outside its input.");
+        const resolved = resolveDecisionQuote(anchor.quote, reference.quote);
+        if (!resolved)
           return yield* fail(
             "invalid",
-            "Each decision must cite its new target, not only old supporting context.",
+            "A writer quotation is missing or ambiguous in its supplied evidence.",
           );
+        evidence.push({
+          ...anchor,
+          quote: reference.quote,
+          start: anchor.start + resolved.start,
+          end: anchor.start + resolved.end,
+          prefix: `${anchor.prefix}${anchor.quote.slice(0, resolved.start)}`.slice(-80),
+          suffix: `${anchor.quote.slice(resolved.end)}${anchor.suffix}`.slice(0, 80),
+        });
       }
       if (
-        action.action === "duplicate" ||
-        action.action === "duplicate_occurrence" ||
-        action.action === "propose_replacement"
-      ) {
-        const id =
-          action.action === "duplicate" || action.action === "duplicate_occurrence"
-            ? action.existingId
-            : action.predecessorId;
-        if (existing.get(id)?.revision !== action.expectedRevision)
-          return yield* fail(
-            "invalid",
-            "The writer referenced an existing decision or revision outside its input.",
-          );
-      }
-      if (
-        action.action === "create" ||
-        action.action === "propose_replacement" ||
-        action.action === "duplicate_occurrence"
-      ) {
-        const roles = new Set(evidence.map((anchor) => anchor.messageRole));
-        if (
-          (action.attribution === "user-directed" && !roles.has("user")) ||
-          (action.attribution === "agent-chosen" && !roles.has("assistant")) ||
-          (action.attribution === "user-accepted" &&
-            (!roles.has("user") || !roles.has("assistant")))
+        !action.evidence.some(
+          (reference) =>
+            candidate.evidenceIds.includes(reference.evidenceId) &&
+            anchors.get(reference.evidenceId)?.messageId === primaryId,
         )
-          return yield* fail(
-            "invalid",
-            "The claimed attribution lacks evidence from the required speaker.",
-          );
-      }
-      if ("occurrenceEvidenceId" in action) {
-        const occurrence = anchors.get(action.occurrenceEvidenceId);
-        if (
-          !occurrence ||
-          occurrence.messageId !== primaryId ||
-          !candidate.evidenceIds.includes(action.occurrenceEvidenceId)
-        )
-          return yield* fail(
-            "invalid",
-            "The occurrence must identify this candidate's new live target.",
-          );
-        if (
-          (action.attribution === "agent-chosen" && occurrence.messageRole !== "assistant") ||
-          (action.attribution !== "agent-chosen" && occurrence.messageRole !== "user")
-        )
-          return yield* fail(
-            "invalid",
-            "The occurrence speaker does not support its own attribution.",
-          );
-        if (action.acceptanceEvidence) {
-          const proposal = anchors.get(action.acceptanceEvidence.proposalEvidenceId);
-          const acceptance = anchors.get(action.acceptanceEvidence.acceptanceEvidenceId);
-          if (
-            !proposal ||
-            !acceptance ||
-            proposal.messageRole !== "assistant" ||
-            acceptance.messageRole !== "user" ||
-            proposal.occurrence >= acceptance.occurrence ||
-            proposal.threadId !== acceptance.threadId
-          )
-            return yield* fail(
-              "invalid",
-              "Acceptance requires its earlier proposal and exact later user acceptance.",
-            );
-        }
-        const origins = input.contextualOrigins ?? [];
-        if (
-          action.sourceLineageIds.some((id) => !origins.some((origin) => origin.evidenceId === id))
-        )
-          return yield* fail("invalid", "The writer referenced unknown original source lineage.");
-        const copiedOrigins = origins.filter(
-          (origin) =>
-            origin.quote !== null &&
-            evidence.some((e) => e.messageId === primaryId && origin.quote!.includes(e.quote)),
-        );
-        if (copiedOrigins.some((origin) => !action.sourceLineageIds.includes(origin.evidenceId)))
-          return yield* fail(
-            "invalid",
-            "A copied source occurrence must retain its original lineage.",
-          );
-        const copied = copiedOrigins.length > 0;
-        if (
-          copied &&
-          (occurrence.messageRole === "assistant" || action.liveChoice !== "explicit-reaffirmation")
-        )
-          return yield* fail(
-            "invalid",
-            "Repeating supplied source text is not a new original choice.",
-          );
-      }
-      actions.push({ action, evidence, key: decisionFingerprint([action]) });
-    }
-    for (const candidate of input.candidates)
-      if (!mentioned.has(candidate.id))
+      )
         return yield* fail(
           "invalid",
-          "The writer omitted a candidate without marking it unresolved.",
+          "Each decision must cite its new target, not only old supporting context.",
         );
-    if (output.complete && output.actions.some((action) => action.action === "needs_context"))
-      return yield* fail("invalid", "The writer cannot mark a context request complete.");
-    return actions;
-  });
+    }
+    if (
+      action.action === "duplicate" ||
+      action.action === "duplicate_occurrence" ||
+      action.action === "propose_replacement"
+    ) {
+      const id =
+        action.action === "duplicate" || action.action === "duplicate_occurrence"
+          ? action.existingId
+          : action.predecessorId;
+      if (existing.get(id)?.revision !== action.expectedRevision)
+        return yield* fail(
+          "invalid",
+          "The writer referenced an existing decision or revision outside its input.",
+        );
+    }
+    if (
+      action.action === "create" ||
+      action.action === "propose_replacement" ||
+      action.action === "duplicate_occurrence"
+    ) {
+      const roles = new Set(evidence.map((anchor) => anchor.messageRole));
+      if (
+        (action.attribution === "user-directed" && !roles.has("user")) ||
+        (action.attribution === "agent-chosen" && !roles.has("assistant")) ||
+        (action.attribution === "user-accepted" && (!roles.has("user") || !roles.has("assistant")))
+      )
+        return yield* fail(
+          "invalid",
+          "The claimed attribution lacks evidence from the required speaker.",
+        );
+    }
+    if ("occurrenceEvidenceId" in action) {
+      const occurrence = anchors.get(action.occurrenceEvidenceId);
+      if (
+        !occurrence ||
+        occurrence.messageId !== primaryId ||
+        !candidate.evidenceIds.includes(action.occurrenceEvidenceId)
+      )
+        return yield* fail(
+          "invalid",
+          "The occurrence must identify this candidate's new live target.",
+        );
+      if (
+        (action.attribution === "agent-chosen" && occurrence.messageRole !== "assistant") ||
+        (action.attribution !== "agent-chosen" && occurrence.messageRole !== "user")
+      )
+        return yield* fail(
+          "invalid",
+          "The occurrence speaker does not support its own attribution.",
+        );
+      if (action.acceptanceEvidence) {
+        const proposal = anchors.get(action.acceptanceEvidence.proposalEvidenceId);
+        const acceptance = anchors.get(action.acceptanceEvidence.acceptanceEvidenceId);
+        if (
+          !proposal ||
+          !acceptance ||
+          proposal.messageRole !== "assistant" ||
+          acceptance.messageRole !== "user" ||
+          proposal.occurrence >= acceptance.occurrence ||
+          proposal.threadId !== acceptance.threadId
+        )
+          return yield* fail(
+            "invalid",
+            "Acceptance requires its earlier proposal and exact later user acceptance.",
+          );
+      }
+      const origins = input.contextualOrigins ?? [];
+      if (action.sourceLineageIds.some((id) => !origins.some((origin) => origin.evidenceId === id)))
+        return yield* fail("invalid", "The writer referenced unknown original source lineage.");
+      const copiedOrigins = origins.filter(
+        (origin) =>
+          origin.quote !== null &&
+          evidence.some((e) => e.messageId === primaryId && origin.quote!.includes(e.quote)),
+      );
+      if (copiedOrigins.some((origin) => !action.sourceLineageIds.includes(origin.evidenceId)))
+        return yield* fail(
+          "invalid",
+          "A copied source occurrence must retain its original lineage.",
+        );
+      const copied = copiedOrigins.length > 0;
+      if (
+        copied &&
+        (occurrence.messageRole === "assistant" || action.liveChoice !== "explicit-reaffirmation")
+      )
+        return yield* fail(
+          "invalid",
+          "Repeating supplied source text is not a new original choice.",
+        );
+    }
+    actions.push({ action, evidence, key: decisionFingerprint([action]) });
+  }
+  for (const candidate of input.candidates)
+    if (!mentioned.has(candidate.id))
+      return yield* fail(
+        "invalid",
+        "The writer omitted a candidate without marking it unresolved.",
+      );
+  if (output.complete && output.actions.some((action) => action.action === "needs_context"))
+    return yield* fail("invalid", "The writer cannot mark a context request complete.");
+  return actions;
+});
 
 export class DecisionWorker extends Context.Service<
   DecisionWorker,

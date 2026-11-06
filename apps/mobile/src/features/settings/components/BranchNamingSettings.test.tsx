@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import type { BranchNamingMode } from "@lecturn/contracts";
 import type { ReactNode } from "react";
 import { act } from "react";

@@ -170,6 +170,8 @@ export class ProcessRunner extends Context.Service<
 >()("lecturn/processRunner") {}
 
 const DEFAULT_TIMEOUT = "60 seconds";
+// Keep SIGTERM-ignoring helpers from blocking timeouts or graceful shutdown.
+const FORCE_KILL_AFTER = "1 second";
 const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 
 export { isWindowsCommandNotFound } from "@lecturn/provider-core/server/snapshotProbe";
@@ -402,6 +404,7 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
         ...((input.spawnCwd ?? input.cwd) ? { cwd: input.spawnCwd ?? input.cwd } : {}),
         ...envOptions,
         shell: spawnCommand.shell,
+        forceKillAfter: FORCE_KILL_AFTER,
       }),
     )
     .pipe(

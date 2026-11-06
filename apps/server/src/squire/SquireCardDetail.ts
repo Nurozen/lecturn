@@ -324,8 +324,8 @@ export const makeSquireCardDetail = (deps: {
   const { repository, projections } = deps;
 
   /** The run's last assistant message; none for a PR-only trigger. */
-  const triggerMessage = (threadId: ThreadId, trigger: SquireCardTrigger) =>
-    Effect.gen(function* () {
+  const triggerMessage = Effect.fn("SquireCardDetail.triggerMessage")(
+    function* (threadId: ThreadId, trigger: SquireCardTrigger) {
       if (trigger.triggerMessageId !== undefined || trigger.runId === undefined) {
         return Option.none<{ readonly id: MessageId; readonly text: string }>();
       }
@@ -335,58 +335,61 @@ export const makeSquireCardDetail = (deps: {
       });
       const message = messages.findLast((candidate) => candidate.text.trim().length > 0);
       return Option.fromNullishOr(message);
-    }).pipe(Effect.orElseSucceed(() => Option.none()));
+    },
+    Effect.orElseSucceed(() => Option.none()),
+  );
 
   /**
    * An overlap thread's latest moment and its PR and CI moments, named by the
    * thread, so the card shows where each stands. Only the PR the overlap names
    * counts: an earlier PR merged or closed before this change set began.
    */
-  const threadMoments = (threadId: ThreadId, pullRequest: number | undefined) =>
-    Effect.gen(function* () {
-      const rows = (yield* repository.listEvents({ statuses: EVENT_STATUSES, threadId })).filter(
-        (row) =>
-          row.kind !== "pull-request-changed" ||
-          Number(PR_STATE_KEY.exec(row.state_key)?.groups?.number) === pullRequest,
-      );
-      const shell = yield* projections.getThreadShell(threadId);
-      const currentHeads = headsOf(shell?.pullRequests ?? []).filter(
-        (head) => head.number === pullRequest,
-      );
-      const [latest] = squireTimeline(rows, { limit: 1, currentHeads });
-      const moments = squireTimeline(rows, { currentHeads, pullRequestsOnly: true });
-      const title = shell?.title.trim();
-      return [...moments, ...(latest === undefined ? [] : [latest])]
-        .filter(
-          (entry, index, all) =>
-            all.findIndex((other) => other.at === entry.at && other.text === entry.text) === index,
-        )
-        .map((entry) => ({ at: entry.at, text: title ? `${title}: ${entry.text}` : entry.text }));
-    });
+  const threadMoments = Effect.fn("SquireCardDetail.threadMoments")(function* (
+    threadId: ThreadId,
+    pullRequest: number | undefined,
+  ) {
+    const rows = (yield* repository.listEvents({ statuses: EVENT_STATUSES, threadId })).filter(
+      (row) =>
+        row.kind !== "pull-request-changed" ||
+        Number(PR_STATE_KEY.exec(row.state_key)?.groups?.number) === pullRequest,
+    );
+    const shell = yield* projections.getThreadShell(threadId);
+    const currentHeads = headsOf(shell?.pullRequests ?? []).filter(
+      (head) => head.number === pullRequest,
+    );
+    const [latest] = squireTimeline(rows, { limit: 1, currentHeads });
+    const moments = squireTimeline(rows, { currentHeads, pullRequestsOnly: true });
+    const title = shell?.title.trim();
+    return [...moments, ...(latest === undefined ? [] : [latest])]
+      .filter(
+        (entry, index, all) =>
+          all.findIndex((other) => other.at === entry.at && other.text === entry.text) === index,
+      )
+      .map((entry) => ({ at: entry.at, text: title ? `${title}: ${entry.text}` : entry.text }));
+  });
 
   /** A card without a target thread: its own log rows, and for an overlap each thread's latest. */
-  const ownTimeline = (row: SquireCardRow) =>
-    Effect.gen(function* () {
-      const rows = yield* repository.listCardLog({
-        cardId: row.id,
-        kinds: SQUIRE_CARD_LOG_KINDS,
-      });
-      const threads =
-        row.kind === "overlap"
-          ? Option.match(decodeOverlapThreads(row.payload_json), {
-              onNone: () => [],
-              onSome: (payload) =>
-                payload.threads.filter(
-                  (thread, index, all) =>
-                    all.findIndex((other) => other.threadId === thread.threadId) === index,
-                ),
-            })
-          : [];
-      const extra = yield* Effect.forEach(threads, (thread) =>
-        threadMoments(thread.threadId, thread.pullRequest),
-      );
-      return squireCardTimeline(row, rows, { extra: extra.flat() });
+  const ownTimeline = Effect.fn("SquireCardDetail.ownTimeline")(function* (row: SquireCardRow) {
+    const rows = yield* repository.listCardLog({
+      cardId: row.id,
+      kinds: SQUIRE_CARD_LOG_KINDS,
     });
+    const threads =
+      row.kind === "overlap"
+        ? Option.match(decodeOverlapThreads(row.payload_json), {
+            onNone: () => [],
+            onSome: (payload) =>
+              payload.threads.filter(
+                (thread, index, all) =>
+                  all.findIndex((other) => other.threadId === thread.threadId) === index,
+              ),
+          })
+        : [];
+    const extra = yield* Effect.forEach(threads, (thread) =>
+      threadMoments(thread.threadId, thread.pullRequest),
+    );
+    return squireCardTimeline(row, rows, { extra: extra.flat() });
+  });
 
   const detail = Effect.fn("SquireCardDetail.detail")(function* (
     row: SquireCardRow,

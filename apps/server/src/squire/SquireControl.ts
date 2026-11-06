@@ -266,140 +266,138 @@ const make = Effect.gen(function* () {
       }
     | SquireControlRefusal;
 
-  const check = (intent: SquireControlIntent) =>
-    Effect.gen(function* () {
-      const none = { widens: false, moves: [] as Array<never> };
-      switch (intent.action) {
-        case "pause":
-        case "resume": {
-          const row = yield* managed(intent.squireId);
-          if (Option.isNone(row)) return toOutdated("that Squire no longer exists");
-          const want = intent.action === "pause" ? "paused" : "active";
-          if (row.value.status === want) {
-            return toOutdated(`${row.value.name} is already ${want}`);
-          }
-          return {
-            ok: true as const,
-            ...none,
-            title: `${intent.action === "pause" ? "Pause" : "Resume"} ${row.value.name}`,
-            before: { status: row.value.status },
-          };
+  const check = Effect.fn("SquireControl.check")(function* (intent: SquireControlIntent) {
+    const none = { widens: false, moves: [] as Array<never> };
+    switch (intent.action) {
+      case "pause":
+      case "resume": {
+        const row = yield* managed(intent.squireId);
+        if (Option.isNone(row)) return toOutdated("that Squire no longer exists");
+        const want = intent.action === "pause" ? "paused" : "active";
+        if (row.value.status === want) {
+          return toOutdated(`${row.value.name} is already ${want}`);
         }
-        case "rescope": {
-          const row = yield* managed(intent.squireId);
-          if (Option.isNone(row)) return toOutdated("that Squire no longer exists");
-          const current = yield* grantsOf(row.value.id);
-          const next = intent.grants ?? [];
-          const same =
-            current.length === new Set(next.map(grantKey)).size &&
-            current.every((grant) => next.some((other) => grantKey(other) === grantKey(grant)));
-          if (same) return toOutdated(`${row.value.name}'s scope already matches`);
-          return {
-            ok: true as const,
-            ...none,
-            widens: rescopeWidens(current, next),
-            title: `Rescope ${row.value.name}`,
-            before: { grants: current },
-          };
-        }
-        case "forward": {
-          const card = Option.getOrUndefined(
-            yield* repository.getCard(intent.cardIds?.[0] ?? SquireCardId.make("-")),
-          );
-          if (card === undefined || card.status !== "open") {
-            return toOutdated("the item is no longer open");
-          }
-          if (card.target_thread_id === null) {
-            return toOutdated("only an item on a thread can be forwarded");
-          }
-          const to = yield* managed(intent.toSquireId);
-          if (Option.isNone(to)) return toOutdated("that Squire no longer exists");
-          if (card.owner_squire_id === to.value.id) {
-            return toOutdated(`the item is already ${to.value.name}'s`);
-          }
-          if (!(yield* scope.isTracked(to.value.id, card.target_thread_id))) {
-            return toOpen(`${to.value.name}'s scope does not cover that item's thread`);
-          }
-          // The Lead's own items stay raised by it; only their owner changes.
-          const squireId = card.squire_id === intent.leadId ? card.squire_id : to.value.id;
-          if (squireId !== card.squire_id && (yield* openSlotTaken(squireId, card))) {
-            return toOpen(
-              `${to.value.name} already has an open item for that thread; merge them instead`,
-            );
-          }
-          return {
-            ok: true as const,
-            widens: false,
-            title: `Forward "${card.title}" to ${to.value.name}`,
-            before: {
-              cards: [
-                { id: card.id, squireId: card.squire_id, ownerSquireId: card.owner_squire_id },
-              ],
-            },
-            moves: [{ card, squireId, ownerSquireId: to.value.id }],
-          };
-        }
-        case "merge": {
-          const ids = [...new Set(intent.cardIds ?? [])];
-          if (ids.length < 2) return toOutdated("merging needs two or more items");
-          const cards: Array<CardRow> = [];
-          for (const id of ids) {
-            const card = Option.getOrUndefined(yield* repository.getCard(id));
-            if (card === undefined || card.status !== "open") {
-              return toOutdated("an item is no longer open");
-            }
-            cards.push(card);
-          }
-          const [kept] = cards;
-          const duplicates =
-            kept!.target_thread_id !== null &&
-            cards.every(
-              (card) =>
-                card.target_thread_id === kept!.target_thread_id && card.kind === kept!.kind,
-            ) &&
-            new Set(cards.map((card) => card.squire_id)).size === cards.length;
-          if (!duplicates) {
-            return toOutdated(
-              "only duplicates merge: items of one kind on the same thread, each raised by a different Squire",
-            );
-          }
-          return {
-            ok: true as const,
-            widens: false,
-            title: `Merge ${cards.length} duplicate items into "${kept!.title}"`,
-            before: {
-              cards: cards.map((card) => ({
-                id: card.id,
-                squireId: card.squire_id,
-                ownerSquireId: card.owner_squire_id,
-              })),
-            },
-            moves: [],
-          };
-        }
+        return {
+          ok: true as const,
+          ...none,
+          title: `${intent.action === "pause" ? "Pause" : "Resume"} ${row.value.name}`,
+          before: { status: row.value.status },
+        };
       }
-    });
+      case "rescope": {
+        const row = yield* managed(intent.squireId);
+        if (Option.isNone(row)) return toOutdated("that Squire no longer exists");
+        const current = yield* grantsOf(row.value.id);
+        const next = intent.grants ?? [];
+        const same =
+          current.length === new Set(next.map(grantKey)).size &&
+          current.every((grant) => next.some((other) => grantKey(other) === grantKey(grant)));
+        if (same) return toOutdated(`${row.value.name}'s scope already matches`);
+        return {
+          ok: true as const,
+          ...none,
+          widens: rescopeWidens(current, next),
+          title: `Rescope ${row.value.name}`,
+          before: { grants: current },
+        };
+      }
+      case "forward": {
+        const card = Option.getOrUndefined(
+          yield* repository.getCard(intent.cardIds?.[0] ?? SquireCardId.make("-")),
+        );
+        if (card === undefined || card.status !== "open") {
+          return toOutdated("the item is no longer open");
+        }
+        if (card.target_thread_id === null) {
+          return toOutdated("only an item on a thread can be forwarded");
+        }
+        const to = yield* managed(intent.toSquireId);
+        if (Option.isNone(to)) return toOutdated("that Squire no longer exists");
+        if (card.owner_squire_id === to.value.id) {
+          return toOutdated(`the item is already ${to.value.name}'s`);
+        }
+        if (!(yield* scope.isTracked(to.value.id, card.target_thread_id))) {
+          return toOpen(`${to.value.name}'s scope does not cover that item's thread`);
+        }
+        // The Lead's own items stay raised by it; only their owner changes.
+        const squireId = card.squire_id === intent.leadId ? card.squire_id : to.value.id;
+        if (squireId !== card.squire_id && (yield* openSlotTaken(squireId, card))) {
+          return toOpen(
+            `${to.value.name} already has an open item for that thread; merge them instead`,
+          );
+        }
+        return {
+          ok: true as const,
+          widens: false,
+          title: `Forward "${card.title}" to ${to.value.name}`,
+          before: {
+            cards: [{ id: card.id, squireId: card.squire_id, ownerSquireId: card.owner_squire_id }],
+          },
+          moves: [{ card, squireId, ownerSquireId: to.value.id }],
+        };
+      }
+      case "merge": {
+        const ids = [...new Set(intent.cardIds ?? [])];
+        if (ids.length < 2) return toOutdated("merging needs two or more items");
+        const cards: Array<CardRow> = [];
+        for (const id of ids) {
+          const card = Option.getOrUndefined(yield* repository.getCard(id));
+          if (card === undefined || card.status !== "open") {
+            return toOutdated("an item is no longer open");
+          }
+          cards.push(card);
+        }
+        const [kept] = cards;
+        const duplicates =
+          kept!.target_thread_id !== null &&
+          cards.every(
+            (card) => card.target_thread_id === kept!.target_thread_id && card.kind === kept!.kind,
+          ) &&
+          new Set(cards.map((card) => card.squire_id)).size === cards.length;
+        if (!duplicates) {
+          return toOutdated(
+            "only duplicates merge: items of one kind on the same thread, each raised by a different Squire",
+          );
+        }
+        return {
+          ok: true as const,
+          widens: false,
+          title: `Merge ${cards.length} duplicate items into "${kept!.title}"`,
+          before: {
+            cards: cards.map((card) => ({
+              id: card.id,
+              squireId: card.squire_id,
+              ownerSquireId: card.owner_squire_id,
+            })),
+          },
+          moves: [],
+        };
+      }
+    }
+  });
 
   // ── Store mutations (inside a transaction, under the policy lock) ──
 
   /** Pauses as `SquireService.setStatus` does. Returns the Lead to wake. */
-  const pauseRows = (squireId: SquireId, now: string) =>
-    Effect.gen(function* () {
-      yield* repository.dropQueuedEvents(squireId);
-      let lead = Option.none<SquireId>();
-      for (const cardId of yield* repository.openHeldCards({ squireId, updatedAt: now })) {
-        const card = yield* repository.getCard(cardId);
-        if (Option.isNone(card)) continue;
-        const woken = yield* writeLeadItemEvent(repository, {
-          transition: "raised",
-          card: card.value,
-          now,
-        });
-        if (Option.isSome(woken)) lead = woken;
-      }
-      yield* repository.updateSquire({ id: squireId, patch: { status: "paused" }, updatedAt: now });
-      return lead;
-    });
+  const pauseRows = Effect.fn("SquireControl.pauseRows")(function* (
+    squireId: SquireId,
+    now: string,
+  ) {
+    yield* repository.dropQueuedEvents(squireId);
+    let lead = Option.none<SquireId>();
+    for (const cardId of yield* repository.openHeldCards({ squireId, updatedAt: now })) {
+      const card = yield* repository.getCard(cardId);
+      if (Option.isNone(card)) continue;
+      const woken = yield* writeLeadItemEvent(repository, {
+        transition: "raised",
+        card: card.value,
+        now,
+      });
+      if (Option.isSome(woken)) lead = woken;
+    }
+    yield* repository.updateSquire({ id: squireId, patch: { status: "paused" }, updatedAt: now });
+    return lead;
+  });
 
   const resumeRows = (squireId: SquireId, now: string) =>
     repository
@@ -407,32 +405,31 @@ const make = Effect.gen(function* () {
       .pipe(Effect.as(Option.none<SquireId>()));
 
   /** As `SquireService.update` replaces grants: kept grants keep their origin. */
-  const replaceGrants = (
+  const replaceGrants = Effect.fn("SquireControl.replaceGrants")(function* (
     squireId: SquireId,
     grants: ReadonlyArray<Grant & { readonly origin?: "granted" | "created" }>,
     now: string,
-  ) =>
-    Effect.gen(function* () {
-      const wanted = new Set(grants.map(grantKey));
-      for (const grant of yield* repository.listGrants(squireId)) {
-        if (!wanted.has(grantKey({ kind: grant.kind, targetId: grant.target_id }))) {
-          yield* repository.deleteGrant({ squireId, kind: grant.kind, targetId: grant.target_id });
-        }
+  ) {
+    const wanted = new Set(grants.map(grantKey));
+    for (const grant of yield* repository.listGrants(squireId)) {
+      if (!wanted.has(grantKey({ kind: grant.kind, targetId: grant.target_id }))) {
+        yield* repository.deleteGrant({ squireId, kind: grant.kind, targetId: grant.target_id });
       }
-      for (const grant of grants) {
-        yield* repository.insertGrant({
-          squire_id: squireId,
-          kind: grant.kind as SquireRepository.SquireGrantRow["kind"],
-          target_id: grant.targetId,
-          origin: grant.origin ?? "granted",
-          created_at: now,
-        });
-      }
-      yield* rules.disableOutOfScope(squireId);
-      const lead = yield* retireOutOfScope(repository, scope, { squireId, now });
-      yield* repository.updateSquire({ id: squireId, patch: {}, updatedAt: now });
-      return lead;
-    });
+    }
+    for (const grant of grants) {
+      yield* repository.insertGrant({
+        squire_id: squireId,
+        kind: grant.kind as SquireRepository.SquireGrantRow["kind"],
+        target_id: grant.targetId,
+        origin: grant.origin ?? "granted",
+        created_at: now,
+      });
+    }
+    yield* rules.disableOutOfScope(squireId);
+    const lead = yield* retireOutOfScope(repository, scope, { squireId, now });
+    yield* repository.updateSquire({ id: squireId, patch: {}, updatedAt: now });
+    return lead;
+  });
 
   const moveCard = (
     cardId: SquireCardId,
@@ -449,44 +446,43 @@ const make = Effect.gen(function* () {
         ),
       );
 
-  const mutate = (
+  const mutate = Effect.fn("SquireControl.mutate")(function* (
     intent: SquireControlIntent,
     checked: Extract<Checked, { readonly ok: true }>,
     now: string,
-  ) =>
-    Effect.gen(function* () {
-      switch (intent.action) {
-        case "pause":
-          return yield* pauseRows(intent.squireId!, now);
-        case "resume":
-          return yield* resumeRows(intent.squireId!, now);
-        case "rescope":
-          return yield* replaceGrants(intent.squireId!, intent.grants ?? [], now);
-        case "forward":
-          for (const move of checked.moves) {
-            yield* moveCard(
-              move.card.id,
-              { squire_id: move.squireId, owner_squire_id: move.ownerSquireId },
-              now,
-            );
+  ) {
+    switch (intent.action) {
+      case "pause":
+        return yield* pauseRows(intent.squireId!, now);
+      case "resume":
+        return yield* resumeRows(intent.squireId!, now);
+      case "rescope":
+        return yield* replaceGrants(intent.squireId!, intent.grants ?? [], now);
+      case "forward":
+        for (const move of checked.moves) {
+          yield* moveCard(
+            move.card.id,
+            { squire_id: move.squireId, owner_squire_id: move.ownerSquireId },
+            now,
+          );
+        }
+        return Option.none<SquireId>();
+      case "merge":
+        // The kept item stays open; each duplicate is superseded by it.
+        for (const cardId of (intent.cardIds ?? []).slice(1)) {
+          const moved = yield* repository.updateCard({
+            id: cardId,
+            fromStatuses: ["open"],
+            patch: { status: "outdated", resolution: "superseded", executes_at: null },
+            updatedAt: now,
+          });
+          if (Option.isNone(moved)) {
+            return yield* new CardMoved({ reason: "an item is no longer open" });
           }
-          return Option.none<SquireId>();
-        case "merge":
-          // The kept item stays open; each duplicate is superseded by it.
-          for (const cardId of (intent.cardIds ?? []).slice(1)) {
-            const moved = yield* repository.updateCard({
-              id: cardId,
-              fromStatuses: ["open"],
-              patch: { status: "outdated", resolution: "superseded", executes_at: null },
-              updatedAt: now,
-            });
-            if (Option.isNone(moved)) {
-              return yield* new CardMoved({ reason: "an item is no longer open" });
-            }
-          }
-          return Option.none<SquireId>();
-      }
-    });
+        }
+        return Option.none<SquireId>();
+    }
+  });
 
   /** The Lead's own Manage Squires level; `paused` is checked apart. */
   const manageLevel = (lead: SquireRepository.SquireRow) =>
@@ -566,53 +562,52 @@ const make = Effect.gen(function* () {
     );
 
   /** Accepting a Lead proposal creates exactly that Squire; `requestId` makes a retry the same one. */
-  const applyCreate = (
+  const applyCreate = Effect.fn("SquireControl.applyCreate")(function* (
     intent: SquireCreateIntent,
     options: {
       readonly executionKey: string;
       readonly now: string;
       readonly verb: SquireActionVerb;
     },
-  ) =>
-    Effect.gen(function* () {
-      if (Option.isSome(yield* repository.getExecution(options.executionKey))) return applied;
-      const created = yield* service
-        .create({ ...intent.input, requestId: intent.requestId })
-        .pipe(Effect.result);
-      if (Result.isFailure(created)) return toOpen(created.failure.message);
-      const lead = yield* repository.getLead;
-      const cardId = parseSquireActionCommandId(options.executionKey)?.cardId;
-      yield* repository.transaction(
-        Effect.gen(function* () {
-          if (Option.isSome(yield* repository.getExecution(options.executionKey))) return;
-          yield* repository.insertActionLog({
-            squire_id: Option.match(lead, {
-              onNone: () => created.success.id,
-              onSome: (row) => row.id,
-            }),
-            kind: "action.executed",
-            room_id: null,
-            post_id: null,
-            trigger_id: null,
-            task_id: null,
-            thread_id: null,
-            card_id: cardId === undefined ? null : SquireCardId.make(cardId),
-            event_id: null,
-            run_id: null,
-            invocation_key: null,
-            execution_key: options.executionKey,
-            data_json: encodeLogData({
-              action: "create_squire",
-              verb: options.verb,
-              squireId: created.success.id,
-              requestId: intent.requestId,
-            }),
-            created_at: options.now,
-          });
-        }),
-      );
-      return applied;
-    });
+  ) {
+    if (Option.isSome(yield* repository.getExecution(options.executionKey))) return applied;
+    const created = yield* service
+      .create({ ...intent.input, requestId: intent.requestId })
+      .pipe(Effect.result);
+    if (Result.isFailure(created)) return toOpen(created.failure.message);
+    const lead = yield* repository.getLead;
+    const cardId = parseSquireActionCommandId(options.executionKey)?.cardId;
+    yield* repository.transaction(
+      Effect.gen(function* () {
+        if (Option.isSome(yield* repository.getExecution(options.executionKey))) return;
+        yield* repository.insertActionLog({
+          squire_id: Option.match(lead, {
+            onNone: () => created.success.id,
+            onSome: (row) => row.id,
+          }),
+          kind: "action.executed",
+          room_id: null,
+          post_id: null,
+          trigger_id: null,
+          task_id: null,
+          thread_id: null,
+          card_id: cardId === undefined ? null : SquireCardId.make(cardId),
+          event_id: null,
+          run_id: null,
+          invocation_key: null,
+          execution_key: options.executionKey,
+          data_json: encodeLogData({
+            action: "create_squire",
+            verb: options.verb,
+            squireId: created.success.id,
+            requestId: intent.requestId,
+          }),
+          created_at: options.now,
+        });
+      }),
+    );
+    return applied;
+  });
 
   const apply: SquireControl["Service"]["apply"] = (intent, options) =>
     (intent.type === "control" ? applyControl(intent, options) : applyCreate(intent, options)).pipe(
@@ -625,28 +620,30 @@ const make = Effect.gen(function* () {
   const refuse = (message: string) => new SquireError({ code: "invalid_request", message });
 
   /** Every `control.reverted` row after the action, paged forward. */
-  const revertsOf = (leadId: SquireId, logEntryId: number) =>
-    Effect.gen(function* () {
-      const found: Array<typeof Reverted.Type> = [];
-      let afterId = logEntryId;
-      for (;;) {
-        const page = yield* repository.listActionLog({
-          squireId: leadId,
-          kinds: ["control.reverted"],
-          afterId,
-          limit: 200,
-        });
-        for (const row of page) {
-          const data = decodeReverted(row.data_json);
-          if (Option.isSome(data) && data.value.logEntryId === logEntryId) found.push(data.value);
-        }
-        if (page.length < 200) return found;
-        afterId = page.at(-1)!.id;
+  const revertsOf = Effect.fn("SquireControl.revertsOf")(function* (
+    leadId: SquireId,
+    logEntryId: number,
+  ) {
+    const found: Array<typeof Reverted.Type> = [];
+    let afterId = logEntryId;
+    for (;;) {
+      const page = yield* repository.listActionLog({
+        squireId: leadId,
+        kinds: ["control.reverted"],
+        afterId,
+        limit: 200,
+      });
+      for (const row of page) {
+        const data = decodeReverted(row.data_json);
+        if (Option.isSome(data) && data.value.logEntryId === logEntryId) found.push(data.value);
       }
-    });
+      if (page.length < 200) return found;
+      afterId = page.at(-1)!.id;
+    }
+  });
 
-  const revert: SquireControl["Service"]["revert"] = (input) =>
-    Effect.gen(function* () {
+  const revert: SquireControl["Service"]["revert"] = Effect.fn("SquireControl.revert")(
+    function* (input) {
       const affected = yield* withPolicyLock(
         Effect.gen(function* () {
           const lead = yield* repository.getLead;
@@ -720,270 +717,274 @@ const make = Effect.gen(function* () {
         });
       }
       return { squire: squire.value };
-    }).pipe(
-      Effect.catchIf(
-        (cause): cause is CardMoved => cause instanceof CardMoved,
-        (cause) => Effect.fail(refuse(`Not reverted: ${cause.reason}.`)),
-      ),
-      orSquireError("revert the Lead's action"),
-      Effect.withSpan("SquireControl.revert"),
-    );
+    },
+    Effect.catchIf(
+      (cause): cause is CardMoved => cause instanceof CardMoved,
+      (cause) => Effect.fail(refuse(`Not reverted: ${cause.reason}.`)),
+    ),
+    orSquireError("revert the Lead's action"),
+  );
 
   /** Checks the action can be undone now; the returned effect writes the undo in the caller's transaction. */
-  const restoreOf = (action: typeof ExecutedControl.Type, now: string) =>
-    Effect.gen(function* () {
-      switch (action.control) {
-        case "pause":
-        case "resume": {
-          const row = yield* managed(action.squireId);
-          if (Option.isNone(row)) return yield* refuse("That Squire no longer exists.");
-          const status = action.before.status ?? (action.control === "pause" ? "active" : "paused");
-          if (row.value.status === status) return Effect.succeed(Option.none<SquireId>());
-          return status === "paused" ? pauseRows(row.value.id, now) : resumeRows(row.value.id, now);
+  const restoreOf = Effect.fn("SquireControl.restoreOf")(function* (
+    action: typeof ExecutedControl.Type,
+    now: string,
+  ) {
+    switch (action.control) {
+      case "pause":
+      case "resume": {
+        const row = yield* managed(action.squireId);
+        if (Option.isNone(row)) return yield* refuse("That Squire no longer exists.");
+        const status = action.before.status ?? (action.control === "pause" ? "active" : "paused");
+        if (row.value.status === status) return Effect.succeed(Option.none<SquireId>());
+        return status === "paused" ? pauseRows(row.value.id, now) : resumeRows(row.value.id, now);
+      }
+      case "rescope": {
+        const row = yield* managed(action.squireId);
+        if (Option.isNone(row)) return yield* refuse("That Squire no longer exists.");
+        return replaceGrants(row.value.id, action.before.grants ?? [], now);
+      }
+      case "forward": {
+        const [was] = action.before.cards ?? [];
+        const card =
+          was === undefined ? undefined : Option.getOrUndefined(yield* repository.getCard(was.id));
+        if (was === undefined || card === undefined || card.status !== "open") {
+          return yield* refuse("This item is no longer open, so the forward cannot be undone.");
         }
-        case "rescope": {
-          const row = yield* managed(action.squireId);
-          if (Option.isNone(row)) return yield* refuse("That Squire no longer exists.");
-          return replaceGrants(row.value.id, action.before.grants ?? [], now);
+        if (card.owner_squire_id !== action.toSquireId) {
+          return yield* refuse("This item moved again since, so it cannot be forwarded back.");
         }
-        case "forward": {
-          const [was] = action.before.cards ?? [];
-          const card =
-            was === undefined
-              ? undefined
-              : Option.getOrUndefined(yield* repository.getCard(was.id));
-          if (was === undefined || card === undefined || card.status !== "open") {
-            return yield* refuse("This item is no longer open, so the forward cannot be undone.");
+        if (was.squireId !== card.squire_id && (yield* openSlotTaken(was.squireId, card))) {
+          return yield* refuse(
+            "The original Squire has a newer open item for that thread, so this cannot move back.",
+          );
+        }
+        return moveCard(
+          card.id,
+          { squire_id: was.squireId, owner_squire_id: was.ownerSquireId },
+          now,
+        ).pipe(Effect.as(Option.none<SquireId>()));
+      }
+      case "merge": {
+        const [kept, ...merged] = action.before.cards ?? [];
+        const keptRow =
+          kept === undefined
+            ? undefined
+            : Option.getOrUndefined(yield* repository.getCard(kept.id));
+        if (keptRow === undefined || keptRow.status !== "open") {
+          return yield* refuse("The merged item is no longer open, so it cannot be unmerged.");
+        }
+        const rows: Array<CardRow> = [];
+        for (const entry of merged) {
+          const card = Option.getOrUndefined(yield* repository.getCard(entry.id));
+          if (
+            card === undefined ||
+            card.status !== "outdated" ||
+            card.resolution !== "superseded"
+          ) {
+            return yield* refuse("A merged item changed since, so the merge cannot be undone.");
           }
-          if (card.owner_squire_id !== action.toSquireId) {
-            return yield* refuse("This item moved again since, so it cannot be forwarded back.");
-          }
-          if (was.squireId !== card.squire_id && (yield* openSlotTaken(was.squireId, card))) {
+          if (yield* openSlotTaken(card.squire_id, card)) {
             return yield* refuse(
-              "The original Squire has a newer open item for that thread, so this cannot move back.",
+              "A Squire has a newer open item for that thread, so the merge cannot be undone.",
             );
           }
-          return moveCard(
-            card.id,
-            { squire_id: was.squireId, owner_squire_id: was.ownerSquireId },
-            now,
-          ).pipe(Effect.as(Option.none<SquireId>()));
+          rows.push(card);
         }
-        case "merge": {
-          const [kept, ...merged] = action.before.cards ?? [];
-          const keptRow =
-            kept === undefined
-              ? undefined
-              : Option.getOrUndefined(yield* repository.getCard(kept.id));
-          if (keptRow === undefined || keptRow.status !== "open") {
-            return yield* refuse("The merged item is no longer open, so it cannot be unmerged.");
+        return Effect.gen(function* () {
+          for (const card of rows) {
+            const reopened = yield* repository.updateCard({
+              id: card.id,
+              fromStatuses: ["outdated"],
+              patch: { status: "open", resolution: null },
+              updatedAt: now,
+            });
+            if (Option.isNone(reopened)) {
+              return yield* new CardMoved({ reason: "a merged item changed since" });
+            }
           }
-          const rows: Array<CardRow> = [];
-          for (const entry of merged) {
-            const card = Option.getOrUndefined(yield* repository.getCard(entry.id));
-            if (
-              card === undefined ||
-              card.status !== "outdated" ||
-              card.resolution !== "superseded"
-            ) {
-              return yield* refuse("A merged item changed since, so the merge cannot be undone.");
-            }
-            if (yield* openSlotTaken(card.squire_id, card)) {
-              return yield* refuse(
-                "A Squire has a newer open item for that thread, so the merge cannot be undone.",
-              );
-            }
-            rows.push(card);
-          }
-          return Effect.gen(function* () {
-            for (const card of rows) {
-              const reopened = yield* repository.updateCard({
-                id: card.id,
-                fromStatuses: ["outdated"],
-                patch: { status: "open", resolution: null },
-                updatedAt: now,
-              });
-              if (Option.isNone(reopened)) {
-                return yield* new CardMoved({ reason: "a merged item changed since" });
-              }
-            }
-            return Option.none<SquireId>();
-          });
-        }
+          return Option.none<SquireId>();
+        });
       }
-    });
+    }
+  });
 
   // ── Tool handlers ──
 
-  const validateAdded = (current: ReadonlyArray<Grant>, next: ReadonlyArray<Grant>) =>
-    Effect.gen(function* () {
-      const known = new Set(current.map(grantKey));
-      for (const grant of next) {
-        if (known.has(grantKey(grant))) continue;
-        if (grant.kind === "thread") {
-          const shell = yield* projections.getThreadShell(ThreadId.make(grant.targetId));
-          if (shell === null) return `thread ${grant.targetId} no longer exists`;
-          if (isSquireThread(shell)) return "a Squire cannot track a Squire's thread";
-        } else if (grant.kind === "project") {
-          if (Option.isNone(yield* projects.get(ProjectId.make(grant.targetId)))) {
-            return `project ${grant.targetId} no longer exists`;
-          }
+  const validateAdded = Effect.fn("SquireControl.validateAdded")(function* (
+    current: ReadonlyArray<Grant>,
+    next: ReadonlyArray<Grant>,
+  ) {
+    const known = new Set(current.map(grantKey));
+    for (const grant of next) {
+      if (known.has(grantKey(grant))) continue;
+      if (grant.kind === "thread") {
+        const shell = yield* projections.getThreadShell(ThreadId.make(grant.targetId));
+        if (shell === null) return `thread ${grant.targetId} no longer exists`;
+        if (isSquireThread(shell)) return "a Squire cannot track a Squire's thread";
+      } else if (grant.kind === "project") {
+        if (Option.isNone(yield* projects.get(ProjectId.make(grant.targetId)))) {
+          return `project ${grant.targetId} no longer exists`;
         }
       }
-      return undefined;
-    });
+    }
+    return undefined;
+  });
 
-  const raise = (ctx: SquireToolContext, kit: SquireToolKit, intent: SquireControlIntent) =>
-    Effect.gen(function* () {
-      const decision = squirePolicy.decide({
-        actionClass: "manageSquires",
-        squire: kit.policySquireOf(ctx.squire),
-        rules: [],
-        target: {
-          threadId: null,
-          projectId: ctx.squire.home_project_id,
-          staveSpaceId: null,
-          staveSagaId: null,
-        },
-        trackers: [],
-        budgetRows: [],
-        origin: ctx.run.origin,
-        now: ctx.now,
-      });
-      if (decision.level === "off") {
-        return yield* kit.refuse(
-          ctx,
-          decision.reason,
-          decision.reason === "paused"
-            ? "The Lead is paused, so it cannot manage Squires."
-            : "Manage Squires is Off for the Lead, so it cannot pause, resume, rescope, forward, or merge.",
-          { decision: { level: "off" } },
-        );
-      }
-      const checked = yield* check(intent);
-      if (!checked.ok) {
-        return yield* kit.refuse(ctx, "invalid", `Not done: ${checked.reason}.`, {
-          decision: { reason: checked.reason },
-        });
-      }
-      if (intent.action === "rescope") {
-        const invalid = yield* validateAdded(checked.before.grants ?? [], intent.grants ?? []);
-        if (invalid !== undefined) {
-          return yield* kit.refuse(ctx, "invalid", `Not done: ${invalid}.`);
-        }
-      }
-      // Only narrowing runs at Auto.
-      const held = decision.level === "auto" && !checked.widens;
-      const cardId = SquireCardId.make(`card:proposal:${ctx.squire.id}:${ctx.key.slice(0, 24)}`);
-      const executesAt = held ? kit.holdUntil(ctx) : null;
-      const push = !held && kit.notifyOn(ctx);
-      const grants = intent.grants ?? [];
-      const payload: ControlPayload = {
-        type: "control",
-        action: intent.action,
-        squireId: intent.squireId,
-        ...(intent.action === "rescope"
-          ? {
-              grants: grants.filter((grant) => grant.kind !== "exclusion"),
-              exclusions: grants
-                .filter((grant) => grant.kind === "exclusion")
-                .map((grant) => ThreadId.make(grant.targetId)),
-            }
-          : {}),
-        ...(intent.cardIds === undefined ? {} : { cardIds: intent.cardIds }),
-        ...(intent.toSquireId === undefined ? {} : { toSquireId: intent.toSquireId }),
-      };
-      const threadId = checked.moves[0]?.card.target_thread_id ?? null;
-      return yield* kit.commit(
-        ctx,
-        null,
-        Effect.gen(function* () {
-          yield* repository.insertCard({
-            id: cardId,
-            squire_id: ctx.squire.id,
-            owner_squire_id: ctx.squire.id,
-            kind: "proposal",
-            status: held ? "held" : "open",
-            // No target: a control item never takes a thread's one open slot.
-            target_thread_id: null,
-            project_id: null,
-            title: checked.title,
-            why: intent.reason,
-            payload_json: encodePayload(payload),
-            evidence_json: "{}",
-            trigger_json: "{}",
-            intent_json: held
-              ? encodeSquireActionIntent({ ...intent, before: checked.before })
-              : null,
-            origin: ctx.run.origin === "unknown" ? "event" : ctx.run.origin,
-            steer_kind: null,
-            routed_task_id: null,
-            rule_id: null,
-            finding_key: null,
-            escalate_at: null,
-            opened_at: null,
-            executes_at: executesAt,
-            attempt: held ? 1 : 0,
-            command_id: held ? squireActionCommandId("execute", cardId, 1) : null,
-            execution_key: null,
-            dedupe_key: null,
-            replaced_count: 0,
-            ask_json: null,
-            resolution: null,
-            created_at: ctx.now,
-            updated_at: ctx.now,
-          });
-          yield* kit.logRow(
-            ctx,
-            held ? "action.held" : "card.created",
-            {
-              kind: "proposal",
-              origin: ctx.run.origin,
-              control: intent.action,
-              squireId: intent.squireId,
-              ...(intent.toSquireId === undefined ? {} : { toSquireId: intent.toSquireId }),
-              ...(intent.cardIds === undefined ? {} : { cardIds: intent.cardIds }),
-              before: checked.before,
-              ...(executesAt === null ? {} : { executesAt }),
-              ...(checked.widens ? { widens: true } : {}),
-            },
-            { threadId, cardId },
-          );
-          yield* kit.logRow(
-            ctx,
-            "decision.recorded",
-            {
-              tool: ctx.tool,
-              level: held ? "auto" : "recommend",
-              reason: checked.widens && decision.level === "auto" ? "widens" : decision.reason,
-            },
-            { threadId, cardId },
-          );
-          if (push) {
-            yield* kit.logRow(
-              ctx,
-              "notification.pushed",
-              { kind: "proposal", source: "card" },
-              { cardId },
-            );
-          }
-          return {
-            result: kit.ok(
-              held
-                ? `Held: ${checked.title}. It runs at ${executesAt} unless the user presses Undo.`
-                : checked.widens && decision.level === "auto"
-                  ? `Proposed: ${checked.title}. Widening a Squire's scope always waits for the user.`
-                  : `Proposed: ${checked.title}. The user decides.`,
-              {
-                cardId,
-                status: held ? "held" : "open",
-                ...(executesAt === null ? {} : { executesAt }),
-              },
-            ),
-          };
-        }),
-      );
+  const raise = Effect.fn("SquireControl.raise")(function* (
+    ctx: SquireToolContext,
+    kit: SquireToolKit,
+    intent: SquireControlIntent,
+  ) {
+    const decision = squirePolicy.decide({
+      actionClass: "manageSquires",
+      squire: kit.policySquireOf(ctx.squire),
+      rules: [],
+      target: {
+        threadId: null,
+        projectId: ctx.squire.home_project_id,
+        staveSpaceId: null,
+        staveSagaId: null,
+      },
+      trackers: [],
+      budgetRows: [],
+      origin: ctx.run.origin,
+      now: ctx.now,
     });
+    if (decision.level === "off") {
+      return yield* kit.refuse(
+        ctx,
+        decision.reason,
+        decision.reason === "paused"
+          ? "The Lead is paused, so it cannot manage Squires."
+          : "Manage Squires is Off for the Lead, so it cannot pause, resume, rescope, forward, or merge.",
+        { decision: { level: "off" } },
+      );
+    }
+    const checked = yield* check(intent);
+    if (!checked.ok) {
+      return yield* kit.refuse(ctx, "invalid", `Not done: ${checked.reason}.`, {
+        decision: { reason: checked.reason },
+      });
+    }
+    if (intent.action === "rescope") {
+      const invalid = yield* validateAdded(checked.before.grants ?? [], intent.grants ?? []);
+      if (invalid !== undefined) {
+        return yield* kit.refuse(ctx, "invalid", `Not done: ${invalid}.`);
+      }
+    }
+    // Only narrowing runs at Auto.
+    const held = decision.level === "auto" && !checked.widens;
+    const cardId = SquireCardId.make(`card:proposal:${ctx.squire.id}:${ctx.key.slice(0, 24)}`);
+    const executesAt = held ? kit.holdUntil(ctx) : null;
+    const push = !held && kit.notifyOn(ctx);
+    const grants = intent.grants ?? [];
+    const payload: ControlPayload = {
+      type: "control",
+      action: intent.action,
+      squireId: intent.squireId,
+      ...(intent.action === "rescope"
+        ? {
+            grants: grants.filter((grant) => grant.kind !== "exclusion"),
+            exclusions: grants
+              .filter((grant) => grant.kind === "exclusion")
+              .map((grant) => ThreadId.make(grant.targetId)),
+          }
+        : {}),
+      ...(intent.cardIds === undefined ? {} : { cardIds: intent.cardIds }),
+      ...(intent.toSquireId === undefined ? {} : { toSquireId: intent.toSquireId }),
+    };
+    const threadId = checked.moves[0]?.card.target_thread_id ?? null;
+    return yield* kit.commit(
+      ctx,
+      null,
+      Effect.gen(function* () {
+        yield* repository.insertCard({
+          id: cardId,
+          squire_id: ctx.squire.id,
+          owner_squire_id: ctx.squire.id,
+          kind: "proposal",
+          status: held ? "held" : "open",
+          // No target: a control item never takes a thread's one open slot.
+          target_thread_id: null,
+          project_id: null,
+          title: checked.title,
+          why: intent.reason,
+          payload_json: encodePayload(payload),
+          evidence_json: "{}",
+          trigger_json: "{}",
+          intent_json: held
+            ? encodeSquireActionIntent({ ...intent, before: checked.before })
+            : null,
+          origin: ctx.run.origin === "unknown" ? "event" : ctx.run.origin,
+          steer_kind: null,
+          routed_task_id: null,
+          rule_id: null,
+          finding_key: null,
+          escalate_at: null,
+          opened_at: null,
+          executes_at: executesAt,
+          attempt: held ? 1 : 0,
+          command_id: held ? squireActionCommandId("execute", cardId, 1) : null,
+          execution_key: null,
+          dedupe_key: null,
+          replaced_count: 0,
+          ask_json: null,
+          resolution: null,
+          created_at: ctx.now,
+          updated_at: ctx.now,
+        });
+        yield* kit.logRow(
+          ctx,
+          held ? "action.held" : "card.created",
+          {
+            kind: "proposal",
+            origin: ctx.run.origin,
+            control: intent.action,
+            squireId: intent.squireId,
+            ...(intent.toSquireId === undefined ? {} : { toSquireId: intent.toSquireId }),
+            ...(intent.cardIds === undefined ? {} : { cardIds: intent.cardIds }),
+            before: checked.before,
+            ...(executesAt === null ? {} : { executesAt }),
+            ...(checked.widens ? { widens: true } : {}),
+          },
+          { threadId, cardId },
+        );
+        yield* kit.logRow(
+          ctx,
+          "decision.recorded",
+          {
+            tool: ctx.tool,
+            level: held ? "auto" : "recommend",
+            reason: checked.widens && decision.level === "auto" ? "widens" : decision.reason,
+          },
+          { threadId, cardId },
+        );
+        if (push) {
+          yield* kit.logRow(
+            ctx,
+            "notification.pushed",
+            { kind: "proposal", source: "card" },
+            { cardId },
+          );
+        }
+        return {
+          result: kit.ok(
+            held
+              ? `Held: ${checked.title}. It runs at ${executesAt} unless the user presses Undo.`
+              : checked.widens && decision.level === "auto"
+                ? `Proposed: ${checked.title}. Widening a Squire's scope always waits for the user.`
+                : `Proposed: ${checked.title}. The user decides.`,
+            {
+              cardId,
+              status: held ? "held" : "open",
+              ...(executesAt === null ? {} : { executesAt }),
+            },
+          ),
+        };
+      }),
+    );
+  });
 
   const handler = <S extends Schema.Top & { readonly DecodingServices: never }>(
     definitionOf: SquireToolHandler["definition"],
@@ -992,18 +993,17 @@ const make = Effect.gen(function* () {
   ): SquireToolHandler => ({
     definition: definitionOf,
     roles: ["lead"],
-    call: (ctx, kit) =>
-      Effect.gen(function* () {
-        const decoded = yield* kit.decodeArgs(schema, ctx.args);
-        if (!decoded.ok) {
-          return yield* kit.refuse(
-            ctx,
-            "invalid-arguments",
-            `Invalid arguments for ${ctx.tool}: ${decoded.message}`,
-          );
-        }
-        return yield* raise(ctx, kit, intentOf(decoded.value, ctx));
-      }),
+    call: Effect.fn("SquireControl.call")(function* (ctx, kit) {
+      const decoded = yield* kit.decodeArgs(schema, ctx.args);
+      if (!decoded.ok) {
+        return yield* kit.refuse(
+          ctx,
+          "invalid-arguments",
+          `Invalid arguments for ${ctx.tool}: ${decoded.message}`,
+        );
+      }
+      return yield* raise(ctx, kit, intentOf(decoded.value, ctx));
+    }),
   });
 
   const base = (action: SquireControlAction, ctx: SquireToolContext, reason: string) => ({

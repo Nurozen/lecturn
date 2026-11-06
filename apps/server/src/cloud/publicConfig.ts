@@ -4,6 +4,7 @@ import {
   DEFAULT_HOSTED_APP_URL,
 } from "@lecturn/shared/connectAuth";
 import { clerkFrontendApiUrlFromPublishableKey } from "@lecturn/shared/relayAuth";
+import { isRelayTracingEnabled } from "@lecturn/shared/otelEnvironment";
 import { normalizeSecureRelayUrl } from "@lecturn/shared/relayUrl";
 import * as Config from "effect/Config";
 import * as ConfigProvider from "effect/ConfigProvider";
@@ -92,6 +93,10 @@ export function resolveRelayClientTracingConfig(
   env: Readonly<Record<string, string | undefined>> = process.env,
   fallback = buildTimeRelayClientTracing,
 ) {
+  if (!isRelayTracingEnabled(env)) {
+    return null;
+  }
+
   const tracesUrl = env.LECTURN_RELAY_CLIENT_OTLP_TRACES_URL?.trim() || fallback.tracesUrl;
   const tracesDataset =
     env.LECTURN_RELAY_CLIENT_OTLP_TRACES_DATASET?.trim() || fallback.tracesDataset;

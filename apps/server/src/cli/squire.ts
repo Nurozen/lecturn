@@ -176,33 +176,36 @@ const requireFixtureServer = Effect.fn("squire.requireFixtureServer")(function* 
 
 const encodeRequest = Schema.encodeEffect(SquireDevFixtureRequest);
 
-const sendFixtureRequest = (origin: string, token: string, request: SquireDevFixtureRequest) =>
-  Effect.gen(function* () {
-    const failed = (fields: {
-      readonly status?: number;
-      readonly detail?: string;
-      readonly cause?: unknown;
-    }) => new SquireFixtureRequestError({ op: request.op, ...fields });
-    const body = yield* encodeRequest(request).pipe(Effect.mapError((cause) => failed({ cause })));
-    const client = yield* HttpClient.HttpClient;
-    const response = yield* client
-      .execute(
-        HttpClientRequest.post(new URL(SQUIRE_DEV_FIXTURE_ROUTE, origin).toString()).pipe(
-          HttpClientRequest.bearerToken(token),
-          HttpClientRequest.bodyJsonUnsafe(body),
-        ),
-      )
-      .pipe(Effect.mapError((cause) => failed({ cause })));
-    const json = yield* response.json.pipe(Effect.orElseSucceed(() => undefined));
-    if (response.status !== 200) {
-      const detail = decodeServerFailure(json);
-      return yield* failed({
-        status: response.status,
-        ...(Option.isSome(detail) ? { detail: detail.value.message } : {}),
-      });
-    }
-    return json;
-  });
+const sendFixtureRequest = Effect.fn("squire.sendFixtureRequest")(function* (
+  origin: string,
+  token: string,
+  request: SquireDevFixtureRequest,
+) {
+  const failed = (fields: {
+    readonly status?: number;
+    readonly detail?: string;
+    readonly cause?: unknown;
+  }) => new SquireFixtureRequestError({ op: request.op, ...fields });
+  const body = yield* encodeRequest(request).pipe(Effect.mapError((cause) => failed({ cause })));
+  const client = yield* HttpClient.HttpClient;
+  const response = yield* client
+    .execute(
+      HttpClientRequest.post(new URL(SQUIRE_DEV_FIXTURE_ROUTE, origin).toString()).pipe(
+        HttpClientRequest.bearerToken(token),
+        HttpClientRequest.bodyJsonUnsafe(body),
+      ),
+    )
+    .pipe(Effect.mapError((cause) => failed({ cause })));
+  const json = yield* response.json.pipe(Effect.orElseSucceed(() => undefined));
+  if (response.status !== 200) {
+    const detail = decodeServerFailure(json);
+    return yield* failed({
+      status: response.status,
+      ...(Option.isSome(detail) ? { detail: detail.value.message } : {}),
+    });
+  }
+  return json;
+});
 
 const LoadedResult = Schema.Struct({ squireId: Schema.String });
 const InjectedResult = Schema.Struct({ sequence: Schema.Int });

@@ -187,42 +187,42 @@ const make = Effect.gen(function* () {
 
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
-  const toSquire = (row: SquireRepository.SquireRow) =>
-    Effect.gen(function* () {
-      const grants = yield* repository.listGrants(row.id);
-      return yield* decodeSquire({
-        id: row.id,
-        role: row.role,
-        name: row.name,
-        lifecycle: row.lifecycle,
-        status: row.status,
-        homeProjectId: row.home_project_id,
-        homeThreadId: row.home_thread_id,
-        providerInstanceId: row.provider_instance_id,
-        modelSelection: yield* parseJson(row.model_selection_json),
-        summaryModelSelection: yield* parseJson(row.summary_model_selection_json),
-        brief: row.brief,
-        grants: grants.map((grant) => ({
-          kind: grant.kind,
-          targetId: grant.target_id,
-          origin: grant.origin,
-          createdAt: grant.created_at,
-        })),
-        events: yield* parseJson(row.events_json),
-        permissions: yield* parseJson(row.permissions_json),
-        budgets: yield* parseJson(row.budgets_json),
-        undoWindowSeconds: row.undo_window_seconds,
-        companion: yield* parseJson(row.companion_json),
-        digest: yield* parseJson(row.digest_json),
-        sweep: yield* parseJson(row.sweep_json),
-        onboardedAt: row.onboarded_at,
-        ...(row.timezone ? { timezone: row.timezone } : {}),
-        automationPausedAt: row.automation_paused_at,
-        revision: row.revision,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      });
-    }).pipe(orSquireError("read the Squire"));
+  // Runs per Squire row; the list and lookup operations own the span.
+  const toSquire = Effect.fnUntraced(function* (row: SquireRepository.SquireRow) {
+    const grants = yield* repository.listGrants(row.id);
+    return yield* decodeSquire({
+      id: row.id,
+      role: row.role,
+      name: row.name,
+      lifecycle: row.lifecycle,
+      status: row.status,
+      homeProjectId: row.home_project_id,
+      homeThreadId: row.home_thread_id,
+      providerInstanceId: row.provider_instance_id,
+      modelSelection: yield* parseJson(row.model_selection_json),
+      summaryModelSelection: yield* parseJson(row.summary_model_selection_json),
+      brief: row.brief,
+      grants: grants.map((grant) => ({
+        kind: grant.kind,
+        targetId: grant.target_id,
+        origin: grant.origin,
+        createdAt: grant.created_at,
+      })),
+      events: yield* parseJson(row.events_json),
+      permissions: yield* parseJson(row.permissions_json),
+      budgets: yield* parseJson(row.budgets_json),
+      undoWindowSeconds: row.undo_window_seconds,
+      companion: yield* parseJson(row.companion_json),
+      digest: yield* parseJson(row.digest_json),
+      sweep: yield* parseJson(row.sweep_json),
+      onboardedAt: row.onboarded_at,
+      ...(row.timezone ? { timezone: row.timezone } : {}),
+      automationPausedAt: row.automation_paused_at,
+      revision: row.revision,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    });
+  }, orSquireError("read the Squire"));
 
   /** Not found while deleting too: the Squire is already on its way out. */
   const requireRow = (squireId: SquireId) =>
@@ -244,49 +244,51 @@ const make = Effect.gen(function* () {
     }),
   );
 
-  const driverSupport = (instanceId: ProviderInstanceId, use: "squire" | "probe") =>
-    Effect.gen(function* () {
-      const instance = yield* providers.getInstance(instanceId);
-      if (instance === undefined) {
-        return { supported: false, reason: "This provider is not configured." };
-      }
-      const label = instance.displayName ?? instanceId;
-      if (!instance.enabled) return { supported: false, reason: `${label} is turned off.` };
-      const driver: string = instance.driverKind;
-      const decision =
-        driver === "scripted"
-          ? environment.LECTURN_TEST_PROVIDERS === "1"
-          : DRIVER_SUPPORT[driver]?.[use] === true;
-      if (!decision) {
-        return {
-          supported: false,
-          reason:
-            use === "squire"
-              ? [`${label} is not supported as a Squire provider.`, DRIVER_SUPPORT[driver]?.reason]
-                  .filter((part) => part !== undefined)
-                  .join(" ")
-              : `Ask is not available for ${label}.`,
-        };
-      }
-      // A managed managed-mcp.json makes Claude refuse --strict-mcp-config and
-      // drop Lecturn's server while keeping the managed ones.
-      if (
-        driver === "claudeAgent" &&
-        (yield* hasClaudeManagedMcpConfig().pipe(
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-        ))
-      ) {
-        return {
-          supported: false,
-          reason: `${label} uses a managed MCP configuration on this machine, so a ${
-            use === "squire" ? "Squire" : "probe"
-          } cannot isolate its tools.`,
-        };
-      }
-      const gap = yield* instance.orchestrationAdapter?.squireReadiness ?? Effect.succeed(null);
-      if (gap !== null) return { supported: false, reason: gap };
-      return { supported: true };
-    });
+  const driverSupport = Effect.fn("SquireService.driverSupport")(function* (
+    instanceId: ProviderInstanceId,
+    use: "squire" | "probe",
+  ) {
+    const instance = yield* providers.getInstance(instanceId);
+    if (instance === undefined) {
+      return { supported: false, reason: "This provider is not configured." };
+    }
+    const label = instance.displayName ?? instanceId;
+    if (!instance.enabled) return { supported: false, reason: `${label} is turned off.` };
+    const driver: string = instance.driverKind;
+    const decision =
+      driver === "scripted"
+        ? environment.LECTURN_TEST_PROVIDERS === "1"
+        : DRIVER_SUPPORT[driver]?.[use] === true;
+    if (!decision) {
+      return {
+        supported: false,
+        reason:
+          use === "squire"
+            ? [`${label} is not supported as a Squire provider.`, DRIVER_SUPPORT[driver]?.reason]
+                .filter((part) => part !== undefined)
+                .join(" ")
+            : `Ask is not available for ${label}.`,
+      };
+    }
+    // A managed managed-mcp.json makes Claude refuse --strict-mcp-config and
+    // drop Lecturn's server while keeping the managed ones.
+    if (
+      driver === "claudeAgent" &&
+      (yield* hasClaudeManagedMcpConfig().pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+      ))
+    ) {
+      return {
+        supported: false,
+        reason: `${label} uses a managed MCP configuration on this machine, so a ${
+          use === "squire" ? "Squire" : "probe"
+        } cannot isolate its tools.`,
+      };
+    }
+    const gap = yield* instance.orchestrationAdapter?.squireReadiness ?? Effect.succeed(null);
+    if (gap !== null) return { supported: false, reason: gap };
+    return { supported: true };
+  });
   const squireSupport: SquireService["Service"]["squireSupport"] = (instanceId) =>
     driverSupport(instanceId, "squire");
   const probeSupport: SquireService["Service"]["probeSupport"] = (instanceId) =>
@@ -306,31 +308,31 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const defaultModelFor = (instanceId: ProviderInstanceId) =>
-    Effect.gen(function* () {
-      const instance = yield* providers.getInstance(instanceId);
-      const models = instance === undefined ? [] : (yield* instance.snapshot.getSnapshot).models;
-      const model = models.find((candidate) => candidate.isDefault) ?? models[0];
-      if (model === undefined)
-        return yield* new SquireError({ code: "invalid_request", message: "Choose a model." });
-      return { instanceId, model: model.slug } satisfies ModelSelection;
-    });
+  const defaultModelFor = Effect.fn("SquireService.defaultModelFor")(function* (
+    instanceId: ProviderInstanceId,
+  ) {
+    const instance = yield* providers.getInstance(instanceId);
+    const models = instance === undefined ? [] : (yield* instance.snapshot.getSnapshot).models;
+    const model = models.find((candidate) => candidate.isDefault) ?? models[0];
+    if (model === undefined)
+      return yield* new SquireError({ code: "invalid_request", message: "Choose a model." });
+    return { instanceId, model: model.slug } satisfies ModelSelection;
+  });
 
   /** The provider and model a create or update asks for, checked against the driver's Squire support. */
-  const resolveModel = (
+  const resolveModel = Effect.fn("SquireService.resolveModel")(function* (
     instanceId: ProviderInstanceId,
     modelSelection: ModelSelection | undefined,
-  ) =>
-    Effect.gen(function* () {
-      if (modelSelection !== undefined && modelSelection.instanceId !== instanceId) {
-        return yield* new SquireError({
-          code: "invalid_request",
-          message: "The model belongs to a different provider.",
-        });
-      }
-      yield* requireSupported(instanceId);
-      return modelSelection ?? (yield* defaultModelFor(instanceId));
-    });
+  ) {
+    if (modelSelection !== undefined && modelSelection.instanceId !== instanceId) {
+      return yield* new SquireError({
+        code: "invalid_request",
+        message: "The model belongs to a different provider.",
+      });
+    }
+    yield* requireSupported(instanceId);
+    return modelSelection ?? (yield* defaultModelFor(instanceId));
+  });
 
   const requireProject = (projectId: ProjectId) =>
     projects.get(projectId).pipe(
@@ -348,25 +350,26 @@ const make = Effect.gen(function* () {
     projections.getThreadShell(ThreadId.make(targetId)).pipe(orSquireError("read the thread"));
 
   // A Squire never tracks a Squire thread.
-  const validateGrant = (grant: SquireGrantInput) =>
-    Effect.gen(function* () {
-      if (grant.kind === "thread") {
-        const shell = yield* threadShell(grant.targetId);
-        if (shell === null)
-          return yield* new SquireError({
-            code: "not_found",
-            message: "That thread no longer exists.",
-          });
-        if (isSquireThread(shell)) {
-          return yield* new SquireError({
-            code: "out_of_scope",
-            message: "A Squire cannot track a Squire's thread.",
-          });
-        }
-      } else if (grant.kind === "project") {
-        yield* requireProject(ProjectId.make(grant.targetId));
+  const validateGrant = Effect.fn("SquireService.validateGrant")(function* (
+    grant: SquireGrantInput,
+  ) {
+    if (grant.kind === "thread") {
+      const shell = yield* threadShell(grant.targetId);
+      if (shell === null)
+        return yield* new SquireError({
+          code: "not_found",
+          message: "That thread no longer exists.",
+        });
+      if (isSquireThread(shell)) {
+        return yield* new SquireError({
+          code: "out_of_scope",
+          message: "A Squire cannot track a Squire's thread.",
+        });
       }
-    });
+    } else if (grant.kind === "project") {
+      yield* requireProject(ProjectId.make(grant.targetId));
+    }
+  });
 
   const validatePermissions = (
     role: SquireRepository.SquireRow["role"],
@@ -432,8 +435,8 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const create: SquireService["Service"]["create"] = (input) =>
-    Effect.gen(function* () {
+  const create: SquireService["Service"]["create"] = Effect.fn("SquireService.create")(
+    function* (input) {
       const existing = yield* repository
         .getSquireByCreateRequestId(input.requestId)
         .pipe(orSquireError("read the Squire"));
@@ -527,7 +530,8 @@ const make = Effect.gen(function* () {
           ),
         ),
       );
-    });
+    },
+  );
 
   const update: SquireService["Service"]["update"] = (input) =>
     withPolicyLock(
@@ -762,8 +766,8 @@ const make = Effect.gen(function* () {
       }),
     ).pipe(Effect.flatMap(toSquire));
 
-  const deleteSquire: SquireService["Service"]["delete"] = (input) =>
-    Effect.gen(function* () {
+  const deleteSquire: SquireService["Service"]["delete"] = Effect.fn("SquireService.deleteSquire")(
+    function* (input) {
       yield* withPolicyLock(
         Effect.gen(function* () {
           const row = yield* repository
@@ -800,24 +804,27 @@ const make = Effect.gen(function* () {
       );
       yield* lifecycle.drive(input.squireId);
       return { squireId: input.squireId };
-    });
+    },
+  );
 
-  const scopedRow = (squireId: SquireId, grant: SquireGrantInput) =>
-    Effect.gen(function* () {
-      const row = yield* requireRow(squireId);
-      if (row.role === "lead")
-        return yield* new SquireError({
-          code: "invalid_request",
-          message: "The Lead has no access scope.",
-        });
-      if (grant.kind === "exclusion") {
-        return yield* new SquireError({
-          code: "invalid_request",
-          message: "Track or untrack the thread itself.",
-        });
-      }
-      return row;
-    });
+  const scopedRow = Effect.fn("SquireService.scopedRow")(function* (
+    squireId: SquireId,
+    grant: SquireGrantInput,
+  ) {
+    const row = yield* requireRow(squireId);
+    if (row.role === "lead")
+      return yield* new SquireError({
+        code: "invalid_request",
+        message: "The Lead has no access scope.",
+      });
+    if (grant.kind === "exclusion") {
+      return yield* new SquireError({
+        code: "invalid_request",
+        message: "Track or untrack the thread itself.",
+      });
+    }
+    return row;
+  });
 
   const bumpRevision = (squireId: SquireId, updatedAt: string) =>
     repository.updateSquire({ id: squireId, patch: {}, updatedAt });
@@ -899,8 +906,8 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const ensureLead: SquireService["Service"]["ensureLead"] = (input) =>
-    Effect.gen(function* () {
+  const ensureLead: SquireService["Service"]["ensureLead"] = Effect.fn("SquireService.ensureLead")(
+    function* (input) {
       const existing = yield* repository.getLead.pipe(orSquireError("read the Lead"));
       if (Option.isSome(existing)) return Option.some(yield* toSquire(existing.value));
       const project = yield* lifecycle.homeProjectCandidate();
@@ -961,12 +968,13 @@ const make = Effect.gen(function* () {
         orSquireError("create the Lead"),
       );
       return Option.some(yield* settle(leadId));
-    });
+    },
+  );
 
   // Delivery sends a voice-note row alone with origin `voice`, so its turn only
   // recommends; the clock wakes the Squire on the new row.
-  const voiceNote: SquireService["Service"]["voiceNote"] = (input) =>
-    Effect.gen(function* () {
+  const voiceNote: SquireService["Service"]["voiceNote"] = Effect.fn("SquireService.voiceNote")(
+    function* (input) {
       const voiceNoteId = voiceNoteIdFor(input.requestId);
       const row = yield* requireRow(input.squireId);
       if (row.role === "lead") {
@@ -1007,7 +1015,8 @@ const make = Effect.gen(function* () {
         })
         .pipe(orSquireError("queue the voice note"));
       return { voiceNoteId };
-    });
+    },
+  );
 
   // The inactivity check counts these as the user acting; no server path calls them.
   const touched =

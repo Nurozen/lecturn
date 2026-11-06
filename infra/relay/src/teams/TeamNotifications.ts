@@ -3,13 +3,13 @@ import { Effect } from "effect";
 import type { ManagedAccess } from "../billing/ManagedAccess.ts";
 
 /** Recheck concrete environments both before enqueue and at signed-job delivery. */
-export const filterPermittedActivity = (
-  access: ManagedAccess["Service"],
-  userId: string,
-  aggregate: RelayAgentActivityAggregateState | null,
-  originCreatedAtSeconds?: number,
-) =>
-  Effect.gen(function* () {
+export const filterPermittedActivity = Effect.fn("TeamNotifications.filterPermittedActivity")(
+  function* (
+    access: ManagedAccess["Service"],
+    userId: string,
+    aggregate: RelayAgentActivityAggregateState | null,
+    originCreatedAtSeconds?: number,
+  ) {
     if (aggregate === null) return null;
     const checks = yield* Effect.forEach(
       aggregate.activities,
@@ -36,4 +36,5 @@ export const filterPermittedActivity = (
         activities[0]!.updatedAt,
       ),
     };
-  });
+  },
+);

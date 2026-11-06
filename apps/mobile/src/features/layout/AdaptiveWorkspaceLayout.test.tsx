@@ -18,6 +18,8 @@ const navigation = { navigate: vi.fn(), dispatch: vi.fn(), getState: () => undef
 const windowSize = { width: 1280, height: 800, scale: 2, fontScale: 1 };
 const selectWorkspace = vi.fn();
 const openThreadPullRequests = vi.fn();
+// Stable like the real hook's handler, so it never changes the sidebar's props identity.
+const openPendingTaskStub = vi.fn();
 const preferences = { value: { threadListFilters: undefined } };
 
 function Passthrough(props: { readonly children?: React.ReactNode }) {
@@ -100,6 +102,9 @@ const stubModules: Record<string, unknown> = {
     useAndroidWorkspaceSelection: () => selectWorkspace,
   },
   "../home/home-list-options": { HomeListOptionsProvider: Passthrough },
+  "../home/usePendingTaskListActions": {
+    usePendingTaskListActions: () => ({ openPendingTask: openPendingTaskStub }),
+  },
   "../threads/ThreadNavigationSidebar": { ThreadNavigationSidebar: () => null },
   "../threads/use-open-thread-pull-requests": {
     useOpenThreadPullRequests: () => openThreadPullRequests,

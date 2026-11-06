@@ -248,7 +248,7 @@ const endpointSignal = (name: OtlpSignalName, own: Settings, generic: Settings):
   };
 };
 
-export const load: Effect.Effect<OtelEnvironment> = Config.all({
+const sdkFlags = {
   lecturn: flag(
     "LECTURN_OTEL_SDK_DISABLED",
     LECTURN_TRUE,
@@ -265,6 +265,10 @@ export const load: Effect.Effect<OtelEnvironment> = Config.all({
     (value) =>
       `OTEL_SDK_DISABLED=${value} was read as false; the OpenTelemetry specification recognizes only the string true, so use OTEL_SDK_DISABLED=true or LECTURN_OTEL_SDK_DISABLED to say it any other way`,
   ),
+};
+
+export const load: Effect.Effect<OtelEnvironment> = Config.all({
+  ...sdkFlags,
   resource: resourceAttributes,
   generic: settings("OTEL_EXPORTER_OTLP_"),
   traces: settings("OTEL_EXPORTER_OTLP_TRACES_"),
@@ -312,6 +316,20 @@ export const load: Effect.Effect<OtelEnvironment> = Config.all({
   }),
   Effect.orDie,
 );
+
+export const isRelayTracingEnabled = (env: Readonly<Record<string, string | undefined>>) =>
+  Config.all({
+    ...sdkFlags,
+    telemetry: flag("LECTURN_TELEMETRY_ENABLED", LECTURN_TRUE, LECTURN_FALSE, String),
+  }).pipe(
+    Effect.map(
+      ({ telemetry, lecturn, spec }) =>
+        telemetry.value !== false && !(lecturn.value ?? spec.value ?? false),
+    ),
+    Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnvRecord(env))),
+    Effect.orDie,
+    Effect.runSync,
+  );
 
 export type SignalName = "traces" | "metrics" | "logs";
 

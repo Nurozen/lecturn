@@ -24,53 +24,56 @@ const fail = (message: string) => new SquireActionLogExportError({ message });
  */
 export const squireActionLogExport = createEnvironmentCommand(connectionAtomRuntime, {
   label: "squire:action-log-export",
-  execute: ({ squireId }: { readonly squireId: SquireId }) =>
-    Effect.gen(function* () {
-      const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
-      const prepared = yield* SubscriptionRef.get(supervisor.prepared);
-      if (Option.isNone(prepared)) {
-        return yield* fail("Reconnect this environment to export the action log.");
+  execute: Effect.fn("squireActionLogExport.execute")(function* ({
+    squireId,
+  }: {
+    readonly squireId: SquireId;
+  }) {
+    const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
+    const prepared = yield* SubscriptionRef.get(supervisor.prepared);
+    if (Option.isNone(prepared)) {
+      return yield* fail("Reconnect this environment to export the action log.");
+    }
+    const connection = prepared.value;
+    const url = squireActionLogUrl(connection.httpBaseUrl, squireId);
+    const authorization = connection.httpAuthorization;
+    const headers: Record<string, string> = {};
+    if (authorization?._tag === "Bearer") {
+      headers.authorization = `Bearer ${authorization.token}`;
+    } else if (authorization?._tag === "Dpop") {
+      const signer = yield* Effect.serviceOption(ManagedRelay.ManagedRelayDpopSigner);
+      if (Option.isNone(signer)) {
+        return yield* fail("This connection cannot authorize the export.");
       }
-      const connection = prepared.value;
-      const url = squireActionLogUrl(connection.httpBaseUrl, squireId);
-      const authorization = connection.httpAuthorization;
-      const headers: Record<string, string> = {};
-      if (authorization?._tag === "Bearer") {
-        headers.authorization = `Bearer ${authorization.token}`;
-      } else if (authorization?._tag === "Dpop") {
-        const signer = yield* Effect.serviceOption(ManagedRelay.ManagedRelayDpopSigner);
-        if (Option.isNone(signer)) {
-          return yield* fail("This connection cannot authorize the export.");
-        }
-        headers.authorization = `DPoP ${authorization.accessToken}`;
-        headers.dpop = yield* signer.value
-          .createProof({ method: "GET", url, accessToken: authorization.accessToken })
-          .pipe(Effect.mapError(() => fail("This connection cannot authorize the export.")));
+      headers.authorization = `DPoP ${authorization.accessToken}`;
+      headers.dpop = yield* signer.value
+        .createProof({ method: "GET", url, accessToken: authorization.accessToken })
+        .pipe(Effect.mapError(() => fail("This connection cannot authorize the export.")));
+    }
+    const body = yield* Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient;
+      const response = yield* client.get(url, { headers });
+      if (response.status !== 200) {
+        return yield* fail(
+          response.status === 404
+            ? "This Squire's action log was not found."
+            : "The action log could not be exported with this connection.",
+        );
       }
-      const body = yield* Effect.gen(function* () {
-        const client = yield* HttpClient.HttpClient;
-        const response = yield* client.get(url, { headers });
-        if (response.status !== 200) {
-          return yield* fail(
-            response.status === 404
-              ? "This Squire's action log was not found."
-              : "The action log could not be exported with this connection.",
-          );
-        }
-        return yield* response.arrayBuffer;
-      }).pipe(
-        Effect.provideService(FetchHttpClient.RequestInit, {
-          credentials: authorization === null ? "include" : "omit",
-          cache: "no-store",
-          redirect: "error",
-        }),
-        Effect.provide(FetchHttpClient.layer),
-        Effect.mapError((error) =>
-          error._tag === "SquireActionLogExportError"
-            ? error
-            : fail("Could not reach the environment to export the action log."),
-        ),
-      );
-      return new Blob([body], { type: "application/x-ndjson" });
-    }).pipe(Effect.timeout("60 seconds")),
+      return yield* response.arrayBuffer;
+    }).pipe(
+      Effect.provideService(FetchHttpClient.RequestInit, {
+        credentials: authorization === null ? "include" : "omit",
+        cache: "no-store",
+        redirect: "error",
+      }),
+      Effect.provide(FetchHttpClient.layer),
+      Effect.mapError((error) =>
+        error._tag === "SquireActionLogExportError"
+          ? error
+          : fail("Could not reach the environment to export the action log."),
+      ),
+    );
+    return new Blob([body], { type: "application/x-ndjson" });
+  }, Effect.timeout("60 seconds")),
 });

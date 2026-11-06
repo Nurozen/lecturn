@@ -206,8 +206,8 @@ const make = Effect.gen(function* () {
    * definitions the toolkit lists (headless first, as there). A title that
    * cannot be read leaves the request on the tool's name.
    */
-  const withToolTitle = (info: ConnectedAppToolApprovalInfo) =>
-    Effect.gen(function* () {
+  const withToolTitle = Effect.fn("AppToolApprovalService.withToolTitle")(
+    function* (info: ConnectedAppToolApprovalInfo) {
       if (info.toolTitle !== undefined) return info;
       const found = yield* apps.get(info.appId);
       if (Option.isNone(found)) return info;
@@ -222,7 +222,9 @@ const make = Effect.gen(function* () {
       ].find((definition) => definition.name === bare);
       const toolTitle = tool === undefined ? undefined : appToolTitle(tool);
       return toolTitle === undefined ? info : { ...info, toolTitle };
-    }).pipe(Effect.orElseSucceed(() => info));
+    },
+    (effect, info) => effect.pipe(Effect.orElseSucceed(() => info)),
+  );
 
   const settleFromEvents = (
     threadId: ThreadId,
@@ -249,31 +251,33 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const expireAfterTtl = (threadId: ThreadId, requestId: RuntimeRequestId) =>
-    Effect.gen(function* () {
-      yield* Effect.sleep(APPROVAL_TTL);
-      const expired = yield* orchestrator
-        .dispatch({
-          type: "runtime-request.app-expire",
-          commandId: CommandId.make(`apps:approval-expire:${requestId}`),
-          threadId,
-          requestId,
-        })
-        .pipe(
-          Effect.as(true),
-          Effect.orElseSucceed(() => false),
+  const expireAfterTtl = Effect.fn("AppToolApprovalService.expireAfterTtl")(function* (
+    threadId: ThreadId,
+    requestId: RuntimeRequestId,
+  ) {
+    yield* Effect.sleep(APPROVAL_TTL);
+    const expired = yield* orchestrator
+      .dispatch({
+        type: "runtime-request.app-expire",
+        commandId: CommandId.make(`apps:approval-expire:${requestId}`),
+        threadId,
+        requestId,
+      })
+      .pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      );
+    // Refused when the request already ended; that end is the outcome.
+    const ended = expired
+      ? "expired"
+      : yield* projections.getRuntimeRequest(threadId, requestId).pipe(
+          Effect.map((request) =>
+            request === undefined ? undefined : outcomeFromRequest(request),
+          ),
+          Effect.orElseSucceed(() => undefined),
         );
-      // Refused when the request already ended; that end is the outcome.
-      const ended = expired
-        ? "expired"
-        : yield* projections.getRuntimeRequest(threadId, requestId).pipe(
-            Effect.map((request) =>
-              request === undefined ? undefined : outcomeFromRequest(request),
-            ),
-            Effect.orElseSucceed(() => undefined),
-          );
-      yield* registry.resolve(requestId, ended ?? "expired");
-    });
+    yield* registry.resolve(requestId, ended ?? "expired");
+  });
 
   // The agent gave up on the call (or the server is stopping); nobody acts on an answer now.
   const withdraw = (threadId: ThreadId, requestId: RuntimeRequestId) =>

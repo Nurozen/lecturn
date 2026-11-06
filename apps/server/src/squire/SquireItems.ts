@@ -82,76 +82,75 @@ const connectedAppToolOptions = (options: ReadonlyArray<ProviderApprovalOption> 
  * The thread's own question for a request id, or a secret request's label and
  * reason when `secretTurnItemId` is given. None once the thread or item is gone.
  */
-export const readSquireQuestion = (
+export const readSquireQuestion = Effect.fn("SquireItems.readSquireQuestion")(function* (
   projections: ProjectionStore.ProjectionStoreV2["Service"],
   threadId: ThreadId,
   ref: { readonly requestId: string; readonly secretTurnItemId?: TurnItemId | undefined },
-): Effect.Effect<Option.Option<SquireQuestion>, ProjectionStore.ProjectionStoreV2Error> =>
-  Effect.gen(function* () {
-    if (ref.secretTurnItemId !== undefined) {
-      const item = yield* projections.getTurnItem({ threadId, itemId: ref.secretTurnItemId });
-      if (item?.type !== "secret_request") return Option.none();
-      const reason = item.reason.trim();
-      return Option.some({
-        requestKind: "secret",
-        question: reason ? `${item.label}: ${reason}` : item.label,
-        // Answered through the secret store, never through the card.
-        options: [],
-        pending: item.secretStatus === "pending",
-      });
-    }
-    if ((yield* projections.getThreadShell(threadId)) === null) return Option.none();
-    const { request, item } = yield* projections.getRuntimeResponseContext(
-      threadId,
-      RuntimeRequestId.make(ref.requestId),
-    );
-    if (request === undefined) return Option.none();
-    const pending = request.status === "pending";
-    const capability = request.responseCapability.type;
-    if (item?.type === "user_input_request") {
-      return Option.some({
-        requestKind: "runtime",
-        question: item.questions.map((question) => question.question).join("\n"),
-        options: (item.questions[0]?.options ?? []).map((option) => ({
-          label: option.label,
-          description: option.description,
-        })),
-        pending,
-        ...(pending
-          ? {
-              request: {
-                type: "user-input" as const,
-                questions: item.questions,
-                canRespond: capability !== "not_resumable",
-              },
-            }
-          : {}),
-      });
-    }
-    const prompt = item?.type === "approval_request" ? item.prompt?.trim() : undefined;
-    const itemOptions = item?.type === "approval_request" ? item.options : undefined;
-    const options =
-      request.connectedAppTool === undefined ? itemOptions : connectedAppToolOptions(itemOptions);
+): Effect.fn.Return<Option.Option<SquireQuestion>, ProjectionStore.ProjectionStoreV2Error> {
+  if (ref.secretTurnItemId !== undefined) {
+    const item = yield* projections.getTurnItem({ threadId, itemId: ref.secretTurnItemId });
+    if (item?.type !== "secret_request") return Option.none();
+    const reason = item.reason.trim();
+    return Option.some({
+      requestKind: "secret",
+      question: reason ? `${item.label}: ${reason}` : item.label,
+      // Answered through the secret store, never through the card.
+      options: [],
+      pending: item.secretStatus === "pending",
+    });
+  }
+  if ((yield* projections.getThreadShell(threadId)) === null) return Option.none();
+  const { request, item } = yield* projections.getRuntimeResponseContext(
+    threadId,
+    RuntimeRequestId.make(ref.requestId),
+  );
+  if (request === undefined) return Option.none();
+  const pending = request.status === "pending";
+  const capability = request.responseCapability.type;
+  if (item?.type === "user_input_request") {
     return Option.some({
       requestKind: "runtime",
-      question: prompt || item?.title?.trim() || `Approve ${request.kind}`,
-      options:
-        options?.map((option) => ({
-          label: option.label,
-          ...(option.warning === undefined ? {} : { description: option.warning }),
-        })) ?? DEFAULT_APPROVAL_OPTIONS,
+      question: item.questions.map((question) => question.question).join("\n"),
+      options: (item.questions[0]?.options ?? []).map((option) => ({
+        label: option.label,
+        description: option.description,
+      })),
       pending,
       ...(pending
         ? {
             request: {
-              type: "approval" as const,
-              ...(options === undefined ? {} : { options }),
-              canRespond: capability === "live",
+              type: "user-input" as const,
+              questions: item.questions,
+              canRespond: capability !== "not_resumable",
             },
           }
         : {}),
     });
+  }
+  const prompt = item?.type === "approval_request" ? item.prompt?.trim() : undefined;
+  const itemOptions = item?.type === "approval_request" ? item.options : undefined;
+  const options =
+    request.connectedAppTool === undefined ? itemOptions : connectedAppToolOptions(itemOptions);
+  return Option.some({
+    requestKind: "runtime",
+    question: prompt || item?.title?.trim() || `Approve ${request.kind}`,
+    options:
+      options?.map((option) => ({
+        label: option.label,
+        ...(option.warning === undefined ? {} : { description: option.warning }),
+      })) ?? DEFAULT_APPROVAL_OPTIONS,
+    pending,
+    ...(pending
+      ? {
+          request: {
+            type: "approval" as const,
+            ...(options === undefined ? {} : { options }),
+            canRespond: capability === "live",
+          },
+        }
+      : {}),
   });
+});
 
 const decodeFyiSource = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ source: Schema.String })),

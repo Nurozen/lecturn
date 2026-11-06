@@ -7,10 +7,14 @@ turn result, duration, release channel, and main-agent token totals when availab
 Events do not include prompts, responses, file contents, authentication tokens, conversation IDs,
 raw provider events, or child-agent output. Child-agent token use is excluded from the totals.
 
-To disable collection, set `LECTURN_TELEMETRY_ENABLED=false` in the server's environment before
-starting it. This stops product events from being recorded or sent.
+Lecturn also sends relay connection traces to Axiom to diagnose Lecturn Connect connectivity.
 
-The desktop app reads the variable from your shell profile (for example `~/.zshrc`) on macOS and
+To disable product events and relay tracing, set `LECTURN_TELEMETRY_ENABLED=false` in the server's
+environment before starting it. Relay tracing also stops when `LECTURN_OTEL_SDK_DISABLED` or
+`OTEL_SDK_DISABLED` turns OpenTelemetry export off. The web app in a browser, including one the
+`lecturn` CLI opens, does not read these variables.
+
+The desktop app reads `LECTURN_TELEMETRY_ENABLED` from your shell profile (for example `~/.zshrc`) on macOS and
 Linux, so export it there and restart the app. On Windows, set it as a user environment variable.
 
 ## Export diagnostics to your own receiver

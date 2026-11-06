@@ -43,12 +43,11 @@ export const layer: Layer.Layer<
       name: CONTRIBUTION,
       aroundProviderSessionOpen: (input, open) =>
         check("aroundProviderSessionOpen", input.driverKind).pipe(Effect.andThen(open)),
-      beforeTurnStart: (input) =>
-        Effect.gen(function* () {
-          const instance = yield* instances.getInstance(input.run.providerInstanceId);
-          if (instance === undefined) return;
-          yield* check("beforeTurnStart", instance.driverKind);
-        }),
+      beforeTurnStart: Effect.fn("TeamProviderPolicyHooks.beforeTurnStart")(function* (input) {
+        const instance = yield* instances.getInstance(input.run.providerInstanceId);
+        if (instance === undefined) return;
+        yield* check("beforeTurnStart", instance.driverKind);
+      }),
     });
   }),
 );

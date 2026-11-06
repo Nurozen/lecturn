@@ -134,16 +134,17 @@ const make = Effect.gen(function* () {
       maxOutputBytes: 16_384,
     });
 
-  const isOwnRepository = (workspace: string) =>
-    Effect.gen(function* () {
-      if (!(yield* fileSystem.exists(path.join(workspace, ".git")))) return false;
-      const topLevel = yield* git(workspace, ["rev-parse", "--show-toplevel"], true);
-      if (topLevel.exitCode !== 0) return false;
-      return (
-        (yield* fileSystem.realPath(topLevel.stdout.trim())) ===
-        (yield* fileSystem.realPath(workspace))
-      );
-    });
+  const isOwnRepository = Effect.fn("SquireWorkspace.isOwnRepository")(function* (
+    workspace: string,
+  ) {
+    if (!(yield* fileSystem.exists(path.join(workspace, ".git")))) return false;
+    const topLevel = yield* git(workspace, ["rev-parse", "--show-toplevel"], true);
+    if (topLevel.exitCode !== 0) return false;
+    return (
+      (yield* fileSystem.realPath(topLevel.stdout.trim())) ===
+      (yield* fileSystem.realPath(workspace))
+    );
+  });
 
   const ensure: SquireWorkspace["Service"]["ensure"] = (squireId) =>
     resolve(squireId, "ensure").pipe(

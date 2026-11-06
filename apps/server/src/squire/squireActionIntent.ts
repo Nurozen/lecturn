@@ -210,8 +210,8 @@ const linkedHead = (shell: OrchestrationV2ThreadShell) =>
   (shell.pullRequests ?? []).find((link) => link.snapshot?.headSha !== undefined);
 
 /** What the target looks like now, stored with an intent so the hook can tell what changed. */
-export const captureSquirePrecondition = (projections: Projections, threadId: ThreadId) =>
-  Effect.gen(function* () {
+export const captureSquirePrecondition = Effect.fn("squireActionIntent.captureSquirePrecondition")(
+  function* (projections: Projections, threadId: ThreadId) {
     const shell = yield* projections.getThreadShell(threadId);
     if (shell === null) return {} satisfies SquireActionPrecondition;
     const message = yield* lastUserAuthoredMessage(projections, threadId);
@@ -223,19 +223,16 @@ export const captureSquirePrecondition = (projections: Projections, threadId: Th
         ? {}
         : { prKey: threadPullRequestKeyOf(link), headSha: link.snapshot.headSha }),
     } satisfies SquireActionPrecondition;
-  });
+  },
+);
 
 /**
  * Why the intent's trigger no longer holds, or undefined while it does: the
  * user wrote in the thread, a newer turn started, or the PR head moved.
  * Read under the target's command lock by the hook.
  */
-export const squirePreconditionBroken = (
-  projections: Projections,
-  threadId: ThreadId,
-  precondition: SquireActionPrecondition,
-) =>
-  Effect.gen(function* () {
+export const squirePreconditionBroken = Effect.fn("squireActionIntent.squirePreconditionBroken")(
+  function* (projections: Projections, threadId: ThreadId, precondition: SquireActionPrecondition) {
     const shell = yield* projections.getThreadShell(threadId);
     if (shell === null || shell.deletedAt !== null) return "the thread no longer exists";
     const latestUser = shell.latestUserAuthoredMessageAt ?? null;
@@ -264,7 +261,8 @@ export const squirePreconditionBroken = (
       }
     }
     return undefined;
-  });
+  },
+);
 
 /**
  * Squire steers never interrupt a running turn. `auto` (steer the active

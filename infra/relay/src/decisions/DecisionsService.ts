@@ -64,72 +64,74 @@ export function makeDecisionEvaluation(
     return yield* deps.evaluator(principal, request);
   }, Effect.withTracerEnabled(false));
 }
-export const makeDecisionsService = (config: DecisionsConfig, approvalOrigin: string) =>
-  Effect.gen(function* () {
-    const extensions = yield* Effect.serviceOption(ExtensionsService);
-    const crypto = yield* Crypto.Crypto;
-    const access = yield* makeDecisionsAccess(config);
-    const funding = yield* makeDecisionFundingStore(access, { approvalOrigin });
-    const usage = yield* makeDecisionUsageStore(config);
-    const fingerprint = Effect.fn("Decisions.fingerprint")(function* (
-      request: DecisionEvaluationRequest,
-    ) {
-      const { explicitRetry: _retry, ...content } = request;
-      return yield* crypto.digest("SHA-256", new TextEncoder().encode(encodeRequest(content))).pipe(
-        Effect.map(Hex.encode),
-        Effect.mapError(() => decisionError("unavailable", "Decision evaluation is unavailable")),
-      );
-    }, Effect.withTracerEnabled(false));
-    const status = Effect.fn("Decisions.status")(function* (
-      userId: string,
-    ): Effect.fn.Return<RelayDecisionsStatus, DecisionEvaluationError> {
-      const result = yield* access.status(userId);
-      return {
-        enabled: result.enabled,
-        eligible: result.eligible,
-        reason: result.reason,
-        allowance: result.eligible ? yield* usage.getAllowance(userId) : null,
-      };
-    });
-    const fundingStatus = Effect.fn("Decisions.fundingStatus")(function* (
-      principal: EnvironmentCredentialPrincipal,
-    ) {
-      const result = yield* funding.status(principal);
-      if (!result.eligible) return result;
-      const { payerId } = yield* funding.requireFunding(principal, result.generation);
-      return { ...result, allowance: yield* usage.getAllowance(payerId) };
-    });
-    const evaluate = makeDecisionEvaluation(config, {
-      funding,
-      usage,
-      fingerprint,
-      evaluator: Option.isNone(extensions)
-        ? null
-        : (principal, request) =>
-            extensions.value
-              .evaluate(principal, request, "decisions")
-              .pipe(
-                Effect.flatMap((result) =>
-                  decodeResult(result).pipe(
-                    Effect.mapError(() =>
-                      decisionError(
-                        "unavailable",
-                        "Decision evaluation did not return a valid response",
-                      ),
+export const makeDecisionsService = Effect.fn("Decisions.makeDecisionsService")(function* (
+  config: DecisionsConfig,
+  approvalOrigin: string,
+) {
+  const extensions = yield* Effect.serviceOption(ExtensionsService);
+  const crypto = yield* Crypto.Crypto;
+  const access = yield* makeDecisionsAccess(config);
+  const funding = yield* makeDecisionFundingStore(access, { approvalOrigin });
+  const usage = yield* makeDecisionUsageStore(config);
+  const fingerprint = Effect.fn("Decisions.fingerprint")(function* (
+    request: DecisionEvaluationRequest,
+  ) {
+    const { explicitRetry: _retry, ...content } = request;
+    return yield* crypto.digest("SHA-256", new TextEncoder().encode(encodeRequest(content))).pipe(
+      Effect.map(Hex.encode),
+      Effect.mapError(() => decisionError("unavailable", "Decision evaluation is unavailable")),
+    );
+  }, Effect.withTracerEnabled(false));
+  const status = Effect.fn("Decisions.status")(function* (
+    userId: string,
+  ): Effect.fn.Return<RelayDecisionsStatus, DecisionEvaluationError> {
+    const result = yield* access.status(userId);
+    return {
+      enabled: result.enabled,
+      eligible: result.eligible,
+      reason: result.reason,
+      allowance: result.eligible ? yield* usage.getAllowance(userId) : null,
+    };
+  });
+  const fundingStatus = Effect.fn("Decisions.fundingStatus")(function* (
+    principal: EnvironmentCredentialPrincipal,
+  ) {
+    const result = yield* funding.status(principal);
+    if (!result.eligible) return result;
+    const { payerId } = yield* funding.requireFunding(principal, result.generation);
+    return { ...result, allowance: yield* usage.getAllowance(payerId) };
+  });
+  const evaluate = makeDecisionEvaluation(config, {
+    funding,
+    usage,
+    fingerprint,
+    evaluator: Option.isNone(extensions)
+      ? null
+      : (principal, request) =>
+          extensions.value
+            .evaluate(principal, request, "decisions")
+            .pipe(
+              Effect.flatMap((result) =>
+                decodeResult(result).pipe(
+                  Effect.mapError(() =>
+                    decisionError(
+                      "unavailable",
+                      "Decision evaluation did not return a valid response",
                     ),
                   ),
                 ),
               ),
-    });
-    return {
-      access,
-      funding,
-      usage,
-      status,
-      fundingStatus,
-      evaluate,
-    };
+            ),
   });
+  return {
+    access,
+    funding,
+    usage,
+    status,
+    fundingStatus,
+    evaluate,
+  };
+});
 export class DecisionsService extends Context.Service<
   DecisionsService,
   Effect.Success<ReturnType<typeof makeDecisionsService>>

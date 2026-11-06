@@ -226,66 +226,65 @@ const leadCursors = Effect.fn("squireRoomContext.leadCursors")(function* (
  * The context a batch for `squireId` carries; posts already in the batch as
  * `message` events are excluded and still advance the cursor.
  */
-export const collectRoomContext = (
+export const collectRoomContext = Effect.fn("squireRoomContext.collectRoomContext")(function* (
   stores: Stores,
   input: {
     readonly squire: Pick<SquireRepository.SquireRow, "id" | "role">;
     readonly batch: ReadonlyArray<SquireRepository.SquireEventRow>;
   },
-): Effect.Effect<ReadonlyArray<RoomContextBlock>, PersistenceSqlError> =>
-  Effect.gen(function* () {
-    const { repository, rooms } = stores;
-    const { squire } = input;
-    const member = { member_kind: memberKind(squire.role), member_id: squire.id };
-    const waiting = yield* repository.listEventsByStatus({
-      squireId: squire.id,
-      statuses: ["pending", "deferred", "batched"],
-    });
-    const asMessages = messagePostIds([...input.batch, ...waiting]);
-
-    const memberRooms = yield* rooms.listRoomsOf({ member, status: "open" });
-    const candidates: Array<{ room: (typeof memberRooms)[number]; after: number }> = [];
-    for (const room of memberRooms) {
-      const row = (yield* rooms.listMembers(room.id)).find(
-        (entry) => entry.member_kind === member.member_kind && entry.member_id === member.member_id,
-      );
-      candidates.push({ room, after: row?.read_cursor ?? 0 });
-    }
-    // The Lead also hears rooms it is not in once Jev shows it a post there.
-    const shownOnly = new Set<string>();
-    if (squire.role === "lead") {
-      const joined = new Set<string>(memberRooms.map((room) => room.id));
-      const cursors = yield* leadCursors(repository, squire.id);
-      for (const room of yield* rooms.listRooms({ status: "open" })) {
-        if (joined.has(room.id)) continue;
-        candidates.push({ room, after: cursors.get(room.id) ?? 0 });
-        shownOnly.add(room.id);
-      }
-    }
-
-    const blocks: Array<RoomContextBlock> = [];
-    for (const { room, after } of candidates) {
-      const unseen = yield* rooms.listPostsAfter({ roomId: room.id, after });
-      const through = unseen.at(-1)?.id;
-      if (through === undefined) continue;
-      if (shownOnly.has(room.id) && !unseen.some(isShownToLead)) continue;
-      const shown = unseen.filter(
-        (post) =>
-          !asMessages.has(post.id) &&
-          !(post.author_kind === member.member_kind && post.author_id === squire.id),
-      );
-      const { kept, olderCount } = bound(shown);
-      blocks.push({
-        roomId: room.id,
-        topic: room.topic,
-        posts: yield* toPosts(repository, kept),
-        olderCount,
-        through,
-        after,
-      });
-    }
-    return blocks;
+): Effect.fn.Return<ReadonlyArray<RoomContextBlock>, PersistenceSqlError> {
+  const { repository, rooms } = stores;
+  const { squire } = input;
+  const member = { member_kind: memberKind(squire.role), member_id: squire.id };
+  const waiting = yield* repository.listEventsByStatus({
+    squireId: squire.id,
+    statuses: ["pending", "deferred", "batched"],
   });
+  const asMessages = messagePostIds([...input.batch, ...waiting]);
+
+  const memberRooms = yield* rooms.listRoomsOf({ member, status: "open" });
+  const candidates: Array<{ room: (typeof memberRooms)[number]; after: number }> = [];
+  for (const room of memberRooms) {
+    const row = (yield* rooms.listMembers(room.id)).find(
+      (entry) => entry.member_kind === member.member_kind && entry.member_id === member.member_id,
+    );
+    candidates.push({ room, after: row?.read_cursor ?? 0 });
+  }
+  // The Lead also hears rooms it is not in once Jev shows it a post there.
+  const shownOnly = new Set<string>();
+  if (squire.role === "lead") {
+    const joined = new Set<string>(memberRooms.map((room) => room.id));
+    const cursors = yield* leadCursors(repository, squire.id);
+    for (const room of yield* rooms.listRooms({ status: "open" })) {
+      if (joined.has(room.id)) continue;
+      candidates.push({ room, after: cursors.get(room.id) ?? 0 });
+      shownOnly.add(room.id);
+    }
+  }
+
+  const blocks: Array<RoomContextBlock> = [];
+  for (const { room, after } of candidates) {
+    const unseen = yield* rooms.listPostsAfter({ roomId: room.id, after });
+    const through = unseen.at(-1)?.id;
+    if (through === undefined) continue;
+    if (shownOnly.has(room.id) && !unseen.some(isShownToLead)) continue;
+    const shown = unseen.filter(
+      (post) =>
+        !asMessages.has(post.id) &&
+        !(post.author_kind === member.member_kind && post.author_id === squire.id),
+    );
+    const { kept, olderCount } = bound(shown);
+    blocks.push({
+      roomId: room.id,
+      topic: room.topic,
+      posts: yield* toPosts(repository, kept),
+      olderCount,
+      through,
+      after,
+    });
+  }
+  return blocks;
+});
 
 /** Inside the batch's transaction; cursors only move forward. */
 export const advanceRoomCursors = (
@@ -337,15 +336,15 @@ export const rewindRoomCursors = (
  * carried no context. The batch in flight is the Squire's newest, so its rows
  * are the newest of that kind.
  */
-export const readRoomContextWindows = (
-  repository: Stores["repository"],
-  input: {
-    readonly squireId: SquireId;
-    readonly batchId: string;
-    readonly batch: ReadonlyArray<SquireRepository.SquireEventRow>;
-  },
-): Effect.Effect<ReadonlyArray<RoomContextWindow>, PersistenceSqlError> =>
-  Effect.gen(function* () {
+export const readRoomContextWindows = Effect.fn("squireRoomContext.readRoomContextWindows")(
+  function* (
+    repository: Stores["repository"],
+    input: {
+      readonly squireId: SquireId;
+      readonly batchId: string;
+      readonly batch: ReadonlyArray<SquireRepository.SquireEventRow>;
+    },
+  ): Effect.fn.Return<ReadonlyArray<RoomContextWindow>, PersistenceSqlError> {
     const firstId = Math.min(...input.batch.map((row) => row.id));
     const rows = yield* repository.listActionLogDesc({
       squireId: input.squireId,
@@ -358,38 +357,38 @@ export const readRoomContextWindows = (
         Option.getOrNull(decodeLogData(row.data_json))?.batchId === input.batchId,
     );
     return first === undefined ? [] : windowsOf(first.data_json);
-  });
+  },
+);
 
 /**
  * The hops of the bot posts (a Squire's or the Lead's, never the reader's
  * own) the batch's stored room context showed, so a message sent in its turn
  * counts them toward the hop limit.
  */
-export const shownBotPostHops = (
+export const shownBotPostHops = Effect.fn("squireRoomContext.shownBotPostHops")(function* (
   stores: Stores,
   input: {
     readonly squireId: SquireId;
     readonly batchId: string;
     readonly batch: ReadonlyArray<SquireRepository.SquireEventRow>;
   },
-): Effect.Effect<ReadonlyArray<number>, PersistenceSqlError> =>
-  Effect.gen(function* () {
-    if (input.batch.length === 0) return [];
-    const windows = yield* readRoomContextWindows(stores.repository, input);
-    const hops: Array<number> = [];
-    for (const window of windows) {
-      const ids = new Set(window.postIds);
-      for (const post of yield* stores.rooms.listPostsAfter({
-        roomId: window.roomId,
-        after: window.after,
-        through: window.through,
-      })) {
-        if (!ids.has(post.id) || !isBotPost(post, input.squireId)) continue;
-        hops.push(post.hop);
-      }
+): Effect.fn.Return<ReadonlyArray<number>, PersistenceSqlError> {
+  if (input.batch.length === 0) return [];
+  const windows = yield* readRoomContextWindows(stores.repository, input);
+  const hops: Array<number> = [];
+  for (const window of windows) {
+    const ids = new Set(window.postIds);
+    for (const post of yield* stores.rooms.listPostsAfter({
+      roomId: window.roomId,
+      after: window.after,
+      through: window.through,
+    })) {
+      if (!ids.has(post.id) || !isBotPost(post, input.squireId)) continue;
+      hops.push(post.hop);
     }
-    return hops;
-  });
+  }
+  return hops;
+});
 
 /** A post by a Squire or the Lead other than `readerId`. */
 export const isBotPost = (post: Pick<Post, "author_kind" | "author_id">, readerId: SquireId) =>

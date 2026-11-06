@@ -202,23 +202,22 @@ export const make = Effect.gen(function* () {
       Effect.match({ onFailure: () => false, onSuccess: () => true }),
     );
   });
-  const refresh = (row: StaveLifecycleRow) =>
-    Effect.gen(function* () {
-      const project = yield* snapshots.getProjectShellById(row.projectId);
-      if (Option.isSome(project))
-        yield* orchestration.dispatch({
-          type: "project.refresh",
-          projectId: row.projectId,
-          commandId: CommandId.make(
-            `server:stave:refresh:${row.projectId}:${NodeCrypto.randomUUID()}`,
-          ),
-        });
-      yield* repo.markRefreshed({
+  const refresh = Effect.fn("StaveLifecycleService.refresh")(function* (row: StaveLifecycleRow) {
+    const project = yield* snapshots.getProjectShellById(row.projectId);
+    if (Option.isSome(project))
+      yield* orchestration.dispatch({
+        type: "project.refresh",
         projectId: row.projectId,
-        updatedAt: row.updatedAt,
-        refreshedAt: yield* nowIso,
+        commandId: CommandId.make(
+          `server:stave:refresh:${row.projectId}:${NodeCrypto.randomUUID()}`,
+        ),
       });
+    yield* repo.markRefreshed({
+      projectId: row.projectId,
+      updatedAt: row.updatedAt,
+      refreshedAt: yield* nowIso,
     });
+  });
   const update = (row: StaveLifecycleRow, patch: StaveLifecyclePatch, reset = false) =>
     locks.withSpaceLock(
       row.workspaceRoot,
@@ -259,8 +258,8 @@ export const make = Effect.gen(function* () {
         }).pipe(Effect.ensuring(repo.releaseLease(lease).pipe(Effect.ignore)));
       }),
     );
-  const validateParticipant = (projectId: StaveLifecycleRow["projectId"]) =>
-    Effect.gen(function* () {
+  const validateParticipant = Effect.fn("StaveLifecycleService.validateParticipant")(
+    function* (projectId: StaveLifecycleRow["projectId"]) {
       const policy = (yield* settings.getSettings).stave.lifecycle;
       const row = yield* repo.getByProjectId(projectId);
       const active = yield* snapshots.getProjectShellById(projectId);
@@ -289,267 +288,265 @@ export const make = Effect.gen(function* () {
         return yield* refusal(
           "A saga member is active, kept, or still inside its archive grace window.",
         );
+    },
+    Effect.mapError((error) =>
+      error._tag === "StaveRefusalError" ? error : refusal(error.message),
+    ),
+  );
+  const sagaReady = Effect.fn("StaveLifecycleService.sagaReady")(function* (
+    project: Effect.Success<ReturnType<typeof snapshots.getShellSnapshot>>["projects"][number],
+  ) {
+    if (!project.stave?.isSaga) return true;
+    if (Option.isNone(cli)) return false;
+    const status = yield* cli.value.spaceStatus(project.stave.spaceId);
+    if (status.manifest.saga == null) return false;
+    const snapshot = yield* snapshots.getShellSnapshot();
+    for (const member of status.manifest.saga.members) {
+      const active = snapshot.projects.find(
+        (candidate) => candidate.stave?.spaceId === member.id && candidate.stave.state === "live",
+      );
+      if (active === undefined) continue;
+      const checked = yield* validateParticipant(active.id).pipe(
+        Effect.match({ onFailure: () => false, onSuccess: () => true }),
+      );
+      if (!checked) return false;
+    }
+    return true;
+  });
+  const execute = Effect.fn("StaveLifecycleService.execute")(function* (
+    row: StaveLifecycleRow,
+    target: "archive" | "destroy",
+    automaticArchive: boolean,
+  ) {
+    const current = yield* settings.getSettings;
+    const operation: StaveLifecycleActionOperation = {
+      kind: "lifecycleAction",
+      projectId: row.projectId,
+      workspaceRoot: row.workspaceRoot,
+      ...(row.manifestCreatedAt === null
+        ? {}
+        : { expectedManifestCreatedAt: row.manifestCreatedAt }),
+      action: "retry",
+      target,
+      force: false,
+      memory: target === "archive" ? "keep" : current.stave.lifecycle.memoryFateOnDestroy,
+      sagaRemoveConfirmed: row.sagaRemoveConfirmed,
+      ...(row.sagaTeardown === null
+        ? {}
+        : { expectedSagaReview: row.sagaTeardown.expectedSagaReview }),
+    };
+    const validate = Effect.gen(function* () {
+      if (!(yield* enabled)) return yield* refusal("Stave cleanup is disabled.");
+      const latest = yield* settings.getSettings.pipe(
+        Effect.mapError((error) => refusal(error.message)),
+      );
+      if (!automaticArchive) {
+        const intent = yield* repo
+          .getByProjectId(row.projectId)
+          .pipe(Effect.mapError((error) => refusal(error.message)));
+        if (
+          row.deleteIntentSequence === null ||
+          Option.isNone(intent) ||
+          intent.value.deleteIntentSequence !== row.deleteIntentSequence ||
+          !["pending_destroy", "pending_archive", "destroying", "archiving"].includes(
+            intent.value.disposition,
+          )
+        )
+          return yield* refusal("This cleanup was dismissed or its delete intent changed.");
+        if (latest.stave.lifecycle.onProjectDelete !== target)
+          return yield* refusal("The deletion policy changed before cleanup.");
+        if (
+          !(yield* repo
+            .isProjectDeleted(row.projectId)
+            .pipe(Effect.mapError((error) => refusal(error.message))))
+        )
+          return yield* refusal("The project is no longer deleted.");
+        return;
+      }
+      const mode = latest.stave.lifecycle.onAllThreadsSettled;
+      if (mode !== "archive" && mode !== "archive-after-grace")
+        return yield* refusal("Automatic archiving was disabled.");
+      const bound = yield* snapshots
+        .getProjectShellById(row.projectId)
+        .pipe(Effect.mapError((error) => refusal(error.message)));
+      if (
+        Option.isNone(bound) ||
+        bound.value.workspaceRoot !== row.workspaceRoot ||
+        (yield* repo
+          .isScheduleResetRequested(row.projectId)
+          .pipe(Effect.mapError((error) => refusal(error.message))))
+      )
+        return yield* refusal("The project binding or archive schedule changed.");
+      const anchors = yield* snapshots
+        .listThreadLifecycleAnchorsByProjectId(row.projectId)
+        .pipe(Effect.mapError((error) => refusal(error.message)));
+      const fresh = yield* repo
+        .getByProjectId(row.projectId)
+        .pipe(Effect.mapError((error) => refusal(error.message)));
+      const decision = resolveArchiveDeadline({
+        anchors,
+        row: Option.getOrNull(fresh),
+        graceDays: mode === "archive" ? 0 : latest.stave.lifecycle.archiveGraceDays,
+        now: yield* nowIso,
+      });
+      if (
+        decision === null ||
+        decision.kept ||
+        decision.anchorAt !== row.anchorAt ||
+        Date.parse(decision.deadlineAt) > Date.parse(yield* nowIso)
+      )
+        return yield* refusal("Thread activity changed the archive schedule.");
     }).pipe(
       Effect.mapError((error) =>
         error._tag === "StaveRefusalError" ? error : refusal(error.message),
       ),
     );
-  const sagaReady = (
-    project: Effect.Success<ReturnType<typeof snapshots.getShellSnapshot>>["projects"][number],
-  ) =>
-    Effect.gen(function* () {
-      if (!project.stave?.isSaga) return true;
-      if (Option.isNone(cli)) return false;
-      const status = yield* cli.value.spaceStatus(project.stave.spaceId);
-      if (status.manifest.saga == null) return false;
-      const snapshot = yield* snapshots.getShellSnapshot();
-      for (const member of status.manifest.saga.members) {
-        const active = snapshot.projects.find(
-          (candidate) => candidate.stave?.spaceId === member.id && candidate.stave.state === "live",
-        );
-        if (active === undefined) continue;
-        const checked = yield* validateParticipant(active.id).pipe(
-          Effect.match({ onFailure: () => false, onSuccess: () => true }),
-        );
-        if (!checked) return false;
-      }
-      return true;
-    });
-  const execute = (
-    row: StaveLifecycleRow,
-    target: "archive" | "destroy",
-    automaticArchive: boolean,
-  ) =>
-    Effect.gen(function* () {
-      const current = yield* settings.getSettings;
-      const operation: StaveLifecycleActionOperation = {
-        kind: "lifecycleAction",
-        projectId: row.projectId,
-        workspaceRoot: row.workspaceRoot,
-        ...(row.manifestCreatedAt === null
-          ? {}
-          : { expectedManifestCreatedAt: row.manifestCreatedAt }),
-        action: "retry",
-        target,
-        force: false,
-        memory: target === "archive" ? "keep" : current.stave.lifecycle.memoryFateOnDestroy,
-        sagaRemoveConfirmed: row.sagaRemoveConfirmed,
-        ...(row.sagaTeardown === null
-          ? {}
-          : { expectedSagaReview: row.sagaTeardown.expectedSagaReview }),
-      };
-      const validate = Effect.gen(function* () {
-        if (!(yield* enabled)) return yield* refusal("Stave cleanup is disabled.");
-        const latest = yield* settings.getSettings.pipe(
-          Effect.mapError((error) => refusal(error.message)),
-        );
-        if (!automaticArchive) {
-          const intent = yield* repo
-            .getByProjectId(row.projectId)
-            .pipe(Effect.mapError((error) => refusal(error.message)));
-          if (
-            row.deleteIntentSequence === null ||
-            Option.isNone(intent) ||
-            intent.value.deleteIntentSequence !== row.deleteIntentSequence ||
-            !["pending_destroy", "pending_archive", "destroying", "archiving"].includes(
-              intent.value.disposition,
+    yield* operations
+      .executeLifecycle(operation, validate, automaticArchive ? validateParticipant : undefined)
+      .pipe(
+        Effect.catch((error) =>
+          Effect.gen(function* () {
+            const failed = yield* repo.getByProjectId(row.projectId);
+            if (
+              Option.isSome(failed) &&
+              failed.value.deleteIntentSequence === row.deleteIntentSequence &&
+              failed.value.anchorAt === row.anchorAt &&
+              ["pending_destroy", "pending_archive", "pending_evaluation"].includes(
+                failed.value.disposition,
+              )
             )
-          )
-            return yield* refusal("This cleanup was dismissed or its delete intent changed.");
-          if (latest.stave.lifecycle.onProjectDelete !== target)
-            return yield* refusal("The deletion policy changed before cleanup.");
-          if (
-            !(yield* repo
-              .isProjectDeleted(row.projectId)
-              .pipe(Effect.mapError((error) => refusal(error.message))))
-          )
-            return yield* refusal("The project is no longer deleted.");
-          return;
-        }
-        const mode = latest.stave.lifecycle.onAllThreadsSettled;
-        if (mode !== "archive" && mode !== "archive-after-grace")
-          return yield* refusal("Automatic archiving was disabled.");
-        const bound = yield* snapshots
-          .getProjectShellById(row.projectId)
-          .pipe(Effect.mapError((error) => refusal(error.message)));
-        if (
-          Option.isNone(bound) ||
-          bound.value.workspaceRoot !== row.workspaceRoot ||
-          (yield* repo
-            .isScheduleResetRequested(row.projectId)
-            .pipe(Effect.mapError((error) => refusal(error.message))))
-        )
-          return yield* refusal("The project binding or archive schedule changed.");
-        const anchors = yield* snapshots
-          .listThreadLifecycleAnchorsByProjectId(row.projectId)
-          .pipe(Effect.mapError((error) => refusal(error.message)));
-        const fresh = yield* repo
-          .getByProjectId(row.projectId)
-          .pipe(Effect.mapError((error) => refusal(error.message)));
-        const decision = resolveArchiveDeadline({
-          anchors,
-          row: Option.getOrNull(fresh),
-          graceDays: mode === "archive" ? 0 : latest.stave.lifecycle.archiveGraceDays,
-          now: yield* nowIso,
-        });
-        if (
-          decision === null ||
-          decision.kept ||
-          decision.anchorAt !== row.anchorAt ||
-          Date.parse(decision.deadlineAt) > Date.parse(yield* nowIso)
-        )
-          return yield* refusal("Thread activity changed the archive schedule.");
-      }).pipe(
-        Effect.mapError((error) =>
-          error._tag === "StaveRefusalError" ? error : refusal(error.message),
+              yield* update(failed.value, {
+                disposition: "refused",
+                refusalCode: error.code,
+                refusalMessage: error.message,
+              });
+            return yield* error;
+          }),
         ),
       );
-      yield* operations
-        .executeLifecycle(operation, validate, automaticArchive ? validateParticipant : undefined)
-        .pipe(
-          Effect.catch((error) =>
-            Effect.gen(function* () {
-              const failed = yield* repo.getByProjectId(row.projectId);
-              if (
-                Option.isSome(failed) &&
-                failed.value.deleteIntentSequence === row.deleteIntentSequence &&
-                failed.value.anchorAt === row.anchorAt &&
-                ["pending_destroy", "pending_archive", "pending_evaluation"].includes(
-                  failed.value.disposition,
-                )
-              )
-                yield* update(failed.value, {
-                  disposition: "refused",
-                  refusalCode: error.code,
-                  refusalMessage: error.message,
-                });
-              return yield* error;
-            }),
-          ),
-        );
-    });
-  const processDeleted = (row: StaveLifecycleRow) =>
-    Effect.gen(function* () {
-      if (!(yield* repo.isProjectDeleted(row.projectId))) return;
-      if (
-        row.disposition === "refused" ||
-        (row.leaseUntil !== null && Date.parse(row.leaseUntil) > Date.parse(yield* nowIso))
-      )
-        return;
-      if (["destroyed", "archived", "kept", "not_stave"].includes(row.disposition)) {
-        yield* update(row, {
-          deleteIntentSequence: null,
-          ...(row.disposition === "archived" ? { disposition: "kept" as const } : {}),
-        });
-        return;
-      }
-      const current = yield* settings.getSettings;
-      yield* reader.invalidate(row.workspaceRoot);
-      const manifest = yield* reader.load(row.workspaceRoot);
-      if (
-        Option.isNone(manifest) &&
-        row.manifestCreatedAt !== null &&
-        (yield* fs.exists(row.workspaceRoot))
-      ) {
-        yield* update(row, {
-          disposition: "refused",
-          refusalCode: "unreadable",
-          refusalMessage: "The recorded space root exists but its manifest cannot be read.",
-        });
-        return;
-      }
-      const decision = evaluateDeletedProject(
-        row,
-        Option.getOrNull(manifest),
-        current.stave.lifecycle,
-      );
+  });
+  const processDeleted = Effect.fn("StaveLifecycleService.processDeleted")(function* (
+    row: StaveLifecycleRow,
+  ) {
+    if (!(yield* repo.isProjectDeleted(row.projectId))) return;
+    if (
+      row.disposition === "refused" ||
+      (row.leaseUntil !== null && Date.parse(row.leaseUntil) > Date.parse(yield* nowIso))
+    )
+      return;
+    if (["destroyed", "archived", "kept", "not_stave"].includes(row.disposition)) {
       yield* update(row, {
-        disposition: decision.disposition,
-        refusalCode: decision.code ?? null,
-        refusalMessage: decision.message ?? null,
-        ...(["kept", "not_stave", "destroyed"].includes(decision.disposition)
-          ? { deleteIntentSequence: null }
-          : {}),
+        deleteIntentSequence: null,
+        ...(row.disposition === "archived" ? { disposition: "kept" as const } : {}),
       });
-      if (decision.disposition !== "pending_destroy" && decision.disposition !== "pending_archive")
-        return;
-      if (row.deleteIntentSequence !== null)
-        yield* orchestration.drainThreadCleanup({
-          projectId: row.projectId,
-          throughSequence: row.deleteIntentSequence,
-        });
-      const fresh = yield* repo.getByProjectId(row.projectId);
-      if (
-        Option.isSome(fresh) &&
-        fresh.value.deleteIntentSequence === row.deleteIntentSequence &&
-        fresh.value.disposition === decision.disposition
-      )
-        yield* execute(
-          fresh.value,
-          decision.disposition === "pending_destroy" ? "destroy" : "archive",
-          false,
-        );
+      return;
+    }
+    const current = yield* settings.getSettings;
+    yield* reader.invalidate(row.workspaceRoot);
+    const manifest = yield* reader.load(row.workspaceRoot);
+    if (
+      Option.isNone(manifest) &&
+      row.manifestCreatedAt !== null &&
+      (yield* fs.exists(row.workspaceRoot))
+    ) {
+      yield* update(row, {
+        disposition: "refused",
+        refusalCode: "unreadable",
+        refusalMessage: "The recorded space root exists but its manifest cannot be read.",
+      });
+      return;
+    }
+    const decision = evaluateDeletedProject(
+      row,
+      Option.getOrNull(manifest),
+      current.stave.lifecycle,
+    );
+    yield* update(row, {
+      disposition: decision.disposition,
+      refusalCode: decision.code ?? null,
+      refusalMessage: decision.message ?? null,
+      ...(["kept", "not_stave", "destroyed"].includes(decision.disposition)
+        ? { deleteIntentSequence: null }
+        : {}),
     });
-  const processLive = (
+    if (decision.disposition !== "pending_destroy" && decision.disposition !== "pending_archive")
+      return;
+    if (row.deleteIntentSequence !== null)
+      yield* orchestration.drainThreadCleanup({
+        projectId: row.projectId,
+        throughSequence: row.deleteIntentSequence,
+      });
+    const fresh = yield* repo.getByProjectId(row.projectId);
+    if (
+      Option.isSome(fresh) &&
+      fresh.value.deleteIntentSequence === row.deleteIntentSequence &&
+      fresh.value.disposition === decision.disposition
+    )
+      yield* execute(
+        fresh.value,
+        decision.disposition === "pending_destroy" ? "destroy" : "archive",
+        false,
+      );
+  });
+  const processLive = Effect.fn("StaveLifecycleService.processLive")(function* (
     project: Effect.Success<ReturnType<typeof snapshots.getShellSnapshot>>["projects"][number],
-  ) =>
-    Effect.gen(function* () {
-      if (project.stave == null || project.stave.state !== "live") return;
-      const current = yield* settings.getSettings;
-      const policy = current.stave.lifecycle;
-      const now = yield* nowIso;
-      let row = yield* repo.ensure({
-        projectId: project.id,
-        workspaceRoot: project.workspaceRoot,
-        spaceId: project.stave.spaceId,
-        manifestCreatedAt: project.stave.createdAt ?? null,
-        now,
-      });
-      if (
-        row.deleteIntentSequence !== null ||
-        (row.leaseUntil !== null && Date.parse(row.leaseUntil) > Date.parse(yield* nowIso)) ||
-        ["archiving", "destroying", "restoring"].includes(row.disposition)
-      )
-        return;
-      if (yield* repo.isScheduleResetRequested(project.id)) {
-        yield* update(row, { disposition: "live" }, true);
-        row = Option.getOrThrow(yield* repo.getByProjectId(project.id));
-        if (yield* repo.isScheduleResetRequested(project.id)) return;
-      }
-      const anchors = yield* snapshots.listThreadLifecycleAnchorsByProjectId(project.id);
-      const decision = resolveArchiveDeadline({
-        anchors,
-        row,
-        graceDays: policy.onAllThreadsSettled === "archive" ? 0 : policy.archiveGraceDays,
-        now,
-      });
-      if (decision === null || policy.onAllThreadsSettled === "nothing") {
-        if (row.anchorAt !== null || row.disposition === "pending_archive")
-          yield* update(row, { disposition: "live" }, true);
-        return;
-      }
-      if (decision.kept || (row.disposition === "refused" && !decision.reset)) return;
-      const deadline = policy.onAllThreadsSettled === "suggest" ? null : decision.deadlineAt;
-      if (
-        decision.reset ||
-        row.disposition !== "pending_archive" ||
-        row.archiveDeadlineAt !== deadline
-      )
-        yield* update(
-          row,
-          {
-            disposition: "pending_archive",
-            anchorAt: decision.anchorAt,
-            scheduledAt: decision.scheduledAt,
-            archiveDeadlineAt: deadline,
-          },
-          decision.reset,
-        );
-      if (deadline === null || Date.parse(deadline) > Date.parse(now)) return;
-      if (!(yield* sagaReady(project))) return;
-      const fresh = yield* repo.getByProjectId(project.id);
-      if (Option.isSome(fresh)) yield* execute(fresh.value, "archive", true);
+  ) {
+    if (project.stave == null || project.stave.state !== "live") return;
+    const current = yield* settings.getSettings;
+    const policy = current.stave.lifecycle;
+    const now = yield* nowIso;
+    let row = yield* repo.ensure({
+      projectId: project.id,
+      workspaceRoot: project.workspaceRoot,
+      spaceId: project.stave.spaceId,
+      manifestCreatedAt: project.stave.createdAt ?? null,
+      now,
     });
+    if (
+      row.deleteIntentSequence !== null ||
+      (row.leaseUntil !== null && Date.parse(row.leaseUntil) > Date.parse(yield* nowIso)) ||
+      ["archiving", "destroying", "restoring"].includes(row.disposition)
+    )
+      return;
+    if (yield* repo.isScheduleResetRequested(project.id)) {
+      yield* update(row, { disposition: "live" }, true);
+      row = Option.getOrThrow(yield* repo.getByProjectId(project.id));
+      if (yield* repo.isScheduleResetRequested(project.id)) return;
+    }
+    const anchors = yield* snapshots.listThreadLifecycleAnchorsByProjectId(project.id);
+    const decision = resolveArchiveDeadline({
+      anchors,
+      row,
+      graceDays: policy.onAllThreadsSettled === "archive" ? 0 : policy.archiveGraceDays,
+      now,
+    });
+    if (decision === null || policy.onAllThreadsSettled === "nothing") {
+      if (row.anchorAt !== null || row.disposition === "pending_archive")
+        yield* update(row, { disposition: "live" }, true);
+      return;
+    }
+    if (decision.kept || (row.disposition === "refused" && !decision.reset)) return;
+    const deadline = policy.onAllThreadsSettled === "suggest" ? null : decision.deadlineAt;
+    if (
+      decision.reset ||
+      row.disposition !== "pending_archive" ||
+      row.archiveDeadlineAt !== deadline
+    )
+      yield* update(
+        row,
+        {
+          disposition: "pending_archive",
+          anchorAt: decision.anchorAt,
+          scheduledAt: decision.scheduledAt,
+          archiveDeadlineAt: deadline,
+        },
+        decision.reset,
+      );
+    if (deadline === null || Date.parse(deadline) > Date.parse(now)) return;
+    if (!(yield* sagaReady(project))) return;
+    const fresh = yield* repo.getByProjectId(project.id);
+    if (Option.isSome(fresh)) yield* execute(fresh.value, "archive", true);
+  });
   const safely = <A, E>(effect: Effect.Effect<A, E>) =>
     effect.pipe(
       Effect.catchCause((cause) =>

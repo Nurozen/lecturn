@@ -26,7 +26,7 @@ export function ChatBannerLane({ children }: { readonly children: ReactNode }) {
   return (
     <div
       ref={laneRef}
-      className="chat-banner-lane pointer-events-none absolute top-0 z-20 flex flex-col"
+      className="chat-banner-lane pointer-events-none absolute top-0 z-30 flex flex-col"
     >
       {children}
     </div>

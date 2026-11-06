@@ -170,36 +170,35 @@ export const connect = Effect.fn("headlessMcpProcess.connect")(function* (
   const write = (message: JsonRpcMessage) =>
     Queue.offer(input, encoder.encode(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`));
 
-  const settleAll = (error: AppsError) =>
-    Effect.gen(function* () {
-      gone = error;
-      for (const deferred of pending.values()) yield* Deferred.fail(deferred, error);
-      pending.clear();
-      yield* Deferred.succeed(exited, undefined);
-    });
+  const settleAll = Effect.fn("headlessMcpProcess.settleAll")(function* (error: AppsError) {
+    gone = error;
+    for (const deferred of pending.values()) yield* Deferred.fail(deferred, error);
+    pending.clear();
+    yield* Deferred.succeed(exited, undefined);
+  });
 
-  const onMessage = (message: JsonRpcMessage) =>
-    Effect.gen(function* () {
-      if (typeof message.method === "string") {
-        // Server-to-client requests (roots, sampling, elicitation) are not offered.
-        if (message.id !== undefined) {
-          yield* write({
-            id: message.id,
-            error: { code: -32601, message: `Lecturn does not support ${message.method}.` },
-          });
-        }
-        return;
+  // Runs per JSON-RPC message from the app process.
+  const onMessage = Effect.fnUntraced(function* (message: JsonRpcMessage) {
+    if (typeof message.method === "string") {
+      // Server-to-client requests (roots, sampling, elicitation) are not offered.
+      if (message.id !== undefined) {
+        yield* write({
+          id: message.id,
+          error: { code: -32601, message: `Lecturn does not support ${message.method}.` },
+        });
       }
-      if (typeof message.id !== "number") return;
-      const deferred = pending.get(message.id);
-      if (deferred === undefined) return;
-      pending.delete(message.id);
-      if (message.error !== undefined) {
-        yield* Deferred.fail(deferred, failure(rpcErrorMessage(message.error)));
-      } else {
-        yield* Deferred.succeed(deferred, message.result);
-      }
-    });
+      return;
+    }
+    if (typeof message.id !== "number") return;
+    const deferred = pending.get(message.id);
+    if (deferred === undefined) return;
+    pending.delete(message.id);
+    if (message.error !== undefined) {
+      yield* Deferred.fail(deferred, failure(rpcErrorMessage(message.error)));
+    } else {
+      yield* Deferred.succeed(deferred, message.result);
+    }
+  });
 
   yield* Effect.forkScoped(stderr.drain);
   yield* handle.stdout.pipe(
@@ -269,8 +268,8 @@ const decodeToolList = (value: unknown, source: string) =>
   );
 
 /** Follows `nextCursor` so a paged server lists every tool. */
-export const listTools = (connection: HeadlessMcpConnection) =>
-  Effect.gen(function* () {
+export const listTools = Effect.fn("headlessMcpProcess.listTools")(
+  function* (connection: HeadlessMcpConnection) {
     const tools: Array<McpSchema.Tool> = [];
     let cursor: string | undefined;
     do {
@@ -279,12 +278,12 @@ export const listTools = (connection: HeadlessMcpConnection) =>
       cursor = isRecord(page) && typeof page.nextCursor === "string" ? page.nextCursor : undefined;
     } while (cursor !== undefined);
     return tools;
-  }).pipe(
-    Effect.timeoutOrElse({
-      duration: LIST_TIMEOUT,
-      orElse: () => Effect.fail(failure("The app's tool server did not list its tools.")),
-    }),
-  );
+  },
+  Effect.timeoutOrElse({
+    duration: LIST_TIMEOUT,
+    orElse: () => Effect.fail(failure("The app's tool server did not list its tools.")),
+  }),
+);
 
 /**
  * Runs the registration's lock-free listing command: it prints the tool

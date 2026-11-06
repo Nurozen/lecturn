@@ -163,6 +163,7 @@ function harness(options: { readonly concurrent: boolean }) {
   const liveActivities = LiveActivities.LiveActivities.of({
     register: () => Effect.void,
     listTargets: () => Effect.sync(() => [...devices.values()]),
+    listIdleArmedTargets: () => Effect.succeed([]),
     markDelivery: (input) =>
       updateDevice(input.deviceId, {
         last_aggregate_json: input.aggregate === null ? null : encodeJson(input.aggregate),

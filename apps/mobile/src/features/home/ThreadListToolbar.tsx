@@ -24,6 +24,7 @@ import { useWorkspaceState } from "../../state/workspace";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import { useToolbarLayout } from "../../components/ui/useToolbarLayout";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
+import { androidHomeFabPosition } from "./AndroidHomeFab.shared";
 
 // The resting row: pl-4 before the brand, then gap-1 before each button. Both are fixed dp, while
 // the buttons and the "Lecturn" wordmark grow with the app text size (`scale`).
@@ -82,6 +83,7 @@ export function ThreadListToolbar(props: {
     homeFocused && (workspace === null || workspace.state.selectedTab === "threads");
   const controlSizing = useAndroidControlSizing();
   const { fabSize } = controlSizing;
+  const fab = androidHomeFabPosition(insets.bottom, props.sidebar);
   const { height: toolbarHeight, ...headerPadding } = useToolbarLayout();
   const { state } = useWorkspaceState();
   const { onRequestVisibility, onSearchQueryChange } = props;
@@ -229,13 +231,8 @@ export function ThreadListToolbar(props: {
       </View>
       {state.hasConnections ? (
         <View
-          className="absolute right-5 z-[5]"
-          style={{
-            bottom:
-              (props.sidebar ? Math.max(insets.bottom, 12) + 6 : Math.max(insets.bottom, 16) + 16) +
-              fabSize +
-              8,
-          }}
+          className="absolute z-[5]"
+          style={{ right: fab.right, bottom: fab.bottom + fabSize + 8 }}
         >
           <AndroidAnchoredMenu actions={props.filterActions} onPressAction={props.onFilterAction}>
             {(open) => (

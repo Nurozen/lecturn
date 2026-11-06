@@ -507,65 +507,64 @@ interface PublishFlags extends PublishCommandConfig, ManifestFlags {
  * them. `use` runs vp pm from the workspace root so pnpm-only workspace
  * config, including override selectors, is interpreted correctly.
  */
-const withPackageManifest = <A, E, R>(
+const withPackageManifest = Effect.fn("cli.withPackageManifest")(function* <A, E, R>(
   config: ManifestFlags & { readonly runtimeExternalsOnly: boolean },
   use: (manifest: PackageJson) => Effect.Effect<A, E, R>,
-) =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
-    const fs = yield* FileSystem.FileSystem;
-    const repoRoot = yield* RepoRoot;
-    const serverDir = path.join(repoRoot, "apps/server");
-    const packageJsonPath = path.join(serverDir, "package.json");
+) {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  const repoRoot = yield* RepoRoot;
+  const serverDir = path.join(repoRoot, "apps/server");
+  const packageJsonPath = path.join(serverDir, "package.json");
 
-    for (const relPath of ["dist/bin.mjs", "dist/client/index.html"]) {
-      const abs = path.join(serverDir, relPath);
-      if (!(yield* fs.exists(abs))) {
-        return yield* new ServerCliBuildAssetMissingError({ assetPath: abs });
-      }
+  for (const relPath of ["dist/bin.mjs", "dist/client/index.html"]) {
+    const abs = path.join(serverDir, relPath);
+    if (!(yield* fs.exists(abs))) {
+      return yield* new ServerCliBuildAssetMissingError({ assetPath: abs });
     }
+  }
 
-    return yield* Effect.acquireUseRelease(
-      // Acquire: resolve publish metadata and read every original before mutation.
+  return yield* Effect.acquireUseRelease(
+    // Acquire: resolve publish metadata and read every original before mutation.
+    Effect.gen(function* () {
+      const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version);
+      const workspaceConfig = yield* readWorkspaceConfig();
+      const pkg = buildPublishManifest({
+        version,
+        workspaceConfig,
+        packageName: Option.getOrUndefined(config.packageName),
+        binName: Option.getOrUndefined(config.binName),
+        githubRepository: process.env.GITHUB_REPOSITORY,
+        runtimeExternalsOnly: config.runtimeExternalsOnly,
+      });
+
+      return {
+        pkg,
+        packageJsonString: yield* encodePackageJson(pkg),
+        originalPackageJson: yield* fs.readFile(packageJsonPath),
+        icons: yield* preparePublishIcons(repoRoot, serverDir, version),
+      };
+    }),
+    (resource) =>
       Effect.gen(function* () {
-        const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version);
-        const workspaceConfig = yield* readWorkspaceConfig();
-        const pkg = buildPublishManifest({
-          version,
-          workspaceConfig,
-          packageName: Option.getOrUndefined(config.packageName),
-          binName: Option.getOrUndefined(config.binName),
-          githubRepository: process.env.GITHUB_REPOSITORY,
-          runtimeExternalsOnly: config.runtimeExternalsOnly,
-        });
-
-        return {
-          pkg,
-          packageJsonString: yield* encodePackageJson(pkg),
-          originalPackageJson: yield* fs.readFile(packageJsonPath),
-          icons: yield* preparePublishIcons(repoRoot, serverDir, version),
-        };
+        yield* fs.writeFileString(packageJsonPath, `${resource.packageJsonString}\n`);
+        for (const icon of resource.icons) {
+          yield* fs.writeFile(icon.targetPath, icon.publish);
+        }
+        yield* Effect.log("[cli] Applied package metadata and publish icon overrides");
+        return yield* use(resource.pkg);
       }),
-      (resource) =>
-        Effect.gen(function* () {
-          yield* fs.writeFileString(packageJsonPath, `${resource.packageJsonString}\n`);
-          for (const icon of resource.icons) {
-            yield* fs.writeFile(icon.targetPath, icon.publish);
-          }
-          yield* Effect.log("[cli] Applied package metadata and publish icon overrides");
-          return yield* use(resource.pkg);
-        }),
-      // Release: restore every file even if applying overrides or `use` fails.
-      (resource) =>
-        Effect.gen(function* () {
-          yield* fs.writeFile(packageJsonPath, resource.originalPackageJson);
-          for (const icon of resource.icons) {
-            yield* fs.writeFile(icon.targetPath, icon.original);
-          }
-          if (config.verbose) yield* Effect.log("[cli] Restored original publish assets");
-        }),
-    );
-  });
+    // Release: restore every file even if applying overrides or `use` fails.
+    (resource) =>
+      Effect.gen(function* () {
+        yield* fs.writeFile(packageJsonPath, resource.originalPackageJson);
+        for (const icon of resource.icons) {
+          yield* fs.writeFile(icon.targetPath, icon.original);
+        }
+        if (config.verbose) yield* Effect.log("[cli] Restored original publish assets");
+      }),
+  );
+});
 
 const runVpPm = Effect.fn("runVpPm")(function* (args: ReadonlyArray<string>, verbose: boolean) {
   const repoRoot = yield* RepoRoot;
@@ -656,24 +655,26 @@ const decodeJsonObject = Schema.decodeEffect(
  * devDependencies, and the workspace ones are bundled into dist, so the packed
  * manifest drops them; the original is restored afterwards.
  */
-const withEmbedPackManifest = <A, E, R>(embedDir: string, use: Effect.Effect<A, E, R>) =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
-    const fs = yield* FileSystem.FileSystem;
-    const packageJsonPath = path.join(embedDir, "package.json");
-    return yield* Effect.acquireUseRelease(
-      fs.readFile(packageJsonPath),
-      (original) =>
-        Effect.gen(function* () {
-          const { devDependencies: _devDependencies, ...packed } = yield* decodeJsonObject(
-            new TextDecoder().decode(original),
-          );
-          yield* fs.writeFileString(packageJsonPath, `${yield* encodePackageJson(packed)}\n`);
-          return yield* use;
-        }),
-      (original) => fs.writeFile(packageJsonPath, original),
-    );
-  });
+const withEmbedPackManifest = Effect.fn("cli.withEmbedPackManifest")(function* <A, E, R>(
+  embedDir: string,
+  use: Effect.Effect<A, E, R>,
+) {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  const packageJsonPath = path.join(embedDir, "package.json");
+  return yield* Effect.acquireUseRelease(
+    fs.readFile(packageJsonPath),
+    (original) =>
+      Effect.gen(function* () {
+        const { devDependencies: _devDependencies, ...packed } = yield* decodeJsonObject(
+          new TextDecoder().decode(original),
+        );
+        yield* fs.writeFileString(packageJsonPath, `${yield* encodePackageJson(packed)}\n`);
+        return yield* use;
+      }),
+    (original) => fs.writeFile(packageJsonPath, original),
+  );
+});
 
 const readPackBuildFacts = Effect.fn("readPackBuildFacts")(function* (
   repoRoot: string,

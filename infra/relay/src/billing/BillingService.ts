@@ -66,25 +66,24 @@ export function makeBillingService(
   const enabled = () => config.mode !== "disabled";
   const assertEnabled = () =>
     enabled() ? Effect.void : Effect.fail(error("disabled", "Billing is not enabled"));
-  const withAccount = <A>(
+  const withAccount = Effect.fn("Billing.withAccount")(function* <A>(
     userId: string,
     run: (account: BillingAccount) => Effect.Effect<A, BillingError>,
-  ) =>
-    Effect.gen(function* () {
-      yield* assertEnabled();
-      const account = yield* store.acquire(userId, yield* now);
-      return yield* run(account).pipe(
-        // Leave room to release the 120-second lease. Interrupted provider results cannot save later.
-        Effect.timeoutOrElse({
-          duration: "90 seconds",
-          orElse: () =>
-            Effect.fail(
-              error("provider", "Billing reconciliation exceeded its budget and will retry"),
-            ),
-        }),
-        Effect.ensuring(store.release(account).pipe(Effect.ignore)),
-      );
-    });
+  ) {
+    yield* assertEnabled();
+    const account = yield* store.acquire(userId, yield* now);
+    return yield* run(account).pipe(
+      // Leave room to release the 120-second lease. Interrupted provider results cannot save later.
+      Effect.timeoutOrElse({
+        duration: "90 seconds",
+        orElse: () =>
+          Effect.fail(
+            error("provider", "Billing reconciliation exceeded its budget and will retry"),
+          ),
+      }),
+      Effect.ensuring(store.release(account).pipe(Effect.ignore)),
+    );
+  });
   const save = (a: BillingAccount) => now.pipe(Effect.flatMap((time) => store.save(a, time)));
   const ensureCustomer = Effect.fn("Billing.ensureCustomer")(function* (a: BillingAccount) {
     if (a.customer_id) return a.customer_id;
@@ -614,8 +613,8 @@ export function makeBillingService(
           }),
         { concurrency: 4, discard: true },
       );
-      const refreshGroup = (userId: string, receipts: readonly BillingEvent[]) =>
-        Effect.gen(function* () {
+      const refreshGroup = Effect.fn("Billing.refreshGroup")(
+        function* (userId: string, receipts: readonly BillingEvent[]) {
           // Only started work is deferred. An interrupted batch leaves unscheduled users due.
           const startedAt = yield* now;
           yield* store.deferReconcile(userId, startedAt);
@@ -629,9 +628,9 @@ export function makeBillingService(
           ];
           yield* withAccount(userId, (account) => refresh(account, disputeCharges));
           for (const event of receipts) yield* store.complete(event.id, yield* now);
-        }).pipe(
-          Effect.catch(() => Effect.logWarning("Billing account reconciliation remains pending")),
-        );
+        },
+        Effect.catch(() => Effect.logWarning("Billing account reconciliation remains pending")),
+      );
       const staleUsers = [...new Set(stale.map((account) => account.user_id))].filter(
         (userId) => !groups.has(userId),
       );

@@ -173,8 +173,8 @@ export const make = Effect.gen(function* () {
     return yield* cancelTurn(begun.failure);
   });
 
-  const beforeTurnStart = (input: LecturnTurnStartInput) =>
-    Effect.gen(function* () {
+  const beforeTurnStart = Effect.fn("ContextualTurnHooks.beforeTurnStart")(
+    function* (input: LecturnTurnStartInput) {
       if (input.compaction) return;
       const { thread, run, message } = input;
       // Retries of one run reuse the dispatch bound by the first attempt.
@@ -221,20 +221,24 @@ export const make = Effect.gen(function* () {
             ).text;
       inFlight.set(run.id, { threadId: thread.id, evidence, prefix });
       return prefix === undefined ? {} : { contextPrefix: prefix };
-    }).pipe(
-      Effect.catchCause((cause) => {
-        // A run.interrupt cancels the start effect; never turn that into a send.
-        if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt;
-        const failure = Cause.findErrorOption(cause);
-        if (Option.isSome(failure) && isRejected(failure.value)) return Effect.fail(failure.value);
-        // Optional context never blocks a turn: storage/evaluation failures fail open.
-        return Effect.logWarning("Contextual turn preparation failed; sending without context", {
-          threadId: input.thread.id,
-          runId: input.run.id,
-          cause,
-        }).pipe(Effect.as({}));
-      }),
-    );
+    },
+    (effect, input) =>
+      effect.pipe(
+        Effect.catchCause((cause) => {
+          // A run.interrupt cancels the start effect; never turn that into a send.
+          if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt;
+          const failure = Cause.findErrorOption(cause);
+          if (Option.isSome(failure) && isRejected(failure.value))
+            return Effect.fail(failure.value);
+          // Optional context never blocks a turn: storage/evaluation failures fail open.
+          return Effect.logWarning("Contextual turn preparation failed; sending without context", {
+            threadId: input.thread.id,
+            runId: input.run.id,
+            cause,
+          }).pipe(Effect.as({}));
+        }),
+      ),
+  );
 
   const providerTurnFor = (runId: RunId) =>
     sql<{ provider_turn_id: string; native_id: string | null; status: string }>`
@@ -245,103 +249,105 @@ export const make = Effect.gen(function* () {
       Effect.map((rows) => rows[0] ?? null),
     );
 
-  const onRunTerminal = (notice: LecturnRunTerminalNotice) =>
-    Effect.gen(function* () {
-      const at = yield* contextualNow;
-      if (notice.status === "rolled_back") {
-        inFlight.delete(notice.runId);
-        yield* lifecycle.applyThreadRemoval({ threadId: notice.threadId, kind: "rolled-back", at });
-        return;
-      }
-      const entry = inFlight.get(notice.runId);
+  const onRunTerminal = Effect.fn("ContextualTurnHooks.onRunTerminal")(function* (
+    notice: LecturnRunTerminalNotice,
+  ) {
+    const at = yield* contextualNow;
+    if (notice.status === "rolled_back") {
       inFlight.delete(notice.runId);
-      const queued = yield* queue.get(notice.runId);
-      if (queued === null) return;
-      if (queued.state !== "dispatching") {
-        // Interrupted, failed or deleted before its packet was bound: V1 session-stop semantics.
-        yield* lifecycle.cancelQueuedTurns({ threadId: notice.threadId, runId: notice.runId, at });
-        return;
-      }
-      if (entry?.evidence === undefined) {
-        yield* queue.finish(
-          notice.runId,
-          notice.reconciled || entry === undefined ? "unknown" : "done",
-        );
-        return;
-      }
-      const turn = yield* providerTurnFor(notice.runId);
-      const accepted =
-        turn !== null &&
-        (turn.native_id !== null || ["running", "completed", "interrupted"].includes(turn.status));
-      const acceptance = notice.reconciled
-        ? "unknown"
-        : accepted
-          ? "accepted"
-          : turn === null
-            ? "rejected"
-            : "unknown";
-      const dispatch = prepareContextualDispatch(
-        { threadId: notice.threadId, contextualEvidence: entry.evidence },
-        "fresh",
-        entry.evidence.providerInstanceId,
+      yield* lifecycle.applyThreadRemoval({ threadId: notice.threadId, kind: "rolled-back", at });
+      return;
+    }
+    const entry = inFlight.get(notice.runId);
+    inFlight.delete(notice.runId);
+    const queued = yield* queue.get(notice.runId);
+    if (queued === null) return;
+    if (queued.state !== "dispatching") {
+      // Interrupted, failed or deleted before its packet was bound: V1 session-stop semantics.
+      yield* lifecycle.cancelQueuedTurns({ threadId: notice.threadId, runId: notice.runId, at });
+      return;
+    }
+    if (entry?.evidence === undefined) {
+      yield* queue.finish(
+        notice.runId,
+        notice.reconciled || entry === undefined ? "unknown" : "done",
       );
-      const receipt = yield* dispatch.receipt(
-        acceptance,
-        acceptance === "accepted" && turn ? TurnId.make(turn.provider_turn_id) : null,
-        acceptance === "accepted" && turn
-          ? (turn.native_id ?? `v2-provider-turn:${turn.provider_turn_id}`)
-          : null,
-      );
-      if (receipt) yield* coordinator.observe(receipt);
-      yield* queue.finish(notice.runId, acceptance === "unknown" ? "unknown" : "done");
-    });
+      return;
+    }
+    const turn = yield* providerTurnFor(notice.runId);
+    const accepted =
+      turn !== null &&
+      (turn.native_id !== null || ["running", "completed", "interrupted"].includes(turn.status));
+    const acceptance = notice.reconciled
+      ? "unknown"
+      : accepted
+        ? "accepted"
+        : turn === null
+          ? "rejected"
+          : "unknown";
+    const dispatch = prepareContextualDispatch(
+      { threadId: notice.threadId, contextualEvidence: entry.evidence },
+      "fresh",
+      entry.evidence.providerInstanceId,
+    );
+    const receipt = yield* dispatch.receipt(
+      acceptance,
+      acceptance === "accepted" && turn ? TurnId.make(turn.provider_turn_id) : null,
+      acceptance === "accepted" && turn
+        ? (turn.native_id ?? `v2-provider-turn:${turn.provider_turn_id}`)
+        : null,
+    );
+    if (receipt) yield* coordinator.observe(receipt);
+    yield* queue.finish(notice.runId, acceptance === "unknown" ? "unknown" : "done");
+  });
 
-  const onThreadLifecycle = (notice: LecturnThreadLifecycleNotice) =>
-    Effect.gen(function* () {
-      switch (notice.kind) {
-        case "created":
-          yield* initializeContextualThread(sql, notice);
-          return;
-        case "forked":
-          yield* initializeContextualThread(sql, {
-            threadId: notice.threadId,
-            projectId: notice.projectId,
-          });
-          yield* applyContextualOrigin(sql, {
-            threadId: notice.threadId,
-            projectId: notice.projectId,
-            parentThreadId: notice.sourceThreadId,
-          });
-          yield* lifecycle.applyFork({
-            parentThreadId: notice.sourceThreadId,
-            threadId: notice.threadId,
-          });
-          return;
-        case "imported":
-          yield* initializeContextualThread(sql, {
-            threadId: notice.threadId,
-            projectId: notice.projectId,
-          });
-          yield* applyContextualOrigin(sql, {
-            threadId: notice.threadId,
-            projectId: notice.projectId,
-          });
-          return;
-        case "deleted":
-          yield* lifecycle.applyThreadRemoval({
-            threadId: notice.threadId,
-            kind: "deleted",
-            at: yield* contextualNow,
-          });
-          return;
-        default:
-          return;
-      }
-    });
+  const onThreadLifecycle = Effect.fn("ContextualTurnHooks.onThreadLifecycle")(function* (
+    notice: LecturnThreadLifecycleNotice,
+  ) {
+    switch (notice.kind) {
+      case "created":
+        yield* initializeContextualThread(sql, notice);
+        return;
+      case "forked":
+        yield* initializeContextualThread(sql, {
+          threadId: notice.threadId,
+          projectId: notice.projectId,
+        });
+        yield* applyContextualOrigin(sql, {
+          threadId: notice.threadId,
+          projectId: notice.projectId,
+          parentThreadId: notice.sourceThreadId,
+        });
+        yield* lifecycle.applyFork({
+          parentThreadId: notice.sourceThreadId,
+          threadId: notice.threadId,
+        });
+        return;
+      case "imported":
+        yield* initializeContextualThread(sql, {
+          threadId: notice.threadId,
+          projectId: notice.projectId,
+        });
+        yield* applyContextualOrigin(sql, {
+          threadId: notice.threadId,
+          projectId: notice.projectId,
+        });
+        return;
+      case "deleted":
+        yield* lifecycle.applyThreadRemoval({
+          threadId: notice.threadId,
+          kind: "deleted",
+          at: yield* contextualNow,
+        });
+        return;
+      default:
+        return;
+    }
+  });
 
   /** thread.create's Lecturn `contextual` option (launchThread forwards it). */
-  const applyCreateOption = (command: OrchestrationV2ServerCommand) =>
-    Effect.gen(function* () {
+  const applyCreateOption = Effect.fn("ContextualTurnHooks.applyCreateOption")(
+    function* (command: OrchestrationV2ServerCommand) {
       if (command.type !== "thread.create" || !("contextual" in command) || !command.contextual)
         return;
       const current = yield* settings.thread(command.threadId);
@@ -351,19 +357,22 @@ export const make = Effect.gen(function* () {
         enabled: command.contextual.enabled,
         sourceIds: [...command.contextual.sourceIds],
       });
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Failed to apply the new thread's Contextual choice", { cause }),
-      ),
-    );
-  const applyProjectDeletion = (projectId: ProjectId) =>
-    Effect.gen(function* () {
+    },
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Failed to apply the new thread's Contextual choice", { cause }),
+    ),
+  );
+  const applyProjectDeletion = Effect.fn("ContextualTurnHooks.applyProjectDeletion")(
+    function* (projectId: ProjectId) {
       yield* lifecycle.applyProjectDeleted({ projectId, at: yield* contextualNow });
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Contextual project cleanup failed", { projectId, cause }),
+    },
+    (effect, projectId) =>
+      effect.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Contextual project cleanup failed", { projectId, cause }),
+        ),
       ),
-    );
+  );
 
   const contribution: LecturnOrchestrationHooksContribution = {
     name: "contextual",

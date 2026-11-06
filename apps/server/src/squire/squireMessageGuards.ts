@@ -87,21 +87,20 @@ export const sentInUserStartedTurn = (
   );
 
 /** The message keys of the batch's Lead messages that a user-started Lead turn sent. */
-export const userStartedLeadKeys = (
+export const userStartedLeadKeys = Effect.fn("squireMessageGuards.userStartedLeadKeys")(function* (
   repository: SquireRepository.SquireRepository["Service"],
   rows: ReadonlyArray<SquireRepository.SquireEventRow>,
-) =>
-  Effect.gen(function* () {
-    const keys = new Set<string>();
-    for (const row of rows) {
-      if (row.kind !== "message") continue;
-      const event = Option.getOrNull(decodeEvent(row.payload_json ?? ""));
-      if (event === null || isUnknownUnionMember(event) || event.type !== "message") continue;
-      if (event.from.kind !== "lead") continue;
-      if (yield* sentInUserStartedTurn(repository, event.messageKey)) keys.add(event.messageKey);
-    }
-    return keys as ReadonlySet<string>;
-  });
+) {
+  const keys = new Set<string>();
+  for (const row of rows) {
+    if (row.kind !== "message") continue;
+    const event = Option.getOrNull(decodeEvent(row.payload_json ?? ""));
+    if (event === null || isUnknownUnionMember(event) || event.type !== "message") continue;
+    if (event.from.kind !== "lead") continue;
+    if (yield* sentInUserStartedTurn(repository, event.messageKey)) keys.add(event.messageKey);
+  }
+  return keys as ReadonlySet<string>;
+});
 
 /** The `squire_read_room` result fields that record what the read showed. */
 export const roomReadMarks = (input: {
@@ -159,51 +158,50 @@ export type MessageBudgetCheck =
  * room post also counts against `roomPostsPerRoomPerDay` for that room
  * (per sender, per room). Rolling 24 h, like steers.
  */
-export const checkMessageBudget = (
+export const checkMessageBudget = Effect.fn("squireMessageGuards.checkMessageBudget")(function* (
   repository: SquireRepository.SquireRepository["Service"],
   input: {
     readonly squire: Pick<SquireRepository.SquireRow, "id" | "budgets_json">;
     readonly now: string;
     readonly roomId?: SquireRoomId | null;
   },
-) =>
-  Effect.gen(function* () {
-    const budgets = Option.getOrElse(
-      decodeBudgets(input.squire.budgets_json),
-      () => DEFAULT_SQUIRE_BUDGETS,
+) {
+  const budgets = Option.getOrElse(
+    decodeBudgets(input.squire.budgets_json),
+    () => DEFAULT_SQUIRE_BUDGETS,
+  );
+  const now = DateTime.makeUnsafe(input.now);
+  const since = DateTime.formatIso(DateTime.subtract(now, { milliseconds: DAY_MS }));
+  const rows = (yield* repository.listBudgetUsage({ squireId: input.squire.id, since })).filter(
+    (row) => row.kind === "message",
+  );
+  const exhausted = (
+    counted: ReadonlyArray<SquireRepository.SquireBudgetUsageRow>,
+    limit: number,
+  ) => {
+    if (counted.length < limit) return undefined;
+    const oldest = counted
+      .map((row) => row.executed_at)
+      .toSorted()
+      .at(Math.max(0, counted.length - limit));
+    const until = DateTime.formatIso(
+      DateTime.add(DateTime.makeUnsafe(oldest ?? input.now), { milliseconds: DAY_MS }),
     );
-    const now = DateTime.makeUnsafe(input.now);
-    const since = DateTime.formatIso(DateTime.subtract(now, { milliseconds: DAY_MS }));
-    const rows = (yield* repository.listBudgetUsage({ squireId: input.squire.id, since })).filter(
-      (row) => row.kind === "message",
+    return {
+      ok: false,
+      reason: "budget",
+      until,
+      text: `message budget reached until ${until}`,
+    } satisfies MessageBudgetCheck;
+  };
+  const daily = exhausted(rows, budgets.messagesPerDay);
+  if (daily) return daily;
+  if (input.roomId != null) {
+    const room = exhausted(
+      rows.filter((row) => row.room_id === input.roomId),
+      budgets.roomPostsPerRoomPerDay,
     );
-    const exhausted = (
-      counted: ReadonlyArray<SquireRepository.SquireBudgetUsageRow>,
-      limit: number,
-    ) => {
-      if (counted.length < limit) return undefined;
-      const oldest = counted
-        .map((row) => row.executed_at)
-        .toSorted()
-        .at(Math.max(0, counted.length - limit));
-      const until = DateTime.formatIso(
-        DateTime.add(DateTime.makeUnsafe(oldest ?? input.now), { milliseconds: DAY_MS }),
-      );
-      return {
-        ok: false,
-        reason: "budget",
-        until,
-        text: `message budget reached until ${until}`,
-      } satisfies MessageBudgetCheck;
-    };
-    const daily = exhausted(rows, budgets.messagesPerDay);
-    if (daily) return daily;
-    if (input.roomId != null) {
-      const room = exhausted(
-        rows.filter((row) => row.room_id === input.roomId),
-        budgets.roomPostsPerRoomPerDay,
-      );
-      if (room) return room;
-    }
-    return { ok: true } satisfies MessageBudgetCheck;
-  });
+    if (room) return room;
+  }
+  return { ok: true } satisfies MessageBudgetCheck;
+});

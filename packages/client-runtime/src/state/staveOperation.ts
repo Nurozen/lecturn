@@ -283,68 +283,67 @@ function markRejected(
  * reattach, except an admission refusal (`StaveOperationRejectedError`),
  * which is a real failure.
  */
-const consumeStaveOperationStream = <R>(
+const consumeStaveOperationStream = Effect.fn("StaveOperation.consumeStream")(function* <R>(
   stream: Stream.Stream<StaveProgressEvent, unknown, R>,
   input: ConsumeInput<R>,
-): Effect.Effect<StaveOperationOutcome<R>, never, R> =>
-  Effect.gen(function* () {
-    let current: StaveOperationState = { ...input.state, status: "running" };
-    const publish = (next: StaveOperationState) =>
-      Effect.sync(() => {
-        current = next;
-        input.onState?.(next);
+): Effect.fn.Return<StaveOperationOutcome<R>, never, R> {
+  let current: StaveOperationState = { ...input.state, status: "running" };
+  const publish = (next: StaveOperationState) =>
+    Effect.sync(() => {
+      current = next;
+      input.onState?.(next);
+    });
+  yield* publish(current);
+
+  const ended = yield* stream.pipe(
+    Stream.runForEach((event) =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        const next = reduceStaveProgressEvent(current, event, now);
+        if (next !== current) {
+          yield* publish(next);
+        }
+      }),
+    ),
+    Effect.as<{ readonly failure: unknown } | null>(null),
+    Effect.catch((failure) => Effect.succeed({ failure })),
+  );
+
+  if (!isStaveOperationTerminal(current.status)) {
+    if (ended !== null && isRejected(ended.failure)) {
+      yield* publish(markRejected(current, ended.failure));
+    } else if (
+      ended !== null &&
+      input.starting &&
+      current.lastSequence === null &&
+      isAdmissionFailure(ended.failure)
+    ) {
+      yield* publish({
+        ...current,
+        status: "failed",
+        error: { code: "unknown", message: ended.failure.message, details: null },
       });
-    yield* publish(current);
-
-    const ended = yield* stream.pipe(
-      Stream.runForEach((event) =>
-        Effect.gen(function* () {
-          const now = yield* Clock.currentTimeMillis;
-          const next = reduceStaveProgressEvent(current, event, now);
-          if (next !== current) {
-            yield* publish(next);
-          }
-        }),
-      ),
-      Effect.as<{ readonly failure: unknown } | null>(null),
-      Effect.catch((failure) => Effect.succeed({ failure })),
-    );
-
-    if (!isStaveOperationTerminal(current.status)) {
-      if (ended !== null && isRejected(ended.failure)) {
-        yield* publish(markRejected(current, ended.failure));
-      } else if (
-        ended !== null &&
-        input.starting &&
-        current.lastSequence === null &&
-        isAdmissionFailure(ended.failure)
-      ) {
-        yield* publish({
-          ...current,
-          status: "failed",
-          error: { code: "unknown", message: ended.failure.message, details: null },
-        });
-      } else {
-        yield* publish(
-          markDisconnected(
-            current,
-            ended === null ? undefined : describeStreamFailure(ended.failure),
-          ),
-        );
-      }
+    } else {
+      yield* publish(
+        markDisconnected(
+          current,
+          ended === null ? undefined : describeStreamFailure(ended.failure),
+        ),
+      );
     }
+  }
 
-    const settled = current;
-    const reattach = (): Effect.Effect<StaveOperationOutcome<R>, never, R> =>
-      isStaveOperationTerminal(settled.status)
-        ? Effect.succeed({ state: settled, reattach })
-        : consumeStaveOperationStream(input.observe(settled), {
-            ...input,
-            state: settled,
-            starting: false,
-          });
-    return { state: settled, reattach };
-  });
+  const settled = current;
+  const reattach = (): Effect.Effect<StaveOperationOutcome<R>, never, R> =>
+    isStaveOperationTerminal(settled.status)
+      ? Effect.succeed({ state: settled, reattach })
+      : consumeStaveOperationStream(input.observe(settled), {
+          ...input,
+          state: settled,
+          starting: false,
+        });
+  return { state: settled, reattach };
+});
 
 export interface RunStaveOperationInput<E, R> {
   readonly transport: StaveOperationClient<E, R>;

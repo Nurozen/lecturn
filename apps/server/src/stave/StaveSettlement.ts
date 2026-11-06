@@ -116,40 +116,38 @@ export const make = Effect.gen(function* () {
   const shells = yield* Effect.serviceOption(StaveProjectShells);
   const mergeSignal = yield* Effect.serviceOption(StaveMergeSignal);
 
-  const spacePullRequest: StaveSettlementShape["spacePullRequest"] = ({
-    project,
-    linkedPullRequest,
-  }) =>
-    Effect.gen(function* () {
-      const stave = project.stave;
-      if (stave == null || stave.state !== "live") return null;
-      const repos = stave.repos.filter((repo) => repo.mode === "edit");
-      if (repos.length === 0) return null;
-      const members: Array<StaveMemberPullRequest | null> = yield* Effect.forEach(
-        repos,
-        (repo) =>
-          Effect.gen(function* () {
-            const cwd = repo.resolvedPath ?? path.resolve(project.workspaceRoot, repo.path);
-            const status = yield* git.localStatus({ cwd });
-            if (!status.isRepo || !status.refName) return null;
-            return yield* git.branchPullRequest({ cwd, branch: status.refName });
-          }),
-        { concurrency: 4 },
-      );
-      // An explicitly linked PR may outlive the checkout branch it was opened from.
-      // Its completion remains required even when all current checkout PRs have finished.
-      if (linkedPullRequest != null) {
-        const linked = yield* pullRequests.summary(linkedPullRequest, {
-          recoverTransientFailure: false,
-        });
-        members.push({
-          state: linked.state,
-          closedAt: linked.closedAt ?? null,
-          mergedAt: linked.mergedAt ?? null,
-        });
-      }
-      return aggregateSpacePullRequests(members);
-    });
+  const spacePullRequest: StaveSettlementShape["spacePullRequest"] = Effect.fn(
+    "StaveSettlement.spacePullRequest",
+  )(function* ({ project, linkedPullRequest }) {
+    const stave = project.stave;
+    if (stave == null || stave.state !== "live") return null;
+    const repos = stave.repos.filter((repo) => repo.mode === "edit");
+    if (repos.length === 0) return null;
+    const members: Array<StaveMemberPullRequest | null> = yield* Effect.forEach(
+      repos,
+      (repo) =>
+        Effect.gen(function* () {
+          const cwd = repo.resolvedPath ?? path.resolve(project.workspaceRoot, repo.path);
+          const status = yield* git.localStatus({ cwd });
+          if (!status.isRepo || !status.refName) return null;
+          return yield* git.branchPullRequest({ cwd, branch: status.refName });
+        }),
+      { concurrency: 4 },
+    );
+    // An explicitly linked PR may outlive the checkout branch it was opened from.
+    // Its completion remains required even when all current checkout PRs have finished.
+    if (linkedPullRequest != null) {
+      const linked = yield* pullRequests.summary(linkedPullRequest, {
+        recoverTransientFailure: false,
+      });
+      members.push({
+        state: linked.state,
+        closedAt: linked.closedAt ?? null,
+        mergedAt: linked.mergedAt ?? null,
+      });
+    }
+    return aggregateSpacePullRequests(members);
+  });
 
   return StaveSettlement.of({
     decorateProjects: (projects) =>

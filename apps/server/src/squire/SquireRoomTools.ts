@@ -237,29 +237,30 @@ const make = Effect.gen(function* () {
     return rows.filter((row) => !answered.has(row.state_key));
   });
 
-  const expireProposals: SquireRoomTools["Service"]["expireProposals"] = (now) =>
-    Effect.gen(function* () {
-      const nowIso = DateTime.formatIso(now);
-      for (const row of yield* unansweredProposals) {
-        if (DateTime.isGreaterThan(expiresAt(row), now)) continue;
-        yield* repository.transaction(
-          Effect.gen(function* () {
-            yield* roomLog({
-              squireId: row.squire_id,
-              kind: "room.proposed",
-              data: { proposalId: row.state_key, expired: "true" },
-              eventId: row.id,
-              now: nowIso,
-            });
-            yield* repository.setEventStatus({
-              ids: [row.id],
-              fromStatuses: ["deferred", "pending"],
-              status: "dropped",
-            });
-          }),
-        );
-      }
-    }).pipe(Effect.withSpan("SquireRoomTools.expireProposals"));
+  const expireProposals: SquireRoomTools["Service"]["expireProposals"] = Effect.fn(
+    "SquireRoomTools.expireProposals",
+  )(function* (now) {
+    const nowIso = DateTime.formatIso(now);
+    for (const row of yield* unansweredProposals) {
+      if (DateTime.isGreaterThan(expiresAt(row), now)) continue;
+      yield* repository.transaction(
+        Effect.gen(function* () {
+          yield* roomLog({
+            squireId: row.squire_id,
+            kind: "room.proposed",
+            data: { proposalId: row.state_key, expired: "true" },
+            eventId: row.id,
+            now: nowIso,
+          });
+          yield* repository.setEventStatus({
+            ids: [row.id],
+            fromStatuses: ["deferred", "pending"],
+            status: "dropped",
+          });
+        }),
+      );
+    }
+  });
 
   const nextExpiryAt: SquireRoomTools["Service"]["nextExpiryAt"] = unansweredProposals.pipe(
     Effect.map((rows) =>
@@ -287,76 +288,72 @@ const make = Effect.gen(function* () {
       ["members", "topic", "about", "reason"],
     ),
     roles: ["squire"],
-    call: (ctx, kit) =>
-      Effect.gen(function* () {
-        const args = yield* kit.decodeArgs(ProposeArgs, ctx.args);
-        if (!args.ok) return yield* invalid(ctx, kit, args.message);
-        const { members, topic, about, reason } = args.value;
-        const lead = Option.filter(
-          yield* repository.getLead,
-          (row) => row.lifecycle !== "deleting",
-        );
-        if (Option.isNone(lead)) {
-          return yield* kit.refuse(ctx, "lead", "There is no Lead to propose a room to.");
-        }
-        if ((kit.policySquireOf(lead.value).permissions.manageSquires ?? "off") === "off") {
-          return yield* kit.refuse(
-            ctx,
-            "permission",
-            "Manage Squires is Off for the Lead, so it cannot open rooms. Not proposed.",
-          );
-        }
-        if (!(yield* botMessagesOn)) {
-          return yield* kit.refuse(
-            ctx,
-            "switch",
-            "Squire-to-Squire messages are off in this environment. Not proposed.",
-          );
-        }
-        const leadId = lead.value.id;
-        const proposalId = `proposal:${ctx.key.slice(0, 24)}`;
-        return yield* kit.commit(
+    call: Effect.fn("SquireRoomTools.call")(function* (ctx, kit) {
+      const args = yield* kit.decodeArgs(ProposeArgs, ctx.args);
+      if (!args.ok) return yield* invalid(ctx, kit, args.message);
+      const { members, topic, about, reason } = args.value;
+      const lead = Option.filter(yield* repository.getLead, (row) => row.lifecycle !== "deleting");
+      if (Option.isNone(lead)) {
+        return yield* kit.refuse(ctx, "lead", "There is no Lead to propose a room to.");
+      }
+      if ((kit.policySquireOf(lead.value).permissions.manageSquires ?? "off") === "off") {
+        return yield* kit.refuse(
           ctx,
-          null,
-          Effect.gen(function* () {
-            const eventId = yield* repository.insertTriggerEvent({
-              squire_id: leadId,
-              thread_id: null,
-              kind: "room-proposed",
-              state_key: proposalId,
-              payload_json: encodeEvent({
-                type: "room-proposed",
-                proposalId,
-                fromSquireId: ctx.squire.id,
-                members,
-                topic,
-                about,
-                reason,
-              }),
-              status: "pending",
-              defer_reason: null,
-              not_before: ctx.now,
-              batch_id: null,
-              created_at: ctx.now,
-            });
-            yield* roomLog({
-              squireId: leadId,
-              kind: "room.proposed",
-              data: { proposalId, fromSquireId: ctx.squire.id, members, topic, about, reason },
-              eventId: Option.getOrNull(eventId),
-              runId: ctx.run.runId,
-              now: ctx.now,
-            });
-            return {
-              result: kit.ok(
-                `Proposed the room "${topic}" to the Lead (proposal ${proposalId}). The Lead decides; it expires in 24 h.`,
-                { proposalId },
-              ),
-              wake: [leadId],
-            };
-          }),
+          "permission",
+          "Manage Squires is Off for the Lead, so it cannot open rooms. Not proposed.",
         );
-      }),
+      }
+      if (!(yield* botMessagesOn)) {
+        return yield* kit.refuse(
+          ctx,
+          "switch",
+          "Squire-to-Squire messages are off in this environment. Not proposed.",
+        );
+      }
+      const leadId = lead.value.id;
+      const proposalId = `proposal:${ctx.key.slice(0, 24)}`;
+      return yield* kit.commit(
+        ctx,
+        null,
+        Effect.gen(function* () {
+          const eventId = yield* repository.insertTriggerEvent({
+            squire_id: leadId,
+            thread_id: null,
+            kind: "room-proposed",
+            state_key: proposalId,
+            payload_json: encodeEvent({
+              type: "room-proposed",
+              proposalId,
+              fromSquireId: ctx.squire.id,
+              members,
+              topic,
+              about,
+              reason,
+            }),
+            status: "pending",
+            defer_reason: null,
+            not_before: ctx.now,
+            batch_id: null,
+            created_at: ctx.now,
+          });
+          yield* roomLog({
+            squireId: leadId,
+            kind: "room.proposed",
+            data: { proposalId, fromSquireId: ctx.squire.id, members, topic, about, reason },
+            eventId: Option.getOrNull(eventId),
+            runId: ctx.run.runId,
+            now: ctx.now,
+          });
+          return {
+            result: kit.ok(
+              `Proposed the room "${topic}" to the Lead (proposal ${proposalId}). The Lead decides; it expires in 24 h.`,
+              { proposalId },
+            ),
+            wake: [leadId],
+          };
+        }),
+      );
+    }),
   };
 
   // ── squire_open_room (Lead) ──
@@ -376,161 +373,160 @@ const make = Effect.gen(function* () {
       ["members", "topic", "about", "reason"],
     ),
     roles: ["lead"],
-    call: (ctx, kit) =>
-      Effect.gen(function* () {
-        const args = yield* kit.decodeArgs(OpenArgs, ctx.args);
-        if (!args.ok) return yield* invalid(ctx, kit, args.message);
-        const { members, topic, about, reason } = args.value;
-        const includesLead = args.value.includesLead ?? false;
-        const proposalId = args.value.proposalId ?? null;
-        const decision = leadLevel(ctx, kit);
-        if (decision.level === "off") {
+    call: Effect.fn("SquireRoomTools.call")(function* (ctx, kit) {
+      const args = yield* kit.decodeArgs(OpenArgs, ctx.args);
+      if (!args.ok) return yield* invalid(ctx, kit, args.message);
+      const { members, topic, about, reason } = args.value;
+      const includesLead = args.value.includesLead ?? false;
+      const proposalId = args.value.proposalId ?? null;
+      const decision = leadLevel(ctx, kit);
+      if (decision.level === "off") {
+        return yield* kit.refuse(
+          ctx,
+          decision.reason,
+          decision.reason === "paused"
+            ? "The Lead is paused, so it cannot open rooms."
+            : "Manage Squires is Off for the Lead, so it cannot open rooms.",
+          { decision: { level: "off" } },
+        );
+      }
+      let proposalEventId: number | null = null;
+      if (proposalId !== null) {
+        const proposal = yield* repository.getEventByKey({
+          squireId: ctx.squire.id,
+          kind: "room-proposed",
+          threadId: null,
+          stateKey: proposalId,
+        });
+        if (Option.isNone(proposal)) {
+          return yield* kit.refuse(ctx, "proposal", `Not opened: no proposal ${proposalId}.`);
+        }
+        if (!DateTime.isGreaterThan(expiresAt(proposal.value), DateTime.makeUnsafe(ctx.now))) {
           return yield* kit.refuse(
             ctx,
-            decision.reason,
-            decision.reason === "paused"
-              ? "The Lead is paused, so it cannot open rooms."
-              : "Manage Squires is Off for the Lead, so it cannot open rooms.",
-            { decision: { level: "off" } },
+            "proposal",
+            `Not opened: proposal ${proposalId} expired after 24 h.`,
           );
         }
-        let proposalEventId: number | null = null;
-        if (proposalId !== null) {
-          const proposal = yield* repository.getEventByKey({
-            squireId: ctx.squire.id,
-            kind: "room-proposed",
-            threadId: null,
-            stateKey: proposalId,
-          });
-          if (Option.isNone(proposal)) {
-            return yield* kit.refuse(ctx, "proposal", `Not opened: no proposal ${proposalId}.`);
-          }
-          if (!DateTime.isGreaterThan(expiresAt(proposal.value), DateTime.makeUnsafe(ctx.now))) {
-            return yield* kit.refuse(
-              ctx,
-              "proposal",
-              `Not opened: proposal ${proposalId} expired after 24 h.`,
-            );
-          }
-          proposalEventId = proposal.value.id;
-        }
-        const checked = yield* rooms.checkOpen({
-          by: "lead",
-          members,
-          includesLead,
-          about,
-          now: ctx.now,
+        proposalEventId = proposal.value.id;
+      }
+      const checked = yield* rooms.checkOpen({
+        by: "lead",
+        members,
+        includesLead,
+        about,
+        now: ctx.now,
+      });
+      if (!checked.ok) {
+        return yield* kit.refuse(ctx, checked.reason, `Not opened: ${checked.text}`, {
+          decision: { reason: checked.reason },
         });
-        if (!checked.ok) {
-          return yield* kit.refuse(ctx, checked.reason, `Not opened: ${checked.text}`, {
-            decision: { reason: checked.reason },
+      }
+      const held = decision.level === "auto";
+      const cardId = SquireCardId.make(`card:proposal:${ctx.squire.id}:${ctx.key.slice(0, 24)}`);
+      const executesAt = held ? kit.holdUntil(ctx) : null;
+      const push = !held && kit.notifyOn(ctx);
+      const title = `Open room: ${topic}`;
+      const payload: RoomProposalPayload = {
+        type: "room-proposal",
+        proposalId,
+        members,
+        includesLead,
+        topic,
+        about,
+      };
+      const intent: SquireRoomOpenIntent = {
+        type: "room-open",
+        leadId: ctx.squire.id,
+        members,
+        includesLead,
+        topic,
+        about,
+        reason,
+        proposalId,
+        proposalEventId,
+      };
+      return yield* kit.commit(
+        ctx,
+        null,
+        Effect.gen(function* () {
+          yield* repository.insertCard({
+            id: cardId,
+            squire_id: ctx.squire.id,
+            owner_squire_id: ctx.squire.id,
+            kind: "proposal",
+            status: held ? "held" : "open",
+            // No target: a room item never takes a thread's one open slot.
+            target_thread_id: null,
+            project_id: null,
+            title,
+            why: reason,
+            payload_json: encodePayload(payload),
+            evidence_json: "{}",
+            trigger_json: "{}",
+            intent_json: held ? encodeSquireActionIntent(intent) : null,
+            origin: ctx.run.origin === "unknown" ? "event" : ctx.run.origin,
+            steer_kind: null,
+            routed_task_id: null,
+            rule_id: null,
+            finding_key: null,
+            escalate_at: null,
+            opened_at: null,
+            executes_at: executesAt,
+            attempt: held ? 1 : 0,
+            command_id: held ? squireActionCommandId("execute", cardId, 1) : null,
+            execution_key: null,
+            dedupe_key: null,
+            replaced_count: 0,
+            ask_json: null,
+            resolution: null,
+            created_at: ctx.now,
+            updated_at: ctx.now,
           });
-        }
-        const held = decision.level === "auto";
-        const cardId = SquireCardId.make(`card:proposal:${ctx.squire.id}:${ctx.key.slice(0, 24)}`);
-        const executesAt = held ? kit.holdUntil(ctx) : null;
-        const push = !held && kit.notifyOn(ctx);
-        const title = `Open room: ${topic}`;
-        const payload: RoomProposalPayload = {
-          type: "room-proposal",
-          proposalId,
-          members,
-          includesLead,
-          topic,
-          about,
-        };
-        const intent: SquireRoomOpenIntent = {
-          type: "room-open",
-          leadId: ctx.squire.id,
-          members,
-          includesLead,
-          topic,
-          about,
-          reason,
-          proposalId,
-          proposalEventId,
-        };
-        return yield* kit.commit(
-          ctx,
-          null,
-          Effect.gen(function* () {
-            yield* repository.insertCard({
-              id: cardId,
-              squire_id: ctx.squire.id,
-              owner_squire_id: ctx.squire.id,
+          yield* kit.logRow(
+            ctx,
+            held ? "action.held" : "card.created",
+            {
               kind: "proposal",
-              status: held ? "held" : "open",
-              // No target: a room item never takes a thread's one open slot.
-              target_thread_id: null,
-              project_id: null,
-              title,
-              why: reason,
-              payload_json: encodePayload(payload),
-              evidence_json: "{}",
-              trigger_json: "{}",
-              intent_json: held ? encodeSquireActionIntent(intent) : null,
-              origin: ctx.run.origin === "unknown" ? "event" : ctx.run.origin,
-              steer_kind: null,
-              routed_task_id: null,
-              rule_id: null,
-              finding_key: null,
-              escalate_at: null,
-              opened_at: null,
-              executes_at: executesAt,
-              attempt: held ? 1 : 0,
-              command_id: held ? squireActionCommandId("execute", cardId, 1) : null,
-              execution_key: null,
-              dedupe_key: null,
-              replaced_count: 0,
-              ask_json: null,
-              resolution: null,
-              created_at: ctx.now,
-              updated_at: ctx.now,
-            });
+              origin: ctx.run.origin,
+              room: "open",
+              members,
+              includesLead,
+              topic,
+              ...(proposalId === null ? {} : { proposalId }),
+              ...(executesAt === null ? {} : { executesAt }),
+            },
+            { cardId },
+          );
+          yield* kit.logRow(
+            ctx,
+            "decision.recorded",
+            { tool: ctx.tool, level: decision.level, reason: decision.reason },
+            { cardId },
+          );
+          if (push) {
             yield* kit.logRow(
               ctx,
-              held ? "action.held" : "card.created",
+              "notification.pushed",
+              { kind: "proposal", source: "card" },
+              { cardId },
+            );
+          }
+          return {
+            result: kit.ok(
+              held
+                ? `Held: ${title}. It opens at ${executesAt} unless the user presses Undo.`
+                : `Proposed: ${title}. The user decides.`,
               {
-                kind: "proposal",
-                origin: ctx.run.origin,
-                room: "open",
-                members,
-                includesLead,
-                topic,
-                ...(proposalId === null ? {} : { proposalId }),
+                cardId,
+                status: held ? "held" : "open",
                 ...(executesAt === null ? {} : { executesAt }),
               },
-              { cardId },
-            );
-            yield* kit.logRow(
-              ctx,
-              "decision.recorded",
-              { tool: ctx.tool, level: decision.level, reason: decision.reason },
-              { cardId },
-            );
-            if (push) {
-              yield* kit.logRow(
-                ctx,
-                "notification.pushed",
-                { kind: "proposal", source: "card" },
-                { cardId },
-              );
-            }
-            return {
-              result: kit.ok(
-                held
-                  ? `Held: ${title}. It opens at ${executesAt} unless the user presses Undo.`
-                  : `Proposed: ${title}. The user decides.`,
-                {
-                  cardId,
-                  status: held ? "held" : "open",
-                  ...(executesAt === null ? {} : { executesAt }),
-                },
-              ),
-            };
-          }),
-        );
-      }),
+            ),
+          };
+        }),
+      );
+    }),
   };
 
   // ── squire_close_room (Lead) ──
@@ -543,73 +539,74 @@ const make = Effect.gen(function* () {
       ["roomId", "reason"],
     ),
     roles: ["lead"],
-    call: (ctx, kit) =>
-      Effect.gen(function* () {
-        const args = yield* kit.decodeArgs(CloseArgs, ctx.args);
-        if (!args.ok) return yield* invalid(ctx, kit, args.message);
-        const { roomId, reason } = args.value;
-        const decision = leadLevel(ctx, kit);
-        if (decision.level === "off") {
-          return yield* kit.refuse(
-            ctx,
-            decision.reason,
-            decision.reason === "paused"
-              ? "The Lead is paused, so it cannot close rooms."
-              : "Manage Squires is Off for the Lead, so it cannot close rooms.",
-            { decision: { level: "off" } },
-          );
-        }
-        const room = yield* store.getRoom(roomId);
-        if (Option.isNone(room)) {
-          return yield* kit.refuse(ctx, "not-found", `There is no room ${roomId}.`);
-        }
-        if (room.value.status !== "open") {
-          return yield* kit.refuse(ctx, "closed", `The room "${room.value.topic}" is not open.`);
-        }
-        return yield* kit.commit(
+    call: Effect.fn("SquireRoomTools.call")(function* (ctx, kit) {
+      const args = yield* kit.decodeArgs(CloseArgs, ctx.args);
+      if (!args.ok) return yield* invalid(ctx, kit, args.message);
+      const { roomId, reason } = args.value;
+      const decision = leadLevel(ctx, kit);
+      if (decision.level === "off") {
+        return yield* kit.refuse(
           ctx,
-          null,
-          Effect.gen(function* () {
-            const closed = yield* rooms.closeInTransaction({
-              roomId,
-              reason: "lead",
-              now: ctx.now,
-            });
-            if (!closed) {
-              return {
-                result: kit.refused("closed", `The room "${room.value.topic}" is not open.`),
-              };
-            }
-            yield* roomLog({
-              squireId: ctx.squire.id,
-              kind: "room.closed",
-              data: { by: "lead", reason },
-              roomId,
-              runId: ctx.run.runId,
-              now: ctx.now,
-            });
-            return {
-              result: kit.ok(`Closed the room "${room.value.topic}". The user can reopen it.`, {
-                roomId,
-              }),
-            };
-          }),
+          decision.reason,
+          decision.reason === "paused"
+            ? "The Lead is paused, so it cannot close rooms."
+            : "Manage Squires is Off for the Lead, so it cannot close rooms.",
+          { decision: { level: "off" } },
         );
-      }),
+      }
+      const room = yield* store.getRoom(roomId);
+      if (Option.isNone(room)) {
+        return yield* kit.refuse(ctx, "not-found", `There is no room ${roomId}.`);
+      }
+      if (room.value.status !== "open") {
+        return yield* kit.refuse(ctx, "closed", `The room "${room.value.topic}" is not open.`);
+      }
+      return yield* kit.commit(
+        ctx,
+        null,
+        Effect.gen(function* () {
+          const closed = yield* rooms.closeInTransaction({
+            roomId,
+            reason: "lead",
+            now: ctx.now,
+          });
+          if (!closed) {
+            return {
+              result: kit.refused("closed", `The room "${room.value.topic}" is not open.`),
+            };
+          }
+          yield* roomLog({
+            squireId: ctx.squire.id,
+            kind: "room.closed",
+            data: { by: "lead", reason },
+            roomId,
+            runId: ctx.run.runId,
+            now: ctx.now,
+          });
+          return {
+            result: kit.ok(`Closed the room "${room.value.topic}". The user can reopen it.`, {
+              roomId,
+            }),
+          };
+        }),
+      );
+    }),
   };
 
   // ── squire_read_room (members; the Lead any room) ──
 
-  const nameOf = (names: Map<string, string>, id: string | null) =>
-    Effect.gen(function* () {
-      if (id === null) return "unknown";
-      const known = names.get(id);
-      if (known !== undefined) return known;
-      const row = yield* repository.getSquire(SquireId.make(id));
-      const name = Option.match(row, { onNone: () => id, onSome: (found) => found.name });
-      names.set(id, name);
-      return name;
-    });
+  const nameOf = Effect.fn("SquireRoomTools.nameOf")(function* (
+    names: Map<string, string>,
+    id: string | null,
+  ) {
+    if (id === null) return "unknown";
+    const known = names.get(id);
+    if (known !== undefined) return known;
+    const row = yield* repository.getSquire(SquireId.make(id));
+    const name = Option.match(row, { onNone: () => id, onSome: (found) => found.name });
+    names.set(id, name);
+    return name;
+  });
 
   const read: SquireToolHandler = {
     definition: definition(
@@ -622,106 +619,105 @@ const make = Effect.gen(function* () {
       ["roomId"],
     ),
     roles: ["squire", "lead"],
-    call: (ctx, kit) =>
-      Effect.gen(function* () {
-        const args = yield* kit.decodeArgs(ReadArgs, ctx.args);
-        if (!args.ok) return yield* invalid(ctx, kit, args.message);
-        const { roomId, before } = args.value;
-        const room = yield* store.getRoom(roomId);
-        if (Option.isNone(room)) {
-          return yield* kit.refuse(ctx, "not-found", `There is no room ${roomId}.`);
-        }
-        const members = yield* store.listMembers(roomId);
-        const isMember = members.some(
-          (member) => member.member_kind !== "user" && member.member_id === ctx.squire.id,
-        );
-        if (ctx.squire.role !== "lead" && !isMember) {
-          return yield* kit.refuse(
-            ctx,
-            "not-member",
-            `You are not a member of the room "${room.value.topic}".`,
-          );
-        }
-        const names = new Map<string, string>();
-        const memberNames: Array<string> = [];
-        for (const member of members) {
-          memberNames.push(
-            member.member_kind === "user" ? "the user" : yield* nameOf(names, member.member_id),
-          );
-        }
-        const header = `Room "${room.value.topic}" (${roomId}, ${room.value.status}) · members: ${memberNames.join(", ")}`;
-        // A rendered post is over 40 characters, so this page always outlasts the budget.
-        const limit = Math.ceil(ROOM_READ_MAX_CHARS / 40) + 1;
-        const page = yield* store.listPostsDesc({
-          roomId,
-          ...(before === undefined ? {} : { before }),
-          limit,
-        });
-        const lines: Array<string> = [];
-        const olderNote = (id: number) => `Older posts: call again with before=${id}.`;
-        // Reserve room for the header and the paging note.
-        let budget =
-          ROOM_READ_MAX_CHARS - header.length - olderNote(Number.MAX_SAFE_INTEGER).length - 2;
-        let oldest: number | undefined;
-        const shownPosts: Array<(typeof page)[number]> = [];
-        for (const post of page) {
-          const author =
-            post.author_kind === "user"
-              ? "you (the user)"
-              : post.author_kind === "system"
-                ? "system"
-                : yield* nameOf(names, post.author_id);
-          const line = `[post #${post.id} · ${author} · ${post.created_at} · key ${post.message_key}] ${post.body}`;
-          const cost = line.length + 1;
-          if (cost > budget) {
-            // A single post over the budget still shows, cut, so the reader is never stuck.
-            if (lines.length === 0) {
-              lines.push(line.slice(0, Math.max(budget - 1, 0)));
-              shownPosts.push(post);
-              oldest = post.id;
-            }
-            break;
-          }
-          lines.push(line);
-          shownPosts.push(post);
-          budget -= cost;
-          oldest = post.id;
-        }
-        // Other bots' posts are model input like their messages: their hops
-        // count toward the limit, and a Squire's words leave the rest of the
-        // run recommend-only (`readSquireText` reads these marks back).
-        let squireText = false;
-        let botPostHop: number | null = null;
-        for (const post of shownPosts) {
-          if (!isBotPost(post, ctx.squire.id)) continue;
-          botPostHop = Math.max(botPostHop ?? 0, post.hop);
-          if (
-            post.author_kind === "squire" ||
-            !(yield* sentInUserStartedTurn(repository, post.message_key))
-          ) {
-            squireText = true;
-          }
-        }
-        const more = oldest !== undefined && page.some((post) => post.id < oldest!);
-        const text = [
-          header,
-          ...(lines.length === 0 ? ["No posts."] : lines.toReversed()),
-          ...(more ? [olderNote(oldest!)] : []),
-        ].join("\n");
-        const note = squireText ? `\n${SQUIRE_TEXT_NOTE}` : "";
-        return yield* kit.commit(
+    call: Effect.fn("SquireRoomTools.call")(function* (ctx, kit) {
+      const args = yield* kit.decodeArgs(ReadArgs, ctx.args);
+      if (!args.ok) return yield* invalid(ctx, kit, args.message);
+      const { roomId, before } = args.value;
+      const room = yield* store.getRoom(roomId);
+      if (Option.isNone(room)) {
+        return yield* kit.refuse(ctx, "not-found", `There is no room ${roomId}.`);
+      }
+      const members = yield* store.listMembers(roomId);
+      const isMember = members.some(
+        (member) => member.member_kind !== "user" && member.member_id === ctx.squire.id,
+      );
+      if (ctx.squire.role !== "lead" && !isMember) {
+        return yield* kit.refuse(
           ctx,
-          null,
-          Effect.succeed({
-            result: kit.ok(`${text.slice(0, ROOM_READ_MAX_CHARS)}${note}`, {
-              roomId,
-              posts: lines.length,
-              ...(more ? { before: oldest } : {}),
-              ...roomReadMarks({ squireText, botPostHop }),
-            }),
-          }),
+          "not-member",
+          `You are not a member of the room "${room.value.topic}".`,
         );
-      }),
+      }
+      const names = new Map<string, string>();
+      const memberNames: Array<string> = [];
+      for (const member of members) {
+        memberNames.push(
+          member.member_kind === "user" ? "the user" : yield* nameOf(names, member.member_id),
+        );
+      }
+      const header = `Room "${room.value.topic}" (${roomId}, ${room.value.status}) · members: ${memberNames.join(", ")}`;
+      // A rendered post is over 40 characters, so this page always outlasts the budget.
+      const limit = Math.ceil(ROOM_READ_MAX_CHARS / 40) + 1;
+      const page = yield* store.listPostsDesc({
+        roomId,
+        ...(before === undefined ? {} : { before }),
+        limit,
+      });
+      const lines: Array<string> = [];
+      const olderNote = (id: number) => `Older posts: call again with before=${id}.`;
+      // Reserve room for the header and the paging note.
+      let budget =
+        ROOM_READ_MAX_CHARS - header.length - olderNote(Number.MAX_SAFE_INTEGER).length - 2;
+      let oldest: number | undefined;
+      const shownPosts: Array<(typeof page)[number]> = [];
+      for (const post of page) {
+        const author =
+          post.author_kind === "user"
+            ? "you (the user)"
+            : post.author_kind === "system"
+              ? "system"
+              : yield* nameOf(names, post.author_id);
+        const line = `[post #${post.id} · ${author} · ${post.created_at} · key ${post.message_key}] ${post.body}`;
+        const cost = line.length + 1;
+        if (cost > budget) {
+          // A single post over the budget still shows, cut, so the reader is never stuck.
+          if (lines.length === 0) {
+            lines.push(line.slice(0, Math.max(budget - 1, 0)));
+            shownPosts.push(post);
+            oldest = post.id;
+          }
+          break;
+        }
+        lines.push(line);
+        shownPosts.push(post);
+        budget -= cost;
+        oldest = post.id;
+      }
+      // Other bots' posts are model input like their messages: their hops
+      // count toward the limit, and a Squire's words leave the rest of the
+      // run recommend-only (`readSquireText` reads these marks back).
+      let squireText = false;
+      let botPostHop: number | null = null;
+      for (const post of shownPosts) {
+        if (!isBotPost(post, ctx.squire.id)) continue;
+        botPostHop = Math.max(botPostHop ?? 0, post.hop);
+        if (
+          post.author_kind === "squire" ||
+          !(yield* sentInUserStartedTurn(repository, post.message_key))
+        ) {
+          squireText = true;
+        }
+      }
+      const more = oldest !== undefined && page.some((post) => post.id < oldest!);
+      const text = [
+        header,
+        ...(lines.length === 0 ? ["No posts."] : lines.toReversed()),
+        ...(more ? [olderNote(oldest!)] : []),
+      ].join("\n");
+      const note = squireText ? `\n${SQUIRE_TEXT_NOTE}` : "";
+      return yield* kit.commit(
+        ctx,
+        null,
+        Effect.succeed({
+          result: kit.ok(`${text.slice(0, ROOM_READ_MAX_CHARS)}${note}`, {
+            roomId,
+            posts: lines.length,
+            ...(more ? { before: oldest } : {}),
+            ...roomReadMarks({ squireText, botPostHop }),
+          }),
+        }),
+      );
+    }),
   };
 
   yield* registry.register([propose, open, close, read]);

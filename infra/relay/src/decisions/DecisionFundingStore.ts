@@ -40,8 +40,8 @@ const isDecisionError = Schema.is(DecisionEvaluationError);
 const nowSeconds = Clock.currentTimeMillis.pipe(Effect.map((ms) => Math.floor(ms / 1000)));
 const iso = (seconds: number) => DateTime.formatIso(DateTime.makeUnsafe(seconds * 1000));
 
-export const makeDecisionFundingStore = (access: DecisionsAccess, config: DecisionFundingConfig) =>
-  Effect.gen(function* () {
+export const makeDecisionFundingStore = Effect.fn("DecisionFunding.makeDecisionFundingStore")(
+  function* (access: DecisionsAccess, config: DecisionFundingConfig) {
     const { $client: sql } = yield* RelayDb;
     const crypto = yield* Crypto.Crypto;
     const ttl = config.challengeTtlSeconds ?? 600;
@@ -559,5 +559,6 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
       revokeEnvironment,
       revokeAccount,
     };
-  });
+  },
+);
 export type DecisionFundingStore = Effect.Success<ReturnType<typeof makeDecisionFundingStore>>;

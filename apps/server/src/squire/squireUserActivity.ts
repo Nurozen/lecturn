@@ -15,11 +15,8 @@ const USER_ACTIVITY_THROTTLE_MS = 10 * 60 * 1000;
  * Call after a user Squire mutation commits, never from server-internal
  * paths. Never fails: the user's action already happened.
  */
-export const touchUserActivity = (
-  repository: SquireRepository.SquireRepository["Service"],
-  now: string,
-) =>
-  Effect.gen(function* () {
+export const touchUserActivity = Effect.fn("squireUserActivity.touchUserActivity")(
+  function* (repository: SquireRepository.SquireRepository["Service"], now: string) {
     const lead = yield* repository.getLead;
     if (Option.isNone(lead)) return;
     const staleBefore = DateTime.formatIso(
@@ -28,6 +25,6 @@ export const touchUserActivity = (
     const last = lead.value.user_active_at;
     if (last !== null && last > staleBefore) return;
     yield* repository.touchUserActiveAt({ id: lead.value.id, at: now, staleBefore });
-  }).pipe(
-    Effect.catchCause((cause) => Effect.logWarning("Could not record Squire activity", { cause })),
-  );
+  },
+  Effect.catchCause((cause) => Effect.logWarning("Could not record Squire activity", { cause })),
+);

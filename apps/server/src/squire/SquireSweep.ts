@@ -248,17 +248,19 @@ const make = Effect.gen(function* () {
       );
 
   /** A slot belongs to the Lead from its creation on, so a new Lead does not sweep at once. */
-  const dueSlot = (lead: SquireRepository.SquireRow, now: DateTime.Utc) =>
-    Effect.gen(function* () {
-      if (!(yield* enabled) || !sweeping(lead)) return Option.none<DateTime.Utc>();
-      const { latest } = slotsAround(lead, now);
-      if (Option.isNone(latest) || DateTime.formatIso(latest.value) < lead.created_at) {
-        return Option.none<DateTime.Utc>();
-      }
-      const key = scheduleKey(latest.value);
-      const ran = yield* ranRows(lead.id, now, 2 * DAY_MS);
-      return ran.some((entry) => entry.data.sweepKey === key) ? Option.none() : latest;
-    });
+  const dueSlot = Effect.fn("SquireSweep.dueSlot")(function* (
+    lead: SquireRepository.SquireRow,
+    now: DateTime.Utc,
+  ) {
+    if (!(yield* enabled) || !sweeping(lead)) return Option.none<DateTime.Utc>();
+    const { latest } = slotsAround(lead, now);
+    if (Option.isNone(latest) || DateTime.formatIso(latest.value) < lead.created_at) {
+      return Option.none<DateTime.Utc>();
+    }
+    const key = scheduleKey(latest.value);
+    const ran = yield* ranRows(lead.id, now, 2 * DAY_MS);
+    return ran.some((entry) => entry.data.sweepKey === key) ? Option.none() : latest;
+  });
 
   const scheduleKey = (slot: DateTime.Utc) => `schedule:${DateTime.formatIso(slot)}`;
 
@@ -268,108 +270,113 @@ const make = Effect.gen(function* () {
       .pipe(Effect.map((cards) => cards.some((card) => card.kind !== "fyi")));
 
   /** When the checks first failed on this head, from the trackers' PR event rows. */
-  const failureAt = (threadId: ThreadId, link: ThreadPullRequestLink, headSha: string) =>
-    Effect.gen(function* () {
-      const key = squireStateKey({
-        kind: "pull-request-changed",
-        pullRequest: link,
-        headSha,
-        state: "checks:failed",
-      });
-      const rows = yield* repository.listEvents({
-        statuses: [...EVENT_STATUSES],
-        threadId,
-        kinds: ["pull-request-changed"],
-      });
-      const first = rows
-        .filter((row) => row.state_key === key)
-        .map((row) => Date.parse(row.created_at))
-        .toSorted((a, b) => a - b)[0];
-      if (first !== undefined) return first;
-      // No tracker heard the transition: the snapshot's own time is the best bound.
-      const snapshot = link.snapshot;
-      return Date.parse(snapshot?.updatedAt ?? snapshot?.syncedAt ?? "") || 0;
+  const failureAt = Effect.fn("SquireSweep.failureAt")(function* (
+    threadId: ThreadId,
+    link: ThreadPullRequestLink,
+    headSha: string,
+  ) {
+    const key = squireStateKey({
+      kind: "pull-request-changed",
+      pullRequest: link,
+      headSha,
+      state: "checks:failed",
     });
+    const rows = yield* repository.listEvents({
+      statuses: [...EVENT_STATUSES],
+      threadId,
+      kinds: ["pull-request-changed"],
+    });
+    const first = rows
+      .filter((row) => row.state_key === key)
+      .map((row) => Date.parse(row.created_at))
+      .toSorted((a, b) => a - b)[0];
+    if (first !== undefined) return first;
+    // No tracker heard the transition: the snapshot's own time is the best bound.
+    const snapshot = link.snapshot;
+    return Date.parse(snapshot?.updatedAt ?? snapshot?.syncedAt ?? "") || 0;
+  });
 
-  const candidateFor = (
+  // Runs per thread in a sweep; SquireSweep.candidates owns the span.
+  const candidateFor = Effect.fnUntraced(function* (
     shell: OrchestrationV2ThreadShell,
     nowMs: number,
     dismissed: ReadonlySet<string>,
-  ) =>
-    Effect.gen(function* () {
-      if (shell.activeRunId !== null) return Option.none<SquireSweepCandidate & { at: number }>();
-      const lastStart = ms(shell.latestRunStartedAt) ?? ms(shell.latestRunRequestedAt);
-      const lastTurn = Math.max(
-        ms(shell.latestRunCompletedAt) ?? 0,
-        lastStart ?? 0,
-        lastStart === null ? DateTime.toEpochMillis(shell.createdAt) : 0,
-      );
-      const open = (shell.pullRequests ?? []).filter((link) => link.snapshot?.state === "open");
-      for (const link of open) {
-        const headSha = link.snapshot?.headSha;
-        if (link.snapshot?.checksState !== "failing" || headSha === undefined) continue;
-        const candidate: SquireSweepCandidate = {
-          threadId: shell.id,
-          kind: "failing-checks-no-turn",
-          pullRequestNumber: link.number,
-          headSha,
-        };
-        if (dismissed.has(findingKeyOf(candidate))) continue;
-        const failedAt = yield* failureAt(shell.id, link, headSha);
-        if (lastStart === null || lastStart < failedAt) {
-          return Option.some({ ...candidate, at: lastTurn });
-        }
+  ) {
+    if (shell.activeRunId !== null) return Option.none<SquireSweepCandidate & { at: number }>();
+    const lastStart = ms(shell.latestRunStartedAt) ?? ms(shell.latestRunRequestedAt);
+    const lastTurn = Math.max(
+      ms(shell.latestRunCompletedAt) ?? 0,
+      lastStart ?? 0,
+      lastStart === null ? DateTime.toEpochMillis(shell.createdAt) : 0,
+    );
+    const open = (shell.pullRequests ?? []).filter((link) => link.snapshot?.state === "open");
+    for (const link of open) {
+      const headSha = link.snapshot?.headSha;
+      if (link.snapshot?.checksState !== "failing" || headSha === undefined) continue;
+      const candidate: SquireSweepCandidate = {
+        threadId: shell.id,
+        kind: "failing-checks-no-turn",
+        pullRequestNumber: link.number,
+        headSha,
+      };
+      if (dismissed.has(findingKeyOf(candidate))) continue;
+      const failedAt = yield* failureAt(shell.id, link, headSha);
+      if (lastStart === null || lastStart < failedAt) {
+        return Option.some({ ...candidate, at: lastTurn });
       }
-      const link = open[0];
-      if (link !== undefined && nowMs - lastTurn >= IDLE_MS) {
-        const candidate: SquireSweepCandidate = {
-          threadId: shell.id,
-          kind: "idle-unmerged-pr",
-          pullRequestNumber: link.number,
-          headSha: link.snapshot?.headSha ?? null,
-        };
-        if (!dismissed.has(findingKeyOf(candidate)))
-          return Option.some({ ...candidate, at: lastTurn });
-      }
-      return Option.none<SquireSweepCandidate & { at: number }>();
-    });
+    }
+    const link = open[0];
+    if (link !== undefined && nowMs - lastTurn >= IDLE_MS) {
+      const candidate: SquireSweepCandidate = {
+        threadId: shell.id,
+        kind: "idle-unmerged-pr",
+        pullRequestNumber: link.number,
+        headSha: link.snapshot?.headSha ?? null,
+      };
+      if (!dismissed.has(findingKeyOf(candidate)))
+        return Option.some({ ...candidate, at: lastTurn });
+    }
+    return Option.none<SquireSweepCandidate & { at: number }>();
+  });
 
   /** Tracked threads of active Squires, failing heads first, then the longest idle. */
-  const candidates = (lead: SquireRepository.SquireRow, now: DateTime.Utc) =>
-    Effect.gen(function* () {
-      const active = new Set(
-        (yield* repository.listSquires)
-          .filter(
-            (row) => row.role === "squire" && row.status === "active" && row.lifecycle === "ready",
-          )
-          .map((row) => row.id),
-      );
-      if (active.size === 0) return [];
-      const dismissed = new Set(
-        (yield* repository.listCards({ squireId: lead.id, statuses: ["dismissed"] })).flatMap(
-          (card) => (card.finding_key === null ? [] : [card.finding_key]),
-        ),
-      );
-      const nowMs = DateTime.toEpochMillis(now);
-      const found: Array<SquireSweepCandidate & { at: number }> = [];
-      for (const shell of (yield* projections.getShellSnapshot({ location: "active" })).threads) {
-        if (isSquireThread(shell) || shell.archivedAt !== null) continue;
-        if (!(shell.pullRequests ?? []).some((link) => link.snapshot?.state === "open")) continue;
-        const trackers = yield* scope.trackersOf(shell.id);
-        if (!trackers.some((id) => active.has(id))) continue;
-        const candidate = yield* candidateFor(shell, nowMs, dismissed);
-        if (Option.isNone(candidate) || (yield* hasOpenDecision(shell.id))) continue;
-        found.push(candidate.value);
-      }
-      return found
-        .toSorted(
-          (a, b) =>
-            Number(b.kind === "failing-checks-no-turn") -
-              Number(a.kind === "failing-checks-no-turn") || a.at - b.at,
+  const candidates = Effect.fn("SquireSweep.candidates")(function* (
+    lead: SquireRepository.SquireRow,
+    now: DateTime.Utc,
+  ) {
+    const active = new Set(
+      (yield* repository.listSquires)
+        .filter(
+          (row) => row.role === "squire" && row.status === "active" && row.lifecycle === "ready",
         )
-        .slice(0, SQUIRE_SWEEP_MAX_CANDIDATES)
-        .map(({ at: _at, ...candidate }) => candidate);
-    });
+        .map((row) => row.id),
+    );
+    if (active.size === 0) return [];
+    const dismissed = new Set(
+      (yield* repository.listCards({ squireId: lead.id, statuses: ["dismissed"] })).flatMap(
+        (card) => (card.finding_key === null ? [] : [card.finding_key]),
+      ),
+    );
+    const nowMs = DateTime.toEpochMillis(now);
+    const found: Array<SquireSweepCandidate & { at: number }> = [];
+    for (const shell of (yield* projections.getShellSnapshot({ location: "active" })).threads) {
+      if (isSquireThread(shell) || shell.archivedAt !== null) continue;
+      if (!(shell.pullRequests ?? []).some((link) => link.snapshot?.state === "open")) continue;
+      const trackers = yield* scope.trackersOf(shell.id);
+      if (!trackers.some((id) => active.has(id))) continue;
+      const candidate = yield* candidateFor(shell, nowMs, dismissed);
+      if (Option.isNone(candidate) || (yield* hasOpenDecision(shell.id))) continue;
+      found.push(candidate.value);
+    }
+    return found
+      .toSorted(
+        (a, b) =>
+          Number(b.kind === "failing-checks-no-turn") -
+            Number(a.kind === "failing-checks-no-turn") || a.at - b.at,
+      )
+      .slice(0, SQUIRE_SWEEP_MAX_CANDIDATES)
+      .map(({ at: _at, ...candidate }) => candidate);
+  });
 
   const logRan = (
     lead: SquireRepository.SquireRow,
@@ -400,103 +407,100 @@ const make = Effect.gen(function* () {
   });
 
   /** One sweep: dedupe on its key, then the sweeps-per-day budget, then the event or the empty row. */
-  const run = (
+  const run = Effect.fn("SquireSweep.run")(function* (
     lead: SquireRepository.SquireRow,
     sweepKey: string,
     source: SweepSource,
     now: DateTime.Utc,
-  ) =>
-    Effect.gen(function* () {
-      const found = yield* candidates(lead, now);
-      const result = yield* runLock(
-        repository.transaction(
-          Effect.gen(function* () {
-            const ran = yield* ranRows(
-              lead.id,
-              now,
-              source === "request" ? 30 * DAY_MS : 2 * DAY_MS,
-            );
-            const previous = ran.find((entry) => entry.data.sweepKey === sweepKey);
-            if (previous !== undefined) return { result: resultOf(previous.data), queued: false };
-            const day = ran.filter(
-              (entry) =>
-                entry.data.outcome === "queued" && entry.row.created_at > minusMs(now, DAY_MS),
-            );
-            const limit = settingsOf(lead).sweepsPerDay;
-            if (day.length >= limit) {
-              // The window frees when the oldest sweep filling it ages out.
-              const oldest = day.at(-limit) ?? day[0];
-              const retryAt = oldest === undefined ? null : isoPlus(oldest.row.created_at, DAY_MS);
-              const data = {
-                sweepKey,
-                source,
-                outcome: "budget-reached",
-                candidates: 0,
-                retryAt,
-              } as const;
-              yield* logRan(lead, data, now);
-              return { result: resultOf(data), queued: false };
-            }
-            if (found.length === 0) {
-              const data = { sweepKey, source, outcome: "empty", candidates: 0 } as const;
-              yield* logRan(lead, data, now);
-              return { result: resultOf(data), queued: false };
-            }
-            const at = DateTime.formatIso(now);
-            const eventId = yield* repository.insertTriggerEvent({
-              squire_id: lead.id,
-              thread_id: null,
-              kind: "sweep-due",
-              state_key: sweepKey,
-              payload_json: encodeEvent({ type: "sweep-due", sweepKey, source, candidates: found }),
-              status: "pending",
-              defer_reason: null,
-              not_before: at,
-              batch_id: null,
-              created_at: at,
-            });
-            const data = { sweepKey, source, outcome: "queued", candidates: found.length } as const;
-            yield* logRan(lead, data, now, Option.getOrNull(eventId));
-            return { result: resultOf(data), queued: true };
-          }),
-        ),
-      );
-      if (result.queued && Option.isSome(delivery)) yield* delivery.value.wake(lead.id);
-      return result.result;
-    });
+  ) {
+    const found = yield* candidates(lead, now);
+    const result = yield* runLock(
+      repository.transaction(
+        Effect.gen(function* () {
+          const ran = yield* ranRows(lead.id, now, source === "request" ? 30 * DAY_MS : 2 * DAY_MS);
+          const previous = ran.find((entry) => entry.data.sweepKey === sweepKey);
+          if (previous !== undefined) return { result: resultOf(previous.data), queued: false };
+          const day = ran.filter(
+            (entry) =>
+              entry.data.outcome === "queued" && entry.row.created_at > minusMs(now, DAY_MS),
+          );
+          const limit = settingsOf(lead).sweepsPerDay;
+          if (day.length >= limit) {
+            // The window frees when the oldest sweep filling it ages out.
+            const oldest = day.at(-limit) ?? day[0];
+            const retryAt = oldest === undefined ? null : isoPlus(oldest.row.created_at, DAY_MS);
+            const data = {
+              sweepKey,
+              source,
+              outcome: "budget-reached",
+              candidates: 0,
+              retryAt,
+            } as const;
+            yield* logRan(lead, data, now);
+            return { result: resultOf(data), queued: false };
+          }
+          if (found.length === 0) {
+            const data = { sweepKey, source, outcome: "empty", candidates: 0 } as const;
+            yield* logRan(lead, data, now);
+            return { result: resultOf(data), queued: false };
+          }
+          const at = DateTime.formatIso(now);
+          const eventId = yield* repository.insertTriggerEvent({
+            squire_id: lead.id,
+            thread_id: null,
+            kind: "sweep-due",
+            state_key: sweepKey,
+            payload_json: encodeEvent({ type: "sweep-due", sweepKey, source, candidates: found }),
+            status: "pending",
+            defer_reason: null,
+            not_before: at,
+            batch_id: null,
+            created_at: at,
+          });
+          const data = { sweepKey, source, outcome: "queued", candidates: found.length } as const;
+          yield* logRan(lead, data, now, Option.getOrNull(eventId));
+          return { result: resultOf(data), queued: true };
+        }),
+      ),
+    );
+    if (result.queued && Option.isSome(delivery)) yield* delivery.value.wake(lead.id);
+    return result.result;
+  });
 
-  const due: SquireSweep["Service"]["due"] = (now) =>
-    Effect.gen(function* () {
-      const lead = yield* repository.getLead;
-      if (Option.isNone(lead)) return;
-      const slot = yield* dueSlot(lead.value, now);
-      if (Option.isNone(slot)) return;
-      yield* run(lead.value, scheduleKey(slot.value), "schedule", now);
-    }).pipe(orSquireError("run the scheduled sweep"));
+  const due: SquireSweep["Service"]["due"] = Effect.fn("SquireSweep.due")(function* (now) {
+    const lead = yield* repository.getLead;
+    if (Option.isNone(lead)) return;
+    const slot = yield* dueSlot(lead.value, now);
+    if (Option.isNone(slot)) return;
+    yield* run(lead.value, scheduleKey(slot.value), "schedule", now);
+  }, orSquireError("run the scheduled sweep"));
 
-  const nextDueAt: SquireSweep["Service"]["nextDueAt"] = (now) =>
-    Effect.gen(function* () {
+  const nextDueAt: SquireSweep["Service"]["nextDueAt"] = Effect.fn("SquireSweep.nextDueAt")(
+    function* (now) {
       const lead = yield* repository.getLead;
       if (!(yield* enabled) || Option.isNone(lead) || !sweeping(lead.value)) return Option.none();
       if (Option.isSome(yield* dueSlot(lead.value, now))) return Option.some(now);
       return slotsAround(lead.value, now).next;
-    }).pipe(orSquireError("read the next sweep slot"));
+    },
+    orSquireError("read the next sweep slot"),
+  );
 
-  const request: SquireSweep["Service"]["request"] = (input) =>
-    Effect.gen(function* () {
-      if (!(yield* enabled)) {
-        return yield* new SquireError({
-          code: "disabled_by_server",
-          message: "Squires are turned off on this server.",
-        });
-      }
-      const lead = yield* repository.getLead;
-      if (Option.isNone(lead) || lead.value.lifecycle === "deleting") {
-        return yield* new SquireError({ code: "not_found", message: "There is no Lead yet." });
-      }
-      if (!sweeping(lead.value)) return { outcome: "paused", retryAt: null } satisfies SweepResult;
-      return yield* run(lead.value, `request:${input.requestId}`, "request", yield* DateTime.now);
-    }).pipe(orSquireError("find work"));
+  const request: SquireSweep["Service"]["request"] = Effect.fn("SquireSweep.request")(function* (
+    input,
+  ) {
+    if (!(yield* enabled)) {
+      return yield* new SquireError({
+        code: "disabled_by_server",
+        message: "Squires are turned off on this server.",
+      });
+    }
+    const lead = yield* repository.getLead;
+    if (Option.isNone(lead) || lead.value.lifecycle === "deleting") {
+      return yield* new SquireError({ code: "not_found", message: "There is no Lead yet." });
+    }
+    if (!sweeping(lead.value)) return { outcome: "paused", retryAt: null } satisfies SweepResult;
+    return yield* run(lead.value, `request:${input.requestId}`, "request", yield* DateTime.now);
+  }, orSquireError("find work"));
 
   const refusal = (reason: SquireSweepRefusal, text: string): SquireSweepAdmission => ({
     ok: false,
@@ -504,88 +508,88 @@ const make = Effect.gen(function* () {
     text,
   });
 
-  const admitFinding: SquireSweep["Service"]["admitFinding"] = (input) =>
-    Effect.gen(function* () {
-      const { lead } = input;
-      if (!sweeping(lead)) {
-        return refusal("paused", "The sweep is paused, so no finding was raised.");
-      }
-      const sweep = input.batchEvents
-        .filter((row) => row.kind === "sweep-due")
-        .flatMap((row) =>
-          Option.toArray(decodeEvent(row.payload_json ?? "")).flatMap((event) =>
-            !isUnknownUnionMember(event) && event.type === "sweep-due" ? [event] : [],
-          ),
-        )
-        .at(-1);
-      if (sweep === undefined) {
-        return refusal("not-a-sweep", "Findings are raised only in a sweep turn.");
-      }
-      const candidate = sweep.candidates.find((entry) => entry.threadId === input.threadId);
-      if (candidate === undefined) {
-        return refusal(
-          "not-a-candidate",
-          "A finding must be about one of this sweep's candidate threads.",
-        );
-      }
-      const findingKey = findingKeyOf(candidate);
-      const findings = (yield* repository.listCards({ squireId: lead.id })).filter(
-        (card) => card.finding_key !== null,
-      );
-      const same = findings.filter((card) => card.finding_key === findingKey);
-      if (same.some((card) => card.status === "dismissed")) {
-        return refusal("finding-dismissed", "The user already dismissed this finding.");
-      }
-      if (same.some((card) => (OPEN_STATUSES as ReadonlyArray<string>).includes(card.status))) {
-        return refusal("already-raised", "This finding is already in the queue.");
-      }
-      const settings = settingsOf(lead);
-      const inSweep = findings.filter((card) =>
-        Option.exists(
-          decodeTrigger(card.trigger_json),
-          (trigger) => trigger.requestId === sweep.sweepKey,
+  const admitFinding: SquireSweep["Service"]["admitFinding"] = Effect.fn(
+    "SquireSweep.admitFinding",
+  )(function* (input) {
+    const { lead } = input;
+    if (!sweeping(lead)) {
+      return refusal("paused", "The sweep is paused, so no finding was raised.");
+    }
+    const sweep = input.batchEvents
+      .filter((row) => row.kind === "sweep-due")
+      .flatMap((row) =>
+        Option.toArray(decodeEvent(row.payload_json ?? "")).flatMap((event) =>
+          !isUnknownUnionMember(event) && event.type === "sweep-due" ? [event] : [],
         ),
+      )
+      .at(-1);
+    if (sweep === undefined) {
+      return refusal("not-a-sweep", "Findings are raised only in a sweep turn.");
+    }
+    const candidate = sweep.candidates.find((entry) => entry.threadId === input.threadId);
+    if (candidate === undefined) {
+      return refusal(
+        "not-a-candidate",
+        "A finding must be about one of this sweep's candidate threads.",
       );
-      if (inSweep.length >= settings.findingsPerSweep) {
-        return refusal(
-          "sweep-findings-reached",
-          `This sweep already raised ${inSweep.length} finding${inSweep.length === 1 ? "" : "s"}, its limit.`,
-        );
-      }
-      const dayStart = isoPlus(input.now, -DAY_MS);
-      const today = findings.filter((card) => card.created_at > dayStart);
-      if (today.length >= settings.findingsPerDay) {
-        const oldest = today.at(-settings.findingsPerDay) ?? today[0];
-        const until = oldest === undefined ? input.now : isoPlus(oldest.created_at, DAY_MS);
-        return refusal("daily-findings-reached", `Sweep finding budget reached until ${until}.`);
-      }
-      const trigger: SquireCardTrigger = { requestId: sweep.sweepKey };
-      if (candidate.kind !== "failing-checks-no-turn" || candidate.headSha === null) {
-        return {
-          ok: true,
-          findingKey,
-          trigger:
-            candidate.headSha === null ? trigger : { ...trigger, headSha: candidate.headSha },
-        };
-      }
-      // The reactor outdates the finding when this PR leaves the failing state on this head.
-      const shell = yield* projections
-        .getThreadShell(candidate.threadId)
-        .pipe(Effect.catch(() => Effect.succeed(null)));
-      const link = (shell?.pullRequests ?? []).find(
-        (entry) => entry.number === candidate.pullRequestNumber,
+    }
+    const findingKey = findingKeyOf(candidate);
+    const findings = (yield* repository.listCards({ squireId: lead.id })).filter(
+      (card) => card.finding_key !== null,
+    );
+    const same = findings.filter((card) => card.finding_key === findingKey);
+    if (same.some((card) => card.status === "dismissed")) {
+      return refusal("finding-dismissed", "The user already dismissed this finding.");
+    }
+    if (same.some((card) => (OPEN_STATUSES as ReadonlyArray<string>).includes(card.status))) {
+      return refusal("already-raised", "This finding is already in the queue.");
+    }
+    const settings = settingsOf(lead);
+    const inSweep = findings.filter((card) =>
+      Option.exists(
+        decodeTrigger(card.trigger_json),
+        (trigger) => trigger.requestId === sweep.sweepKey,
+      ),
+    );
+    if (inSweep.length >= settings.findingsPerSweep) {
+      return refusal(
+        "sweep-findings-reached",
+        `This sweep already raised ${inSweep.length} finding${inSweep.length === 1 ? "" : "s"}, its limit.`,
       );
+    }
+    const dayStart = isoPlus(input.now, -DAY_MS);
+    const today = findings.filter((card) => card.created_at > dayStart);
+    if (today.length >= settings.findingsPerDay) {
+      const oldest = today.at(-settings.findingsPerDay) ?? today[0];
+      const until = oldest === undefined ? input.now : isoPlus(oldest.created_at, DAY_MS);
+      return refusal("daily-findings-reached", `Sweep finding budget reached until ${until}.`);
+    }
+    const trigger: SquireCardTrigger = { requestId: sweep.sweepKey };
+    if (candidate.kind !== "failing-checks-no-turn" || candidate.headSha === null) {
       return {
         ok: true,
         findingKey,
-        trigger: {
-          ...trigger,
-          headSha: candidate.headSha,
-          transition: "checks:failed",
-          ...(link === undefined ? {} : { prKey: threadPullRequestKeyOf(link) }),
-        },
+        trigger: candidate.headSha === null ? trigger : { ...trigger, headSha: candidate.headSha },
       };
-    });
+    }
+    // The reactor outdates the finding when this PR leaves the failing state on this head.
+    const shell = yield* projections
+      .getThreadShell(candidate.threadId)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+    const link = (shell?.pullRequests ?? []).find(
+      (entry) => entry.number === candidate.pullRequestNumber,
+    );
+    return {
+      ok: true,
+      findingKey,
+      trigger: {
+        ...trigger,
+        headSha: candidate.headSha,
+        transition: "checks:failed",
+        ...(link === undefined ? {} : { prKey: threadPullRequestKeyOf(link) }),
+      },
+    };
+  });
 
   const outcomeOf = (card: SquireRepository.SquireCardRow) =>
     card.status === "dismissed"
@@ -594,72 +598,76 @@ const make = Effect.gen(function* () {
         ? ("outdated" as const)
         : ("accepted" as const);
 
-  const recordFor = (lead: SquireId, now: DateTime.Utc) =>
-    Effect.gen(function* () {
-      const since = minusMs(now, OUTCOME_LOOKBACK_MS);
-      const finished = (yield* repository.listCards({
-        squireId: lead,
-        statuses: [...FINAL_STATUSES],
-      })).filter((card) => card.finding_key !== null && card.updated_at >= since);
-      if (finished.length === 0) return 0;
-      const oldest = finished.map((card) => card.created_at).toSorted()[0] ?? since;
-      return yield* repository.transaction(
-        Effect.gen(function* () {
-          const logged = new Set(
-            (yield* repository.listActionLogAfter({
-              squireId: lead,
-              kinds: [FINDING],
-              after: isoPlus(oldest, -1),
-            })).map((row) => row.card_id),
-          );
-          const missing = finished.filter((card) => !logged.has(card.id));
-          for (const card of missing) {
-            yield* repository.insertActionLog({
-              squire_id: lead,
-              kind: FINDING,
-              room_id: null,
-              post_id: null,
-              trigger_id: null,
-              task_id: null,
-              thread_id: card.target_thread_id,
-              card_id: card.id,
-              event_id: null,
-              run_id: null,
-              invocation_key: null,
-              execution_key: null,
-              data_json: encodeFinding({
-                outcome: outcomeOf(card),
-                findingKey: card.finding_key ?? "",
-              }),
-              // The outcome counts on the day it happened.
-              created_at: card.updated_at,
-            });
-          }
-          return missing.length;
-        }),
-      );
+  const recordFor = Effect.fn("SquireSweep.recordFor")(function* (
+    lead: SquireId,
+    now: DateTime.Utc,
+  ) {
+    const since = minusMs(now, OUTCOME_LOOKBACK_MS);
+    const finished = (yield* repository.listCards({
+      squireId: lead,
+      statuses: [...FINAL_STATUSES],
+    })).filter((card) => card.finding_key !== null && card.updated_at >= since);
+    if (finished.length === 0) return 0;
+    const oldest = finished.map((card) => card.created_at).toSorted()[0] ?? since;
+    return yield* repository.transaction(
+      Effect.gen(function* () {
+        const logged = new Set(
+          (yield* repository.listActionLogAfter({
+            squireId: lead,
+            kinds: [FINDING],
+            after: isoPlus(oldest, -1),
+          })).map((row) => row.card_id),
+        );
+        const missing = finished.filter((card) => !logged.has(card.id));
+        for (const card of missing) {
+          yield* repository.insertActionLog({
+            squire_id: lead,
+            kind: FINDING,
+            room_id: null,
+            post_id: null,
+            trigger_id: null,
+            task_id: null,
+            thread_id: card.target_thread_id,
+            card_id: card.id,
+            event_id: null,
+            run_id: null,
+            invocation_key: null,
+            execution_key: null,
+            data_json: encodeFinding({
+              outcome: outcomeOf(card),
+              findingKey: card.finding_key ?? "",
+            }),
+            // The outcome counts on the day it happened.
+            created_at: card.updated_at,
+          });
+        }
+        return missing.length;
+      }),
+    );
+  });
+
+  const recordOutcomes: SquireSweep["Service"]["recordOutcomes"] = Effect.fn(
+    "SquireSweep.recordOutcomes",
+  )(function* (now) {
+    const lead = yield* repository.getLead;
+    return Option.isNone(lead) ? 0 : yield* recordFor(lead.value.id, now);
+  }, orSquireError("record sweep outcomes"));
+
+  const acceptanceRate: SquireSweep["Service"]["acceptanceRate"] = Effect.fn(
+    "SquireSweep.acceptanceRate",
+  )(function* (leadId, now) {
+    yield* recordFor(leadId, now);
+    const rows = yield* repository.listActionLogAfter({
+      squireId: leadId,
+      kinds: [FINDING],
+      after: minusMs(now, ACCEPTANCE_WINDOW_MS),
     });
-
-  const recordOutcomes: SquireSweep["Service"]["recordOutcomes"] = (now) =>
-    Effect.gen(function* () {
-      const lead = yield* repository.getLead;
-      return Option.isNone(lead) ? 0 : yield* recordFor(lead.value.id, now);
-    }).pipe(orSquireError("record sweep outcomes"));
-
-  const acceptanceRate: SquireSweep["Service"]["acceptanceRate"] = (leadId, now) =>
-    Effect.gen(function* () {
-      yield* recordFor(leadId, now);
-      const rows = yield* repository.listActionLogAfter({
-        squireId: leadId,
-        kinds: [FINDING],
-        after: minusMs(now, ACCEPTANCE_WINDOW_MS),
-      });
-      const outcomes = rows.flatMap((row) => Option.toArray(decodeFinding(row.data_json)));
-      return {
-        accepted: outcomes.filter((data) => data.outcome === "accepted").length,
-        total: outcomes.length,
-      };
-    }).pipe(orSquireError("read the sweep acceptance rate"));
+    const outcomes = rows.flatMap((row) => Option.toArray(decodeFinding(row.data_json)));
+    return {
+      accepted: outcomes.filter((data) => data.outcome === "accepted").length,
+      total: outcomes.length,
+    };
+  }, orSquireError("read the sweep acceptance rate"));
 
   return SquireSweep.of({
     due,

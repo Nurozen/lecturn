@@ -106,24 +106,23 @@ export const writeMessages = (
  * Rewrites the message answering `id`. Returning `undefined` keeps the
  * transport's own response untouched.
  */
-const rewriteAnswer = <E, R>(
+const rewriteAnswer = Effect.fn("AppToolInterceptor.rewriteAnswer")(function* <E, R>(
   response: HttpServerResponse.HttpServerResponse,
   id: string | number,
   rewrite: (answer: JsonRpcMessage) => Effect.Effect<JsonRpcMessage | undefined, E, R>,
-) =>
-  Effect.gen(function* () {
-    const read = readMessages(response);
-    if (Option.isNone(read)) return response;
-    const index = read.value.messages.findIndex(
-      (message) => isRecord(message) && message.id === id && !("method" in message),
-    );
-    const answer = read.value.messages[index];
-    if (!isRecord(answer)) return response;
-    const next = yield* rewrite(answer);
-    if (next === undefined) return response;
-    const messages = read.value.messages.with(index, next);
-    return writeMessages(response, read.value.sse, messages);
-  });
+) {
+  const read = readMessages(response);
+  if (Option.isNone(read)) return response;
+  const index = read.value.messages.findIndex(
+    (message) => isRecord(message) && message.id === id && !("method" in message),
+  );
+  const answer = read.value.messages[index];
+  if (!isRecord(answer)) return response;
+  const next = yield* rewrite(answer);
+  if (next === undefined) return response;
+  const messages = read.value.messages.with(index, next);
+  return writeMessages(response, read.value.sse, messages);
+});
 
 /** The effect McpServer's answer for a name no registered tool has. */
 const isToolNotFound = (answer: JsonRpcMessage, name: string) =>
@@ -131,12 +130,12 @@ const isToolNotFound = (answer: JsonRpcMessage, name: string) =>
   answer.error.code === -32602 &&
   answer.error.message === `Tool '${name}' not found`;
 
-const appendAppTools = (
-  source: AppToolSourceShape,
-  scope: McpInvocationContext.McpAppInvocationScope,
-  answer: JsonRpcMessage,
-) =>
-  Effect.gen(function* () {
+const appendAppTools = Effect.fn("AppToolInterceptor.appendAppTools")(
+  function* (
+    source: AppToolSourceShape,
+    scope: McpInvocationContext.McpAppInvocationScope,
+    answer: JsonRpcMessage,
+  ) {
     const result = answer.result;
     // Later pages already got the app tools on the last one.
     if (!isRecord(result) || !Array.isArray(result.tools) || result.nextCursor !== undefined) {
@@ -146,25 +145,29 @@ const appendAppTools = (
     const appTools = (yield* source.listFor(scope)).filter((tool) => !builtIn.has(tool.name));
     if (appTools.length === 0) return undefined;
     return { ...answer, result: { ...result, tools: [...result.tools, ...appTools] } };
-  }).pipe(
-    Effect.catchCause((cause) =>
-      Effect.logWarning("app tools left out of tools/list", { appId: scope.app.appId, cause }).pipe(
-        Effect.as(undefined),
+  },
+  (effect, source, scope) =>
+    effect.pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("app tools left out of tools/list", {
+          appId: scope.app.appId,
+          cause,
+        }).pipe(Effect.as(undefined)),
       ),
     ),
-  );
+);
 
-const answerAppCall = (
-  source: AppToolSourceShape,
-  scope: McpInvocationContext.McpAppInvocationScope,
-  answer: JsonRpcMessage,
-  params: {
-    readonly name: string;
-    readonly arguments?: unknown;
-    readonly _meta?: Readonly<Record<string, unknown>> | undefined;
-  },
-) =>
-  Effect.gen(function* () {
+const answerAppCall = Effect.fn("AppToolInterceptor.answerAppCall")(
+  function* (
+    source: AppToolSourceShape,
+    scope: McpInvocationContext.McpAppInvocationScope,
+    answer: JsonRpcMessage,
+    params: {
+      readonly name: string;
+      readonly arguments?: unknown;
+      readonly _meta?: Readonly<Record<string, unknown>> | undefined;
+    },
+  ) {
     if (!isToolNotFound(answer, params.name)) return undefined;
     const tools = yield* source.listFor(scope);
     if (!tools.some((tool) => tool.name === params.name)) return undefined;
@@ -175,21 +178,24 @@ const answerAppCall = (
       yield* Clock.currentTimeMillis,
     );
     return { jsonrpc: "2.0", id: answer.id, result };
-  }).pipe(
-    Effect.catchCause((cause) =>
-      Effect.logWarning("app tool call failed", {
-        appId: scope.app.appId,
-        tool: params.name,
-        cause,
-      }).pipe(
-        Effect.as({
-          jsonrpc: "2.0",
-          id: answer.id,
-          error: { code: -32603, message: `App tool '${params.name}' failed.` },
-        }),
+  },
+  (effect, source, scope, answer, params) =>
+    effect.pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("app tool call failed", {
+          appId: scope.app.appId,
+          tool: params.name,
+          cause,
+        }).pipe(
+          Effect.as({
+            jsonrpc: "2.0",
+            id: answer.id,
+            error: { code: -32603, message: `App tool '${params.name}' failed.` },
+          }),
+        ),
       ),
     ),
-  );
+);
 
 /**
  * The shared `/mcp` server has one flat tool registry, so per-thread app tools

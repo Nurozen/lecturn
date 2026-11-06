@@ -69,34 +69,38 @@ const storage = (error: unknown) =>
       });
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const get: SagaWorkbenchRepository["Service"]["get"] = (identity) =>
-    Effect.gen(function* () {
+  const get: SagaWorkbenchRepository["Service"]["get"] = Effect.fn("SagaWorkbenchRepository.get")(
+    function* (identity) {
       const rows = yield* sql<{
         workflow_json: string;
       }>`SELECT workflow_json FROM saga_workbench WHERE identity_key = ${workflowIdentityKey(identity)}`;
       return rows[0] ? yield* decode(rows[0].workflow_json) : emptyWorkflow(identity);
-    }).pipe(Effect.mapError(storage));
-  const findIncarnation: SagaWorkbenchRepository["Service"]["findIncarnation"] = (identity) =>
-    Effect.gen(function* () {
-      const rows = yield* sql<{
-        workflow_json: string;
-      }>`SELECT workflow_json FROM saga_workbench WHERE json_extract(workflow_json, '$.identity.projectId') = ${identity.projectId} AND json_extract(workflow_json, '$.identity.spaceId') = ${identity.spaceId} AND json_extract(workflow_json, '$.identity.createdAt') = ${identity.createdAt} LIMIT 2`;
-      return rows.length === 1 ? yield* decode(rows[0]!.workflow_json) : null;
-    }).pipe(Effect.mapError(storage));
-  const receipt: SagaWorkbenchRepository["Service"]["receipt"] = (input) =>
-    Effect.gen(function* () {
-      const rows = yield* sql<{
-        request_hash: string;
-        result_json: string;
-      }>`SELECT request_hash, result_json FROM saga_workbench_receipts WHERE identity_key = ${workflowIdentityKey(input.identity)} AND actor_key = ${input.actorKey} AND request_id = ${input.requestId}`;
-      if (!rows[0]) return null;
-      if (rows[0].request_hash !== input.requestHash)
-        return yield* new SagaWorkbenchError({
-          code: "conflict",
-          message: "This request identifier was already used for another workflow change.",
-        });
-      return yield* decode(rows[0].result_json);
-    }).pipe(Effect.mapError(storage));
+    },
+    Effect.mapError(storage),
+  );
+  const findIncarnation: SagaWorkbenchRepository["Service"]["findIncarnation"] = Effect.fn(
+    "SagaWorkbenchRepository.findIncarnation",
+  )(function* (identity) {
+    const rows = yield* sql<{
+      workflow_json: string;
+    }>`SELECT workflow_json FROM saga_workbench WHERE json_extract(workflow_json, '$.identity.projectId') = ${identity.projectId} AND json_extract(workflow_json, '$.identity.spaceId') = ${identity.spaceId} AND json_extract(workflow_json, '$.identity.createdAt') = ${identity.createdAt} LIMIT 2`;
+    return rows.length === 1 ? yield* decode(rows[0]!.workflow_json) : null;
+  }, Effect.mapError(storage));
+  const receipt: SagaWorkbenchRepository["Service"]["receipt"] = Effect.fn(
+    "SagaWorkbenchRepository.receipt",
+  )(function* (input) {
+    const rows = yield* sql<{
+      request_hash: string;
+      result_json: string;
+    }>`SELECT request_hash, result_json FROM saga_workbench_receipts WHERE identity_key = ${workflowIdentityKey(input.identity)} AND actor_key = ${input.actorKey} AND request_id = ${input.requestId}`;
+    if (!rows[0]) return null;
+    if (rows[0].request_hash !== input.requestHash)
+      return yield* new SagaWorkbenchError({
+        code: "conflict",
+        message: "This request identifier was already used for another workflow change.",
+      });
+    return yield* decode(rows[0].result_json);
+  }, Effect.mapError(storage));
   const save: SagaWorkbenchRepository["Service"]["save"] = (input) =>
     sql
       .withTransaction(
@@ -125,13 +129,14 @@ export const make = Effect.gen(function* () {
         }),
       )
       .pipe(Effect.mapError(storage));
-  const activity: SagaWorkbenchRepository["Service"]["activity"] = (identity) =>
-    Effect.gen(function* () {
-      const rows = yield* sql<{
-        activity_json: string;
-      }>`SELECT activity_json FROM saga_workbench_activity WHERE identity_key = ${workflowIdentityKey(identity)} ORDER BY revision DESC LIMIT 200`;
-      return yield* Effect.forEach(rows, (row) => decodeActivity(row.activity_json));
-    }).pipe(Effect.mapError(storage));
+  const activity: SagaWorkbenchRepository["Service"]["activity"] = Effect.fn(
+    "SagaWorkbenchRepository.activity",
+  )(function* (identity) {
+    const rows = yield* sql<{
+      activity_json: string;
+    }>`SELECT activity_json FROM saga_workbench_activity WHERE identity_key = ${workflowIdentityKey(identity)} ORDER BY revision DESC LIMIT 200`;
+    return yield* Effect.forEach(rows, (row) => decodeActivity(row.activity_json));
+  }, Effect.mapError(storage));
   return SagaWorkbenchRepository.of({ get, findIncarnation, receipt, save, activity });
 });
 export const layer = Layer.effect(SagaWorkbenchRepository, make);

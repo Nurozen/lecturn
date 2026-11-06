@@ -1033,27 +1033,26 @@ export const make = Effect.fn("StaveCli.make")(function* () {
   const memoryList = method("memory list", buildStaveArgv.memoryList, decodeStaveMemoryList);
   const setup = method("setup", buildStaveArgv.setup, decodeStaveSetupResult);
 
-  const supports = (verb: StaveFeatureVerb) =>
-    Effect.gen(function* () {
-      const execution = yield* StaveExecutionContext;
-      const binary = yield* (
-        execution === undefined ? staveBinary.resolve : Effect.succeed(execution.binary)
-      ).pipe(
-        Effect.mapError(
-          (error) =>
-            new StaveError({
-              code: "binary_missing",
-              message: error.message,
-              details: null,
-              exitCode: null,
-              stderrTail: null,
-              verb,
-            }),
-        ),
-      );
-      const features = yield* staveBinary.featuresFor(binary);
-      return supportsStaveVerb(features.commands, verb);
-    });
+  const supports = Effect.fn("StaveCli.supports")(function* (verb: StaveFeatureVerb) {
+    const execution = yield* StaveExecutionContext;
+    const binary = yield* (
+      execution === undefined ? staveBinary.resolve : Effect.succeed(execution.binary)
+    ).pipe(
+      Effect.mapError(
+        (error) =>
+          new StaveError({
+            code: "binary_missing",
+            message: error.message,
+            details: null,
+            exitCode: null,
+            stderrTail: null,
+            verb,
+          }),
+      ),
+    );
+    const features = yield* staveBinary.featuresFor(binary);
+    return supportsStaveVerb(features.commands, verb);
+  });
 
   return StaveCli.of({
     lastFailure: Ref.get(lastFailure),

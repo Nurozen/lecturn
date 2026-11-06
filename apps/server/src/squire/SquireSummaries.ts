@@ -254,8 +254,8 @@ export const make = Effect.gen(function* () {
     return { status, summary, payerSquireId } satisfies SquireStoredSummary;
   });
 
-  const ensure: SquireSummaries["Service"]["ensure"] = (request) =>
-    Effect.gen(function* () {
+  const ensure: SquireSummaries["Service"]["ensure"] = Effect.fn("SquireSummaries.ensure")(
+    function* (request) {
       const key = keyString(request);
       const pending = inFlight.get(key);
       if (pending) return yield* Deferred.await(pending);
@@ -270,10 +270,11 @@ export const make = Effect.gen(function* () {
         Effect.ensuring(Effect.sync(() => inFlight.delete(key))),
         Effect.flatten,
       );
-    });
+    },
+  );
 
-  const read: SquireSummaries["Service"]["read"] = (key) =>
-    Effect.gen(function* () {
+  const read: SquireSummaries["Service"]["read"] = Effect.fn("SquireSummaries.read")(
+    function* (key) {
       if (key.stage) {
         const row = yield* repository.getSummary(rowKey({ ...key, stage: key.stage }));
         return Option.map(row, toStored);
@@ -284,7 +285,8 @@ export const make = Effect.gen(function* () {
       });
       const chosen = rows.find((row) => row.stage === "terminal") ?? rows.at(-1);
       return Option.map(Option.fromNullishOr(chosen), toStored);
-    });
+    },
+  );
 
   return SquireSummaries.of({
     ensure,

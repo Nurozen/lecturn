@@ -1,4 +1,3 @@
-import { makeAggregateState } from "./agentActivityAggregate.ts";
 import { filterPermittedActivity } from "../teams/TeamNotifications.ts";
 import type {
   RelayAgentActivityAggregateState,
@@ -26,6 +25,7 @@ import {
   sanitizeApnsNotificationPayload,
   statusForAgentActivity,
 } from "./agentActivityPayloads.ts";
+import { makeAggregateState } from "./agentActivityAggregate.ts";
 import * as Apns from "./ApnsClient.ts";
 import {
   ApnsDeliveryJobLiveActivityAggregateMissing,
@@ -1047,6 +1047,26 @@ export const make = Effect.gen(function* () {
     );
   });
 
+  const userHasContentToShow = Effect.fnUntraced(function* (userId: string) {
+    const now = yield* DateTime.now;
+    return yield* activityRows.listForUser({ userId }).pipe(
+      Effect.map(
+        (activeStates) =>
+          makeAggregateState({
+            activeStates,
+            terminalState: null,
+            nowMs: now.epochMilliseconds,
+          }) !== null,
+      ),
+      // Keep the card on persistence failures; a later sweep can retry.
+      Effect.catch((error) =>
+        Effect.logWarning("Content recheck failed; keeping the card", { error }).pipe(
+          Effect.as(true),
+        ),
+      ),
+    );
+  });
+
   const stateIdentityIsCurrent = Effect.fnUntraced(function* (input: {
     readonly userId: string;
     readonly environmentId: string;
@@ -1242,6 +1262,7 @@ export const make = Effect.gen(function* () {
         cause,
       );
     if (input.sourceJobId) {
+      const sourceJobId = input.sourceJobId;
       const claim = yield* attempts.claimSourceJob({
         userId: input.target.user_id,
         environmentId: null,
@@ -1342,6 +1363,20 @@ export const make = Effect.gen(function* () {
         yield* attempts.completeSourceJob({
           sourceJobId: input.sourceJobId,
           apnsReason: "Stale agent activity state skipped.",
+        });
+        return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
+      }
+      // A contentless end must not retire a card that newer work now owns. An
+      // end for a device that turned Live Activities off still goes out.
+      if (
+        input.kind === "live_activity_end" &&
+        aggregate === null &&
+        parsePreferences(currentTarget.preferences_json)?.liveActivitiesEnabled !== false &&
+        (yield* userHasContentToShow(input.target.user_id))
+      ) {
+        yield* attempts.completeSourceJob({
+          sourceJobId,
+          apnsReason: "Stale APNs end job skipped.",
         });
         return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
       }

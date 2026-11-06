@@ -282,64 +282,65 @@ const make = Effect.gen(function* () {
    */
   const unreadable = (cause: unknown) =>
     reject("Could not re-check the Squire action. Try again.", cause);
-  const recheckTrigger = (command: OrchestrationV2ServerCommand) =>
-    Effect.gen(function* () {
-      if (command.type !== "message.dispatch") return;
-      const parsed = parseSquireActionCommandId(command.commandId);
-      if (parsed === undefined || Option.isNone(squires)) return;
-      if (Option.isSome(receipts)) {
-        const receipt = yield* receipts.value
-          .getByCommandId({ commandId: CommandId.make(command.commandId) })
-          .pipe(Effect.mapError(unreadable));
-        if (Option.isSome(receipt)) return;
-      }
-      const card = yield* squires.value
-        .getCard(SquireCardId.make(parsed.cardId))
+  const recheckTrigger = Effect.fn("SquireCommandHook.recheckTrigger")(function* (
+    command: OrchestrationV2ServerCommand,
+  ) {
+    if (command.type !== "message.dispatch") return;
+    const parsed = parseSquireActionCommandId(command.commandId);
+    if (parsed === undefined || Option.isNone(squires)) return;
+    if (Option.isSome(receipts)) {
+      const receipt = yield* receipts.value
+        .getByCommandId({ commandId: CommandId.make(command.commandId) })
         .pipe(Effect.mapError(unreadable));
-      const intent = Option.flatMap(card, (row) => decodeSquireActionIntent(row.intent_json));
-      if (Option.isNone(intent) || intent.value.type !== "steer") {
-        return yield* reject("This Squire action no longer exists.");
-      }
-      if (intent.value.threadId !== command.threadId) {
-        return yield* reject("This Squire action names another thread.");
-      }
-      const broken = yield* squirePreconditionBroken(
-        projections,
-        command.threadId,
-        intent.value.precondition,
-      ).pipe(Effect.mapError(unreadable));
-      if (broken !== undefined) {
-        return yield* reject(`Not sent: ${broken} after the Squire raised it.`);
-      }
-    });
+      if (Option.isSome(receipt)) return;
+    }
+    const card = yield* squires.value
+      .getCard(SquireCardId.make(parsed.cardId))
+      .pipe(Effect.mapError(unreadable));
+    const intent = Option.flatMap(card, (row) => decodeSquireActionIntent(row.intent_json));
+    if (Option.isNone(intent) || intent.value.type !== "steer") {
+      return yield* reject("This Squire action no longer exists.");
+    }
+    if (intent.value.threadId !== command.threadId) {
+      return yield* reject("This Squire action names another thread.");
+    }
+    const broken = yield* squirePreconditionBroken(
+      projections,
+      command.threadId,
+      intent.value.precondition,
+    ).pipe(Effect.mapError(unreadable));
+    if (broken !== undefined) {
+      return yield* reject(`Not sent: ${broken} after the Squire raised it.`);
+    }
+  });
 
-  const aroundCommand = <A, E, R>(
+  // Wraps every dispatched command; the dispatch owns the span.
+  const aroundCommand = Effect.fnUntraced(function* <A, E, R>(
     input: LecturnCommandAdmissionInput,
     commit: Effect.Effect<A, E, R>,
-  ): Effect.Effect<A, E | LecturnHookRejectedError, R> =>
-    Effect.gen(function* () {
-      if (input.scope !== "thread") return yield* commit;
-      const command = input.command;
-      const markers = yield* markedThreads;
-      if (yield* SquireDispatchOrigin) {
-        yield* recheckTrigger(command);
-        return yield* commit.pipe(Effect.tap(() => track(command)));
-      }
-      if (markerSetBy(command) !== undefined) {
-        return yield* reject("Only a Squire can create Squire threads.");
-      }
-      let marker: SquireThreadMarker | undefined;
-      for (const threadId of namedThreadIds(command)) {
-        marker ??= markers.get(threadId);
-      }
-      if (marker === undefined) return yield* commit;
-      const model =
-        command.type === "message.dispatch" && command.modelSelection !== undefined
-          ? yield* threadModel(command.threadId)
-          : undefined;
-      if (allowedOnMarkedThread(command, model)) return yield* commit;
-      return yield* reject(yield* managedBy(marker));
-    });
+  ): Effect.fn.Return<A, E | LecturnHookRejectedError, R> {
+    if (input.scope !== "thread") return yield* commit;
+    const command = input.command;
+    const markers = yield* markedThreads;
+    if (yield* SquireDispatchOrigin) {
+      yield* recheckTrigger(command);
+      return yield* commit.pipe(Effect.tap(() => track(command)));
+    }
+    if (markerSetBy(command) !== undefined) {
+      return yield* reject("Only a Squire can create Squire threads.");
+    }
+    let marker: SquireThreadMarker | undefined;
+    for (const threadId of namedThreadIds(command)) {
+      marker ??= markers.get(threadId);
+    }
+    if (marker === undefined) return yield* commit;
+    const model =
+      command.type === "message.dispatch" && command.modelSelection !== undefined
+        ? yield* threadModel(command.threadId)
+        : undefined;
+    if (allowedOnMarkedThread(command, model)) return yield* commit;
+    return yield* reject(yield* managedBy(marker));
+  });
 
   return { name: CONTRIBUTION, aroundCommand };
 });

@@ -187,10 +187,13 @@ function makePushNotificationRequest(input: {
         sound: "default",
         "thread-id": notificationThreadId(input.notification),
       },
-      ...(input.notification.accountId ? { accountId: input.notification.accountId } : {}),
-      environmentId: input.notification.environmentId,
-      threadId: input.notification.threadId,
-      deepLink: input.notification.deepLink,
+      // Expo iOS exposes userInfo.body as notification.content.data for remote pushes.
+      body: {
+        ...(input.notification.accountId ? { accountId: input.notification.accountId } : {}),
+        environmentId: input.notification.environmentId,
+        threadId: input.notification.threadId,
+        deepLink: input.notification.deepLink,
+      },
     },
   };
 }

@@ -72,6 +72,7 @@ function makeLiveActivities(
   return {
     register: () => Effect.void,
     listTargets: () => Effect.succeed([]),
+    listIdleArmedTargets: () => Effect.succeed([]),
     markDelivery: () => Effect.void,
     withPushNotificationLock: (target, use) => use(target),
     markPushNotified: () => Effect.void,
@@ -202,6 +203,7 @@ function makeAgentActivityPublisher(
   return {
     publish: () => Effect.succeed({ ok: true, deliveries: [] }),
     replayForLiveActivityRegistration: () => Effect.succeed(null),
+    endIdleLiveActivities: Effect.void,
     ...overrides,
   };
 }

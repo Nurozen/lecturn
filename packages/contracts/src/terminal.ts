@@ -3,6 +3,7 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
 export const DEFAULT_TERMINAL_ID = "term-1";
+export const DEFAULT_MAX_TERMINAL_BUFFER_BYTES = 512 * 1024;
 
 /** Reserved setup PTY: authentication output must stay in memory, never terminal history files. */
 export const PHONE_AUTH_TERMINAL_THREAD_ID = "onboarding-phone-auth";

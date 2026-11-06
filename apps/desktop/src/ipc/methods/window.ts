@@ -18,6 +18,7 @@ import {
 import { PROJECT_FAVICON_EXTENSIONS } from "@lecturn/shared/projectFavicon";
 import { resolveEditorCommand } from "@lecturn/shared/editor";
 import * as HostProcess from "@lecturn/shared/HostProcess";
+import { isRelayTracingEnabled } from "@lecturn/shared/otelEnvironment";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Effect from "effect/Effect";
@@ -71,8 +72,8 @@ const decodeSaveTextFileInput = Schema.decodeUnknownEffect(DesktopSaveTextFileIn
 /** No renderer-supplied paths: the native Save dialog grants the destination. */
 export const saveTextFile = {
   channel: IpcChannels.SAVE_TEXT_FILE_CHANNEL,
-  handler: (raw: unknown) =>
-    Effect.gen(function* () {
+  handler: Effect.fn("desktop.ipc.window.saveTextFile")(
+    function* (raw: unknown) {
       const input = yield* decodeSaveTextFileInput(raw).pipe(
         Effect.mapError(() => "invalid-input" as const),
       );
@@ -93,17 +94,17 @@ export const saveTextFile = {
         return { status: "canceled" } satisfies DesktopSaveTextFileResult;
       yield* fileSystem.writeFileString(selected.value, input.content);
       return { status: "saved", filePath: selected.value } satisfies DesktopSaveTextFileResult;
-    }).pipe(
-      Effect.catch((error) =>
-        Effect.succeed({
-          status: "error",
-          message:
-            error === "invalid-input"
-              ? "Invalid or oversized export request. Choose a smaller Markdown or JSON export."
-              : "Could not save the export. Choose a writable destination and try again.",
-        } satisfies DesktopSaveTextFileResult),
-      ),
+    },
+    Effect.catch((error) =>
+      Effect.succeed({
+        status: "error",
+        message:
+          error === "invalid-input"
+            ? "Invalid or oversized export request. Choose a smaller Markdown or JSON export."
+            : "Could not save the export. Choose a writable destination and try again.",
+      } satisfies DesktopSaveTextFileResult),
     ),
+  ),
 };
 
 export const getAppBranding = DesktopIpc.makeSyncIpcMethod({
@@ -112,6 +113,14 @@ export const getAppBranding = DesktopIpc.makeSyncIpcMethod({
   handler: Effect.fn("desktop.ipc.window.getAppBranding")(function* () {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     return environment.branding;
+  }),
+});
+
+export const getRelayTelemetryEnabled = DesktopIpc.makeSyncIpcMethod({
+  channel: IpcChannels.GET_RELAY_TELEMETRY_ENABLED_CHANNEL,
+  result: Schema.Boolean,
+  handler: Effect.fn("desktop.ipc.window.getRelayTelemetryEnabled")(function* () {
+    return isRelayTracingEnabled(yield* HostProcess.Environment);
   }),
 });
 
@@ -393,6 +402,24 @@ export const pasteAsText = DesktopIpc.makeIpcMethod({
     ) {
       focused.paste();
     }
+  }),
+});
+
+export const revealWindow = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.REVEAL_WINDOW_CHANNEL,
+  payload: Schema.Undefined,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.revealWindow")(function* (_input, event) {
+    const electronWindow = yield* ElectronWindow.ElectronWindow;
+    const window = yield* electronWindow.main;
+    if (
+      event === undefined ||
+      Option.isNone(window) ||
+      window.value.webContents.id !== event.sender.id
+    ) {
+      return;
+    }
+    yield* electronWindow.reveal(window.value);
   }),
 });
 

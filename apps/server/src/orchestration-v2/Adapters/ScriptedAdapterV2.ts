@@ -198,49 +198,50 @@ const openMcpConnection = Effect.fnUntraced(function* (
     ...(sessionId === null ? {} : { "mcp-session-id": sessionId }),
     ...(protocolVersion === null ? {} : { "mcp-protocol-version": protocolVersion }),
   });
-  const send = (message: Record<string, unknown>) =>
-    Effect.gen(function* () {
-      const response = yield* Effect.tryPromise({
-        try: (signal) =>
-          fetchImplementation(config.endpoint, {
-            method: "POST",
-            signal,
-            headers: {
-              ...headers(),
-              "content-type": "application/json",
-              accept: "application/json, text/event-stream",
-            },
-            body: JSON.stringify(message),
-          }),
-        catch: mcpError,
+  const send = Effect.fn("ScriptedAdapterV2.send")(function* (message: Record<string, unknown>) {
+    const response = yield* Effect.tryPromise({
+      try: (signal) =>
+        fetchImplementation(config.endpoint, {
+          method: "POST",
+          signal,
+          headers: {
+            ...headers(),
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+          },
+          body: JSON.stringify(message),
+        }),
+      catch: mcpError,
+    });
+    sessionId = response.headers.get("mcp-session-id") ?? sessionId;
+    if (!response.ok) {
+      yield* Effect.promise(
+        () => response.body?.cancel().catch(() => undefined) ?? Promise.resolve(),
+      );
+      return yield* new ScriptedMcpError({
+        detail: `${String(message.method)} got HTTP ${response.status}`,
       });
-      sessionId = response.headers.get("mcp-session-id") ?? sessionId;
-      if (!response.ok) {
-        yield* Effect.promise(
-          () => response.body?.cancel().catch(() => undefined) ?? Promise.resolve(),
-        );
-        return yield* new ScriptedMcpError({
-          detail: `${String(message.method)} got HTTP ${response.status}`,
-        });
-      }
-      return [...(yield* Stream.runCollect(responsePayloads(response, mcpError)))];
-    });
-  const request = (method: string, params: Record<string, unknown>) =>
-    Effect.gen(function* () {
-      const id = ++nextId;
-      const payloads = yield* send({ jsonrpc: "2.0", id, method, params });
-      const envelope = payloads.map(asRecord).find((payload) => payload?.id === id);
-      if (envelope === undefined) {
-        return yield* new ScriptedMcpError({ detail: `${method} got no matching response` });
-      }
-      if (envelope.error !== undefined) {
-        const message = asRecord(envelope.error)?.message;
-        return yield* new ScriptedMcpError({
-          detail: `${method} failed: ${typeof message === "string" ? message : "error"}`,
-        });
-      }
-      return asRecord(envelope.result) ?? {};
-    });
+    }
+    return [...(yield* Stream.runCollect(responsePayloads(response, mcpError)))];
+  });
+  const request = Effect.fn("ScriptedAdapterV2.request")(function* (
+    method: string,
+    params: Record<string, unknown>,
+  ) {
+    const id = ++nextId;
+    const payloads = yield* send({ jsonrpc: "2.0", id, method, params });
+    const envelope = payloads.map(asRecord).find((payload) => payload?.id === id);
+    if (envelope === undefined) {
+      return yield* new ScriptedMcpError({ detail: `${method} got no matching response` });
+    }
+    if (envelope.error !== undefined) {
+      const message = asRecord(envelope.error)?.message;
+      return yield* new ScriptedMcpError({
+        detail: `${method} failed: ${typeof message === "string" ? message : "error"}`,
+      });
+    }
+    return asRecord(envelope.result) ?? {};
+  });
 
   const initialized = yield* request("initialize", {
     protocolVersion: MCP_PROTOCOL_VERSION,
@@ -279,24 +280,23 @@ const HOLD_FALLBACK_INTERVAL = "500 millis";
  * the stat schedule covers a directory that does not exist yet and lost
  * watch events. Interrupting the wait closes both.
  */
-export const waitForFile = (file: string) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const exists = fileSystem.exists(file).pipe(Effect.orElseSucceed(() => false));
-    if (yield* exists) return;
-    const watched = fileSystem.watch(path.dirname(file)).pipe(
-      Stream.mapEffect(() => exists),
-      Stream.filter((found) => found),
-      Stream.take(1),
-      Stream.runDrain,
-      Effect.catch(() => Effect.never),
-    );
-    const polled = exists.pipe(
-      Effect.repeat({ until: (found) => found, schedule: Schedule.spaced(HOLD_FALLBACK_INTERVAL) }),
-    );
-    yield* Effect.raceFirst(watched, polled);
-  });
+export const waitForFile = Effect.fn("ScriptedAdapterV2.waitForFile")(function* (file: string) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const exists = fileSystem.exists(file).pipe(Effect.orElseSucceed(() => false));
+  if (yield* exists) return;
+  const watched = fileSystem.watch(path.dirname(file)).pipe(
+    Stream.mapEffect(() => exists),
+    Stream.filter((found) => found),
+    Stream.take(1),
+    Stream.runDrain,
+    Effect.catch(() => Effect.never),
+  );
+  const polled = exists.pipe(
+    Effect.repeat({ until: (found) => found, schedule: Schedule.spaced(HOLD_FALLBACK_INTERVAL) }),
+  );
+  yield* Effect.raceFirst(watched, polled);
+});
 
 /**
  * Lecturn: picks a turn's script per thread (Squire fixtures, `SquireFakeScripts`).
@@ -348,35 +348,36 @@ export const makeScriptedAdapterV2 = Effect.fn("makeScriptedAdapterV2")(function
   const protocolError = (detail: string) =>
     new ProviderAdapter.ProviderAdapterProtocolError({ driver: SCRIPTED_PROVIDER, detail });
 
-  const loadScript = (input: ProviderAdapter.ProviderAdapterV2TurnInput) =>
-    Effect.gen(function* () {
-      if (Option.isSome(scriptSource)) {
-        const fromSource = yield* scriptSource.value.scriptFor(input);
-        if (fromSource !== undefined) return fromSource;
-      }
-      const fromMessage = yield* Effect.try({
-        try: () => scriptFromMessage(input.message.text),
-        catch: scriptError,
-      });
-      if (fromMessage !== undefined) return fromMessage;
-      const file = options.environment[SCRIPTED_PROVIDER_SCRIPTS_ENV];
-      const fromFile =
-        file === undefined || file.length === 0
-          ? undefined
-          : yield* fileSystem.readFileString(file).pipe(
-              Effect.mapError(scriptError),
-              Effect.flatMap((text) =>
-                Effect.try({
-                  try: () => scriptFromFile(text, input.runOrdinal),
-                  catch: scriptError,
-                }),
-              ),
-            );
-      if (fromFile !== undefined) return fromFile;
-      return yield* new ScriptedScriptError({
-        detail: `turn ${input.runOrdinal} has no fenced scripted block and no ${SCRIPTED_PROVIDER_SCRIPTS_ENV} entry`,
-      });
+  const loadScript = Effect.fn("ScriptedAdapterV2.loadScript")(function* (
+    input: ProviderAdapter.ProviderAdapterV2TurnInput,
+  ) {
+    if (Option.isSome(scriptSource)) {
+      const fromSource = yield* scriptSource.value.scriptFor(input);
+      if (fromSource !== undefined) return fromSource;
+    }
+    const fromMessage = yield* Effect.try({
+      try: () => scriptFromMessage(input.message.text),
+      catch: scriptError,
     });
+    if (fromMessage !== undefined) return fromMessage;
+    const file = options.environment[SCRIPTED_PROVIDER_SCRIPTS_ENV];
+    const fromFile =
+      file === undefined || file.length === 0
+        ? undefined
+        : yield* fileSystem.readFileString(file).pipe(
+            Effect.mapError(scriptError),
+            Effect.flatMap((text) =>
+              Effect.try({
+                try: () => scriptFromFile(text, input.runOrdinal),
+                catch: scriptError,
+              }),
+            ),
+          );
+    if (fromFile !== undefined) return fromFile;
+    return yield* new ScriptedScriptError({
+      detail: `turn ${input.runOrdinal} has no fenced scripted block and no ${SCRIPTED_PROVIDER_SCRIPTS_ENV} entry`,
+    });
+  });
 
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: options.instanceId,
@@ -822,58 +823,59 @@ export const makeScriptedAdapterV2 = Effect.fn("makeScriptedAdapterV2")(function
         });
       });
 
-      const attach = (args: ProviderAdapter.ProviderAdapterV2EnsureThreadInput) =>
-        Effect.gen(function* () {
-          const existing = args.existingProviderThread;
-          if (
-            existing !== undefined &&
-            (existing.driver !== SCRIPTED_PROVIDER ||
-              existing.providerInstanceId !== options.instanceId)
-          ) {
-            return yield* protocolError("The provider thread belongs to another instance");
-          }
-          if (thread !== undefined && thread.appThreadId === args.threadId) return thread;
-          if (thread !== undefined) {
-            return yield* protocolError("A scripted session holds one provider thread");
-          }
-          const now = yield* DateTime.now;
-          const nativeThreadId = `${options.instanceId}:${args.threadId}`;
-          thread =
-            existing !== undefined
-              ? {
-                  ...existing,
-                  providerSessionId: input.providerSessionId,
-                  status: "idle",
-                  updatedAt: now,
-                }
-              : {
-                  id: idAllocator.derive.providerThread({
-                    driver: SCRIPTED_PROVIDER,
-                    providerInstanceId: options.instanceId,
-                    nativeThreadId,
-                  }),
+      const attach = Effect.fn("ScriptedAdapterV2.attach")(function* (
+        args: ProviderAdapter.ProviderAdapterV2EnsureThreadInput,
+      ) {
+        const existing = args.existingProviderThread;
+        if (
+          existing !== undefined &&
+          (existing.driver !== SCRIPTED_PROVIDER ||
+            existing.providerInstanceId !== options.instanceId)
+        ) {
+          return yield* protocolError("The provider thread belongs to another instance");
+        }
+        if (thread !== undefined && thread.appThreadId === args.threadId) return thread;
+        if (thread !== undefined) {
+          return yield* protocolError("A scripted session holds one provider thread");
+        }
+        const now = yield* DateTime.now;
+        const nativeThreadId = `${options.instanceId}:${args.threadId}`;
+        thread =
+          existing !== undefined
+            ? {
+                ...existing,
+                providerSessionId: input.providerSessionId,
+                status: "idle",
+                updatedAt: now,
+              }
+            : {
+                id: idAllocator.derive.providerThread({
                   driver: SCRIPTED_PROVIDER,
                   providerInstanceId: options.instanceId,
-                  providerSessionId: input.providerSessionId,
-                  appThreadId: args.threadId,
-                  ownerNodeId: null,
-                  nativeThreadRef: nativeRef(nativeThreadId),
-                  nativeConversationHeadRef: null,
-                  status: "idle",
-                  firstRunOrdinal: null,
-                  lastRunOrdinal: null,
-                  handoffIds: [],
-                  forkedFrom: null,
-                  createdAt: now,
-                  updatedAt: now,
-                };
-          yield* emit({
-            type: "provider_thread.updated",
-            driver: SCRIPTED_PROVIDER,
-            providerThread: thread,
-          });
-          return thread;
+                  nativeThreadId,
+                }),
+                driver: SCRIPTED_PROVIDER,
+                providerInstanceId: options.instanceId,
+                providerSessionId: input.providerSessionId,
+                appThreadId: args.threadId,
+                ownerNodeId: null,
+                nativeThreadRef: nativeRef(nativeThreadId),
+                nativeConversationHeadRef: null,
+                status: "idle",
+                firstRunOrdinal: null,
+                lastRunOrdinal: null,
+                handoffIds: [],
+                forkedFrom: null,
+                createdAt: now,
+                updatedAt: now,
+              };
+        yield* emit({
+          type: "provider_thread.updated",
+          driver: SCRIPTED_PROVIDER,
+          providerThread: thread,
         });
+        return thread;
+      });
 
       const start = Effect.fnUntraced(function* (
         turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
@@ -998,13 +1000,12 @@ export const makeScriptedAdapterV2 = Effect.fn("makeScriptedAdapterV2")(function
               providerThreadId: args.providerThread.id,
             }),
           ),
-        interruptTurn: (args) =>
-          Effect.gen(function* () {
-            const turn = active;
-            if (turn === undefined || turn.providerTurn.id !== args.providerTurnId) return;
-            if (turn.fiber !== undefined) yield* Fiber.interrupt(turn.fiber);
-            yield* finish(turn, "interrupted");
-          }),
+        interruptTurn: Effect.fn("ScriptedAdapterV2.interruptTurn")(function* (args) {
+          const turn = active;
+          if (turn === undefined || turn.providerTurn.id !== args.providerTurnId) return;
+          if (turn.fiber !== undefined) yield* Fiber.interrupt(turn.fiber);
+          yield* finish(turn, "interrupted");
+        }),
         respondToRuntimeRequest: (args) => {
           const pending = pendingRequests.get(String(args.requestId));
           return pending === undefined

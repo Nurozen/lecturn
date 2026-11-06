@@ -119,10 +119,8 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const nowSeconds = Clock.currentTimeMillis.pipe(Effect.map((ms) => Math.floor(ms / 1000)));
 const iso = (seconds: number) => DateTime.formatIso(DateTime.makeUnsafe(seconds * 1000));
 
-export const makeExtensionsUsageStore = <J = DecisionEvaluationJudgment>(
-  config: DecisionUsageConfig,
-) =>
-  Effect.gen(function* () {
+export const makeExtensionsUsageStore = Effect.fn("DecisionUsage.makeExtensionsUsageStore")(
+  function* <J = DecisionEvaluationJudgment>(config: DecisionUsageConfig) {
     const { $client: sql } = yield* RelayDb;
     const access = yield* makeDecisionsAccess(config);
     const featureId = config.featureId ?? "decisions";
@@ -830,7 +828,8 @@ export const makeExtensionsUsageStore = <J = DecisionEvaluationJudgment>(
       reconcile,
       getAllowance,
     };
-  });
+  },
+);
 export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
   makeExtensionsUsageStore<DecisionEvaluationJudgment>(config);
 export type DecisionUsageStore = Effect.Success<ReturnType<typeof makeDecisionUsageStore>>;

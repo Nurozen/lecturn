@@ -1,3 +1,4 @@
+import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
 import { ContextualMessageDisclosure } from "../contextual/ContextualMessageDisclosure";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
@@ -41,7 +42,7 @@ import {
 import { renderAssistantCitationsAsText } from "@lecturn/shared/assistantCitations";
 import { encodeComposerContextFragment } from "@lecturn/shared/composerContextClipboard";
 import { parseAppReferenceHref } from "@lecturn/shared/appReferences";
-import { parseThreadLinkHref } from "@lecturn/shared/threadLinks";
+import { parseThreadLinkHref, resolveThreadLinkRef } from "@lecturn/shared/threadLinks";
 import { PROMPT_LINK_MAX_PROMPT_LENGTH } from "@lecturn/shared/promptLinks";
 import {
   parseComposerContextHref,
@@ -200,6 +201,7 @@ import {
 } from "../../lib/markdownLinks";
 import {
   deriveTerminalAssistantMessageIds,
+  createThreadFeedCache,
   failedFeedRunIds,
   deriveThreadFeedPresentation,
   shouldShowImportTruncatedNote,
@@ -841,14 +843,12 @@ function ArtifactTemplateCard(props: {
         </Text>
       </View>
       {props.onUse ? (
-        <Pressable
-          accessibilityRole="button"
+        <Button
+          label="Use template"
+          tone="secondary"
           accessibilityLabel={`Use ${props.template.displayName} template`}
-          className="min-h-9 justify-center rounded-lg border border-border bg-subtle px-3 active:opacity-65"
           onPress={() => props.onUse?.(props.template)}
-        >
-          <Text className="font-lecturn-bold text-xs text-foreground">Use template</Text>
-        </Pressable>
+        />
       ) : null}
     </View>
   );
@@ -1211,6 +1211,7 @@ function renderFeedEntry(
         environmentId={props.environmentId}
         projectedItem={entry.activities[0]!.projectedItem}
         iconColor={iconSubtleColor}
+        surfaceColor={props.screenColor}
       />
     );
   }
@@ -1822,6 +1823,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
   const disclosureSettleFrameRef = useRef<number | null>(null);
   const disclosureSettleSecondFrameRef = useRef<number | null>(null);
   const disclosureAnchorKeyRef = useRef<string | null>(null);
+  const [feedCache] = useState(createThreadFeedCache);
   const previousLatestTurnRef = useRef(props.latestRun);
   const userScrollSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const headerMaterialVisibleRef = useRef(false);
@@ -1937,9 +1939,13 @@ function ThreadFeedView(props: ThreadFeedProps) {
     if (parseAppReferenceHref(href) !== null) return;
     const linkedThreadId = parseThreadLinkHref(href);
     if (linkedThreadId) {
+      const source = scopeThreadRef(props.environmentId, linkedThreadId);
+      const target =
+        resolveThreadLinkRef(source, appAtomRegistry.get(environmentThreadShells.threadRefsAtom)) ??
+        source;
       navigation.navigate("Thread", {
-        environmentId: String(props.environmentId),
-        threadId: String(linkedThreadId),
+        environmentId: String(target.environmentId),
+        threadId: String(target.threadId),
       });
       return;
     }
@@ -2272,6 +2278,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
       props.activeWorkStartedAt,
       props.runlessWorkActive ?? false,
       props.importedFrom ?? null,
+      feedCache,
     ),
     props.feed,
     props.queuedMessages,
@@ -2825,6 +2832,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
                   environmentId={props.environmentId}
                   endpoints={props.pendingHandoff}
                   iconColor={iconSubtleColor}
+                  surfaceColor={screenColor}
                   label="Context handoff pending"
                 />
               ) : null
@@ -2863,29 +2871,23 @@ function ThreadFeedView(props: ThreadFeedProps) {
 function ThreadFeedLoadEarlierControl(props: ThreadFeedHistoryControls) {
   const theme = useUniwindTheme();
   const mutedColor = theme["--color-icon-subtle"];
-  const accentColor = theme["--color-primary"];
   if (!props.hasMoreHistory && props.error === null) {
     return null;
   }
   return (
     <View className="mb-3 items-center gap-1.5 px-2">
       {props.hasMoreHistory ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Load earlier activity"
-          disabled={props.loading}
-          onPress={props.onLoadEarlier}
-          className="min-h-9 flex-row items-center justify-center gap-2 rounded-full border border-border/60 bg-card/80 px-4 py-2 disabled:opacity-50"
-        >
-          {props.loading ? (
-            <AppActivityIndicator size="small" color={accentColor} />
-          ) : (
-            <SymbolView name="chevron.up" size={12} tintColor={accentColor} type="monochrome" />
-          )}
-          <Text className="text-sm font-medium text-foreground">
-            {props.loading ? "Loading earlier activity…" : "Load earlier activity"}
-          </Text>
-        </Pressable>
+        <View className="self-center">
+          <Button
+            label={props.loading ? "Loading earlier activity…" : "Load earlier activity"}
+            tone="secondary"
+            accessibilityLabel="Load earlier activity"
+            disabled={props.loading}
+            onPress={props.onLoadEarlier}
+            icon="chevron.up"
+            loading={props.loading}
+          />
+        </View>
       ) : null}
       {props.error !== null ? (
         <Text className="text-center text-xs" style={{ color: mutedColor }}>

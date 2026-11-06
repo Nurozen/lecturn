@@ -778,156 +778,160 @@ const make = Effect.gen(function* () {
   const knownKind = (kind: string) => LEAD_KINDS.has(kind) || SQUIRE_KINDS.has(kind);
 
   /** Callers hold the Squire's lock. Only rows this call moves get FYIs, so a repeat writes none. */
-  const finalizeBatch = (squire: SquireRow, batchId: string, runId: RunId) =>
-    Effect.gen(function* () {
-      const now = yield* nowIso;
-      yield* repository.transaction(
-        Effect.gen(function* () {
-          const delivered = yield* repository.markBatchDelivered(batchId);
-          // The latest summary-bearing event per thread; a newer FYI would replace earlier ones.
-          const latest = new Map<ThreadId, SquireEventRow>();
-          for (const row of delivered) {
-            // A waiting-on-user event raises its own question card.
-            if (!isSummaryBearing(row.kind) || row.kind === "waiting-on-user") continue;
-            if (row.thread_id !== null) latest.set(row.thread_id, row);
-          }
-          for (const [threadId, row] of latest) {
-            const decided = yield* repository.runRaisedDecisionCard({
-              squireId: squire.id,
-              runId,
-              threadId,
-            });
-            if (!decided) yield* writeFyi({ squire, runId, row, now });
-          }
-        }),
-      );
-    });
+  const finalizeBatch = Effect.fn("SquireDelivery.finalizeBatch")(function* (
+    squire: SquireRow,
+    batchId: string,
+    runId: RunId,
+  ) {
+    const now = yield* nowIso;
+    yield* repository.transaction(
+      Effect.gen(function* () {
+        const delivered = yield* repository.markBatchDelivered(batchId);
+        // The latest summary-bearing event per thread; a newer FYI would replace earlier ones.
+        const latest = new Map<ThreadId, SquireEventRow>();
+        for (const row of delivered) {
+          // A waiting-on-user event raises its own question card.
+          if (!isSummaryBearing(row.kind) || row.kind === "waiting-on-user") continue;
+          if (row.thread_id !== null) latest.set(row.thread_id, row);
+        }
+        for (const [threadId, row] of latest) {
+          const decided = yield* repository.runRaisedDecisionCard({
+            squireId: squire.id,
+            runId,
+            threadId,
+          });
+          if (!decided) yield* writeFyi({ squire, runId, row, now });
+        }
+      }),
+    );
+  });
 
   /**
    * Callers hold the Squire's lock. A refused batch is dropped and the next
    * one tried; one Stave turned away for a busy space waits for it instead.
    */
-  const deliverNext = (squireId: SquireId): Effect.Effect<void, SquireDeliveryError> =>
-    Effect.gen(function* () {
-      if (!(yield* squireSwitch.isOn)) return;
-      const found = yield* repository.getSquire(squireId);
-      if (Option.isNone(found)) return;
-      const squire = found.value;
-      const homeThreadId = squire.home_thread_id;
-      if (squire.status !== "active" || squire.lifecycle !== "ready" || homeThreadId === null) {
-        return;
-      }
-      const rows = yield* repository.listEventsByStatus({
-        squireId,
-        statuses: ["pending", "batched"],
-      });
-      if (rows.length === 0) return;
-      const shell = yield* projections.getThreadShell(homeThreadId);
-      // A `waiting` run is still active, so the busy check reads activityRunStatus.
-      if (!shell || shell.archivedAt !== null || shell.activityRunStatus != null) return;
-
-      // One batch in flight. Its run's end normally finalizes it; an idle
-      // thread with the batch unfinished means that report was missed, or
-      // the dispatch never committed.
-      const outstanding = rows.filter((row) => row.status === "batched");
-      const outstandingId = outstanding[0]?.batch_id;
-      if (outstandingId) {
-        const context = yield* storedContext(squire, outstandingId, outstanding);
-        const origin = yield* originOf(outstanding, context);
-        const messageId = deliverMessageId(origin, outstandingId);
-        const { messages } = yield* projections.getThreadRecords(homeThreadId, ["messages"], {
-          messageIds: [messageId],
-        });
-        const runId = messages[0]?.runId ?? null;
-        if (messages.length === 0) {
-          const { text } = yield* renderBatch(squire, outstanding, origin, context);
-          const outcome = yield* dispatchBatch(squire, homeThreadId, outstandingId, outstanding, {
-            origin,
-            text,
-          });
-          if (outcome !== "refused") return;
-        } else {
-          if (runId === null) return;
-          const { runs } = yield* projections.getThreadRecords(homeThreadId, ["runs"], {
-            runIds: [runId],
-          });
-          if (!runs.some((run) => TERMINAL_RUN_STATUSES.has(run.status))) return;
-          yield* finalizeBatch(squire, outstandingId, runId);
-        }
-      }
-
-      const pending = rows.filter((row) => row.status === "pending");
-      const unwanted = pending.filter((row) => knownKind(row.kind) && !receives(squire, row.kind));
-      yield* repository.dropPendingEvents(unwanted.map((row) => row.id));
-      const ready = pending.filter((row) => receives(squire, row.kind));
-      if (ready.length === 0) return;
-
-      const batch = chooseBatch(ready);
-      const batchId = batchIdFor(squire, batch);
-      const now = yield* nowIso;
-      // Context rides a batch that exists anyway; it never wakes a member.
-      const collected = yield* collectRoomContext({ repository, rooms }, { squire, batch });
-      // Rendered first, so only rooms whose posts reached the text advance;
-      // a cut room keeps its cursor and its posts ride the next batch.
-      const leadKeys = yield* userStartedLeadKeys(repository, batch);
-      let origin = batchOrigin(batch, collected, leadKeys);
-      let rendered = yield* renderBatch(squire, batch, origin, collected);
-      let context = collected.filter((block) => rendered.roomsShown.includes(block.roomId));
-      // The origin follows what was shown, so a re-dispatch from the stored
-      // windows names the same message id. A demotion only a cut room caused
-      // is undone; the shorter header still fits every room shown.
-      if (batchOrigin(batch, context, leadKeys) !== origin) {
-        origin = batchOrigin(batch, context, leadKeys);
-        rendered = yield* renderBatch(squire, batch, origin, context);
-        context = context.filter((block) => rendered.roomsShown.includes(block.roomId));
-      }
-      const marked = yield* repository.transaction(
-        Effect.gen(function* () {
-          const count = yield* repository.markEventsBatched({
-            ids: batch.map((row) => row.id),
-            batchId,
-          });
-          if (count === 0) return count;
-          yield* advanceRoomCursors(rooms, {
-            squireId,
-            role: squire.role,
-            blocks: context,
-          });
-          const firstId = Math.min(...batch.map((row) => row.id));
-          for (const row of batch) {
-            yield* repository.insertActionLog({
-              squire_id: squireId,
-              kind: "event.received",
-              room_id: null,
-              post_id: null,
-              trigger_id: null,
-              task_id: null,
-              thread_id: row.thread_id,
-              card_id: null,
-              event_id: row.id,
-              run_id: null,
-              invocation_key: null,
-              execution_key: null,
-              data_json: encodeLogData({
-                batchId,
-                kind: row.kind,
-                ...(row.id === firstId && context.length > 0
-                  ? { [ROOM_CONTEXT_LOG_KEY]: encodeRoomContextWindows(context) }
-                  : {}),
-              }),
-              created_at: now,
-            });
-          }
-          return count;
-        }),
-      );
-      if (marked === 0) return;
-      const outcome = yield* dispatchBatch(squire, homeThreadId, batchId, batch, {
-        origin,
-        text: rendered.text,
-      });
-      if (outcome === "refused") yield* deliverNext(squireId);
+  const deliverNext = Effect.fn("SquireDelivery.deliverNext")(function* (
+    squireId: SquireId,
+  ): Effect.fn.Return<void, SquireDeliveryError> {
+    if (!(yield* squireSwitch.isOn)) return;
+    const found = yield* repository.getSquire(squireId);
+    if (Option.isNone(found)) return;
+    const squire = found.value;
+    const homeThreadId = squire.home_thread_id;
+    if (squire.status !== "active" || squire.lifecycle !== "ready" || homeThreadId === null) {
+      return;
+    }
+    const rows = yield* repository.listEventsByStatus({
+      squireId,
+      statuses: ["pending", "batched"],
     });
+    if (rows.length === 0) return;
+    const shell = yield* projections.getThreadShell(homeThreadId);
+    // A `waiting` run is still active, so the busy check reads activityRunStatus.
+    if (!shell || shell.archivedAt !== null || shell.activityRunStatus != null) return;
+
+    // One batch in flight. Its run's end normally finalizes it; an idle
+    // thread with the batch unfinished means that report was missed, or
+    // the dispatch never committed.
+    const outstanding = rows.filter((row) => row.status === "batched");
+    const outstandingId = outstanding[0]?.batch_id;
+    if (outstandingId) {
+      const context = yield* storedContext(squire, outstandingId, outstanding);
+      const origin = yield* originOf(outstanding, context);
+      const messageId = deliverMessageId(origin, outstandingId);
+      const { messages } = yield* projections.getThreadRecords(homeThreadId, ["messages"], {
+        messageIds: [messageId],
+      });
+      const runId = messages[0]?.runId ?? null;
+      if (messages.length === 0) {
+        const { text } = yield* renderBatch(squire, outstanding, origin, context);
+        const outcome = yield* dispatchBatch(squire, homeThreadId, outstandingId, outstanding, {
+          origin,
+          text,
+        });
+        if (outcome !== "refused") return;
+      } else {
+        if (runId === null) return;
+        const { runs } = yield* projections.getThreadRecords(homeThreadId, ["runs"], {
+          runIds: [runId],
+        });
+        if (!runs.some((run) => TERMINAL_RUN_STATUSES.has(run.status))) return;
+        yield* finalizeBatch(squire, outstandingId, runId);
+      }
+    }
+
+    const pending = rows.filter((row) => row.status === "pending");
+    const unwanted = pending.filter((row) => knownKind(row.kind) && !receives(squire, row.kind));
+    yield* repository.dropPendingEvents(unwanted.map((row) => row.id));
+    const ready = pending.filter((row) => receives(squire, row.kind));
+    if (ready.length === 0) return;
+
+    const batch = chooseBatch(ready);
+    const batchId = batchIdFor(squire, batch);
+    const now = yield* nowIso;
+    // Context rides a batch that exists anyway; it never wakes a member.
+    const collected = yield* collectRoomContext({ repository, rooms }, { squire, batch });
+    // Rendered first, so only rooms whose posts reached the text advance;
+    // a cut room keeps its cursor and its posts ride the next batch.
+    const leadKeys = yield* userStartedLeadKeys(repository, batch);
+    let origin = batchOrigin(batch, collected, leadKeys);
+    let rendered = yield* renderBatch(squire, batch, origin, collected);
+    let context = collected.filter((block) => rendered.roomsShown.includes(block.roomId));
+    // The origin follows what was shown, so a re-dispatch from the stored
+    // windows names the same message id. A demotion only a cut room caused
+    // is undone; the shorter header still fits every room shown.
+    if (batchOrigin(batch, context, leadKeys) !== origin) {
+      origin = batchOrigin(batch, context, leadKeys);
+      rendered = yield* renderBatch(squire, batch, origin, context);
+      context = context.filter((block) => rendered.roomsShown.includes(block.roomId));
+    }
+    const marked = yield* repository.transaction(
+      Effect.gen(function* () {
+        const count = yield* repository.markEventsBatched({
+          ids: batch.map((row) => row.id),
+          batchId,
+        });
+        if (count === 0) return count;
+        yield* advanceRoomCursors(rooms, {
+          squireId,
+          role: squire.role,
+          blocks: context,
+        });
+        const firstId = Math.min(...batch.map((row) => row.id));
+        for (const row of batch) {
+          yield* repository.insertActionLog({
+            squire_id: squireId,
+            kind: "event.received",
+            room_id: null,
+            post_id: null,
+            trigger_id: null,
+            task_id: null,
+            thread_id: row.thread_id,
+            card_id: null,
+            event_id: row.id,
+            run_id: null,
+            invocation_key: null,
+            execution_key: null,
+            data_json: encodeLogData({
+              batchId,
+              kind: row.kind,
+              ...(row.id === firstId && context.length > 0
+                ? { [ROOM_CONTEXT_LOG_KEY]: encodeRoomContextWindows(context) }
+                : {}),
+            }),
+            created_at: now,
+          });
+        }
+        return count;
+      }),
+    );
+    if (marked === 0) return;
+    const outcome = yield* dispatchBatch(squire, homeThreadId, batchId, batch, {
+      origin,
+      text: rendered.text,
+    });
+    if (outcome === "refused") yield* deliverNext(squireId);
+  });
 
   const deliverReady: SquireDelivery["Service"]["deliverReady"] = (squireId) =>
     lockFor(squireId).withPermits(1)(deliverNext(squireId));
@@ -1044,21 +1048,22 @@ const make = Effect.gen(function* () {
       ),
     ).pipe(Effect.asVoid);
 
-  const finalizeRun: SquireDelivery["Service"]["finalizeRun"] = (input) =>
-    Effect.gen(function* () {
-      const { runs } = yield* projections.getThreadRecords(input.homeThreadId, ["runs"], {
-        runIds: [input.runId],
-      });
-      const run = runs.find((entry) => entry.id === input.runId);
-      const parsed = run ? parseSquireMessageId(run.userMessageId) : Option.none();
-      const found = yield* repository.getSquire(input.squireId);
-      if (Option.isSome(parsed) && Option.isSome(found)) {
-        yield* lockFor(input.squireId).withPermits(1)(
-          finalizeBatch(found.value, parsed.value.batchId, input.runId),
-        );
-      }
-      yield* wake(input.squireId);
+  const finalizeRun: SquireDelivery["Service"]["finalizeRun"] = Effect.fn(
+    "SquireDelivery.finalizeRun",
+  )(function* (input) {
+    const { runs } = yield* projections.getThreadRecords(input.homeThreadId, ["runs"], {
+      runIds: [input.runId],
     });
+    const run = runs.find((entry) => entry.id === input.runId);
+    const parsed = run ? parseSquireMessageId(run.userMessageId) : Option.none();
+    const found = yield* repository.getSquire(input.squireId);
+    if (Option.isSome(parsed) && Option.isSome(found)) {
+      yield* lockFor(input.squireId).withPermits(1)(
+        finalizeBatch(found.value, parsed.value.batchId, input.runId),
+      );
+    }
+    yield* wake(input.squireId);
+  });
 
   const redispatchBatched: SquireDelivery["Service"]["redispatchBatched"] = Effect.gen(
     function* () {

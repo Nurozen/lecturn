@@ -106,17 +106,16 @@ const make = Effect.gen(function* () {
         next.delete(threadId);
         return next;
       }),
-    scriptFor: (threadId, message) =>
-      Effect.gen(function* () {
-        const entry = (yield* Ref.get(byThread)).get(threadId);
-        if (entry === undefined) return undefined;
-        const kind = pickSquireFakeKind(entry.scripts, squireFakeEventKinds(message));
-        if (kind === undefined) return undefined;
-        const script = entry.scripts[kind]!;
-        return entry.fillScript === undefined
-          ? script
-          : yield* entry.fillScript({ kind, script, message });
-      }),
+    scriptFor: Effect.fn("SquireFakeScripts.scriptFor")(function* (threadId, message) {
+      const entry = (yield* Ref.get(byThread)).get(threadId);
+      if (entry === undefined) return undefined;
+      const kind = pickSquireFakeKind(entry.scripts, squireFakeEventKinds(message));
+      if (kind === undefined) return undefined;
+      const script = entry.scripts[kind]!;
+      return entry.fillScript === undefined
+        ? script
+        : yield* entry.fillScript({ kind, script, message });
+    }),
   });
 });
 

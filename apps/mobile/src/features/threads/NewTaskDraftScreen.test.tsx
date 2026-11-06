@@ -66,9 +66,8 @@ vi.mock("@react-navigation/native", () => ({
 vi.mock("../../native/StackHeader", () => ({
   NativeStackScreenOptions: native.noop,
 }));
-vi.mock("../../components/ui/Toolbar", () => ({
-  Toolbar: Object.assign(native.noop, { Button: native.noop }),
-}));
+vi.mock("../../components/ui/SheetHeader", () => ({ SheetHeader: native.noop }));
+vi.mock("../../components/ui/Button", () => ({ Button: native.noop }));
 vi.mock("../../lib/useUniwindTheme", () => ({ useUniwindTheme: () => ({}) }));
 vi.mock("../settings/appearance/useScaledTextRole", () => ({ useScaledTextRole: () => ({}) }));
 vi.mock("./use-thread-settings-sheet-presentation", () => ({

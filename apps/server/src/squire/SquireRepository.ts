@@ -746,8 +746,9 @@ const make = Effect.gen(function* () {
     Effect.flatMap((outer) => (Option.isNone(outer) ? publish : Effect.void)),
   );
 
-  const transaction: SquireRepository["Service"]["transaction"] = (effect) =>
-    Effect.gen(function* () {
+  // Wraps every Squire transaction; the SQL client already traces it.
+  const transaction: SquireRepository["Service"]["transaction"] = Effect.fnUntraced(
+    function* (effect) {
       const outer = yield* Effect.serviceOption(sql.transactionService);
       const result = yield* sql
         .withTransaction(effect)
@@ -756,7 +757,8 @@ const make = Effect.gen(function* () {
         );
       if (Option.isNone(outer)) yield* publish;
       return result;
-    });
+    },
+  );
 
   const read = <A>(operation: string, effect: Effect.Effect<A, StatementError>) =>
     effect.pipe(Effect.mapError(toPersistenceSqlError(`SquireRepository.${operation}`)));

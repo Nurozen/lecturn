@@ -26,6 +26,8 @@ export interface DiffCheckpointsInput {
   readonly ignoreWhitespace: boolean;
   /** `name-status` is NUL-separated with renames split into delete plus add. */
   readonly format?: "patch" | "numstat" | "name-status";
+  /** Maximum bytes collected from the diff command. */
+  readonly maxOutputBytes?: number;
   /** Limits the diff to these exact paths. An empty list yields an empty diff. */
   readonly filePaths?: ReadonlyArray<string>;
 }

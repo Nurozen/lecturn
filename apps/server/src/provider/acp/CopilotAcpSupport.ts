@@ -75,14 +75,14 @@ export function buildCopilotAcpSpawnInput(
   };
 }
 
-export const makeCopilotAcpRuntime = (
-  input: CopilotAcpRuntimeInput,
-): Effect.Effect<
-  AcpSessionRuntime.AcpSessionRuntime["Service"],
-  EffectAcpErrors.AcpError,
-  Crypto.Crypto | Scope.Scope
-> =>
-  Effect.gen(function* () {
+export const makeCopilotAcpRuntime = Effect.fn("CopilotAcpSupport.makeCopilotAcpRuntime")(
+  function* (
+    input: CopilotAcpRuntimeInput,
+  ): Effect.fn.Return<
+    AcpSessionRuntime.AcpSessionRuntime["Service"],
+    EffectAcpErrors.AcpError,
+    Crypto.Crypto | Scope.Scope
+  > {
     const acpContext = yield* Layer.build(
       AcpSessionRuntime.layer({
         ...input,
@@ -97,7 +97,8 @@ export const makeCopilotAcpRuntime = (
     return yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(
       Effect.provide(acpContext),
     );
-  });
+  },
+);
 
 /** Bounds the post-cancel discard if the next prompt never opens with `usage_update`. */
 export const COPILOT_CANCELLED_STREAM_GRACE = Duration.seconds(1);
@@ -109,64 +110,63 @@ export const COPILOT_CANCELLED_STREAM_GRACE = Duration.seconds(1);
  * with `usage_update` (Copilot sends it before any of that prompt's output),
  * or until a short grace after that prompt is dispatched.
  */
-export function withCopilotCancelledStreamDiscard(
+export const withCopilotCancelledStreamDiscard = Effect.fn(
+  "CopilotAcpSupport.withCopilotCancelledStreamDiscard",
+)(function* (
   runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
-): Effect.Effect<AcpSessionRuntime.AcpSessionRuntime["Service"], never, Scope.Scope> {
-  return Effect.gen(function* () {
-    const scope = yield* Scope.Scope;
-    let discarding = false;
-    let promptsInFlight = 0;
-    let epoch = 0;
-    const stopDiscarding = () => {
-      discarding = false;
-      epoch += 1;
-    };
-    return {
-      ...runtime,
-      handleSessionUpdate: (handler) =>
-        runtime.handleSessionUpdate((notification) => {
-          if (discarding) {
-            if (notification.update.sessionUpdate !== "usage_update" || promptsInFlight === 0) {
-              return Effect.void;
+): Effect.fn.Return<AcpSessionRuntime.AcpSessionRuntime["Service"], never, Scope.Scope> {
+  const scope = yield* Scope.Scope;
+  let discarding = false;
+  let promptsInFlight = 0;
+  let epoch = 0;
+  const stopDiscarding = () => {
+    discarding = false;
+    epoch += 1;
+  };
+  return {
+    ...runtime,
+    handleSessionUpdate: (handler) =>
+      runtime.handleSessionUpdate((notification) => {
+        if (discarding) {
+          if (notification.update.sessionUpdate !== "usage_update" || promptsInFlight === 0) {
+            return Effect.void;
+          }
+          stopDiscarding();
+        }
+        return handler(notification);
+      }),
+    prompt: Effect.fn("CopilotAcpSupport.prompt")(function* (payload, options) {
+      promptsInFlight += 1;
+      if (discarding) {
+        const discardEpoch = epoch;
+        // A prompt that never opens with usage_update must not lose its reply.
+        yield* Effect.sleep(COPILOT_CANCELLED_STREAM_GRACE).pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              if (discarding && epoch === discardEpoch) stopDiscarding();
+            }),
+          ),
+          Effect.forkIn(scope),
+        );
+      }
+      return yield* runtime.prompt(payload, options).pipe(
+        Effect.tap((response) =>
+          Effect.sync(() => {
+            if (response.stopReason === "cancelled" && promptsInFlight === 1) {
+              discarding = true;
+              epoch += 1;
             }
-            stopDiscarding();
-          }
-          return handler(notification);
-        }),
-      prompt: (payload, options) =>
-        Effect.gen(function* () {
-          promptsInFlight += 1;
-          if (discarding) {
-            const discardEpoch = epoch;
-            // A prompt that never opens with usage_update must not lose its reply.
-            yield* Effect.sleep(COPILOT_CANCELLED_STREAM_GRACE).pipe(
-              Effect.andThen(
-                Effect.sync(() => {
-                  if (discarding && epoch === discardEpoch) stopDiscarding();
-                }),
-              ),
-              Effect.forkIn(scope),
-            );
-          }
-          return yield* runtime.prompt(payload, options).pipe(
-            Effect.tap((response) =>
-              Effect.sync(() => {
-                if (response.stopReason === "cancelled" && promptsInFlight === 1) {
-                  discarding = true;
-                  epoch += 1;
-                }
-              }),
-            ),
-            Effect.ensuring(
-              Effect.sync(() => {
-                promptsInFlight = Math.max(0, promptsInFlight - 1);
-              }),
-            ),
-          );
-        }),
-    } satisfies AcpSessionRuntime.AcpSessionRuntime["Service"];
-  });
-}
+          }),
+        ),
+        Effect.ensuring(
+          Effect.sync(() => {
+            promptsInFlight = Math.max(0, promptsInFlight - 1);
+          }),
+        ),
+      );
+    }),
+  } satisfies AcpSessionRuntime.AcpSessionRuntime["Service"];
+});
 
 /**
  * Sends `session/set_model` unless the requested model is the one last set in this
@@ -257,7 +257,9 @@ export function resolveCopilotModeId(
  * `allow_all` switch. Other runtime modes turn `allow_all` off so a resumed
  * full-access session does not keep bypassing approvals.
  */
-export function applyCopilotSessionConfiguration<E>(input: {
+export const applyCopilotSessionConfiguration = Effect.fn(
+  "CopilotAcpSupport.applyCopilotSessionConfiguration",
+)(function* <E>(input: {
   readonly runtime: Pick<
     AcpSessionRuntime.AcpSessionRuntime["Service"],
     "getModeState" | "getConfigOptions" | "setMode" | "setConfigOption"
@@ -268,30 +270,28 @@ export function applyCopilotSessionConfiguration<E>(input: {
     readonly cause: EffectAcpErrors.AcpError;
     readonly method: "session/set_config_option";
   }) => E;
-}): Effect.Effect<void, E> {
-  return Effect.gen(function* () {
-    const mapError = (cause: EffectAcpErrors.AcpError) =>
-      input.mapError({ cause, method: "session/set_config_option" });
-    const configOptions = yield* input.runtime.getConfigOptions;
-    const allowAll = findSessionConfigOption(configOptions, COPILOT_ALLOW_ALL_CONFIG_ID);
-    const allowAllValue = input.runtimeMode === "full-access" ? "on" : "off";
-    if (allowAll && collectSessionConfigOptionValues(allowAll).includes(allowAllValue)) {
-      yield* input.runtime
-        .setConfigOption(COPILOT_ALLOW_ALL_CONFIG_ID, allowAllValue)
-        .pipe(Effect.mapError(mapError));
-    }
+}): Effect.fn.Return<void, E> {
+  const mapError = (cause: EffectAcpErrors.AcpError) =>
+    input.mapError({ cause, method: "session/set_config_option" });
+  const configOptions = yield* input.runtime.getConfigOptions;
+  const allowAll = findSessionConfigOption(configOptions, COPILOT_ALLOW_ALL_CONFIG_ID);
+  const allowAllValue = input.runtimeMode === "full-access" ? "on" : "off";
+  if (allowAll && collectSessionConfigOptionValues(allowAll).includes(allowAllValue)) {
+    yield* input.runtime
+      .setConfigOption(COPILOT_ALLOW_ALL_CONFIG_ID, allowAllValue)
+      .pipe(Effect.mapError(mapError));
+  }
 
-    const modeState = yield* input.runtime.getModeState;
-    const modeOption = findSessionConfigOption(configOptions, COPILOT_MODE_CONFIG_ID);
-    const modeIds =
-      modeState?.availableModes.map((mode) => mode.id) ??
-      (modeOption ? collectSessionConfigOptionValues(modeOption) : []);
-    const modeId = resolveCopilotModeId(modeIds, input.interactionMode);
-    if (modeId !== undefined) {
-      yield* input.runtime.setMode(modeId).pipe(Effect.asVoid, Effect.mapError(mapError));
-    }
-  });
-}
+  const modeState = yield* input.runtime.getModeState;
+  const modeOption = findSessionConfigOption(configOptions, COPILOT_MODE_CONFIG_ID);
+  const modeIds =
+    modeState?.availableModes.map((mode) => mode.id) ??
+    (modeOption ? collectSessionConfigOptionValues(modeOption) : []);
+  const modeId = resolveCopilotModeId(modeIds, input.interactionMode);
+  if (modeId !== undefined) {
+    yield* input.runtime.setMode(modeId).pipe(Effect.asVoid, Effect.mapError(mapError));
+  }
+});
 
 /**
  * Rewrites Copilot sign-in and policy failures into an actionable message.

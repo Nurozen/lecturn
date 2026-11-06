@@ -161,22 +161,23 @@ const make = Effect.gen(function* () {
   const path = yield* Path.Path;
 
   /** Every `.stave.yaml` root at or above `start`. */
-  const manifestAncestors = (start: string) =>
-    Effect.gen(function* () {
-      const roots: string[] = [];
-      let candidate = path.resolve(start);
-      while (true) {
-        if (
-          yield* fs
-            .exists(path.join(candidate, STAVE_MANIFEST_FILE_NAME))
-            .pipe(Effect.orElseSucceed(() => false))
-        )
-          roots.push(candidate);
-        const parent = path.dirname(candidate);
-        if (parent === candidate) return roots;
-        candidate = parent;
-      }
-    });
+  const manifestAncestors = Effect.fn("StaveOrchestrationHooks.manifestAncestors")(function* (
+    start: string,
+  ) {
+    const roots: string[] = [];
+    let candidate = path.resolve(start);
+    while (true) {
+      if (
+        yield* fs
+          .exists(path.join(candidate, STAVE_MANIFEST_FILE_NAME))
+          .pipe(Effect.orElseSucceed(() => false))
+      )
+        roots.push(candidate);
+      const parent = path.dirname(candidate);
+      if (parent === candidate) return roots;
+      candidate = parent;
+    }
+  });
 
   const aroundProjectCommand = <A, E, R>(
     command: ProjectCommand,
@@ -219,32 +220,31 @@ const make = Effect.gen(function* () {
     });
   };
 
-  const resolveIntent = (intent: StaveThreadIntent) =>
-    Effect.gen(function* () {
-      const thread =
-        intent.threadId === undefined ? null : yield* threads.getThreadShell(intent.threadId);
-      const projectId = intent.projectId ?? thread?.projectId;
-      if (projectId === undefined) return null;
-      const project = yield* projects.get(projectId);
-      if (Option.isNone(project)) return null;
-      const input: StaveAdmissionInput = {
-        projectRoot: project.value.workspaceRoot,
-        projectId,
-        intent: intent.intent,
-        worktreePath:
-          intent.worktreePath !== undefined
-            ? intent.worktreePath
-            : // Lecturn: see `describeStaveThreadIntent`; a Squire home is not a space worktree.
-              thread?.squire?.role === "home"
-              ? null
-              : (thread?.worktreePath ?? null),
-        ...(intent.prepareWorktree === undefined
-          ? {}
-          : { prepareWorktree: intent.prepareWorktree }),
-        lockHeld: true,
-      };
-      return input;
-    });
+  const resolveIntent = Effect.fn("StaveOrchestrationHooks.resolveIntent")(function* (
+    intent: StaveThreadIntent,
+  ) {
+    const thread =
+      intent.threadId === undefined ? null : yield* threads.getThreadShell(intent.threadId);
+    const projectId = intent.projectId ?? thread?.projectId;
+    if (projectId === undefined) return null;
+    const project = yield* projects.get(projectId);
+    if (Option.isNone(project)) return null;
+    const input: StaveAdmissionInput = {
+      projectRoot: project.value.workspaceRoot,
+      projectId,
+      intent: intent.intent,
+      worktreePath:
+        intent.worktreePath !== undefined
+          ? intent.worktreePath
+          : // Lecturn: see `describeStaveThreadIntent`; a Squire home is not a space worktree.
+            thread?.squire?.role === "home"
+            ? null
+            : (thread?.worktreePath ?? null),
+      ...(intent.prepareWorktree === undefined ? {} : { prepareWorktree: intent.prepareWorktree }),
+      lockHeld: true,
+    };
+    return input;
+  });
 
   /**
    * Waits for the space here, before the orchestrator takes the thread lock,
@@ -302,16 +302,16 @@ const make = Effect.gen(function* () {
     });
   };
 
-  const aroundCommand = <A, E, R>(
+  // Wraps every dispatched command; the dispatch owns the span.
+  const aroundCommand = Effect.fnUntraced(function* <A, E, R>(
     input: LecturnCommandAdmissionInput,
     commit: Effect.Effect<A, E, R>,
-  ): Effect.Effect<A, E | LecturnHookRejectedError, R> =>
-    Effect.gen(function* () {
-      if (yield* StaveReconciliation) return yield* commit;
-      return yield* input.scope === "project"
-        ? aroundProjectCommand(input.command, commit)
-        : aroundThreadCommand(input.command, commit);
-    });
+  ): Effect.fn.Return<A, E | LecturnHookRejectedError, R> {
+    if (yield* StaveReconciliation) return yield* commit;
+    return yield* input.scope === "project"
+      ? aroundProjectCommand(input.command, commit)
+      : aroundThreadCommand(input.command, commit);
+  });
 
   const contribution: LecturnOrchestrationHooksContribution = {
     name: CONTRIBUTION,

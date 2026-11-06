@@ -257,81 +257,82 @@ const make = Effect.gen(function* () {
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
   /** Merges over whatever the card holds now, since the read may have taken a while. */
-  const storeExcerpt = (
+  const storeExcerpt = Effect.fn("SquireCiExcerpt.storeExcerpt")(function* (
     cardId: SquireCardId,
     excerpt: SquireCiExcerptResult,
     extra: Pick<SquireEvidence, "pullRequest" | "diffStats" | "headBranch">,
-  ) =>
-    Effect.gen(function* () {
-      const latest = Option.getOrNull(yield* repository.getCard(cardId));
-      if (latest === null) return;
-      const current = Option.getOrElse(
-        decodeEvidence(latest.evidence_json),
-        (): SquireEvidence => ({}),
-      );
-      const { errorLines: _previous, ...rest } = current;
-      const evidence: SquireEvidence = {
-        ...rest,
-        ...(excerpt.errorLines.length === 0 ? {} : { errorLines: excerpt.errorLines }),
-        ciLog: excerpt.ciLog,
-        ...(extra.pullRequest === undefined ? {} : { pullRequest: extra.pullRequest }),
-        ...(extra.diffStats === undefined ? {} : { diffStats: extra.diffStats }),
-        ...(extra.headBranch === undefined ? {} : { headBranch: extra.headBranch }),
-      };
-      yield* repository.updateCard({
-        id: cardId,
-        fromStatuses: ALL_STATUSES,
-        patch: { evidence_json: encodeEvidence(evidence) },
-        updatedAt: yield* nowIso,
-      });
+  ) {
+    const latest = Option.getOrNull(yield* repository.getCard(cardId));
+    if (latest === null) return;
+    const current = Option.getOrElse(
+      decodeEvidence(latest.evidence_json),
+      (): SquireEvidence => ({}),
+    );
+    const { errorLines: _previous, ...rest } = current;
+    const evidence: SquireEvidence = {
+      ...rest,
+      ...(excerpt.errorLines.length === 0 ? {} : { errorLines: excerpt.errorLines }),
+      ciLog: excerpt.ciLog,
+      ...(extra.pullRequest === undefined ? {} : { pullRequest: extra.pullRequest }),
+      ...(extra.diffStats === undefined ? {} : { diffStats: extra.diffStats }),
+      ...(extra.headBranch === undefined ? {} : { headBranch: extra.headBranch }),
+    };
+    yield* repository.updateCard({
+      id: cardId,
+      fromStatuses: ALL_STATUSES,
+      patch: { evidence_json: encodeEvidence(evidence) },
+      updatedAt: yield* nowIso,
     });
+  });
 
   /**
    * A fixture PR is never read. Its scenario's error lines, branch, and diff stats ride on
    * the injected event's payload, newest event for this head first; the check counts come from
    * the run summary the fixture stored, as a real read's would come from GitHub.
    */
-  const fixtureExcerpt = (threadId: ThreadId, headSha: string) =>
-    Effect.gen(function* () {
-      const rows = yield* repository.listEvents({
-        statuses: EVENT_STATUSES,
-        threadId,
-        kinds: ["pull-request-changed"],
-      });
-      const payload = rows
-        .toReversed()
-        .flatMap((row) => Option.toArray(decodePayload(row.payload_json ?? "")))
-        .find(
-          (candidate) =>
-            candidate.pullRequest?.headSha === headSha &&
-            (candidate.evidence?.errorLines?.length ?? 0) > 0,
-        );
-      const errorLines = payload?.evidence?.errorLines;
-      if (payload === undefined || errorLines === undefined) return Option.none();
-      const summaries =
-        payload.runId === null
-          ? []
-          : yield* repository.listRunSummaries({ thread_id: threadId, run_id: payload.runId });
-      const pullRequest = summaries
-        .flatMap((row) => Option.toArray(decodeSummary(row.summary_json)))
-        .map((summary) => summary.pullRequest)
-        .find((candidate) => candidate?.headSha === headSha);
-      return Option.some({
-        excerpt: {
-          errorLines: errorLines.slice(0, MAX_LINES),
-          ciLog: { status: "log", headSha, jobs: [], truncated: false },
-        } satisfies SquireCiExcerptResult,
-        extra: {
-          ...(pullRequest == null ? {} : { pullRequest }),
-          ...(payload.evidence?.diffStats === undefined
-            ? {}
-            : { diffStats: payload.evidence.diffStats }),
-          ...(payload.evidence?.headBranch === undefined
-            ? {}
-            : { headBranch: payload.evidence.headBranch }),
-        },
-      });
+  const fixtureExcerpt = Effect.fn("SquireCiExcerpt.fixtureExcerpt")(function* (
+    threadId: ThreadId,
+    headSha: string,
+  ) {
+    const rows = yield* repository.listEvents({
+      statuses: EVENT_STATUSES,
+      threadId,
+      kinds: ["pull-request-changed"],
     });
+    const payload = rows
+      .toReversed()
+      .flatMap((row) => Option.toArray(decodePayload(row.payload_json ?? "")))
+      .find(
+        (candidate) =>
+          candidate.pullRequest?.headSha === headSha &&
+          (candidate.evidence?.errorLines?.length ?? 0) > 0,
+      );
+    const errorLines = payload?.evidence?.errorLines;
+    if (payload === undefined || errorLines === undefined) return Option.none();
+    const summaries =
+      payload.runId === null
+        ? []
+        : yield* repository.listRunSummaries({ thread_id: threadId, run_id: payload.runId });
+    const pullRequest = summaries
+      .flatMap((row) => Option.toArray(decodeSummary(row.summary_json)))
+      .map((summary) => summary.pullRequest)
+      .find((candidate) => candidate?.headSha === headSha);
+    return Option.some({
+      excerpt: {
+        errorLines: errorLines.slice(0, MAX_LINES),
+        ciLog: { status: "log", headSha, jobs: [], truncated: false },
+      } satisfies SquireCiExcerptResult,
+      extra: {
+        ...(pullRequest == null ? {} : { pullRequest }),
+        ...(payload.evidence?.diffStats === undefined
+          ? {}
+          : { diffStats: payload.evidence.diffStats }),
+        ...(payload.evidence?.headBranch === undefined
+          ? {}
+          : { headBranch: payload.evidence.headBranch }),
+      },
+    });
+  });
 
   const excerptCard: SquireCiExcerpt["Service"]["excerptCard"] = Effect.fn(
     "SquireCiExcerpt.excerptCard",

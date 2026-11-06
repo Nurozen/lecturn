@@ -207,13 +207,12 @@ const make = Effect.gen(function* () {
     return new Map(pending.map((request) => [request.appId, request]));
   });
 
-  const statusOf = (appId: AppId) =>
-    Effect.gen(function* () {
-      const record = yield* storage(repository.get(appId));
-      if (Option.isNone(record)) return Option.none<AppStatus>();
-      const pending = (yield* pendingRequests).get(appId);
-      return Option.some(toStatus(record.value, pending, yield* leases.current(appId)));
-    });
+  const statusOf = Effect.fn("AppRegistryService.statusOf")(function* (appId: AppId) {
+    const record = yield* storage(repository.get(appId));
+    if (Option.isNone(record)) return Option.none<AppStatus>();
+    const pending = (yield* pendingRequests).get(appId);
+    return Option.some(toStatus(record.value, pending, yield* leases.current(appId)));
+  });
 
   const publishStatus = (appId: AppId) =>
     statusOf(appId).pipe(
@@ -234,11 +233,12 @@ const make = Effect.gen(function* () {
    * `pairing-requested` holds only while a request waits, so no client shows
    * a prompt it cannot answer.
    */
-  const settleLapsed = (publish: ReadonlyArray<AppId>) =>
-    Effect.gen(function* () {
-      const settled = yield* storage(repository.settleLapsedPairings(yield* DateTime.now));
-      yield* Effect.forEach(new Set([...publish, ...settled]), publishStatus, { discard: true });
-    });
+  const settleLapsed = Effect.fn("AppRegistryService.settleLapsed")(function* (
+    publish: ReadonlyArray<AppId>,
+  ) {
+    const settled = yield* storage(repository.settleLapsedPairings(yield* DateTime.now));
+    yield* Effect.forEach(new Set([...publish, ...settled]), publishStatus, { discard: true });
+  });
 
   // Clients keep no timers: this update takes the lapsed prompt off them.
   const settleAfterLapse = (appId: AppId, expiresAt: DateTime.Utc) =>
@@ -262,89 +262,89 @@ const make = Effect.gen(function* () {
   });
 
   /** A prefix both reserved-free and unique, so `<prefix>_<tool>` names one tool. */
-  const checkToolPrefix = (registration: AppRegistration) =>
-    Effect.gen(function* () {
-      if (RESERVED_APP_TOOL_PREFIXES.has(registration.toolPrefix)) {
-        return yield* invalid(
-          `Tool prefix "${registration.toolPrefix}" is reserved for Lecturn's own tools.`,
-        );
-      }
-      const records = yield* storage(repository.list);
-      const holder = records.find(
-        (record) =>
-          record.appId !== registration.appId &&
-          record.registration.toolPrefix === registration.toolPrefix,
+  const checkToolPrefix = Effect.fn("AppRegistryService.checkToolPrefix")(function* (
+    registration: AppRegistration,
+  ) {
+    if (RESERVED_APP_TOOL_PREFIXES.has(registration.toolPrefix)) {
+      return yield* invalid(
+        `Tool prefix "${registration.toolPrefix}" is reserved for Lecturn's own tools.`,
       );
-      if (holder !== undefined) {
-        return yield* new AppsError({
-          code: "conflict",
-          message: `Tool prefix "${registration.toolPrefix}" is already used by ${holder.registration.name}.`,
-        });
-      }
-    });
+    }
+    const records = yield* storage(repository.list);
+    const holder = records.find(
+      (record) =>
+        record.appId !== registration.appId &&
+        record.registration.toolPrefix === registration.toolPrefix,
+    );
+    if (holder !== undefined) {
+      return yield* new AppsError({
+        code: "conflict",
+        message: `Tool prefix "${registration.toolPrefix}" is already used by ${holder.registration.name}.`,
+      });
+    }
+  });
 
-  const createPairingRequest: AppRegistryService["Service"]["createPairingRequest"] = (
-    registration,
-  ) =>
-    Effect.gen(function* () {
-      yield* checkToolPrefix(registration);
-      const now = yield* DateTime.now;
-      const expiresAt = DateTime.addDuration(now, PAIRING_REQUEST_TTL);
-      const requestId = NodeCrypto.randomUUID();
-      const pollSecret = NodeCrypto.randomBytes(32).toString("base64url");
-      const existing = Option.getOrUndefined(yield* storage(repository.get(registration.appId)));
-      // Stored before the app's state changes, so a lapse settling in between
-      // sees this request waiting and leaves the app alone.
+  const createPairingRequest: AppRegistryService["Service"]["createPairingRequest"] = Effect.fn(
+    "AppRegistryService.createPairingRequest",
+  )(function* (registration) {
+    yield* checkToolPrefix(registration);
+    const now = yield* DateTime.now;
+    const expiresAt = DateTime.addDuration(now, PAIRING_REQUEST_TTL);
+    const requestId = NodeCrypto.randomUUID();
+    const pollSecret = NodeCrypto.randomBytes(32).toString("base64url");
+    const existing = Option.getOrUndefined(yield* storage(repository.get(registration.appId)));
+    // Stored before the app's state changes, so a lapse settling in between
+    // sees this request waiting and leaves the app alone.
+    yield* storage(
+      repository.createPairingRequest({
+        requestId,
+        appId: registration.appId,
+        registration,
+        pollSecretHash: sha256Hex(pollSecret),
+        expiresAt,
+        now,
+      }),
+    );
+    if (existing === undefined) {
       yield* storage(
-        repository.createPairingRequest({
-          requestId,
+        repository.upsert({
           appId: registration.appId,
           registration,
-          pollSecretHash: sha256Hex(pollSecret),
-          expiresAt,
+          state: "pairing-requested",
+          grantedFingerprint: null,
+          runtimeCeiling: null,
+          cachedHeadlessTools: null,
+          cachedLiveTools: null,
+          lastSeenAt: null,
           now,
         }),
       );
-      if (existing === undefined) {
+    } else {
+      // A changed command or frame origin is not what the user approved, so
+      // the grant is suspended until they decide. Denied and revoked
+      // apps keep their state, which an unanswered request then leaves standing.
+      const suspend =
+        existing.state === "pairing-requested" ||
+        (existing.state === "granted" &&
+          existing.grantedFingerprint !== registrationFingerprint(registration));
+      // An approved registration stays on the record while the new one waits
+      // on the request; with none approved, the record shows what is asked.
+      const unapproved = existing.grantedFingerprint === null;
+      if (suspend || unapproved) {
         yield* storage(
-          repository.upsert({
-            appId: registration.appId,
-            registration,
-            state: "pairing-requested",
-            grantedFingerprint: null,
-            runtimeCeiling: null,
-            cachedHeadlessTools: null,
-            cachedLiveTools: null,
-            lastSeenAt: null,
-            now,
-          }),
+          repository.upsert(
+            writeOf(existing, now, {
+              ...(suspend ? { state: "pairing-requested" as const } : {}),
+              ...(unapproved ? { registration } : {}),
+            }),
+          ),
         );
-      } else {
-        // A changed command or frame origin is not what the user approved, so
-        // the grant is suspended until they decide. Denied and revoked
-        // apps keep their state, which an unanswered request then leaves standing.
-        const suspend =
-          existing.state === "pairing-requested" ||
-          (existing.state === "granted" &&
-            existing.grantedFingerprint !== registrationFingerprint(registration));
-        // An approved registration stays on the record while the new one waits
-        // on the request; with none approved, the record shows what is asked.
-        const unapproved = existing.grantedFingerprint === null;
-        if (suspend || unapproved) {
-          yield* storage(
-            repository.upsert(
-              writeOf(existing, now, {
-                ...(suspend ? { state: "pairing-requested" as const } : {}),
-                ...(unapproved ? { registration } : {}),
-              }),
-            ),
-          );
-        }
       }
-      yield* publishStatus(registration.appId);
-      yield* settleAfterLapse(registration.appId, expiresAt);
-      return { requestId, pollSecret, expiresAt: iso(expiresAt) };
-    });
+    }
+    yield* publishStatus(registration.appId);
+    yield* settleAfterLapse(registration.appId, expiresAt);
+    return { requestId, pollSecret, expiresAt: iso(expiresAt) };
+  });
 
   const credentialFailed = (cause: unknown) =>
     Effect.logError("Connected-app credential could not be issued", { cause }).pipe(
@@ -359,25 +359,24 @@ const make = Effect.gen(function* () {
     );
 
   /** Live sessions acting for the app: its credentials and, unless `onlyCredentials`, its embed tokens. */
-  const revokeAppSessions = (
+  const revokeAppSessions = Effect.fn("AppRegistryService.revokeAppSessions")(function* (
     appId: AppId,
     options: { readonly keep?: string; readonly onlyCredentials?: boolean } = {},
-  ) =>
-    Effect.gen(function* () {
-      const active = yield* sessions.listActive().pipe(Effect.catch(credentialFailed));
-      yield* Effect.forEach(
-        active.filter((session) => {
-          const subject = parseAppSubject(session.subject);
-          return (
-            session.sessionId !== options.keep &&
-            subject?.appId === appId &&
-            (!options.onlyCredentials || subject.kind === "app")
-          );
-        }),
-        (session) => sessions.revoke(session.sessionId).pipe(Effect.catch(credentialFailed)),
-        { discard: true },
-      );
-    });
+  ) {
+    const active = yield* sessions.listActive().pipe(Effect.catch(credentialFailed));
+    yield* Effect.forEach(
+      active.filter((session) => {
+        const subject = parseAppSubject(session.subject);
+        return (
+          session.sessionId !== options.keep &&
+          subject?.appId === appId &&
+          (!options.onlyCredentials || subject.kind === "app")
+        );
+      }),
+      (session) => sessions.revoke(session.sessionId).pipe(Effect.catch(credentialFailed)),
+      { discard: true },
+    );
+  });
 
   /**
    * Undelivered grants are denied before the session sweep: delivery issues
@@ -387,69 +386,68 @@ const make = Effect.gen(function* () {
   const endAccess = (appId: AppId) =>
     storage(repository.denyUndeliveredGrants(appId)).pipe(Effect.andThen(revokeAppSessions(appId)));
 
-  const deliverCredential = (request: AppPairingRequestRecord) =>
-    Effect.gen(function* () {
-      const record = Option.getOrUndefined(yield* storage(repository.get(request.appId)));
-      // Revoked or deleted between the grant and this poll.
-      if (record === undefined) return { state: "revoked" } as const;
-      if (record.state !== "granted") return { state: record.state } as const;
-      if (request.credentialDelivered) return { state: "granted" } as const;
-      // Issued before claiming: a claim followed by a failed issue would lose
-      // the credential for good, while an unclaimed issue is simply revoked.
-      const issued = yield* issueAppCredential(sessions, {
-        appId: record.appId,
-        name: record.registration.name,
-        ceiling: record.runtimeCeiling,
-      }).pipe(Effect.catch(credentialFailed));
-      const claimed = yield* storage(repository.claimCredentialDelivery(request.requestId)).pipe(
-        Effect.onError(() => sessions.revoke(issued.sessionId).pipe(Effect.ignore)),
-      );
-      if (!claimed) {
-        yield* sessions.revoke(issued.sessionId).pipe(Effect.ignore);
-        return { state: "granted" } as const;
-      }
-      // One credential per app: pairing again retires the previous one. Open
-      // embed views keep their short-lived tokens and refresh through the app.
-      yield* revokeAppSessions(record.appId, { keep: issued.sessionId, onlyCredentials: true });
-      return {
-        state: "granted",
-        credential: {
-          token: issued.token,
-          expiresAt: iso(DateTime.toUtc(issued.expiresAt)),
-          environmentId: yield* environment.getEnvironmentId,
-        },
-      } as const;
-    });
+  const deliverCredential = Effect.fn("AppRegistryService.deliverCredential")(function* (
+    request: AppPairingRequestRecord,
+  ) {
+    const record = Option.getOrUndefined(yield* storage(repository.get(request.appId)));
+    // Revoked or deleted between the grant and this poll.
+    if (record === undefined) return { state: "revoked" } as const;
+    if (record.state !== "granted") return { state: record.state } as const;
+    if (request.credentialDelivered) return { state: "granted" } as const;
+    // Issued before claiming: a claim followed by a failed issue would lose
+    // the credential for good, while an unclaimed issue is simply revoked.
+    const issued = yield* issueAppCredential(sessions, {
+      appId: record.appId,
+      name: record.registration.name,
+      ceiling: record.runtimeCeiling,
+    }).pipe(Effect.catch(credentialFailed));
+    const claimed = yield* storage(repository.claimCredentialDelivery(request.requestId)).pipe(
+      Effect.onError(() => sessions.revoke(issued.sessionId).pipe(Effect.ignore)),
+    );
+    if (!claimed) {
+      yield* sessions.revoke(issued.sessionId).pipe(Effect.ignore);
+      return { state: "granted" } as const;
+    }
+    // One credential per app: pairing again retires the previous one. Open
+    // embed views keep their short-lived tokens and refresh through the app.
+    yield* revokeAppSessions(record.appId, { keep: issued.sessionId, onlyCredentials: true });
+    return {
+      state: "granted",
+      credential: {
+        token: issued.token,
+        expiresAt: iso(DateTime.toUtc(issued.expiresAt)),
+        environmentId: yield* environment.getEnvironmentId,
+      },
+    } as const;
+  });
 
-  const pollPairingRequest: AppRegistryService["Service"]["pollPairingRequest"] = ({
-    requestId,
-    pollSecret,
-  }) =>
-    Effect.gen(function* () {
-      const request = yield* storage(repository.getPairingRequest(requestId));
-      // One answer for unknown ids and wrong secrets, so ids cannot be probed.
-      if (
-        Option.isNone(request) ||
-        !sameSecretHash(request.value.pollSecretHash, sha256Hex(pollSecret))
-      ) {
-        return yield* notFound("Unknown pairing request.");
-      }
-      const now = yield* DateTime.now;
-      switch (request.value.state) {
-        case "pending":
-          return {
-            state: DateTime.isLessThan(now, request.value.expiresAt)
-              ? "pairing-requested"
-              : "expired",
-          } as const;
-        case "superseded":
-          return { state: "expired" } as const;
-        case "denied":
-          return { state: "denied" } as const;
-        case "granted":
-          return yield* deliverCredential(request.value);
-      }
-    });
+  const pollPairingRequest: AppRegistryService["Service"]["pollPairingRequest"] = Effect.fn(
+    "AppRegistryService.pollPairingRequest",
+  )(function* ({ requestId, pollSecret }) {
+    const request = yield* storage(repository.getPairingRequest(requestId));
+    // One answer for unknown ids and wrong secrets, so ids cannot be probed.
+    if (
+      Option.isNone(request) ||
+      !sameSecretHash(request.value.pollSecretHash, sha256Hex(pollSecret))
+    ) {
+      return yield* notFound("Unknown pairing request.");
+    }
+    const now = yield* DateTime.now;
+    switch (request.value.state) {
+      case "pending":
+        return {
+          state: DateTime.isLessThan(now, request.value.expiresAt)
+            ? "pairing-requested"
+            : "expired",
+        } as const;
+      case "superseded":
+        return { state: "expired" } as const;
+      case "denied":
+        return { state: "denied" } as const;
+      case "granted":
+        return yield* deliverCredential(request.value);
+    }
+  });
 
   const requireStatus = (appId: AppId) =>
     statusOf(appId).pipe(
@@ -461,58 +459,57 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const decidePairing: AppRegistryService["Service"]["decidePairing"] = ({ requestId, decision }) =>
-    Effect.gen(function* () {
-      const now = yield* DateTime.now;
-      const request = Option.getOrUndefined(
-        yield* storage(repository.getPairingRequest(requestId)),
+  const decidePairing: AppRegistryService["Service"]["decidePairing"] = Effect.fn(
+    "AppRegistryService.decidePairing",
+  )(function* ({ requestId, decision }) {
+    const now = yield* DateTime.now;
+    const request = Option.getOrUndefined(yield* storage(repository.getPairingRequest(requestId)));
+    if (
+      request === undefined ||
+      request.state !== "pending" ||
+      !DateTime.isLessThan(now, request.expiresAt)
+    ) {
+      return yield* notFound("This pairing request is no longer waiting for a decision.");
+    }
+    const record = yield* requireRecord(request.appId);
+    // Another app may have taken the prefix while the prompt was open.
+    if (decision === "grant") yield* checkToolPrefix(request.registration);
+    const decided = yield* storage(
+      repository.decidePairingRequest({
+        requestId,
+        state: decision === "grant" ? "granted" : "denied",
+      }),
+    );
+    // Another client answered the same prompt first.
+    if (!decided) {
+      return yield* notFound("This pairing request is no longer waiting for a decision.");
+    }
+    if (decision === "grant") {
+      const fingerprint = registrationFingerprint(request.registration);
+      yield* storage(
+        repository.upsert(
+          writeOf(record, now, {
+            registration: request.registration,
+            state: "granted",
+            grantedFingerprint: fingerprint,
+            // A different command may list different tools.
+            cachedHeadlessTools:
+              record.grantedFingerprint === fingerprint ? record.cachedHeadlessTools : null,
+          }),
+        ),
       );
-      if (
-        request === undefined ||
-        request.state !== "pending" ||
-        !DateTime.isLessThan(now, request.expiresAt)
-      ) {
-        return yield* notFound("This pairing request is no longer waiting for a decision.");
-      }
-      const record = yield* requireRecord(request.appId);
-      // Another app may have taken the prefix while the prompt was open.
-      if (decision === "grant") yield* checkToolPrefix(request.registration);
-      const decided = yield* storage(
-        repository.decidePairingRequest({
-          requestId,
-          state: decision === "grant" ? "granted" : "denied",
-        }),
-      );
-      // Another client answered the same prompt first.
-      if (!decided) {
-        return yield* notFound("This pairing request is no longer waiting for a decision.");
-      }
-      if (decision === "grant") {
-        const fingerprint = registrationFingerprint(request.registration);
-        yield* storage(
-          repository.upsert(
-            writeOf(record, now, {
-              registration: request.registration,
-              state: "granted",
-              grantedFingerprint: fingerprint,
-              // A different command may list different tools.
-              cachedHeadlessTools:
-                record.grantedFingerprint === fingerprint ? record.cachedHeadlessTools : null,
-            }),
-          ),
-        );
-      } else if (record.state === "pairing-requested") {
-        // A granted app asking for a fresh credential with the command the user
-        // already approved keeps its grant, and a revoked or denied one stays so.
-        yield* storage(repository.upsert(writeOf(record, now, { state: "denied" })));
-        yield* endAccess(record.appId);
-      }
-      yield* publishStatus(request.appId);
-      return yield* requireStatus(request.appId);
-    });
+    } else if (record.state === "pairing-requested") {
+      // A granted app asking for a fresh credential with the command the user
+      // already approved keeps its grant, and a revoked or denied one stays so.
+      yield* storage(repository.upsert(writeOf(record, now, { state: "denied" })));
+      yield* endAccess(record.appId);
+    }
+    yield* publishStatus(request.appId);
+    return yield* requireStatus(request.appId);
+  });
 
-  const revoke: AppRegistryService["Service"]["revoke"] = (appId) =>
-    Effect.gen(function* () {
+  const revoke: AppRegistryService["Service"]["revoke"] = Effect.fn("AppRegistryService.revoke")(
+    function* (appId) {
       const record = yield* requireRecord(appId);
       const now = yield* DateTime.now;
       yield* storage(repository.upsert(writeOf(record, now, { state: "revoked" })));
@@ -521,42 +518,42 @@ const make = Effect.gen(function* () {
       // Headless processes stop from this status change (HeadlessToolHost).
       yield* publishStatus(appId);
       return yield* requireStatus(appId);
-    });
+    },
+  );
 
-  const setRuntimeCeiling: AppRegistryService["Service"]["setRuntimeCeiling"] = ({
-    appId,
-    ceiling,
-  }) =>
-    Effect.gen(function* () {
-      const record = yield* requireRecord(appId);
+  const setRuntimeCeiling: AppRegistryService["Service"]["setRuntimeCeiling"] = Effect.fn(
+    "AppRegistryService.setRuntimeCeiling",
+  )(function* ({ appId, ceiling }) {
+    const record = yield* requireRecord(appId);
+    const now = yield* DateTime.now;
+    // The registry is what the tool gate reads; a credential's `rtc` claim
+    // catches up when the app next pairs.
+    yield* storage(repository.upsert(writeOf(record, now, { runtimeCeiling: ceiling })));
+    yield* publishStatus(appId);
+    return yield* requireStatus(appId);
+  });
+
+  const deleteApp: AppRegistryService["Service"]["delete"] = Effect.fn(
+    "AppRegistryService.deleteApp",
+  )(function* ({ appId, deleteThreads }) {
+    const record = yield* requireRecord(appId);
+    yield* endAccess(appId);
+    yield* leases.clear(appId);
+    if (deleteThreads) {
+      // Revoked first, so the app is shut out and its headless processes stop
+      // while its threads go; a deletion that fails part way leaves a revoked
+      // app the user can delete again, never a granted one missing threads.
       const now = yield* DateTime.now;
-      // The registry is what the tool gate reads; a credential's `rtc` claim
-      // catches up when the app next pairs.
-      yield* storage(repository.upsert(writeOf(record, now, { runtimeCeiling: ceiling })));
+      yield* storage(repository.upsert(writeOf(record, now, { state: "revoked" })));
       yield* publishStatus(appId);
-      return yield* requireStatus(appId);
-    });
+      yield* projects.deleteAppProjects(appId);
+    }
+    yield* storage(repository.delete(appId));
+    yield* publishStatus(appId);
+  });
 
-  const deleteApp: AppRegistryService["Service"]["delete"] = ({ appId, deleteThreads }) =>
-    Effect.gen(function* () {
-      const record = yield* requireRecord(appId);
-      yield* endAccess(appId);
-      yield* leases.clear(appId);
-      if (deleteThreads) {
-        // Revoked first, so the app is shut out and its headless processes stop
-        // while its threads go; a deletion that fails part way leaves a revoked
-        // app the user can delete again, never a granted one missing threads.
-        const now = yield* DateTime.now;
-        yield* storage(repository.upsert(writeOf(record, now, { state: "revoked" })));
-        yield* publishStatus(appId);
-        yield* projects.deleteAppProjects(appId);
-      }
-      yield* storage(repository.delete(appId));
-      yield* publishStatus(appId);
-    });
-
-  const get: AppRegistryService["Service"]["get"] = (appId) =>
-    Effect.gen(function* () {
+  const get: AppRegistryService["Service"]["get"] = Effect.fn("AppRegistryService.get")(
+    function* (appId) {
       const record = yield* storage(repository.get(appId));
       if (Option.isNone(record)) return Option.none();
       const pending = (yield* pendingRequests).get(appId);
@@ -564,7 +561,8 @@ const make = Effect.gen(function* () {
         status: toStatus(record.value, pending, yield* leases.current(appId)),
         registration: record.value.registration,
       });
-    });
+    },
+  );
 
   const isGranted: AppRegistryService["Service"]["isGranted"] = (appId) =>
     storage(repository.get(appId)).pipe(
@@ -579,19 +577,16 @@ const make = Effect.gen(function* () {
       })),
     );
 
-  const setCachedTools: AppRegistryService["Service"]["setCachedTools"] = (
-    appId,
-    tier,
-    definitions,
-  ) =>
-    Effect.gen(function* () {
-      const now = yield* DateTime.now;
-      const updated = yield* storage(
-        repository.setCachedTools({ appId, tier, tools: definitions, now }),
-      );
-      if (!updated) return yield* notFound(`No connected app is registered as ${appId}.`);
-      yield* PubSub.publish(toolDefinitionChanges, appId);
-    });
+  const setCachedTools: AppRegistryService["Service"]["setCachedTools"] = Effect.fn(
+    "AppRegistryService.setCachedTools",
+  )(function* (appId, tier, definitions) {
+    const now = yield* DateTime.now;
+    const updated = yield* storage(
+      repository.setCachedTools({ appId, tier, tools: definitions, now }),
+    );
+    if (!updated) return yield* notFound(`No connected app is registered as ${appId}.`);
+    yield* PubSub.publish(toolDefinitionChanges, appId);
+  });
 
   /** Headless tools win a name both tiers list, as they do in AppToolkit's listing. */
   const toolTitlesOf = (appId: AppId) =>
@@ -616,29 +611,30 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => new Map<string, string>()),
     );
 
-  const seedSidecarGrant: AppRegistryService["Service"]["seedSidecarGrant"] = ({ registration }) =>
-    Effect.gen(function* () {
-      yield* checkToolPrefix(registration);
-      const now = yield* DateTime.now;
-      const fingerprint = registrationFingerprint(registration);
-      const existing = Option.getOrUndefined(yield* storage(repository.get(registration.appId)));
-      // A different command may list different tools, so its headless cache is stale.
-      const sameCommand = existing?.grantedFingerprint === fingerprint;
-      yield* storage(
-        repository.upsert({
-          appId: registration.appId,
-          registration,
-          state: "granted",
-          grantedFingerprint: fingerprint,
-          runtimeCeiling: existing?.runtimeCeiling ?? null,
-          cachedHeadlessTools: sameCommand ? (existing?.cachedHeadlessTools ?? null) : null,
-          cachedLiveTools: existing?.cachedLiveTools ?? null,
-          lastSeenAt: now,
-          now,
-        }),
-      );
-      yield* publishStatus(registration.appId);
-    });
+  const seedSidecarGrant: AppRegistryService["Service"]["seedSidecarGrant"] = Effect.fn(
+    "AppRegistryService.seedSidecarGrant",
+  )(function* ({ registration }) {
+    yield* checkToolPrefix(registration);
+    const now = yield* DateTime.now;
+    const fingerprint = registrationFingerprint(registration);
+    const existing = Option.getOrUndefined(yield* storage(repository.get(registration.appId)));
+    // A different command may list different tools, so its headless cache is stale.
+    const sameCommand = existing?.grantedFingerprint === fingerprint;
+    yield* storage(
+      repository.upsert({
+        appId: registration.appId,
+        registration,
+        state: "granted",
+        grantedFingerprint: fingerprint,
+        runtimeCeiling: existing?.runtimeCeiling ?? null,
+        cachedHeadlessTools: sameCommand ? (existing?.cachedHeadlessTools ?? null) : null,
+        cachedLiveTools: existing?.cachedLiveTools ?? null,
+        lastSeenAt: now,
+        now,
+      }),
+    );
+    yield* publishStatus(registration.appId);
+  });
 
   const streamStatus: AppRegistryService["Service"]["streamStatus"] = Stream.unwrap(
     Effect.gen(function* () {
@@ -681,17 +677,23 @@ const make = Effect.gen(function* () {
   // lease changes what clients show, and a status carries a 64 KB icon, so
   // renewals are not broadcast.
   const establishedLeases = new Map<AppId, AppLease>();
-  const refreshLiveDefinitions = (lease: AppLease) =>
-    Effect.gen(function* () {
+  const refreshLiveDefinitions = Effect.fn("AppRegistryService.refreshLiveDefinitions")(
+    function* (lease: AppLease) {
       const record = yield* requireRecord(lease.appId);
       if (!record.registration.liveTools) return;
       const definitions = yield* liveTools.listTools(lease);
       yield* setCachedTools(lease.appId, "live", definitions);
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logDebug("Live tool definitions were not refreshed", { appId: lease.appId, cause }),
+    },
+    (effect, lease) =>
+      effect.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logDebug("Live tool definitions were not refreshed", {
+            appId: lease.appId,
+            cause,
+          }),
+        ),
       ),
-    );
+  );
 
   yield* leases.stream.pipe(
     Stream.runForEach(({ appId, lease }) =>

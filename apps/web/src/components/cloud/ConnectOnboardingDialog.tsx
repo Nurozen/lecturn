@@ -16,6 +16,7 @@ import { useAccountEmailWhenSeveral } from "~/cloud/useAccountEmailWhenSeveral";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
 import { knownConnectAccountsAtom, newlyKnownAccounts } from "~/cloud/knownAccounts";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
+import { isHostedStaticApp } from "~/hostedPairing";
 import {
   useEnvironments,
   usePrimaryEnvironment,
@@ -53,7 +54,10 @@ function ConfiguredConnectOnboardingDialog() {
     ConnectOnboardingOptOutSchema,
   );
 
-  const { isReady: environmentsReady } = useEnvironments();
+  const { environments, isReady: environmentsReady } = useEnvironments();
+  // The empty hosted home already adds account computers after sign-in.
+  const homeScreenAddsComputers =
+    isHostedStaticApp() && environmentsReady && environments.length === 0;
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const primarySessionState = useAtomValue(
     primaryEnvironmentId === null
@@ -147,9 +151,11 @@ function ConfiguredConnectOnboardingDialog() {
       now: Date.now(),
     }).find((entry) => entry.accountId === userId);
     if (request === undefined) return;
-    if (!sessionScopesKnown || !publishStepDecided) return;
+    if (!homeScreenAddsComputers && (!sessionScopesKnown || !publishStepDecided)) return;
     // oxlint-disable-next-line react/set-state-in-effect -- A request lapses after a while, so whether it still opens the wizard depends on the current time, which render must not read.
     setRequests((current) => current.filter((entry) => entry !== request));
+    // The empty hosted home adds this account's computers itself.
+    if (homeScreenAddsComputers) return;
     setPrefilledFromLinkState(false);
     setExposeEnvironment(true);
     setPublishAgentActivity(true);
@@ -159,6 +165,7 @@ function ConfiguredConnectOnboardingDialog() {
   }, [
     canManageRelay,
     controller.linkState.target,
+    homeScreenAddsComputers,
     isLoaded,
     knownAccounts.accountIds,
     openForAccount,

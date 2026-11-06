@@ -237,86 +237,89 @@ export function createContextualEnvironmentAtoms<R, E>(
     changes,
     downloadExport: createEnvironmentCommand(runtime, {
       label: "contextual:download-export",
-      execute: ({ artifactId }: { artifactId: string }) =>
-        Effect.gen(function* () {
-          if (!/^[a-zA-Z0-9_-]{1,240}(?:\.jsonl)?$/.test(artifactId))
+      execute: Effect.fn("ContextualCommands.downloadExport")(function* ({
+        artifactId,
+      }: {
+        artifactId: string;
+      }) {
+        if (!/^[a-zA-Z0-9_-]{1,240}(?:\.jsonl)?$/.test(artifactId))
+          return yield* new ContextualError({
+            code: "invalid",
+            message: "Invalid export artifact",
+          });
+        const supervisor = yield* EnvironmentSupervisor;
+        const prepared = yield* SubscriptionRef.get(supervisor.prepared);
+        if (Option.isNone(prepared))
+          return yield* new ContextualError({
+            code: "unavailable",
+            message: "Reconnect this environment to download the export.",
+          });
+        const connection = prepared.value;
+        const url = environmentEndpointUrl(
+          connection.httpBaseUrl,
+          `/api/contextual/exports/${encodeURIComponent(artifactId)}`,
+        );
+        const signer = yield* Effect.serviceOption(ManagedRelayDpopSigner);
+        const headers = yield* buildEnvironmentAuthHeaders(
+          connection.httpAuthorization,
+          "GET",
+          url,
+          signer,
+        );
+        const request = Effect.gen(function* () {
+          const client = yield* HttpClient.HttpClient;
+          const response = yield* client.get(url, { headers: { ...headers } });
+          if (response.status !== 200)
             return yield* new ContextualError({
-              code: "invalid",
-              message: "Invalid export artifact",
+              code: response.status === 404 ? "not-found" : "unavailable",
+              message:
+                response.status === 404
+                  ? "This export expired or was forgotten. Create a new export."
+                  : "The export could not be downloaded with this connection.",
             });
-          const supervisor = yield* EnvironmentSupervisor;
-          const prepared = yield* SubscriptionRef.get(supervisor.prepared);
-          if (Option.isNone(prepared))
-            return yield* new ContextualError({
-              code: "unavailable",
-              message: "Reconnect this environment to download the export.",
-            });
-          const connection = prepared.value;
-          const url = environmentEndpointUrl(
-            connection.httpBaseUrl,
-            `/api/contextual/exports/${encodeURIComponent(artifactId)}`,
-          );
-          const signer = yield* Effect.serviceOption(ManagedRelayDpopSigner);
-          const headers = yield* buildEnvironmentAuthHeaders(
-            connection.httpAuthorization,
-            "GET",
-            url,
-            signer,
-          );
-          const request = Effect.gen(function* () {
-            const client = yield* HttpClient.HttpClient;
-            const response = yield* client.get(url, { headers: { ...headers } });
-            if (response.status !== 200)
-              return yield* new ContextualError({
-                code: response.status === 404 ? "not-found" : "unavailable",
-                message:
-                  response.status === 404
-                    ? "This export expired or was forgotten. Create a new export."
-                    : "The export could not be downloaded with this connection.",
-              });
-            const content = yield* response.stream.pipe(
-              Stream.runFoldEffect(
-                () => ({ chunks: [] as Uint8Array[], length: 0 }),
-                (state, chunk) => {
-                  if (state.length + chunk.length > 64 * 1024 * 1024)
-                    return Effect.fail(
-                      new ContextualError({
-                        code: "unavailable",
-                        message: "This export exceeds the download limit. Export fewer sources.",
-                      }),
-                    );
-                  state.chunks.push(chunk);
-                  state.length += chunk.length;
-                  return Effect.succeed(state);
-                },
-              ),
-            );
-            const result = new Uint8Array(content.length);
-            let offset = 0;
-            for (const chunk of content.chunks) {
-              result.set(chunk, offset);
-              offset += chunk.length;
-            }
-            return result.buffer;
-          }).pipe(
-            Effect.provideService(FetchHttpClient.RequestInit, {
-              credentials: connection.httpAuthorization === null ? "include" : "omit",
-              cache: "no-store",
-              redirect: "error",
-            }),
-            Effect.provide(FetchHttpClient.layer),
-          );
-          return yield* request.pipe(
-            Effect.mapError((error) =>
-              error._tag === "ContextualError"
-                ? error
-                : new ContextualError({
-                    code: "unavailable",
-                    message: "Could not download the export.",
-                  }),
+          const content = yield* response.stream.pipe(
+            Stream.runFoldEffect(
+              () => ({ chunks: [] as Uint8Array[], length: 0 }),
+              (state, chunk) => {
+                if (state.length + chunk.length > 64 * 1024 * 1024)
+                  return Effect.fail(
+                    new ContextualError({
+                      code: "unavailable",
+                      message: "This export exceeds the download limit. Export fewer sources.",
+                    }),
+                  );
+                state.chunks.push(chunk);
+                state.length += chunk.length;
+                return Effect.succeed(state);
+              },
             ),
           );
-        }).pipe(Effect.timeout("60 seconds")),
+          const result = new Uint8Array(content.length);
+          let offset = 0;
+          for (const chunk of content.chunks) {
+            result.set(chunk, offset);
+            offset += chunk.length;
+          }
+          return result.buffer;
+        }).pipe(
+          Effect.provideService(FetchHttpClient.RequestInit, {
+            credentials: connection.httpAuthorization === null ? "include" : "omit",
+            cache: "no-store",
+            redirect: "error",
+          }),
+          Effect.provide(FetchHttpClient.layer),
+        );
+        return yield* request.pipe(
+          Effect.mapError((error) =>
+            error._tag === "ContextualError"
+              ? error
+              : new ContextualError({
+                  code: "unavailable",
+                  message: "Could not download the export.",
+                }),
+          ),
+        );
+      }, Effect.timeout("60 seconds")),
     }),
     status: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "contextual:status",

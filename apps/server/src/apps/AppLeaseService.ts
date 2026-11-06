@@ -41,8 +41,8 @@ const make = Effect.gen(function* () {
       Effect.asVoid,
     );
 
-  const set: AppLeaseService["Service"]["set"] = (appId, input) =>
-    Effect.gen(function* () {
+  const set: AppLeaseService["Service"]["set"] = Effect.fn("AppLeaseService.set")(
+    function* (appId, input) {
       const ttl = Duration.seconds(input.ttlSeconds);
       const now = yield* DateTime.now;
       const lease: AppLease = {
@@ -59,19 +59,21 @@ const make = Effect.gen(function* () {
         Effect.sleep(ttl).pipe(Effect.andThen(drop(appId, lease))),
       );
       return { expiresAt: DateTime.formatIso(lease.expiresAt) };
-    });
+    },
+  );
 
   const clear: AppLeaseService["Service"]["clear"] = (appId) =>
     FiberMap.remove(expiryTimers, appId).pipe(Effect.andThen(drop(appId)));
 
-  const current: AppLeaseService["Service"]["current"] = (appId) =>
-    Effect.gen(function* () {
+  const current: AppLeaseService["Service"]["current"] = Effect.fn("AppLeaseService.current")(
+    function* (appId) {
       const lease = (yield* Ref.get(leases)).get(appId);
       if (lease === undefined) return Option.none();
       // The timer may not have run yet at the exact expiry instant.
       const now = yield* DateTime.now;
       return DateTime.isLessThan(now, lease.expiresAt) ? Option.some(lease) : Option.none();
-    });
+    },
+  );
 
   return AppLeaseService.of({
     set,

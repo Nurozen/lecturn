@@ -1,4 +1,5 @@
 import { GlassCard } from "../../components/GlassCard";
+import { Button } from "../../components/ui/Button";
 import { ChatGptUsageSummary } from "./ChatGptUsageSummary";
 import { EnvironmentId, USAGE_CONTRACT_VERSION, type UsageProviderKind } from "@lecturn/contracts";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
@@ -442,16 +443,15 @@ function CursorEnableAction({
     if (result._tag === "Success") onEnabled();
   };
   return (
-    <Pressable
-      accessibilityRole="button"
+    <Button
+      label={buttonText}
+      tone="primary"
       accessibilityLabel={`Enable Cursor usage from ${label}`}
       accessibilityHint={CURSOR_KEYCHAIN_COPY}
       disabled={pending}
       onPress={() => void enable()}
-      className="rounded-full bg-primary px-4 py-2"
-    >
-      <Text className="text-sm font-medium text-primary-foreground">{buttonText}</Text>
-    </Pressable>
+      loading={pending}
+    />
   );
 }
 

@@ -140,51 +140,52 @@ export function parseBillingOperation(args: readonly string[]): BillingOperation
   );
 }
 
-export const runBillingOperation = (operation: BillingOperation) =>
-  Effect.gen(function* () {
-    const store = yield* makeBillingStore;
-    const operations = yield* makeBillingOperations({
-      store,
-      identity: () =>
-        Effect.fail(
-          new BillingError({
-            code: "disabled",
-            message: "Identity scan is not available in this command",
-          }),
-        ),
-    });
-    switch (operation.command) {
-      case "payment-reviews":
-        return yield* (yield* makePaymentReviews).pending();
-      case "resolve-review":
-        return yield* (yield* makePaymentReviews).resolve({
-          invoiceId: operation.invoiceId,
-          operator: operation.operator,
-          resolution: operation.reason,
-        });
-
-      case "inventory":
-        return yield* (yield* makeBillingGrantOperations).inventory(operation.after);
-      case "grant":
-        return yield* (yield* makeBillingGrantOperations).grant(operation.userId, operation);
-      case "revoke-grant":
-        return yield* (yield* makeBillingGrantOperations).revoke({
-          userId: operation.userId,
-          grantId: operation.grantId,
-          operationId: operation.id,
-          operator: operation.operator,
-          reason: operation.reason,
-        });
-      case "status":
-        return yield* operations.health();
-      case "replay":
-        return yield* operations.replay(operation.eventId, operation.reason);
-      case "suspension-control":
-        return yield* operations.suspensionControl(operation.enabled, operation.reason);
-      case "prune":
-        return yield* operations.pruneProcessedInbox({ enabled: true, reason: operation.reason });
-    }
+export const runBillingOperation = Effect.fn("billing-operations.runBillingOperation")(function* (
+  operation: BillingOperation,
+) {
+  const store = yield* makeBillingStore;
+  const operations = yield* makeBillingOperations({
+    store,
+    identity: () =>
+      Effect.fail(
+        new BillingError({
+          code: "disabled",
+          message: "Identity scan is not available in this command",
+        }),
+      ),
   });
+  switch (operation.command) {
+    case "payment-reviews":
+      return yield* (yield* makePaymentReviews).pending();
+    case "resolve-review":
+      return yield* (yield* makePaymentReviews).resolve({
+        invoiceId: operation.invoiceId,
+        operator: operation.operator,
+        resolution: operation.reason,
+      });
+
+    case "inventory":
+      return yield* (yield* makeBillingGrantOperations).inventory(operation.after);
+    case "grant":
+      return yield* (yield* makeBillingGrantOperations).grant(operation.userId, operation);
+    case "revoke-grant":
+      return yield* (yield* makeBillingGrantOperations).revoke({
+        userId: operation.userId,
+        grantId: operation.grantId,
+        operationId: operation.id,
+        operator: operation.operator,
+        reason: operation.reason,
+      });
+    case "status":
+      return yield* operations.health();
+    case "replay":
+      return yield* operations.replay(operation.eventId, operation.reason);
+    case "suspension-control":
+      return yield* operations.suspensionControl(operation.enabled, operation.reason);
+    case "prune":
+      return yield* operations.pruneProcessedInbox({ enabled: true, reason: operation.reason });
+  }
+});
 
 if (import.meta.main) {
   try {

@@ -186,70 +186,69 @@ export const layer = Layer.effect(
       }
       return lock;
     };
-    const withSpaceLock = <A, E, R>(root: string, effect: Effect.Effect<A, E, R>) =>
-      Effect.gen(function* () {
-        const key = yield* canonical(root);
-        // Waiting would never end: the writer would wait on this fiber's own read.
-        if ((yield* HeldSharedSpaces).get(key)?.live)
-          return yield* Effect.die(new Error(`Stave space ${key} is already held shared.`));
-        return Option.getOrThrow(yield* lockFor(key).with(true, effect));
-      });
-    const withSharedSpaceLock = <A, E, R>(
+    const withSpaceLock = Effect.fn("StaveSpaceLock.withSpaceLock")(function* <A, E, R>(
+      root: string,
+      effect: Effect.Effect<A, E, R>,
+    ) {
+      const key = yield* canonical(root);
+      // Waiting would never end: the writer would wait on this fiber's own read.
+      if ((yield* HeldSharedSpaces).get(key)?.live)
+        return yield* Effect.die(new Error(`Stave space ${key} is already held shared.`));
+      return Option.getOrThrow(yield* lockFor(key).with(true, effect));
+    });
+    const withSharedSpaceLock = Effect.fn("StaveSpaceLock.withSharedSpaceLock")(function* <A, E, R>(
       root: string,
       effect: Effect.Effect<A, E, R>,
       wait?: Duration.Input,
-    ) =>
-      Effect.gen(function* () {
-        const key = yield* canonical(root);
-        const held = yield* HeldSharedSpaces;
-        const hold: SharedHold = { live: true };
-        return yield* lockFor(key).with(
-          false,
-          Effect.provideService(effect, HeldSharedSpaces, new Map([...held, [key, hold]])).pipe(
-            Effect.ensuring(
-              Effect.sync(() => {
-                hold.live = false;
-              }),
-            ),
+    ) {
+      const key = yield* canonical(root);
+      const held = yield* HeldSharedSpaces;
+      const hold: SharedHold = { live: true };
+      return yield* lockFor(key).with(
+        false,
+        Effect.provideService(effect, HeldSharedSpaces, new Map([...held, [key, hold]])).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              hold.live = false;
+            }),
           ),
-          held.get(key)?.live
-            ? "join"
-            : wait === undefined
-              ? undefined
-              : Duration.fromInputUnsafe(wait),
-        );
-      });
-    const tryWithWorkspaceLocks = <A, E, R>(
-      roots: ReadonlyArray<string>,
-      effect: Effect.Effect<A, E, R>,
-    ) =>
-      Effect.gen(function* () {
-        const targets = yield* Effect.forEach(roots, canonical);
-        const keys = new Set(targets);
-        // Registered roots survive the filesystem move until their operation
-        // releases the lock, even when the manifest is already gone.
-        for (const root of locks.keys()) {
-          if (
-            targets.some((target) => {
-              const relative = path.relative(root, target);
-              return (
-                relative === "" ||
-                (relative !== ".." &&
-                  !relative.startsWith(`..${path.sep}`) &&
-                  !path.isAbsolute(relative))
-              );
-            })
-          )
-            keys.add(root);
-        }
-        let guarded = Effect.asSome(effect);
-        for (const root of [...keys].sort().toReversed()) {
-          guarded = lockFor(root)
-            .with(true, guarded, Duration.zero)
-            .pipe(Effect.map(Option.flatten));
-        }
-        return yield* guarded;
-      });
+        ),
+        held.get(key)?.live
+          ? "join"
+          : wait === undefined
+            ? undefined
+            : Duration.fromInputUnsafe(wait),
+      );
+    });
+    const tryWithWorkspaceLocks = Effect.fn("StaveSpaceLock.tryWithWorkspaceLocks")(function* <
+      A,
+      E,
+      R,
+    >(roots: ReadonlyArray<string>, effect: Effect.Effect<A, E, R>) {
+      const targets = yield* Effect.forEach(roots, canonical);
+      const keys = new Set(targets);
+      // Registered roots survive the filesystem move until their operation
+      // releases the lock, even when the manifest is already gone.
+      for (const root of locks.keys()) {
+        if (
+          targets.some((target) => {
+            const relative = path.relative(root, target);
+            return (
+              relative === "" ||
+              (relative !== ".." &&
+                !relative.startsWith(`..${path.sep}`) &&
+                !path.isAbsolute(relative))
+            );
+          })
+        )
+          keys.add(root);
+      }
+      let guarded = Effect.asSome(effect);
+      for (const root of [...keys].sort().toReversed()) {
+        guarded = lockFor(root).with(true, guarded, Duration.zero).pipe(Effect.map(Option.flatten));
+      }
+      return yield* guarded;
+    });
     return StaveSpaceLock.of({ withSpaceLock, withSharedSpaceLock, tryWithWorkspaceLocks });
   }),
 );

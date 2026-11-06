@@ -9,10 +9,10 @@ const attempts = Metric.counter("lecturn_decisions_attempts_total");
 export const recordDecisionAttempt = (outcome: "dispatched" | "unknown" | "late") =>
   Metric.update(Metric.withAttributes(attempts, [["outcome", outcome]]), 1);
 export const recordDecisionTokens = (inputTokens: number) => Metric.update(tokens, inputTokens);
-export const observeDecisionEvaluation = <A extends { readonly replayed: boolean }, E, R>(
-  effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, R> =>
-  Effect.gen(function* () {
+export const observeDecisionEvaluation = Effect.fn("DecisionsTelemetry.observeDecisionEvaluation")(
+  function* <A extends { readonly replayed: boolean }, E, R>(
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.fn.Return<A, E, R> {
     const start = yield* Clock.currentTimeNanos;
     const exit = yield* Effect.exit(effect);
     const end = yield* Clock.currentTimeNanos;
@@ -20,4 +20,5 @@ export const observeDecisionEvaluation = <A extends { readonly replayed: boolean
     const outcome = Exit.isSuccess(exit) ? (exit.value.replayed ? "replay" : "success") : "failed";
     yield* Metric.update(Metric.withAttributes(evaluations, [["outcome", outcome]]), 1);
     return Exit.isSuccess(exit) ? exit.value : yield* Effect.failCause(exit.cause);
-  });
+  },
+);

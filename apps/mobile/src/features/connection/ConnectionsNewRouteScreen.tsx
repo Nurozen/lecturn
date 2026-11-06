@@ -1,4 +1,5 @@
 import { GlassCard } from "../../components/GlassCard";
+import { SettingsRow } from "../settings/components/SettingsRow";
 import * as Dialog from "../../components/ui/Dialog";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { useAuth } from "@clerk/expo";
@@ -396,26 +397,14 @@ function LecturnConnectSection() {
         />
       ) : (
         <GlassCard collapsable={false} radius={24}>
-          <Pressable
-            accessibilityRole="button"
+          <SettingsRow
+            icon={undefined}
+            label="Sign in to Lecturn Connect"
+            value="Reach your machines from anywhere, no network setup."
+            valuePosition="below"
             disabled={!isLoaded}
             onPress={() => navigation.navigate("SettingsSheet", { screen: "SettingsAuth" })}
-            className="min-h-13 flex-row items-center gap-3 px-4 active:opacity-70"
-          >
-            <View className="min-w-0 flex-1 py-3">
-              <Text className="text-base text-foreground">Sign in to Lecturn Connect</Text>
-              <Text className="text-sm text-foreground-muted">
-                Reach your machines from anywhere, no network setup.
-              </Text>
-            </View>
-            <SymbolView
-              name="chevron.right"
-              size={14}
-              tintColorClassName="accent-chevron"
-              type="monochrome"
-              weight="semibold"
-            />
-          </Pressable>
+          />
         </GlassCard>
       )}
     </View>
