@@ -59,6 +59,8 @@ const blockedRuntime = Effect.gen(function* () {
     recoveryRequests: Stream.empty,
     requestRecovery: () => Effect.void,
     tunnelConnected: Stream.empty,
+    inspectConnector: Effect.succeed(null),
+    readinessChanged: Stream.empty,
     withLinkStateLock: (effect) => effect,
   };
   return { endpointRuntime, entered, release, calls: () => calls };
@@ -148,6 +150,8 @@ it.effect.each([
       recoveryRequests: Stream.empty,
       requestRecovery: () => Effect.void,
       tunnelConnected: Stream.empty,
+      inspectConnector: Effect.succeed(null),
+      readinessChanged: Stream.empty,
       withLinkStateLock: (effect) => effect,
     };
     const dependencies = { secrets, endpointRuntime };
@@ -179,6 +183,8 @@ it.effect("a losing same-home installation cannot clear the owner's stored crede
           recoveryRequests: Stream.empty,
           requestRecovery: () => Effect.void,
           tunnelConnected: Stream.empty,
+          inspectConnector: Effect.succeed(null),
+          readinessChanged: Stream.empty,
           withLinkStateLock: (effect) => effect,
         },
       }).pipe(Effect.provideService(ServerSecretStore.ServerSecretStore, store.secrets)),

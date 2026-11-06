@@ -195,6 +195,7 @@ function Timeline(props: { stage: Stage; parallel: boolean; raced: boolean; thre
     <MessagesTimeline
       isWorking={live}
       activeTurnInProgress={live}
+      emptyPlaceholderInset={0}
       awaitingUser={approvals.length > 0}
       activeTurnStartedAt={at(0)}
       listRef={createRef<LegendListRef | null>()}

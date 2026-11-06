@@ -1,8 +1,6 @@
 import * as ProviderEventLoggers from "@lecturn/provider-core/server/ProviderEventLoggers";
 import type { RelayManagedEndpointRuntimeConfig } from "@lecturn/contracts/relay";
-import * as Clock from "effect/Clock";
 import * as Random from "effect/Random";
-import * as Semaphore from "effect/Semaphore";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
 import * as PullRequestWatchReactor from "./orchestration-v2/PullRequestWatchReactor.ts";
@@ -192,14 +190,16 @@ import {
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as CloudHttp from "./cloud/http.ts";
 import * as CloudLink from "./cloud/CloudLink.ts";
+import * as ConnectReachability from "./cloud/ConnectReachability.ts";
 import { pendingServiceUpdateExists } from "./cloud/updateHandoff.ts";
 import * as RelayTracing from "./cloud/relayTracing.ts";
 import * as DeviceRelayReservation from "./cloud/DeviceRelayReservation.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
 import {
   MANAGED_TUNNEL_FIRST_REGISTRATION_JITTER,
-  MANAGED_TUNNEL_RECOVERY_COOLDOWN,
+  makeManagedTunnelRecovery,
   managedTunnelStartupAction,
+  retryDesiredLinkReconcile,
   retryManagedTunnelRegistration,
 } from "./cloud/managedTunnelStartup.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
@@ -215,20 +215,24 @@ import * as DesktopTelemetryReceiver from "./resourceTelemetry/DesktopTelemetryR
 import * as NativeTelemetryClient from "./resourceTelemetry/NativeTelemetryClient.ts";
 import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts";
 import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinary.ts";
+import * as ProcessGroupMetrics from "./resourceTelemetry/ProcessGroupMetrics.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as AntigravityUsage from "./provider/Drivers/AntigravityUsage.ts";
 import * as CursorAccountReader from "@lecturn/provider-cursor/server/CursorAccountReader";
 import * as CursorKeychain from "@lecturn/provider-cursor/server/CursorKeychain";
 import * as CursorUsageAccounts from "@lecturn/provider-cursor/server/CursorUsageAccounts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as CodexUsageHistory from "./usage/CodexUsageHistory.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import * as ThreadSettlementService from "./orchestration-v2/ThreadSettlementService.ts";
+import * as IdleCompactionService from "./orchestration-v2/IdleCompactionService.ts";
 import * as ThreadPullRequestService from "./orchestration-v2/ThreadPullRequestService.ts";
 import * as RunFinalizationService from "./orchestration-v2/RunFinalizationService.ts";
 import * as ProjectionStoreV2 from "./orchestration-v2/ProjectionStore.ts";
 import { makePersistedServerRuntimeState } from "./serverRuntimeState.ts";
+import { loopbackUrlHostForAddress } from "./startupAccess.ts";
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as ProjectHttp from "./project/http.ts";
 import * as NetService from "@lecturn/shared/Net";
@@ -313,6 +317,7 @@ const layerUsage = UsageService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       AntigravityUsage.layer,
+      CodexUsageHistory.layer,
       CursorUsageAccounts.layer.pipe(
         Layer.provide(CursorAccountReader.layer.pipe(Layer.provide(CursorKeychain.layer))),
       ),
@@ -326,6 +331,7 @@ const layerResourceDiagnostics = Layer.mergeAll(
   layerResourceTelemetry,
   ProcessDiagnostics.layer.pipe(Layer.provide(layerResourceTelemetry)),
   ProcessResourceMonitor.layer.pipe(Layer.provide(layerResourceTelemetry)),
+  ProcessGroupMetrics.layer.pipe(Layer.provide(layerResourceTelemetry)),
 );
 
 const layerRelayClient = Layer.unwrap(
@@ -776,6 +782,10 @@ const layerThreadSettlementWorker = Layer.effectDiscard(
   Layer.provide(ProjectionStoreV2.layer),
 );
 
+const layerIdleCompactionWorker = Layer.effectDiscard(
+  IdleCompactionService.make.pipe(Effect.flatMap((service) => service.start())),
+).pipe(Layer.provide(ProjectionStoreV2.layer));
+
 const layerThreadPullRequestWorker = Layer.effectDiscard(
   ThreadPullRequestService.make.pipe(Effect.flatMap((service) => service.start())),
 ).pipe(Layer.provide(layerPullRequestService));
@@ -852,6 +862,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   layerLecturnRuntimeServices,
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
+  layerIdleCompactionWorker,
   StorageCleanup.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
   // Lecturn: compaction keeps the PR link events a Squire has not consumed.
   LayerSquire.layerDatabaseStorage,
@@ -1099,7 +1110,7 @@ const layerMakeServer = Layer.unwrap(
               return yield* ensureTailscaleServe({
                 localPort,
                 servePort: config.tailscaleServePort,
-                localHost: "127.0.0.1",
+                localHost: loopbackUrlHostForAddress(address),
               }).pipe(
                 Effect.as({ localPort, servePort: config.tailscaleServePort }),
                 Effect.tap(() =>
@@ -1169,46 +1180,30 @@ const layerMakeServer = Layer.unwrap(
             const server = yield* HttpServer.HttpServer;
             const address = server.address;
             if (typeof address === "string" || !("port" in address)) return;
-            const localOrigin = `http://127.0.0.1:${address.port}`;
+            const localOrigin = `http://${loopbackUrlHostForAddress(address)}:${address.port}`;
             const endpointRuntime = yield* CloudManagedEndpointRuntime.CloudManagedEndpointRuntime;
-            const recoveryLock = yield* Semaphore.make(1);
-            let lastRecoveryAtMillis = 0;
+            const runManagedTunnelRecovery = yield* makeManagedTunnelRecovery({
+              recover: (config: RelayManagedEndpointRuntimeConfig) =>
+                cloudLink.recoverManagedTunnel(localOrigin, config, {
+                  retryRuntimeFailures: true,
+                }),
+              isRetryable: (error) =>
+                CloudLink.shouldRetryCloudLink(error) &&
+                error._tag !== "CloudLinkEndpointUnavailableError",
+            });
             const recoverManagedTunnel = (config: RelayManagedEndpointRuntimeConfig) =>
-              recoveryLock.withPermits(1)(
-                Effect.gen(function* () {
-                  const elapsed = (yield* Clock.currentTimeMillis) - lastRecoveryAtMillis;
-                  const wait = Duration.toMillis(MANAGED_TUNNEL_RECOVERY_COOLDOWN) - elapsed;
-                  if (wait > 0) yield* Effect.sleep(Duration.millis(wait));
-                  lastRecoveryAtMillis = yield* Clock.currentTimeMillis;
-                }).pipe(
-                  Effect.andThen(
-                    cloudLink.recoverManagedTunnel(localOrigin, config, {
-                      retryRuntimeFailures: true,
-                    }),
-                  ),
-                  Effect.retry({
-                    while: (error) =>
-                      CloudLink.shouldRetryCloudLink(error) &&
-                      error._tag !== "CloudLinkEndpointUnavailableError",
-                    schedule: Schedule.exponential("1 second").pipe(
-                      Schedule.modifyDelay(({ duration }) =>
-                        Effect.succeed(Duration.min(duration, Duration.seconds(30))),
-                      ),
-                      Schedule.jittered,
-                    ),
-                  }),
-                  Effect.tap((recovered) =>
-                    recovered
-                      ? Effect.logInfo("Lecturn Connect managed tunnel recovered")
-                      : Effect.void,
-                  ),
-                  Effect.catchCause((cause) =>
-                    Cause.hasInterrupts(cause)
-                      ? Effect.interrupt
-                      : Effect.logWarning("Failed to recover the Lecturn Connect managed tunnel", {
-                          cause,
-                        }),
-                  ),
+              runManagedTunnelRecovery(config).pipe(
+                Effect.tap((recovered) =>
+                  recovered
+                    ? Effect.logInfo("Lecturn Connect managed tunnel recovered")
+                    : Effect.void,
+                ),
+                Effect.catchCause((cause) =>
+                  Cause.hasInterrupts(cause)
+                    ? Effect.interrupt
+                    : Effect.logWarning("Failed to recover the Lecturn Connect managed tunnel", {
+                        cause,
+                      }),
                 ),
               );
             yield* endpointRuntime.recoveryRequests.pipe(
@@ -1345,15 +1340,13 @@ const layerMakeServer = Layer.unwrap(
               const reconciledMode = yield* cloudLink
                 .reconcileDesiredLinkIfStillDesired(localOrigin)
                 .pipe(
-                  Effect.retry({
-                    while: CloudLink.shouldRetryCloudLink,
-                    schedule: Schedule.exponential("1 second").pipe(
-                      Schedule.modifyDelay(({ duration }) =>
-                        Effect.succeed(Duration.min(duration, Duration.seconds(30))),
+                  (reconcile) =>
+                    retryDesiredLinkReconcile(reconcile, CloudLink.shouldRetryCloudLink, (cause) =>
+                      Effect.logWarning(
+                        "Lecturn Connect relay is still unavailable; retrying the desired link in the background",
+                        { cause },
                       ),
-                      Schedule.upTo({ duration: "10 minutes" }),
                     ),
-                  }),
                   Effect.tap((mode) =>
                     mode === null
                       ? Effect.void
@@ -1412,7 +1405,7 @@ const layerMakeServer = Layer.unwrap(
     );
 
     return layerServerApplication.pipe(
-      Layer.provide(CloudLink.layer),
+      Layer.provide(CloudLink.layer.pipe(Layer.provideMerge(ConnectReachability.layer))),
       Layer.provideMerge(layerRuntimeServices),
       Layer.provideMerge(McpSessionRegistry.layer.pipe(Layer.provide(layerServerEnvironment))),
       Layer.provide(layerActivation),

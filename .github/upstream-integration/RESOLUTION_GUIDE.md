@@ -476,6 +476,20 @@ from upstream's side.
   stays fork-owned for the fork-only `squires/*` cards and
   `apps/AppPairingRow`. Upstream-owned files use `ui/Button`. Delete it only
   after those callers move to `ui/Button`.
+- **Fork pieces next to upstream reverts (sync to 758d773f).** Upstream's
+  reverts remove only upstream code:
+  - #22242: the web command palette keeps the "No project" entry and the
+    import-session/folder views, and Apps mode keeps its Cmd+N new-thread
+    target.
+  - #21950 (server-update chip): `BranchToolbar` keeps the `isStaveProject`
+    strip rule.
+  - #8034 (`MessagesTimeline` overlay wrapper): the fork reveal, notes and
+    `AppThreadTitleBeside` stay.
+  - #22222 (takeover revert) removes AppImage stale-mount stripping.
+    `ShellEnvironment` keeps the fork's darwin 15 s timeout and macOS fallback
+    locale.
+  - #22253 (runtime prune): `lecturn update` keeps the
+    `RuntimeReleaseArchivesPublished` gate and prunes old runtimes.
 
 **Upstream changes taken in a Lecturn shape (sync to upstream 791feeb0).**
 
@@ -769,13 +783,14 @@ from upstream's side.
     `appsSidebarActiveThreadKey`; Apps shortcuts start from that row.
   - App-thread notifications use upstream's hashed `threadNotificationTag`
     (#12289).
-  - Android (#21071 dropped the rail): the bottom bar has Chats/Apps/Pulls, and
-    each split-view sidebar toolbar has "Show <tab>" buttons for the other two
-    lists. When the threads sidebar row cannot fit the full wordmark beside
-    four buttons (320 dp at default font; `resolveSidebarHeaderButtons` scales
-    with the font), they move into a "More actions" menu (upstream's
-    `AndroidScreenHeader` overflow), and the `CompactBrandTitle` wordmark is
-    single-line, so "Lecturn" never wraps.
+  - Android navigation (#20813 brought the rail back): the bottom bar and the
+    split-view rail switch Chats/Apps/Pulls/Settings (the rail labels Pulls
+    "Pull requests"); `LecturnWorkspaceNavigationModule.kt` keeps the fork Apps
+    tab. The rail replaced the fork's split-view "Show <tab>" buttons, "More
+    actions" menu and `resolveSidebarHeaderButtons`; do not bring them back.
+    List headers are upstream's `WorkspaceListToolbarRow` (brand, search,
+    filter), `AppsToolbar.android` is a plain brand row, and the
+    `CompactBrandTitle` wordmark stays single-line.
     `ThreadNavigationSidebar` also takes the sidebar half of 325a7e2ae4.
   - Mobile Apps code follows the compiler rules: promise `.finally` instead of
     try/finally; LegendList rows built in `renderItem` keep `memo`.
@@ -877,6 +892,79 @@ from upstream's side.
     embed.
   - LaTeX (#18735): fork assistant-text selection uses upstream's
     formula-aware range helpers.
+
+**Upstream changes taken in a Lecturn shape (sync to upstream 758d773f).**
+
+- **Relay migrations.** An upstream relay drizzle migration dated before the
+  fork's newest relay migration gets a new timestamp after it, and its
+  snapshot is rechained onto the fork's latest snapshot.
+- **Relay tunnel reuse (#22059).** `reuseReadyTunnel` applies only to direct
+  tunnels and still runs `managedAccess.check` and completes the managed
+  reservation. Gateway allocations always fully provision.
+- **Patched dependencies are pinned exactly** in their `package.json`, now
+  including `react-native-gesture-handler`, `react-native-image-viewing`,
+  `@react-native-menu/menu` and `expo-notifications`. `expo-modules-core` has
+  one override and one combined patch: upstream's Android layout fix plus the
+  fork's iOS permission-registry lock.
+- **Server migrations.** Upstream 65 runs as fork id 83 (it skips when the
+  index exists) and upstream 66 as fork id 84, after Squire 82.
+- **Claude.** A custom `ANTHROPIC_BASE_URL` overrides the fork's
+  `claude auth status` `loggedIn: false` verdict (#21169). The #15836 TTL
+  gating lives in fork `ClaudeCapabilitiesCache.ts`, and an unauthenticated
+  status invalidates it. #20413 launch append text is ignored for Squire homes
+  and probes.
+- **Idle compaction (#21682)** stays an opt-in beta (`compactIdleThreads`
+  defaults to false), and `idleCompactionWindow` skips Squire threads.
+- **Owner analytics (#21506).** `readClientOwnerParams` hashes the primary
+  signed-in Connect account. `ws.ts` `readClientOwners` records only
+  `isTelemetryIdHash` values. The web device id key is
+  `lecturn:analytics-device-id`, and server resource metrics use the
+  `lecturn_` prefix.
+- **Expo/EAS (#21843).** GraphQL operation names use the Lecturn prefix and
+  EAS session names are "Lecturn · ...". Upstream's `t3` package is
+  `apps/server`, so CI checks Expo operations with `--filter lecturn`
+  (`--filter t3` matches nothing and passes silently).
+- **Connect troubleshooting.** `LECTURN_CONNECT_TROUBLESHOOTING_SECTIONS` and
+  `lecturnConnectTroubleshootingUrl` point at
+  `docs/user/lecturn-connect-troubleshooting.md` on Nurozen/lecturn; anchors
+  follow its Lecturn headings.
+- **Providers.**
+  - Cursor `planRequired` matches the error code, not `instanceof`, because the
+    fork loads `@cursor/sdk` lazily.
+  - Grok `GROK_DETECTION_TIMEOUT_MS` is version + 2x models probe + ACP init +
+    5 s. Recompute it when upstream changes those probe timeouts.
+  - ACP permission admission: the fork app-tool and Squire dispositions live
+    inside upstream's `followsAgentWorkState` admission; Squires skip the
+    "ask" pre-wait.
+- **Git.** `GitVcsDriverCore` caches the Stave `GIT_CEILING` env per cwd for
+  10 minutes. An uncached ancestor walk before every git command hangs
+  upstream's TestClock tests.
+- **Squire locked HTML pages** also reject viewport-height units (#22131).
+- **Nushell live tests** read `LECTURN_TEST_NU_PATH`.
+- **Mobile.**
+  - Android navigation (#20813): see Lecturn Apps above.
+  - New-task branch checkout (#20825): live `readRefs` decides reuse or
+    switch, including for the current branch (no short-circuit). The fork
+    keeps `resolveProjectGitCwd` and the rule that Stave never adopts another
+    worktree; the `refreshStatus` path is retired.
+  - Ended Live Activity dismissal (#21307) runs inside the fork's per-account
+    registration factory and clears ended cards for every account.
+  - `AgentActivity` keeps the square `LecturnMark` and the gold/phase tints;
+    upstream's `widgetURL` link modifiers apply to compact and minimal.
+- **Web.**
+  - The Edit-from-here dialog stays in `ChatView`, not upstream's
+    `ChatOverlayHosts`. Port upstream dialog changes there.
+  - Draft hero headings keep `font-display` (fork serif), including
+    `DraftHeroProjectHeading`.
+  - Fork sidebar rows use `SidebarRowStatusLine` markers and ignore upstream
+    status-slot and pin geometry changes (#11122, #22303).
+  - `PullRequestDetailPanel` always keeps `host` on the reference but strips
+    non-reference fields.
+  - #22242 revert: `_chat.tsx` counts grouped snapshots of
+    `projectsForProjectsMode(projects)`.
+  - `__root.tsx` stays fork. Upstream root coordinators
+    (`HostFreezeToastCoordinator`, `AddProjectToMachineDialogHost`) go into
+    `AppShell.tsx`.
 
 ## Recurring mechanical conflicts
 

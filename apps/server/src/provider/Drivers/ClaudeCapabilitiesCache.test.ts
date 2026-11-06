@@ -13,6 +13,9 @@ const capabilities = (slug: string): ClaudeCapabilitiesProbe => ({
   apiProvider: undefined,
   slashCommands: [],
   models: [{ value: slug, displayName: slug, description: "Synthetic model" }],
+  usage: { rate_limits_available: false, rate_limits: null } as NonNullable<
+    ClaudeCapabilitiesProbe["usage"]
+  >,
 });
 
 describe("Claude capabilities cache", () => {
@@ -113,6 +116,23 @@ describe("Claude capabilities cache", () => {
       // A fallback earns no TTL, and the last account is reused only once.
       expect(yield* Effect.flip(cache.get("2.0.0"))).toBe("probe timed out");
       expect(calls).toBe(3);
+    }),
+  );
+
+  it.effect("reprobes on the next check when the usage request failed", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const withoutUsage = { ...capabilities("known-model") };
+      delete withoutUsage.usage;
+      const cache = yield* makeClaudeCapabilitiesCache(
+        Effect.sync(() => {
+          calls++;
+          return withoutUsage;
+        }),
+      );
+      yield* cache.get("2.0.0");
+      yield* cache.get("2.0.0");
+      expect(calls).toBe(2);
     }),
   );
 

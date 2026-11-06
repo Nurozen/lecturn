@@ -191,6 +191,7 @@ const makeEnvironmentLayer = (name: string, gate?: PromotionGate) =>
         }),
         Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
           resolvePath: () => Effect.succeed(null),
+          invalidate: () => Effect.void,
         }),
       ),
     ),
@@ -1877,6 +1878,7 @@ describe("copied card assets", () => {
               WorkspacePaths.layer,
               Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
                 resolvePath: () => Effect.succeed(null),
+                invalidate: () => Effect.void,
               }),
             ),
           ),

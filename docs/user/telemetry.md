@@ -1,8 +1,11 @@
 # Product usage data
 
 The Lecturn server sends product usage events to PostHog, associated with a hashed account or
-installation identifier. Events include the provider, model, reasoning effort, permission mode,
-turn result, duration, release channel, and main-agent token totals when available.
+installation identifier. To count how many installations one person uses, the server also sends
+hashed account identifiers: your Lecturn Connect account, your OpenAI and Claude accounts when you
+are signed in, and a random identifier for each device that connects. Events include the provider,
+model, reasoning effort, permission mode, turn result, duration, release channel, and main-agent
+token totals when available.
 
 Events do not include prompts, responses, file contents, authentication tokens, conversation IDs,
 raw provider events, or child-agent output. Child-agent token use is excluded from the totals.

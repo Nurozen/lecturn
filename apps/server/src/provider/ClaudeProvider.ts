@@ -200,6 +200,8 @@ function claudeAuthStatus(
 // Amazon Bedrock initializes far slower than first-party auth: the SDK boots the Bedrock
 // backend and runs the `awsAuthRefresh` credential hook before returning account info.
 const CAPABILITIES_PROBE_TIMEOUT_MS = 25_000;
+// Native CLI startup on Windows can exceed the shared probe deadline.
+const CLAUDE_VERSION_CHECK_TIMEOUT_MS = 20_000;
 
 export const CLAUDE_CAPABILITIES_PROBE_SETTING_SOURCES = [
   "user",
@@ -270,6 +272,7 @@ export type ClaudeCapabilitiesProbe = {
    * otherwise successful response mean the account has none (API key).
    */
   readonly usage?: Pick<SDKControlGetUsageResponse, "rate_limits_available" | "rate_limits">;
+  readonly usageCheckedAt?: string;
 };
 
 function parseClaudeInitializationCommands(
@@ -391,6 +394,7 @@ const probeClaudeCapabilities = Effect.fn("ClaudeProvider.probeClaudeCapabilitie
           // Usage has its own deadline so a slow optional request cannot discard initialization.
           // Only the rate limits are read, so skip the local transcript scan that fills
           // `behaviors`: with a few GB of transcripts it outlasts the deadline.
+          const usageCheckedAt = DateTime.formatIso(yield* DateTime.now);
           const usageResult = includeUsage
             ? yield* Effect.tryPromise(() =>
                 q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({
@@ -422,7 +426,7 @@ const probeClaudeCapabilities = Effect.fn("ClaudeProvider.probeClaudeCapabilitie
             apiKeySource: account?.apiKeySource,
             apiProvider: account?.apiProvider,
             slashCommands: parseClaudeInitializationCommands(init.commands),
-            ...(usage ? { usage } : {}),
+            ...(usage ? { usage, usageCheckedAt } : {}),
           } satisfies ClaudeCapabilitiesProbe;
         }),
       ),
@@ -579,7 +583,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     ["--version"],
     resolvedEnvironment,
     cwd,
-  ).pipe(Effect.timeoutOption(DEFAULT_TIMEOUT_MS), Effect.result);
+  ).pipe(Effect.timeoutOption(CLAUDE_VERSION_CHECK_TIMEOUT_MS), Effect.result);
 
   if (Result.isFailure(versionProbe)) {
     const error = versionProbe.failure;
@@ -650,7 +654,16 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
 
   // Resolve sign-in before optional SDK initialization, which can stall on a
   // logged-out CLI and consume the entire discovery budget.
-  const loggedIn = yield* probeClaudeLoggedIn(claudeSettings, resolvedEnvironment, cwd);
+  const cliLoggedIn = yield* probeClaudeLoggedIn(claudeSettings, resolvedEnvironment, cwd);
+  // First-party account fields cannot verify custom endpoint credentials, and
+  // neither can the CLI's first-party sign-in verdict.
+  const endpoint = URL.parse(resolvedEnvironment.ANTHROPIC_BASE_URL?.trim() ?? "");
+  const customApiEndpoint =
+    endpoint !== null &&
+    (endpoint.protocol === "http:" || endpoint.protocol === "https:") &&
+    endpoint.hostname !== "" &&
+    endpoint.hostname !== "api.anthropic.com";
+  const loggedIn = customApiEndpoint && cliLoggedIn === false ? true : cliLoggedIn;
   const probeResult =
     resolveCapabilities && loggedIn !== false
       ? yield* resolveCapabilities(claudeSettings, parsedVersion ?? undefined).pipe(Effect.result)
@@ -720,7 +733,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
-  if (claudeAuthStatus(capabilities) === "unauthenticated") {
+  if (!customApiEndpoint && claudeAuthStatus(capabilities) === "unauthenticated") {
     return buildServerProvider({
       presentation: CLAUDE_PRESENTATION,
       enabled: claudeSettings.enabled,
@@ -743,15 +756,21 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     claudeAuthMetadata({
       subscriptionType: capabilities.subscriptionType,
       authMethod: capabilities.tokenSource,
-    }) ?? apiProviderAuthMetadata(capabilities.apiProvider);
+    }) ??
+    apiProviderAuthMetadata(capabilities.apiProvider) ??
+    (customApiEndpoint ? { type: "customEndpoint", label: "Custom API endpoint" } : undefined);
+  const usageCheckedAt = capabilities.usageCheckedAt ?? checkedAt;
   const usageLimits = !capabilities.usage
     ? makeUnavailableUsageLimits({ checkedAt, reason: "probeFailed" })
     : scopedLimitNames
       ? yield* recordClaudeUsageResponse(scopedLimitNames, {
           response: capabilities.usage,
-          checkedAt,
+          checkedAt: usageCheckedAt,
         })
-      : claudeUsageResponseToLimits({ response: capabilities.usage, checkedAt }).limits;
+      : claudeUsageResponseToLimits({
+          response: capabilities.usage,
+          checkedAt: usageCheckedAt,
+        }).limits;
   const resetCredits =
     resolveResetCredits &&
     capabilities.subscriptionType &&

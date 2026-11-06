@@ -341,13 +341,16 @@ your login; `lecturn connect logout` also clears that login. Background-service
 Treat pairing URLs and authorization codes as passwords. Do not include them in
 screenshots, logs, or bug reports.
 
-## Lecturn Connect troubleshooting
-
-- Treat pairing URLs and pairing tokens like passwords.
 - Prefer binding `--host` to a trusted private address, such as a Tailnet IP, instead of exposing the server broadly.
 - Anyone with a valid pairing credential can create a session until that credential expires or is revoked.
 - Hosted pairing links keep the credential in the URL hash so it is not sent to the hosted app server, but it can still be exposed through browser history, screenshots, logs, or copy/paste.
 - Use `lecturn auth` to revoke credentials or sessions you no longer trust.
+
+## Lecturn Connect troubleshooting
+
+When a Lecturn Connect connection fails, see
+[Lecturn Connect troubleshooting](./lecturn-connect-troubleshooting.md). It explains each
+error, where the problem is, and how to fix it.
 
 ## Signing out and switching your Connect account
 
@@ -372,26 +375,6 @@ You can also stop publication explicitly from **Settings → Connections → Unl
 When multiple Connect accounts are available, add them from the account menu on web or desktop, or **Settings → Connect accounts** on mobile. Each account retains its own environments, subscription, and team selection. Labels and colors help distinguish accounts across devices. Directly paired environments remain separate from Connect accounts.
 
 Signing out of one account removes its saved Connect access on that client without signing out your other accounts. An expired sign-in keeps an account section visible so you can restore access. Adding an account does not share a computer with another person or grant that account access to another account's environment.
-Run `lecturn connect status` on the host to inspect saved authorization and link
-configuration. It is not a live reachability check. If the environment appears
-offline, run `lecturn service status` and read the displayed log. If it disappears
-when SSH closes, see [background-service troubleshooting](./background-service.md#troubleshooting).
-
-| Error                                                     | Recovery                                                                                                                                                   |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `environment_link_limit_exceeded` or managed tunnel limit | Deregister an unused environment, then restart Lecturn on the host.                                                                                        |
-| `auth_invalid` or `invalid_bearer`                        | Run `lecturn connect login`. If credentials were revoked, run `lecturn connect logout`, then `lecturn connect` again. Restart the server after signing in. |
-| Expired or invalid link proof                             | Check the host's date and time, update Lecturn, then restart it.                                                                                           |
-| HTTP 403 without a recognized error                       | Check relay access, proxies, and firewall rules. Keep any Cloudflare Ray ID for a bug report.                                                              |
-| HTTP 408, 429, or 5xx                                     | Check network and relay availability. Startup retries temporary failures for up to ten minutes.                                                            |
-
-After fixing a permanent rejection, restart the host's server. On Linux, use
-`systemctl --user restart lecturn.service` for the background service. For a
-foreground server, stop it and run `lecturn serve` again with your usual options.
-Include the diagnostic message and trace ID when reporting a persistent failure.
-
-For a connection that still fails after linking, check the date and time on both
-devices. For server version warnings, follow [Updating Lecturn](./updating.md).
 
 ## Using the Desktop App as a Remote Only
 

@@ -113,6 +113,7 @@ async function renderAppThread({
     timelineEntries,
     isWorking: false,
     activeTurnInProgress: false,
+    emptyPlaceholderInset: 0,
     listRef,
     latestRun: null,
     turnDiffSummaries: [],

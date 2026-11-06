@@ -37,7 +37,9 @@ const memberProjectFilesAtom = Atom.family((membersKey: string) => {
         Option.getOrNull(AsyncResult.value(result));
       files.set(
         physicalProjectKey,
-        data === null || data.truncated ? null : parseLecturnProjectFile(data.contents),
+        data === null || data.exists === false || data.truncated
+          ? null
+          : parseLecturnProjectFile(data.contents),
       );
     }
     return files;

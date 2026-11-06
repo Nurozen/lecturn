@@ -100,6 +100,11 @@ import Migration0080 from "./Migrations/080_ProjectionProjectsAppBinding.ts";
 // Lecturn's own 79 and 80.
 import Migration0081 from "./Migrations/064_CanonicalizeThreadPullRequestLinks.ts";
 import Migration0082 from "./Migrations/082_Squire.ts";
+// Upstream published these as 65 and 66, which Lecturn's ledger already used
+// (ProjectionThreadsActiveOrderCompatibility, ProjectionThreadPullRequestsCompatibility),
+// so they run here as 83 and 84, after Squire.
+import Migration0083 from "./Migrations/065_CodexUsageNativeTurnIndex.ts";
+import Migration0084 from "./Migrations/066_RepairClientSettlementTimestamps.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -131,6 +136,18 @@ const ThreadFailureLookupIndexCompatibility = Effect.gen(function* () {
   `;
   if (indexes.length > 0) return;
   yield* Migration0077;
+});
+
+// Upstream 65 creates its index without IF NOT EXISTS. A database that already
+// ran it under upstream's id keeps that index, so only create it when missing.
+const CodexUsageNativeTurnIndexCompatibility = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const indexes = yield* sql`
+    SELECT name FROM sqlite_master
+    WHERE type = 'index' AND name = 'orchestration_v2_provider_turns_codex_native_id_idx'
+  `;
+  if (indexes.length > 0) return;
+  yield* Migration0083;
 });
 
 /**
@@ -245,6 +262,11 @@ export const migrationEntries = [
   // database that already ran it under upstream's id is safe to run again here.
   [81, "CanonicalizeThreadPullRequestLinks", Migration0081],
   squireMigration,
+  // Upstream 65.
+  [83, "CodexUsageNativeTurnIndex", CodexUsageNativeTurnIndexCompatibility],
+  // Upstream 66. It only rewrites settlements still at their sweep time, so a
+  // database that already ran it under upstream's id is safe to run again here.
+  [84, "RepairClientSettlementTimestamps", Migration0084],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

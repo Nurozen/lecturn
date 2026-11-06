@@ -336,6 +336,7 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
                 Effect.sync(() => {
                   analytics.push({ event, properties });
                 }),
+              recordOwners: () => Effect.void,
               flush: Effect.void,
             }),
           ),

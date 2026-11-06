@@ -5,6 +5,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 
 import * as CursorSdk from "./CursorSdk.ts";
@@ -25,6 +26,11 @@ export class CursorSdkCatalogError extends Schema.TaggedError<CursorSdkCatalogEr
     return this.authenticationFailure
       ? "Cursor SDK authentication failed."
       : "Cursor SDK catalog request failed.";
+  }
+
+  // The SDK loads lazily, so its CursorSdkError class is not in scope here; match the code.
+  get planRequired(): boolean {
+    return Predicate.hasProperty(this.cause, "code") && this.cause.code === "plan_required";
   }
 }
 

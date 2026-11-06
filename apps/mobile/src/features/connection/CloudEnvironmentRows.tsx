@@ -32,6 +32,7 @@ import { useConnectAccounts } from "../cloud/knownAccounts";
 import { accountTintColor } from "@lecturn/shared/accountTint";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { ConnectionStatusDot } from "./ConnectionStatusDot";
+import { useConnectionDiagnosis } from "./ConnectionDiagnosisDetails";
 import { environmentStatusText } from "./environmentStatusText";
 import { type RelayEnvironmentView, useConnectionController } from "./useConnectionController";
 
@@ -243,6 +244,7 @@ function ConnectedCloudEnvironmentRow(props: {
   );
   const canRetry = presentation !== null && hasSavedBearerRoute(presentation.entry);
   const enabled = props.environment.isEnabled && !unsupported;
+  const { diagnosis } = useConnectionDiagnosis(props.environment.environmentId, presentation);
   const [lastDescriptor, setLastDescriptor] = useState(props.descriptor);
   if (props.descriptor !== undefined && props.descriptor !== lastDescriptor) {
     setLastDescriptor(props.descriptor);
@@ -264,7 +266,11 @@ function ConnectedCloudEnvironmentRow(props: {
       onValueChange={props.onSetEnabled}
       onToggleError={props.onToggleError}
       disabled={unsupported && !canRetry}
-      {...(enabled || unsupported ? {} : { statusText: "Off" })}
+      {...(enabled || unsupported
+        ? diagnosis
+          ? { statusText: diagnosis.headline }
+          : {}
+        : { statusText: "Off" })}
       value={enabled}
     />
   );

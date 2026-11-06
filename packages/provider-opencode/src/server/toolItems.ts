@@ -1,4 +1,5 @@
 import type { OrchestrationV2TurnItem } from "@lecturn/contracts";
+import { resolveLecturnMcpToolId } from "@lecturn/shared/lecturnMcpToolPresentation";
 import { formatReadToolLabel, formatSearchToolLabel } from "@lecturn/shared/toolActivity";
 
 // Search results stay on the timeline wire, so keep their text a preview.
@@ -12,6 +13,7 @@ type ToolItemBase = Omit<
 export function openCodeToolProjectionKind(
   toolName: string,
 ): "command_execution" | "file_change" | "file_search" | "web_search" | "dynamic_tool" {
+  if (resolveLecturnMcpToolId(toolName) !== null) return "dynamic_tool";
   const normalized = toolName.toLowerCase();
   if (normalized === "todowrite") {
     return "dynamic_tool";

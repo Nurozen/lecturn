@@ -18,6 +18,7 @@ import {
   type ReactNode,
   memo,
   useEffect,
+  useEffectEvent,
   useId,
   useRef,
   useState,
@@ -44,6 +45,8 @@ import {
   type DesktopServerExposureState,
   type DesktopWslState,
   type EnvironmentId,
+  connectReachabilityHelpUrl,
+  formatConnectReachable,
   resolveEnvironmentMachineKind,
 } from "@lecturn/contracts";
 import {
@@ -88,6 +91,11 @@ import { LocalEnvironmentSetting } from "./LocalEnvironmentSetting";
 import { searchableSetting } from "./settingsSearch";
 import { EnvironmentIconMenu } from "./EnvironmentIconPicker";
 import { EnvironmentRoutesList } from "./EnvironmentRoutesList";
+import {
+  ConnectionDiagnosisPanel,
+  ConnectionDiagnosisSummary,
+  useConnectionDiagnosis,
+} from "./ConnectionDiagnosisDetails";
 import { usePreparedConnection } from "~/state/session";
 import {
   EnvironmentRow,
@@ -1473,6 +1481,7 @@ function SavedBackendListRow({
 }: SavedBackendListRowProps) {
   const [routesOpen, setRoutesOpen] = useState(false);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [diagnosisOpen, setDiagnosisOpen] = useState(false);
   const environmentId = environment.environmentId;
   const unsupported = environment.connection.phase === "unsupported";
   const blocked = unsupported && !hasSavedBearerRoute(environment.entry);
@@ -1546,6 +1555,13 @@ function SavedBackendListRow({
   ) {
     setLastRelayHttpBaseUrl(discoveredRelayHttpBaseUrl);
   }
+  const retryNow = useAtomCommand(environmentCatalog.retryNow);
+  const {
+    diagnosis: currentDiagnosis,
+    state: connectionState,
+    relayOnly,
+  } = useConnectionDiagnosis(environment);
+  const diagnosis = resumingServerUpdate ? null : currentDiagnosis;
   const prepared = usePreparedConnection(environmentId);
   const connectedTarget = isConnected && prepared._tag === "Some" ? prepared.value.target : null;
   const mcpUrl = environmentMcpUrl({
@@ -1560,7 +1576,8 @@ function SavedBackendListRow({
   const routeCount = connectionRoutes(environment.entry).length;
   const subtitleText = [
     environmentTransportLabel(environment, connectedTarget),
-    resumingServerUpdate ? "Restarting" : status.text,
+    // The headline below names the failure in full.
+    diagnosis ? null : resumingServerUpdate ? "Restarting" : status.text,
     enabled && versionMismatch ? serverVersion : null,
   ]
     .filter((value): value is string => value !== null)
@@ -1603,6 +1620,7 @@ function SavedBackendListRow({
                     enabled &&
                       status.tone === "error" &&
                       !resumingServerUpdate &&
+                      !diagnosis &&
                       "text-destructive",
                   )}
                 />
@@ -1654,14 +1672,33 @@ function SavedBackendListRow({
         </span>
       }
       below={
-        serverUpdateState.status !== "idle" ? (
-          <div className="mt-1 max-w-md">
-            <ServerUpdateProgress state={serverUpdateState} />
-          </div>
-        ) : null
+        <>
+          {diagnosis ? (
+            <ConnectionDiagnosisSummary
+              diagnosis={diagnosis}
+              retryAt={connectionState.phase === "backoff" ? connectionState.retryAt : null}
+              attempt={connectionState.attempt}
+              expanded={diagnosisOpen}
+              onToggle={() => setDiagnosisOpen((open) => !open)}
+            />
+          ) : null}
+          {serverUpdateState.status !== "idle" ? (
+            <div className="mt-1 max-w-md">
+              <ServerUpdateProgress state={serverUpdateState} />
+            </div>
+          ) : null}
+        </>
       }
       detail={
         <>
+          {diagnosis && diagnosisOpen ? (
+            <ConnectionDiagnosisPanel
+              hostLabel={environment.label}
+              diagnosis={diagnosis}
+              onRetry={() => void retryNow(environmentId)}
+              onAddRoute={relayOnly ? () => onAddRoute(environment) : null}
+            />
+          ) : null}
           {routesOpen && (
             <EnvironmentRoutesList
               environment={environment}
@@ -1823,6 +1860,32 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
       ? "Your session does not have permission to manage Lecturn Connect access."
       : null;
   const isBusy = isUpdating || isUpdatingPreference;
+  const refreshLinkState = useEffectEvent(primaryCloudLinkState.refresh);
+  // The server rechecks reachability when the tunnel's 30 s readiness poll changes.
+  // Poll while mounted, so a failed read does not stop later ones.
+  useEffect(() => {
+    const interval = window.setInterval(() => refreshLinkState(), 30_000);
+    return () => window.clearInterval(interval);
+  }, []);
+  const reachability = managedTunnelActive ? primaryCloudLinkState.data?.reachability : undefined;
+  const reachabilityStatus =
+    reachability?.status === "reachable" ? (
+      formatConnectReachable(reachability)
+    ) : reachability?.status === "unreachable" ? (
+      <span className="block text-destructive">
+        {[reachability.reason, reachability.hint, `Fix: ${reachability.fix}`]
+          .filter(Boolean)
+          .join(" ")}{" "}
+        <a
+          href={connectReachabilityHelpUrl(reachability.cause)}
+          target="_blank"
+          rel="noreferrer"
+          className="underline underline-offset-2"
+        >
+          More info
+        </a>
+      </span>
+    ) : null;
 
   const updateManagedTunnel = async (enabled: boolean) => {
     if (
@@ -1922,7 +1985,11 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
           linkRevoked
             ? "This environment was removed from Lecturn Connect. Turn it on to link it again."
             : managedTunnelActive
-              ? "This environment is available to your other devices through Lecturn Connect."
+              ? reachability?.status === "unreachable"
+                ? "Lecturn Connect is on, but other devices cannot reach this environment."
+                : reachability?.status === "reachable"
+                  ? "This environment is available to your other devices through Lecturn Connect."
+                  : "Lecturn Connect is on. Reachability has not been checked yet."
               : managedTunnelOutOfSync
                 ? "Lecturn Connect is out of sync. This environment is linked only to publish agent activity, so other devices cannot connect. Turn Lecturn Connect on to repair it."
                 : "Make this environment available to your other devices through Lecturn Connect."
@@ -1931,7 +1998,8 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
           operationError ??
           primaryCloudLinkState.data?.deviceRelayConflict ??
           accountMismatchMessage ??
-          primaryCloudLinkState.error
+          primaryCloudLinkState.error ??
+          reachabilityStatus
         }
         control={
           <CloudLinkSwitch

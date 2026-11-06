@@ -65,6 +65,7 @@ const layerMetadata = Layer.merge(
   }),
   Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
     resolvePath: () => Effect.succeed(null),
+    invalidate: () => Effect.void,
   }),
 );
 

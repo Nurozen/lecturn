@@ -199,6 +199,7 @@ export function AgentActivity(
     deepLinkRow && deepLinkRow.deepLink.startsWith("/") && !deepLinkRow.deepLink.startsWith("//")
       ? `lecturn://${deepLinkRow.deepLink.slice(1)}${props.accountId ? `?accountId=${encodeURIComponent(props.accountId)}` : ""}`
       : null;
+  const linkModifiers = deepLink ? [widgetURL(deepLink)] : [];
 
   type SFName = NonNullable<ComponentProps<typeof Image>["systemName"]>;
   const phaseSymbol = (phase: AgentActivityPhase): SFName => {
@@ -223,8 +224,15 @@ export function AgentActivity(
 
   // SF Symbols, like the logo, ignore frame/foregroundStyle applied directly to
   // the image; size + tint them through a container the resizable symbol fills.
-  const renderGlyph = (systemName: SFName, size: number, color: Foreground) => (
-    <HStack modifiers={[frame({ width: size, height: size }), foregroundStyle(color)]}>
+  const renderGlyph = (
+    systemName: SFName,
+    size: number,
+    color: Foreground,
+    modifiers: typeof linkModifiers = [],
+  ) => (
+    <HStack
+      modifiers={[frame({ width: size, height: size }), foregroundStyle(color), ...modifiers]}
+    >
       <Image systemName={systemName} modifiers={[resizable()]} />
     </HStack>
   );
@@ -318,8 +326,8 @@ export function AgentActivity(
   // dropped), so we size it via a container frame the resizable image fills and
   // tint it through the container's foreground style, which the template image
   // inherits.
-  const renderLogo = (height: number, color: Foreground) => (
-    <HStack modifiers={[frame({ width: height, height }), foregroundStyle(color)]}>
+  const renderLogo = (height: number, color: Foreground, modifiers: typeof linkModifiers = []) => (
+    <HStack modifiers={[frame({ width: height, height }), foregroundStyle(color), ...modifiers]}>
       <Image assetName="LecturnMark" modifiers={[resizable()]} />
     </HStack>
   );
@@ -460,12 +468,13 @@ export function AgentActivity(
         ) : null}
       </VStack>,
     ),
-    compactLeading: renderLogo(16, subdued ? "secondary" : systemGold),
+    compactLeading: renderLogo(16, subdued ? "secondary" : systemGold, linkModifiers),
     compactTrailing: (
       <Text
         modifiers={[
           font({ weight: "semibold", size: 11 }),
           foregroundStyle(phaseTint(heroRow?.phase, true)),
+          ...linkModifiers,
         ]}
       >
         {attentionRow
@@ -477,8 +486,8 @@ export function AgentActivity(
     ),
     minimal:
       (attentionRow || failedRow || allDone) && heroRow
-        ? renderGlyph(phaseSymbol(heroRow.phase), 15, phaseTint(heroRow.phase, true))
-        : renderLogo(14, subdued ? "secondary" : systemGold),
+        ? renderGlyph(phaseSymbol(heroRow.phase), 15, phaseTint(heroRow.phase, true), linkModifiers)
+        : renderLogo(14, subdued ? "secondary" : systemGold, linkModifiers),
     expandedLeading: (
       <HStack
         spacing={5}

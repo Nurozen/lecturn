@@ -7,8 +7,11 @@ import {
   type AuthEnvironmentScope,
 } from "@lecturn/contracts";
 import { encodeOAuthScope } from "@lecturn/shared/oauthScope";
+import { hashTelemetryId } from "@lecturn/shared/telemetryId";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
+import * as ClientCapabilities from "../platform/capabilities.ts";
 import {
   executeEnvironmentHttpRequest,
   makeEnvironmentHttpApiGroupClient,
@@ -37,10 +40,38 @@ const clientMetadataTokenExchangeFields = (
   };
 };
 
+/** Hashes of who is connecting. Only hashes leave the client. */
+export interface ClientOwnerParams {
+  readonly connect?: string;
+  readonly device?: string;
+}
+
+/**
+ * Tells the environment, for analytics, which Lecturn Connect account and device
+ * are connecting, so it can count the environment as theirs.
+ */
+export const readClientOwnerParams = Effect.gen(function* () {
+  const session = yield* Effect.serviceOption(ClientCapabilities.CloudSession);
+  // With several Connect accounts signed in, the primary one owns the device.
+  const primaryAccountId = Option.isSome(session)
+    ? (yield* session.value.accountIds)[0]
+    : undefined;
+  const account =
+    Option.isSome(session) && primaryAccountId !== undefined
+      ? yield* session.value.identity(primaryAccountId)
+      : Option.none<ClientCapabilities.CloudSessionIdentity>();
+  const device = yield* (yield* ClientCapabilities.AnalyticsDevice).id;
+  return {
+    ...(Option.isSome(account) ? { connect: hashTelemetryId(account.value.accountId) } : {}),
+    ...(Option.isSome(device) ? { device: hashTelemetryId(device.value) } : {}),
+  } satisfies ClientOwnerParams;
+});
+
 export const appendClientConnectionParams = (
   url: URL,
   clientMetadata: AuthClientPresentationMetadata | undefined,
   connectionMethod?: ClientConnectionMethod,
+  owners?: ClientOwnerParams,
 ): void => {
   if (clientMetadata?.surface) {
     url.searchParams.set("clientSurface", clientMetadata.surface);
@@ -78,6 +109,12 @@ export const appendClientConnectionParams = (
   }
   if (connectionMethod) {
     url.searchParams.set("connectionMethod", connectionMethod);
+  }
+  if (owners?.connect) {
+    url.searchParams.set("clientOwner", owners.connect);
+  }
+  if (owners?.device) {
+    url.searchParams.set("clientDevice", owners.device);
   }
 };
 
@@ -217,7 +254,12 @@ export const resolveRemoteWebSocketConnectionUrl = Effect.fn(
     url.pathname = "/ws";
   }
   url.searchParams.set("wsTicket", issued.ticket);
-  appendClientConnectionParams(url, input.clientMetadata, input.connectionMethod);
+  appendClientConnectionParams(
+    url,
+    input.clientMetadata,
+    input.connectionMethod,
+    yield* readClientOwnerParams,
+  );
   return url.toString();
 });
 
@@ -243,6 +285,11 @@ export const resolveRemoteDpopWebSocketConnectionUrl = Effect.fn(
     url.pathname = "/ws";
   }
   url.searchParams.set("wsTicket", issued.ticket);
-  appendClientConnectionParams(url, input.clientMetadata, input.connectionMethod);
+  appendClientConnectionParams(
+    url,
+    input.clientMetadata,
+    input.connectionMethod,
+    yield* readClientOwnerParams,
+  );
   return url.toString();
 });

@@ -35,6 +35,7 @@ import {
   setDeviceRelayConflict,
   setDeviceRelayPublicationActive,
 } from "./DeviceRelayReservation.ts";
+import * as ConnectReachability from "./ConnectReachability.ts";
 import * as ManagedEndpointRuntime from "./ManagedEndpointRuntime.ts";
 
 const unused = () => Effect.die("unused operation");
@@ -118,7 +119,16 @@ const provideHarness =
           recoveryRequests: Stream.empty,
           requestRecovery: () => Effect.void,
           tunnelConnected: Stream.empty,
+          inspectConnector: Effect.succeed(null),
+          readinessChanged: Stream.empty,
           withLinkStateLock: (effect) => effect,
+        }),
+      ),
+      Effect.provideService(
+        ConnectReachability.ConnectReachability,
+        ConnectReachability.ConnectReachability.of({
+          check: Effect.die("unused"),
+          latest: Effect.succeed(Option.none()),
         }),
       ),
       Effect.provideService(

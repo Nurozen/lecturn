@@ -1,3 +1,5 @@
+import { formatFilePathForClipboard } from "@lecturn/client-runtime/media-actions";
+import { resolvePathLinkTarget } from "@lecturn/shared/fileLinks";
 import { resolveFilesystemReadAccess } from "@lecturn/client-runtime/state/filesystem";
 import { environmentSession } from "../../state/session";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
@@ -783,7 +785,13 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
               title: "Copy path",
               icon: "doc.on.doc",
               inline: false,
-              onPress: () => copyTextWithHaptic(relativePath),
+              onPress: () =>
+                copyTextWithHaptic(
+                  formatFilePathForClipboard(
+                    relativePath,
+                    resolvePathLinkTarget(relativePath, cwd ?? ""),
+                  ),
+                ),
             } as const,
           ]),
       fileData?.contents != null

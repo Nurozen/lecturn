@@ -12,7 +12,7 @@ import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { ProviderInstance } from "@lecturn/provider-core/server/driver";
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
-import type * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
+import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import * as TestProviderHost from "@lecturn/provider-testing/TestProviderHost";
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import {
@@ -445,6 +445,7 @@ export const phase4Layer = (baseDir: string, options: Phase4Options = {}) => {
     Layer.provideMerge(stores),
     // The server provides it beside the Squire layer; only `staveSpaceLock` admits through it.
     Layer.provideMerge(StaveSpaceLock.layer),
+    Layer.provideMerge(McpProviderSessions.layer),
     Layer.provideMerge(config),
     Layer.provideMerge(database),
     Layer.provideMerge(NodeServices.layer),

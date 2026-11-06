@@ -15,6 +15,7 @@ import {
   type SquireRole,
   type ThreadId,
 } from "@lecturn/contracts";
+import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import type { McpProviderSessionConfig } from "@lecturn/provider-core/server/mcpSession";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -162,6 +163,7 @@ export const serveBoundMcp = (options: {
     );
     yield* HttpRouter.serve(routes, { disableListenLog: true, disableLogger: true }).pipe(
       Layer.provide(PreviewAutomationBroker.layer),
+      Layer.provide(McpProviderSessions.layer),
       Layer.provide(layerStubServices),
       Layer.provide(Layer.succeedContext(config)),
       Layer.provide(layerEnvironment),

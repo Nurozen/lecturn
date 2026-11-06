@@ -18,6 +18,7 @@ import {
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2ThreadShell,
 } from "@lecturn/contracts";
+import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -293,6 +294,7 @@ it.effect("returns an HTML render reference that Codex and Claude tool rows both
     Effect.provide(
       McpHttpServer.layerHtmlToolkit.pipe(
         Layer.provideMerge(McpServer.McpServer.layer),
+        Layer.provide(McpProviderSessions.layer),
         Layer.provide(PreviewBrowser.layer),
         Layer.provide(
           ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-mcp-html-render-" }),
@@ -487,6 +489,7 @@ it.effect("records the calling agent and the agent a tool acted on", () => {
                   properties: properties ?? {},
                 }).pipe(Effect.asVoid),
               flush: Effect.void,
+              recordOwners: () => Effect.void,
             }),
           ),
         ),

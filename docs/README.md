@@ -26,6 +26,7 @@
 - [Teams and company Connect](./user/teams.md)
 - [Remote access](./user/remote-access.md)
 - [Notifications and Live Activities](./user/notifications-and-live-activities.md)
+- [Lecturn Connect troubleshooting](./user/lecturn-connect-troubleshooting.md)
 - [Outside agents (MCP)](./user/outside-agents.md)
 - [Connected apps](./user/connected-apps.md)
 - [Running in the background](./user/background-service.md)

@@ -12,6 +12,8 @@ import { vi } from "vite-plus/test";
 import {
   databaseBackupBlocker,
   Launcher,
+  main,
+  readServiceEnvironment,
   PREPARED_TIMEOUT_MS,
   type BackupSpaceProbe,
   readServiceState,
@@ -21,6 +23,7 @@ import {
   compareExactServiceVersions,
   decodeServiceState,
   isExactServiceVersion,
+  SERVICE_ENV_FILE,
   SERVICE_LAUNCHER_PROTOCOL,
   SERVICE_RESTART_PENDING_FILE,
   SERVICE_STOP_MARKER_FILE,
@@ -126,6 +129,52 @@ const writeFakeRuntime = (
   });
 
 it.layer(NodeServices.layer)("service state persistence", (it) => {
+  it.effect(
+    "loads optional service.env literally without changing inherited or managed variables",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-service-env-" });
+        const inherited = Object.freeze({
+          PATH: "inherited-path",
+          LECTURN_HOME: root,
+          LECTURN_BOOT_SERVICE_UNIT: "managed-unit",
+          LECTURN_SERVICE_LAUNCHER_CONTEXT: "managed-context",
+          LECTURN_PORT: "ambient",
+        });
+        assert.deepEqual(
+          yield* Effect.promise(() => readServiceEnvironment(root, inherited)),
+          inherited,
+        );
+        yield* fs.writeFileString(
+          path.join(root, SERVICE_ENV_FILE),
+          [
+            "# service configuration",
+            "export LECTURN_PORT=1234 # inline comment",
+            'LECTURN_TOKEN="literal $HOME ${USER} $(whoami) # token"',
+            'MULTILINE="first\nsecond"',
+            "EMPTY=",
+            "PATH=/bad",
+            "Path=/bad",
+            "LECTURN_HOME=/bad",
+            "lecturn_home=/bad",
+            "LECTURN_BOOT_SERVICE_UNIT=bad",
+            "lecturn_boot_service_unit=bad",
+            "LECTURN_SERVICE_LAUNCHER_CONTEXT=bad",
+            "lecturn_service_launcher_context=bad",
+          ].join("\n"),
+        );
+        assert.deepEqual(yield* Effect.promise(() => readServiceEnvironment(root, inherited)), {
+          ...inherited,
+          LECTURN_PORT: "1234",
+          LECTURN_TOKEN: "literal $HOME ${USER} $(whoami) # token",
+          MULTILINE: "first\nsecond",
+          EMPTY: "",
+        });
+      }),
+  );
+
   it.effect("durably replaces and strictly reads one state document", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -305,7 +354,7 @@ if (context.update?.status === "pending") {
     }),
   );
 
-  it.effect("rolls back a trial that reports the wrong update ID", () =>
+  it.effect("rolls back invalid trials with the startup environment", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -314,14 +363,26 @@ if (context.update?.status === "pending") {
       });
       const statePath = path.join(root, "runtime", "service-state.json");
       const databasePath = path.join(root, "userdata", "state.sqlite");
+      const observationsPath = path.join(root, "environment-observations.jsonl");
+      const envPath = path.join(root, SERVICE_ENV_FILE);
+      yield* fs.writeFileString(envPath, "LECTURN_TEST_SERVICE_TOKEN=initial\n");
+      vi.stubEnv("LECTURN_HOME", root);
+      vi.stubEnv("LECTURN_TEST_SERVICE_TOKEN", "inherited");
+      yield* Effect.addFinalizer(() => Effect.sync(() => vi.unstubAllEnvs()));
       yield* fs.makeDirectory(path.dirname(databasePath), { recursive: true });
       yield* fs.writeFileString(databasePath, "before trial");
       const encodedDatabasePath = JSON.stringify(databasePath);
       const childSource = `
+import { appendFileSync, writeFileSync } from "node:fs";
 const context = JSON.parse(process.env.LECTURN_SERVICE_LAUNCHER_CONTEXT);
+appendFileSync(${JSON.stringify(observationsPath)}, JSON.stringify({
+  token: process.env.LECTURN_TEST_SERVICE_TOKEN,
+  update: context.update?.status ?? "active",
+}) + "\\n");
 if (context.update?.status === "pending") {
   process.send({ type: "prepared", updateId: "wrong-update" });
 } else if (context.update === undefined) {
+  writeFileSync(${JSON.stringify(envPath)}, "LECTURN_TEST_SERVICE_TOKEN=changed\\n");
   process.send({ type: "request-update", targetVersion: "1.1.0", dbPath: ${encodedDatabasePath} });
   setInterval(() => {}, 1_000);
 } else {
@@ -343,9 +404,8 @@ if (context.update?.status === "pending") {
         }),
       );
 
-      const launcher = new Launcher(root, yield* Effect.promise(() => readServiceState(statePath)));
       yield* Effect.promise(() =>
-        launcher.run().then(
+        main().then(
           () => Promise.reject(new Error("launcher unexpectedly completed")),
           () => Promise.resolve(),
         ),
@@ -358,6 +418,17 @@ if (context.update?.status === "pending") {
         state.update?.status === "rolled-back" ? state.update.reason : undefined,
         "invalid-prepared",
       );
+      const observations = (yield* fs.readFileString(observationsPath))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      assert.deepEqual(observations, [
+        { token: "initial", update: "active" },
+        { token: "initial", update: "pending" },
+        { token: "initial", update: "rolled-back" },
+      ]);
+      assert.equal(process.env.LECTURN_TEST_SERVICE_TOKEN, "inherited");
+      assert.equal(yield* fs.readFileString(envPath), "LECTURN_TEST_SERVICE_TOKEN=changed\n");
     }),
   );
 

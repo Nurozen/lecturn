@@ -27,7 +27,9 @@ import { useUiStateStore } from "../uiStateStore";
 import { AppSidebarLayout } from "./AppSidebarLayout";
 import { CommandPalette } from "./CommandPalette";
 import { ConfirmDialogHost } from "./ConfirmDialogHost";
+import { AddProjectToMachineDialogHost } from "./AddProjectToMachineDialog";
 import { CustomSnoozeDialogHost } from "./CustomSnoozeDialog";
+import { HostFreezeToastCoordinator } from "./HostFreezeToastCoordinator";
 import { ImportFolderSessionsDialog } from "./ImportFolderSessionsDialog";
 import { KeybindingsConfigWarning } from "./KeybindingsConfigWarning";
 import {
@@ -143,9 +145,11 @@ export default function AppShell({
           <ImportFolderSessionsDialog />
           <CustomSnoozeDialogHost />
           <SlowRpcRequestToastCoordinator />
+          <HostFreezeToastCoordinator />
           <PermissionUpdateNotice />
           {primaryEnvironmentAuthenticated ? <LegacyThreadMigrationToast /> : null}
           <ProjectCloneToastCoordinator />
+          <AddProjectToMachineDialogHost />
           <PullRequestGuideRunCoordinator />
           <HostedStaticEnvironmentBootstrap />
           {primaryEnvironmentAuthenticated ? (

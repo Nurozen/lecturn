@@ -19,6 +19,16 @@ export const Hostname = Context.Reference<string>("@lecturn/shared/HostProcess/H
   defaultValue: () => NodeOS.hostname(),
 });
 
+export const Username = Context.Reference<string | null>("@lecturn/shared/HostProcess/Username", {
+  defaultValue: () => {
+    try {
+      return NodeOS.userInfo().username.trim() || null;
+    } catch {
+      return null;
+    }
+  },
+});
+
 export const HomeDirectory = Context.Reference<string>(
   "@lecturn/shared/HostProcess/HomeDirectory",
   {

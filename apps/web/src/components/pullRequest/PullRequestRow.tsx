@@ -1,6 +1,7 @@
 import type { PullRequestAction } from "@lecturn/contracts";
 import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
 import { SearchIcon } from "lucide-react";
+import { PullRequestChangeBreakdownStat } from "./PullRequestChangeBreakdownStat";
 import { PullRequestStackPopover } from "./PullRequestStackPopover";
 import {
   PullRequestSpeedActions,
@@ -22,11 +23,7 @@ import {
   PullRequestRowGlyph,
   PullRequestRowLines,
 } from "./PullRequestListRow";
-import {
-  PullRequestDiffStat,
-  PullRequestLabelChip,
-  PullRequestReviewDecisionGlyph,
-} from "./pullRequestPresentation";
+import { PullRequestLabelChip, PullRequestReviewDecisionGlyph } from "./pullRequestPresentation";
 
 const LABEL_SLOTS = [
   { overflow: "@xl/pr-row-meta:hidden" },
@@ -188,7 +185,14 @@ function PullRequestRowImpl({
                   }
                 />
               ) : null}
-              <PullRequestDiffStat
+              <PullRequestChangeBreakdownStat
+                environmentId={entry.environmentId}
+                reference={{
+                  projectId: entry.projectId,
+                  host: entry.host,
+                  repository: entry.repository,
+                  number: entry.number,
+                }}
                 additions={entry.additions}
                 deletions={entry.deletions}
                 className="font-mono"
