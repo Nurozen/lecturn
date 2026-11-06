@@ -791,6 +791,11 @@ from upstream's side.
 
 **Upstream changes taken in a Lecturn shape (sync to upstream be6dd8b7).**
 
+- **Patched mobile dependencies are pinned exactly.** Upstream #22043 patches
+  `expo-network@58.0.3` but declares `~58.0.3`. Release smoke resolves a fresh
+  lockfile, picks 58.0.4 and fails with an unused patch, so the fork pins
+  `"expo-network": "58.0.3"` (like `expo-audio`). Bump the patch with the pin.
+
 - **Effect functions (#21989-#22000).** `lecturn/prefer-effect-fn` is an error
   outside tests, and fork-only files follow it too. Span names are
   `<Service>.<operation>` and reuse the file's existing span prefix, never a
