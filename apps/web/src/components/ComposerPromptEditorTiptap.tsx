@@ -1034,7 +1034,10 @@ function ComposerPromptEditorTiptapInner(
   });
   const selectionRangeRef = useRef({ start: initialExpandedCursor, end: initialExpandedCursor });
   const isApplyingControlledUpdateRef = useRef(false);
-  const hasAppliedControlledSelectionRef = useRef(false);
+  // The editor the controlled selection was last applied to. Tiptap replaces an
+  // editor it destroyed (cold load, a hidden composer revealed), and the
+  // replacement starts with its caret at the document start.
+  const controlledSelectionEditorRef = useRef<TiptapEditor | null>(null);
   const citationRequestRef = useRef<ComposerCitationCommentRequest | null>(null);
   const [openCitation, setOpenCitation] = useState<OpenCitationComment | null>(null);
   const citationDraftRef = useRef<{ key: string; comment: string } | null>(null);
@@ -1570,8 +1573,8 @@ function ComposerPromptEditorTiptapInner(
   useLayoutEffect(() => {
     // A destroyed editor is about to be replaced, and this effect reruns for the new one.
     if (!editor || editor.isDestroyed) return;
-    const initialSelection = !hasAppliedControlledSelectionRef.current;
-    hasAppliedControlledSelectionRef.current = true;
+    const initialSelection = controlledSelectionEditorRef.current !== editor;
+    controlledSelectionEditorRef.current = editor;
     const normalizedCursor = clampEditorCursor(value, cursor);
     const previousSnapshot = snapshotRef.current;
     if (

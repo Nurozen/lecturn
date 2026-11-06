@@ -28,13 +28,14 @@ afterEach(async () => {
 });
 
 // One element for every render, so revealing the Activity reruns the composer's
-// effects from its last commit without re-rendering it first.
+// effects from its last commit without re-rendering it first. The controlled
+// caret sits mid-text so a restored selection differs from a fresh editor's.
 const composer = (
   <ComposerPromptEditor
     draftKey="a"
     editorRef={createRef<ComposerPromptEditorHandle>()}
     value="Draft A"
-    cursor={7}
+    cursor={3}
     richTextEnabled
     contextRecords={new Map()}
     skills={[]}
@@ -62,6 +63,9 @@ function editor() {
 // swaps in a new one.
 const tiptapDestroyDelay = () => act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
 
+// "Dra|ft A": the controlled cursor 3 is ProseMirror position 4.
+const controlledCaret = 4;
+
 it("mounts while hidden and reveals after tiptap destroys the unmounted editor", async () => {
   await render("hidden");
   await tiptapDestroyDelay();
@@ -76,6 +80,7 @@ it("reveals a focused composer under StrictMode", async () => {
   await render("visible");
   const hiddenEditor = editor();
   await act(async () => hiddenEditor.view.focus());
+  expect(hiddenEditor.state.selection.from).toBe(controlledCaret);
   await render("hidden");
   await tiptapDestroyDelay();
   expect(hiddenEditor.isDestroyed).toBe(true);
@@ -84,15 +89,17 @@ it("reveals a focused composer under StrictMode", async () => {
   expect(errors.map(String)).toEqual([]);
   expect(editor()).not.toBe(hiddenEditor);
   expect(editor().isDestroyed).toBe(false);
+  expect(editor().state.selection.from).toBe(controlledCaret);
 });
 
 // Without StrictMode: its dev-only remount of tiptap's EditorContent moves the
 // replacement editor's DOM out and back, which drops the restored focus.
-it("restores focus to the editor that replaces one destroyed while hidden", async () => {
+it("restores focus and the caret to the editor that replaces one destroyed while hidden", async () => {
   await render("visible", false);
   const hiddenEditor = editor();
   await act(async () => hiddenEditor.view.focus());
   expect(document.activeElement).toBe(hiddenEditor.view.dom);
+  expect(hiddenEditor.state.selection.from).toBe(controlledCaret);
   await render("hidden", false);
   await tiptapDestroyDelay();
   expect(hiddenEditor.isDestroyed).toBe(true);
@@ -101,4 +108,6 @@ it("restores focus to the editor that replaces one destroyed while hidden", asyn
   expect(errors.map(String)).toEqual([]);
   expect(editor()).not.toBe(hiddenEditor);
   expect(document.activeElement).toBe(editor().view.dom);
+  // The replacement editor gets the controlled caret back, not the document start.
+  expect(editor().state.selection.from).toBe(controlledCaret);
 });
