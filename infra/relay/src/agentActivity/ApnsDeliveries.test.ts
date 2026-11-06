@@ -3509,8 +3509,6 @@ describe("queued delivery entitlement windows", () => {
           layerFor({
             attempts: [],
             config: signingConfig,
-            // A cleanup end: no content remains to keep the card.
-            activityStates: [],
             managedAccess: makeManagedAccess((userId) =>
               Effect.succeed(accountForWindow(userId, 30)),
             ),
@@ -3518,6 +3516,55 @@ describe("queued delivery entitlement windows", () => {
               Effect.sync(() => {
                 if (request.body._tag === "Uint8Array")
                   body = new TextDecoder().decode(request.body.body);
+                return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+              }),
+          }),
+        ),
+      );
+    },
+  );
+
+  it.effect.each([
+    { access: "revoked", sends: true },
+    { access: "unavailable", sends: false },
+  ] as const)(
+    "a queued contentless end ignores remaining content that is $access",
+    ({ access, sends }) => {
+      let requests = 0;
+      const signedEnd = signApnsDeliveryJob({
+        secret: config.apnsDeliveryJobSigningSecret,
+        payload: makeApnsDeliveryJobPayload({
+          kind: "live_activity_end",
+          userId: target.user_id,
+          deviceId: target.device_id,
+          token: "activity-token",
+          aggregate: null,
+          createdAt: state.updatedAt,
+          expiresAt: "1970-01-01T00:10:00.000Z",
+          jobId: `job-end-${access}`,
+        }),
+      });
+      return Effect.gen(function* () {
+        const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+        expect((yield* deliveries.processSignedJob(signedEnd)).ok).toBe(true);
+        expect(requests).toBe(sends ? 1 : 0);
+      }).pipe(
+        Effect.provide(
+          layerFor({
+            attempts: [],
+            config: signingConfig,
+            currentTargets: [{ ...target, preferences_json: enabledPreferences }],
+            // The user's running row remains, but access to it was lost.
+            activityStates: [state],
+            managedAccess: {
+              check: () =>
+                access === "revoked"
+                  ? Effect.fail(new ManagedAccessRequired({ message: "Company seat removed" }))
+                  : Effect.fail(new ManagedAccessUnavailable({ message: "Billing unavailable" })),
+            },
+            execute: (request) =>
+              Effect.sync(() => {
+                requests++;
                 return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
               }),
           }),

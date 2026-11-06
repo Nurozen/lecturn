@@ -6042,7 +6042,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
   const makeTaskToolHarnessWithOptions = (environment: NodeJS.ProcessEnv = {}) =>
     Effect.gen(function* () {
       const configDir = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
-        prefix: "t3-claude-tasks-",
+        prefix: "lecturn-claude-tasks-",
       });
       const path = yield* Path.Path;
       const harness = yield* makeWakeHarnessWithOptions({

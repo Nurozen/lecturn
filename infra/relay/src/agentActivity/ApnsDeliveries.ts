@@ -1047,18 +1047,28 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  const userHasContentToShow = Effect.fnUntraced(function* (userId: string) {
+  // Only content the user may still see owns the card: an access-loss cleanup
+  // end must not be skipped because unpermitted rows remain.
+  const userHasContentToShow = Effect.fnUntraced(function* (
+    userId: string,
+    originCreatedAtSeconds?: number,
+  ) {
     const now = yield* DateTime.now;
     return yield* activityRows.listForUser({ userId }).pipe(
-      Effect.map(
-        (activeStates) =>
+      Effect.flatMap((activeStates) =>
+        filterPermittedActivity(
+          managedAccess,
+          userId,
           makeAggregateState({
             activeStates,
             terminalState: null,
             nowMs: now.epochMilliseconds,
-          }) !== null,
+          }),
+          originCreatedAtSeconds,
+        ),
       ),
-      // Keep the card on persistence failures; a later sweep can retry.
+      Effect.map((permitted) => permitted !== null),
+      // Keep the card on persistence or billing failures; a later sweep can retry.
       Effect.catch((error) =>
         Effect.logWarning("Content recheck failed; keeping the card", { error }).pipe(
           Effect.as(true),
@@ -1372,7 +1382,7 @@ export const make = Effect.gen(function* () {
         input.kind === "live_activity_end" &&
         aggregate === null &&
         parsePreferences(currentTarget.preferences_json)?.liveActivitiesEnabled !== false &&
-        (yield* userHasContentToShow(input.target.user_id))
+        (yield* userHasContentToShow(input.target.user_id, input.originCreatedAtSeconds))
       ) {
         yield* attempts.completeSourceJob({
           sourceJobId,

@@ -1269,10 +1269,15 @@ function toSessionKey(threadId: string, terminalId: string): string {
   return `${threadId}\u0000${terminalId}`;
 }
 
+// Lecturn folds upstream's `T3CODE_*` (stripped) and `T3_*` (kept) prefixes into one
+// `LECTURN_*`; the boot service marker stays so `lecturn update` / `lecturn service restart`
+// typed in a terminal still knows it runs inside the service.
+const TERMINAL_ENV_PASSTHROUGH: ReadonlySet<string> = new Set(["LECTURN_BOOT_SERVICE_UNIT"]);
+
 function shouldExcludeTerminalEnvKey(key: string): boolean {
   const normalizedKey = key.toUpperCase();
   if (normalizedKey.startsWith("LECTURN_")) {
-    return true;
+    return !TERMINAL_ENV_PASSTHROUGH.has(normalizedKey);
   }
   if (normalizedKey.startsWith("VITE_")) {
     return true;

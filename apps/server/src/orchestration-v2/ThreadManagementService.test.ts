@@ -106,6 +106,22 @@ it("records a client interrupt as the user's, whatever actor the client claims",
   ).toEqual({ ...command, createdBy: "user" });
 });
 
+it("records a client thread stop as the user's, whatever actor the client claims", () => {
+  const command: OrchestrationV2Command = {
+    type: "thread.stop",
+    commandId: CommandId.make("command:thread-management:thread-stop"),
+    threadId: ThreadId.make("thread:thread-management:thread-stop"),
+    createdBy: "system",
+  };
+
+  expect(
+    ThreadManagementService.withCreationProvenance(command, {
+      createdBy: "user",
+      creationSource: "web",
+    }),
+  ).toEqual({ ...command, createdBy: "user" });
+});
+
 it("identifies every existing thread that must be hydrated before dispatch", () => {
   const sourceThreadId = ThreadId.make("thread:thread-management:source");
   const targetThreadId = ThreadId.make("thread:thread-management:target");

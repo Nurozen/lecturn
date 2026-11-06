@@ -108,7 +108,8 @@ export const SQUIRE_COMMAND_RULES = {
   "thread.created.record": "squire",
   "provider.switch": "squire",
   "thread.background-work.settle": "plumbing",
-  "thread.stop": "plumbing",
+  // A user's Stop, like `run.interrupt` (provenance is stamped the same way).
+  "thread.stop": "user",
   "thread.app-data.set": "squire",
   "thread.continued-in.set": "squire",
   "runtime-request.app-expire": "squire",

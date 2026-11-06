@@ -78,6 +78,7 @@ export function withCreationProvenance(
       return { ...command, ...provenance };
     // Lecturn: overwrites any client-sent actor, so a client cannot pose as an agent or the server.
     case "run.interrupt":
+    case "thread.stop":
       return { ...command, createdBy: provenance.createdBy };
     default:
       return command;

@@ -1010,7 +1010,7 @@ const RootStackConfig = createWorkspaceStackNavigator({
       linking: "connect-onboarding",
       options: {
         // A root-level Android formSheet does not host the native stack bar;
-        // the route renders an embedded AndroidSheetHeader instead.
+        // the route renders the shared SheetHeader inline instead.
         ...(Platform.OS === "android" ? { headerShown: false } : SHEET_SOLID_HEADER_OPTIONS),
         title: "Set up Lecturn Connect",
         gestureEnabled: true,

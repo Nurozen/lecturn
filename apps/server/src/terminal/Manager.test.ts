@@ -2720,6 +2720,7 @@ it.layer(
         env: {
           PORT: "5173",
           LECTURN_PORT: "3773",
+          LECTURN_BOOT_SERVICE_UNIT: "lecturn.service",
           VITE_DEV_SERVER_URL: "http://localhost:5173",
           TEST_TERMINAL_KEEP: "keep-me",
           TMUX: "/tmp/tmux-1000/default,1234,0",
@@ -2736,6 +2737,8 @@ it.layer(
 
       expect(spawnInput.env.PORT).toBeUndefined();
       expect(spawnInput.env.LECTURN_PORT).toBeUndefined();
+      // Upstream keeps its boot service marker so in-service commands detect the service.
+      expect(spawnInput.env.LECTURN_BOOT_SERVICE_UNIT).toBe("lecturn.service");
       expect(spawnInput.env.VITE_DEV_SERVER_URL).toBeUndefined();
       expect(spawnInput.env.TEST_TERMINAL_KEEP).toBe("keep-me");
       expect(spawnInput.env.TMUX).toBeUndefined();

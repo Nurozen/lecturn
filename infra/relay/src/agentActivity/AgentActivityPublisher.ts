@@ -26,7 +26,8 @@ import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as LiveActivities from "./LiveActivities.ts";
 import * as ApnsDeliveries from "./ApnsDeliveries.ts";
 import { TeamRuntime } from "../teams/TeamRuntime.ts";
-import { ManagedAccessUnavailable } from "../billing/ManagedAccess.ts";
+import { ManagedAccess, ManagedAccessUnavailable } from "../billing/ManagedAccess.ts";
+import { filterPermittedActivity } from "../teams/TeamNotifications.ts";
 import * as FcmDeliveries from "./FcmDeliveries.ts";
 
 export type AgentActivityPublishError =
@@ -69,6 +70,7 @@ export const make = Effect.gen(function* () {
   const apnsDeliveries = yield* ApnsDeliveries.ApnsDeliveries;
   const teams = yield* Effect.serviceOption(TeamRuntime);
   const fcmDeliveries = yield* FcmDeliveries.FcmDeliveries;
+  const managedAccess = yield* ManagedAccess;
 
   const publishForDeliveryUser = Effect.fn(
     "relay.agent_activity_publisher.publish_for_delivery_user",
@@ -183,11 +185,17 @@ export const make = Effect.gen(function* () {
         ([userId, candidates]) =>
           Effect.gen(function* () {
             const activeStates = yield* rows.listForUser({ userId });
-            const aggregate = makeAggregateState({
-              activeStates,
-              terminalState: null,
-              nowMs: now.epochMilliseconds,
-            });
+            // Rows the user lost access to no longer hold the card. When billing
+            // cannot be read, keep it (the outer catch logs) and retry next sweep.
+            const aggregate = yield* filterPermittedActivity(
+              managedAccess,
+              userId,
+              makeAggregateState({
+                activeStates,
+                terminalState: null,
+                nowMs: now.epochMilliseconds,
+              }),
+            );
             if (aggregate !== null) return;
             const targets = yield* liveActivities.listTargets({ userId });
             const idleDeviceIds = new Set(candidates.map((target) => target.device_id));

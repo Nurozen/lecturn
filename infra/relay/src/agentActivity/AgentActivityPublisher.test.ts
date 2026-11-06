@@ -12,15 +12,24 @@ import * as FcmDeliveries from "./FcmDeliveries.ts";
 import * as ApnsDeliveries from "./ApnsDeliveries.ts";
 import { TeamRuntime } from "../teams/TeamRuntime.ts";
 import { TeamError } from "../teams/TeamStore.ts";
+import {
+  layerDisabled,
+  ManagedAccess,
+  ManagedAccessRequired,
+  ManagedAccessUnavailable,
+} from "../billing/ManagedAccess.ts";
 
-const layerPublisher = AgentActivityPublisher.layer.pipe(
-  Layer.provide(
-    Layer.succeed(FcmDeliveries.FcmDeliveries, {
-      enqueue: () => Effect.succeed(null),
-      process: () => Effect.void,
-    }),
-  ),
-);
+const layerPublisherWithAccess = (access: Layer.Layer<ManagedAccess> = layerDisabled) =>
+  AgentActivityPublisher.layer.pipe(
+    Layer.provide(
+      Layer.succeed(FcmDeliveries.FcmDeliveries, {
+        enqueue: () => Effect.succeed(null),
+        process: () => Effect.void,
+      }),
+    ),
+    Layer.provide(access),
+  );
+const layerPublisher = layerPublisherWithAccess();
 
 const state: RelayAgentActivityState = {
   environmentId: "env" as RelayAgentActivityState["environmentId"],
@@ -172,6 +181,7 @@ describe("AgentActivityPublisher", () => {
     }).pipe(
       Effect.provide(
         AgentActivityPublisher.layer.pipe(
+          Layer.provide(layerDisabled),
           Layer.provide(
             Layer.mergeAll(
               Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
@@ -337,6 +347,66 @@ describe("AgentActivityPublisher", () => {
       ]);
     });
   });
+
+  it.effect.each([
+    { access: "revoked", ends: true },
+    { access: "unavailable", ends: false },
+  ] as const)(
+    "ends an idle card whose content is $access only when access is lost",
+    ({ access, ends }) => {
+      const sent: Array<Parameters<ApnsDeliveries.ApnsDeliveries["Service"]["sendForTarget"]>[0]> =
+        [];
+      return AgentActivityPublisher.AgentActivityPublisher.pipe(
+        Effect.flatMap((publisher) => publisher.endIdleLiveActivities),
+        Effect.andThen(
+          Effect.sync(() => {
+            expect(sent).toMatchObject(
+              ends ? [{ target: { device_id: "device-1" }, aggregate: null }] : [],
+            );
+          }),
+        ),
+        Effect.provide(
+          layerPublisherWithAccess(
+            Layer.succeed(ManagedAccess, {
+              check: () =>
+                access === "revoked"
+                  ? Effect.fail(new ManagedAccessRequired({ message: "Company seat removed" }))
+                  : Effect.fail(new ManagedAccessUnavailable({ message: "Billing unavailable" })),
+            }),
+          ).pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                // Running work the user can no longer see must not hold the card.
+                Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
+                Layer.succeed(EnvironmentLinks.EnvironmentLinks, makeEnvironmentLinks()),
+                Layer.succeed(
+                  LiveActivities.LiveActivities,
+                  makeLiveActivities({
+                    listIdleArmedTargets: () =>
+                      Effect.succeed([{ user_id: "dev:julius", device_id: "device-1" }]),
+                    listTargets: () =>
+                      Effect.succeed([
+                        { ...target("device-1"), activity_push_token: "activity-token" },
+                      ]),
+                  }),
+                ),
+                Layer.succeed(
+                  ApnsDeliveries.ApnsDeliveries,
+                  makeApnsDeliveries({
+                    sendForTarget: (input) =>
+                      Effect.sync(() => {
+                        sent.push(input);
+                        return null;
+                      }),
+                  }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
 
   it.effect("publishes listed targets through the APNs delivery service", () => {
     const firstTarget = target("device-1");
